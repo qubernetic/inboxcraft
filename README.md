@@ -62,6 +62,17 @@ and its signature.
 
 ## Build and run
 
+For development, the toolchain runs in a container and needs only `just` and Docker or Podman on your computer
+([docs/development.md](docs/development.md)):
+
+```sh
+just setup                                   # build the dev image, start the container
+just ci                                      # every check CI runs (cargo xtask ci)
+just build && just run-sample                # build in the container, run on your desktop
+```
+
+With a Rust toolchain of your own:
+
 ```sh
 cargo run --release -p inboxcraft            # the desktop app
 cargo run --release -p inboxcraft -- --sample   # with the invented sample mailbox
