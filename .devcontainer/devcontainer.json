@@ -1,0 +1,23 @@
+{
+  "name": "inboxcraft",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "rust",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "dev",
+  "shutdownAction": "stopCompose",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "skellock.just"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "rust-analyzer.check.command": "clippy",
+        "rust-analyzer.check.allTargets": true
+      }
+    }
+  }
+}
