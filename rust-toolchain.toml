@@ -1,0 +1,6 @@
+# Bumped together with the base image tag in the Dockerfile.
+# wasm32-unknown-unknown is for `cargo xtask wasm` (L0–L5 must build for wasm).
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
+targets = ["wasm32-unknown-unknown"]
