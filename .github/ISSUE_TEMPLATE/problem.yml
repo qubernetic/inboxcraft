@@ -1,0 +1,29 @@
+name: Something is wrong
+description: A crash, lost mail, wrong sync, or anything else that does not work
+labels: [bug]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem
+      options: [Mail was lost or changed, Crash or hang, Sync is wrong or late, Calendar, Looks wrong, Other]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes: { label: InboxCraft version, placeholder: "0.1.0 (Help › About)" }
+    validations: { required: true }
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Linux x86_64, Linux aarch64, Windows x64, Windows ARM64, macOS Apple silicon, macOS Intel, FreeBSD]
+  - type: input
+    id: server
+    attributes: { label: Mail / calendar server, placeholder: "e.g. Dovecot (Namecheap Private Email), Gmail, Fastmail" }
+  - type: textarea
+    id: what
+    attributes: { label: What you did and what happened, description: "Never paste real mail, passwords or tokens." }
+    validations: { required: true }
+  - type: textarea
+    id: log
+    attributes: { label: Log lines, description: "From <settings>/logs/inboxcraft.log; remove addresses you do not want public.", render: text }
