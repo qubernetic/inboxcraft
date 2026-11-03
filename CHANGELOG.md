@@ -8,3 +8,4 @@ All notable changes to InboxCraft are listed here. The format follows
 
 ### Added
 - Repository structure, project documents and contribution rules.
+- Development container and justfile (#1)
