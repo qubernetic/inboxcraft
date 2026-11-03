@@ -1,0 +1,9 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+cognitive-complexity-threshold = 30
+disallowed-methods = [
+  { path = "std::time::Instant::now", reason = "traps on wasm; use the time crate's clock" },
+  { path = "std::time::SystemTime::now", reason = "traps on wasm; use the time crate's clock" },
+]

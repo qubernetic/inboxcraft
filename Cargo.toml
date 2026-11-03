@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/inboxcraft", "apps/inboxcraft-cli", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qubernetic/inboxcraft"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
+
+[workspace.dependencies]
+# internal crates (every crate is registered here and in xtask/src/layers.rs)
+inboxcraft-control-key = { path = "crates/control-key" }
+inboxcraft-time = { path = "crates/time" }
+inboxcraft-charset = { path = "crates/charset" }
+inboxcraft-model = { path = "crates/model" }
+inboxcraft-html = { path = "crates/html" }
+inboxcraft-store = { path = "crates/store" }
+inboxcraft-mime = { path = "crates/mime" }
+inboxcraft-ical = { path = "crates/ical" }
+inboxcraft-vcard = { path = "crates/vcard" }
+inboxcraft-proto = { path = "crates/proto" }
+inboxcraft-dav = { path = "crates/dav" }
+inboxcraft-net = { path = "crates/net" }
+inboxcraft-engine = { path = "crates/engine" }
+inboxcraft-mcp = { path = "crates/mcp" }
+inboxcraft-ui-egui = { path = "crates/ui-egui" }
+# reused crates: pin by full rev, record in PROVENANCE.md
+# example-crate = { git = "https://github.com/<source>/<repo>", rev = "<40-char sha>", version = "=0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+# [patch.crates-io]
+# egui/eframe/winit forks, if the Craft forks are used: pin by rev
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 0
