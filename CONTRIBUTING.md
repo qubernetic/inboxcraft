@@ -1,6 +1,6 @@
 # Contributing to InboxCraft
 
-> **Last reviewed:** <date> · **Last updated:** <date> · **Change:** <kind>
+> **Last reviewed:** <date> · **Last updated:** 2026-11-03 · **Change:** minor
 
 Thank you for wanting to help. InboxCraft handles people's private mail, so how work comes in matters as much as the
 work itself.
@@ -13,11 +13,24 @@ work itself.
 4. A bug together with its fix needs no claim: send both at once.
 5. A new feature that is not in the issues: open one first and wait for a yes.
 
+## Development setup
+You need `git`, [just](https://just.systems) and Docker or Podman with Compose; no Rust toolchain on your computer.
+The toolchain and every check run in a dev container, and the app runs on your desktop from the container's build:
+
+```sh
+just setup        # build the image, start the container, fetch dependencies
+just ci           # every gate CI runs (cargo xtask ci, in the container)
+just build        # then: just run-sample
+```
+
+Podman: `COMPOSE_CMD="podman compose"`. The details, and what only works on the host, are in
+[docs/development.md](docs/development.md).
+
 ## The pull request
 - Branch from the latest `develop`: `feature/<issue>-<slug>` or `fix/<issue>-<slug>`. One issue per pull request,
   with `Closes #<n>`. A feature in several parts: one PR per part, `Builds on #<n>`.
 - Tick "Allow edits by maintainers".
-- `cargo xtask ci` passes locally.
+- `just ci` (= `cargo xtask ci`) passes locally.
 - A crash or data-loss fix comes with a regression test; tests live in files of their own.
 - Every new source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Never use a real mailbox in tests: use the fake servers and `example.org` addresses.
@@ -40,3 +53,4 @@ anything that changes what leaves the person's computer.
 | Date | Change | Summary |
 |---|---|---|
 | <date> | major | First version |
+| 2026-11-03 | minor | Development setup with the justfile and the dev container (#1) |
