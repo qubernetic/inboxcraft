@@ -1,0 +1,47 @@
+# Build output
+/target
+/target-*/
+/dist
+/craft-fonts/
+/craft-i18n/
+*~
+.DS_Store
+
+# Local data
+/corpus
+/log
+*.profraw
+lcov.info
+
+# Secrets: never commit
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.mobileprovision
+
+# ---------------------------------------------------------------------------
+# AI planning and session artifacts: local only, never committed.
+# (Same as the Craft repos: plan/ and /.claude/ are gitignored there.)
+# AGENTS.md and CLAUDE.md ARE committed: they are the public rules.
+# ---------------------------------------------------------------------------
+plan/
+/.claude/
+CLAUDE.local.md
+AGENTS.local.md
+# skill/plugin outputs that write specs, plans, brainstorms, handoffs into the repo
+/docs/plans/
+/docs/specs/
+/docs/brainstorms/
+/docs/solutions/
+/docs/superpowers/
+/docs/handoff*/
+HANDOFF*.md
+*.handoff.md
+/.superpowers/
+/.compound-engineering/
+/.cursor/
+/.codex/
+/.aider*
+/.continue/

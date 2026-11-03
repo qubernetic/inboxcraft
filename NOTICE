@@ -1,0 +1,28 @@
+InboxCraft
+Copyright (c) 2026 Qubernetic and the InboxCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+InboxCraft is a clean-room mail and calendar program. It is not affiliated with, endorsed by or derived from Spark,
+Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
+corresponds to) are trademarks of their owners.
+
+Portions adapted from other projects
+------------------------------------
+Each source below is MIT OR Apache-2.0. What was taken, from which commit, and how it was changed is listed in
+PROVENANCE.md.
+
+- WordCraft (https://github.com/storytold/wordcraft), Copyright (c) 2026 ArtCraft Team and the WordCraft
+  contributors: <workspace tooling (xtask), packaging scripts, control channel, MCP framing, design-token scheme …>
+- MailCraft (https://github.com/UCS-Care-Group/mailcraft), Copyright (c) 2026 the MailCraft contributors:
+  <crates/html, crates/mime …>
+- MailCraft (https://github.com/ZIDAN44/mailcraft), Copyright (c) 2026 <holder as written in its LICENSE>:
+  <IMAP sync, CalDAV …>
+
+The ArtCraft name, wordmark and logos and the MailCraft name and icon are not included and not covered by the licence
+above.
+
+Third-party material
+--------------------
+- <font or asset>, <licence>, licence text in <path>
+- Rust dependencies keep their own licences; `cargo deny check licenses` lists them.
