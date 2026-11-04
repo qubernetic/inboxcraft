@@ -13,6 +13,7 @@ mod flags;
 mod folder;
 mod id;
 mod role;
+mod text;
 
 pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};

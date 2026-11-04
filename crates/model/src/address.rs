@@ -13,6 +13,8 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+use crate::text::clean_line;
+
 /// The longest display name kept, in characters; the rest is cut.
 pub const MAX_NAME_CHARS: usize = 256;
 
@@ -258,39 +260,8 @@ impl fmt::Display for Address {
     }
 }
 
-/// A mark that changes how text runs or joins without showing itself (bidi controls, zero-width characters).
-fn is_invisible_mark(c: char) -> bool {
-    matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
-}
-
 pub(crate) fn clean_name(name: &str) -> Option<String> {
-    let mut cleaned = String::new();
-    let mut kept = 0_usize;
-    let mut space = false;
-    for c in name.chars() {
-        if kept >= MAX_NAME_CHARS {
-            break;
-        }
-        if c.is_whitespace() {
-            space = !cleaned.is_empty();
-            continue;
-        }
-        if c.is_control() || is_invisible_mark(c) {
-            continue;
-        }
-        if space {
-            cleaned.push(' ');
-            kept = kept.saturating_add(1);
-            space = false;
-            if kept >= MAX_NAME_CHARS {
-                break;
-            }
-        }
-        cleaned.push(c);
-        kept = kept.saturating_add(1);
-    }
-    let cleaned = cleaned.trim_end().to_owned();
-    (!cleaned.is_empty()).then_some(cleaned)
+    clean_line(name, MAX_NAME_CHARS)
 }
 
 /// How to show each address of `addresses` where they appear together (suggestions, rows): the display name alone,
