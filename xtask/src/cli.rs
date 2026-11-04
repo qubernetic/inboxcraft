@@ -7,12 +7,13 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE};
+use crate::{Context, Error, FAILED, OK, USAGE, spdx};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
+  spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   help          print this text
 
 options:
@@ -24,6 +25,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Help,
+    Spdx { fix: bool },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,6 +45,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let mut args = args.into_iter().map(|arg| arg.into_string().map_err(|_| "arguments must be UTF-8".to_owned()));
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
+        Some("spdx") => Command::Spdx { fix: false },
         Some(other) => return Err(format!("unknown command `{other}`")),
     };
     let mut invocation = Invocation { command, root: None };
@@ -52,6 +55,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
                 let dir = args.next().transpose()?.ok_or_else(|| "`--root` needs a directory".to_owned())?;
                 invocation.root = Some(PathBuf::from(dir));
             }
+            "--fix" => match &mut invocation.command {
+                Command::Spdx { fix } => *fix = true,
+                Command::Help => return Err("`--fix` only goes with `spdx`".to_owned()),
+            },
             other => return Err(format!("unknown option `{other}`")),
         }
     }
@@ -71,7 +78,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, ctx: &mut Context, out: &mu
     if let Some(root) = invocation.root {
         ctx.root = root;
     }
-    match dispatch(&invocation.command, out) {
+    match dispatch(&invocation.command, ctx, out) {
         Ok(true) => OK,
         Ok(false) | Err(Error::Output(_)) => FAILED,
         Err(error) => {
@@ -81,12 +88,13 @@ pub fn run(args: impl IntoIterator<Item = OsString>, ctx: &mut Context, out: &mu
     }
 }
 
-fn dispatch(command: &Command, out: &mut dyn Write) -> Result<bool, Error> {
+fn dispatch(command: &Command, ctx: &Context, out: &mut dyn Write) -> Result<bool, Error> {
     match command {
         Command::Help => {
             out.write_all(HELP.as_bytes())?;
             Ok(true)
         }
+        Command::Spdx { fix } => spdx::gate(&ctx.root, *fix, out),
     }
 }
 
