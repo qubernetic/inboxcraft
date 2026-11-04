@@ -7,12 +7,13 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, spdx, test_files};
+use crate::{Context, Error, FAILED, OK, USAGE, ci, spdx, test_files};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, nextest (ci profile), doctests, deny
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   test-files    no inline `mod tests { ... }`: tests live in files of their own
   help          print this text
@@ -25,6 +26,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
+    Ci,
     Help,
     Spdx { fix: bool },
     TestFiles,
@@ -47,6 +49,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let mut args = args.into_iter().map(|arg| arg.into_string().map_err(|_| "arguments must be UTF-8".to_owned()));
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
+        Some("ci") => Command::Ci,
         Some("spdx") => Command::Spdx { fix: false },
         Some("test-files") => Command::TestFiles,
         Some(other) => return Err(format!("unknown command `{other}`")),
@@ -60,7 +63,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Help | Command::TestFiles => return Err("`--fix` only goes with `spdx`".to_owned()),
+                Command::Ci | Command::Help | Command::TestFiles => return Err("`--fix` only goes with `spdx`".to_owned()),
             },
             other => return Err(format!("unknown option `{other}`")),
         }
@@ -91,8 +94,9 @@ pub fn run(args: impl IntoIterator<Item = OsString>, ctx: &mut Context, out: &mu
     }
 }
 
-fn dispatch(command: &Command, ctx: &Context, out: &mut dyn Write) -> Result<bool, Error> {
+fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error> {
     match command {
+        Command::Ci => ci::gate(ctx, out),
         Command::Help => {
             out.write_all(HELP.as_bytes())?;
             Ok(true)
