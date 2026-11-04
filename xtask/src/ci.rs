@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{Context, Error, layers, spdx, test_files};
+use crate::{Context, Error, layers, spdx, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -44,6 +44,7 @@ pub(crate) enum Gate {
     Layers,
     Spdx,
     TestFiles,
+    Wasm,
 }
 
 /// The gates of `cargo xtask ci`, cheap ones first.
@@ -55,6 +56,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("layers", Gate::Layers),
     ("nextest", Gate::Cargo(&["nextest", "run", "--workspace", "--profile", "ci"])),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
+    ("wasm", Gate::Wasm),
     ("deny", Gate::Cargo(&["deny", "check"])),
 ];
 
@@ -69,6 +71,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
             Gate::Layers => layers::gate(&ctx.root, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
             Gate::TestFiles => test_files::gate(&ctx.root, out),
+            Gate::Wasm => wasm::gate(ctx, out),
         };
         match result {
             Ok(true) => {}

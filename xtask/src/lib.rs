@@ -16,6 +16,7 @@ mod layers;
 mod spdx;
 mod test_files;
 mod walk;
+mod wasm;
 mod workspace;
 
 #[cfg(test)]

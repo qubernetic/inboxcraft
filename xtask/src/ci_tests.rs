@@ -42,24 +42,29 @@ fn ci_runs_every_gate_in_order() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, OK, "{out}");
     let root = crate::default_root();
+    let wasm = ["charset", "control-key", "dav", "engine", "html", "ical", "mcp", "mime", "model", "proto", "store", "time", "vcard"]
+        .map(|name| format!(" -p inboxcraft-{name}"))
+        .concat();
+    let wasm = format!("build --target wasm32-unknown-unknown{wasm}");
     let expected: Vec<String> = [
         "fmt --all -- --check",
         "clippy --workspace --all-targets -- -D warnings",
         "nextest run --workspace --profile ci",
         "test --workspace --doc",
+        &wasm,
         "deny check",
     ]
     .iter()
     .map(|args| format!("cargo {args} @ {}", root.display()))
     .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in ["fmt", "clippy", "spdx", "test-files", "layers", "nextest", "doctests", "deny"] {
+    for name in ["fmt", "clippy", "spdx", "test-files", "layers", "nextest", "doctests", "wasm", "deny"] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
     assert!(out.contains("layers: "), "{out}");
-    assert!(out.ends_with("ci: all 8 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 8);
+    assert!(out.ends_with("ci: all 9 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 9);
 }
 
 #[test]
@@ -67,8 +72,8 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (ctx, calls) = ci_context(vec!["clippy", "deny"]);
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
-    assert_eq!(calls.borrow().len(), 5, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 8 gates failed: clippy, deny\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 6, "every gate still ran");
+    assert!(out.ends_with("ci: 2 of 9 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -77,7 +82,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 5 of 8 gates failed: fmt, clippy, nextest, doctests, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 6 of 9 gates failed: fmt, clippy, nextest, doctests, wasm, deny\n"), "{out}");
 }
 
 #[test]
@@ -88,7 +93,7 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 2 of 8 gates failed: spdx, layers\n"), "{out}");
+    assert!(out.ends_with("ci: 3 of 9 gates failed: spdx, layers, wasm\n"), "{out}");
     assert_eq!(calls.borrow().len(), 5);
 }
 
