@@ -12,11 +12,13 @@
 //!   or malformed configuration is an error, which names the variable and never its value.
 //! - The two accounts are called `live-imap` and `live-google` in output; their addresses, user names and secrets
 //!   never appear in a [`fmt::Debug`] or [`fmt::Display`] of anything here. A [`Secret`] prints `[redacted]`.
-//! - [`LiveConfig::check_recipient`] is the recipient allow-list: exactly the two addresses given at run time. A
-//!   live test that sends mail checks every recipient with it first.
+//!   Values a test prints itself, or passes to a failing `assert_eq!`, are not redacted.
+//! - [`LiveConfig::check_recipient`] is the recipient allow-list: exactly the two addresses given at run time, each
+//!   a plain dot-atom address. A live test that sends mail checks every recipient with it first.
 //! - [`LiveConfig::run_folder`] names the per-run folder `InboxCraft-Test/<run id>`, and [`RunFolder`] creates it and
-//!   removes it again, also when the test fails.
-//! - [`LiveConfig::leaked_secret`] scans a log or panic output for the secret values.
+//!   removes it again, also when the test fails. [`RunFolder`] takes no other name, so it deletes nothing else.
+//! - [`LiveConfig::leaked_secret`] scans a log or panic output for the secret values, and
+//!   [`LiveConfig::leaked_identifier`] for the addresses and login names, each raw and as `{:?}` prints it.
 //!
 //! | Variable | Meaning |
 //! |---|---|
@@ -101,6 +103,8 @@ pub enum LiveError {
     SameAddress,
     /// A recipient is not one of the two run-time addresses.
     RecipientRefused,
+    /// The hierarchy delimiter could make the run folder name something other than a folder under [`RUN_ROOT`].
+    Delimiter,
 }
 
 impl fmt::Display for LiveError {
@@ -112,6 +116,7 @@ impl fmt::Display for LiveError {
             Self::Invalid { variable, why } => write!(f, "{variable} {why}"),
             Self::SameAddress => f.write_str("live-imap and live-google have the same address"),
             Self::RecipientRefused => f.write_str("recipient refused: not one of the two live test accounts"),
+            Self::Delimiter => f.write_str("the hierarchy delimiter is a letter, a digit, -, _, white space, a control character, * or %"),
         }
     }
 }
@@ -300,9 +305,16 @@ impl LiveConfig {
     }
 
     /// The per-run folder, `InboxCraft-Test<delimiter><run id>`, with the server's hierarchy delimiter.
-    #[must_use]
-    pub fn run_folder(&self, delimiter: char) -> String {
-        format!("{RUN_ROOT}{delimiter}{}", self.run_id)
+    ///
+    /// # Errors
+    ///
+    /// [`LiveError::Delimiter`] for a delimiter that could run into the root or the run id, or that a server reads
+    /// as white space or a wildcard: a letter, a digit, `-`, `_`, white space, a control character, `*` or `%`.
+    pub fn run_folder(&self, delimiter: char) -> Result<String, LiveError> {
+        if delimiter.is_alphanumeric() || delimiter.is_whitespace() || delimiter.is_control() || matches!(delimiter, '-' | '_' | '*' | '%') {
+            return Err(LiveError::Delimiter);
+        }
+        Ok(format!("{RUN_ROOT}{delimiter}{}", self.run_id))
     }
 
     /// The recipient allow-list: admits exactly the two run-time addresses, the domain compared without case.
@@ -314,11 +326,31 @@ impl LiveConfig {
         if self.accounts().iter().any(|account| same_address(&account.address, recipient)) { Ok(()) } else { Err(LiveError::RecipientRefused) }
     }
 
-    /// The account whose secret appears in `text` (a log or panic output), or `None` when no secret does.
+    /// The account whose secret appears in `text` (a log or panic output), raw or as `{:?}` prints it, or `None`
+    /// when no secret does.
     #[must_use]
     pub fn leaked_secret(&self, text: &str) -> Option<&'static str> {
-        self.accounts().into_iter().find(|account| text.contains(account.secret.expose())).map(|account| account.name)
+        self.accounts().into_iter().find(|account| appears(text, account.secret.expose())).map(|account| account.name)
     }
+
+    /// The account and the field (`address` or `user`) whose value appears in `text`, raw or as `{:?}` prints it,
+    /// or `None` when neither address nor login name does.
+    #[must_use]
+    pub fn leaked_identifier(&self, text: &str) -> Option<(&'static str, &'static str)> {
+        self.accounts().into_iter().find_map(|account| {
+            [("address", account.address.as_str()), ("user", account.user.as_str())]
+                .into_iter()
+                .find(|(_, value)| appears(text, value))
+                .map(|(field, _)| (account.name, field))
+        })
+    }
+}
+
+/// Whether `value` appears in `text` as it is or as `{:?}` prints it, without the quotes.
+fn appears(text: &str, value: &str) -> bool {
+    let debug = format!("{value:?}");
+    let escaped = debug.strip_prefix('"').and_then(|rest| rest.strip_suffix('"')).unwrap_or(&debug);
+    text.contains(value) || text.contains(escaped)
 }
 
 /// Reads the live configuration for the test `test`: `Some` to run, `None` after printing why it skips.
@@ -365,8 +397,28 @@ pub trait Folders {
     fn delete(&mut self, name: &str) -> Result<(), Self::Error>;
 }
 
+/// Why [`RunFolder::create`] made no folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunFolderError<E> {
+    /// The harness refused before asking the server: see [`LiveConfig::run_folder`].
+    Refused(LiveError),
+    /// The error of [`Folders::create`].
+    Folders(E),
+}
+
+impl<E: fmt::Display> fmt::Display for RunFolderError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(err) => err.fmt(f),
+            Self::Folders(err) => err.fmt(f),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for RunFolderError<E> {}
+
 /// The per-run folder: created by [`RunFolder::create`], deleted by [`RunFolder::remove`] or, when a failing test
-/// never gets there, on drop.
+/// never gets there, on drop. Its name is always [`LiveConfig::run_folder`], so it can delete nothing else.
 pub struct RunFolder<'a, F: Folders> {
     folders: &'a mut F,
     name: String,
@@ -374,13 +426,15 @@ pub struct RunFolder<'a, F: Folders> {
 }
 
 impl<'a, F: Folders> RunFolder<'a, F> {
-    /// Creates the folder `name`, usually [`LiveConfig::run_folder`].
+    /// Creates the run's folder, [`LiveConfig::run_folder`] with the server's hierarchy delimiter.
     ///
     /// # Errors
     ///
-    /// The error of [`Folders::create`]; nothing is left to remove then.
-    pub fn create(folders: &'a mut F, name: String) -> Result<Self, F::Error> {
-        folders.create(&name)?;
+    /// [`RunFolderError::Refused`] for a delimiter [`LiveConfig::run_folder`] refuses, before the server is asked;
+    /// [`RunFolderError::Folders`] with the error of [`Folders::create`]. Nothing is left to remove then.
+    pub fn create(folders: &'a mut F, config: &LiveConfig, delimiter: char) -> Result<Self, RunFolderError<F::Error>> {
+        let name = config.run_folder(delimiter).map_err(RunFolderError::Refused)?;
+        folders.create(&name).map_err(RunFolderError::Folders)?;
         Ok(Self { folders, name, open: true })
     }
 
@@ -452,12 +506,29 @@ fn plain_value(variable: &'static str, get: &impl Fn(&str) -> Option<String>) ->
     Ok(value)
 }
 
-/// One `@` with something on both sides, and no white space.
+/// A plain dot-atom address, `local@domain`: no quotes, brackets, comments or address lists, so that every later
+/// layer reads it as this one address.
 fn is_address(text: &str) -> bool {
     match text.split_once('@') {
-        Some((local, domain)) => !local.is_empty() && !domain.is_empty() && !domain.contains('@') && !text.chars().any(char::is_whitespace),
+        Some((local, domain)) => is_dot_atom(local) && is_domain(domain),
         None => false,
     }
+}
+
+/// RFC 5322 `dot-atom-text` in ASCII: `atext` runs joined by single dots.
+fn is_dot_atom(local: &str) -> bool {
+    local.split('.').all(|atom| !atom.is_empty() && atom.chars().all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-/=?^_`{|}~".contains(c)))
+}
+
+/// Two or more letter-digit-hyphen labels of 1 to 63 bytes, no label starting or ending with `-`, no trailing dot.
+fn is_domain(domain: &str) -> bool {
+    domain.contains('.')
+        && domain.split('.').all(|label| {
+            (1..=63).contains(&label.len())
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
 }
 
 /// The same address: the local part exactly, the domain without case.

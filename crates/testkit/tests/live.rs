@@ -17,6 +17,6 @@ fn live_configuration_is_complete() -> Result<(), Box<dyn std::error::Error>> {
     let [imap, google] = config.accounts();
     config.check_recipient(imap.address())?;
     config.check_recipient(google.address())?;
-    println!("live: accounts {} and {}, run folder {}", imap.name(), google.name(), config.run_folder('/'));
+    println!("live: accounts {} and {}, run folder {}", imap.name(), google.name(), config.run_folder('/')?);
     Ok(())
 }
