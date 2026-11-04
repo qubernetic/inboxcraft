@@ -80,6 +80,21 @@ impl CopyUid {
         if words.next().is_some() {
             return None;
         }
+        Self::checked(uid_validity, source, destination, asked)
+    }
+
+    /// This COPYUID and a later one for the same move (a server may move the messages in parts), when together they
+    /// still fit `asked`.
+    pub(crate) fn merged(mut self, other: Self, asked: &UidSet) -> Option<Self> {
+        if other.uid_validity != self.uid_validity {
+            return None;
+        }
+        self.source.extend(other.source);
+        self.destination.extend(other.destination);
+        Self::checked(self.uid_validity, self.source, self.destination, asked)
+    }
+
+    fn checked(uid_validity: UidValidity, source: Vec<(Uid, Uid)>, destination: Vec<(Uid, Uid)>, asked: &UidSet) -> Option<Self> {
         let set: UidSet = source.iter().copied().collect();
         // Not one UID twice, each asked for, and one destination for each.
         let fits = set.len() == count(&source) && count(&source) == count(&destination) && within(&set, asked);

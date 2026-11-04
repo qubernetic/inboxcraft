@@ -1,0 +1,194 @@
+# MOVE (RFC 6851): the messages go to another mailbox in one step; COPYUID comes before they are expunged.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 MOVE UIDPLUS] ready
+= greeted preauth
+> move 1 Archive
+! WrongState { command: "UID MOVE", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 5 EXISTS
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=5 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 42:43 Archive
+C: A0002 UID MOVE 42:43 "Archive"
+S: * OK [COPYUID 432432 42:43 7:8] Moved
+S: * 2 EXPUNGE
+S: * 2 EXPUNGE
+S: A0002 OK Done
+= expunged 2
+= expunged 2
+= A0002 moved 432432 42:43 -> 7:8 by move
+# COPYUID on the tagged OK, as some servers send it.
+> move 44 Archive
+C: A0003 UID MOVE 44 "Archive"
+S: * 2 EXPUNGE
+S: A0003 OK [COPYUID 432432 44 9] Done
+= expunged 2
+= A0003 moved 432432 44 -> 9 by move
+# One that does not fit what was moved is left out.
+> move 45 Archive
+C: A0004 UID MOVE 45 "Archive"
+S: * OK [COPYUID 432432 46 10] Moved
+S: A0004 OK Done
+= A0004 moved by move
+> move 45 Lists/Rust
+C: A0005 UID MOVE 45 "Lists/Rust"
+S: A0005 NO [TRYCREATE] No such mailbox
+= A0005 No [TRYCREATE] No such mailbox
+# A COPYUID while no MOVE is on its way is passed over.
+S: * OK [COPYUID 432432 45 10] stray
+> examine INBOX
+C: A0006 EXAMINE "INBOX"
+S: A0006 OK [READ-ONLY] done
+= A0006 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+> move 45 Archive
+! ReadOnly
+
+# With QRESYNC on, the messages that went come as VANISHED.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 MOVE ENABLE QRESYNC] ready
+= greeted preauth
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED QRESYNC
+S: A0001 OK done
+= A0001 enabled QRESYNC
+> select INBOX
+C: A0002 SELECT "INBOX"
+S: A0002 OK done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 42:43 Archive
+C: A0003 UID MOVE 42:43 "Archive"
+S: * OK [COPYUID 432432 42:43 7:8] Moved
+S: * VANISHED 42:43
+S: A0003 OK Done
+= vanished 42:43
+= A0003 moved 432432 42:43 -> 7:8 by move
+
+# IMAP4rev2 has MOVE in it.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev2] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 4 Archive
+C: A0002 UID MOVE 4 "Archive"
+S: A0002 OK done
+= A0002 moved by move
+
+# A server that moves in parts sends a COPYUID for each; parts that do not fit together void them all.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 MOVE UIDPLUS] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 50:53 Archive
+C: A0002 UID MOVE 50:53 "Archive"
+S: * OK [COPYUID 432432 50:51 20:21] Moved
+S: * OK [COPYUID 432432 52:53 22:23] Moved
+S: A0002 OK Done
+= A0002 moved 432432 50:51,52:53 -> 20:21,22:23 by move
+> move 50:53 Archive
+C: A0003 UID MOVE 50:53 "Archive"
+S: * OK [COPYUID 432432 50:51 20:21] Moved
+S: * OK [COPYUID 999 52:53 22:23] Moved
+S: A0003 OK [COPYUID 432432 50:53 20:23] Done
+= A0003 moved by move
+> move 50:51 Archive
+C: A0004 UID MOVE 50:51 "Archive"
+S: * OK [COPYUID 432432 50 20] Moved
+S: * OK [COPYUID 432432 50 21] Moved
+S: * OK [COPYUID 432432 51 22] Moved
+S: A0004 OK Done
+= A0004 moved by move
+> move 50:51 Archive
+C: A0005 UID MOVE 50:51 "Archive"
+S: * OK [COPYUID 432432 52 20] Moved
+S: * OK [COPYUID 432432 50:51 21:22] Moved
+S: A0005 OK Done
+= A0005 moved by move
+
+# Without MOVE, with UIDPLUS: UID COPY, UID STORE of \Deleted, UID EXPUNGE of only these messages, one answer.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 UIDPLUS] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 5 EXISTS
+S: A0001 OK done
+= A0001 selected exists=5 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 42:43 Archive
+C: A0002 UID COPY 42:43 "Archive"
+S: A0002 OK [COPYUID 432432 42:43 7:8] Done
+C: A0003 UID STORE 42:43 +FLAGS.SILENT (\Deleted)
+# One command at a time, the steps of the move too.
+> list
+! Busy
+S: A0003 OK Done
+C: A0004 UID EXPUNGE 42:43
+S: * 2 EXPUNGE
+S: * 2 EXPUNGE
+S: A0004 OK Done
+= expunged 2
+= expunged 2
+= A0002 moved 432432 42:43 -> 7:8 by copy and expunge
+# A refused copy moves nothing.
+> move 44 Lists/Rust
+C: A0005 UID COPY 44 "Lists/Rust"
+S: A0005 NO [TRYCREATE] No such mailbox
+= A0005 No [TRYCREATE] No such mailbox
+# A refused STORE leaves the copy made and the message where it was.
+> move 44 Archive
+C: A0006 UID COPY 44 "Archive"
+S: A0006 OK [COPYUID 432432 44 9] Done
+C: A0007 UID STORE 44 +FLAGS.SILENT (\Deleted)
+S: A0007 NO Permission denied
+= A0006 moved 432432 44 -> 9 kept, not marked: No Permission denied
+# A refused UID EXPUNGE leaves the message marked \Deleted.
+> move 45 Archive
+C: A0008 UID COPY 45 "Archive"
+S: A0008 OK Done
+C: A0009 UID STORE 45 +FLAGS.SILENT (\Deleted)
+S: * 3 FETCH (FLAGS (\Deleted))
+S: A0009 OK Done
+= fetch seq=3 flags=\Deleted
+C: A0010 UID EXPUNGE 45
+S: A0010 BAD [CLIENTBUG] Try later
+= A0008 moved kept, not expunged: Bad [CLIENTBUG] Try later
+# A step's answer under the first tag ends the session.
+> move 46 Archive
+C: A0011 UID COPY 46 "Archive"
+S: A0011 OK Done
+C: A0012 UID STORE 46 +FLAGS.SILENT (\Deleted)
+S: A0011 OK Done
+! Unexpected("tagged response")
+
+# Without MOVE and UIDPLUS the messages are copied and marked \Deleted, but not expunged: EXPUNGE would remove every
+# message marked \Deleted, not only these.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 42 Archive
+C: A0002 UID COPY 42 "Archive"
+S: A0002 OK Done
+C: A0003 UID STORE 42 +FLAGS.SILENT (\Deleted)
+S: A0003 OK Done
+= A0002 moved marked deleted
+# Not knowing what the server can do, the client cannot choose.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> move 42 Archive
+! CapabilitiesUnknown

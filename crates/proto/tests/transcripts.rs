@@ -25,8 +25,8 @@ use std::path::Path;
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, SearchDate, SearchKey, Section,
-    SelectOptions, Transport,
+    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, Refusal, Removal, SearchDate,
+    SearchKey, Section, SelectOptions, Transport,
 };
 
 /// A UID set as IMAP writes one: `4,7:9`.
@@ -177,6 +177,10 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let set = uid_set(words.pop_front().unwrap());
             client.uid_copy(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
         }
+        "move" => {
+            let set = uid_set(words.pop_front().unwrap());
+            client.uid_move(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
+        }
         "expunge" => client.uid_expunge(&uid_set(words.pop_front().unwrap())),
         "notify" => client.notify(&notify(words)),
         "notify-none" => client.notify_none(),
@@ -231,6 +235,21 @@ fn copy_uid(copy_uid: Option<&CopyUid>) -> String {
     copy_uid.map_or(String::new(), |c| format!(" {} {} -> {}", c.uid_validity(), ranges_text(c.source()), ranges_text(c.destination())))
 }
 
+fn refusal_text(refusal: &Refusal) -> String {
+    let code = refusal.code.as_ref().map(|code| format!(" [{code}]")).unwrap_or_default();
+    format!("{:?}{code} {}", refusal.kind, refusal.text).trim_end().to_owned()
+}
+
+fn removal(removal: &Removal) -> String {
+    match removal {
+        Removal::Moved => "by move".to_owned(),
+        Removal::Expunged => "by copy and expunge".to_owned(),
+        Removal::MarkedDeleted => "marked deleted".to_owned(),
+        Removal::NotMarked(refusal) => format!("kept, not marked: {}", refusal_text(refusal)),
+        Removal::NotExpunged(refusal) => format!("kept, not expunged: {}", refusal_text(refusal)),
+    }
+}
+
 /// The lines an event is written as.
 fn render(event: &Event) -> Vec<String> {
     match event {
@@ -282,10 +301,7 @@ fn render(event: &Event) -> Vec<String> {
             }
             vec![line]
         }
-        Event::Completed { tag, outcome: Err(refusal) } => {
-            let code = refusal.code.as_ref().map(|code| format!(" [{code}]")).unwrap_or_default();
-            vec![format!("{tag} {:?}{code} {}", refusal.kind, refusal.text).trim_end().to_owned()]
-        }
+        Event::Completed { tag, outcome: Err(refusal) } => vec![format!("{tag} {}", refusal_text(refusal))],
         Event::Completed { tag, outcome: Ok(answer) } => match answer {
             Answer::Capabilities(caps) => vec![format!("{tag} capabilities {}", caps.iter().collect::<Vec<_>>().join(" ")).trim_end().to_owned()],
             Answer::StartTls => vec![format!("{tag} starttls")],
@@ -300,6 +316,7 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Fetched => vec![format!("{tag} fetched")],
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
             Answer::Copied(copied) => vec![format!("{tag} copied{}", copy_uid(copied.as_ref()))],
+            Answer::Moved(moved) => vec![format!("{tag} moved{} {}", copy_uid(moved.copy_uid.as_ref()), removal(&moved.removal))],
             Answer::Expunged => vec![format!("{tag} expunged")],
             Answer::Idled => vec![format!("{tag} idled")],
             Answer::Notified => vec![format!("{tag} notified")],

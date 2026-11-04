@@ -25,7 +25,7 @@ mod utf7;
 mod value;
 
 pub use capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN};
-pub use client::{Answer, Client, Event, Refusal, RefusalKind, State, Tag, Transport};
+pub use client::{Answer, Client, Event, Moved, Refusal, RefusalKind, Removal, State, Tag, Transport};
 pub use fetch::{FetchAttributes, FetchItem, Section};
 pub use frame::{MAX_LINE, MAX_LITERAL, MAX_LITERALS};
 pub use list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
