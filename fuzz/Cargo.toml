@@ -17,6 +17,7 @@ inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
 inboxcraft-proto = { path = "../crates/proto" }
+inboxcraft-net = { path = "../crates/net" }
 inboxcraft-testkit = { path = "../crates/testkit" }
 
 [workspace]
@@ -81,6 +82,13 @@ bench = false
 [[bin]]
 name = "testkit_imap"
 path = "fuzz_targets/testkit_imap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_envelope"
+path = "fuzz_targets/net_envelope.rs"
 test = false
 doc = false
 bench = false

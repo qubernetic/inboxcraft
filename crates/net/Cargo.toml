@@ -8,5 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+inboxcraft-charset = { workspace = true }
+inboxcraft-mime = { workspace = true }
+inboxcraft-model = { workspace = true }
+inboxcraft-time = { workspace = true }
+
 [lints]
 workspace = true

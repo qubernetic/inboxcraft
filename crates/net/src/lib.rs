@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Sockets, TLS, OAuth and the per-account sync workers.
+//! Sockets, TLS and the per-account sync workers.
 //!
-//! Layer 3, native only: the one crate that does network I/O. Nothing is implemented yet; the crate holds its place in the workspace (see
-//! `docs/architecture.md`).
+//! Layer 3, native only: the one crate that does network I/O (see `docs/architecture.md`).
+//!
+//! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+pub mod envelope;
 
 /// The crate's package name.
 ///
