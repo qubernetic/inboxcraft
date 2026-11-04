@@ -10,3 +10,7 @@ publish = false
 
 [lints]
 workspace = true
+
+# `std` has no clock on wasm32-unknown-unknown; `web-time` reads the browser's (native builds use `std`).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+web-time = { workspace = true }

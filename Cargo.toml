@@ -45,6 +45,8 @@ serde_json = "1"
 log = "0.4"
 tempfile = "3"
 toml = "1"
+# time only, on wasm32-unknown-unknown: the browser's clock
+web-time = "1"
 # testkit only: the test CA, the fake servers' TLS and the test client
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
