@@ -11,6 +11,7 @@
 //!   the hour they run.
 //! - [`Timestamp`] is a point in time, UTC, from year 0 to year 10000. [`CivilDateTime`] is what a wall clock shows at
 //!   an [`Offset`] from UTC.
+//! - [`MailDate`] reads and writes the dates of mail headers (RFC 5322), obsolete forms included.
 //!
 //! ```
 //! use std::time::Duration;
@@ -25,8 +26,10 @@
 
 mod civil;
 mod clock;
+mod rfc5322;
 mod timestamp;
 
 pub use civil::{CivilDateTime, Offset, Weekday, days_in_month, is_leap_year};
 pub use clock::{Clock, FakeClock, SystemClock};
+pub use rfc5322::{DateError, MAX_COMMENT_DEPTH, MAX_LEN, MailDate, Zone};
 pub use timestamp::Timestamp;
