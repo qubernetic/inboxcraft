@@ -291,7 +291,7 @@ fn percent_decode(s: &str) -> Vec<u8> {
 }
 
 /// An RFC 2045 token: printable ASCII without space and without the `tspecials`.
-fn is_token(s: &str) -> bool {
+pub(crate) fn is_token(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?=".contains(&b))
 }
 

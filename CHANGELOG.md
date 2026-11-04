@@ -65,3 +65,12 @@ All notable changes to InboxCraft are listed here. The format follows
   bad or absent boundaries, broken base64, unknown transfer encodings and charsets; property tests and the fuzz
   targets `mime_message`, `mime_headers` and `mime_dsn`. The header, parameter, transfer encoding and multipart
   reading is adapted from UCS-Care-Group/mailcraft (MIT OR Apache-2.0) (#18)
+- `inboxcraft-mime` builds messages: `MessageBuilder` writes `Date`, `From`, `Sender`, `Reply-To`, `To`, `Cc`,
+  `Subject`, `Message-ID`, `In-Reply-To`, `References` and extra fields, folded within 78 characters where the
+  value allows, with RFC 2047 encoded words for text and display names that need them; a text body, an HTML body
+  or both as `multipart/alternative`, and attachments in `multipart/mixed` (base64, file names in RFC 2231 form when
+  they are not plain ASCII); text in `7bit` or quoted-printable with CRLF line ends; boundaries that are in none of
+  the parts. A header injection guard: text for people loses CR, LF and NUL, and addresses, message ids, field
+  names and media types that do not fit their grammar are refused (`MimeError::BadHeader`), as are media type names
+  over 127 characters and attached `message` types other than `message/global`. What the reader could
+  not read back (a field over 256 KiB, a message over 128 MiB) is refused too; build-then-parse property tests (#19)

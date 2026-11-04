@@ -64,6 +64,9 @@ pub enum MimeError {
         /// The cap, [`crate::MAX_RECIPIENTS`].
         limit: usize,
     },
+    /// A value given to [`crate::MessageBuilder`] does not fit its header's grammar, so writing it could break the
+    /// header: `"address"`, `"message id"`, `"field name"` or `"media type"`.
+    BadHeader(&'static str),
 }
 
 impl fmt::Display for MimeError {
@@ -85,6 +88,7 @@ impl fmt::Display for MimeError {
             Self::MissingField(name) => write!(f, "a delivery report lacks the {name} field"),
             Self::BadField(name) => write!(f, "a delivery report has a bad {name} field"),
             Self::TooManyRecipients { limit } => write!(f, "a delivery report names more than {limit} recipients"),
+            Self::BadHeader(what) => write!(f, "the {what} cannot be written into a header"),
         }
     }
 }

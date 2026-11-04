@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Internet messages and MIME (RFC 5322, RFC 2045 to 2049): reading them.
+//! Internet messages and MIME (RFC 5322, RFC 2045 to 2049): reading and building them.
 //!
 //! Layer 2 (see `docs/architecture.md`); it uses `charset` for character sets and RFC 2047 encoded words. No I/O,
 //! the same on native and wasm.
@@ -12,6 +12,9 @@
 //!   encoding and [`Part::text`] the character set of one part when asked.
 //! - [`Part::text_body`], [`Part::html_body`] and [`Part::attachments`] find what a reader shows.
 //! - [`Part::delivery_status`] reads the [`DeliveryStatus`] of a bounce (RFC 3464).
+//! - [`MessageBuilder`] writes a message from [`Mailbox`]es, text, HTML and [`Attachment`]s, behind a header
+//!   injection guard: text for people loses CR, LF and NUL, and a value with a grammar of its own that does not fit
+//!   it is [`MimeError::BadHeader`]. What it writes, [`parse`] reads back.
 //!
 //! Mail is hostile. Nothing panics on any bytes; what cannot be read is a [`MimeError`]: a message over
 //! [`MAX_MESSAGE_BYTES`], more than [`MAX_FIELDS`] fields or a field over [`MAX_FIELD_BYTES`], nesting deeper than
@@ -51,13 +54,16 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod build;
 mod dsn;
+mod encode;
 mod error;
 mod header;
 mod params;
 mod part;
 mod transfer;
 
+pub use build::{Attachment, Mailbox, MessageBuilder};
 pub use dsn::{Action, DeliveryStatus, MAX_RECIPIENTS, RecipientStatus, Status, TypedValue};
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};

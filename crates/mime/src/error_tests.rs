@@ -24,6 +24,7 @@ fn every_error_says_what_went_wrong() {
         (MimeError::MissingField("Action"), "a delivery report lacks the Action field"),
         (MimeError::BadField("Status"), "a delivery report has a bad Status field"),
         (MimeError::TooManyRecipients { limit: 9 }, "a delivery report names more than 9 recipients"),
+        (MimeError::BadHeader("address"), "the address cannot be written into a header"),
     ];
     for (error, text) in cases {
         assert_eq!(error.to_string(), text);
