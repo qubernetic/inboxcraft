@@ -81,6 +81,8 @@ invented.
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
   layers, wasm, deny, and the coverage floors in `.config/coverage.toml` (`cargo xtask cov --check`).
+- CI (`.github/workflows/ci.yml`) runs `cargo xtask ci` on ready PRs only: a draft gets only the quick `draft`
+  check, so run `just ci` locally before `gh pr ready`. The `ci` job is the gate.
 - The host has no Rust toolchain: every `cargo` command runs in the dev container (`just shell`) or in native mode.
 - Every source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Git: Gitflow (`main` and `develop` are protected; work on `feature/<issue>-<slug>`, `fix/…`, `hotfix/…`,
@@ -114,3 +116,4 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 |---|---|---|
 | 2026-11-03 | major | First version |
 | 2026-11-04 | minor | The coverage gate joins the `just ci` list (#7) |
+| 2026-11-04 | minor | CI runs on ready PRs only, drafts get the quick check (#9) |
