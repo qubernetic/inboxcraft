@@ -41,3 +41,14 @@ All notable changes to InboxCraft are listed here. The format follows
   reported), `decode_word` reads one strictly, `encode_text` writes the parts that need it as UTF-8 words of at
   most 75 characters, Q or B by length, without CR, LF and NUL; property tests and the fuzz targets
   `charset_decode` and `rfc2047_words` (#16)
+- `inboxcraft-model`, the mailbox model, serialisable with `serde` and checked again when read back: our own ids
+  and the server's UIDs, UIDVALIDITY, modification sequences and UID sets kept as ranges; accounts whose servers
+  use TLS or STARTTLS (no unencrypted choice) and hold no secret; folders with their SPECIAL-USE attributes and
+  roles found by SPECIAL-USE first, then by English and Hungarian names (`Elküldött`, `Piszkozatok`, `Kuka`,
+  `Levélszemét`, `Archívum`, ...), then by asking the owner once per role, Inbox, Sent and Drafts fixed once set;
+  addresses compared without case, and two contacts with the same display name shown with their addresses;
+  flags and keywords; messages with their envelope, size and preview; threads by `Message-ID`, `In-Reply-To` and
+  `References`, across folders and accounts; the read path jobs (sync folder list, sync folder, fetch body, idle)
+  and events (folders, messages added, changed and expunged, UIDVALIDITY reset, body fetched, folder synced,
+  connection state, one error kind per cause). Names, subjects and previews are cleaned of control characters and
+  invisible direction marks; property tests and the fuzz target `model_values` (#17)

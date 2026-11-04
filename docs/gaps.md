@@ -49,6 +49,17 @@ B = blocks the next stage.
   control characters, which the reader and the header writer must handle (#16).
 - `encode_text` writes UTF-8 words only, and does not fold the header line: a long plain part stays as long as it
   is, and folding at the spaces between words is left to the `mime` header writer (#16).
+- Folder roles by name match the whole last part of the path against a fixed English and Hungarian list; other
+  languages, and names with extra words (`Sent 2026`), are left to the owner's one question. When several folders
+  could take a role, the first in the server's order wins; detection never moves a role once set, even when a
+  SPECIAL-USE attribute appears later (#17).
+- Mail addresses are compared without case in the local part too, which RFC 5321 does not promise; a header
+  entry without a usable address (`undisclosed-recipients:;`, a bare name) is not an `Address`, and `mime` decides
+  what to show for it (#17).
+- Threads link by `Message-ID`, `In-Reply-To` and `References` only: a reply from a program that sends none of
+  them starts a thread of its own; subjects are not used (#17).
+- `model` caps what one message keeps (1000 addresses per field, 64 references, 64 keywords, subject 1000 and
+  preview 256 characters) but not the size of a body or of a folder list in an event; `net` sets those caps (#17).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -69,3 +80,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the clock and RFC 5322 dates (#15) |
 | 2026-11-04 | minor | Rough edges of charsets and encoded words (#16) |
 | 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |
+| 2026-11-04 | minor | Rough edges of the mailbox model (#17) |
