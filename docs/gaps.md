@@ -31,6 +31,15 @@ B = blocks the next stage.
   hide it; a short login name that also occurs in ordinary output fails the run (#10).
 - A server without a hierarchy delimiter (`NIL` in `LIST`) has no run folder under `InboxCraft-Test`;
   `RunFolder` needs a delimiter (#10).
+- `time` knows fixed offsets only: no IANA zones and no lookup of the computer's own zone yet, so a date shows in
+  the sender's offset or UTC. ISO 8601 and iCalendar text come with `ical` (#15).
+- RFC 5322 dates are read leniently where RFC 5322 section 4.3 allows it or real mail needs it: the day of the
+  week is not checked against the date, second 60 reads as 59, and a missing zone, a military letter or an unknown
+  zone name (`CET`) reads as `-0000`. Text after the zone other than a comment (`+0100 CET`) is refused (#15).
+- `testkit`'s certificate `Clock` still reads the wall clock (through the `time` crate of crates.io), because the
+  test certificates are made valid around the real now; it is not an `inboxcraft_time::Clock` (#15).
+- `fuzz/` resolves its dependencies afresh on every run: it has no committed `Cargo.lock` and `cargo deny` does
+  not see it (#15).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -48,4 +57,5 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the coverage gate (#7) |
 | 2026-11-04 | minor | Rough edges of the fake server frame (#8) |
 | 2026-11-04 | minor | Rough edges of the live test harness (#10) |
+| 2026-11-04 | minor | Rough edges of the clock and RFC 5322 dates (#15) |
 | 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |
