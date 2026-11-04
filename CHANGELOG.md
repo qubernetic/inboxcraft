@@ -134,3 +134,11 @@ All notable changes to InboxCraft are listed here. The format follows
   network) for COMPRESS. Property tests on hostile input and the fuzz target `testkit_imap` (#23)
 - `cargo xtask layers` refuses any dependency of `testkit` on `proto`, so a fake server never uses the parser it
   tests (#23)
+- `inboxcraft-store`, the local-first cache: the `Storage` trait over accounts, folders, messages, flags, bodies and
+  folder sync state (UIDVALIDITY, UIDNEXT, HIGHESTMODSEQ), written as a `Batch` of changes that applies whole or
+  not at all. Two backends: `Memory` (always built, the one on wasm) and `Sqlite` (native only, feature `sqlite`,
+  on by default): SQLite in WAL mode with `synchronous=FULL`, a schema version with migrations, an FTS5 index of
+  the body text, and the message sources as files beside the database, written and synced before their row
+  commits and swept when a kill left one behind. Bodies are kept for opened messages and for the last 30 days
+  (`StoreConfig::body_days`). `Search` matches from, to and Cc, subject and date, and body words as a phrase,
+  newest first. New dependency `rusqlite` with the bundled SQLite, native builds only (#24)

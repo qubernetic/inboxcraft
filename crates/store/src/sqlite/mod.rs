@@ -30,7 +30,7 @@ pub const SOURCES_DIR: &str = "sources";
 /// A store in a directory: [`DATABASE_FILE`] (SQLite, WAL, `synchronous=FULL`, foreign keys on) and the message
 /// sources in [`SOURCES_DIR`].
 ///
-/// One process at a time opens a directory; the app's single-instance guard sees to that.
+/// One process at a time may open a directory; the store takes no lock, the app's single instance guard is to see to it.
 #[derive(Debug)]
 pub struct Sqlite {
     conn: Connection,

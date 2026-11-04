@@ -170,6 +170,15 @@ B = blocks the next stage.
   bytes, so the buffer can pass it by about 64 KiB first (#23).
 - Between its STARTTLS answer and the client's handshake the fake records at most 16 lines sent in clear; more go
   to rustls, which ends the session. A line past 8192 bytes ends the session and is kept cut at 8192 (#23).
+- `store` search: from, to and subject match a piece of the text without case (Unicode lower case, no accent
+  folding); body text matches whole words as a phrase, without prefixes, operators or ranking. A word is a run of
+  letters and digits; SQLite's `unicode61` tokenizer and the memory backend may split rare characters differently.
+  The query language is E5.1 (#24).
+- `store` keeps no lock on its directory: keeping a second process away from an open store is the app's single
+  instance guard, which is not built yet. The memory backend copies its rows on every batch, which is fine for tests and
+  the browser build but not for a large mailbox (#24).
+- `store` ids above `i64::MAX` are refused by the SQLite backend; the memory backend takes them. A source file
+  that is missing or damaged is reported as `Corrupt` and is not fetched again by the store itself (#24).
 
 ## Revision history
 | Date | Change | Summary |
@@ -195,3 +204,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the IMAP sync extensions (#21) |
 | 2026-11-04 | minor | Rough edges of IMAP move, UIDPLUS, preview and compression (#22) |
 | 2026-11-04 | minor | Rough edges of the fake IMAP server (#23) |
+| 2026-11-04 | minor | Limits of the local-first store and its search (#24) |
