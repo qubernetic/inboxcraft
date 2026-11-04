@@ -14,6 +14,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
 inboxcraft-charset = { path = "../crates/charset" }
+inboxcraft-model = { path = "../crates/model" }
 
 [workspace]
 members = ["."]
@@ -35,6 +36,13 @@ bench = false
 [[bin]]
 name = "rfc2047_words"
 path = "fuzz_targets/rfc2047_words.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_values"
+path = "fuzz_targets/model_values.rs"
 test = false
 doc = false
 bench = false

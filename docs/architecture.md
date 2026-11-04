@@ -6,8 +6,37 @@
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
 
 ## Data flow
-<UI/CLI/MCP → Session::run(id, params) → engine emits Jobs → net worker per account (IDLE/NOTIFY, back-off)
- → Events → engine applies → store (atomic writes) → UI repaints>
+UI, CLI and MCP call `Session::run(id, params)`. The engine changes the local state at once and emits jobs; the
+account's `net` worker runs them and reports events; the engine applies the events, `store` writes them atomically
+and the UI repaints.
+
+```text
+UI / CLI / MCP --Session::run--> engine --Job--> net worker (one thread per account) <--IMAP--> server
+                                   ^                         |
+                                   +--------- Event ---------+
+                                   |
+                                   +--> store (atomic writes) --> UI repaints
+```
+
+The jobs and events are types of `model` (layer 1), not of `engine`, because `net` (layer 3) may not depend on
+`engine` (layer 4); both speak `model`, and no protocol type crosses the line. A job carries everything the worker
+needs (the folder's path, the UIDVALIDITY and the state the last sync ended at), so the worker never reads the
+engine's state.
+
+| Job (`model::JobKind`) | What the worker does | Events it answers with |
+|---|---|---|
+| `SyncFolderList` | `LIST` with SPECIAL-USE | `Folders` (the whole list) |
+| `SyncFolder` | a full sync, or a resync from the known `FolderState` (CONDSTORE, QRESYNC) | `MessagesAdded`, `MessagesChanged`, `MessagesExpunged`, `UidValidityReset` if the UIDVALIDITY changed, `FolderSynced` last |
+| `FetchBody` | fetches one whole message | `BodyFetched` |
+| `Idle` | watches the folder (IDLE, or NOTIFY) until the next job | the same change events as `SyncFolder` |
+
+On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
+and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
+refused, folder gone, ...), so the owner is told the cause. Every event with UIDs carries the UIDVALIDITY they
+belong to; the engine drops an event for an older one.
+
+Folder roles come from `model::RoleMap`: SPECIAL-USE first, then the English and Hungarian names, then the owner,
+asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and Archive can be changed.
 
 ## Decisions worth knowing
 - The engine does no I/O; protocols are sans-I/O (`proto`, `dav`); sockets and TLS live only in `net`.
@@ -27,3 +56,4 @@
 |---|---|---|
 | <date> | major | First version |
 | 2026-11-04 | minor | The injectable clock (#15) |
+| 2026-11-04 | minor | Data flow: the read path jobs and events in `model`, folder roles (#17) |
