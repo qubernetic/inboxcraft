@@ -280,3 +280,30 @@ fn a_removed_body_leaves_no_words_in_the_files() {
     drop(store);
     assert_eq!(holding(dir, "platypusbody"), Vec::<String>::new(), "nothing comes back on close");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_open_store_is_tightened() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = dir();
+    let dir = tmp.path();
+    drop(with_body(dir));
+    let wide = |path: &Path, mode: u32| fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    let wal = dir.join(format!("{DATABASE_FILE}-wal"));
+    let shm = dir.join(format!("{DATABASE_FILE}-shm"));
+    fs::write(&wal, b"").unwrap();
+    fs::write(&shm, b"").unwrap();
+    for (path, mode) in
+        [(dir.to_owned(), 0o755), (dir.join(SOURCES_DIR), 0o755), (dir.join(DATABASE_FILE), 0o644), (wal.clone(), 0o644), (shm.clone(), 0o644)]
+    {
+        wide(&path, mode);
+    }
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(dir), 0o700, "the store directory");
+    assert_eq!(mode(&dir.join(SOURCES_DIR)), 0o700, "the sources directory");
+    for path in [dir.join(DATABASE_FILE), wal, shm] {
+        assert_eq!(mode(&path), 0o600, "{}", path.display());
+    }
+    assert_eq!(store.body(m(1)).unwrap(), Some(body("hello")));
+}

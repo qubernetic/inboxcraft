@@ -77,6 +77,8 @@ impl Sqlite {
         let sources = dir.join(SOURCES_DIR);
         private::create_dir(&sources)?;
         let database = dir.join(DATABASE_FILE);
+        let (wal, shm) = (dir.join(format!("{DATABASE_FILE}-wal")), dir.join(format!("{DATABASE_FILE}-shm")));
+        private::tighten(&[dir, &sources], &[&database, &wal, &shm])?;
         drop(private::create_file(&database, false)?);
         let mut conn = Connection::open(database)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;

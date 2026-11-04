@@ -179,10 +179,10 @@ B = blocks the next stage.
   the browser build but not for a large mailbox (#24).
 - `store` ids above `i64::MAX` are refused by the SQLite backend; the memory backend takes them. A source file
   that is missing or damaged is reported as `Corrupt` and is not fetched again by the store itself (#24).
-- `store` makes its directories `0700` and its files `0600` on unix, whatever the umask. It does not tighten a
-  directory or file that is already there with wider modes. On Windows it sets no ACL of its own: the files inherit
-  the ACL of the directory they are made in, which for the profile directory is the owner's account alone; a store
-  put in a shared folder there is as open as that folder (#24).
+- `store` makes its directories `0700` and its files `0600` on unix, whatever the umask, and narrows wider ones at
+  open. The directories above the store directory are left as they are. On Windows it sets no ACL of its own: the
+  files inherit the ACL of the directory they are made in, which for the profile directory is the owner's account
+  alone; a store put in a shared folder there is as open as that folder (#24).
 - `store` removes mail from its own files: removed rows are zeroed (`secure_delete`), removed words leave the FTS5
   index at once (`secure-delete`), the write-ahead log is emptied after a batch that removed mail, and a removed
   source file is unlinked. What the file system or the disk kept of those bytes (journal, copy-on-write snapshots,
