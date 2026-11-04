@@ -42,21 +42,27 @@ pub(crate) fn tidy(text: &str) -> String {
 pub(crate) struct Secrets(Vec<String>);
 
 impl Secrets {
+    /// Adds `secret`, and `secret` without its edge white space: a server line is trimmed before it is searched, so
+    /// a password written back first or last has lost it.
     pub(crate) fn add(&mut self, secret: &str) {
-        if !secret.is_empty() && !self.0.iter().any(|s| s == secret) {
-            self.0.push(secret.to_owned());
-            // Longest first, so a secret inside another one cannot leave a piece behind.
-            self.0.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        for secret in [secret, secret.trim()] {
+            if !secret.is_empty() && !self.0.iter().any(|s| s == secret) {
+                self.0.push(secret.to_owned());
+            }
         }
+        // Longest first, so a secret inside another one cannot leave a piece behind.
+        self.0.sort_by_key(|s| std::cmp::Reverse(s.len()));
     }
 
     /// `text` with every secret replaced by `***`, then tidied. Hidden before it is shortened: a secret cut in half
-    /// would no longer be recognised.
+    /// would no longer be recognised. A secret's edge white space stays, so that `***` does not run into a word.
     pub(crate) fn tidy(&self, text: &str) -> String {
         let mut out = text.to_owned();
         for secret in &self.0 {
             if out.contains(secret.as_str()) {
-                out = out.replace(secret.as_str(), "***");
+                let before = if secret.starts_with(char::is_whitespace) { " " } else { "" };
+                let after = if secret.ends_with(char::is_whitespace) { " " } else { "" };
+                out = out.replace(secret.as_str(), &format!("{before}***{after}"));
             }
         }
         tidy(&out)

@@ -44,3 +44,15 @@ fn invisible_direction_and_zero_width_marks_are_dropped() {
     // A mark between two words leaves one space, not two.
     assert_eq!(tidy("a \u{200b} b"), "a b");
 }
+
+#[test]
+fn a_secret_with_edge_white_space_is_hidden_at_the_edge() {
+    for password in [" secret", "secret ", "\tsecret"] {
+        let mut secrets = Secrets::default();
+        secrets.add(password);
+        // The server's line is trimmed before it is searched, so the password's own white space may be gone.
+        assert_eq!(secrets.tidy("secret is wrong"), "*** is wrong", "{password:?}");
+        assert_eq!(secrets.tidy("wrong password secret"), "wrong password ***", "{password:?}");
+        assert_eq!(secrets.tidy(&format!("wrong {password} here")), "wrong *** here", "{password:?}");
+    }
+}

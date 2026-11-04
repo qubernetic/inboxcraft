@@ -124,6 +124,32 @@ fn the_password_is_hidden_also_as_login_quotes_it() {
     assert_eq!(refusal.text, "bad password \"***\" or ***");
 }
 
+/// A client over TLS, greeted, whose server offers LOGIN and AUTHENTICATE PLAIN with SASL-IR.
+fn greeted() -> Client {
+    let mut client = Client::new(Transport::Tls);
+    client.receive(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR] ready\r\n").unwrap();
+    client.next_event();
+    client
+}
+
+#[test]
+fn a_password_with_edge_white_space_is_hidden_first_and_last() {
+    for password in [" secret", "secret ", "\tsecret"] {
+        for plain in [false, true] {
+            let mut client = greeted();
+            if plain { client.authenticate_plain("tim", password) } else { client.login("tim", password) }.unwrap();
+            client.receive(b"A0001 NO secret is wrong, wrong password secret\r\n").unwrap();
+            let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+            assert_eq!(refusal.text, "*** is wrong, wrong password ***", "{password:?}");
+
+            let mut client = greeted();
+            if plain { client.authenticate_plain("tim", password) } else { client.login("tim", password) }.unwrap();
+            let error = client.receive(b"* BYE secret bad secret\r\n").unwrap_err();
+            assert_eq!(error, ProtoError::Bye("*** bad ***".to_owned()), "{password:?}");
+        }
+    }
+}
+
 /// Hostile bytes for a session in any state.
 fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
     let line = prop_oneof![
@@ -152,7 +178,7 @@ proptest! {
     fn hostile_bytes_never_panic_and_never_show_the_password(
         pieces in session_bytes(),
         commands in proptest::collection::vec(0_u8..10, 0..8),
-        password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2")],
+        password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2"), Just(" hunter2"), Just("hunter2\t"), Just(" hun\"ter\\2 ")],
     ) {
         // The password as LOGIN quotes it; also how `Debug` writes it.
         let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
@@ -204,6 +230,8 @@ proptest! {
         shown.push(format!("{client:?}"));
         for text in &shown {
             prop_assert!(!text.contains(password) && !text.contains(&quoted), "{}", text);
+            // A server line is trimmed, so the password may come back without its edge white space.
+            prop_assert!(!text.contains(password.trim()) && !text.contains(quoted.trim()), "{}", text);
             prop_assert!(!text.contains("AHRpbQBodW50ZXIy"), "{}", text);
         }
     }
