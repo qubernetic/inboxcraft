@@ -16,6 +16,7 @@ mod message;
 mod role;
 mod text;
 mod thread;
+mod uid_set;
 
 pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
@@ -25,6 +26,7 @@ pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidVa
 pub use message::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Summary};
 pub use role::{Role, RoleError, RoleMap, RoleSource, detect_role};
 pub use thread::{Thread, group_threads};
+pub use uid_set::UidSet;
 
 /// The crate's package name.
 ///
