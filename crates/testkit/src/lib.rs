@@ -17,6 +17,9 @@
 //! - [`TestClient`] drives a server and reports each failure with its own [`ErrorKind`]. It stands in for the real
 //!   client until `net` exists; later slices drive `net` against the same servers.
 //!
+//! The [`live`] module is the harness of the opt-in live tests the owner runs by hand on two throwaway test
+//! accounts (`just it-live`); without their credentials, and always in the agent sandbox and in CI, they skip.
+//!
 //! Servers listen on 127.0.0.1 only and certificates name `example.org` hosts ([`HOST`], [`WRONG_HOST`]).
 //!
 //! ```
@@ -45,6 +48,7 @@
 mod client;
 mod error;
 mod line;
+pub mod live;
 mod pki;
 mod script;
 mod server;
