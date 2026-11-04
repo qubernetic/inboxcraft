@@ -12,8 +12,9 @@ use super::capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN, is_a
 use super::command::{Command, escaped};
 use super::fetch::{FetchAttributes, FetchItem};
 use super::frame::Framer;
-use super::list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
+use super::list::{ListEntry, MAX_MAILBOXES, check_mailbox};
 use super::mailbox::{MailboxStatus, flag_list};
+use super::notify::{MailboxCounts, Notify};
 use super::response::{Response, classify};
 use super::sasl::{check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
@@ -124,6 +125,13 @@ pub enum Event {
     Alert(String),
     /// The server agreed to IDLE: changes come as events until [`Client::done`].
     Idling,
+    /// NOTIFY: what a STATUS response says of a mailbox.
+    Status(MailboxCounts),
+    /// NOTIFY: a mailbox was made, renamed (under its new name) or removed (`\NonExistent`), as LIST tells it.
+    MailboxChanged(ListEntry),
+    /// NOTIFY: the server could not keep up and tells of nothing more, as after NOTIFY NONE; read the mailboxes
+    /// again and send NOTIFY anew.
+    NotificationOverflow,
 }
 
 /// What a command brought when it succeeded.
@@ -147,6 +155,8 @@ pub enum Answer {
     Searched(UidSet),
     /// IDLE, ended by DONE.
     Idled,
+    /// NOTIFY SET or NOTIFY NONE.
+    Notified,
     /// LOGOUT.
     LoggedOut,
 }
@@ -193,6 +203,10 @@ enum Kind {
     Select(Opening),
     Fetch,
     Search(Vec<Uid>),
+    /// NOTIFY SET (`set`) or NOTIFY NONE.
+    Notify {
+        set: bool,
+    },
     /// IDLE; `going` once the server agreed, `done` once DONE was asked for.
     Idle {
         going: bool,
@@ -246,6 +260,8 @@ pub struct Client {
     qresync: bool,
     /// The open mailbox's UIDVALIDITY.
     uid_validity: Option<UidValidity>,
+    /// NOTIFY SET is on.
+    notifying: bool,
 }
 
 /// Neither the output (it may hold a password) nor anything secret is shown.
@@ -277,6 +293,7 @@ impl Client {
             condstore: false,
             qresync: false,
             uid_validity: None,
+            notifying: false,
         }
     }
 
@@ -567,6 +584,31 @@ impl Client {
         Ok(self.start(command, Kind::Search(Vec::new())))
     }
 
+    /// NOTIFY SET (RFC 5465): the server tells of what `notify` names without being asked, until NOTIFY NONE or
+    /// [`Event::NotificationOverflow`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::BadArgument`] for nothing to tell of, MailboxName without mailboxes, or mailbox names that cannot
+    /// be sent; [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without `NOTIFY`, or a state error.
+    pub fn notify(&mut self, notify: &Notify) -> Result<Tag, ProtoError> {
+        self.ready("NOTIFY", &[State::Authenticated, State::Selected])?;
+        self.require("NOTIFY")?;
+        let command = notify.command(self.condstore)?;
+        Ok(self.start(command, Kind::Notify { set: true }))
+    }
+
+    /// NOTIFY NONE: the server tells of nothing more without being asked.
+    ///
+    /// # Errors
+    ///
+    /// As [`notify`](Self::notify).
+    pub fn notify_none(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("NOTIFY", &[State::Authenticated, State::Selected])?;
+        self.require("NOTIFY")?;
+        Ok(self.start(Command::new("NOTIFY NONE"), Kind::Notify { set: false }))
+    }
+
     /// IDLE (RFC 2177) in the open mailbox: [`Event::Idling`] once the server agrees, then what changes, as events,
     /// until [`done`](Self::done). Nothing else can be sent meanwhile. Ending it before the server's time limit (often
     /// 30 minutes) is the caller's work.
@@ -705,6 +747,9 @@ impl Client {
             Status::Preauth => Err(ProtoError::Unexpected("PREAUTH")),
             Status::Ok | Status::No | Status::Bad => {
                 self.note_code(line);
+                if line.code == "NOTIFICATIONOVERFLOW" && std::mem::take(&mut self.notifying) {
+                    self.events.push_back(Event::NotificationOverflow);
+                }
                 match self.in_flight.as_mut() {
                     Some(InFlight { kind: Kind::Select(opening), .. }) if line.code == "CLOSED" => {
                         // What came so far was about the mailbox open before.
@@ -795,6 +840,16 @@ impl Client {
             }
             ("ENABLED", Some(Kind::Enable { words, .. })) => {
                 words.extend(values.iter().skip(1).filter_map(Value::atom).take(MAX_CAPABILITIES).map(str::to_owned));
+            }
+            ("STATUS", flight) if self.notifying || matches!(flight, Some(Kind::Notify { .. })) => {
+                if let Some(counts) = MailboxCounts::from_values(values) {
+                    self.events.push_back(Event::Status(counts));
+                }
+            }
+            ("LIST", flight) if self.notifying || matches!(flight, Some(Kind::Notify { .. })) => {
+                if let Some(entry) = ListEntry::from_values(values) {
+                    self.events.push_back(Event::MailboxChanged(entry));
+                }
             }
             ("FLAGS", Some(Kind::Select(opening))) => {
                 if let Some(Value::List(flags)) = values.into_iter().nth(1)
@@ -929,6 +984,10 @@ impl Client {
             Kind::Fetch => Answer::Fetched,
             Kind::Search(found) => Answer::Searched(found.into_iter().collect()),
             Kind::Idle { .. } => Answer::Idled,
+            Kind::Notify { set } => {
+                self.notifying = set;
+                Answer::Notified
+            }
             Kind::Logout { .. } => {
                 self.state = State::Closed;
                 Answer::LoggedOut
@@ -936,14 +995,6 @@ impl Client {
         };
         Ok(Some(answer))
     }
-}
-
-/// A mailbox name as a command takes it: not empty, at most [`MAX_MAILBOX_NAME`] bytes, no control character.
-fn check_mailbox(mailbox: &str) -> Result<(), ProtoError> {
-    if mailbox.is_empty() || mailbox.len() > MAX_MAILBOX_NAME || mailbox.chars().any(char::is_control) {
-        return Err(ProtoError::BadArgument("mailbox name"));
-    }
-    Ok(())
 }
 
 /// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`. EXISTS, EXPUNGE and FETCH belong to a mailbox

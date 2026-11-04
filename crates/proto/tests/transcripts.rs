@@ -25,7 +25,8 @@ use std::path::Path;
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, SearchDate, SearchKey, Section, SelectOptions, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, SearchDate, SearchKey, Section,
+    SelectOptions, Transport,
 };
 
 /// A UID set as IMAP writes one: `4,7:9`.
@@ -93,10 +94,34 @@ fn select_options(words: VecDeque<&str>) -> SelectOptions {
     options
 }
 
+/// What NOTIFY asks for, from words: `status`, `selected`, `names`, and one of `personal`, `inboxes`, `subscribed`,
+/// `subtree=<name>,<name>`, `mailboxes=<name>,<name>`.
+fn notify(words: VecDeque<&str>) -> Notify {
+    let mut notify = Notify::default();
+    let names = |list: &str| list.split(',').map(str::to_owned).collect();
+    for word in words {
+        match word {
+            "status" => notify.status = true,
+            "selected" => notify.selected = true,
+            "names" => notify.mailbox_names = true,
+            "personal" => notify.mailboxes = Some(NotifyMailboxes::Personal),
+            "inboxes" => notify.mailboxes = Some(NotifyMailboxes::Inboxes),
+            "subscribed" => notify.mailboxes = Some(NotifyMailboxes::Subscribed),
+            other => match other.split_once('=') {
+                Some(("subtree", list)) => notify.mailboxes = Some(NotifyMailboxes::Subtree(names(list))),
+                Some(("mailboxes", list)) => notify.mailboxes = Some(NotifyMailboxes::Mailboxes(names(list))),
+                _ => panic!("unknown notify word {other}"),
+            },
+        }
+    }
+    notify
+}
+
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
-/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `idle`, `done`, `logout`.
+/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
+/// `notify-none`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let mut words: VecDeque<&str> = rest.split_whitespace().collect();
@@ -148,6 +173,8 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let key = if keys.len() == 1 { keys.remove(0) } else { SearchKey::And(keys) };
             client.uid_search(&key)
         }
+        "notify" => client.notify(&notify(words)),
+        "notify-none" => client.notify_none(),
         "idle" => client.idle(),
         "done" => return client.done(),
         "logout" => client.logout(),
@@ -198,6 +225,21 @@ fn render(event: &Event) -> Vec<String> {
         Event::Expunged(seq) => vec![format!("expunged {seq}")],
         Event::Alert(text) => vec![format!("alert {text}")],
         Event::Idling => vec!["idling".to_owned()],
+        Event::NotificationOverflow => vec!["notifications overflow".to_owned()],
+        Event::MailboxChanged(entry) => vec![format!("changed {}", mailbox(entry).trim_start())],
+        Event::Status(counts) => {
+            let some = |value: Option<String>| value.unwrap_or_else(|| "none".to_owned());
+            vec![format!(
+                "status {:?} name={:?} messages={} uidnext={} uidvalidity={} unseen={} modseq={}",
+                counts.raw,
+                counts.name,
+                some(counts.messages.map(|v| v.to_string())),
+                some(counts.uid_next.map(|v| v.to_string())),
+                some(counts.uid_validity.map(|v| v.to_string())),
+                some(counts.unseen.map(|v| v.to_string())),
+                some(counts.highest_modseq.map(|v| v.to_string())),
+            )]
+        }
         Event::Vanished { uids, earlier: true } => vec![format!("vanished earlier {}", set_text(uids))],
         Event::Vanished { uids, earlier: false } => vec![format!("vanished {}", set_text(uids))],
         Event::UidValidityChanged { old, new } => {
@@ -243,6 +285,7 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Fetched => vec![format!("{tag} fetched")],
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
             Answer::Idled => vec![format!("{tag} idled")],
+            Answer::Notified => vec![format!("{tag} notified")],
             Answer::LoggedOut => vec![format!("{tag} logged out")],
         },
     }

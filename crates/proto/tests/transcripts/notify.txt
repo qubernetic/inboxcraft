@@ -1,0 +1,104 @@
+# NOTIFY (RFC 5465): the open mailbox and other mailboxes, told as FETCH, EXISTS and EXPUNGE, as STATUS and as LIST.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 NOTIFY] ready
+= greeted preauth
+# Before NOTIFY, STATUS and LIST that nobody asked for are passed over.
+S: * STATUS Archive (MESSAGES 12)
+S: * LIST () "/" "Stray"
+> notify selected
+C: A0001 NOTIFY SET (SELECTED (MessageNew (UID FLAGS) MessageExpunge FlagChange))
+S: A0001 OK NOTIFY completed
+= A0001 notified
+> notify status personal names
+C: A0002 NOTIFY SET STATUS (PERSONAL (MessageNew MessageExpunge MailboxName))
+S: * STATUS INBOX (MESSAGES 3 UIDNEXT 9 UIDVALIDITY 7 UNSEEN 1)
+S: * STATUS "Elk&APw-ld&APY-tt" (MESSAGES 0 HIGHESTMODSEQ 4 RECENT 2 X-UNKNOWN 5 UNSEEN x)
+S: A0002 OK NOTIFY completed
+= status "INBOX" name="INBOX" messages=3 uidnext=9 uidvalidity=7 unseen=1 modseq=none
+= status "Elk&APw-ld&APY-tt" name="Elküldött" messages=0 uidnext=none uidvalidity=none unseen=none modseq=4
+= A0002 notified
+S: * LIST () "/" "Projects/New"
+S: * LIST (\NonExistent) "/" "Old"
+S: * STATUS Archive (MESSAGES 12 UIDNEXT 40)
+= changed mailbox "Projects/New" name="Projects/New" delimiter='/' attributes=- special-use=- selectable=true
+= changed mailbox "Old" name="Old" delimiter='/' attributes=\NonExistent special-use=- selectable=false
+= status "Archive" name="Archive" messages=12 uidnext=40 uidvalidity=none unseen=none modseq=none
+# What cannot be read is passed over.
+S: * STATUS "" (MESSAGES 1)
+S: * STATUS Archive MESSAGES 1
+S: * STATUS
+S: * LIST () "/"
+# The open mailbox.
+> select INBOX
+C: A0003 SELECT "INBOX"
+S: * 3 EXISTS
+S: A0003 OK done
+= A0003 selected exists=3 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+S: * 4 EXISTS
+S: * 4 FETCH (UID 20 FLAGS ())
+S: * 1 EXPUNGE
+= exists 4
+= fetch seq=4 uid=20 flags=-
+= expunged 1
+# The server stops telling: NOTIFY is off as after NOTIFY NONE.
+S: * OK [NOTIFICATIONOVERFLOW] Too many notifications
+= notifications overflow
+S: * STATUS Archive (MESSAGES 13)
+S: * LIST () "/" "Later"
+S: * OK [NOTIFICATIONOVERFLOW] again
+> notify selected subtree=Lists,Work
+C: A0004 NOTIFY SET (SELECTED (MessageNew (UID FLAGS) MessageExpunge FlagChange)) (SUBTREE "Lists" (MessageNew MessageExpunge)) (SUBTREE "Work" (MessageNew MessageExpunge))
+S: A0004 OK done
+= A0004 notified
+> notify mailboxes=Drafts
+C: A0005 NOTIFY SET (MAILBOXES "Drafts" (MessageNew MessageExpunge))
+S: A0005 OK done
+= A0005 notified
+> notify inboxes
+C: A0006 NOTIFY SET (INBOXES (MessageNew MessageExpunge))
+S: A0006 NO [BADEVENT (MessageNew MessageExpunge)] Not for inboxes
+= A0006 No [BADEVENT] Not for inboxes
+> notify subscribed names
+C: A0007 NOTIFY SET (SUBSCRIBED (MessageNew MessageExpunge MailboxName))
+S: A0007 OK done
+= A0007 notified
+> notify-none
+C: A0008 NOTIFY NONE
+S: A0008 OK done
+= A0008 notified
+S: * STATUS Archive (MESSAGES 14)
+# Nothing to tell of, or names without mailboxes.
+> notify
+! BadArgument("NOTIFY events")
+> notify selected names
+! BadArgument("MailboxName without mailboxes")
+
+# With CONDSTORE enabled the new messages come with their modification sequence.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 NOTIFY ENABLE CONDSTORE] ready
+= greeted preauth
+> enable condstore
+C: A0001 ENABLE CONDSTORE
+S: * ENABLED CONDSTORE
+S: A0001 OK
+= A0001 enabled CONDSTORE
+> notify selected
+C: A0002 NOTIFY SET (SELECTED (MessageNew (UID FLAGS MODSEQ) MessageExpunge FlagChange))
+S: A0002 OK
+= A0002 notified
+
+# A server that lacks NOTIFY: IDLE is what is left.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 IDLE] ready
+= greeted preauth
+> notify selected
+! NotOffered("NOTIFY")
+> notify-none
+! NotOffered("NOTIFY")
+
+# Not before the sign-in.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 NOTIFY] ready
+= greeted
+> notify selected
+! WrongState { command: "NOTIFY", state: NotAuthenticated }

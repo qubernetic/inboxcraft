@@ -12,6 +12,7 @@ use inboxcraft_model::{FolderError, FolderListing, FolderPath, SpecialUse};
 use super::mailbox::flag_list;
 use super::utf7::decode_utf7;
 use super::value::Value;
+use crate::ProtoError;
 
 /// Most mailboxes one LIST keeps; the ones after are read and dropped.
 pub const MAX_MAILBOXES: usize = 10_000;
@@ -66,10 +67,7 @@ impl ListEntry {
             Value::Atom(nil) if nil.eq_ignore_ascii_case("NIL") => None,
             _ => return None,
         };
-        let raw = values.next()?.into_text()?;
-        if raw.is_empty() || raw.len() > MAX_MAILBOX_NAME || raw.chars().any(|c| c.is_control()) {
-            return None;
-        }
+        let (raw, name) = mailbox_name(values.next()?.into_text()?)?;
         let attributes = flag_list(attributes);
         let mut special_use: Vec<SpecialUse> = Vec::new();
         for use_ in attributes.iter().filter_map(|a| SpecialUse::from_attribute(a)) {
@@ -77,9 +75,24 @@ impl ListEntry {
                 special_use.push(use_);
             }
         }
-        let name = if raw.eq_ignore_ascii_case("INBOX") { "INBOX".to_owned() } else { decode_utf7(&raw) };
         Some(Self { raw, name, delimiter, attributes, special_use })
     }
+}
+
+/// A mailbox name from the server as it was written and decoded for people; `None` when it is empty, longer than
+/// [`MAX_MAILBOX_NAME`] or holds a control character.
+pub(crate) fn mailbox_name(raw: String) -> Option<(String, String)> {
+    check_mailbox(&raw).ok()?;
+    let name = if raw.eq_ignore_ascii_case("INBOX") { "INBOX".to_owned() } else { decode_utf7(&raw) };
+    Some((raw, name))
+}
+
+/// A mailbox name as a command takes it: not empty, at most [`MAX_MAILBOX_NAME`] bytes, no control character.
+pub(crate) fn check_mailbox(mailbox: &str) -> Result<(), ProtoError> {
+    if mailbox.is_empty() || mailbox.len() > MAX_MAILBOX_NAME || mailbox.chars().any(char::is_control) {
+        return Err(ProtoError::BadArgument("mailbox name"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
