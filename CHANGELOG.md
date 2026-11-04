@@ -54,12 +54,12 @@ All notable changes to InboxCraft are listed here. The format follows
   invisible direction marks; property tests and the fuzz target `model_values` (#17)
 - `inboxcraft-mime` reads messages (RFC 5322, RFC 2045 to 2049): `parse` gives a tree of parts that borrow the
   message's bytes; header blocks with CRLF or bare LF, folded fields unfolded, raw 8-bit values read as UTF-8 or
-  windows-1252, a leading mbox `From ` line skipped; `Headers::text` decodes RFC 2047 encoded words and turns
-  control characters into spaces; `Content-Type` and `Content-Disposition` with RFC 2231 parameters (character
+  windows-1252, a leading mbox `From ` line skipped; `Headers::text` decodes RFC 2047 encoded words, turns
+  control characters into spaces and drops invisible direction marks, in file names too; `Content-Type` and `Content-Disposition` with RFC 2231 parameters (character
   sets and continuations) and encoded words in file names; base64 (strict, missing padding forgiven) and
   quoted-printable; multiparts, `multipart/digest` and attached `message/rfc822` and `message/global` messages;
-  the text and HTML body and the attachments a reader shows; the delivery report of a bounce
-  (`multipart/report` with `message/delivery-status` or `message/global-delivery-status`, RFC 3464 and 6533) with
+  the text and HTML body and the attachments a reader shows (an `inline` text part is a body even with a file
+  name); the delivery report of a bounce, read from the report's own parts only (`multipart/report` with `message/delivery-status` or `message/global-delivery-status`, RFC 3464 and 6533) with
   its action and RFC 3463 status per recipient. Hostile input is an error, never a panic: messages over 128 MiB,
   more than 2000 header fields or a field over 256 KiB, nesting deeper than 20, more than 1000 parts, missing,
   bad or absent boundaries, broken base64, unknown transfer encodings and charsets; property tests and the fuzz

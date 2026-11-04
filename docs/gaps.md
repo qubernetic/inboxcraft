@@ -71,7 +71,13 @@ B = blocks the next stage.
 - `mime` refuses what it cannot read safely: a message over 128 MiB, a header block of more than 2000 fields or a
   field over 256 KiB, nesting deeper than 20, more than 1000 parts, a multipart without a boundary, with a boundary
   over 70 characters or one never found in its body, broken base64, an unknown transfer encoding or charset, and a
-  delivery report with more than 1000 recipients. The reader has to show such a message as its raw source (#18).
+  delivery report with more than 1000 recipients. Any one such part, however deep, makes the whole message an
+  error, so a good text part next to it is lost too; the reader has to show such a message as its raw source (#18).
+- `Part::file_name` gives the name as the sender wrote it, control characters as spaces and invisible direction
+  marks dropped, but path parts such as `../` kept. Whatever saves an attachment must cut the name down to a safe
+  base name first (#18).
+- A delivery report is read only from the direct parts of the `multipart/report`, never from an attached message
+  inside it (#18).
 - `mime` reads leniently where mail often breaks: a multipart without its closing delimiter keeps what arrived
   (`Multipart::closed` is false), base64 without padding or in padded chunks reads, an `=` in quoted-printable
   that starts no escape stays as it is, a `Content-Type` that cannot be read is `text/plain`, a line that is no
@@ -104,3 +110,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the mailbox model (#17) |
 | 2026-11-04 | minor | Invisible marks in addresses and folder names (#17) |
 | 2026-11-04 | minor | Rough edges of the message reader (#18) |
+| 2026-11-04 | minor | Message reader: whole-message errors, unsafe file names, reports read from direct parts (#18) |
