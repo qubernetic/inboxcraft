@@ -15,6 +15,7 @@ libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
 inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-model = { path = "../crates/model" }
+inboxcraft-mime = { path = "../crates/mime" }
 
 [workspace]
 members = ["."]
@@ -43,6 +44,27 @@ bench = false
 [[bin]]
 name = "model_values"
 path = "fuzz_targets/model_values.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_message"
+path = "fuzz_targets/mime_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_headers"
+path = "fuzz_targets/mime_headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_dsn"
+path = "fuzz_targets/mime_dsn.rs"
 test = false
 doc = false
 bench = false
