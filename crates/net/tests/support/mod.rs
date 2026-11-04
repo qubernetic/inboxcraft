@@ -15,7 +15,7 @@ use std::time::Duration;
 use inboxcraft_model::{Host, Security, Server};
 use inboxcraft_net::{Connector, Timeouts, TlsSettings, Trust};
 use inboxcraft_testkit::{FAR_OFF, HOST, TestPki};
-use inboxcraft_time::{Clock, FakeClock, SystemClock};
+use inboxcraft_time::{Clock, FakeClock, Offset, SystemClock};
 
 pub type Result<T = ()> = std::result::Result<T, Box<dyn Error>>;
 
@@ -37,6 +37,15 @@ pub fn far_off() -> Result<Arc<dyn Clock>> {
 /// A connector that trusts only the test CA, reads `clock` and dials `addr`.
 pub fn connector(pki: &TestPki, clock: Arc<dyn Clock>, addr: SocketAddr) -> Connector {
     Connector::new(TlsSettings::new(Trust::Roots(vec![pki.ca()]), clock)).with_timeouts(TIMEOUTS).with_addresses(vec![addr])
+}
+
+/// The wall clock's time `days` ago as IMAP writes an arrival time (`05-Nov-2026 10:00:00 +0000`).
+pub fn days_ago(days: u64) -> Result<String> {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let then = SystemClock::new().now().checked_sub(Duration::from_secs(days * 86_400)).ok_or("clock out of range")?;
+    let civil = then.to_civil(Offset::UTC).ok_or("clock out of range")?;
+    let month = MONTHS.get(usize::from(civil.month()).saturating_sub(1)).ok_or("month")?;
+    Ok(format!("{:02}-{month}-{} {:02}:{:02}:{:02} +0000", civil.day(), civil.year(), civil.hour(), civil.minute(), civil.second()))
 }
 
 /// The server [`HOST`] with `security`.
