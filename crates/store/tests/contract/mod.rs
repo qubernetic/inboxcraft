@@ -352,6 +352,18 @@ pub fn search_by_body_words<S: Storage>(mut store: S) {
     assert_eq!(found(&store, Search::new().with_text("budget").with_since(at(11))), [2]);
 }
 
+pub fn search_reads_operators_as_words<S: Storage>(mut store: S) {
+    two_accounts(&mut store);
+    let words = "cats or dogs near the barn, not here and there";
+    put(&mut store, vec![Change::PutMessage(message(1, 1, 1, 1, "pets", Some(1))), Change::PutBody(m(1), body(words))]).unwrap();
+    for text in ["cats OR dogs", "NEAR the", "NOT here AND", "\"or dogs\"", "barn NOT", "AND there"] {
+        assert_eq!(found(&store, Search::new().with_text(text)), [1], "{text}");
+    }
+    for text in ["cats AND dogs", "dogs OR cats", "NEAR(cats dogs)", "cats NOT dogs"] {
+        assert_eq!(found(&store, Search::new().with_text(text)), Vec::<u64>::new(), "{text}");
+    }
+}
+
 pub fn retention_drops_old_unopened_bodies<S: Storage>(mut store: S) {
     two_accounts(&mut store);
     put(
@@ -428,6 +440,7 @@ macro_rules! contract_tests {
             search_by_from_to_and_subject_without_case,
             search_by_date,
             search_by_body_words,
+            search_reads_operators_as_words,
             retention_drops_old_unopened_bodies,
             retention_names_the_bodies_to_fetch,
         );

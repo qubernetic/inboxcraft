@@ -126,6 +126,12 @@ impl Sqlite {
     }
 }
 
+/// The FTS5 query for `words` in this order: one string in double quotes, a `"` inside doubled, so FTS5 reads every
+/// word, `OR`, `NEAR` and `*` too, as a word to find. No words, no query.
+fn phrase(words: &[String]) -> Option<String> {
+    (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ").replace('"', "\"\"")))
+}
+
 /// An id as SQLite stores it.
 fn key(id: u64) -> Result<i64, StoreError> {
     i64::try_from(id).map_err(|_| StoreError::Database(format!("id {id} is out of range")))
@@ -352,7 +358,7 @@ impl Storage for Sqlite {
     fn search(&self, search: &Search) -> Result<Vec<MessageId>, StoreError> {
         let account = search.account().map(|account| key(account.get())).transpose()?;
         let folder = search.folder().map(|folder| key(folder.get())).transpose()?;
-        let text = (!search.text().is_empty()).then(|| format!("\"{}\"", search.text().join(" ")));
+        let text = phrase(search.text());
         let limit = i64::try_from(search.limit()).unwrap_or(i64::MAX);
         self.ids(
             "SELECT id FROM message
