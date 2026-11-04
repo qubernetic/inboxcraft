@@ -58,13 +58,13 @@ fn ci_runs_every_gate_in_order() {
     .map(|args| format!("cargo {args} @ {}", root.display()))
     .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in ["fmt", "clippy", "spdx", "test-files", "layers", "nextest", "doctests", "wasm", "deny"] {
+    for name in ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "nextest", "doctests", "wasm", "deny"] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
-    assert!(out.contains("layers: "), "{out}");
-    assert!(out.ends_with("ci: all 9 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 9);
+    assert!(out.contains("layers: ") && out.contains("assets: "), "{out}");
+    assert!(out.ends_with("ci: all 10 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 10);
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert_eq!(calls.borrow().len(), 6, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 9 gates failed: clippy, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 2 of 10 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 6 of 9 gates failed: fmt, clippy, nextest, doctests, wasm, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 6 of 10 gates failed: fmt, clippy, nextest, doctests, wasm, deny\n"), "{out}");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 3 of 9 gates failed: spdx, layers, wasm\n"), "{out}");
+    assert!(out.ends_with("ci: 4 of 10 gates failed: spdx, assets, layers, wasm\n"), "{out}");
     assert_eq!(calls.borrow().len(), 5);
 }
 

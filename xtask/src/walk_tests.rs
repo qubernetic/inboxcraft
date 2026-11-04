@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{MAX_DEPTH, rust_files};
+use super::{MAX_DEPTH, files, rust_files};
 use crate::Error;
 
 fn touch(root: &Path, rel: &str) {
@@ -62,4 +62,14 @@ fn a_tree_deeper_than_the_limit_is_an_error_not_a_stack_overflow() {
         Err(Error::Io { source, .. }) => assert!(source.to_string().contains("deeper than"), "{source}"),
         other => panic!("expected an io error, got {other:?}"),
     }
+}
+
+#[test]
+fn files_keeps_what_the_filter_accepts() {
+    let dir = tempfile::tempdir().unwrap();
+    for rel in ["a/x.png", "a/y.rs", "target/z.png", "b.png"] {
+        touch(dir.path(), rel);
+    }
+    let found = files(dir.path(), &|path| path.extension().is_some_and(|ext| ext == "png")).unwrap();
+    assert_eq!(found, [PathBuf::from("a/x.png"), PathBuf::from("b.png")]);
 }

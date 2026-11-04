@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{Context, Error, layers, spdx, test_files, wasm};
+use crate::{Context, Error, assets, layers, spdx, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -39,6 +39,7 @@ impl Runner for ProcessRunner {
 }
 
 pub(crate) enum Gate {
+    Assets,
     /// `cargo` with these arguments.
     Cargo(&'static [&'static str]),
     Layers,
@@ -53,6 +54,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("clippy", Gate::Cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])),
     ("spdx", Gate::Spdx),
     ("test-files", Gate::TestFiles),
+    ("assets", Gate::Assets),
     ("layers", Gate::Layers),
     ("nextest", Gate::Cargo(&["nextest", "run", "--workspace", "--profile", "ci"])),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
@@ -68,6 +70,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
         out.flush()?;
         let result = match gate {
             Gate::Cargo(args) => ctx.runner.run(&ctx.cargo, args, &ctx.root),
+            Gate::Assets => assets::gate(&ctx.root, out),
             Gate::Layers => layers::gate(&ctx.root, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
             Gate::TestFiles => test_files::gate(&ctx.root, out),

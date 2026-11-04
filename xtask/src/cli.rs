@@ -7,13 +7,14 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, ci, layers, spdx, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, layers, spdx, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
   ci            every gate: fmt, clippy -D warnings, spdx, test-files, nextest (ci profile), doctests, deny
+  assets        every asset file has a row in ATTRIBUTION.md
   layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   test-files    no inline `mod tests { ... }`: tests live in files of their own
@@ -28,6 +29,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
+    Assets,
     Ci,
     Help,
     Layers,
@@ -53,6 +55,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let mut args = args.into_iter().map(|arg| arg.into_string().map_err(|_| "arguments must be UTF-8".to_owned()));
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
+        Some("assets") => Command::Assets,
         Some("ci") => Command::Ci,
         Some("layers") => Command::Layers,
         Some("spdx") => Command::Spdx { fix: false },
@@ -69,7 +72,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Ci | Command::Help | Command::Layers | Command::TestFiles | Command::Wasm => {
+                Command::Assets | Command::Ci | Command::Help | Command::Layers | Command::TestFiles | Command::Wasm => {
                     return Err("`--fix` only goes with `spdx`".to_owned());
                 }
             },
@@ -104,6 +107,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, ctx: &mut Context, out: &mu
 
 fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error> {
     match command {
+        Command::Assets => assets::gate(&ctx.root, out),
         Command::Ci => ci::gate(ctx, out),
         Command::Help => {
             out.write_all(HELP.as_bytes())?;
