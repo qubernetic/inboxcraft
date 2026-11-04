@@ -354,6 +354,26 @@ fn what_is_an_attachment_and_what_is_not() {
 }
 
 #[test]
+fn a_file_name_loses_its_invisible_direction_marks() {
+    let bytes = "Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"invoice\u{202e}fdp.exe\"\r\n\r\nx";
+    assert_eq!(parse(bytes.as_bytes()).unwrap().file_name().as_deref(), Some("invoicefdp.exe"));
+    let bytes = b"Content-Type: application/octet-stream; name=\"=?UTF-8?Q?a=E2=80=8Fb=E2=81=A7.txt?=\"\r\n\r\nx";
+    assert_eq!(parse(bytes).unwrap().file_name().as_deref(), Some("ab.txt"));
+}
+
+#[test]
+fn an_inline_text_part_with_a_file_name_is_the_body() {
+    let message = parse(b"Content-Type: text/plain\r\nContent-Disposition: inline; filename=body.txt\r\n\r\nhello").unwrap();
+    assert!(!message.is_attachment());
+    assert!(message.attachments().is_empty());
+    assert_eq!(message.text_body().map(|part| part.text().unwrap()).as_deref(), Some("hello"));
+    let html = parse(b"Content-Type: text/html; name=page.html\r\nContent-Disposition: inline\r\n\r\n<p>hi</p>").unwrap();
+    assert!(html.html_body().is_some());
+    let named = parse(b"Content-Type: text/plain; name=notes.txt\r\n\r\nnotes").unwrap();
+    assert!(named.is_attachment());
+}
+
+#[test]
 fn a_content_id_is_cleaned() {
     let message = parse(b"Content-ID:  < a\x01b@example.org > \r\n\r\n").unwrap();
     assert_eq!(message.content_id().as_deref(), Some("a b@example.org"));

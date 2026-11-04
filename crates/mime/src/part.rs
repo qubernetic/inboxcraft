@@ -197,13 +197,17 @@ impl<'a> Part<'a> {
 
     /// Whether the part is a file to show as an attachment: one with `Content-Disposition: attachment` or a file
     /// name, or one that is no text body and is not shown inline (no disposition and no `Content-ID`). Multiparts
-    /// never are; an attached message is.
+    /// never are; an attached message is. A `text/plain` or `text/html` part marked `inline` is a body, file name
+    /// or not.
     #[must_use]
     pub fn is_attachment(&self) -> bool {
         if matches!(self.body, Body::Multipart(_)) {
             return false;
         }
         let disposition = self.disposition();
+        if disposition.as_ref().is_some_and(Disposition::is_inline) && self.is_text_body_type() {
+            return false;
+        }
         if disposition.as_ref().is_some_and(Disposition::is_attachment) || self.file_name().is_some() {
             return true;
         }
