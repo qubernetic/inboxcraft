@@ -21,6 +21,12 @@ B = blocks the next stage.
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
   OS verifier `net` will use. It knows its clock is far off because the test sets the offset; the real
   `account.check` needs another reference for the clock (#8).
+- The live test harness has one live test so far, which checks the configuration only; the IMAP, SMTP and CalDAV
+  round trips, and the code that creates and removes the run folder on a server, come with `net`. Deleting the run
+  folder leaves the empty `InboxCraft-Test` parent behind (#10).
+- `just it-live` reads the credentials with `secret-tool` (Secret Service) or `security` (macOS Keychain) and needs
+  bash; Windows Credential Manager is not supported yet. The leak scan of its output looks for the two secret
+  values verbatim, not for encoded forms such as base64 in an `AUTHENTICATE` line (#10).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -37,3 +43,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the `layers`, `wasm`, `assets` and `stats` gates (#6) |
 | 2026-11-04 | minor | Rough edges of the coverage gate (#7) |
 | 2026-11-04 | minor | Rough edges of the fake server frame (#8) |
+| 2026-11-04 | minor | Rough edges of the live test harness (#10) |

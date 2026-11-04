@@ -20,3 +20,9 @@ All notable changes to InboxCraft are listed here. The format follows
   plain TCP or implicit TLS, a fault script (drop, delay, garbage), a test CA generated at test time, the
   certificate faults (unknown CA, expired, wrong host name, client clock far off) and a test client that reports
   each fault as its own error kind; 98 % coverage floor (#8)
+- Opt-in live tests on two throwaway test accounts, run by the owner alone with `just it-live`: the
+  `inboxcraft-testkit` `live` module reads `INBOXCRAFT_LIVE_*` and skips with its reason printed without them
+  (always in the agent sandbox and in CI), enforces the recipient allow-list of the two run-time addresses, names
+  the accounts `live-imap` and `live-google` in output, redacts secrets and creates and removes the per-run folder
+  `InboxCraft-Test/<run id>`; nextest profile `live`; `just it-live` reads the credentials from the OS credential
+  store for that run only and fails when a secret value appears in the test output (#10)
