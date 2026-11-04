@@ -7,8 +7,10 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod address;
 mod id;
 
+pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
 pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
 
 /// The crate's package name.
