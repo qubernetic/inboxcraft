@@ -370,3 +370,26 @@ fn injection_into_a_media_type_is_refused() {
         assert_eq!(MessageBuilder::new().attach(attachment).build(), Err(MimeError::BadHeader("media type")), "{media_type:?}");
     }
 }
+
+#[test]
+fn a_media_type_with_a_name_over_127_characters_is_refused() {
+    let long = "x".repeat(128);
+    for media_type in [format!("application/{long}"), format!("{long}/plain"), format!("application/{}", "x".repeat(2000))] {
+        let attachment = Attachment::new("a.bin", &media_type, vec![]);
+        assert_eq!(MessageBuilder::new().attach(attachment).build(), Err(MimeError::BadHeader("media type")));
+    }
+    let longest = format!("{}/{}", "a".repeat(127), "b".repeat(127));
+    let bytes = MessageBuilder::new().attach(Attachment::new("a.bin", &longest, vec![])).build().unwrap();
+    assert!(bytes.split(|b| *b == b'\n').all(|line| line.len() <= 1000));
+    assert_eq!(parse(&bytes).unwrap().attachments()[0].content_type().essence(), longest);
+}
+
+#[test]
+fn an_attached_message_type_other_than_message_global_is_refused() {
+    for media_type in ["message/rfc822", "Message/RFC822", "message/partial", "message/external-body", "message/delivery-status"] {
+        let attachment = Attachment::new("fwd.eml", media_type, b"Subject: hi\r\n\r\nhi\r\n".to_vec());
+        assert_eq!(MessageBuilder::new().attach(attachment).build(), Err(MimeError::BadHeader("media type")), "{media_type:?}");
+    }
+    let bytes = MessageBuilder::new().attach(Attachment::new("fwd.eml", "message/global", b"hi".to_vec())).build().unwrap();
+    assert_eq!(parse(&bytes).unwrap().attachments()[0].decoded().unwrap().as_ref(), b"hi");
+}

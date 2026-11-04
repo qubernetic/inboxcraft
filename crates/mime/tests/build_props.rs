@@ -21,6 +21,11 @@ fn hostile_text() -> impl Strategy<Value = String> {
     .prop_map(|pieces| pieces.concat())
 }
 
+/// A media type: hostile text, or tokens long enough to break the 998 line limit if nothing capped them.
+fn media_type() -> impl Strategy<Value = String> {
+    prop_oneof![hostile_text(), "[a-z]{1,200}/[a-z0-9.+-]{1,1200}"]
+}
+
 /// Line ends as the builder writes them.
 fn crlf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n")
@@ -93,7 +98,7 @@ proptest! {
         address_text in hostile_text(),
         id in hostile_text(),
         name in hostile_text(),
-        media_type in hostile_text(),
+        media_type in media_type(),
     ) {
         let built = MessageBuilder::new()
             .subject(&text)
@@ -117,6 +122,12 @@ proptest! {
         let header = MessageBuilder::new().header(&name, &text).build();
         prop_assert!(header.as_ref().is_ok_and(|bytes| parse(bytes).is_ok_and(|m| m.headers().fields().len() == 4)) || header == Err(MimeError::BadHeader("field name")));
         let attached = MessageBuilder::new().attach(Attachment::new("a", &media_type, vec![])).build();
-        prop_assert!(attached.as_ref().is_ok_and(|bytes| parse(bytes).is_ok_and(|m| m.attachments().len() == 1)) || attached == Err(MimeError::BadHeader("media type")));
+        match attached {
+            Ok(bytes) => {
+                lines_are_clean(&bytes)?;
+                prop_assert_eq!(parse(&bytes).map_err(fail)?.attachments().len(), 1);
+            }
+            Err(error) => prop_assert_eq!(error, MimeError::BadHeader("media type")),
+        }
     }
 }

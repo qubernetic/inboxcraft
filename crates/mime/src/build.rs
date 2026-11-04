@@ -22,6 +22,9 @@ const MAX_ID: usize = 250;
 /// The longest name of an extra field (RFC 5322 section 2.1.1 keeps the whole line within 78).
 const MAX_FIELD_NAME: usize = 76;
 
+/// The longest type or subtype name of a media type (RFC 6838 section 4.2).
+const MAX_MEDIA_NAME: usize = 127;
+
 /// The longest word of a field value that is still folded as it is; an encoded word is at most 75.
 const MAX_FOLDED_WORD: usize = 76;
 
@@ -240,7 +243,8 @@ impl MessageBuilder {
     /// [`MimeError::BadHeader`] naming the kind of value that does not fit its grammar: `"address"` (RFC 5322
     /// `addr-spec`, at most 254 bytes), `"message id"` (`msg-id`, ASCII, at most 250 bytes), `"field name"` (printable
     /// ASCII without `:`, at most 76 characters, none the builder writes itself) or `"media type"` (`type/subtype`
-    /// of RFC 2045 tokens, no multipart). [`MimeError::FieldTooLong`] and [`MimeError::TooLarge`] when the reader
+    /// of RFC 2045 tokens of at most 127 characters, no multipart, no `message` type but `message/global`).
+    /// [`MimeError::FieldTooLong`] and [`MimeError::TooLarge`] when the reader
     /// could not read the result back ([`crate::MAX_FIELD_BYTES`], [`MAX_MESSAGE_BYTES`]).
     pub fn build(&self) -> Result<Vec<u8>, MimeError> {
         let attached = self.attachments.iter().fold(0usize, |sum, a| sum.saturating_add(a.data.len().div_ceil(3).saturating_mul(4)));
@@ -493,11 +497,14 @@ fn field_name(name: &str) -> Result<String, MimeError> {
     if ok { Ok(name.to_owned()) } else { Err(MimeError::BadHeader("field name")) }
 }
 
-/// A media type for an attachment: `type/subtype` of RFC 2045 tokens, lower case, no multipart.
+/// A media type for an attachment: `type/subtype` of RFC 2045 tokens of at most 127 characters each, lower case, no
+/// multipart and no attached message but `message/global`: RFC 2046 section 5.2 allows the others only in an
+/// identity encoding, and every attachment is base64.
 fn media_type(text: &str) -> Result<String, MimeError> {
     let lower = text.trim_matches(' ').to_ascii_lowercase();
+    let name = |part: &str| is_token(part) && part.len() <= MAX_MEDIA_NAME;
     match lower.split_once('/') {
-        Some((kind, subtype)) if is_token(kind) && is_token(subtype) && kind != "multipart" => Ok(lower),
+        Some((kind, subtype)) if name(kind) && name(subtype) && kind != "multipart" && (kind != "message" || subtype == "global") => Ok(lower),
         _ => Err(MimeError::BadHeader("media type")),
     }
 }
