@@ -8,7 +8,7 @@ use crate::imap::fixture::Message;
 use crate::imap::reader::Token;
 use crate::imap::session::{Session, State};
 use crate::imap::set::{UidSet, compact};
-use crate::imap::write::{flags, line, literal, ok};
+use crate::imap::write::{flags, line, literal, ok, string};
 
 /// The part of a message a body item returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,14 +26,16 @@ enum Item {
     InternalDate,
     Size,
     ModSeq,
+    Preview,
     /// A body item: the part, whether it leaves `\Seen` alone, and its name in the answer.
     Body(Section, bool, &'static str),
 }
 
 impl Item {
-    fn read(token: &Token, condstore: bool) -> Option<Self> {
+    fn read(token: &Token, condstore: bool, preview: bool) -> Option<Self> {
         let item = match token.atom()?.to_ascii_uppercase().as_str() {
             "MODSEQ" if condstore => Self::ModSeq,
+            "PREVIEW" if preview => Self::Preview,
             "UID" => Self::Uid,
             "FLAGS" => Self::Flags,
             "INTERNALDATE" => Self::InternalDate,
@@ -68,8 +70,7 @@ impl Session {
             Token::List(_) => return self.bad(out, Some(tag), "UID FETCH needs a UID set and items"),
             single => vec![single],
         };
-        let offered = self.fake.offers(Capability::CondStore);
-        let Some(items) = items.into_iter().map(|item| Item::read(item, offered)).collect::<Option<Vec<Item>>>() else {
+        let Some(items) = read_items(items, self.fake.offers(Capability::CondStore), self.fake.offers(Capability::Preview)) else {
             return self.bad(out, Some(tag), "Unknown FETCH item");
         };
         let (changed_since, vanished) = match self.modifiers(modifiers) {
@@ -140,6 +141,25 @@ impl Session {
     }
 }
 
+/// The FETCH items; PREVIEW may be followed by `(LAZY)`, which the fake takes like PREVIEW alone.
+fn read_items(tokens: Vec<&Token>, condstore: bool, preview: bool) -> Option<Vec<Item>> {
+    let mut items = Vec::new();
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(token) = tokens.next() {
+        let item = Item::read(token, condstore, preview)?;
+        if item == Item::Preview
+            && let Some(Token::List(modifiers)) = tokens.peek()
+        {
+            if !matches!(modifiers.as_slice(), [lazy] if lazy.atom().is_some_and(|lazy| lazy.eq_ignore_ascii_case("LAZY"))) {
+                return None;
+            }
+            tokens.next();
+        }
+        items.push(item);
+    }
+    Some(items)
+}
+
 /// One item of `message`'s FETCH answer.
 fn answer(message: &Message, item: Item) -> Vec<u8> {
     let text = match item {
@@ -148,6 +168,12 @@ fn answer(message: &Message, item: Item) -> Vec<u8> {
         Item::InternalDate => format!("INTERNALDATE \"{}\"", message.date),
         Item::Size => format!("RFC822.SIZE {}", message.raw.len()),
         Item::ModSeq => format!("MODSEQ ({})", message.modseq),
+        Item::Preview => {
+            let Some(text) = message.preview_text() else { return b"PREVIEW NIL".to_vec() };
+            let mut out = b"PREVIEW ".to_vec();
+            out.extend_from_slice(&string(text.as_bytes()));
+            return out;
+        }
         Item::Body(section, _, name) => {
             let (header, text) = message.parts();
             let bytes = match section {

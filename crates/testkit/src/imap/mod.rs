@@ -32,6 +32,7 @@ mod reader;
 mod search;
 mod session;
 mod set;
+mod store;
 mod sync;
 mod update;
 mod write;

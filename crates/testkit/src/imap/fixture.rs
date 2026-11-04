@@ -15,6 +15,7 @@ pub struct Message {
     pub(super) date: String,
     pub(super) raw: Vec<u8>,
     pub(super) modseq: u64,
+    pub(super) preview: Option<String>,
 }
 
 impl Message {
@@ -23,7 +24,7 @@ impl Message {
     #[must_use]
     pub fn new(text: &str) -> Self {
         let raw = text.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line)).collect::<Vec<_>>().join("\r\n").into_bytes();
-        Self { uid: 0, flags: Vec::new(), date: DEFAULT_DATE.to_owned(), raw, modseq: 0 }
+        Self { uid: 0, flags: Vec::new(), date: DEFAULT_DATE.to_owned(), raw, modseq: 0, preview: None }
     }
 
     /// Takes this UID when the mailbox adds the message, unless that UID is below the mailbox's next one.
@@ -42,6 +43,24 @@ impl Message {
     #[must_use]
     pub fn date(self, date: &str) -> Self {
         Self { date: clean(date), ..self }
+    }
+
+    /// The PREVIEW text (RFC 8970) the server gives instead of making one from the body.
+    #[must_use]
+    pub fn preview(self, text: &str) -> Self {
+        Self { preview: Some(clean(text)), ..self }
+    }
+
+    /// The PREVIEW text: the one set, or the body's first 200 characters with white space runs made one space.
+    /// `None` (NIL) for an empty body. The body is taken as it is, without decoding a transfer encoding or HTML.
+    pub(super) fn preview_text(&self) -> Option<String> {
+        if let Some(text) = &self.preview {
+            return Some(text.clone());
+        }
+        let body = String::from_utf8_lossy(self.parts().1).into_owned();
+        let text: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+        let text = text.trim_end().to_owned();
+        (!text.is_empty()).then_some(text)
     }
 
     pub(super) fn has_flag(&self, flag: &str) -> bool {

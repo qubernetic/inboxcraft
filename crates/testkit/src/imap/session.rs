@@ -309,6 +309,11 @@ impl Session {
             ("CLOSE", Phase::Selected) => self.close(&tag, out),
             ("UID FETCH", Phase::Selected) => self.uid_fetch(&tag, &args, out),
             ("UID SEARCH", Phase::Selected) => self.uid_search(&tag, &args, out),
+            ("UID STORE", Phase::Selected) => self.uid_store(&tag, &args, out),
+            ("UID COPY", Phase::Selected) => self.uid_copy(&tag, &args, out, false),
+            ("UID MOVE", Phase::Selected) if self.fake.offers(Capability::Move) => self.uid_copy(&tag, &args, out, true),
+            ("UID EXPUNGE", Phase::Selected) if self.fake.offers(Capability::UidPlus) => self.uid_expunge(&tag, &args, out),
+            ("EXPUNGE", Phase::Selected) => self.expunge(&tag, out),
             ("FETCH" | "STORE" | "SEARCH" | "COPY" | "MOVE", _) => {
                 self.bad(out, Some(&tag), &format!("{name} is not available now (the fake knows the UID form only)"));
             }
