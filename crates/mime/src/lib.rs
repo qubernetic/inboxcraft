@@ -11,11 +11,14 @@
 mod error;
 mod header;
 mod params;
+mod part;
 mod transfer;
 
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};
+pub use inboxcraft_charset::CharsetError;
 pub use params::{ContentType, Disposition, MAX_PARAMS, Params};
+pub use part::{Body, MAX_DEPTH, MAX_MESSAGE_BYTES, MAX_PARTS, Multipart, Part, parse};
 pub use transfer::{MAX_NAME_IN_ERROR, TransferEncoding};
 
 /// The crate's package name.
