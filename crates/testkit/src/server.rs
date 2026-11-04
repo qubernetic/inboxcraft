@@ -3,18 +3,19 @@
 
 //! The fake server: one listener on the loopback interface, one client, one script.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use rustls::ServerConfig;
 
 use crate::Error;
 use crate::line::{Line, LineReader};
 use crate::script::{Fault, Script, Step};
+use crate::wire::Wire;
 
 /// How often the server looks for a client or for the stop signal.
 const POLL: Duration = Duration::from_millis(5);
@@ -58,29 +59,38 @@ impl Listen {
     ///
     /// [`Error::Io`] when the port cannot be bound or the thread cannot be started.
     pub fn start(self, script: Script) -> Result<FakeServer, Error> {
+        self.spawn(move |wire, stop| play(wire, &script, stop))
+    }
+
+    /// Binds a free port on 127.0.0.1 and runs `session` with the first client on a thread of its own.
+    pub(crate) fn spawn<F>(self, session: F) -> Result<FakeServer, Error>
+    where
+        F: FnOnce(&mut Wire, &AtomicBool) -> Result<(Transcript, Ending), Error> + Send + 'static,
+    {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
-        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || self.serve(&listener, &script, &flag))?;
+        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || self.serve(&listener, session, &flag))?;
         Ok(FakeServer { addr, stop, handle: Some(handle) })
     }
 
-    fn serve(&self, listener: &TcpListener, script: &Script, stop: &AtomicBool) -> Result<Transcript, Error> {
+    fn serve<F>(&self, listener: &TcpListener, session: F, stop: &AtomicBool) -> Result<Transcript, Error>
+    where
+        F: FnOnce(&mut Wire, &AtomicBool) -> Result<(Transcript, Ending), Error>,
+    {
         let stream = accept(listener, self.accept_timeout, stop)?;
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(self.io_timeout))?;
         stream.set_write_timeout(Some(self.io_timeout))?;
-        let Some(config) = &self.tls else {
-            let mut stream = stream;
-            return play(&mut stream, script, stop).map(|(transcript, _)| transcript);
-        };
-        let mut stream = StreamOwned::new(ServerConnection::new(Arc::clone(config))?, stream);
-        let (transcript, ending) = play(&mut stream, script, stop)?;
+        let mut wire = Wire::plain(stream);
+        if let Some(config) = &self.tls {
+            wire.accept_tls(config)?;
+        }
+        let (transcript, ending) = session(&mut wire, stop)?;
         if ending == Ending::Finished {
-            stream.conn.send_close_notify();
-            stream.flush()?;
+            wire.close()?;
         }
         Ok(transcript)
     }
@@ -126,6 +136,7 @@ impl Drop for FakeServer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Transcript {
     received: Vec<String>,
+    clear: usize,
 }
 
 impl Transcript {
@@ -134,11 +145,26 @@ impl Transcript {
     pub fn received(&self) -> &[String] {
         &self.received
     }
+
+    /// The first of [`Transcript::received`], those that came before the connection was encrypted: all of them over
+    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS.
+    #[must_use]
+    pub fn in_clear(&self) -> &[String] {
+        self.received.get(..self.clear).unwrap_or_default()
+    }
+
+    /// Adds a line the client sent, over an encrypted connection or not.
+    pub(crate) fn push(&mut self, line: String, encrypted: bool) {
+        self.received.push(line);
+        if !encrypted {
+            self.clear = self.received.len();
+        }
+    }
 }
 
-/// How a script ended.
+/// How a session ended.
 #[derive(Debug, PartialEq, Eq)]
-enum Ending {
+pub(crate) enum Ending {
     /// Every step was played.
     Finished,
     /// A [`Fault::Drop`] or the stop signal cut it short.
@@ -164,7 +190,7 @@ fn accept(listener: &TcpListener, wait: Duration, stop: &AtomicBool) -> Result<T
 }
 
 /// Sleeps for `wait`, in [`POLL`] rounds, or until the stop signal; returns whether the signal came.
-fn pause(wait: Duration, stop: &AtomicBool) -> bool {
+pub(crate) fn pause(wait: Duration, stop: &AtomicBool) -> bool {
     for _ in 0..rounds(wait) {
         if stop.load(Ordering::Relaxed) {
             return true;
@@ -174,7 +200,7 @@ fn pause(wait: Duration, stop: &AtomicBool) -> bool {
     stop.load(Ordering::Relaxed)
 }
 
-fn play(stream: &mut (impl Read + Write), script: &Script, stop: &AtomicBool) -> Result<(Transcript, Ending), Error> {
+fn play(stream: &mut Wire, script: &Script, stop: &AtomicBool) -> Result<(Transcript, Ending), Error> {
     let mut reader = LineReader::default();
     let mut transcript = Transcript::default();
     for step in script.steps() {
@@ -191,7 +217,7 @@ fn play(stream: &mut (impl Read + Write), script: &Script, stop: &AtomicBool) ->
                     Line::Eof => return Err(Error::ClientGone),
                     Line::TooLong => return Err(Error::LineTooLong),
                 };
-                transcript.received.push(got.clone());
+                transcript.push(got.clone(), stream.is_tls());
                 if got != *expected {
                     return Err(Error::Unexpected { expected: expected.clone(), got });
                 }

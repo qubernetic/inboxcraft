@@ -20,6 +20,7 @@ fn a_client_follows_the_script() -> Result<(), Box<dyn std::error::Error>> {
     drop(client);
     let transcript = server.finish()?;
     assert_eq!(transcript.received(), ["a1 HELLO"]);
+    assert_eq!(transcript.in_clear(), ["a1 HELLO"]);
     Ok(())
 }
 

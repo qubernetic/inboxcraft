@@ -52,6 +52,7 @@ pub mod live;
 mod pki;
 mod script;
 mod server;
+mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};
 pub use error::Error;
