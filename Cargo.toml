@@ -54,6 +54,8 @@ web-time = "1"
 # testkit only: the test CA, the fake servers' TLS and the test client
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# net only: the operating system's certificate verifier (approved for E1)
+rustls-platform-verifier = "0.6"
 # testkit only: COMPRESS=DEFLATE of the fake IMAP server and the test client (pure Rust, no network)
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 time = "0.3"

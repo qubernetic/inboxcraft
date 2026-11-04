@@ -1,0 +1,163 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Opening a connection: the address, TCP with timeouts, and TLS over it, at once or after STARTTLS.
+
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::time::Duration;
+
+use inboxcraft_model::{ErrorKind, Host, Server};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, StreamOwned};
+
+use crate::{NetError, TlsSettings};
+
+/// How long to wait for a connection, and for the server on an open one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Timeouts {
+    /// For the TCP connection to open, per address.
+    pub connect: Duration,
+    /// For each read and write on an open connection.
+    pub io: Duration,
+}
+
+impl Default for Timeouts {
+    /// 30 seconds to connect, 120 seconds for each read and write.
+    fn default() -> Self {
+        Self { connect: Duration::from_secs(30), io: Duration::from_secs(120) }
+    }
+}
+
+/// Where a host is: looked up by the system, or given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Dial {
+    Lookup,
+    To(Vec<SocketAddr>),
+}
+
+/// Opens connections: TCP with [`Timeouts`], then TLS with the [`TlsSettings`].
+#[derive(Debug, Clone)]
+pub struct Connector {
+    tls: TlsSettings,
+    timeouts: Timeouts,
+    dial: Dial,
+}
+
+impl Connector {
+    /// A connector that looks host names up with the system's resolver.
+    #[must_use]
+    pub fn new(tls: TlsSettings) -> Self {
+        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup }
+    }
+
+    /// With other timeouts.
+    #[must_use]
+    pub fn with_timeouts(self, timeouts: Timeouts) -> Self {
+        Self { timeouts, ..self }
+    }
+
+    /// Connects to `addresses` instead of looking the host up; the certificate is still checked for the host's
+    /// name. For the fake servers of the tests, which listen on 127.0.0.1.
+    #[must_use]
+    pub fn with_addresses(self, addresses: Vec<SocketAddr>) -> Self {
+        Self { dial: Dial::To(addresses), ..self }
+    }
+
+    /// The TLS settings.
+    #[must_use]
+    pub fn tls(&self) -> &TlsSettings {
+        &self.tls
+    }
+
+    /// The timeouts.
+    #[must_use]
+    pub fn timeouts(&self) -> Timeouts {
+        self.timeouts
+    }
+
+    /// A TCP connection to `server`, not encrypted yet.
+    pub(crate) fn tcp(&self, server: &Server) -> Result<Stream, NetError> {
+        let now = self.tls.clock().now();
+        let addresses = match &self.dial {
+            Dial::To(addresses) => addresses.clone(),
+            Dial::Lookup => (server.host().as_str(), server.port().get())
+                .to_socket_addrs()
+                .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
+                .collect(),
+        };
+        let mut last = NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host()));
+        for address in addresses {
+            match TcpStream::connect_timeout(&address, self.timeouts.connect) {
+                Ok(socket) => {
+                    socket.set_read_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
+                    socket.set_write_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
+                    socket.set_nodelay(true).map_err(|error| NetError::io(&error, now))?;
+                    return Ok(Stream::Plain(socket));
+                }
+                Err(error) => last = NetError::io(&error, now),
+            }
+        }
+        Err(last)
+    }
+
+    /// `stream` encrypted for `host`: the TLS handshake runs here, so a certificate fault comes out of this call.
+    pub(crate) fn encrypt(&self, stream: Stream, host: &Host, config: &Arc<ClientConfig>) -> Result<Stream, NetError> {
+        let now = self.tls.clock().now();
+        let Stream::Plain(mut socket) = stream else { return Err(NetError::new(ErrorKind::Tls, "the connection is encrypted already")) };
+        let name = ServerName::try_from(host.as_str().to_owned()).map_err(|error| NetError::new(ErrorKind::Tls, error.to_string()))?;
+        let mut connection = ClientConnection::new(Arc::clone(config), name).map_err(|error| NetError::tls(&error, now))?;
+        while connection.is_handshaking() {
+            connection.complete_io(&mut socket).map_err(|error| NetError::io(&error, now))?;
+        }
+        Ok(Stream::Tls(Box::new(StreamOwned::new(connection, socket))))
+    }
+}
+
+impl Stream {
+    /// Ends TLS with a `close_notify`, so the server knows the end was meant.
+    pub(crate) fn close(&mut self) {
+        if let Self::Tls(stream) = self {
+            stream.conn.send_close_notify();
+            let _sent = stream.flush();
+        }
+    }
+}
+
+/// A connection: plain TCP, or TLS over it.
+#[derive(Debug)]
+pub(crate) enum Stream {
+    Plain(TcpStream),
+    Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
+    /// In the moment between the two, while the handshake runs.
+    Closed,
+}
+
+impl Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.read(buf),
+            Self::Tls(stream) => stream.read(buf),
+            Self::Closed => Err(io::ErrorKind::NotConnected.into()),
+        }
+    }
+}
+
+impl Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.write(buf),
+            Self::Tls(stream) => stream.write(buf),
+            Self::Closed => Err(io::ErrorKind::NotConnected.into()),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Plain(socket) => socket.flush(),
+            Self::Tls(stream) => stream.flush(),
+            Self::Closed => Err(io::ErrorKind::NotConnected.into()),
+        }
+    }
+}
