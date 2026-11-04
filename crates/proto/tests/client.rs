@@ -8,8 +8,8 @@
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, MAX_SET_RANGES, Notify, NotifyMailboxes,
-    Refusal, SearchKey, SelectOptions, State, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, FetchItem, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, MAX_PREVIEW_CHARS, MAX_SET_RANGES,
+    Moved, Notify, NotifyMailboxes, PreviewFetch, Refusal, SearchKey, SelectOptions, State, Transport,
 };
 use proptest::prelude::*;
 
@@ -245,6 +245,13 @@ fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
         Just(
             b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR STARTTLS LIST-EXTENDED SPECIAL-USE ENABLE CONDSTORE QRESYNC IDLE NOTIFY] hi\r\n".to_vec()
         ),
+        Just(b"* CAPABILITY IMAP4rev1 MOVE UIDPLUS PREVIEW COMPRESS=DEFLATE\r\n".to_vec()),
+        Just(b"* OK [COPYUID 7 1 9] moved\r\n".to_vec()),
+        Just(b"* OK [COPYUID 7 1:2 9:10] moved\r\n".to_vec()),
+        Just(b"A0002 OK [COPYUID 7 1 9] done\r\n".to_vec()),
+        Just(b"* NO [UIDNOTSTICKY] gone\r\n".to_vec()),
+        Just("* 1 FETCH (UID 1 PREVIEW \"pay\u{202e}fdp.exe\")\r\n".as_bytes().to_vec()),
+        Just(b"* 1 FETCH (PREVIEW {3}\r\na\r\n)\r\n".to_vec()),
         Just(b"* ENABLED QRESYNC CONDSTORE\r\n".to_vec()),
         Just(b"* VANISHED (EARLIER) 1:5,9\r\n".to_vec()),
         Just(b"* VANISHED 1:*\r\n".to_vec()),
@@ -276,7 +283,7 @@ proptest! {
     #[test]
     fn hostile_bytes_never_panic_and_never_show_the_password(
         pieces in session_bytes(),
-        commands in proptest::collection::vec(0_u8..17, 0..8),
+        commands in proptest::collection::vec(0_u8..22, 0..8),
         password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2"), Just(" hunter2"), Just("hunter2\t"), Just(" hun\"ter\\2 ")],
     ) {
         // The password as LOGIN quotes it; also how `Debug` writes it.
@@ -285,6 +292,8 @@ proptest! {
         let known = FolderState::new(UidValidity::new(9).unwrap()).with_highest_modseq(ModSeq::new(5));
         let resync = SelectOptions { condstore: true, known: Some(known), known_uids: Some(UidSet::from_iter(Uid::new(3))) };
         let changed = FetchAttributes { changed_since: ModSeq::new(5), vanished: true, ..FetchAttributes::default() };
+        let one = UidSet::from_iter([Uid::new(1).unwrap()]);
+        let preview = FetchAttributes { preview: Some(PreviewFetch::Generate), ..FetchAttributes::default() };
         // The client can hide the password only once it has been given one.
         let mut given = false;
         let mut shown = Vec::new();
@@ -308,6 +317,11 @@ proptest! {
                     12 => client.idle(),
                     14 => client.notify(&Notify { selected: true, mailboxes: Some(NotifyMailboxes::Personal), mailbox_names: true, status: true }),
                     15 => client.notify_none(),
+                    17 => client.uid_copy(&one, "Archive"),
+                    18 => client.uid_move(&one, "Archive"),
+                    19 => client.uid_expunge(&one),
+                    20 => client.compress(),
+                    21 => client.uid_fetch(&one, preview),
                     _ => client.logout(),
                     }
                     .map(Some),
@@ -325,6 +339,19 @@ proptest! {
             }
             client.take_output();
             let events: Vec<Event> = std::iter::from_fn(|| client.next_event()).collect();
+            for event in &events {
+                match event {
+                    // A COPYUID names only UIDs that were asked for.
+                    Event::Completed { outcome: Ok(Answer::Copied(Some(copy_uid)) | Answer::Moved(Moved { copy_uid: Some(copy_uid), .. })), .. } => {
+                        prop_assert!(copy_uid.pairs().all(|(source, _)| source == Uid::new(1).unwrap()), "{:?}", copy_uid);
+                    }
+                    Event::Fetched(FetchItem { preview: Some(preview), .. }) => {
+                        prop_assert!(preview.chars().count() <= MAX_PREVIEW_CHARS, "{:?}", preview);
+                        prop_assert!(!preview.chars().any(|c| c.is_control() || inboxcraft_model::is_invisible_mark(c)), "{:?}", preview);
+                    }
+                    _ => {}
+                }
+            }
             // Whatever the server wrote for people is shown without invisible marks.
             let mut words: Vec<&str> = events.iter().filter_map(server_words).collect();
             if let Err(ProtoError::Bye(text)) = &received {
