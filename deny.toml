@@ -1,5 +1,8 @@
 [graph]
 all-features = true
+# `rustls-platform-verifier` pulls the Mozilla roots (CDLA-Permissive-2.0) only on wasm32, and `net` depends on it
+# only off wasm32: the crate is never built, so it is left out of the graph rather than its licence allowed.
+exclude = ["webpki-root-certs"]
 
 [licenses]
 confidence-threshold = 0.93

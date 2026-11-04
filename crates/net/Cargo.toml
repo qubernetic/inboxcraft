@@ -8,5 +8,20 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+inboxcraft-charset = { workspace = true }
+inboxcraft-mime = { workspace = true }
+inboxcraft-model = { workspace = true }
+inboxcraft-proto = { workspace = true }
+inboxcraft-time = { workspace = true }
+rustls = { workspace = true }
+
+# Native only, like the crate: every native target has a platform verifier (unix, Apple, Android, Windows).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rustls-platform-verifier = { workspace = true }
+
+[dev-dependencies]
+inboxcraft-testkit = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 # Where InboxCraft falls short
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
@@ -194,6 +194,28 @@ B = blocks the next stage.
 - `store` reads a record and a body's text back from SQLite in full before it checks them; SQLite's default limit
   on one value is 1 GB. `Body` cuts the text to `MAX_TEXT_BYTES` only after it was read. A source length is checked
   before the file is read. Only something that writes the owner's database file can plant such a value (#24).
+- `net` has no back-off, no IDLE or NOTIFY, no resync of flags and removed messages and no COMPRESS stream yet
+  (E1.7b): a sync of a known folder brings only the messages from its UIDNEXT on, an `Idle` job only waits for the
+  next job, and a failed job is reported and the next job connects again at once (#25).
+- `net` tells a far-off clock from a bad certificate by the certificate's dates: it ended more than four years
+  before the clock's time, or starts more than a day after it, or the clock is before 2026. Where the platform
+  verifier gives no dates (Windows, Apple, Android) and checks at the system's own time, only the last test applies.
+  A server whose certificate really expired more than four years ago is reported as a clock fault. The check
+  against a server's time is `account.check` (E1.8) (#25).
+- `net` does not fetch in the first sync a body larger than `proto`'s literal cap (64 MiB); asked for on its own,
+  such a message fails with `TooLarge` and the connection closes (#25).
+- `net` opens a folder by its name written back in modified UTF-7. A server name that is not valid modified UTF-7
+  (taken as it was written by `proto`) is not written back the same way and the folder cannot be opened (#25).
+- `net` waits up to two minutes for each read; a server that sends a byte now and then keeps a job running. The
+  worker's event channel has no bound, so a slow engine lets events pile up in memory (#25).
+- `net`'s `Password` overwrites its bytes when dropped, but `proto` keeps the password to hide it in what the server
+  echoes, and `rustls` keeps the sent bytes in its buffers, until the connection is dropped (#25).
+- `net` takes PREVIEW only from a server that offers it; others give summaries without a preview until the reader
+  makes one from the body. Encoded words in a quoted display name are decoded, as most programs do, though RFC 2047
+  says they should not be (#25).
+- `net` keeps the Mozilla roots of `rustls-platform-verifier` (CDLA-Permissive-2.0, pulled only on wasm32, where
+  `net` is never built) out of `cargo deny`'s graph with `[graph] exclude` in `deny.toml`, rather than allowing the
+  licence (#25).
 
 ## Revision history
 | Date | Change | Summary |
@@ -223,3 +245,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Who may read the local-first store on unix and Windows (#24) |
 | 2026-11-04 | minor | What is left of removed mail on the disk (#24) |
 | 2026-11-04 | minor | Symlinks in the store and values read back unbounded (#24) |
+| 2026-11-05 | minor | Rough edges of TLS, the IMAP sign-in and the first sync (#25) |

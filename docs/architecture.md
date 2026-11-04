@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -40,7 +40,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 
 ## Decisions worth knowing
 - The engine does no I/O; protocols are sans-I/O (`proto`, `dav`); sockets and TLS live only in `net`.
-- No async runtime; one worker thread per account.
+- No async runtime; one worker thread per account (`net::Worker`). It opens one connection at its first job, signs
+  in, runs the jobs in order and opens folders read-only (EXAMINE, `BODY.PEEK`), so the read path changes nothing on
+  the server. Answers stream out as events while they come in.
+- TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
+  checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
+  `proto` only on an encrypted connection, and `proto` refuses it before as well.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
@@ -68,3 +73,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-04 | minor | Data flow: the read path jobs and events in `model`, folder roles (#17) |
 | 2026-11-04 | minor | The local-first store and its two backends (#24) |
 | 2026-11-04 | minor | The store zeroes removed mail (#24) |
+| 2026-11-05 | minor | The account worker and TLS in `net` (#25) |

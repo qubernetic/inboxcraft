@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-05 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -226,7 +226,8 @@ branch, `main`, so the nightly run starts with the first release.
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
 runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
 `charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), `imap_client` (#20), and `testkit_imap` (#23), the fake IMAP server's own command reader.
+(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, and `net_envelope`
+(#25), the envelope of a header block.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -265,3 +266,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |
 | 2026-11-04 | minor | The layering rule that keeps `rcgen` and `flate2` in `testkit` (#23) |
 | 2026-11-04 | minor | `store` may depend on `model` inside layer 1 (#24) |
+| 2026-11-05 | minor | Fuzzing: the envelope target of `net` (#25) |

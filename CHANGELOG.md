@@ -144,3 +144,18 @@ All notable changes to InboxCraft are listed here. The format follows
   no words in the database, its index or its write-ahead log. `Search` matches from, to and Cc, subject and date,
   and body words as a phrase, newest first. New dependency `rusqlite` with the bundled SQLite, native builds only
   (#24)
+- `inboxcraft-net` connects, signs in and runs the first sync of an account. TLS through `rustls` (`ring`, TLS 1.2
+  and 1.3) with the operating system's verifier (`rustls-platform-verifier`) or, for tests, given roots, checked at
+  the time of an injected clock. Implicit TLS, or STARTTLS before anything else is sent: a STARTTLS account whose
+  server does not offer it, or refuses it, gets nothing at all, and a password goes out only once the connection is
+  encrypted, also to a server that offers a sign-in in clear. AUTHENTICATE PLAIN where offered, LOGIN otherwise.
+  Every cause has its own error kind: host not found, connection refused, timed out, dropped, unknown issuer,
+  expired, not yet valid, wrong host, clock far off, other TLS, STARTTLS missing, login refused, no login method,
+  no password stored, command refused, protocol, too large, folder gone, message gone. `Worker` runs one thread per
+  account: it takes the model's jobs in order on one signed-in connection and reports the model's events, the
+  folder list, the first sync of a folder opened read-only (summaries with flags, size, arrival time, PREVIEW and
+  the envelope read from the header block, in batches; then the bodies of the messages of the last 30 days,
+  `SyncConfig::body_days`), the new messages of a known folder, a UIDVALIDITY reset, and the body of one message.
+  A refused password is not sent again by the same worker. `envelope` reads address lists (groups, quoted names,
+  comments, encoded words) and message ids; fuzz target `net_envelope`. New dependency
+  `rustls-platform-verifier`, native builds only (#25)
