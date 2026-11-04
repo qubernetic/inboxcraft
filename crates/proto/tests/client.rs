@@ -8,7 +8,7 @@
 use inboxcraft_model::{Uid, UidSet};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport,
 };
 use proptest::prelude::*;
 
@@ -179,6 +179,23 @@ fn a_refused_capability_after_the_sign_in_leaves_none_known() {
     assert_eq!(capabilities.iter().count(), 0);
     assert_eq!(client.capabilities(), None);
     assert_eq!(client.state(), State::Authenticated);
+}
+
+#[test]
+fn only_what_was_asked_for_and_confirmed_is_enabled() {
+    let enabled = |reply: &[u8], extension| {
+        let mut client = Client::new(Transport::Tls);
+        client.receive(b"* PREAUTH [CAPABILITY IMAP4rev1 ENABLE CONDSTORE QRESYNC] ready\r\n").unwrap();
+        client.enable(extension).unwrap();
+        client.receive(reply).unwrap();
+        (client.is_enabled(Extension::CondStore), client.is_enabled(Extension::QResync))
+    };
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 OK\r\n", Extension::QResync), (true, true));
+    assert_eq!(enabled(b"* ENABLED condstore\r\nA0001 OK\r\n", Extension::CondStore), (true, false));
+    // Not what was asked for, or refused in the end.
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 OK\r\n", Extension::CondStore), (false, false));
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 NO\r\n", Extension::QResync), (false, false));
+    assert_eq!(enabled(b"A0001 OK\r\n", Extension::QResync), (false, false));
 }
 
 /// Hostile bytes for a session in any state.

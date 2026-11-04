@@ -8,7 +8,7 @@ use std::fmt;
 
 use inboxcraft_model::{Uid, UidSet};
 
-use super::capability::{Capabilities, MAX_CAPABILITY_LEN, is_atom_char};
+use super::capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN, is_atom_char};
 use super::command::{Command, escaped};
 use super::fetch::{FetchAttributes, FetchItem};
 use super::frame::Framer;
@@ -17,6 +17,7 @@ use super::mailbox::{MailboxStatus, flag_list};
 use super::response::{Response, classify};
 use super::sasl::{check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
+use super::sync::{Extension, SelectOptions};
 use super::text::Secrets;
 use super::value::{Piece, Status, StatusLine, Value, number};
 use crate::ProtoError;
@@ -113,6 +114,8 @@ pub enum Answer {
     Capabilities(Capabilities),
     /// STARTTLS: run the TLS handshake now, then call [`Client::tls_established`].
     StartTls,
+    /// ENABLE: what the server says it switched on (`ENABLED`), which may be nothing.
+    Enabled(Capabilities),
     /// LOGIN or AUTHENTICATE, with the capabilities as the server lists them after the sign-in.
     Authenticated(Capabilities),
     /// LIST: the mailboxes, each once, at most [`MAX_MAILBOXES`].
@@ -158,6 +161,10 @@ enum Kind {
     StartTls,
     /// LOGIN or AUTHENTICATE PLAIN.
     SignIn,
+    Enable {
+        asked: Extension,
+        words: Vec<String>,
+    },
     List {
         entries: Vec<ListEntry>,
         seen: HashSet<String>,
@@ -198,6 +205,10 @@ pub struct Client {
     next_tag: u32,
     in_flight: Option<InFlight>,
     secrets: Secrets,
+    /// CONDSTORE is on (ENABLE CONDSTORE or QRESYNC).
+    condstore: bool,
+    /// QRESYNC is on.
+    qresync: bool,
 }
 
 /// Neither the output (it may hold a password) nor anything secret is shown.
@@ -226,6 +237,8 @@ impl Client {
             next_tag: 1,
             in_flight: None,
             secrets: Secrets::default(),
+            condstore: false,
+            qresync: false,
         }
     }
 
@@ -245,6 +258,15 @@ impl Client {
     #[must_use]
     pub fn capabilities(&self) -> Option<&Capabilities> {
         self.capabilities.as_ref()
+    }
+
+    /// Whether the server switched `extension` on after an [`enable`](Self::enable); QRESYNC brings CONDSTORE with it.
+    #[must_use]
+    pub fn is_enabled(&self, extension: Extension) -> bool {
+        match extension {
+            Extension::CondStore => self.condstore,
+            Extension::QResync => self.qresync,
+        }
     }
 
     /// The bytes to write to the server, taken out.
@@ -376,6 +398,23 @@ impl Client {
         Ok(tag)
     }
 
+    /// ENABLE (RFC 5161) of an extension the server offers, after the sign-in and before a mailbox is open.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without `ENABLE` or the extension, or a state
+    /// error.
+    pub fn enable(&mut self, extension: Extension) -> Result<Tag, ProtoError> {
+        self.ready("ENABLE", &[State::Authenticated])?;
+        let capabilities = self.capabilities.as_ref().ok_or(ProtoError::CapabilitiesUnknown)?;
+        for needed in ["ENABLE", extension.name()] {
+            if !capabilities.has(needed) {
+                return Err(ProtoError::NotOffered(needed));
+            }
+        }
+        Ok(self.start(Command::new("ENABLE").arg(extension.name()), Kind::Enable { asked: extension, words: Vec::new() }))
+    }
+
     /// LIST `""` `"*"`: every mailbox, with `RETURN (SPECIAL-USE)` when the server offers LIST-EXTENDED and
     /// SPECIAL-USE (RFC 5258, RFC 6154).
     ///
@@ -384,9 +423,8 @@ impl Client {
     /// [`ProtoError::Busy`], a state error, or [`ProtoError::Closed`].
     pub fn list(&mut self) -> Result<Tag, ProtoError> {
         self.ready("LIST", &[State::Authenticated, State::Selected])?;
-        let offers = |capability| self.capabilities.as_ref().is_some_and(|capabilities| capabilities.has(capability));
         let mut command = Command::new("LIST").arg("\"\"").arg("\"*\"");
-        if offers("LIST-EXTENDED") && offers("SPECIAL-USE") {
+        if self.offers("LIST-EXTENDED") && self.offers("SPECIAL-USE") {
             command = command.arg("RETURN (SPECIAL-USE)");
         }
         Ok(self.start(command, Kind::List { entries: Vec::new(), seen: HashSet::new() }))
@@ -398,7 +436,16 @@ impl Client {
     ///
     /// [`ProtoError::BadArgument`] for an empty or overlong name or one with a control character, a state error.
     pub fn select(&mut self, mailbox: &str) -> Result<Tag, ProtoError> {
-        self.open("SELECT", mailbox, false)
+        self.open("SELECT", mailbox, false, &SelectOptions::default())
+    }
+
+    /// SELECT with [`SelectOptions`]: CONDSTORE, and QRESYNC once enabled.
+    ///
+    /// # Errors
+    ///
+    /// As [`select`](Self::select), and [`ProtoError::NotOffered`] for CONDSTORE from a server without it.
+    pub fn select_with(&mut self, mailbox: &str, options: &SelectOptions) -> Result<Tag, ProtoError> {
+        self.open("SELECT", mailbox, false, options)
     }
 
     /// EXAMINE: opens a mailbox read-only. As [`select`](Self::select).
@@ -407,17 +454,30 @@ impl Client {
     ///
     /// As [`select`](Self::select).
     pub fn examine(&mut self, mailbox: &str) -> Result<Tag, ProtoError> {
-        self.open("EXAMINE", mailbox, true)
+        self.open("EXAMINE", mailbox, true, &SelectOptions::default())
     }
 
-    fn open(&mut self, verb: &'static str, mailbox: &str, read_only: bool) -> Result<Tag, ProtoError> {
+    /// EXAMINE with [`SelectOptions`]. As [`select_with`](Self::select_with).
+    ///
+    /// # Errors
+    ///
+    /// As [`select_with`](Self::select_with).
+    pub fn examine_with(&mut self, mailbox: &str, options: &SelectOptions) -> Result<Tag, ProtoError> {
+        self.open("EXAMINE", mailbox, true, options)
+    }
+
+    fn open(&mut self, verb: &'static str, mailbox: &str, read_only: bool, options: &SelectOptions) -> Result<Tag, ProtoError> {
         self.ready(verb, &[State::Authenticated, State::Selected])?;
-        if mailbox.is_empty() || mailbox.len() > MAX_MAILBOX_NAME || mailbox.chars().any(char::is_control) {
-            return Err(ProtoError::BadArgument("mailbox name"));
+        check_mailbox(mailbox)?;
+        if options.condstore && !self.offers_condstore() {
+            return Err(ProtoError::NotOffered("CONDSTORE"));
+        }
+        let mut command = Command::new(verb).string(mailbox.as_bytes());
+        if options.condstore {
+            command = command.arg("(CONDSTORE)");
         }
         // Whatever the answer, the mailbox open before is closed (RFC 9051 section 6.3.2).
         self.state = State::Authenticated;
-        let command = Command::new(verb).string(mailbox.as_bytes());
         Ok(self.start(command, Kind::Select(MailboxStatus { read_only, ..MailboxStatus::default() })))
     }
 
@@ -425,11 +485,24 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// [`ProtoError::BadArgument`] for an empty set or one of more than [`crate::imap::MAX_SET_RANGES`] ranges, a
-    /// state error.
+    /// [`ProtoError::BadArgument`] for an empty set or one of more than [`crate::imap::MAX_SET_RANGES`] ranges or
+    /// VANISHED without CHANGEDSINCE, [`ProtoError::NotOffered`] for MODSEQ or CHANGEDSINCE from a server without
+    /// CONDSTORE, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is enabled, a state error.
     pub fn uid_fetch(&mut self, set: &UidSet, attributes: FetchAttributes) -> Result<Tag, ProtoError> {
         self.ready("UID FETCH", &[State::Selected])?;
-        let command = Command::new("UID FETCH").arg(&set_text(set)?).arg(&attributes.items());
+        if (attributes.modseq || attributes.changed_since.is_some()) && !self.offers_condstore() {
+            return Err(ProtoError::NotOffered("CONDSTORE"));
+        }
+        if attributes.vanished && attributes.changed_since.is_none() {
+            return Err(ProtoError::BadArgument("VANISHED without CHANGEDSINCE"));
+        }
+        if attributes.vanished && !self.qresync {
+            return Err(ProtoError::NotEnabled("QRESYNC"));
+        }
+        let mut command = Command::new("UID FETCH").arg(&set_text(set)?).arg(&attributes.items());
+        if let Some(modifiers) = attributes.modifiers() {
+            command = command.arg(&modifiers);
+        }
         Ok(self.start(command, Kind::Fetch))
     }
 
@@ -462,6 +535,16 @@ impl Client {
             return Err(ProtoError::NotEncrypted);
         }
         self.capabilities.as_ref().ok_or(ProtoError::CapabilitiesUnknown)
+    }
+
+    /// Whether the server listed `capability`.
+    fn offers(&self, capability: &str) -> bool {
+        self.capabilities.as_ref().is_some_and(|capabilities| capabilities.has(capability))
+    }
+
+    /// Whether the server keeps modification sequences: CONDSTORE, or QRESYNC, which brings it (RFC 7162 section 3.2).
+    fn offers_condstore(&self) -> bool {
+        self.offers("CONDSTORE") || self.offers("QRESYNC")
     }
 
     fn ready(&self, command: &'static str, allowed: &[State]) -> Result<(), ProtoError> {
@@ -588,6 +671,9 @@ impl Client {
                     entries.push(entry);
                 }
             }
+            ("ENABLED", Some(Kind::Enable { words, .. })) => {
+                words.extend(values.iter().skip(1).filter_map(Value::atom).take(MAX_CAPABILITIES).map(str::to_owned));
+            }
             ("FLAGS", Some(Kind::Select(status))) => {
                 if let Some(Value::List(flags)) = values.into_iter().nth(1) {
                     status.flags = flag_list(flags);
@@ -681,6 +767,14 @@ impl Client {
                 }
                 Answer::Authenticated(self.capabilities.clone().unwrap_or_default())
             }
+            Kind::Enable { asked, words } => {
+                let enabled = Capabilities::from_words(words.iter().map(String::as_str));
+                if enabled.has(asked.name()) {
+                    self.condstore = true;
+                    self.qresync |= asked == Extension::QResync;
+                }
+                Answer::Enabled(enabled)
+            }
             Kind::List { entries, .. } => Answer::Listed(entries),
             Kind::Select(mut status) => {
                 match line.code.as_str() {
@@ -700,6 +794,14 @@ impl Client {
         };
         Ok(Some(answer))
     }
+}
+
+/// A mailbox name as a command takes it: not empty, at most [`MAX_MAILBOX_NAME`] bytes, no control character.
+fn check_mailbox(mailbox: &str) -> Result<(), ProtoError> {
+    if mailbox.is_empty() || mailbox.len() > MAX_MAILBOX_NAME || mailbox.chars().any(char::is_control) {
+        return Err(ProtoError::BadArgument("mailbox name"));
+    }
+    Ok(())
 }
 
 /// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`. EXISTS, EXPUNGE and FETCH belong to a mailbox

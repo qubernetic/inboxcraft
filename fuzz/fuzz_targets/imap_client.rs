@@ -28,7 +28,7 @@ fn clean(text: &str) -> bool {
 
 fn start(client: &mut Client, command: u8) -> Option<bool> {
     let one = UidSet::from_iter(Uid::new(1));
-    let attributes = FetchAttributes { flags: true, internal_date: true, size: true, section: Some(Section::Full) };
+    let attributes = FetchAttributes { flags: true, internal_date: true, size: true, section: Some(Section::Full), ..FetchAttributes::default() };
     let result = match command % 12 {
         0 => client.capability(),
         1 => client.starttls(),

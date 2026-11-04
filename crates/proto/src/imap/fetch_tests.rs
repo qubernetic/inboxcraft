@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_model::Uid;
+use inboxcraft_model::{ModSeq, Uid};
 use inboxcraft_time::{CivilDateTime, Offset};
 
 use super::{FetchAttributes, FetchItem, Section, internal_date};
@@ -18,10 +18,31 @@ fn text(s: &str) -> Piece {
 #[test]
 fn the_items_asked_for() {
     assert_eq!(FetchAttributes::default().items(), "(UID)");
-    let all = FetchAttributes { flags: true, internal_date: true, size: true, section: Some(Section::Full) };
-    assert_eq!(all.items(), "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])");
+    let all =
+        FetchAttributes { flags: true, internal_date: true, size: true, modseq: true, section: Some(Section::Full), ..FetchAttributes::default() };
+    assert_eq!(all.items(), "(UID FLAGS INTERNALDATE RFC822.SIZE MODSEQ BODY.PEEK[])");
+    assert_eq!(all.modifiers(), None);
     assert_eq!(FetchAttributes { section: Some(Section::Header), ..FetchAttributes::default() }.items(), "(UID BODY.PEEK[HEADER])");
     assert_eq!(FetchAttributes { section: Some(Section::Text), flags: true, ..FetchAttributes::default() }.items(), "(UID FLAGS BODY.PEEK[TEXT])");
+}
+
+#[test]
+fn changed_since_asks_for_the_modseq_and_vanished_goes_with_it() {
+    let since = FetchAttributes { flags: true, changed_since: ModSeq::new(12345), ..FetchAttributes::default() };
+    assert_eq!(since.items(), "(UID FLAGS MODSEQ)");
+    assert_eq!(since.modifiers().as_deref(), Some("(CHANGEDSINCE 12345)"));
+    assert_eq!(FetchAttributes { vanished: true, ..since }.modifiers().as_deref(), Some("(CHANGEDSINCE 12345 VANISHED)"));
+    assert_eq!(FetchAttributes { vanished: true, ..FetchAttributes::default() }.modifiers(), None);
+}
+
+#[test]
+fn a_modseq_is_one_number_in_parentheses() {
+    let modseq = |text: &str| item(vec![self::text(text)]).and_then(|item| item.modseq);
+    assert_eq!(modseq("1 FETCH (MODSEQ (624140003))"), ModSeq::new(624_140_003));
+    assert_eq!(modseq("1 FETCH (MODSEQ (18446744073709551615))"), ModSeq::new(u64::MAX));
+    for bad in ["1 FETCH (MODSEQ 5)", "1 FETCH (MODSEQ ())", "1 FETCH (MODSEQ (0))", "1 FETCH (MODSEQ (\"5\"))", "1 FETCH (MODSEQ (x))"] {
+        assert_eq!(modseq(bad), None, "{bad}");
+    }
 }
 
 #[test]
@@ -40,6 +61,7 @@ fn a_fetch_response_in_any_order() {
             flags: Some(vec!["\\Seen".into(), "$Work".into()]),
             internal_date: date,
             size: Some(4286),
+            modseq: None,
             section: Some((Section::Header, b"Subject: ".to_vec())),
         })
     );
@@ -66,7 +88,7 @@ fn sections_by_every_name() {
 
 #[test]
 fn values_that_cannot_be_read_are_left_out() {
-    let found = item(vec![text("3 FETCH (UID 0 FLAGS \\Seen INTERNALDATE \"yesterday\" RFC822.SIZE x (junk) MODSEQ (5) UID)")]);
+    let found = item(vec![text("3 FETCH (UID 0 FLAGS \\Seen INTERNALDATE \"yesterday\" RFC822.SIZE x (junk) MODSEQ (0) UID)")]);
     assert_eq!(found, Some(FetchItem { seq: 3, ..FetchItem::default() }));
     for line in ["", "0 FETCH (UID 1)", "x FETCH (UID 1)", "1 STORE (UID 1)", "1 FETCH UID 1", "1 FETCH", "1"] {
         assert_eq!(item(vec![text(line)]), None, "{line:?}");

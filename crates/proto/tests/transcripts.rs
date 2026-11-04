@@ -22,9 +22,11 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use inboxcraft_model::{Uid, UidSet};
+use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
-use inboxcraft_proto::imap::{Answer, Client, Event, FetchAttributes, ListEntry, MailboxStatus, SearchDate, SearchKey, Section, Transport};
+use inboxcraft_proto::imap::{
+    Answer, Client, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, SearchDate, SearchKey, Section, SelectOptions, Transport,
+};
 
 /// A UID set as IMAP writes one: `4,7:9`.
 fn uid_set(text: &str) -> UidSet {
@@ -72,9 +74,29 @@ fn search_key(words: &mut VecDeque<&str>) -> SearchKey {
     }
 }
 
+/// Options from words: `condstore`, `known=<uidvalidity>[/<modseq>]`, `uids=<set>`.
+fn select_options(words: VecDeque<&str>) -> SelectOptions {
+    let mut options = SelectOptions::default();
+    for word in words {
+        if word == "condstore" {
+            options.condstore = true;
+        } else if let Some(known) = word.strip_prefix("known=") {
+            let (validity, modseq) = known.split_once('/').map_or((known, None), |(v, m)| (v, Some(m)));
+            let state = FolderState::new(UidValidity::new(validity.parse().unwrap()).unwrap());
+            options.known = Some(state.with_highest_modseq(modseq.and_then(|m| ModSeq::new(m.parse().unwrap()))));
+        } else if let Some(uids) = word.strip_prefix("uids=") {
+            options.known_uids = Some(uid_set(uids));
+        } else {
+            panic!("unknown select option {word}");
+        }
+    }
+    options
+}
+
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
-/// `list`, `select <name>`, `examine <name>` (the rest of the line), `fetch <set> [flags] [date] [size] [full|header|
-/// text]`, `search <keys>`, `logout`.
+/// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
+/// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
+/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let mut words: VecDeque<&str> = rest.split_whitespace().collect();
@@ -87,6 +109,16 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
         "list" => client.list(),
         "select" => client.select(rest),
         "examine" => client.examine(rest),
+        "select-with" | "examine-with" => {
+            let name = words.pop_front().unwrap();
+            let options = select_options(words);
+            if command == "select-with" { client.select_with(name, &options) } else { client.examine_with(name, &options) }
+        }
+        "enable" => client.enable(match rest {
+            "condstore" => Extension::CondStore,
+            "qresync" => Extension::QResync,
+            other => panic!("unknown extension {other}"),
+        }),
         "fetch" => {
             let set = uid_set(words.pop_front().unwrap());
             let mut attributes = FetchAttributes::default();
@@ -95,10 +127,15 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
                     "flags" => attributes.flags = true,
                     "date" => attributes.internal_date = true,
                     "size" => attributes.size = true,
+                    "modseq" => attributes.modseq = true,
+                    "vanished" => attributes.vanished = true,
                     "full" => attributes.section = Some(Section::Full),
                     "header" => attributes.section = Some(Section::Header),
                     "text" => attributes.section = Some(Section::Text),
-                    other => panic!("unknown fetch attribute {other}"),
+                    other => match other.strip_prefix("since=") {
+                        Some(since) => attributes.changed_since = ModSeq::new(since.parse().unwrap()),
+                        None => panic!("unknown fetch attribute {other}"),
+                    },
                 }
             }
             client.uid_fetch(&set, attributes)
@@ -172,6 +209,9 @@ fn render(event: &Event) -> Vec<String> {
             if let Some(size) = item.size {
                 let _ = write!(line, " size={size}");
             }
+            if let Some(modseq) = item.modseq {
+                let _ = write!(line, " modseq={modseq}");
+            }
             if let Some((section, bytes)) = &item.section {
                 let _ = write!(line, " {section:?}=\"{}\"", bytes.escape_ascii());
             }
@@ -184,6 +224,7 @@ fn render(event: &Event) -> Vec<String> {
         Event::Completed { tag, outcome: Ok(answer) } => match answer {
             Answer::Capabilities(caps) => vec![format!("{tag} capabilities {}", caps.iter().collect::<Vec<_>>().join(" ")).trim_end().to_owned()],
             Answer::StartTls => vec![format!("{tag} starttls")],
+            Answer::Enabled(enabled) => vec![format!("{tag} enabled {}", list_text(&enabled.iter().map(str::to_owned).collect::<Vec<_>>()))],
             Answer::Authenticated(caps) => vec![format!("{tag} authenticated {}", caps.iter().collect::<Vec<_>>().join(" ")).trim_end().to_owned()],
             Answer::Listed(entries) => {
                 let mut lines = vec![format!("{tag} listed {}", entries.len())];
