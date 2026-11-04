@@ -4,7 +4,7 @@
 use inboxcraft_model::{ModSeq, Uid};
 use inboxcraft_time::{CivilDateTime, Offset};
 
-use super::{FetchAttributes, FetchItem, Section, internal_date};
+use super::{FetchAttributes, FetchItem, MAX_PREVIEW_CHARS, PreviewFetch, Section, internal_date};
 use crate::imap::value::{Piece, values};
 
 fn item(pieces: Vec<Piece>) -> Option<FetchItem> {
@@ -46,6 +46,20 @@ fn a_modseq_is_one_number_in_parentheses() {
 }
 
 #[test]
+fn a_preview_is_one_clean_line_of_at_most_256_characters() {
+    let preview = |pieces: Vec<Piece>| item(pieces).and_then(|item| item.preview);
+    let long = "é".repeat(MAX_PREVIEW_CHARS + 10);
+    let cut = preview(vec![text(&format!("1 FETCH (PREVIEW \"{long}\")"))]);
+    assert_eq!(cut, Some("é".repeat(MAX_PREVIEW_CHARS)));
+    let raw = preview(vec![text("1 FETCH (PREVIEW {9}"), Piece::Literal(b"a\0b\x1b\xff\r\n c".to_vec()), text(")")]);
+    assert_eq!(raw.as_deref(), Some("a b \u{fffd} c"));
+    assert_eq!(preview(vec![text("1 FETCH (PREVIEW NIL)")]), None);
+    assert_eq!(preview(vec![text("1 FETCH (PREVIEW (x))")]), None);
+    let both = FetchAttributes { preview: Some(PreviewFetch::Lazy), section: Some(Section::Header), ..FetchAttributes::default() };
+    assert_eq!(both.items(), "(UID PREVIEW (LAZY) BODY.PEEK[HEADER])");
+}
+
+#[test]
 fn a_fetch_response_in_any_order() {
     let pieces = vec![
         text(r#"12 FETCH (FLAGS (\Seen $Work) UID 40 INTERNALDATE "17-Jul-1996 02:44:25 -0700" RFC822.SIZE 4286 BODY[HEADER] {9}"#),
@@ -62,6 +76,7 @@ fn a_fetch_response_in_any_order() {
             internal_date: date,
             size: Some(4286),
             modseq: None,
+            preview: None,
             section: Some((Section::Header, b"Subject: ".to_vec())),
         })
     );

@@ -627,7 +627,8 @@ impl Client {
     ///
     /// [`ProtoError::BadArgument`] for an empty set or one of more than [`crate::imap::MAX_SET_RANGES`] ranges or
     /// VANISHED without CHANGEDSINCE, [`ProtoError::NotOffered`] for MODSEQ or CHANGEDSINCE from a server without
-    /// CONDSTORE, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is enabled, a state error.
+    /// CONDSTORE and for a preview from one without PREVIEW, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is
+    /// enabled, a state error.
     pub fn uid_fetch(&mut self, set: &UidSet, attributes: FetchAttributes) -> Result<Tag, ProtoError> {
         self.ready("UID FETCH", &[State::Selected])?;
         if attributes.modseq || attributes.changed_since.is_some() {
@@ -638,6 +639,9 @@ impl Client {
         }
         if attributes.vanished && !self.qresync {
             return Err(ProtoError::NotEnabled("QRESYNC"));
+        }
+        if attributes.preview.is_some() {
+            self.require("PREVIEW")?;
         }
         let mut command = Command::new("UID FETCH").arg(&set_text(set)?).arg(&attributes.items());
         if let Some(modifiers) = attributes.modifiers() {

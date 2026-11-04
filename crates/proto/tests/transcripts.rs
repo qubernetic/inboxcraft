@@ -25,8 +25,8 @@ use std::path::Path;
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, Refusal, Removal, SearchDate,
-    SearchKey, Section, SelectOptions, Transport,
+    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, PreviewFetch, Refusal, Removal,
+    SearchDate, SearchKey, Section, SelectOptions, Transport,
 };
 
 /// A UID set as IMAP writes one: `4,7:9`.
@@ -120,7 +120,7 @@ fn notify(words: VecDeque<&str>) -> Notify {
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
-/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
+/// [modseq] [since=<modseq>] [vanished] [preview|lazy-preview] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
 /// `notify-none`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -154,6 +154,8 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
                     "size" => attributes.size = true,
                     "modseq" => attributes.modseq = true,
                     "vanished" => attributes.vanished = true,
+                    "preview" => attributes.preview = Some(PreviewFetch::Generate),
+                    "lazy-preview" => attributes.preview = Some(PreviewFetch::Lazy),
                     "full" => attributes.section = Some(Section::Full),
                     "header" => attributes.section = Some(Section::Header),
                     "text" => attributes.section = Some(Section::Text),
@@ -295,6 +297,9 @@ fn render(event: &Event) -> Vec<String> {
             }
             if let Some(modseq) = item.modseq {
                 let _ = write!(line, " modseq={modseq}");
+            }
+            if let Some(preview) = &item.preview {
+                let _ = write!(line, " preview={preview:?}");
             }
             if let Some((section, bytes)) = &item.section {
                 let _ = write!(line, " {section:?}=\"{}\"", bytes.escape_ascii());

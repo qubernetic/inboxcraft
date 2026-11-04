@@ -26,7 +26,7 @@ mod value;
 
 pub use capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN};
 pub use client::{Answer, Client, Event, Moved, Refusal, RefusalKind, Removal, State, Tag, Transport};
-pub use fetch::{FetchAttributes, FetchItem, Section};
+pub use fetch::{FetchAttributes, FetchItem, MAX_PREVIEW_CHARS, PreviewFetch, Section};
 pub use frame::{MAX_LINE, MAX_LITERAL, MAX_LITERALS};
 pub use list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
 pub use mailbox::{MAX_FLAG_LEN, MAX_FLAGS, MailboxStatus};
