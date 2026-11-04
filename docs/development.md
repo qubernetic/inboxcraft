@@ -103,6 +103,8 @@ included) and fails on:
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
+- a testkit-only crate (`TESTKIT_ONLY_CRATES`: `rcgen`, `flate2`) as a normal or build dependency anywhere but
+  `testkit`; a dev-dependency on one is fine, and a crate that comes to need one lifts it in a reviewed change;
 - a dependency on an app or `xtask` from a library crate.
 
 Member patterns in the root `Cargo.toml` are directories or `<dir>/*`; `layers`, `wasm` and `stats` refuse other
@@ -261,3 +263,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the IMAP client target (#20) |
 | 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |
 | 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |
+| 2026-11-04 | minor | The layering rule that keeps `rcgen` and `flate2` in `testkit` (#23) |

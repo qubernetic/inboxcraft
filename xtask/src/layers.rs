@@ -13,6 +13,7 @@
 //! - `testkit` with any dependency on a [`TESTKIT_NEVER`] crate, whose parser its fakes test;
 //! - a [`UI_CRATES`] dependency anywhere but layer 6 and the apps;
 //! - a [`NETWORK_CRATES`] dependency anywhere but `net`, `testkit` and the apps;
+//! - a [`TESTKIT_ONLY_CRATES`] dependency anywhere but `testkit`, unless it is a dev-dependency;
 //! - a dependency on an app or tool crate from anything but another app or tool crate.
 
 use std::io::Write;
@@ -76,6 +77,10 @@ pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] = &[("inboxcraft-net", "inbo
 /// parser bug cannot hide behind the same bug in the fake.
 pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto"];
 
+/// Crates the fakes need and nothing that ships does: `testkit` only, or a dev-dependency. A crate that comes to need
+/// one lifts it here as a reviewed choice.
+pub(crate) const TESTKIT_ONLY_CRATES: &[&str] = &["rcgen", "flate2"];
+
 /// The crate that does the network I/O.
 const NET: &str = "inboxcraft-net";
 
@@ -119,6 +124,10 @@ fn violations(member: &Member, own: Class, members: &[Member]) -> Vec<String> {
             }
             if NETWORK_CRATES.contains(&target.as_str()) && name != NET && !matches!(own, Class::Testkit | Class::Exempt) {
                 found.push(format!("`{name}` depends on the network crate `{target}`; only `{NET}` does network I/O"));
+            }
+            if TESTKIT_ONLY_CRATES.contains(&target.as_str()) && own != Class::Testkit && dep.kind != Kind::Dev {
+                let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
+                found.push(format!("`{name}` has `{target}` as a {kind} dependency; it is for `inboxcraft-testkit` and dev-dependencies only"));
             }
             continue;
         }

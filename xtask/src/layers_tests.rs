@@ -3,7 +3,7 @@
 
 use tempfile::TempDir;
 
-use super::{CRATES, Class, INTRA_LAYER_ORDER, NETWORK_CRATES, UI_CRATES, class, gate};
+use super::{CRATES, Class, INTRA_LAYER_ORDER, NETWORK_CRATES, TESTKIT_ONLY_CRATES, UI_CRATES, class, gate};
 use crate::test_support::{Broken, context, manifest, run_in, run_xtask, write};
 use crate::{Error, FAILED, OK, count};
 
@@ -140,6 +140,20 @@ fn a_network_crate_outside_net_fails() {
         ("inboxcraft-testkit", "[dependencies]\nrustls = \"1\"\n"),
         ("inboxcraft-cli", "[dependencies]\nureq = \"1\"\n"),
     ]);
+}
+
+#[test]
+fn a_testkit_only_crate_outside_testkit_fails_but_as_a_dev_dependency() {
+    for only in TESTKIT_ONLY_CRATES {
+        for member in ["inboxcraft-proto", "inboxcraft-net"] {
+            fails_with(
+                &[(member, &format!("[dependencies]\n{only} = \"1\"\n"))],
+                &format!("`{member}` has `{only}` as a normal dependency; it is for `inboxcraft-testkit` and dev-dependencies only"),
+            );
+        }
+    }
+    fails_with(&[("inboxcraft", "[build-dependencies]\nflate2 = \"1\"\n")], "`inboxcraft` has `flate2` as a build dependency");
+    passes(&[("inboxcraft-testkit", "[dependencies]\nflate2 = \"1\"\nrcgen = \"1\"\n"), ("inboxcraft-net", "[dev-dependencies]\nflate2 = \"1\"\n")]);
 }
 
 #[test]
