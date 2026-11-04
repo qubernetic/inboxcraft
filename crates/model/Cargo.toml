@@ -1,0 +1,12 @@
+[package]
+name = "inboxcraft-model"
+description = "InboxCraft: the mailbox model: accounts, folders, messages and threads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

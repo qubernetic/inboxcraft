@@ -1,0 +1,12 @@
+[package]
+name = "inboxcraft-html"
+description = "InboxCraft: safe HTML: message HTML turned into something that can be shown without running anything"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
