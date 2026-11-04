@@ -1,0 +1,27 @@
+# LOGOUT: BYE is the answer that was asked for; afterwards the session is over.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> logout
+C: A0001 LOGOUT
+? LoggingOut
+> capability
+! Busy
+S: * BYE IMAP4rev1 Server logging out
+S: A0001 OK LOGOUT completed
+= A0001 logged out
+? Closed
+> capability
+! Closed
+S: * OK more
+! Closed
+
+# Refused (a server should never): the session goes on as it was.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> logout
+C: A0001 LOGOUT
+S: A0001 BAD not now
+= A0001 Bad not now
+? Authenticated

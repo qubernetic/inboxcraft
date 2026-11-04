@@ -1,0 +1,14 @@
+# LOGIN and AUTHENTICATE before TLS are refused, and nothing is sent: the LOGOUT after them is the first command.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN SASL-IR] ready
+= greeted
+> login ada@example.org secret
+! NotEncrypted
+> authenticate ada@example.org secret
+! NotEncrypted
+? NotAuthenticated
+> logout
+C: A0001 LOGOUT
+S: * BYE Logging out
+S: A0001 OK LOGOUT completed
+= A0001 logged out

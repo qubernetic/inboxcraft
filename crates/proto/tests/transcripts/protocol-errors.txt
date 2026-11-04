@@ -1,0 +1,75 @@
+# A server that breaks the protocol ends the session.
+
+# BYE nobody asked for.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> list
+C: A0001 LIST "" "*"
+S: * BYE Autologout; idle for too long
+! Bye("Autologout; idle for too long")
+? Closed
+
+# An answer to a command that was not sent.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> list
+C: A0001 LIST "" "*"
+S: A0002 OK done
+! Unexpected("tagged response")
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: A0001 OK done
+! Unexpected("tagged response")
+
+# A go-ahead when nothing waits for one.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: + more?
+! Unexpected("continuation request")
+
+# A second greeting.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * PREAUTH again
+! Unexpected("PREAUTH")
+
+# A literal larger than the cap is refused when it is announced.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * 1 FETCH (BODY[] {67108865}
+! LiteralTooLarge { size: 67108865, limit: 67108864 }
+
+# A tagged line that is no status.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: A0001 HELLO
+! Malformed("tagged response")
+
+# Lists nested too deeply.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * 1 FETCH (FLAGS (((((((((((((((((((((((((((((((((x)))))))))))))))))))))))))))))))))
+! TooDeep { limit: 32 }
+
+# What the client has no use for is passed over; an alert is shown, whatever the status word.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * NO [ALERT] Disk almost full
+S: * BAD junk
+S: * ENABLED
+S: * 3 RECENT
+S: * FLAGS (\Seen)
+S: * LIST () "/" Stray
+S: * SEARCH 1 2
+S: * 1 STORE
+S: * x
+= alert Disk almost full

@@ -1,0 +1,40 @@
+# SELECT: what the server says about the mailbox, then a refused SELECT, which leaves no mailbox open.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> fetch 1 flags
+! WrongState { command: "UID FETCH", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 172 EXISTS
+S: * 1 RECENT
+S: * OK [UNSEEN 12] Message 12 is first unseen
+S: * OK [UIDVALIDITY 3857529045] UIDs valid
+S: * OK [UIDNEXT 4392] Predicted next UID
+S: * FLAGS (\Answered \Flagged \Deleted \Seen \Draft)
+S: * OK [PERMANENTFLAGS (\Deleted \Seen \*)] Limited
+S: * OK [HIGHESTMODSEQ 715194045007] Highest
+S: A0001 OK [READ-WRITE] SELECT completed
+= A0001 selected exists=172 recent=1 flags=\Answered,\Flagged,\Deleted,\Seen,\Draft permanent=\Deleted,\Seen,\* uidvalidity=3857529045 uidnext=4392 unseen=12 modseq=715194045007 read-only=false
+? Selected
+> select Elküldött
+C: A0002 SELECT {11}
+? Authenticated
+S: + go ahead
+C: Elküldött
+S: A0002 NO [NONEXISTENT] No such mailbox
+= A0002 No [NONEXISTENT] No such mailbox
+? Authenticated
+> select Archive
+C: A0003 SELECT "Archive"
+S: * 3 EXISTS
+S: A0003 OK [READ-ONLY] SELECT completed, read-only
+= A0003 selected exists=3 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+? Selected
+
+# Not before the sign-in.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> select INBOX
+! WrongState { command: "SELECT", state: NotAuthenticated }

@@ -1,0 +1,77 @@
+# STARTTLS on port 143: no password before TLS, the capabilities read again after it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS LOGINDISABLED] ready
+= greeted
+> login ada@example.org secret
+! NotEncrypted
+> authenticate ada@example.org secret
+! NotEncrypted
+> tls
+! WrongState { command: "STARTTLS", state: NotAuthenticated }
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] Begin TLS negotiation now
+= A0001 starttls
+? StartingTls
+> list
+! WrongState { command: "LIST", state: StartingTls }
+> tls
+C: A0002 CAPABILITY
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+S: A0002 OK done
+= A0002 capabilities IMAP4REV1 AUTH=PLAIN
+> starttls
+! AlreadyEncrypted
+> login ada@example.org secret
+C: A0003 LOGIN "ada@example.org" "secret"
+S: A0003 OK [CAPABILITY IMAP4rev1 IDLE] Logged in
+= A0003 authenticated IMAP4REV1 IDLE
+? Authenticated
+
+# Bytes after the go-ahead came before encryption: anyone on the way could have put them there.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK Begin TLS negotiation now
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+! PlaintextAfterStartTls
+? Closed
+
+# Also when they come in a later piece, before the handshake.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK Begin TLS negotiation now
+= A0001 starttls
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+! PlaintextAfterStartTls
+> tls
+! Closed
+
+# STARTTLS only when the server lists it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> starttls
+! NotOffered("STARTTLS")
+@ plain
+S: * OK ready
+= greeted
+> starttls
+! CapabilitiesUnknown
+
+# Refused: the session stays unencrypted, and no password goes out.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 NO [UNAVAILABLE] TLS is not available
+= A0001 No [UNAVAILABLE] TLS is not available
+? NotAuthenticated
+> login ada@example.org secret
+! NotEncrypted

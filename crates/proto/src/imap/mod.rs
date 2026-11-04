@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! An IMAP client core without I/O (RFC 9051 and RFC 3501): the [`Client`] state machine and what it reads.
+//!
+//! The commands of the read path: CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN (encrypted connections only),
+//! LIST with SPECIAL-USE, SELECT and EXAMINE, UID FETCH, UID SEARCH and LOGOUT.
+
+mod capability;
+mod client;
+mod command;
+mod fetch;
+mod frame;
+mod list;
+mod mailbox;
+mod response;
+mod sasl;
+mod search;
+mod text;
+mod utf7;
+mod value;
+
+pub use capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN};
+pub use client::{Answer, Client, Event, Refusal, RefusalKind, State, Tag, Transport};
+pub use fetch::{FetchAttributes, FetchItem, Section};
+pub use frame::{MAX_LINE, MAX_LITERAL, MAX_LITERALS};
+pub use list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
+pub use mailbox::{MAX_FLAG_LEN, MAX_FLAGS, MailboxStatus};
+pub use sasl::MAX_CREDENTIALS;
+pub use search::{MAX_SEARCH_DEPTH, MAX_SEARCH_KEYS, MAX_SET_RANGES, SearchDate, SearchKey};
+pub use text::MAX_TEXT_CHARS;
+pub use utf7::{decode_utf7, encode_utf7};
+pub use value::MAX_DEPTH;

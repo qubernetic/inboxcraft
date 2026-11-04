@@ -15,7 +15,8 @@ PROVENANCE.md.
 - WordCraft (https://github.com/storytold/wordcraft), Copyright (c) 2026 ArtCraft Team and the WordCraft
   contributors: <workspace tooling (xtask), packaging scripts, control channel, MCP framing, design-token scheme …>
 - MailCraft (https://github.com/UCS-Care-Group/mailcraft), Copyright (c) 2026 the MailCraft contributors:
-  the header field, parameter, transfer encoding and multipart reading in crates/mime (adapted, commit
+  the header field, parameter, transfer encoding and multipart reading in crates/mime, and the IMAP response
+  values, status lines, modified UTF-7, command quoting and caps in crates/proto (adapted, commit
   e92228cf05362ac76df40d103b929a8506257395)
 - MailCraft (https://github.com/ZIDAN44/mailcraft), Copyright (c) 2026 <holder as written in its LICENSE>:
   <IMAP sync, CalDAV …>
