@@ -186,3 +186,15 @@ fn a_literal_sent_after_the_go_ahead_is_read() -> Result<(), Box<dyn std::error:
     assert_eq!(server.finish()?.received(), [format!("a1 LOGIN {{{}}}", USER.len()), USER.to_owned(), format!(" {PASSWORD}")]);
     Ok(())
 }
+
+#[test]
+fn a_refused_non_synchronising_literal_ends_the_session_with_an_error() -> Result<(), Box<dyn std::error::Error>> {
+    let server = Listen::plain().start_imap(FakeImap::new().without(Capability::LiteralPlus))?;
+    let mut client = TestClient::plain(server.addr(), TIMEOUT)?;
+    client.read_line()?;
+    client.send_line("a1 LOGIN {3+}")?;
+    assert_eq!(client.read_line()?, "* BYE The literal is refused");
+    let err = server.finish().err().ok_or("the server went on")?;
+    assert!(matches!(err, Error::LineTooLong), "{err}");
+    Ok(())
+}

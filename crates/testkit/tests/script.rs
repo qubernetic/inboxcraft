@@ -113,7 +113,7 @@ fn errors_name_their_cause() {
         [
             "no client connected before the accept timeout",
             "the client closed the connection while the script expected a line",
-            "the client sent a line longer than the server reads",
+            "the client sent a line or literal longer than the server reads",
             "the server thread ended without a result",
         ]
     );
