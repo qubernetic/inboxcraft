@@ -23,9 +23,15 @@
 
 mod base64;
 mod capability;
+mod fetch;
+mod fixture;
 mod happen;
+mod mailbox;
 mod reader;
+mod search;
 mod session;
+mod set;
+mod write;
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -34,6 +40,7 @@ use std::sync::atomic::AtomicBool;
 use rustls::ServerConfig;
 
 pub use capability::Capability;
+pub use fixture::{Mailbox, Message};
 pub use happen::{Action, When};
 
 use crate::Error;
@@ -55,6 +62,7 @@ pub struct FakeImap {
     preauth: bool,
     starttls: Option<Arc<ServerConfig>>,
     rules: Rules,
+    mailboxes: Vec<Mailbox>,
 }
 
 impl Default for FakeImap {
@@ -74,7 +82,26 @@ impl FakeImap {
             preauth: false,
             starttls: None,
             rules: Rules::default(),
+            mailboxes: vec![Mailbox::new("INBOX")],
         }
+    }
+
+    /// [`FakeImap::new`] with the invented sample mailboxes: INBOX with three messages; Sent, Drafts, Archive, Junk
+    /// and Trash with their SPECIAL-USE attributes; `Lists` with `Lists/Rust` under it; and `Elküldött`, a Hungarian
+    /// name without an attribute.
+    #[must_use]
+    pub fn sample() -> Self {
+        Self { mailboxes: fixture::sample(), ..Self::new() }
+    }
+
+    /// Adds `mailbox`, or puts it in place of the mailbox with its name.
+    #[must_use]
+    pub fn mailbox(mut self, mailbox: Mailbox) -> Self {
+        match self.mailboxes.iter_mut().find(|own| own.name == mailbox.name) {
+            Some(own) => *own = mailbox,
+            None => self.mailboxes.push(mailbox),
+        }
+        self
     }
 
     /// Switches `cap` off.

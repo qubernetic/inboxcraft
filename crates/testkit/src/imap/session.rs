@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 use rustls::ServerConfig;
 
 use crate::imap::reader::{self, Command, MAX_LITERAL, MAX_LITERALS, Refused, Token};
+use crate::imap::write::{clean, line, no, ok};
 use crate::imap::{Action, Capability, FakeImap, When, base64};
 use crate::line::{Line, LineReader};
 use crate::server::{Ending, Transcript, pause};
@@ -27,10 +28,28 @@ pub(crate) enum Effect {
     StartTls(Arc<ServerConfig>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
+/// The session's state (RFC 3501 section 3).
+pub(super) enum State {
     NotAuthenticated,
     Authenticated,
+    Selected(Selected),
+}
+
+/// The mailbox open in the selected state.
+pub(super) struct Selected {
+    /// Its place in [`FakeImap`]'s mailboxes.
+    pub(super) index: usize,
+    pub(super) read_only: bool,
+    /// The UIDs the client knows, in the order of their message sequence numbers.
+    pub(super) view: Vec<u32>,
+}
+
+/// [`State`] without what it holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Phase {
+    NotAuthenticated,
+    Authenticated,
+    Selected,
 }
 
 /// What the server does after writing an answer.
@@ -52,8 +71,8 @@ enum Input {
 }
 
 pub(crate) struct Session {
-    fake: FakeImap,
-    state: State,
+    pub(super) fake: FakeImap,
+    pub(super) state: State,
     tls: bool,
     greeted: bool,
     bad: u32,
@@ -78,7 +97,7 @@ impl Session {
             if let Some(end) = self.play(io, &When::Greeting, stop)? {
                 return Ok(Effect::End(end));
             }
-            let kind = if self.state == State::Authenticated { "PREAUTH" } else { "OK" };
+            let kind = if self.phase() == Phase::Authenticated { "PREAUTH" } else { "OK" };
             send(io, format!("* {kind} [CAPABILITY {}] InboxCraft fake IMAP ready\r\n", self.capabilities()).as_bytes())?;
         }
         loop {
@@ -203,7 +222,7 @@ impl Session {
     /// Answers one command into `out`.
     fn answer(&mut self, command: Command, out: &mut Vec<u8>) -> Next {
         let Command { tag, name, args } = command;
-        match (name.as_str(), self.state) {
+        match (name.as_str(), self.phase()) {
             ("CAPABILITY", _) => {
                 line(out, &format!("* CAPABILITY {}", self.capabilities()));
                 ok(out, &tag, "CAPABILITY completed");
@@ -214,13 +233,22 @@ impl Session {
                 ok(out, &tag, "LOGOUT completed");
                 return Next::Logout;
             }
-            ("STARTTLS", State::NotAuthenticated) => {
+            ("STARTTLS", Phase::NotAuthenticated) => {
                 let Some(config) = self.starttls() else { return self.unavailable(out, &tag, &name) };
                 ok(out, &tag, "Begin TLS negotiation now");
                 return Next::StartTls(config);
             }
-            ("LOGIN", State::NotAuthenticated) => self.login(&tag, &args, out),
-            ("AUTHENTICATE", State::NotAuthenticated) => return self.authenticate(&tag, &args, out),
+            ("LOGIN", Phase::NotAuthenticated) => self.login(&tag, &args, out),
+            ("AUTHENTICATE", Phase::NotAuthenticated) => return self.authenticate(&tag, &args, out),
+            ("LIST", Phase::Authenticated | Phase::Selected) => self.list(&tag, &args, out),
+            ("SELECT" | "EXAMINE", Phase::Authenticated | Phase::Selected) => self.select(&tag, &name, &args, out),
+            ("STATUS", Phase::Authenticated | Phase::Selected) => self.status(&tag, &args, out),
+            ("CLOSE", Phase::Selected) => self.close(&tag, out),
+            ("UID FETCH", Phase::Selected) => self.uid_fetch(&tag, &args, out),
+            ("UID SEARCH", Phase::Selected) => self.uid_search(&tag, &args, out),
+            ("FETCH" | "STORE" | "SEARCH" | "COPY" | "MOVE", _) => {
+                self.bad(out, Some(&tag), &format!("{name} is not available now (the fake knows the UID form only)"));
+            }
             _ => return self.unavailable(out, &tag, &name),
         }
         Next::Go
@@ -231,7 +259,15 @@ impl Session {
         Next::Go
     }
 
-    fn bad(&mut self, out: &mut Vec<u8>, tag: Option<&str>, reason: &str) {
+    pub(super) fn phase(&self) -> Phase {
+        match self.state {
+            State::NotAuthenticated => Phase::NotAuthenticated,
+            State::Authenticated => Phase::Authenticated,
+            State::Selected(_) => Phase::Selected,
+        }
+    }
+
+    pub(super) fn bad(&mut self, out: &mut Vec<u8>, tag: Option<&str>, reason: &str) {
         self.bad = self.bad.saturating_add(1);
         line(out, &format!("{} BAD {reason}", tag.unwrap_or("*")));
     }
@@ -244,7 +280,7 @@ impl Session {
     }
 
     fn listed(&self, cap: Capability) -> bool {
-        let signing_in = self.state == State::NotAuthenticated;
+        let signing_in = self.phase() == Phase::NotAuthenticated;
         self.fake.offers(cap)
             && match cap {
                 Capability::StartTls => signing_in && !self.tls && self.fake.starttls.is_some(),
@@ -324,22 +360,4 @@ impl Session {
 fn send(io: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
     io.write_all(bytes)?;
     io.flush()
-}
-
-fn line(out: &mut Vec<u8>, text: &str) {
-    out.extend_from_slice(text.as_bytes());
-    out.extend_from_slice(b"\r\n");
-}
-
-fn ok(out: &mut Vec<u8>, tag: &str, text: &str) {
-    line(out, &format!("{tag} OK {text}"));
-}
-
-fn no(out: &mut Vec<u8>, tag: &str, text: &str) {
-    line(out, &format!("{tag} NO {text}"));
-}
-
-/// `text` without CR, LF and NUL.
-fn clean(text: &str) -> String {
-    text.chars().filter(|c| !matches!(c, '\r' | '\n' | '\0')).collect()
 }
