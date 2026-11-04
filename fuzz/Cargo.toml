@@ -13,6 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
+inboxcraft-charset = { path = "../crates/charset" }
 
 [workspace]
 members = ["."]
@@ -20,6 +21,20 @@ members = ["."]
 [[bin]]
 name = "rfc5322_date"
 path = "fuzz_targets/rfc5322_date.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "charset_decode"
+path = "fuzz_targets/charset_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rfc2047_words"
+path = "fuzz_targets/rfc2047_words.rs"
 test = false
 doc = false
 bench = false
