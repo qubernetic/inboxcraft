@@ -99,6 +99,7 @@ included) and fails on:
   `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
+- `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
@@ -258,3 +259,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the model values target (#17) |
 | 2026-11-04 | minor | Fuzzing: the message, header and delivery report targets (#18) |
 | 2026-11-04 | minor | Fuzzing: the IMAP client target (#20) |
+| 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |

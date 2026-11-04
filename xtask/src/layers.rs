@@ -10,6 +10,7 @@
 //! - a dependency on a higher layer, or on a crate in the same layer that [`INTRA_LAYER_ORDER`] does not list;
 //! - a standalone crate with any workspace dependency;
 //! - `testkit` as a normal or build dependency (it is for dev-dependencies only);
+//! - `testkit` with any dependency on a [`TESTKIT_NEVER`] crate, whose parser its fakes test;
 //! - a [`UI_CRATES`] dependency anywhere but layer 6 and the apps;
 //! - a [`NETWORK_CRATES`] dependency anywhere but `net`, `testkit` and the apps;
 //! - a dependency on an app or tool crate from anything but another app or tool crate.
@@ -71,6 +72,10 @@ pub(crate) const CRATES: &[(&str, Class)] = &[
 /// The dependencies allowed inside one layer, as `(from, to)`.
 pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] = &[("inboxcraft-net", "inboxcraft-proto"), ("inboxcraft-net", "inboxcraft-dav")];
 
+/// The crates whose parsers the fake servers test: `testkit` never depends on them, not even for its own tests, so a
+/// parser bug cannot hide behind the same bug in the fake.
+pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto"];
+
 /// The crate that does the network I/O.
 const NET: &str = "inboxcraft-net";
 
@@ -119,6 +124,9 @@ fn violations(member: &Member, own: Class, members: &[Member]) -> Vec<String> {
         }
         // An unregistered member is reported on its own.
         let Some(theirs) = class(target) else { continue };
+        if own == Class::Testkit && TESTKIT_NEVER.contains(&target.as_str()) {
+            found.push(format!("`{name}` depends on `{target}`; a fake server never uses the parser it tests"));
+        }
         if theirs == Class::Testkit && dep.kind != Kind::Dev {
             let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
             found.push(format!("`{name}` has `{target}` as a {kind} dependency; testkit is for dev-dependencies only"));

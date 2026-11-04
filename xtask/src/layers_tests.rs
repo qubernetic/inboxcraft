@@ -94,7 +94,15 @@ fn testkit_as_a_normal_or_build_dependency_fails() {
     let build = "[build-dependencies]\ninboxcraft-testkit = { path = \"x\" }\n";
     fails_with(&[("inboxcraft", build), ("inboxcraft-testkit", "")], "as a build dependency");
     let dev = "[dev-dependencies]\ninboxcraft-testkit = { path = \"x\" }\n";
-    passes(&[("inboxcraft-proto", dev), ("inboxcraft-testkit", &dep("inboxcraft-proto"))]);
+    passes(&[("inboxcraft-mime", dev), ("inboxcraft-testkit", &dep("inboxcraft-mime"))]);
+}
+
+#[test]
+fn testkit_depending_on_a_parser_its_fakes_test_fails() {
+    let message = "`inboxcraft-testkit` depends on `inboxcraft-proto`; a fake server never uses the parser it tests";
+    fails_with(&[("inboxcraft-testkit", &dep("inboxcraft-proto")), ("inboxcraft-proto", "")], message);
+    let dev = "[dev-dependencies]\ninboxcraft-proto = { path = \"x\" }\n";
+    fails_with(&[("inboxcraft-testkit", dev), ("inboxcraft-proto", "")], message);
 }
 
 #[test]
