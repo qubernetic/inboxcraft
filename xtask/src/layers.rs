@@ -14,6 +14,7 @@
 //! - a [`UI_CRATES`] dependency anywhere but layer 6 and the apps;
 //! - a [`NETWORK_CRATES`] dependency anywhere but `net`, `testkit` and the apps;
 //! - a [`TESTKIT_ONLY_CRATES`] dependency anywhere but `testkit`, unless it is a dev-dependency;
+//! - a [`NET_ONLY_CRATES`] dependency anywhere but `net` and `testkit`, unless it is a dev-dependency;
 //! - a dependency on an app or tool crate from anything but another app or tool crate.
 
 use std::io::Write;
@@ -80,7 +81,11 @@ pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto"];
 
 /// Crates the fakes need and nothing that ships does: `testkit` only, or a dev-dependency. A crate that comes to need
 /// one lifts it here as a reviewed choice.
-pub(crate) const TESTKIT_ONLY_CRATES: &[&str] = &["rcgen", "flate2"];
+pub(crate) const TESTKIT_ONLY_CRATES: &[&str] = &["rcgen"];
+
+/// Crates for `net`'s streams that the fakes speak too: `net` and `testkit` only, or a dev-dependency. `flate2` is the
+/// COMPRESS=DEFLATE stream (RFC 4978).
+pub(crate) const NET_ONLY_CRATES: &[&str] = &["flate2"];
 
 /// The crate that does the network I/O.
 const NET: &str = "inboxcraft-net";
@@ -126,9 +131,14 @@ fn violations(member: &Member, own: Class, members: &[Member]) -> Vec<String> {
             if NETWORK_CRATES.contains(&target.as_str()) && name != NET && !matches!(own, Class::Testkit | Class::Exempt) {
                 found.push(format!("`{name}` depends on the network crate `{target}`; only `{NET}` does network I/O"));
             }
+            let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
             if TESTKIT_ONLY_CRATES.contains(&target.as_str()) && own != Class::Testkit && dep.kind != Kind::Dev {
-                let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
                 found.push(format!("`{name}` has `{target}` as a {kind} dependency; it is for `inboxcraft-testkit` and dev-dependencies only"));
+            }
+            if NET_ONLY_CRATES.contains(&target.as_str()) && name != NET && own != Class::Testkit && dep.kind != Kind::Dev {
+                found.push(format!(
+                    "`{name}` has `{target}` as a {kind} dependency; it is for `{NET}`, `inboxcraft-testkit` and dev-dependencies only"
+                ));
             }
             continue;
         }
