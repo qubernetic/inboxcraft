@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+flate2 = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 time = { workspace = true }

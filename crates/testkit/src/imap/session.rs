@@ -28,6 +28,8 @@ pub(crate) enum Effect {
     End(Ending),
     /// The server answered STARTTLS: the connection turns into TLS with this configuration, then the session goes on.
     StartTls(Arc<ServerConfig>),
+    /// The server answered COMPRESS DEFLATE: the connection is compressed from now on, then the session goes on.
+    Compress,
 }
 
 /// The session's state (RFC 3501 section 3).
@@ -59,6 +61,7 @@ enum Next {
     Go,
     Logout,
     StartTls(Arc<ServerConfig>),
+    Compress,
     /// The `+ idling` is sent: play the idle actions, then wait for DONE.
     Idle(String),
     /// Send an empty challenge and read the AUTHENTICATE PLAIN response.
@@ -87,6 +90,7 @@ pub(crate) struct Session {
     pub(super) notify: Option<Notify>,
     /// The client idles: changes are told at once.
     pub(super) idling: bool,
+    compressed: bool,
     tls: bool,
     greeted: bool,
     bad: u32,
@@ -105,6 +109,7 @@ impl Session {
             pending: Vec::new(),
             notify: None,
             idling: false,
+            compressed: false,
             tls,
             greeted: false,
             bad: 0,
@@ -190,10 +195,18 @@ impl Session {
             if let Some(end) = self.play(io, &When::Answered(name), stop)? {
                 return Ok(Effect::End(end));
             }
-            if let Next::StartTls(config) = next {
-                self.tls = true;
-                self.reader.discard();
-                return Ok(Effect::StartTls(config));
+            match next {
+                Next::StartTls(config) => {
+                    self.tls = true;
+                    self.reader.discard();
+                    return Ok(Effect::StartTls(config));
+                }
+                Next::Compress => {
+                    self.compressed = true;
+                    self.reader.discard();
+                    return Ok(Effect::Compress);
+                }
+                _ => {}
             }
         }
     }
@@ -303,6 +316,9 @@ impl Session {
                 return Next::Idle(tag);
             }
             ("NOTIFY", Phase::Authenticated | Phase::Selected) if self.fake.offers(Capability::Notify) => self.notify_set(&tag, &args, out),
+            ("COMPRESS", Phase::Authenticated | Phase::Selected) if self.fake.offers(Capability::CompressDeflate) => {
+                return self.compress(&tag, &args, out);
+            }
             ("LIST", Phase::Authenticated | Phase::Selected) => self.list(&tag, &args, out),
             ("SELECT" | "EXAMINE", Phase::Authenticated | Phase::Selected) => self.select(&tag, &name, &args, out),
             ("STATUS", Phase::Authenticated | Phase::Selected) => self.status(&tag, &args, out),
@@ -320,6 +336,20 @@ impl Session {
             _ => return self.unavailable(out, &tag, &name),
         }
         Next::Go
+    }
+
+    /// COMPRESS (RFC 4978): DEFLATE only, once.
+    fn compress(&mut self, tag: &str, args: &[Token], out: &mut Vec<u8>) -> Next {
+        if !matches!(args, [Token::Atom(algorithm)] if algorithm.eq_ignore_ascii_case("DEFLATE")) {
+            self.bad(out, Some(tag), "Unknown compression");
+            return Next::Go;
+        }
+        if self.compressed {
+            no(out, tag, "[COMPRESSIONACTIVE] Compression is already active");
+            return Next::Go;
+        }
+        ok(out, tag, "DEFLATE active");
+        Next::Compress
     }
 
     fn unavailable(&mut self, out: &mut Vec<u8>, tag: &str, name: &str) -> Next {
@@ -354,6 +384,7 @@ impl Session {
                 Capability::StartTls => signing_in && !self.tls && self.fake.starttls.is_some(),
                 Capability::LoginDisabled => signing_in && !self.tls,
                 Capability::AuthPlain | Capability::SaslIr => signing_in && self.sign_in_allowed(),
+                Capability::CompressDeflate => !self.compressed,
                 _ => true,
             }
     }

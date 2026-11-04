@@ -151,7 +151,8 @@ impl FakeImap {
     }
 
     /// Plays one session without a socket, as over implicit TLS: reads the client's `input` and returns what the
-    /// server sent. The session ends with the input, at `LOGOUT`, or where a socket would change (STARTTLS).
+    /// server sent. The session ends with the input, at `LOGOUT`, or where a socket would change (STARTTLS,
+    /// COMPRESS).
     #[must_use]
     pub fn answer(&self, input: &[u8]) -> Vec<u8> {
         let mut memory = Memory { input, output: Vec::new() };
@@ -178,6 +179,7 @@ impl Listen {
                 match session.run(wire, stop)? {
                     Effect::End(ending) => return Ok((session.transcript(), ending)),
                     Effect::StartTls(config) => wire.accept_tls(&config)?,
+                    Effect::Compress => wire.compress(),
                 }
             }
         })

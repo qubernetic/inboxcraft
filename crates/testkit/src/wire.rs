@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The server's end of a connection: plain TCP, or TLS over it from the start or after STARTTLS.
+//! The server's end of a connection: plain TCP, or TLS over it from the start or after STARTTLS, and either
+//! compressed after COMPRESS=DEFLATE.
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -10,6 +11,7 @@ use std::sync::Arc;
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use crate::Error;
+use crate::deflate::Deflate;
 
 #[derive(Debug)]
 enum Tcp {
@@ -21,12 +23,13 @@ enum Tcp {
 #[derive(Debug)]
 pub(crate) struct Wire {
     tcp: Tcp,
+    deflate: Option<Box<Deflate>>,
 }
 
 impl Wire {
     /// A plain connection.
     pub(crate) fn plain(stream: TcpStream) -> Self {
-        Self { tcp: Tcp::Plain(stream) }
+        Self { tcp: Tcp::Plain(stream), deflate: None }
     }
 
     /// Whether the connection is encrypted.
@@ -43,6 +46,11 @@ impl Wire {
         Ok(())
     }
 
+    /// Compresses both directions from now on.
+    pub(crate) fn compress(&mut self) {
+        self.deflate = Some(Box::new(Deflate::new()));
+    }
+
     /// Ends the session in order: a TLS connection sends its close notification.
     pub(crate) fn close(&mut self) -> io::Result<()> {
         if let Tcp::Tls(stream) = &mut self.tcp {
@@ -53,27 +61,49 @@ impl Wire {
     }
 }
 
+impl Read for Tcp {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(stream) => stream.read(buf),
+            Self::Tls(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for Tcp {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(stream) => stream.write(buf),
+            Self::Tls(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Plain(stream) => stream.flush(),
+            Self::Tls(stream) => stream.flush(),
+        }
+    }
+}
+
 impl Read for Wire {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match &mut self.tcp {
-            Tcp::Plain(stream) => stream.read(buf),
-            Tcp::Tls(stream) => stream.read(buf),
+        match &mut self.deflate {
+            Some(deflate) => deflate.read(&mut self.tcp, buf),
+            None => self.tcp.read(buf),
         }
     }
 }
 
 impl Write for Wire {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match &mut self.tcp {
-            Tcp::Plain(stream) => stream.write(buf),
-            Tcp::Tls(stream) => stream.write(buf),
+        match &mut self.deflate {
+            Some(deflate) => deflate.write(&mut self.tcp, buf).map(|()| buf.len()),
+            None => self.tcp.write(buf),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        match &mut self.tcp {
-            Tcp::Plain(stream) => stream.flush(),
-            Tcp::Tls(stream) => stream.flush(),
-        }
+        self.tcp.flush()
     }
 }
