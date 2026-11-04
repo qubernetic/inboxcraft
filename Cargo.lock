@@ -342,6 +342,11 @@ dependencies = [
 [[package]]
 name = "inboxcraft-store"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-model",
+ "inboxcraft-time",
+ "tempfile",
+]
 
 [[package]]
 name = "inboxcraft-testkit"
