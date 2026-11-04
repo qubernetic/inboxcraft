@@ -55,8 +55,10 @@ fn arguments_that_cannot_be_sent_are_refused_unsent() {
     for name in ["", "a\r\nb", "a\0", "\u{7}", &"x".repeat(MAX_MAILBOX_NAME + 1)] {
         assert_eq!(client.select(name), Err(ProtoError::BadArgument("mailbox name")), "{name:?}");
         assert_eq!(client.examine(name), Err(ProtoError::BadArgument("mailbox name")), "{name:?}");
+        assert_eq!(client.uid_copy(&UidSet::from_iter(Uid::new(1)), name), Err(ProtoError::BadArgument("mailbox name")), "{name:?}");
     }
     assert!(matches!(client.uid_fetch(&UidSet::default(), FetchAttributes::default()), Err(ProtoError::BadArgument(_))));
+    assert!(matches!(client.uid_copy(&UidSet::default(), "Archive"), Err(ProtoError::BadArgument(_))));
     assert!(matches!(client.uid_search(&SearchKey::Subject("a\nb".into())), Err(ProtoError::BadArgument(_))));
     assert!(client.take_output().is_empty());
     assert_eq!(client.state(), State::Selected);

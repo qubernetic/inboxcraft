@@ -1,0 +1,124 @@
+# UIDPLUS (RFC 4315): COPYUID says where copied messages went, UID EXPUNGE removes only the messages named.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 UIDPLUS] ready
+= greeted preauth
+> copy 1 Archive
+! WrongState { command: "UID COPY", state: Authenticated }
+> expunge 1
+! WrongState { command: "UID EXPUNGE", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 3 EXISTS
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=3 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> copy 304,319:320 Archive
+C: A0002 UID COPY 304,319:320 "Archive"
+S: A0002 OK [COPYUID 38505 304,319:320 3956:3958] Done
+= A0002 copied 38505 304,319:320 -> 3956:3958
+# A range written backwards keeps its order: 6 went to 10, 4 to 12.
+> copy 4:6 Archive
+C: A0003 UID COPY 4:6 "Archive"
+S: A0003 OK [COPYUID 7 6:4 10:12] Done
+= A0003 copied 7 6:4 -> 10:12
+# A COPYUID that does not fit what was copied is left out: UIDs not asked for, counts that differ, a UID twice, a
+# UIDVALIDITY or UID of zero, words that are no set.
+> copy 4 Archive
+C: A0004 UID COPY 4 "Archive"
+S: A0004 OK [COPYUID 7 5 10] Done
+= A0004 copied
+> copy 4:5 Archive
+C: A0005 UID COPY 4:5 "Archive"
+S: A0005 OK [COPYUID 7 4:5 10] Done
+= A0005 copied
+> copy 4:5 Archive
+C: A0006 UID COPY 4:5 "Archive"
+S: A0006 OK [COPYUID 7 4,4 10:11] Done
+= A0006 copied
+> copy 4 Archive
+C: A0007 UID COPY 4 "Archive"
+S: A0007 OK [COPYUID 0 4 10] Done
+= A0007 copied
+> copy 4 Archive
+C: A0008 UID COPY 4 "Archive"
+S: A0008 OK [COPYUID 7 4 0] Done
+= A0008 copied
+> copy 4 Archive
+C: A0009 UID COPY 4 "Archive"
+S: A0009 OK [COPYUID 7 4] Done
+= A0009 copied
+> copy 4 Archive
+C: A0010 UID COPY 4 "Archive"
+S: A0010 OK [COPYUID 7 4 * extra] Done
+= A0010 copied
+# A refused copy.
+> copy 4 Lists/Rust
+C: A0011 UID COPY 4 "Lists/Rust"
+S: A0011 NO [TRYCREATE] No such mailbox
+= A0011 No [TRYCREATE] No such mailbox
+> expunge 4,7:9
+C: A0012 UID EXPUNGE 4,7:9
+S: * 3 EXPUNGE
+S: * 1 EXPUNGE
+S: A0012 OK done
+= expunged 3
+= expunged 1
+= A0012 expunged
+S: A0013 OK done
+! Unexpected("tagged response")
+
+# UIDNOTSTICKY: the mailbox cannot keep UIDs; a read-only mailbox expunges nothing.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 UIDPLUS] ready
+= greeted preauth
+> select Scratch
+C: A0001 SELECT "Scratch"
+S: * NO [UIDNOTSTICKY] Non-persistent UIDs
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false uidnotsticky
+> examine INBOX
+C: A0002 EXAMINE "INBOX"
+S: A0002 OK [READ-ONLY] done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+> expunge 4
+! ReadOnly
+> copy 4 Archive
+C: A0003 UID COPY 4 "Archive"
+S: A0003 OK done
+= A0003 copied
+
+# IMAP4rev2 has UIDPLUS in it.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev2] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> expunge 4
+C: A0002 UID EXPUNGE 4
+S: A0002 OK done
+= A0002 expunged
+
+# A server that lacks UIDPLUS copies without saying where to, and has no UID EXPUNGE.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> copy 4 Archive
+C: A0002 UID COPY 4 "Archive"
+S: A0002 OK done
+= A0002 copied
+> expunge 4
+! NotOffered("UIDPLUS")
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> expunge 4
+! CapabilitiesUnknown

@@ -35,6 +35,8 @@ pub struct MailboxStatus {
     pub highest_modseq: Option<ModSeq>,
     /// Whether it is open read-only: EXAMINE, or a SELECT the server answered with `READ-ONLY`.
     pub read_only: bool,
+    /// The mailbox cannot keep UIDs (`UIDNOTSTICKY`, RFC 4315): a message gets a new one in every session.
+    pub uid_not_sticky: bool,
 }
 
 impl MailboxStatus {
@@ -45,6 +47,7 @@ impl MailboxStatus {
             "UIDNEXT" => self.uid_next = number(&line.arg).and_then(Uid::new),
             "UNSEEN" => self.unseen = number(&line.arg),
             "HIGHESTMODSEQ" => self.highest_modseq = modseq(&line.arg),
+            "UIDNOTSTICKY" => self.uid_not_sticky = true,
             "PERMANENTFLAGS" => self.permanent_flags = flag_words(line.arg.trim_start_matches('(').trim_end_matches(')')),
             _ => {}
         }

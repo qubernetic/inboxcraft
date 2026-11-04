@@ -20,6 +20,7 @@ mod sasl;
 mod search;
 mod sync;
 mod text;
+mod uidplus;
 mod utf7;
 mod value;
 
@@ -34,5 +35,6 @@ pub use sasl::MAX_CREDENTIALS;
 pub use search::{MAX_SEARCH_DEPTH, MAX_SEARCH_KEYS, MAX_SET_RANGES, SearchDate, SearchKey};
 pub use sync::{Extension, SelectOptions};
 pub use text::MAX_TEXT_CHARS;
+pub use uidplus::CopyUid;
 pub use utf7::{decode_utf7, encode_utf7};
 pub use value::MAX_DEPTH;

@@ -25,7 +25,7 @@ use std::path::Path;
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, SearchDate, SearchKey, Section,
+    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, SearchDate, SearchKey, Section,
     SelectOptions, Transport,
 };
 
@@ -173,6 +173,11 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let key = if keys.len() == 1 { keys.remove(0) } else { SearchKey::And(keys) };
             client.uid_search(&key)
         }
+        "copy" => {
+            let set = uid_set(words.pop_front().unwrap());
+            client.uid_copy(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
+        }
+        "expunge" => client.uid_expunge(&uid_set(words.pop_front().unwrap())),
         "notify" => client.notify(&notify(words)),
         "notify-none" => client.notify_none(),
         "idle" => client.idle(),
@@ -203,7 +208,7 @@ fn mailbox(entry: &ListEntry) -> String {
 fn status(status: &MailboxStatus) -> String {
     let some = |value: Option<String>| value.unwrap_or_else(|| "none".to_owned());
     format!(
-        "selected exists={} recent={} flags={} permanent={} uidvalidity={} uidnext={} unseen={} modseq={} read-only={}",
+        "selected exists={} recent={} flags={} permanent={} uidvalidity={} uidnext={} unseen={} modseq={} read-only={}{}",
         status.exists,
         status.recent,
         list_text(&status.flags),
@@ -212,8 +217,18 @@ fn status(status: &MailboxStatus) -> String {
         some(status.uid_next.map(|v| v.to_string())),
         some(status.unseen.map(|v| v.to_string())),
         some(status.highest_modseq.map(|v| v.to_string())),
-        status.read_only
+        status.read_only,
+        if status.uid_not_sticky { " uidnotsticky" } else { "" }
     )
+}
+
+/// Ranges as the server wrote them, backwards ones too: `304,6:4`.
+fn ranges_text(ranges: &[(Uid, Uid)]) -> String {
+    ranges.iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}:{b}") }).collect::<Vec<_>>().join(",")
+}
+
+fn copy_uid(copy_uid: Option<&CopyUid>) -> String {
+    copy_uid.map_or(String::new(), |c| format!(" {} {} -> {}", c.uid_validity(), ranges_text(c.source()), ranges_text(c.destination())))
 }
 
 /// The lines an event is written as.
@@ -284,6 +299,8 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Selected(selected) => vec![format!("{tag} {}", status(selected))],
             Answer::Fetched => vec![format!("{tag} fetched")],
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
+            Answer::Copied(copied) => vec![format!("{tag} copied{}", copy_uid(copied.as_ref()))],
+            Answer::Expunged => vec![format!("{tag} expunged")],
             Answer::Idled => vec![format!("{tag} idled")],
             Answer::Notified => vec![format!("{tag} notified")],
             Answer::LoggedOut => vec![format!("{tag} logged out")],

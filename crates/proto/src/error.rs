@@ -36,6 +36,8 @@ pub enum ProtoError {
     NotEnabled(&'static str),
     /// An argument cannot be sent: it is empty, too long, or holds a character the command cannot carry.
     BadArgument(&'static str),
+    /// The open mailbox is read-only (EXAMINE, or `READ-ONLY`): nothing in it can be removed.
+    ReadOnly,
 
     /// The server sent a line, or the text of one response, longer than `limit` bytes.
     LineTooLong {
@@ -87,6 +89,7 @@ impl ProtoError {
                 | Self::CapabilitiesUnknown
                 | Self::NotEnabled(_)
                 | Self::BadArgument(_)
+                | Self::ReadOnly
         )
     }
 }
@@ -102,6 +105,7 @@ impl fmt::Display for ProtoError {
             Self::CapabilitiesUnknown => f.write_str("the server has not said what it can do yet"),
             Self::NotEnabled(what) => write!(f, "{what} is not enabled"),
             Self::BadArgument(what) => write!(f, "the {what} cannot be sent"),
+            Self::ReadOnly => f.write_str("the mailbox is open read-only"),
             Self::LineTooLong { limit } => write!(f, "the server sent a response longer than {limit} bytes"),
             Self::LiteralTooLarge { size, limit } => write!(f, "the server announced {size} bytes in one response, more than {limit}"),
             Self::TooManyLiterals { limit } => write!(f, "the server sent more than {limit} literals in one response"),

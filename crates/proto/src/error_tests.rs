@@ -15,6 +15,7 @@ fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
         ProtoError::CapabilitiesUnknown,
         ProtoError::NotEnabled("QRESYNC"),
         ProtoError::BadArgument("mailbox name"),
+        ProtoError::ReadOnly,
     ];
     let fatal = [
         ProtoError::LineTooLong { limit: 1 },

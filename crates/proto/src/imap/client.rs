@@ -20,6 +20,7 @@ use super::sasl::{check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
 use super::sync::{Extension, SelectOptions, vanished};
 use super::text::Secrets;
+use super::uidplus::CopyUid;
 use super::value::{Piece, Status, StatusLine, Value, number};
 use crate::ProtoError;
 
@@ -153,6 +154,10 @@ pub enum Answer {
     Fetched,
     /// UID SEARCH: the UIDs found.
     Searched(UidSet),
+    /// UID COPY, with where the messages went when the server says so (UIDPLUS).
+    Copied(Option<CopyUid>),
+    /// UID EXPUNGE: the messages that went came as [`Event::Expunged`] or [`Event::Vanished`].
+    Expunged,
     /// IDLE, ended by DONE.
     Idled,
     /// NOTIFY SET or NOTIFY NONE.
@@ -203,6 +208,9 @@ enum Kind {
     Select(Opening),
     Fetch,
     Search(Vec<Uid>),
+    /// UID COPY of these UIDs.
+    Copy(UidSet),
+    Expunge,
     /// NOTIFY SET (`set`) or NOTIFY NONE.
     Notify {
         set: bool,
@@ -260,6 +268,8 @@ pub struct Client {
     qresync: bool,
     /// The open mailbox's UIDVALIDITY.
     uid_validity: Option<UidValidity>,
+    /// The open mailbox is read-only.
+    read_only: bool,
     /// NOTIFY SET is on.
     notifying: bool,
 }
@@ -293,6 +303,7 @@ impl Client {
             condstore: false,
             qresync: false,
             uid_validity: None,
+            read_only: false,
             notifying: false,
         }
     }
@@ -544,6 +555,7 @@ impl Client {
         // Whatever the answer, the mailbox open before is closed (RFC 9051 section 6.3.2).
         self.state = State::Authenticated;
         self.uid_validity = None;
+        self.read_only = read_only;
         let status = MailboxStatus { read_only, ..MailboxStatus::default() };
         Ok(self.start(command, Kind::Select(Opening { status, known: options.known.map(|known| known.uid_validity()), closing })))
     }
@@ -582,6 +594,35 @@ impl Client {
         self.ready("UID SEARCH", &[State::Selected])?;
         let command = search::command(key)?;
         Ok(self.start(command, Kind::Search(Vec::new())))
+    }
+
+    /// UID COPY (RFC 9051 section 6.4.7) of the messages in `set` to `mailbox`, the name as the server wrote it. With
+    /// UIDPLUS the answer says which UIDs they got there.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::BadArgument`] for a set or mailbox name that cannot be sent, or a state error.
+    pub fn uid_copy(&mut self, set: &UidSet, mailbox: &str) -> Result<Tag, ProtoError> {
+        self.ready("UID COPY", &[State::Selected])?;
+        check_mailbox(mailbox)?;
+        let command = Command::new("UID COPY").arg(&set_text(set)?).string(mailbox.as_bytes());
+        Ok(self.start(command, Kind::Copy(set.clone())))
+    }
+
+    /// UID EXPUNGE (UIDPLUS, RFC 4315 section 2.1): removes the messages in `set` that are marked `\Deleted`, and no
+    /// other.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without UIDPLUS or IMAP4rev2,
+    /// [`ProtoError::ReadOnly`], [`ProtoError::BadArgument`] for a set that cannot be sent, or a state error.
+    pub fn uid_expunge(&mut self, set: &UidSet) -> Result<Tag, ProtoError> {
+        self.ready("UID EXPUNGE", &[State::Selected])?;
+        self.require_in_rev2("UIDPLUS")?;
+        if self.read_only {
+            return Err(ProtoError::ReadOnly);
+        }
+        Ok(self.start(Command::new("UID EXPUNGE").arg(&set_text(set)?), Kind::Expunge))
     }
 
     /// NOTIFY SET (RFC 5465): the server tells of what `notify` names without being asked, until NOTIFY NONE or
@@ -673,6 +714,11 @@ impl Client {
     fn require(&self, capability: &'static str) -> Result<(), ProtoError> {
         let capabilities = self.capabilities.as_ref().ok_or(ProtoError::CapabilitiesUnknown)?;
         if capabilities.has(capability) { Ok(()) } else { Err(ProtoError::NotOffered(capability)) }
+    }
+
+    /// That the server listed `capability`, or IMAP4rev2, which has it in it (RFC 9051 appendix E).
+    fn require_in_rev2(&self, capability: &'static str) -> Result<(), ProtoError> {
+        self.require(capability).or_else(|error| if self.offers("IMAP4rev2") { Ok(()) } else { Err(error) })
     }
 
     /// That the server keeps modification sequences: CONDSTORE, or QRESYNC, which brings it (RFC 7162 section 3.2).
@@ -978,11 +1024,14 @@ impl Client {
                     self.events.push_back(Event::UidValidityChanged { old, new: status.uid_validity });
                 }
                 self.uid_validity = status.uid_validity;
+                self.read_only = status.read_only;
                 self.state = State::Selected;
                 Answer::Selected(status)
             }
             Kind::Fetch => Answer::Fetched,
             Kind::Search(found) => Answer::Searched(found.into_iter().collect()),
+            Kind::Copy(asked) => Answer::Copied(copy_uid(line, &asked)),
+            Kind::Expunge => Answer::Expunged,
             Kind::Idle { .. } => Answer::Idled,
             Kind::Notify { set } => {
                 self.notifying = set;
@@ -995,6 +1044,11 @@ impl Client {
         };
         Ok(Some(answer))
     }
+}
+
+/// The COPYUID of a status line, when it has one that fits the UIDs `asked` for.
+fn copy_uid(line: &StatusLine, asked: &UidSet) -> Option<CopyUid> {
+    (line.code == "COPYUID").then(|| CopyUid::parse(&line.arg, asked)).flatten()
 }
 
 /// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`. EXISTS, EXPUNGE and FETCH belong to a mailbox
