@@ -66,6 +66,27 @@ B = blocks the next stage.
   them starts a thread of its own; subjects are not used (#17).
 - `model` caps what one message keeps (1000 addresses per field, 64 references, 64 keywords, subject 1000 and
   preview 256 characters) but not the size of a body or of a folder list in an event; `net` sets those caps (#17).
+- `mime` reads messages only; building them is #19. It reads no address lists, `Message-ID` or `References`: the
+  read path takes those from the server's envelope (#18).
+- `mime` refuses what it cannot read safely: a message over 128 MiB, a header block of more than 2000 fields or a
+  field over 256 KiB, nesting deeper than 20, more than 1000 parts, a multipart without a boundary, with a boundary
+  over 70 characters or one never found in its body, broken base64, an unknown transfer encoding or charset, and a
+  delivery report with more than 1000 recipients. Any one such part, however deep, makes the whole message an
+  error, so a good text part next to it is lost too; the reader has to show such a message as its raw source (#18).
+- `Part::file_name` gives the name as the sender wrote it, control characters as spaces and invisible direction
+  marks dropped, but path parts such as `../` kept. Whatever saves an attachment must cut the name down to a safe
+  base name first (#18).
+- A delivery report is read only from the direct parts of the `multipart/report`, never from an attached message
+  inside it (#18).
+- `mime` reads leniently where mail often breaks: a multipart without its closing delimiter keeps what arrived
+  (`Multipart::closed` is false), base64 without padding or in padded chunks reads, an `=` in quoted-printable
+  that starts no escape stays as it is, a `Content-Type` that cannot be read is `text/plain`, a line that is no
+  field ends the header block, and text declared `us-ascii` that is valid UTF-8 reads as UTF-8 (#18).
+- `mime` does not open an attached message sent in base64 or quoted-printable (RFC 2046 forbids it); it stays a
+  leaf whose decoded bytes are the message. Text keeps its line ends as written; parameters past the 64th are
+  ignored (#18).
+- A delivery report keeps its dates as text and does not undo the RFC 3461 `xtext` in addresses; it needs one
+  per-message block first, then at least one recipient block with `Final-Recipient`, `Action` and `Status` (#18).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -88,3 +109,5 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |
 | 2026-11-04 | minor | Rough edges of the mailbox model (#17) |
 | 2026-11-04 | minor | Invisible marks in addresses and folder names (#17) |
+| 2026-11-04 | minor | Rough edges of the message reader (#18) |
+| 2026-11-04 | minor | Message reader: whole-message errors, unsafe file names, reports read from direct parts (#18) |

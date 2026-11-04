@@ -222,7 +222,8 @@ branch, `main`, so the nightly run starts with the first release.
 `fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
 runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
-`charset_decode` and `rfc2047_words` (#16), and `model_values` (#17).
+`charset_decode` and `rfc2047_words` (#16), `model_values` (#17), and `mime_message`, `mime_headers` and `mime_dsn`
+(#18).
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -255,3 +256,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the `fuzz/` workspace and how a target is added (#15) |
 | 2026-11-04 | minor | Fuzzing: the charset and encoded word targets (#16) |
 | 2026-11-04 | minor | Fuzzing: the model values target (#17) |
+| 2026-11-04 | minor | Fuzzing: the message, header and delivery report targets (#18) |

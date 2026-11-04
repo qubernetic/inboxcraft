@@ -41,6 +41,7 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | `time`: injectable clock (system and fake), RFC 5322 dates with the obsolete forms, first fuzz target (#15) |
 | 2026-11-04 | `charset`: WHATWG charsets to UTF-8, RFC 2047 encoded words read and written, two fuzz targets (#16) |
 | 2026-11-04 | `model`: accounts, folders with roles (SPECIAL-USE, English and Hungarian names, ask once), messages, threads, the read path jobs and events (#17) |
+| 2026-11-04 | `mime`: messages read into a tree of parts (headers, RFC 2231 parameters, base64 and quoted-printable, multiparts, attached messages, attachments, delivery reports), capped, three fuzz targets (#18) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -54,3 +55,4 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | minor | Progress log: the clock and RFC 5322 dates (#15) |
 | 2026-11-04 | minor | Progress log: charsets and encoded words (#16) |
 | 2026-11-04 | minor | Progress log: the mailbox model (#17) |
+| 2026-11-04 | minor | Progress log: the message reader (#18) |
