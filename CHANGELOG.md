@@ -83,9 +83,12 @@ All notable changes to InboxCraft are listed here. The format follows
   literals) and `NOT`, `OR` and `AND`, and LOGOUT. LOGIN and AUTHENTICATE are refused before TLS and under
   `LOGINDISABLED`; the capabilities are forgotten after STARTTLS and read again after it and after a sign-in;
   bytes after the STARTTLS go-ahead end the session; the password is hidden in server text as it was given, as
-  LOGIN quotes it and as the PLAIN response. Server text loses control characters and the invisible direction and
-  zero-width marks (the model's `is_invisible_mark`, now public); `[ALERT]` text is shown only over TLS; EXISTS,
-  EXPUNGE and FETCH responses when no mailbox is open or being opened end the session. Lines
+  LOGIN quotes it, without its edge white space and as the PLAIN response. Server text loses control characters
+  and the invisible direction and zero-width marks (the model's `is_invisible_mark`, now public); before TLS no
+  server words are passed on at all (`[ALERT]` is dropped, BYE and refusal texts are empty); a response code is
+  kept only as an atom of at most 128 characters that holds no password. EXISTS, EXPUNGE and FETCH responses when
+  no mailbox is open or being opened end the session. A CAPABILITY the server refuses after a sign-in leaves the
+  capabilities unknown. A literal is moved out of the read buffer, not copied, so a response holds it once. Lines
   over 1 MiB, literals over 64 MiB, more than 64 literals in a response, lists nested deeper than 32, LIST answers
   over 10000 mailboxes and flag lists over 64 are capped or refused. Golden transcripts in
   `crates/proto/tests/transcripts/`, property tests and the fuzz target `imap_client`. The response values, status

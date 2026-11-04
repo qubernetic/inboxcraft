@@ -116,7 +116,14 @@ B = blocks the next stage.
   over a local tunnel (#20).
 - `proto` ends the session on an EXISTS, EXPUNGE or FETCH response when no mailbox is open or being opened (RFC 9051
   section 7.4), also before TLS, rather than passing it over: a server that sends one after a refused SELECT is cut
-  off. `[ALERT]` text that comes before TLS is dropped, not shown later (#20).
+  off. `[ALERT]` text that comes before TLS is dropped, not shown later, and BYE and refusal texts before TLS are
+  empty: a server that explains in the clear why it has no STARTTLS is not heard, only that it refused (#20).
+- `proto` hides the password as it was given, quoted, trimmed and as the PLAIN response. A server that writes back
+  a cut or changed piece of it (a few characters, another case, other escapes) cannot be recognised, so that piece
+  shows; a response code is dropped when it holds the password in any case (#20).
+- `proto` takes an untagged CAPABILITY that comes during LOGIN or AUTHENTICATE as the list after the sign-in: the
+  client cannot tell whether the server sent it before or after it signed the session in. Over TLS that can only
+  mean an extension goes unseen (#20).
 
 ## Revision history
 | Date | Change | Summary |
@@ -138,3 +145,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | The message builder refuses attached messages other than `message/global` (#19) |
 | 2026-11-04 | minor | Rough edges of the IMAP client core (#20) |
 | 2026-11-04 | minor | The IMAP client refuses message data outside a mailbox and drops alerts before TLS (#20) |
+| 2026-11-04 | minor | IMAP server words before TLS, password pieces, capabilities during a sign-in (#20) |
