@@ -29,7 +29,7 @@ impl Notify {
 /// The events of one filter. MessageNew and MessageExpunge always come together, so one flag stands for both.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Events {
-    new: bool,
+    pub(super) new: bool,
     /// The FETCH items (UID, FLAGS, MODSEQ) to send with each new message of the open mailbox.
     pub(super) fetch: Vec<String>,
 }

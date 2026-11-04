@@ -57,7 +57,7 @@ impl Session {
         let open = matches!(&self.state, State::Selected(selected) if selected.index == index);
         if open {
             self.pending.push(update);
-            if self.idling || self.notify.as_ref().is_some_and(|notify| notify.selected.is_some()) {
+            if self.idling || self.notify.as_ref().and_then(|notify| notify.selected.as_ref()).is_some_and(|events| events.new) {
                 self.flush(out);
             }
         } else if let Some(mailbox) = self.fake.mailboxes.get(index)

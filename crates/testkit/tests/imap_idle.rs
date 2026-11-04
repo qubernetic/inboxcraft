@@ -158,6 +158,14 @@ fn notify_without_the_selected_filter_leaves_the_open_mailbox_for_the_next_comma
 }
 
 #[test]
+fn notify_with_selected_none_leaves_the_open_mailbox_for_the_next_command() {
+    let fake = FakeImap::sample().on(When::answered("NOTIFY"), [deliver("INBOX")]);
+    assert_eq!(after_a1(&signed_in(&fake, "a1 SELECT INBOX\r\na2 NOTIFY SET (SELECTED NONE)\r\n")), ["a2 OK NOTIFY completed"]);
+    let got = signed_in(&fake, "a1 SELECT INBOX\r\na2 NOTIFY SET (SELECTED NONE)\r\na3 NOOP\r\n");
+    assert_eq!(after_a1(&got), ["a2 OK NOTIFY completed", "* 4 EXISTS", "a3 OK NOOP completed"]);
+}
+
+#[test]
 fn notify_filters_pick_their_mailboxes() {
     let cases = [
         ("(INBOXES (MessageNew MessageExpunge))", vec!["INBOX"]),
