@@ -10,7 +10,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use crate::{Error, walk};
 
@@ -27,10 +27,7 @@ const LOCAL: &[&str] = &["corpus", "craft-fonts", "craft-i18n", "dist", "log"];
 pub(crate) const MAX_PATTERN: usize = 256;
 
 fn top(rel: &Path) -> Option<&str> {
-    match rel.components().next() {
-        Some(Component::Normal(name)) => name.to_str(),
-        _ => None,
-    }
+    rel.iter().next().and_then(|name| name.to_str())
 }
 
 /// Whether `rel` (relative to the workspace root) is an asset file.
