@@ -162,10 +162,12 @@ B = blocks the next stage.
   unless the fixture sets one (#23).
 - The fake's NOTIFY takes every mailbox as personal and subscribed. It sends a STATUS line for any change to a
   covered mailbox that is not open, and never sends FlagChange for those, MailboxName or SubscriptionChange. The
-  open mailbox's changes go out at once only under a SELECTED filter; without one they wait for the next command.
+  open mailbox's changes go out at once only under a SELECTED filter with MessageNew and MessageExpunge; under
+  `SELECTED NONE` or without the filter they wait for the next command.
   ENABLE works only in the authenticated state (#23).
 - A scripted change to a mailbox that does not exist, or to a UID that is not there, does nothing. Each `on` rule
-  plays once. A compressed read that inflates past 1 MiB ends the session (#23).
+  plays once. A compressed read that inflates past 1 MiB ends the session; the cap is checked every 64 compressed
+  bytes, so the buffer can pass it by about 64 KiB first (#23).
 
 ## Revision history
 | Date | Change | Summary |

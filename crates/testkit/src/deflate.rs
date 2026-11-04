@@ -12,6 +12,10 @@ use flate2::write::{DeflateDecoder, DeflateEncoder};
 /// The most bytes one read may inflate to before the stream counts as hostile.
 const MAX_INFLATED: usize = 1 << 20;
 
+/// How many compressed bytes are inflated between two checks of [`MAX_INFLATED`]: at deflate's best ratio of about
+/// 1:1032 one step adds at most about 64 KiB.
+const STEP: usize = 64;
+
 /// The deflate state of one end of a connection.
 #[derive(Debug)]
 pub(crate) struct Deflate {
@@ -47,10 +51,12 @@ impl Deflate {
             if read == 0 {
                 return Ok(0);
             }
-            self.decoder.write_all(chunk.get(..read).unwrap_or_default())?;
-            self.decoder.flush()?;
-            if self.decoder.get_ref().len() > MAX_INFLATED {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "the compressed stream inflates past the cap"));
+            for step in chunk.get(..read).unwrap_or_default().chunks(STEP) {
+                self.decoder.write_all(step)?;
+                self.decoder.flush()?;
+                if self.decoder.get_ref().len() > MAX_INFLATED {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "the compressed stream inflates past the cap"));
+                }
             }
         }
     }
