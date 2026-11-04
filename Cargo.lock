@@ -291,6 +291,7 @@ name = "inboxcraft-model"
 version = "0.1.0"
 dependencies = [
  "inboxcraft-time",
+ "proptest",
  "serde",
  "serde_json",
 ]
