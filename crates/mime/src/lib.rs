@@ -10,9 +10,11 @@
 
 mod error;
 mod header;
+mod params;
 
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};
+pub use params::{ContentType, Disposition, MAX_PARAMS, Params};
 
 /// The crate's package name.
 ///
