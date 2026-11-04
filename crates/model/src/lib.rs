@@ -9,10 +9,12 @@
 
 mod address;
 mod flags;
+mod folder;
 mod id;
 
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
 pub use flags::{Flag, FlagError, Flags, Keyword};
+pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
 
 /// The crate's package name.
