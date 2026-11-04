@@ -34,9 +34,7 @@ pub(crate) fn gate(root: &Path, out: &mut dyn Write) -> Result<bool, Error> {
     let members = workspace::members(root)?;
     let mut counts = vec![Counts::default(); members.len()];
     for rel in walk::rust_files(root)? {
-        let owner =
-            members.iter().enumerate().filter(|(_, member)| rel.starts_with(&member.dir)).max_by_key(|(_, member)| member.dir.components().count());
-        let Some((index, member)) = owner else { continue };
+        let Some((index, member)) = workspace::owner(&members, &rel) else { continue };
         let path = root.join(&rel);
         let text = fs::read_to_string(&path).map_err(|source| Error::Io { path: path.clone(), source })?;
         let lines = text.lines().filter(|line| !line.trim().is_empty()).count();

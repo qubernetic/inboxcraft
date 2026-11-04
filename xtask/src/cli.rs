@@ -7,14 +7,15 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, cov, layers, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, nextest (ci profile), doctests, wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, nextest (ci profile), doctests, cov --check, wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
+  cov [--check] line coverage per crate under cargo llvm-cov nextest; --check fails below the floors in .config/coverage.toml
   layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   stats         Rust files, code lines and test lines per crate
@@ -32,6 +33,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 pub(crate) enum Command {
     Assets,
     Ci,
+    Cov { check: bool },
     Help,
     Layers,
     Spdx { fix: bool },
@@ -59,6 +61,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
         None | Some("help" | "--help" | "-h") => Command::Help,
         Some("assets") => Command::Assets,
         Some("ci") => Command::Ci,
+        Some("cov") => Command::Cov { check: false },
         Some("layers") => Command::Layers,
         Some("spdx") => Command::Spdx { fix: false },
         Some("stats") => Command::Stats,
@@ -75,9 +78,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Assets | Command::Ci | Command::Help | Command::Layers | Command::Stats | Command::TestFiles | Command::Wasm => {
-                    return Err("`--fix` only goes with `spdx`".to_owned());
-                }
+                _ => return Err("`--fix` only goes with `spdx`".to_owned()),
+            },
+            "--check" => match &mut invocation.command {
+                Command::Cov { check } => *check = true,
+                _ => return Err("`--check` only goes with `cov`".to_owned()),
             },
             other => return Err(format!("unknown option `{other}`")),
         }
@@ -112,6 +117,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
     match command {
         Command::Assets => assets::gate(&ctx.root, out),
         Command::Ci => ci::gate(ctx, out),
+        Command::Cov { check } => cov::gate(ctx, *check, out),
         Command::Help => {
             out.write_all(HELP.as_bytes())?;
             Ok(true)

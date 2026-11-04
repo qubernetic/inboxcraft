@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{Context, Error, assets, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, assets, cov, layers, spdx, stats, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -42,6 +42,8 @@ pub(crate) enum Gate {
     Assets,
     /// `cargo` with these arguments.
     Cargo(&'static [&'static str]),
+    /// `cov --check`.
+    Cov,
     Layers,
     Spdx,
     Stats,
@@ -59,6 +61,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("layers", Gate::Layers),
     ("nextest", Gate::Cargo(&["nextest", "run", "--workspace", "--profile", "ci"])),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
+    ("cov", Gate::Cov),
     ("wasm", Gate::Wasm),
     ("deny", Gate::Cargo(&["deny", "check"])),
     ("stats", Gate::Stats),
@@ -73,6 +76,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
         let result = match gate {
             Gate::Cargo(args) => ctx.runner.run(&ctx.cargo, args, &ctx.root),
             Gate::Assets => assets::gate(&ctx.root, out),
+            Gate::Cov => cov::gate(ctx, true, out),
             Gate::Layers => layers::gate(&ctx.root, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
             Gate::Stats => stats::gate(&ctx.root, out),

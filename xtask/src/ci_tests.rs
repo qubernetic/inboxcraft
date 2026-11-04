@@ -8,13 +8,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::{GATES, ProcessRunner, Runner};
-use crate::test_support::{Broken, run_in};
+use crate::test_support::{Broken, empty_report, run_in};
 use crate::{Context, Error, FAILED, OK};
 
 /// Records every call and fails the calls whose first argument is in `failing`; `"spawn"` in `failing` makes the
-/// call a spawn error instead.
-#[derive(Default)]
+/// call a spawn error instead. `cargo llvm-cov` reports no lines into a directory of its own.
 struct Recorder {
+    report: tempfile::TempDir,
     calls: Rc<RefCell<Vec<String>>>,
     failing: Vec<&'static str>,
 }
@@ -23,6 +23,7 @@ impl Runner for Recorder {
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error> {
         self.calls.borrow_mut().push(format!("{} {} @ {}", program.to_string_lossy(), args.join(" "), dir.display()));
         let first = args.first().copied().unwrap_or_default();
+        empty_report(args);
         if self.failing.contains(&"spawn") {
             return Err(Error::Spawn { program: program.to_string_lossy().into_owned(), source: io::Error::other("gone") });
         }
@@ -32,13 +33,19 @@ impl Runner for Recorder {
 
 fn ci_context(failing: Vec<&'static str>) -> (Context, Rc<RefCell<Vec<String>>>) {
     let calls = Rc::new(RefCell::new(Vec::new()));
-    let runner = Recorder { calls: Rc::clone(&calls), failing };
-    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner) }, calls)
+    let runner = Recorder { report: tempfile::tempdir().unwrap(), calls: Rc::clone(&calls), failing };
+    let lcov = Some(runner.report.path().join("lcov.info"));
+    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov }, calls)
+}
+
+fn report_of(ctx: &Context) -> String {
+    ctx.lcov.as_deref().map(|path| path.display().to_string()).unwrap_or_default()
 }
 
 #[test]
 fn ci_runs_every_gate_in_order() {
     let (ctx, calls) = ci_context(vec![]);
+    let cov = format!("llvm-cov nextest --workspace --profile ci --lcov --output-path {}", report_of(&ctx));
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, OK, "{out}");
     let root = crate::default_root();
@@ -51,6 +58,7 @@ fn ci_runs_every_gate_in_order() {
         "clippy --workspace --all-targets -- -D warnings",
         "nextest run --workspace --profile ci",
         "test --workspace --doc",
+        &cov,
         &wasm,
         "deny check",
     ]
@@ -58,13 +66,13 @@ fn ci_runs_every_gate_in_order() {
     .map(|args| format!("cargo {args} @ {}", root.display()))
     .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "nextest", "doctests", "wasm", "deny", "stats"] {
+    for name in ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "nextest", "doctests", "cov", "wasm", "deny", "stats"] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
     assert!(out.contains("layers: ") && out.contains("assets: ") && out.contains("stats: total"), "{out}");
-    assert!(out.ends_with("ci: all 11 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 11);
+    assert!(out.ends_with("ci: all 12 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 12);
 }
 
 #[test]
@@ -72,8 +80,8 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (ctx, calls) = ci_context(vec!["clippy", "deny"]);
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
-    assert_eq!(calls.borrow().len(), 6, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 11 gates failed: clippy, deny\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 7, "every gate still ran");
+    assert!(out.ends_with("ci: 2 of 12 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -82,7 +90,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 6 of 11 gates failed: fmt, clippy, nextest, doctests, wasm, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 7 of 12 gates failed: fmt, clippy, nextest, doctests, cov, wasm, deny\n"), "{out}");
 }
 
 #[test]
@@ -93,7 +101,7 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 5 of 11 gates failed: spdx, assets, layers, wasm, stats\n"), "{out}");
+    assert!(out.ends_with("ci: 6 of 12 gates failed: spdx, assets, layers, cov, wasm, stats\n"), "{out}");
     assert_eq!(calls.borrow().len(), 5);
 }
 

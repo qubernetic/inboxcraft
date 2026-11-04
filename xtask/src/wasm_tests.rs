@@ -27,7 +27,7 @@ impl Runner for Recorder {
 fn context(root: PathBuf, result: Result<bool, ()>) -> (Context, Rc<RefCell<Vec<String>>>) {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let runner = Recorder { calls: Rc::clone(&calls), result };
-    (Context { root, cargo: OsString::from("cargo"), runner: Box::new(runner) }, calls)
+    (Context { root, cargo: OsString::from("cargo"), runner: Box::new(runner), lcov: None }, calls)
 }
 
 fn fixture(names: &[&str]) -> tempfile::TempDir {
