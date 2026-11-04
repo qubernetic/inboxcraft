@@ -27,4 +27,6 @@ above.
 Third-party material
 --------------------
 - <font or asset>, <licence>, licence text in <path>
+- SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
+  the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

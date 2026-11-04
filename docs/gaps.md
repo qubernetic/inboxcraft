@@ -170,6 +170,30 @@ B = blocks the next stage.
   bytes, so the buffer can pass it by about 64 KiB first (#23).
 - Between its STARTTLS answer and the client's handshake the fake records at most 16 lines sent in clear; more go
   to rustls, which ends the session. A line past 8192 bytes ends the session and is kept cut at 8192 (#23).
+- `store` search: from, to and subject match a piece of the text without case (Unicode lower case, no accent
+  folding); body text matches whole words as a phrase, without prefixes, operators or ranking. A word is a run of
+  letters and digits; SQLite's `unicode61` tokenizer and the memory backend may split rare characters differently.
+  The query language is E5.1 (#24).
+- `store` keeps no lock on its directory: keeping a second process away from an open store is the app's single
+  instance guard, which is not built yet. The memory backend copies its rows on every batch, which is fine for tests and
+  the browser build but not for a large mailbox (#24).
+- `store` ids above `i64::MAX` are refused by the SQLite backend; the memory backend takes them. A source file
+  that is missing or damaged is reported as `Corrupt` and is not fetched again by the store itself (#24).
+- `store` makes its directories `0700` and its files `0600` on unix, whatever the umask, and narrows wider ones at
+  open. The directories above the store directory are left as they are. On Windows it sets no ACL of its own: the
+  files inherit the ACL of the directory they are made in, which for the profile directory is the owner's account
+  alone; a store put in a shared folder there is as open as that folder (#24).
+- `store` removes mail from its own files: removed rows are zeroed (`secure_delete`), removed words leave the FTS5
+  index at once (`secure-delete`), the write-ahead log is emptied after a batch that removed mail, and a removed
+  source file is unlinked. What the file system or the disk kept of those bytes (journal, copy-on-write snapshots,
+  SSD blocks not yet erased, backups) may still be there; only full-disk encryption covers that (#24).
+- `store` does not check its paths for symlinks. A link in place of `sources/` is followed, so the sweep at open
+  works in the link's target; a link at a `.partial` or `.eml` name is followed when the file is written or read,
+  and a FIFO there blocks `body()`. The sweep touches regular files only. Only something running as the owner
+  inside the store directory can place such a link, since the directory is `0700` (#24).
+- `store` reads a record and a body's text back from SQLite in full before it checks them; SQLite's default limit
+  on one value is 1 GB. `Body` cuts the text to `MAX_TEXT_BYTES` only after it was read. A source length is checked
+  before the file is read. Only something that writes the owner's database file can plant such a value (#24).
 
 ## Revision history
 | Date | Change | Summary |
@@ -195,3 +219,7 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the IMAP sync extensions (#21) |
 | 2026-11-04 | minor | Rough edges of IMAP move, UIDPLUS, preview and compression (#22) |
 | 2026-11-04 | minor | Rough edges of the fake IMAP server (#23) |
+| 2026-11-04 | minor | Limits of the local-first store and its search (#24) |
+| 2026-11-04 | minor | Who may read the local-first store on unix and Windows (#24) |
+| 2026-11-04 | minor | What is left of removed mail on the disk (#24) |
+| 2026-11-04 | minor | Symlinks in the store and values read back unbounded (#24) |

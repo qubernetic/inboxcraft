@@ -96,7 +96,7 @@ included) and fails on:
 
 - a member that is not registered;
 - a dependency on a higher layer, or on a crate in its own layer that `INTRA_LAYER_ORDER` does not list (only
-  `net` -> `proto` and `net` -> `dav`);
+  `store` -> `model`, `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
 - `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
@@ -264,3 +264,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |
 | 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |
 | 2026-11-04 | minor | The layering rule that keeps `rcgen` and `flate2` in `testkit` (#23) |
+| 2026-11-04 | minor | `store` may depend on `model` inside layer 1 (#24) |

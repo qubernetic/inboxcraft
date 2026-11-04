@@ -45,6 +45,15 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
   the reference server has no IMAP METADATA.
+- The store (`inboxcraft-store`, layer 1, the one crate allowed to depend on `model` inside its layer) is the
+  `Storage` trait with two backends. `Memory` is always built and is the store on wasm. `Sqlite` is native only
+  (feature `sqlite`): `store.sqlite3` in WAL mode with `synchronous=FULL` and foreign keys on, its schema version in
+  `PRAGMA user_version` with one migration per version, an FTS5 index of the body text, and each message source as
+  `sources/<body id>.eml` beside it. A source is written and synced before the row that names it commits and
+  removed only after that row is gone; opening the store removes the files a kill left behind. Removed mail is
+  zeroed in the database (`secure_delete`, FTS5 `secure-delete`) and the write-ahead log is emptied after the batch
+  that removed it. The store does no
+  network I/O and parses no mail: the caller hands in each body's text.
 - Tray/background mode: the window can close while the engine keeps running.
 
 ## Start-up
@@ -57,3 +66,5 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | <date> | major | First version |
 | 2026-11-04 | minor | The injectable clock (#15) |
 | 2026-11-04 | minor | Data flow: the read path jobs and events in `model`, folder roles (#17) |
+| 2026-11-04 | minor | The local-first store and its two backends (#24) |
+| 2026-11-04 | minor | The store zeroes removed mail (#24) |
