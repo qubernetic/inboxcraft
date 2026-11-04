@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{Context, Error, assets, layers, spdx, test_files, wasm};
+use crate::{Context, Error, assets, layers, spdx, stats, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -44,11 +44,12 @@ pub(crate) enum Gate {
     Cargo(&'static [&'static str]),
     Layers,
     Spdx,
+    Stats,
     TestFiles,
     Wasm,
 }
 
-/// The gates of `cargo xtask ci`, cheap ones first.
+/// The gates of `cargo xtask ci`, cheap ones first; `stats` only reports.
 pub(crate) const GATES: &[(&str, Gate)] = &[
     ("fmt", Gate::Cargo(&["fmt", "--all", "--", "--check"])),
     ("clippy", Gate::Cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])),
@@ -60,6 +61,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
     ("wasm", Gate::Wasm),
     ("deny", Gate::Cargo(&["deny", "check"])),
+    ("stats", Gate::Stats),
 ];
 
 /// Runs every gate, reports to `out` and returns whether all passed.
@@ -73,6 +75,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
             Gate::Assets => assets::gate(&ctx.root, out),
             Gate::Layers => layers::gate(&ctx.root, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
+            Gate::Stats => stats::gate(&ctx.root, out),
             Gate::TestFiles => test_files::gate(&ctx.root, out),
             Gate::Wasm => wasm::gate(ctx, out),
         };

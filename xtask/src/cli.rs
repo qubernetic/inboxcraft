@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, layers, spdx, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, layers, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
@@ -17,6 +17,7 @@ commands:
   assets        every asset file has a row in ATTRIBUTION.md
   layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
+  stats         Rust files, code lines and test lines per crate
   test-files    no inline `mod tests { ... }`: tests live in files of their own
   wasm          build the standalone and layer 0 to 5 crates for wasm32-unknown-unknown (not net)
   help          print this text
@@ -34,6 +35,7 @@ pub(crate) enum Command {
     Help,
     Layers,
     Spdx { fix: bool },
+    Stats,
     TestFiles,
     Wasm,
 }
@@ -59,6 +61,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
         Some("ci") => Command::Ci,
         Some("layers") => Command::Layers,
         Some("spdx") => Command::Spdx { fix: false },
+        Some("stats") => Command::Stats,
         Some("test-files") => Command::TestFiles,
         Some("wasm") => Command::Wasm,
         Some(other) => return Err(format!("unknown command `{other}`")),
@@ -72,7 +75,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Assets | Command::Ci | Command::Help | Command::Layers | Command::TestFiles | Command::Wasm => {
+                Command::Assets | Command::Ci | Command::Help | Command::Layers | Command::Stats | Command::TestFiles | Command::Wasm => {
                     return Err("`--fix` only goes with `spdx`".to_owned());
                 }
             },
@@ -115,6 +118,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
         }
         Command::Layers => layers::gate(&ctx.root, out),
         Command::Spdx { fix } => spdx::gate(&ctx.root, *fix, out),
+        Command::Stats => stats::gate(&ctx.root, out),
         Command::TestFiles => test_files::gate(&ctx.root, out),
         Command::Wasm => wasm::gate(ctx, out),
     }

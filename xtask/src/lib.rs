@@ -15,6 +15,7 @@ mod config;
 mod error;
 mod layers;
 mod spdx;
+mod stats;
 mod test_files;
 mod walk;
 mod wasm;
