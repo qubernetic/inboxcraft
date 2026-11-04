@@ -859,7 +859,7 @@ impl Client {
                 }
             }
             ("VANISHED", flight) => {
-                let open = self.state == State::Selected || matches!(flight, Some(Kind::Select(_)));
+                let open = self.state == State::Selected || matches!(flight, Some(Kind::Select(_) | Kind::Logout { previous: State::Selected }));
                 if !open || !self.qresync {
                     return Err(ProtoError::Unexpected("VANISHED response"));
                 }

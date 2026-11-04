@@ -71,6 +71,14 @@ S: * OK [CLOSED]
 S: * OK [UIDVALIDITY 67890009] UIDs valid
 S: A0007 OK done
 = A0007 selected exists=0 recent=0 flags=- permanent=- uidvalidity=67890009 uidnext=none unseen=none modseq=none read-only=false
+# The mailbox is still open while LOGOUT waits for its answer.
+> logout
+C: A0008 LOGOUT
+S: * VANISHED 5
+S: * BYE Logging out
+S: A0008 OK done
+= vanished 5
+= A0008 logged out
 
 # A VANISHED that cannot be read ends the session.
 @ tls
