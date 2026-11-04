@@ -85,8 +85,10 @@ fn starttls_error(pki: &TestPki, fault: CertFault) -> Result<ErrorKind, Box<dyn 
     client.read_line()?;
     assert_eq!(client.command("a1 STARTTLS")?, ["a1 OK Begin TLS negotiation now"]);
     let err = client.start_tls(&pki.client(fault.clock())?).err().ok_or("the handshake passed")?;
-    let server_side = server.finish().err().ok_or("the server went on")?;
+    let (transcript, ended) = server.finish_with_transcript();
+    let server_side = ended.err().ok_or("the server went on")?;
     assert!(matches!(server_side, Error::Io(_)), "{server_side}");
+    assert_eq!(transcript.in_clear(), ["a1 STARTTLS"]);
     Ok(err.kind())
 }
 
@@ -142,6 +144,23 @@ fn a_password_pipelined_behind_starttls_is_recorded_in_clear_and_not_answered() 
     let in_clear = ["a1 STARTTLS".to_owned(), format!("a2 LOGIN {USER} {PASSWORD}"), "a3 NO".to_owned()];
     assert_eq!(transcript.in_clear(), in_clear);
     assert_eq!(transcript.received().get(3).map(String::as_str), Some("a4 LOGOUT"));
+    Ok(())
+}
+
+#[test]
+fn a_password_sent_after_the_starttls_answer_but_before_the_handshake_is_recorded_in_clear() -> Result<(), Box<dyn std::error::Error>> {
+    let pki = TestPki::new()?;
+    let server = Listen::plain().start_imap(FakeImap::new().starttls(pki.server_config(None)?))?;
+    let mut client = TestClient::plain(server.addr(), TIMEOUT)?;
+    client.read_line()?;
+    assert_eq!(client.command("a1 STARTTLS")?, ["a1 OK Begin TLS negotiation now"]);
+    std::thread::sleep(Duration::from_millis(100));
+    client.send_line(&format!("a2 LOGIN {USER} {PASSWORD}"))?;
+    let mut client = client.start_tls(&pki.client(Clock::wall())?)?;
+    assert_eq!(client.command("a3 LOGOUT")?, ["* BYE Logging out", "a3 OK LOGOUT completed"]);
+    let transcript = server.finish()?;
+    assert_eq!(transcript.in_clear(), ["a1 STARTTLS".to_owned(), format!("a2 LOGIN {USER} {PASSWORD}")]);
+    assert_eq!(transcript.received().len(), 3);
     Ok(())
 }
 

@@ -48,7 +48,8 @@ pub use fixture::{Mailbox, Message};
 pub use happen::{Action, When};
 
 use crate::Error;
-use crate::server::{FakeServer, Listen};
+use crate::server::{Ending, FakeServer, Listen};
+use crate::wire::Wire;
 use happen::Rules;
 use session::{Effect, Session};
 
@@ -175,14 +176,23 @@ impl Listen {
     pub fn start_imap(self, fake: FakeImap) -> Result<FakeServer, Error> {
         self.spawn(move |wire, stop| {
             let mut session = Session::new(fake, wire.is_tls());
-            loop {
-                match session.run(wire, stop)? {
-                    Effect::End(ending) => return Ok((session.transcript(), ending)),
-                    Effect::StartTls(config) => wire.accept_tls(&config)?,
-                    Effect::Compress => wire.compress(),
-                }
-            }
+            let ended = serve(&mut session, wire, stop);
+            (session.transcript(), ended)
         })
+    }
+}
+
+/// Runs `session` on `wire`, turning the connection into TLS or compressing it when the session asks.
+fn serve(session: &mut Session, wire: &mut Wire, stop: &AtomicBool) -> Result<Ending, Error> {
+    loop {
+        match session.run(wire, stop)? {
+            Effect::End(ending) => return Ok(ending),
+            Effect::StartTls(config) => {
+                session.heard_in_clear(wire.lines_before_handshake()?);
+                wire.accept_tls(&config)?;
+            }
+            Effect::Compress => wire.compress(),
+        }
     }
 }
 

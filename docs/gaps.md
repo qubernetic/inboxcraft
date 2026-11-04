@@ -168,6 +168,8 @@ B = blocks the next stage.
 - A scripted change to a mailbox that does not exist, or to a UID that is not there, does nothing. Each `on` rule
   plays once. A compressed read that inflates past 1 MiB ends the session; the cap is checked every 64 compressed
   bytes, so the buffer can pass it by about 64 KiB first (#23).
+- Between its STARTTLS answer and the client's handshake the fake records at most 16 lines sent in clear; more go
+  to rustls, which ends the session. A line past 8192 bytes ends the session and is kept cut at 8192 (#23).
 
 ## Revision history
 | Date | Change | Summary |

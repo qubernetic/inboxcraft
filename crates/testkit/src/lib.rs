@@ -59,6 +59,7 @@ mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};
 pub use error::Error;
+pub use line::MAX_LINE;
 pub use pki::{CertFault, Clock, FAR_OFF, HOST, TestPki, TlsClient, WRONG_HOST};
 pub use script::{Fault, Script, Step};
 pub use server::{FakeServer, Listen, Transcript};

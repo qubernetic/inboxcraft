@@ -5,8 +5,9 @@
 
 use std::io::{self, Read};
 
-/// The longest line, without its terminator, that the server and the client read.
-pub(crate) const MAX_LINE: usize = 8192;
+/// The longest line, without its terminator, that the fake servers and the test client read; a longer one ends the
+/// session, and the transcript keeps its first `MAX_LINE` bytes.
+pub const MAX_LINE: usize = 8192;
 
 /// What one [`LineReader::read_line`] call found.
 #[derive(Debug, PartialEq, Eq)]
@@ -15,8 +16,8 @@ pub(crate) enum Line {
     Complete(Vec<u8>),
     /// The peer closed the connection.
     Eof,
-    /// More than [`MAX_LINE`] bytes came without a terminator.
-    TooLong,
+    /// More than [`MAX_LINE`] bytes came without a terminator: the first [`MAX_LINE`] of them.
+    TooLong(Vec<u8>),
 }
 
 /// Buffers what was read past the end of the last line.
@@ -35,11 +36,16 @@ impl LineReader {
                 if line.last() == Some(&b'\r') {
                     line.pop();
                 }
-                return Ok(if line.len() > MAX_LINE { Line::TooLong } else { Line::Complete(line) });
+                if line.len() > MAX_LINE {
+                    line.truncate(MAX_LINE);
+                    return Ok(Line::TooLong(line));
+                }
+                return Ok(Line::Complete(line));
             }
             if self.buf.len() > MAX_LINE {
-                self.buf.clear();
-                return Ok(Line::TooLong);
+                let mut cut = std::mem::take(&mut self.buf);
+                cut.truncate(MAX_LINE);
+                return Ok(Line::TooLong(cut));
             }
             let mut chunk = [0_u8; 4096];
             let read = src.read(&mut chunk)?;

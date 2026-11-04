@@ -159,7 +159,11 @@ impl Session {
             let next = match next {
                 Next::Challenge(tag) => {
                     send(io, b"+ \r\n")?;
-                    let Line::Complete(response) = self.reader.read_line(io)? else { return Ok(Effect::End(Ending::Dropped)) };
+                    let response = match self.reader.read_line(io)? {
+                        Line::Complete(response) => response,
+                        Line::Eof => return Ok(Effect::End(Ending::Dropped)),
+                        Line::TooLong(cut) => return self.cut(io, &cut),
+                    };
                     self.transcript.push(String::from_utf8_lossy(&response).into_owned(), self.tls);
                     let mut out = Vec::new();
                     self.plain(&tag, &response, &mut out);
@@ -173,7 +177,11 @@ impl Session {
                     }
                     let done = self.reader.read_line(io)?;
                     self.idling = false;
-                    let Line::Complete(done) = done else { return Ok(Effect::End(Ending::Dropped)) };
+                    let done = match done {
+                        Line::Complete(done) => done,
+                        Line::Eof => return Ok(Effect::End(Ending::Dropped)),
+                        Line::TooLong(cut) => return self.cut(io, &cut),
+                    };
                     self.transcript.push(String::from_utf8_lossy(&done).into_owned(), self.tls);
                     let mut out = Vec::new();
                     if done.eq_ignore_ascii_case(b"DONE") {
@@ -217,6 +225,20 @@ impl Session {
         for line in self.reader.discard() {
             self.transcript.push(String::from_utf8_lossy(&line).into_owned(), self.tls);
         }
+    }
+
+    /// Records the lines a client sent in clear between the STARTTLS answer and its handshake, unanswered.
+    pub(crate) fn heard_in_clear(&mut self, lines: Vec<Vec<u8>>) {
+        for line in lines {
+            self.transcript.push(String::from_utf8_lossy(&line).into_owned(), false);
+        }
+    }
+
+    /// Records the first [`crate::MAX_LINE`] bytes of a line that is too long and says goodbye.
+    fn cut(&mut self, io: &mut impl Write, cut: &[u8]) -> Result<Effect, Error> {
+        self.transcript.push(String::from_utf8_lossy(cut).into_owned(), self.tls);
+        send(io, b"* BYE Line too long\r\n")?;
+        Err(Error::LineTooLong)
     }
 
     /// Says goodbye after too many `BAD` answers; returns whether it did.
@@ -268,7 +290,10 @@ impl Session {
             let line = match self.reader.read_line(io)? {
                 Line::Complete(line) => line,
                 Line::Eof => return Ok(Input::Closed),
-                Line::TooLong => return Ok(Input::Lost("Line too long")),
+                Line::TooLong(cut) => {
+                    self.transcript.push(String::from_utf8_lossy(&cut).into_owned(), self.tls);
+                    return Ok(Input::Lost("Line too long"));
+                }
             };
             self.transcript.push(String::from_utf8_lossy(&line).into_owned(), self.tls);
             let Some((len, plus)) = reader::literal_at_end(&line) else {
@@ -277,6 +302,7 @@ impl Session {
             };
             if len > MAX_LITERAL || literals.len() >= MAX_LITERALS || (plus && !self.fake.offers(Capability::LiteralPlus)) {
                 if plus {
+                    self.discard();
                     return Ok(Input::Lost("The literal is refused"));
                 }
                 let tag = reader::tag_of(lines.first().unwrap_or(&line));

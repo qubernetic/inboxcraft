@@ -12,6 +12,13 @@ use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use crate::Error;
 use crate::deflate::Deflate;
+use crate::line::MAX_LINE;
+
+/// The first byte of a TLS handshake record (RFC 8446 section 5.1).
+const HANDSHAKE: u8 = 0x16;
+
+/// How many lines a client may send in clear between the STARTTLS answer and its handshake.
+const MAX_CLEAR_LINES: usize = 16;
 
 #[derive(Debug)]
 enum Tcp {
@@ -46,6 +53,26 @@ impl Wire {
         Ok(())
     }
 
+    /// Reads the lines a client sends in clear after the STARTTLS answer and before its TLS handshake, which stays
+    /// unread for rustls: up to [`MAX_CLEAR_LINES`] lines, each cut at [`MAX_LINE`] bytes. They are read a byte at a
+    /// time, so not one byte of the handshake is taken with them.
+    pub(crate) fn lines_before_handshake(&mut self) -> io::Result<Vec<Vec<u8>>> {
+        let mut lines = Vec::new();
+        let (Tcp::Plain(stream), None) = (&mut self.tcp, &self.deflate) else { return Ok(lines) };
+        while lines.len() < MAX_CLEAR_LINES {
+            let mut first = [0_u8; 1];
+            if stream.peek(&mut first)? == 0 || first == [HANDSHAKE] {
+                break;
+            }
+            let (line, whole) = raw_line(stream)?;
+            lines.push(line);
+            if !whole {
+                break;
+            }
+        }
+        Ok(lines)
+    }
+
     /// Compresses both directions from now on.
     pub(crate) fn compress(&mut self) {
         self.deflate = Some(Box::new(Deflate::new()));
@@ -59,6 +86,26 @@ impl Wire {
         }
         Ok(())
     }
+}
+
+/// Reads one line a byte at a time, without its terminator; whether it ended with LF rather than the connection or
+/// [`MAX_LINE`].
+fn raw_line(stream: &mut TcpStream) -> io::Result<(Vec<u8>, bool)> {
+    let mut line = Vec::new();
+    let mut byte = [0_u8; 1];
+    while line.len() < MAX_LINE {
+        if stream.read(&mut byte)? == 0 {
+            return Ok((line, false));
+        }
+        if byte == *b"\n" {
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            return Ok((line, true));
+        }
+        line.extend_from_slice(&byte);
+    }
+    Ok((line, false))
 }
 
 impl Read for Tcp {

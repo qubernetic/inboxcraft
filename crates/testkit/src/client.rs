@@ -222,7 +222,7 @@ impl TestClient {
         match line {
             Line::Complete(bytes) => printable(bytes),
             Line::Eof => Err(ClientError::new(ErrorKind::Dropped, "the server closed the connection")),
-            Line::TooLong => Err(ClientError::new(ErrorKind::Garbage, "the server sent a line that is too long")),
+            Line::TooLong(_) => Err(ClientError::new(ErrorKind::Garbage, "the server sent a line that is too long")),
         }
     }
 
