@@ -285,6 +285,10 @@ version = "0.1.0"
 [[package]]
 name = "inboxcraft-mime"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-charset",
+ "proptest",
+]
 
 [[package]]
 name = "inboxcraft-model"
