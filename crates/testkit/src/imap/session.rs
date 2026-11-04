@@ -10,7 +10,9 @@ use std::sync::atomic::AtomicBool;
 
 use rustls::ServerConfig;
 
+use crate::imap::notify::Notify;
 use crate::imap::reader::{self, Command, MAX_LITERAL, MAX_LITERALS, Refused, Token};
+use crate::imap::update::{Change, Update};
 use crate::imap::write::{clean, line, no, ok};
 use crate::imap::{Action, Capability, FakeImap, When, base64};
 use crate::line::{Line, LineReader};
@@ -57,6 +59,8 @@ enum Next {
     Go,
     Logout,
     StartTls(Arc<ServerConfig>),
+    /// The `+ idling` is sent: play the idle actions, then wait for DONE.
+    Idle(String),
     /// Send an empty challenge and read the AUTHENTICATE PLAIN response.
     Challenge(String),
 }
@@ -77,6 +81,12 @@ pub(crate) struct Session {
     pub(super) condstore: bool,
     /// QRESYNC is enabled (RFC 7162 section 3.2), always by ENABLE.
     pub(super) qresync: bool,
+    /// What the client of the open mailbox has not been told yet.
+    pub(super) pending: Vec<Update>,
+    /// What the last NOTIFY SET asked for.
+    pub(super) notify: Option<Notify>,
+    /// The client idles: changes are told at once.
+    pub(super) idling: bool,
     tls: bool,
     greeted: bool,
     bad: u32,
@@ -92,6 +102,9 @@ impl Session {
             state,
             condstore: false,
             qresync: false,
+            pending: Vec::new(),
+            notify: None,
+            idling: false,
             tls,
             greeted: false,
             bad: 0,
@@ -148,6 +161,24 @@ impl Session {
                     send(io, &out)?;
                     Next::Go
                 }
+                Next::Idle(tag) => {
+                    self.idling = true;
+                    if let Some(end) = self.play(io, &When::Idle, stop)? {
+                        return Ok(Effect::End(end));
+                    }
+                    let done = self.reader.read_line(io)?;
+                    self.idling = false;
+                    let Line::Complete(done) = done else { return Ok(Effect::End(Ending::Dropped)) };
+                    self.transcript.push(String::from_utf8_lossy(&done).into_owned(), self.tls);
+                    let mut out = Vec::new();
+                    if done.eq_ignore_ascii_case(b"DONE") {
+                        ok(&mut out, &tag, "IDLE terminated");
+                    } else {
+                        self.bad(&mut out, Some(&tag), "Expected DONE");
+                    }
+                    send(io, &out)?;
+                    Next::Go
+                }
                 next => next,
             };
             if self.too_bad(io)? {
@@ -192,9 +223,20 @@ impl Session {
                     send(io, format!("* BYE {}\r\n", clean(&text)).as_bytes())?;
                     return Ok(Some(Ending::Finished));
                 }
+                Action::Deliver { mailbox, message } => self.tell(io, &mailbox, Change::Deliver(message))?,
+                Action::Expunge { mailbox, uid } => self.tell(io, &mailbox, Change::Expunge(uid))?,
+                Action::Flags { mailbox, uid, flags } => self.tell(io, &mailbox, Change::Flags(uid, flags))?,
+                Action::UidValidity { mailbox, value } => self.tell(io, &mailbox, Change::UidValidity(value))?,
             }
         }
         Ok(None)
+    }
+
+    /// Makes a scripted change and sends what the client hears of it at once.
+    fn tell(&mut self, io: &mut impl Write, mailbox: &str, change: Change) -> io::Result<()> {
+        let mut out = Vec::new();
+        self.change(mailbox, change, &mut out);
+        send(io, &out)
     }
 
     /// Reads one command with its literals, sending the go-ahead for each synchronising one.
@@ -236,6 +278,7 @@ impl Session {
     /// Answers one command into `out`.
     fn answer(&mut self, command: Command, out: &mut Vec<u8>) -> Next {
         let Command { tag, name, args } = command;
+        self.flush(out);
         match (name.as_str(), self.phase()) {
             ("CAPABILITY", _) => {
                 line(out, &format!("* CAPABILITY {}", self.capabilities()));
@@ -255,6 +298,11 @@ impl Session {
             ("LOGIN", Phase::NotAuthenticated) => self.login(&tag, &args, out),
             ("AUTHENTICATE", Phase::NotAuthenticated) => return self.authenticate(&tag, &args, out),
             ("ENABLE", Phase::Authenticated) if self.fake.offers(Capability::Enable) => self.enable(&tag, &args, out),
+            ("IDLE", Phase::Authenticated | Phase::Selected) if self.fake.offers(Capability::Idle) => {
+                line(out, "+ idling");
+                return Next::Idle(tag);
+            }
+            ("NOTIFY", Phase::Authenticated | Phase::Selected) if self.fake.offers(Capability::Notify) => self.notify_set(&tag, &args, out),
             ("LIST", Phase::Authenticated | Phase::Selected) => self.list(&tag, &args, out),
             ("SELECT" | "EXAMINE", Phase::Authenticated | Phase::Selected) => self.select(&tag, &name, &args, out),
             ("STATUS", Phase::Authenticated | Phase::Selected) => self.status(&tag, &args, out),

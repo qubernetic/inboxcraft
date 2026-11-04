@@ -27,11 +27,13 @@ mod fetch;
 mod fixture;
 mod happen;
 mod mailbox;
+mod notify;
 mod reader;
 mod search;
 mod session;
 mod set;
 mod sync;
+mod update;
 mod write;
 
 use std::io::{self, Read, Write};

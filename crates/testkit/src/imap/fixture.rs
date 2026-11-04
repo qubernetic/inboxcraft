@@ -158,6 +158,18 @@ impl Mailbox {
         uids
     }
 
+    /// Makes the mailbox again: a new UIDVALIDITY, UIDs from 1, nothing removed.
+    pub(super) fn renumber(&mut self, uid_validity: u32) {
+        self.uid_validity = uid_validity;
+        let mut uid: u32 = 0;
+        for message in &mut self.messages {
+            uid = uid.saturating_add(1);
+            message.uid = uid;
+        }
+        self.uid_next = uid.saturating_add(1);
+        self.vanished.clear();
+    }
+
     /// The next modification sequence, which is now the highest.
     pub(super) fn bump(&mut self) -> u64 {
         self.highest_modseq = self.highest_modseq.saturating_add(1);
