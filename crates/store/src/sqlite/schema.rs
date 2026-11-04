@@ -8,7 +8,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use crate::StoreError;
 
 /// The schema version this build writes: the number of [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Migration `n` (from 0) takes a database from version `n` to `n + 1`. A released migration never changes; a new
 /// schema is a new migration at the end.
@@ -53,6 +53,8 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     CREATE TRIGGER body_text_gone AFTER DELETE ON body BEGIN
         DELETE FROM body_text WHERE rowid = old.message;
     END;",
+    // 3: a deleted body's words leave the index segments at once, not at some later merge.
+    "INSERT INTO body_text (body_text, rank) VALUES ('secure-delete', 1);",
 ];
 
 /// Brings `conn` to [`SCHEMA_VERSION`] in one transaction.

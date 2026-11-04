@@ -125,3 +125,32 @@ fn a_migrated_store_opens_again_unchanged() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.search(&Search::new().with_text("attached")).unwrap(), [m(1)]);
 }
+
+/// Schema version 2 as it was released, applied on top of version 1. Frozen like [`VERSION_1`].
+const VERSION_2: &str = "CREATE VIRTUAL TABLE body_text USING fts5 (text, tokenize = 'unicode61 remove_diacritics 0');
+    INSERT INTO body_text (rowid, text) SELECT message, text FROM body;
+    ALTER TABLE body DROP COLUMN text;
+    CREATE TRIGGER body_text_gone AFTER DELETE ON body BEGIN
+        DELETE FROM body_text WHERE rowid = old.message;
+    END;
+    PRAGMA user_version = 2;";
+
+fn secure_delete(dir: &Path) -> Option<i64> {
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.query_row("SELECT v FROM body_text_config WHERE k = 'secure-delete'", [], |row| row.get(0)).ok()
+}
+
+#[test]
+fn a_version_2_store_deletes_index_words_at_once() {
+    let tmp = dir();
+    let dir = tmp.path();
+    version_1(dir);
+    Connection::open(dir.join(DATABASE_FILE)).unwrap().execute_batch(VERSION_2).unwrap();
+    assert_eq!(secure_delete(dir), None);
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    assert_eq!(secure_delete(dir), Some(1));
+    assert_eq!(store.search(&Search::new().with_text("draft budget")).unwrap(), [m(1)], "the index is kept");
+    store.apply(&Batch::new().with(Change::RemoveBody(m(1)))).unwrap();
+    assert_eq!(store.search(&Search::new().with_text("draft")).unwrap(), []);
+}

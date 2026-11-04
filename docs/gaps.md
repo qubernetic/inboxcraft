@@ -183,6 +183,10 @@ B = blocks the next stage.
   directory or file that is already there with wider modes. On Windows it sets no ACL of its own: the files inherit
   the ACL of the directory they are made in, which for the profile directory is the owner's account alone; a store
   put in a shared folder there is as open as that folder (#24).
+- `store` removes mail from its own files: removed rows are zeroed (`secure_delete`), removed words leave the FTS5
+  index at once (`secure-delete`), the write-ahead log is emptied after a batch that removed mail, and a removed
+  source file is unlinked. What the file system or the disk kept of those bytes (journal, copy-on-write snapshots,
+  SSD blocks not yet erased, backups) may still be there; only full-disk encryption covers that (#24).
 
 ## Revision history
 | Date | Change | Summary |
@@ -210,3 +214,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the fake IMAP server (#23) |
 | 2026-11-04 | minor | Limits of the local-first store and its search (#24) |
 | 2026-11-04 | minor | Who may read the local-first store on unix and Windows (#24) |
+| 2026-11-04 | minor | What is left of removed mail on the disk (#24) |

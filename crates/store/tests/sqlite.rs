@@ -235,3 +235,48 @@ fn only_the_owner_can_read_the_store() {
     assert_eq!(mode(&dir.join(SOURCES_DIR).join("1.eml")), 0o600, "a source");
     drop(store);
 }
+
+/// The files under `dir` whose bytes hold `marker`.
+fn holding(dir: &Path, marker: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            found.extend(holding(&path, marker));
+        } else if fs::read(&path).unwrap().windows(marker.len()).any(|window| window == marker.as_bytes()) {
+            found.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    found
+}
+
+#[test]
+fn a_removed_body_leaves_no_words_in_the_files() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    two_accounts(&mut store);
+    store
+        .apply(
+            &Batch::new()
+                .with(Change::PutMessage(message(1, 1, 1, 1, "old", Some(1))))
+                .with(Change::PutBody(m(1), body("the zebrafinch ledger")))
+                .with(Change::PutMessage(message(2, 1, 1, 2, "wombatsubject", Some(199))))
+                .with(Change::PutBody(m(2), body("the platypusbody note"))),
+        )
+        .unwrap();
+    for marker in ["zebrafinch", "wombatsubject", "platypusbody"] {
+        assert!(!holding(dir, marker).is_empty(), "{marker} is written before it is removed");
+    }
+
+    assert_eq!(store.prune_bodies(contract::at(200)).unwrap(), 1);
+    assert_eq!(holding(dir, "zebrafinch"), Vec::<String>::new(), "a pruned body");
+    assert!(!holding(dir, "platypusbody").is_empty(), "the kept body stays");
+
+    store.apply(&Batch::new().with(Change::RemoveMessage(m(2)))).unwrap();
+    for marker in ["wombatsubject", "platypusbody"] {
+        assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker} of a removed message");
+    }
+    drop(store);
+    assert_eq!(holding(dir, "platypusbody"), Vec::<String>::new(), "nothing comes back on close");
+}

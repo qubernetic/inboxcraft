@@ -50,11 +50,20 @@ impl From<serde_json::Error> for StoreError {
     }
 }
 
-/// The source files a batch wrote (removed if it fails) and dropped (removed once it committed).
+/// The source files a batch wrote (removed if it fails) and dropped (removed once it committed), and whether it
+/// removed mail from the database.
 #[derive(Default)]
 struct Files {
     written: Vec<i64>,
     dropped: Vec<i64>,
+    removed: bool,
+}
+
+/// Moves the write-ahead log into the database and empties it, so removed mail, whose pages `secure_delete` zeroes,
+/// leaves no older copy in the log.
+fn scrub(conn: &Connection) -> Result<(), StoreError> {
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    Ok(())
 }
 
 impl Sqlite {
@@ -71,8 +80,9 @@ impl Sqlite {
         drop(private::create_file(&database, false)?);
         let mut conn = Connection::open(database)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
-        conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
         schema::migrate(&mut conn)?;
+        scrub(&conn)?;
         let kept = conn.prepare("SELECT id FROM body")?.query_map([], |row| row.get(0))?.collect::<Result<BTreeSet<i64>, _>>()?;
         sources::sweep(&sources, &kept)?;
         Ok(Self { conn, sources, config })
@@ -146,6 +156,7 @@ fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: i64, files: &mut Files) -
 }
 
 fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Files) -> Result<(), StoreError> {
+    files.removed |= matches!(change, Change::RemoveAccount(_) | Change::RemoveFolder(_) | Change::RemoveMessage(_) | Change::RemoveBody(_));
     match change {
         Change::PutAccount(account) => {
             tx.execute(
@@ -248,6 +259,7 @@ fn put_message(tx: &Transaction<'_>, message: &Message) -> Result<(), StoreError
 
 fn put_body(tx: &Transaction<'_>, sources: &Path, message: i64, body: &Body, files: &mut Files) -> Result<(), StoreError> {
     drop_bodies(tx, "message.id = ?1", message, files)?;
+    files.removed |= !files.dropped.is_empty();
     tx.execute("DELETE FROM body WHERE message = ?1", [message])?;
     let length = i64::try_from(body.source().len()).map_err(|_| StoreError::TooLarge)?;
     tx.execute("INSERT INTO body (message, length) VALUES (?1, ?2)", [message, length])?;
@@ -273,7 +285,13 @@ impl Storage for Sqlite {
             Ok(tx.commit()?)
         });
         let (remove, result) = match applied {
-            Ok(()) => (files.dropped, Ok(())),
+            Ok(()) => {
+                if files.removed {
+                    // The batch is committed whatever the checkpoint does; a failed one is done again at the next open.
+                    let _ = scrub(&self.conn);
+                }
+                (files.dropped, Ok(()))
+            }
             Err(error) => (files.written, Err(error)),
         };
         for id in remove {
