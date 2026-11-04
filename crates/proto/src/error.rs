@@ -19,6 +19,8 @@ pub enum ProtoError {
     NotEncrypted,
     /// STARTTLS on a connection that is encrypted already.
     AlreadyEncrypted,
+    /// COMPRESS on a connection that is compressed already.
+    AlreadyCompressed,
     /// The command is not allowed in the session's state (FETCH before SELECT, LOGIN after LOGIN).
     WrongState {
         /// The command, as IMAP names it.
@@ -83,6 +85,7 @@ impl ProtoError {
             self,
             Self::NotEncrypted
                 | Self::AlreadyEncrypted
+                | Self::AlreadyCompressed
                 | Self::WrongState { .. }
                 | Self::Busy
                 | Self::NotOffered(_)
@@ -99,6 +102,7 @@ impl fmt::Display for ProtoError {
         match self {
             Self::NotEncrypted => f.write_str("the connection is not encrypted, so no password is sent"),
             Self::AlreadyEncrypted => f.write_str("the connection is encrypted already"),
+            Self::AlreadyCompressed => f.write_str("the connection is compressed already"),
             Self::WrongState { command, state } => write!(f, "{command} cannot be sent in the {state} state"),
             Self::Busy => f.write_str("another command is waiting for its answer"),
             Self::NotOffered(what) => write!(f, "the server does not offer {what}"),

@@ -9,6 +9,7 @@ fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
     let local = [
         ProtoError::NotEncrypted,
         ProtoError::AlreadyEncrypted,
+        ProtoError::AlreadyCompressed,
         ProtoError::WrongState { command: "LOGIN", state: State::Authenticated },
         ProtoError::Busy,
         ProtoError::NotOffered("STARTTLS"),

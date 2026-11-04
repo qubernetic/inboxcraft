@@ -42,6 +42,27 @@ fn encryption_and_capabilities_as_the_session_goes() {
 }
 
 #[test]
+fn compression_is_on_once_the_server_agreed_and_its_first_bytes_come_back_unread() {
+    let mut client = Client::new(Transport::Tls);
+    client.receive(b"* PREAUTH [CAPABILITY IMAP4rev1 COMPRESS=DEFLATE] ready\r\n").unwrap();
+    assert!(!client.is_compressed());
+    client.compress().unwrap();
+    client.receive(b"A0001 NO [COMPRESSIONACTIVE] no\r\n").unwrap();
+    assert!(!client.is_compressed());
+    while client.next_event().is_some() {}
+    let tag = client.compress().unwrap();
+    // Raw DEFLATE bytes, a line feed among them, and no line ending at the end.
+    client.receive(b"A0002 OK go\r\n\xf2\x0a\x00\x00").unwrap();
+    assert!(client.is_compressed());
+    assert_eq!(client.next_event(), Some(Event::Completed { tag, outcome: Ok(Answer::Compressed(b"\xf2\x0a\x00\x00".to_vec())) }));
+    assert_eq!(client.next_event(), None);
+    assert_eq!(client.compress(), Err(ProtoError::AlreadyCompressed));
+    // The caller feeds what it inflated.
+    client.receive(b"* OK still here\r\n").unwrap();
+    assert_eq!(client.state(), State::Authenticated);
+}
+
+#[test]
 fn arguments_that_cannot_be_sent_are_refused_unsent() {
     let mut client = Client::new(Transport::Tls);
     client.receive(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready\r\n").unwrap();

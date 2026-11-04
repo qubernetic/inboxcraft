@@ -160,6 +160,11 @@ pub enum Answer {
     Moved(Moved),
     /// UID EXPUNGE: the messages that went came as [`Event::Expunged`] or [`Event::Vanished`].
     Expunged,
+    /// COMPRESS DEFLATE: from the byte after this answer on, both directions are compressed (RFC 4978, raw DEFLATE
+    /// as in RFC 1951). The caller deflates everything [`Client::take_output`] gives from now on and inflates what the
+    /// server sends before it goes to [`Client::receive`]. These are the bytes that came after the OK in the same
+    /// piece, still compressed: they go through the inflater first.
+    Compressed(Vec<u8>),
     /// IDLE, ended by DONE.
     Idled,
     /// NOTIFY SET or NOTIFY NONE.
@@ -240,6 +245,7 @@ enum Kind {
     Copy(UidSet),
     Move(Moving),
     Expunge,
+    Compress,
     /// NOTIFY SET (`set`) or NOTIFY NONE.
     Notify {
         set: bool,
@@ -333,6 +339,8 @@ pub struct Client {
     read_only: bool,
     /// NOTIFY SET is on.
     notifying: bool,
+    /// COMPRESS DEFLATE is on.
+    compressed: bool,
 }
 
 /// Neither the output (it may hold a password) nor anything secret is shown.
@@ -366,6 +374,7 @@ impl Client {
             uid_validity: None,
             read_only: false,
             notifying: false,
+            compressed: false,
         }
     }
 
@@ -379,6 +388,12 @@ impl Client {
     #[must_use]
     pub fn is_encrypted(&self) -> bool {
         self.tls
+    }
+
+    /// Whether COMPRESS DEFLATE is on: what goes to and comes from the server is compressed.
+    #[must_use]
+    pub fn is_compressed(&self) -> bool {
+        self.compressed
     }
 
     /// What the server said it can do, `None` until it has (and again after STARTTLS and a sign-in, until read).
@@ -735,6 +750,22 @@ impl Client {
         self.ready("NOTIFY", &[State::Authenticated, State::Selected])?;
         self.require("NOTIFY")?;
         Ok(self.start(Command::new("NOTIFY NONE"), Kind::Notify { set: false }))
+    }
+
+    /// COMPRESS DEFLATE (RFC 4978), after the sign-in, to a server that offers `COMPRESS=DEFLATE`. Only the
+    /// negotiation is here; see [`Answer::Compressed`] for what the caller does once the server agreed.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::AlreadyCompressed`], [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`], or a state
+    /// error.
+    pub fn compress(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("COMPRESS", &[State::Authenticated, State::Selected])?;
+        if self.compressed {
+            return Err(ProtoError::AlreadyCompressed);
+        }
+        self.require("COMPRESS=DEFLATE")?;
+        Ok(self.start(Command::new("COMPRESS DEFLATE"), Kind::Compress))
     }
 
     /// IDLE (RFC 2177) in the open mailbox: [`Event::Idling`] once the server agrees, then what changes, as events,
@@ -1165,6 +1196,11 @@ impl Client {
             }
             Kind::Copy(asked) => Answer::Copied(copy_uid(line, &asked)),
             Kind::Expunge => Answer::Expunged,
+            Kind::Compress => {
+                self.compressed = true;
+                // Not read here: the caller inflates it first.
+                Answer::Compressed(self.framer.take_pending())
+            }
             Kind::Idle { .. } => Answer::Idled,
             Kind::Notify { set } => {
                 self.notifying = set;

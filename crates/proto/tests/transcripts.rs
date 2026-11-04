@@ -121,7 +121,8 @@ fn notify(words: VecDeque<&str>) -> Notify {
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
 /// [modseq] [since=<modseq>] [vanished] [preview|lazy-preview] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
-/// `notify-none`, `idle`, `done`, `logout`.
+/// `notify-none`, `copy <set> <name>`, `move <set> <name>`,
+/// `expunge <set>`, `compress`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let mut words: VecDeque<&str> = rest.split_whitespace().collect();
@@ -186,6 +187,7 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
         "expunge" => client.uid_expunge(&uid_set(words.pop_front().unwrap())),
         "notify" => client.notify(&notify(words)),
         "notify-none" => client.notify_none(),
+        "compress" => client.compress(),
         "idle" => client.idle(),
         "done" => return client.done(),
         "logout" => client.logout(),
@@ -323,6 +325,7 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Copied(copied) => vec![format!("{tag} copied{}", copy_uid(copied.as_ref()))],
             Answer::Moved(moved) => vec![format!("{tag} moved{} {}", copy_uid(moved.copy_uid.as_ref()), removal(&moved.removal))],
             Answer::Expunged => vec![format!("{tag} expunged")],
+            Answer::Compressed(pending) => vec![format!("{tag} compressed \"{}\"", pending.escape_ascii())],
             Answer::Idled => vec![format!("{tag} idled")],
             Answer::Notified => vec![format!("{tag} notified")],
             Answer::LoggedOut => vec![format!("{tag} logged out")],

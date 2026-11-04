@@ -48,6 +48,14 @@ impl Framer {
         self.start < self.buf.len()
     }
 
+    /// The bytes pushed that no response has taken, taken out; the framer starts afresh. For COMPRESS: what came
+    /// after its OK is no longer IMAP as it is.
+    pub(crate) fn take_pending(&mut self) -> Vec<u8> {
+        let pending = self.pending().to_vec();
+        *self = Self::default();
+        pending
+    }
+
     fn pending(&self) -> &[u8] {
         self.buf.get(self.start..).unwrap_or_default()
     }
