@@ -110,6 +110,51 @@ run-sample profile="debug": _host_only
     [ -x "$bin" ] || { echo "$bin is missing: run 'just build' first" >&2; exit 1; }; \
     exec "$bin" --sample
 
+# Opt-in live tests on the owner's two throwaway test accounts (owner only; docs/development.md, "Live tests")
+it-live *args: _host_only _up
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${AGENT_HORDE:-}" ] || [ -n "${CI:-}" ]; then
+        echo "it-live: agents and CI never run live tests" >&2; exit 1
+    fi
+    lookup() {
+        if command -v secret-tool >/dev/null 2>&1; then
+            secret-tool lookup service inboxcraft-live variable "$1"
+        elif command -v security >/dev/null 2>&1; then
+            security find-generic-password -s inboxcraft-live -a "$1" -w
+        else
+            echo "it-live: no OS credential store tool found (secret-tool or security)" >&2; return 1
+        fi
+    }
+    vars=()
+    for account in IMAP GOOGLE; do
+        for field in ADDRESS HOST USER SECRET; do vars+=("INBOXCRAFT_LIVE_${account}_${field}"); done
+    done
+    pass=()
+    for var in "${vars[@]}"; do
+        value="$(lookup "$var")" || value=""
+        if [ -z "$value" ]; then
+            echo "it-live: $var is not in the credential store (service inboxcraft-live)" >&2; exit 1
+        fi
+        export "$var=$value"
+        pass+=(-e "$var")
+    done
+    INBOXCRAFT_LIVE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    export INBOXCRAFT_LIVE_RUN_ID
+    pass+=(-e INBOXCRAFT_LIVE_RUN_ID)
+    # The values reach the container through this process's environment, never on a command line or in a file.
+    log="$(mktemp)"
+    trap 'rm -f "$log"' EXIT
+    status=0
+    {{ dc }} exec "${pass[@]}" {{ service }} cargo nextest run --workspace --profile live "$@" 2>&1 \
+        | tee "$log" || status=$?
+    for var in INBOXCRAFT_LIVE_IMAP_SECRET INBOXCRAFT_LIVE_GOOGLE_SECRET; do
+        if grep -qF -- "${!var}" "$log"; then
+            echo "it-live: the value of $var appears in the test output" >&2; status=1
+        fi
+    done
+    exit "$status"
+
 # ---- Helpers ---------------------------------------------------------------
 
 # Start the container if it is not running (no-op in native mode)
