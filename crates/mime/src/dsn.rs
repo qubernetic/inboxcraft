@@ -7,7 +7,7 @@
 use std::fmt;
 
 use crate::header::{clean, line_at, split};
-use crate::{Headers, MimeError, Part};
+use crate::{Body, Headers, MimeError, Part};
 
 /// The most recipients one delivery report may name.
 pub const MAX_RECIPIENTS: usize = 1000;
@@ -167,19 +167,21 @@ impl DeliveryStatus {
 
 impl Part<'_> {
     /// The delivery report of a bounce: the first `message/delivery-status` or `message/global-delivery-status`
-    /// part of this `multipart/report`, read.
+    /// part among the direct parts of this `multipart/report`, read. Parts further down, those of an attached
+    /// message above all, are not looked at: a status there was written by someone else.
     ///
     /// # Errors
     ///
     /// [`MimeError::NotAReport`] when this is no `multipart/report` with such a part; the errors of
     /// [`Part::decoded`] and [`DeliveryStatus::parse`].
     pub fn delivery_status(&self) -> Result<DeliveryStatus, MimeError> {
+        let Body::Multipart(multipart) = self.body() else { return Err(MimeError::NotAReport) };
         if !self.content_type().is("multipart", "report") {
             return Err(MimeError::NotAReport);
         }
         let is_status =
             |part: &&Self| part.content_type().is("message", "delivery-status") || part.content_type().is("message", "global-delivery-status");
-        let part = self.parts().into_iter().find(is_status).ok_or(MimeError::NotAReport)?;
+        let part = multipart.parts().iter().find(is_status).ok_or(MimeError::NotAReport)?;
         DeliveryStatus::parse(&part.decoded()?)
     }
 }

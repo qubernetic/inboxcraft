@@ -131,6 +131,57 @@ fn a_message_that_is_no_report_has_no_delivery_status() {
 }
 
 #[test]
+fn a_report_inside_an_attached_message_is_not_read() {
+    let bytes = eml(&[
+        "Content-Type: multipart/report; report-type=delivery-status; boundary=outer",
+        "",
+        "--outer",
+        "Content-Type: text/plain",
+        "",
+        "See the attached message.",
+        "--outer",
+        "Content-Type: message/rfc822",
+        "",
+        "Content-Type: multipart/report; report-type=delivery-status; boundary=inner",
+        "",
+        "--inner",
+        "Content-Type: message/delivery-status",
+        "",
+        "Reporting-MTA: dns; evil.example.org",
+        "",
+        "Final-Recipient: rfc822; anna@example.org",
+        "Action: delivered",
+        "Status: 2.0.0",
+        "--inner--",
+        "--outer--",
+    ]);
+    let message = parse(&bytes).unwrap();
+    assert_eq!(message.delivery_status(), Err(MimeError::NotAReport));
+}
+
+#[test]
+fn a_status_in_a_nested_multipart_of_the_report_is_not_read() {
+    let bytes = eml(&[
+        "Content-Type: multipart/report; report-type=delivery-status; boundary=outer",
+        "",
+        "--outer",
+        "Content-Type: multipart/mixed; boundary=inner",
+        "",
+        "--inner",
+        "Content-Type: message/delivery-status",
+        "",
+        "Reporting-MTA: dns; mx.example.org",
+        "",
+        "Final-Recipient: rfc822; anna@example.org",
+        "Action: failed",
+        "Status: 5.1.1",
+        "--inner--",
+        "--outer--",
+    ]);
+    assert_eq!(parse(&bytes).unwrap().delivery_status(), Err(MimeError::NotAReport));
+}
+
+#[test]
 fn a_delivery_status_in_base64_is_decoded_first() {
     let bytes = eml(&[
         "Content-Type: multipart/report; boundary=r",
