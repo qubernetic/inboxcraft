@@ -29,3 +29,12 @@ fn search_criteria_are_capped() {
     let first = (0..MAX_QUERY_WORDS).map(|n| format!("w{n}")).collect::<Vec<_>>().join(" ");
     assert_eq!(Search::new().with_text(&many), Search::new().with_text(&first));
 }
+
+#[test]
+fn a_body_prints_its_lengths_and_no_mail() {
+    let body = super::Body::new(b"Subject: marmotsource\r\n\r\nx\r\n".to_vec(), "the marmottext").unwrap();
+    let printed = format!("{body:?}");
+    assert_eq!(printed, "Body { source_bytes: 28, text_bytes: 14 }");
+    let batch = Batch::new().with(Change::PutBody(MessageId::new(1), body));
+    assert!(!format!("{batch:?}").contains("marmot"), "nor does a batch that holds it");
+}

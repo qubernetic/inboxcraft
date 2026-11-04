@@ -3,6 +3,8 @@
 
 //! A kept message body: the source as the server sent it and its text for the search.
 
+use std::fmt;
+
 use crate::StoreError;
 
 /// The largest message source the store keeps, in bytes.
@@ -14,10 +16,17 @@ pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 /// The body of one message: the RFC 5322 source and the plain text the caller read from it.
 ///
 /// The store does not parse mail (it sits below `mime`), so the caller hands in both. The text is only searched.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Debug` prints the two lengths and no mail, so a log or a panic message never holds a body.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Body {
     source: Vec<u8>,
     text: String,
+}
+
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Body").field("source_bytes", &self.source.len()).field("text_bytes", &self.text.len()).finish()
+    }
 }
 
 impl Body {
