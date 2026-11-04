@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
+
 use crate::Error;
 use crate::line::{Line, LineReader};
 use crate::script::{Fault, Script, Step};
@@ -17,9 +19,10 @@ use crate::script::{Fault, Script, Step};
 /// How often the server looks for a client or for the stop signal.
 const POLL: Duration = Duration::from_millis(5);
 
-/// How a fake server listens, and its timeouts.
+/// How a fake server listens: plain TCP or implicit TLS, and its timeouts.
 #[derive(Debug, Clone)]
 pub struct Listen {
+    tls: Option<Arc<ServerConfig>>,
     accept_timeout: Duration,
     io_timeout: Duration,
 }
@@ -28,7 +31,13 @@ impl Listen {
     /// Plain TCP, ten seconds to accept, five seconds per read or write.
     #[must_use]
     pub fn plain() -> Self {
-        Self { accept_timeout: Duration::from_secs(10), io_timeout: Duration::from_secs(5) }
+        Self { tls: None, accept_timeout: Duration::from_secs(10), io_timeout: Duration::from_secs(5) }
+    }
+
+    /// Implicit TLS with `config`, usually from [`crate::TestPki::server_config`].
+    #[must_use]
+    pub fn tls(config: Arc<ServerConfig>) -> Self {
+        Self { tls: Some(config), ..Self::plain() }
     }
 
     /// How long the server waits for its client before [`Error::NoClient`].
@@ -63,8 +72,17 @@ impl Listen {
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(self.io_timeout))?;
         stream.set_write_timeout(Some(self.io_timeout))?;
-        let mut stream = stream;
-        play(&mut stream, script, stop).map(|(transcript, _)| transcript)
+        let Some(config) = &self.tls else {
+            let mut stream = stream;
+            return play(&mut stream, script, stop).map(|(transcript, _)| transcript);
+        };
+        let mut stream = StreamOwned::new(ServerConnection::new(Arc::clone(config))?, stream);
+        let (transcript, ending) = play(&mut stream, script, stop)?;
+        if ending == Ending::Finished {
+            stream.conn.send_close_notify();
+            stream.flush()?;
+        }
+        Ok(transcript)
     }
 }
 

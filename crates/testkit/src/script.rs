@@ -77,6 +77,13 @@ impl Script {
         self.step(Step::Fault(Fault::Garbage(bytes.to_vec())))
     }
 
+    /// Adds the steps of `other` after these.
+    #[must_use]
+    pub fn then(mut self, other: Self) -> Self {
+        self.steps.extend(other.steps);
+        self
+    }
+
     /// Adds any step.
     #[must_use]
     pub fn step(mut self, step: Step) -> Self {

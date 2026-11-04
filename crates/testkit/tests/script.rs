@@ -77,6 +77,7 @@ fn a_silent_client_times_the_server_out() -> Result<(), Box<dyn std::error::Erro
     let _client = TestClient::plain(server.addr(), TIMEOUT)?;
     let err = server.finish().err().ok_or("the script passed")?;
     assert!(matches!(&err, Error::Io(_)), "{err}");
+    assert!(err.to_string().starts_with("socket error: "), "{err}");
     assert!(std::error::Error::source(&err).is_some());
     Ok(())
 }

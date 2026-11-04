@@ -10,11 +10,18 @@
 //!   garbage).
 //! - [`Listen`] starts a [`FakeServer`] on a free loopback port, over plain TCP or implicit TLS. It serves one client
 //!   and [`FakeServer::finish`] returns the [`Transcript`] of what the client sent.
-//! - [`TestClient`] drives a server and reports each failure with its own [`ErrorKind`].
+//! - [`TestPki`] generates a test CA the client trusts and a stranger CA it does not, in memory at test time; no key
+//!   or certificate file exists anywhere. It makes the server configurations for the certificate faults of
+//!   [`CertFault`]: a chain from the stranger CA, an expired certificate, a certificate for the wrong host name, and a
+//!   valid chain met by a client whose [`Clock`] is far off.
+//! - [`TestClient`] drives a server and reports each failure with its own [`ErrorKind`]. It stands in for the real
+//!   client until `net` exists; later slices drive `net` against the same servers.
+//!
+//! Servers listen on 127.0.0.1 only and certificates name `example.org` hosts ([`HOST`], [`WRONG_HOST`]).
 //!
 //! ```
 //! use std::time::Duration;
-//! use inboxcraft_testkit::{ErrorKind, Listen, Script, TestClient};
+//! use inboxcraft_testkit::{CertFault, ErrorKind, Listen, Script, TestClient, TestPki};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let server = Listen::plain().start(Script::new().send("* OK ready").drop_connection())?;
@@ -22,6 +29,13 @@
 //! assert_eq!(client.read_line()?, "* OK ready");
 //! assert_eq!(client.read_line().map_err(|err| err.kind()), Err(ErrorKind::Dropped));
 //! server.finish()?;
+//!
+//! let pki = TestPki::new()?;
+//! let fault = CertFault::Expired;
+//! let server = Listen::tls(pki.server_config(Some(fault))?).start(Script::new().send("* OK ready"))?;
+//! let err = TestClient::tls(server.addr(), &pki.client(fault.clock())?, Duration::from_secs(5)).err();
+//! assert_eq!(err.map(|err| err.kind()), Some(ErrorKind::Expired));
+//! assert!(server.finish().is_err());
 //! # Ok(())
 //! # }
 //! ```
@@ -31,10 +45,12 @@
 mod client;
 mod error;
 mod line;
+mod pki;
 mod script;
 mod server;
 
 pub use client::{ClientError, ErrorKind, TestClient};
 pub use error::Error;
+pub use pki::{CertFault, Clock, FAR_OFF, HOST, TestPki, TlsClient, WRONG_HOST};
 pub use script::{Fault, Script, Step};
 pub use server::{FakeServer, Listen, Transcript};

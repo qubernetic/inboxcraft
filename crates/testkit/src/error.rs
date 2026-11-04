@@ -12,6 +12,10 @@ use std::io;
 pub enum Error {
     /// A socket call failed.
     Io(io::Error),
+    /// The TLS library refused a configuration.
+    Tls(rustls::Error),
+    /// Generating a test certificate failed.
+    Certificate(rcgen::Error),
     /// No client connected before the accept timeout.
     NoClient,
     /// The client sent a line the script did not expect.
@@ -33,6 +37,8 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(f, "socket error: {err}"),
+            Self::Tls(err) => write!(f, "TLS configuration error: {err}"),
+            Self::Certificate(err) => write!(f, "test certificate error: {err}"),
             Self::NoClient => f.write_str("no client connected before the accept timeout"),
             Self::Unexpected { expected, got } => write!(f, "the script expected {expected:?}, the client sent {got:?}"),
             Self::ClientGone => f.write_str("the client closed the connection while the script expected a line"),
@@ -46,6 +52,8 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
+            Self::Tls(err) => Some(err),
+            Self::Certificate(err) => Some(err),
             _ => None,
         }
     }
@@ -54,5 +62,17 @@ impl std::error::Error for Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Self::Io(err)
+    }
+}
+
+impl From<rustls::Error> for Error {
+    fn from(err: rustls::Error) -> Self {
+        Self::Tls(err)
+    }
+}
+
+impl From<rcgen::Error> for Error {
+    fn from(err: rcgen::Error) -> Self {
+        Self::Certificate(err)
     }
 }

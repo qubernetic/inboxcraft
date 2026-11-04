@@ -8,5 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+rcgen = { workspace = true }
+rustls = { workspace = true }
+time = { workspace = true }
+
 [lints]
 workspace = true
