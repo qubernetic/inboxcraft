@@ -263,7 +263,7 @@ fn is_invisible_mark(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
 }
 
-fn clean_name(name: &str) -> Option<String> {
+pub(crate) fn clean_name(name: &str) -> Option<String> {
     let mut cleaned = String::new();
     let mut kept = 0_usize;
     let mut space = false;

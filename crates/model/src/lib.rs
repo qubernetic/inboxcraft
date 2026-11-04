@@ -7,12 +7,14 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod account;
 mod address;
 mod flags;
 mod folder;
 mod id;
 mod role;
 
+pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
 pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
