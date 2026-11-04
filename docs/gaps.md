@@ -25,8 +25,12 @@ B = blocks the next stage.
   round trips, and the code that creates and removes the run folder on a server, come with `net`. Deleting the run
   folder leaves the empty `InboxCraft-Test` parent behind (#10).
 - `just it-live` reads the credentials with `secret-tool` (Secret Service) or `security` (macOS Keychain) and needs
-  bash; Windows Credential Manager is not supported yet. The leak scan of its output looks for the two secret
-  values verbatim, not for encoded forms such as base64 in an `AUTHENTICATE` line (#10).
+  bash; Windows Credential Manager is not supported yet. The leak scan of its output looks for the two secrets, the
+  two addresses and the two login names, each verbatim and as Rust's `{:?}` prints it, not for encoded forms such
+  as base64 in an `AUTHENTICATE` line. It runs after the output is on the screen, so it reports a leak and does not
+  hide it; a short login name that also occurs in ordinary output fails the run (#10).
+- A server without a hierarchy delimiter (`NIL` in `LIST`) has no run folder under `InboxCraft-Test`;
+  `RunFolder` needs a delimiter (#10).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -44,3 +48,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the coverage gate (#7) |
 | 2026-11-04 | minor | Rough edges of the fake server frame (#8) |
 | 2026-11-04 | minor | Rough edges of the live test harness (#10) |
+| 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |

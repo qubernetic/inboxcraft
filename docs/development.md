@@ -143,19 +143,33 @@ servers and `example.org` addresses.
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
-- **Accounts:** `live-imap` (a plain IMAP and SMTP account) and `live-google`. Output names them only by these
-  names; addresses, user names and secrets never appear in debug or error output.
-- **Allow-list:** `LiveConfig::check_recipient` admits exactly the two addresses given at run time; a live test
-  that sends mail checks every recipient with it first.
+- **Accounts:** `live-imap` (a plain IMAP and SMTP account) and `live-google`. The harness's own types name them
+  only by these names: their debug and error output never shows an address, a login name or a secret. Values a
+  test prints itself, or passes to an `assert_eq!` that fails, are not redacted; a live test never does either.
+- **Allow-list:** `LiveConfig::check_recipient` admits exactly the two addresses given at run time, each a plain
+  dot-atom address; a live test that sends mail checks every recipient with it first.
 - **Run folder:** `InboxCraft-Test/<run id>` (with the server's hierarchy delimiter), created by
   `RunFolder::create` and removed by `RunFolder::remove`, or on drop when a test fails before it gets there.
+  `RunFolder` builds the name itself and refuses a delimiter that could change it, so it deletes no other folder.
 - **Profile:** `nextest --profile live` (`.config/nextest.toml`) runs only the `live_*` tests, one at a time.
 
 ### Running them (owner)
-`just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It reads eight
-values from the OS credential store, service `inboxcraft-live`, one entry per variable, passes them into the
-container through its own environment for that run only (never on a command line or in a file), runs the `live`
-profile, and fails when a secret value appears in the test output. Extra arguments go to nextest.
+`just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It works in two
+steps:
+
+1. It builds the live test binary into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
+   build script, proc macro or other test binary ever runs with the credentials.
+2. It reads eight values from the OS credential store, service `inboxcraft-live`, one entry per variable, and runs
+   the `live` profile from the archive, which never compiles. The values reach the container through its own
+   environment for that run only, never on a command line or in a file.
+
+Extra arguments are test name filters for nextest; options (anything starting with `-`) are refused, so nothing
+can widen the run beyond the archived live tests.
+
+After the run it scans the output for the two secrets, the two addresses and the two login names, each as it is and
+as Rust's `{:?}` prints it, and fails the run when one appears, naming only the variable. The scan runs after the
+output is already on the screen and in the terminal's scrollback: it reports a leak, it does not hide it. Check the
+output yourself before you paste it anywhere, such as into an issue.
 
 | Variable | Meaning |
 |---|---|
@@ -232,3 +246,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | CI: the workspace workflow with Codecov, nightly fuzzing, Dependabot (#9) |
 | 2026-11-04 | minor | The `testkit` coverage floor (#8) |
 | 2026-11-04 | minor | Live tests: `just it-live`, the nextest `live` profile and `testkit::live` (#10) |
+| 2026-11-04 | minor | Live tests: build before reading the credentials, the wider leak scan, what is not redacted (#10) |
