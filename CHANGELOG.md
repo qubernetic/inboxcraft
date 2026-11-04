@@ -118,3 +118,19 @@ All notable changes to InboxCraft are listed here. The format follows
   compressed, for `net` to inflate. A move or UID EXPUNGE in a read-only mailbox is refused before anything is sent
   (`ProtoError::ReadOnly`), a second COMPRESS too (`AlreadyCompressed`). Transcripts with and without each
   capability; the property test and the fuzz target `imap_client` drive the new commands (#22)
+- `inboxcraft-testkit` fake IMAP server, `testkit::imap::FakeImap`, with its own command reader (tags, atoms,
+  quoted strings, synchronising and LITERAL+ literals, nested lists, all capped), never `proto`'s parser:
+  CAPABILITY, NOOP, LOGOUT, STARTTLS (with the certificate faults), LOGIN and AUTHENTICATE PLAIN with SASL-IR, refused
+  before TLS while LOGINDISABLED is on; LIST with SPECIAL-USE, SELECT, EXAMINE, STATUS, CLOSE, UID FETCH (flags,
+  arrival time, size, whole message, header, text, MODSEQ, PREVIEW), UID SEARCH; ENABLE, CONDSTORE (CHANGEDSINCE,
+  UNCHANGEDSINCE), QRESYNC (SELECT with VANISHED (EARLIER), `[CLOSED]`, UID FETCH VANISHED); IDLE; NOTIFY with its
+  filters and STATUS; UID STORE, UID COPY and UID MOVE with COPYUID, UID EXPUNGE and EXPUNGE; COMPRESS=DEFLATE.
+  Every capability can be switched off per test (`FakeImap::without`). `FakeImap::sample()` serves invented
+  `example.org` mailboxes; `Mailbox` and `Message` build others. `FakeImap::on` scripts what happens at a greeting,
+  a command, an answer or an IDLE: drop, delay and garbage faults, lines sent as they are, BYE, new mail, removed
+  mail, changed flags and a new UIDVALIDITY. `Listen::start_imap` serves it over plain TCP, STARTTLS or implicit
+  TLS; `FakeImap::answer` plays it without a socket. `Transcript::in_clear` lists what a client sent before TLS;
+  `TestClient` gains `start_tls`, `command` and `compress`. New dependency `flate2` (pure Rust deflate, no
+  network) for COMPRESS. Property tests on hostile input and the fuzz target `testkit_imap` (#23)
+- `cargo xtask layers` refuses any dependency of `testkit` on `proto`, so a fake server never uses the parser it
+  tests (#23)

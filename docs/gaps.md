@@ -16,8 +16,8 @@ B = blocks the next stage.
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
 - `cargo xtask ci` runs the tests twice, once under nextest and once under `cargo llvm-cov nextest` for the
   coverage gate (#7).
-- `testkit` serves one client per fake server and speaks implicit TLS only; STARTTLS comes with the fake SMTP
-  server. A script matches whole lines exactly (#8).
+- `testkit` serves one client per fake server. A line script speaks implicit TLS only and matches whole lines
+  exactly (#8); the fake IMAP server also speaks STARTTLS (#23).
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
   OS verifier `net` will use. It knows its clock is far off because the test sets the offset; the real
   `account.check` needs another reference for the clock (#8).
@@ -152,6 +152,20 @@ B = blocks the next stage.
 - `proto` COMPRESS=DEFLATE: only the negotiation; the stream, its inflate size cap and a server that sends a
   compression bomb are `net`'s (E1.7b). The client cannot tell a server that compresses at the TLS layer already;
   such a server answers `NO [COMPRESSIONACTIVE]` (#22).
+- The fake IMAP server knows the UID forms only: FETCH, STORE, SEARCH, COPY and MOVE by sequence number are
+  answered `BAD`. It has no APPEND, CREATE, DELETE, RENAME, SUBSCRIBE, LSUB, UNSELECT, NAMESPACE or ID, no
+  ENVELOPE, BODYSTRUCTURE, partial or `HEADER.FIELDS` fetch, and no SEARCH by sequence set, KEYWORD, MODSEQ, NEW,
+  RECENT or sent date. SEARCH compares arrival days without their zone and text without ASCII case over the raw
+  bytes, without decoding encoded words or transfer encodings. `RECENT` is always 0 (#23).
+- The fake IMAP server compares mailbox names as UTF-8 and knows no modified UTF-7. Its PREVIEW is the first 200
+  characters of the raw body with white space runs made one space, with no transfer decoding or HTML stripping,
+  unless the fixture sets one (#23).
+- The fake's NOTIFY takes every mailbox as personal and subscribed. It sends a STATUS line for any change to a
+  covered mailbox that is not open, and never sends FlagChange for those, MailboxName or SubscriptionChange. The
+  open mailbox's changes go out at once only under a SELECTED filter; without one they wait for the next command.
+  ENABLE works only in the authenticated state (#23).
+- A scripted change to a mailbox that does not exist, or to a UID that is not there, does nothing. Each `on` rule
+  plays once. A compressed read that inflates past 1 MiB ends the session (#23).
 
 ## Revision history
 | Date | Change | Summary |
@@ -176,3 +190,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | IMAP server words before TLS, password pieces, capabilities during a sign-in (#20) |
 | 2026-11-04 | minor | Rough edges of the IMAP sync extensions (#21) |
 | 2026-11-04 | minor | Rough edges of IMAP move, UIDPLUS, preview and compression (#22) |
+| 2026-11-04 | minor | Rough edges of the fake IMAP server (#23) |

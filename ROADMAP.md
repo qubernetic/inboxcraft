@@ -46,6 +46,7 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | `proto`: the sans-I/O IMAP client core (greeting, CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN over TLS only, LIST with SPECIAL-USE, SELECT, EXAMINE, UID FETCH, UID SEARCH, LOGOUT), golden transcripts, fuzz target (#20) |
 | 2026-11-04 | `proto`: ENABLE, CONDSTORE, QRESYNC with VANISHED and the UIDVALIDITY check, IDLE, NOTIFY with STATUS and mailbox changes, transcripts with and without each (#21) |
 | 2026-11-04 | `proto`: UID COPY, UID MOVE with the copy and expunge fallback, UIDPLUS (UID EXPUNGE, COPYUID, UIDNOTSTICKY), PREVIEW, COMPRESS=DEFLATE negotiation (#22) |
+| 2026-11-04 | `testkit`: the fake IMAP server with its own command reader, invented mailboxes, every E1.4 extension switchable per test, scripted mail changes and faults, STARTTLS with the certificate faults, fuzz target (#23) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -64,3 +65,4 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | minor | Progress log: the IMAP client core (#20) |
 | 2026-11-04 | minor | Progress log: the IMAP sync extensions (#21) |
 | 2026-11-04 | minor | Progress log: IMAP move, UIDPLUS, preview and compression (#22) |
+| 2026-11-04 | minor | Progress log: the fake IMAP server (#23) |
