@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-03 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -80,7 +80,7 @@ invented.
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
-  layers, wasm, deny.
+  layers, wasm, deny, and the coverage floors in `.config/coverage.toml` (`cargo xtask cov --check`).
 - The host has no Rust toolchain: every `cargo` command runs in the dev container (`just shell`) or in native mode.
 - Every source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Git: Gitflow (`main` and `develop` are protected; work on `feature/<issue>-<slug>`, `fix/…`, `hotfix/…`,
@@ -108,3 +108,9 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
   `v<version>` → GitHub Release from the CHANGELOG section → back-merge `main` into `develop`.
 - Every doc has a status line at the top and a `## Revision history` table at the bottom; bump both when you touch it.
 - British spelling (licence as a noun, colour, behaviour). Plain words, numbers, honest limits, no marketing.
+
+## Revision history
+| Date | Change | Summary |
+|---|---|---|
+| 2026-11-03 | major | First version |
+| 2026-11-04 | minor | The coverage gate joins the `just ci` list (#7) |
