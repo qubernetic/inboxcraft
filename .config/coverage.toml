@@ -1,0 +1,34 @@
+# Line coverage floors in per cent for `cargo xtask cov --check` (part of `cargo xtask ci`); see
+# docs/development.md, "The coverage gate". A floor is never lowered in the PR that falls below it: lowering one
+# needs the project owner.
+#
+# Patterns are workspace-relative paths of `/`-separated components: a name, `*` (one component) or, last, `**` (one
+# or more components).
+
+# The workspace total: every counted line, without the files in `workspace-exclude`.
+workspace = 95
+
+# Files counted nowhere: `xtask`'s `main` dispatch.
+exclude = ["xtask/src/main.rs"]
+
+# Files counted for their own crate but not for the workspace total: the apps' `main`. The `ui-egui` drawing code
+# joins this list when it lands.
+workspace-exclude = ["apps/*/src/main.rs"]
+
+[crates]
+# The core crates.
+inboxcraft-charset = 98
+inboxcraft-dav = 98
+inboxcraft-engine = 98
+inboxcraft-ical = 98
+inboxcraft-mime = 98
+inboxcraft-model = 98
+inboxcraft-proto = 98
+inboxcraft-store = 98
+# The fake server frame: the issue asks the core-crate floor of it.
+inboxcraft-testkit = 98
+inboxcraft-time = 98
+inboxcraft-vcard = 98
+# State and view-model logic tested headless, drawing through `ui_shot`; `net` against the fake servers.
+inboxcraft-net = 80
+inboxcraft-ui-egui = 80

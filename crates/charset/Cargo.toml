@@ -1,0 +1,12 @@
+[package]
+name = "inboxcraft-charset"
+description = "InboxCraft: character set decoding for mail text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
