@@ -76,15 +76,17 @@ fn json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap()
 }
 
-fn dir() -> std::path::PathBuf {
-    tempfile::Builder::new().prefix("migrate-").tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap().keep()
+/// A fresh store directory under the target directory, removed when the value drops.
+fn dir() -> tempfile::TempDir {
+    tempfile::Builder::new().prefix("migrate-").tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
 }
 
 #[test]
 fn a_version_1_store_migrates_with_nothing_lost() {
-    let dir = dir();
-    version_1(&dir);
-    let mut store = Sqlite::open(&dir, StoreConfig::default()).unwrap();
+    let tmp = dir();
+    let dir = tmp.path();
+    version_1(dir);
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.accounts().unwrap(), [account(1)]);
     assert_eq!(store.folders(AccountId::new(1)).unwrap(), [folder(1, 1, "INBOX")]);
@@ -103,9 +105,10 @@ fn a_version_1_store_migrates_with_nothing_lost() {
 
 #[test]
 fn the_body_text_leaves_the_body_table() {
-    let dir = dir();
-    version_1(&dir);
-    drop(Sqlite::open(&dir, StoreConfig::default()).unwrap());
+    let tmp = dir();
+    let dir = tmp.path();
+    version_1(dir);
+    drop(Sqlite::open(dir, StoreConfig::default()).unwrap());
     let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
     let columns: Vec<String> =
         conn.prepare("SELECT name FROM pragma_table_info('body')").unwrap().query_map([], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
@@ -114,10 +117,11 @@ fn the_body_text_leaves_the_body_table() {
 
 #[test]
 fn a_migrated_store_opens_again_unchanged() {
-    let dir = dir();
-    version_1(&dir);
-    drop(Sqlite::open(&dir, StoreConfig::default()).unwrap());
-    let store = Sqlite::open(&dir, StoreConfig::default()).unwrap();
+    let tmp = dir();
+    let dir = tmp.path();
+    version_1(dir);
+    drop(Sqlite::open(dir, StoreConfig::default()).unwrap());
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.search(&Search::new().with_text("attached")).unwrap(), [m(1)]);
 }

@@ -9,7 +9,7 @@ mod contract;
 
 use inboxcraft_store::{Body, MAX_SOURCE_BYTES, MAX_TEXT_BYTES, Memory, Storage, StoreConfig, StoreError};
 
-contract_tests!(Memory::new(StoreConfig::default()));
+contract_tests!((Memory::new(StoreConfig::default()), ()));
 
 #[test]
 fn the_config_is_the_one_given() {

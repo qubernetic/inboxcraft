@@ -401,6 +401,7 @@ pub fn retention_names_the_bodies_to_fetch<S: Storage>(mut store: S) {
     assert_eq!(store.config().body_days, 30);
 }
 
+/// One test per contract function. `$make` gives the store and what has to live as long as the test (its directory).
 #[macro_export]
 macro_rules! contract_tests {
     ($make:expr) => {
@@ -435,7 +436,8 @@ macro_rules! contract_tests {
         $(
             #[test]
             fn $name() {
-                contract::$name($make);
+                let (store, _keep) = $make;
+                contract::$name(store);
             }
         )+
     };

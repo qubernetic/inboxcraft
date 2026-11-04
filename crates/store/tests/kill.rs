@@ -11,7 +11,7 @@
 mod contract;
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use contract::{body, message, two_accounts};
@@ -52,8 +52,9 @@ fn child_writes_until_killed() {
     }
 }
 
-fn dir() -> PathBuf {
-    tempfile::Builder::new().prefix("kill-").tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap().keep()
+/// A fresh store directory under the target directory, removed when the value drops.
+fn dir() -> tempfile::TempDir {
+    tempfile::Builder::new().prefix("kill-").tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
 }
 
 /// Runs the child until it has committed `more` batches, kills it, and returns the last batch it reported.
@@ -104,12 +105,13 @@ fn check(dir: &Path, committed: u64) -> u64 {
 
 #[test]
 fn a_kill_loses_no_committed_batch() {
-    let dir = dir();
-    two_accounts(&mut Sqlite::open(&dir, StoreConfig::default()).unwrap());
+    let tmp = dir();
+    let dir = tmp.path();
+    two_accounts(&mut Sqlite::open(dir, StoreConfig::default()).unwrap());
     let mut held = 0;
     for more in [1, 7, 30, 3, 60] {
-        let committed = run_and_kill(&dir, more);
+        let committed = run_and_kill(dir, more);
         assert_eq!(committed, held + more);
-        held = check(&dir, committed);
+        held = check(dir, committed);
     }
 }
