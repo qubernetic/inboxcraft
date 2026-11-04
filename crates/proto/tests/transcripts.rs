@@ -96,7 +96,7 @@ fn select_options(words: VecDeque<&str>) -> SelectOptions {
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
-/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `logout`.
+/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let mut words: VecDeque<&str> = rest.split_whitespace().collect();
@@ -148,6 +148,8 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let key = if keys.len() == 1 { keys.remove(0) } else { SearchKey::And(keys) };
             client.uid_search(&key)
         }
+        "idle" => client.idle(),
+        "done" => return client.done(),
         "logout" => client.logout(),
         other => panic!("unknown command {other}"),
     };
@@ -195,6 +197,7 @@ fn render(event: &Event) -> Vec<String> {
         Event::Exists(count) => vec![format!("exists {count}")],
         Event::Expunged(seq) => vec![format!("expunged {seq}")],
         Event::Alert(text) => vec![format!("alert {text}")],
+        Event::Idling => vec!["idling".to_owned()],
         Event::Vanished { uids, earlier: true } => vec![format!("vanished earlier {}", set_text(uids))],
         Event::Vanished { uids, earlier: false } => vec![format!("vanished {}", set_text(uids))],
         Event::UidValidityChanged { old, new } => {
@@ -239,6 +242,7 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Selected(selected) => vec![format!("{tag} {}", status(selected))],
             Answer::Fetched => vec![format!("{tag} fetched")],
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
+            Answer::Idled => vec![format!("{tag} idled")],
             Answer::LoggedOut => vec![format!("{tag} logged out")],
         },
     }

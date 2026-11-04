@@ -122,6 +122,8 @@ pub enum Event {
     },
     /// A text the server says must be shown to the person (`[ALERT]`), cleaned; only over TLS.
     Alert(String),
+    /// The server agreed to IDLE: changes come as events until [`Client::done`].
+    Idling,
 }
 
 /// What a command brought when it succeeded.
@@ -143,6 +145,8 @@ pub enum Answer {
     Fetched,
     /// UID SEARCH: the UIDs found.
     Searched(UidSet),
+    /// IDLE, ended by DONE.
+    Idled,
     /// LOGOUT.
     LoggedOut,
 }
@@ -189,6 +193,11 @@ enum Kind {
     Select(Opening),
     Fetch,
     Search(Vec<Uid>),
+    /// IDLE; `going` once the server agreed, `done` once DONE was asked for.
+    Idle {
+        going: bool,
+        done: bool,
+    },
     Logout {
         previous: State,
     },
@@ -498,8 +507,8 @@ impl Client {
     fn open(&mut self, verb: &'static str, mailbox: &str, read_only: bool, options: &SelectOptions) -> Result<Tag, ProtoError> {
         self.ready(verb, &[State::Authenticated, State::Selected])?;
         check_mailbox(mailbox)?;
-        if options.condstore && !self.offers_condstore() {
-            return Err(ProtoError::NotOffered("CONDSTORE"));
+        if options.condstore {
+            self.require_condstore()?;
         }
         let mut command = Command::new(verb).string(mailbox.as_bytes());
         let resync = options.known.filter(|_| self.qresync).and_then(|known| Some((known.uid_validity(), known.highest_modseq()?)));
@@ -531,8 +540,8 @@ impl Client {
     /// CONDSTORE, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is enabled, a state error.
     pub fn uid_fetch(&mut self, set: &UidSet, attributes: FetchAttributes) -> Result<Tag, ProtoError> {
         self.ready("UID FETCH", &[State::Selected])?;
-        if (attributes.modseq || attributes.changed_since.is_some()) && !self.offers_condstore() {
-            return Err(ProtoError::NotOffered("CONDSTORE"));
+        if attributes.modseq || attributes.changed_since.is_some() {
+            self.require_condstore()?;
         }
         if attributes.vanished && attributes.changed_since.is_none() {
             return Err(ProtoError::BadArgument("VANISHED without CHANGEDSINCE"));
@@ -556,6 +565,41 @@ impl Client {
         self.ready("UID SEARCH", &[State::Selected])?;
         let command = search::command(key)?;
         Ok(self.start(command, Kind::Search(Vec::new())))
+    }
+
+    /// IDLE (RFC 2177) in the open mailbox: [`Event::Idling`] once the server agrees, then what changes, as events,
+    /// until [`done`](Self::done). Nothing else can be sent meanwhile. Ending it before the server's time limit (often
+    /// 30 minutes) is the caller's work.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without `IDLE`, or a state error.
+    pub fn idle(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("IDLE", &[State::Selected])?;
+        self.require("IDLE")?;
+        Ok(self.start(Command::new("IDLE"), Kind::Idle { going: false, done: false }))
+    }
+
+    /// DONE: ends the IDLE in flight; before the server agreed to it, as soon as it does. Its answer is
+    /// [`Answer::Idled`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::WrongState`] when no IDLE is waiting for DONE, or [`ProtoError::Closed`].
+    pub fn done(&mut self) -> Result<(), ProtoError> {
+        if self.state == State::Closed {
+            return Err(ProtoError::Closed);
+        }
+        let Some(InFlight { kind: Kind::Idle { going, done: done @ false }, waiting, .. }) = self.in_flight.as_mut() else {
+            return Err(ProtoError::WrongState { command: "DONE", state: self.state });
+        };
+        *done = true;
+        if *going {
+            self.output.extend_from_slice(b"DONE\r\n");
+        } else {
+            waiting.push_back(b"DONE\r\n".to_vec());
+        }
+        Ok(())
     }
 
     /// LOGOUT.
@@ -583,9 +627,15 @@ impl Client {
         self.capabilities.as_ref().is_some_and(|capabilities| capabilities.has(capability))
     }
 
-    /// Whether the server keeps modification sequences: CONDSTORE, or QRESYNC, which brings it (RFC 7162 section 3.2).
-    fn offers_condstore(&self) -> bool {
-        self.offers("CONDSTORE") || self.offers("QRESYNC")
+    /// That the server listed `capability`.
+    fn require(&self, capability: &'static str) -> Result<(), ProtoError> {
+        let capabilities = self.capabilities.as_ref().ok_or(ProtoError::CapabilitiesUnknown)?;
+        if capabilities.has(capability) { Ok(()) } else { Err(ProtoError::NotOffered(capability)) }
+    }
+
+    /// That the server keeps modification sequences: CONDSTORE, or QRESYNC, which brings it (RFC 7162 section 3.2).
+    fn require_condstore(&self) -> Result<(), ProtoError> {
+        self.require("QRESYNC").or_else(|_| self.require("CONDSTORE"))
     }
 
     fn ready(&self, command: &'static str, allowed: &[State]) -> Result<(), ProtoError> {
@@ -711,6 +761,16 @@ impl Client {
     }
 
     fn go_ahead(&mut self) -> Result<(), ProtoError> {
+        if let Some(InFlight { kind: Kind::Idle { going, .. }, waiting, .. }) = self.in_flight.as_mut() {
+            if *going {
+                return Err(ProtoError::Unexpected("continuation request"));
+            }
+            *going = true;
+            self.events.push_back(Event::Idling);
+            // A DONE asked for before.
+            self.output.extend(waiting.pop_front().unwrap_or_default());
+            return Ok(());
+        }
         let chunk = self.in_flight.as_mut().and_then(|flight| flight.waiting.pop_front());
         let chunk = chunk.ok_or(ProtoError::Unexpected("continuation request"))?;
         self.output.extend_from_slice(&chunk);
@@ -868,6 +928,7 @@ impl Client {
             }
             Kind::Fetch => Answer::Fetched,
             Kind::Search(found) => Answer::Searched(found.into_iter().collect()),
+            Kind::Idle { .. } => Answer::Idled,
             Kind::Logout { .. } => {
                 self.state = State::Closed;
                 Answer::LoggedOut
