@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 inboxcraft-charset = { workspace = true }
+inboxcraft-time = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
