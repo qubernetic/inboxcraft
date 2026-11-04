@@ -30,6 +30,13 @@ fn encoding_letters_and_hex_digits_are_read_without_case() {
 }
 
 #[test]
+fn a_leading_u_feff_in_a_word_is_text_not_a_byte_order_mark() {
+    assert_eq!(decode_word("=?UTF-8?B?77u/?="), Ok("\u{feff}".to_owned()));
+    assert_eq!(decode_text("a =?UTF-8?Q?=EF=BB=BFb?="), clean("a \u{feff}b"));
+    assert_eq!(decode_text(&encode_text("\u{feff}")), clean("\u{feff}"));
+}
+
+#[test]
 fn an_empty_word_is_empty_text() {
     assert_eq!(decode_word("=?utf-8?q??="), Ok(String::new()));
     assert_eq!(decode_word("=?utf-8?b??="), Ok(String::new()));

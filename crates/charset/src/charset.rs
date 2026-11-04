@@ -49,6 +49,13 @@ impl Charset {
         let (text, malformed) = self.0.decode_with_bom_removal(bytes);
         Decoded { text: text.into_owned(), malformed }
     }
+
+    /// Decodes bytes in this charset to text, a byte order mark at the start kept as U+FEFF: for pieces of text,
+    /// such as the encoded words of a header, where it cannot be one.
+    pub(crate) fn decode_piece(self, bytes: &[u8]) -> Decoded {
+        let (text, malformed) = self.0.decode_without_bom_handling(bytes);
+        Decoded { text: text.into_owned(), malformed }
+    }
 }
 
 impl fmt::Debug for Charset {

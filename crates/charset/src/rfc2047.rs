@@ -68,7 +68,7 @@ impl std::error::Error for WordError {
 pub fn decode_word(word: &str) -> Result<String, WordError> {
     let raw = shape(word).filter(|raw| raw.len == word.len()).ok_or(WordError::NotAWord)?;
     let (charset, bytes) = raw.decode()?;
-    let decoded = charset.decode(&bytes);
+    let decoded = charset.decode_piece(&bytes);
     if decoded.malformed { Err(WordError::Malformed) } else { Ok(decoded.text) }
 }
 
@@ -145,7 +145,7 @@ impl Words {
 
     fn flush(&mut self) {
         if let Some((charset, bytes)) = self.pending.take() {
-            let decoded = charset.decode(&bytes);
+            let decoded = charset.decode_piece(&bytes);
             self.malformed |= decoded.malformed;
             self.text.push_str(&decoded.text);
         }
