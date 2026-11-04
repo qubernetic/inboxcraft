@@ -12,7 +12,21 @@ use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
 use super::mailbox::flag_list;
 use super::sync::modseq;
+use super::text::one_line;
 use super::value::{Value, number};
+
+/// Most characters of a preview kept: RFC 8970 allows no more.
+pub const MAX_PREVIEW_CHARS: usize = 256;
+
+/// How a fetch asks for a preview (PREVIEW, RFC 8970).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewFetch {
+    /// `PREVIEW`: the server makes one when it has none at hand.
+    Generate,
+    /// `PREVIEW (LAZY)`: only one the server has at hand; for the others it sends none, and they are asked for again
+    /// later with [`Generate`](Self::Generate).
+    Lazy,
+}
 
 /// The part of a message a fetch takes, without setting `\Seen` (`BODY.PEEK`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +76,8 @@ pub struct FetchAttributes {
     /// With [`changed_since`](Self::changed_since): the UIDs of the messages removed since then come as
     /// [`Event::Vanished`](super::Event::Vanished) (`VANISHED`, QRESYNC enabled).
     pub vanished: bool,
+    /// A short plain text of the message (PREVIEW).
+    pub preview: Option<PreviewFetch>,
     /// A part of the message.
     pub section: Option<Section>,
 }
@@ -75,6 +91,11 @@ impl FetchAttributes {
             if wanted {
                 items.push(item);
             }
+        }
+        match self.preview {
+            Some(PreviewFetch::Generate) => items.push("PREVIEW"),
+            Some(PreviewFetch::Lazy) => items.push("PREVIEW (LAZY)"),
+            None => {}
         }
         if let Some(section) = self.section {
             items.push(section.peek());
@@ -104,6 +125,9 @@ pub struct FetchItem {
     pub size: Option<u32>,
     /// Its modification sequence (CONDSTORE).
     pub modseq: Option<ModSeq>,
+    /// Its preview (PREVIEW): message data, not words of the server, made one line without control characters or
+    /// invisible marks and cut at [`MAX_PREVIEW_CHARS`]. `None` when the server sent none (`NIL`, after a lazy fetch).
+    pub preview: Option<String>,
     /// The part of the message the response carries, and its bytes.
     pub section: Option<(Section, Vec<u8>)>,
 }
@@ -129,6 +153,7 @@ impl FetchItem {
                 ("INTERNALDATE", Value::Str(date)) => item.internal_date = internal_date(&date),
                 ("RFC822.SIZE", value) => item.size = value.number(),
                 ("MODSEQ", Value::List(inner)) => item.modseq = inner.first().and_then(Value::atom).and_then(modseq),
+                ("PREVIEW", Value::Str(text)) => item.preview = Some(one_line(&String::from_utf8_lossy(&text), MAX_PREVIEW_CHARS, "")),
                 (name, Value::Str(bytes)) => {
                     if let Some(section) = Section::named(name) {
                         item.section = Some((section, bytes));

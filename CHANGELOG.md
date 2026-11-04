@@ -107,3 +107,14 @@ All notable changes to InboxCraft are listed here. The format follows
   (`ProtoError::NotOffered`, or `NotEnabled` for VANISHED before ENABLE QRESYNC), and a VANISHED it sends anyway
   ends the session. Transcripts for each extension and for a server without it; the property test and the fuzz
   target `imap_client` drive the new commands and responses (#21)
+- `inboxcraft-proto` moves and copies messages and reads previews. UID COPY, and UID MOVE (RFC 6851); a server
+  without MOVE gets UID COPY, UID STORE of `\Deleted` and, with UIDPLUS, UID EXPUNGE of only those messages, under
+  one tag, and the answer says how far that got (moved, expunged, marked deleted, or kept because a step was
+  refused). Without UIDPLUS the messages are copied and marked, but not expunged: EXPUNGE would remove every message
+  marked `\Deleted`. UIDPLUS (RFC 4315): UID EXPUNGE, COPYUID from COPY and from MOVE (also in parts), kept only
+  when its UIDs were asked for, none twice and as many on both sides, and UIDNOTSTICKY at SELECT. IMAP4rev2 counts
+  as offering MOVE and UIDPLUS. PREVIEW (RFC 8970), also lazy, made one clean line of at most 256 characters.
+  COMPRESS=DEFLATE (RFC 4978) is negotiated: after the OK the client hands back the bytes that came with it, still
+  compressed, for `net` to inflate. A move or UID EXPUNGE in a read-only mailbox is refused before anything is sent
+  (`ProtoError::ReadOnly`), a second COMPRESS too (`AlreadyCompressed`). Transcripts with and without each
+  capability; the property test and the fuzz target `imap_client` drive the new commands (#22)

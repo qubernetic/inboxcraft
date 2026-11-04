@@ -25,8 +25,8 @@ use std::path::Path;
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, SearchDate, SearchKey, Section,
-    SelectOptions, Transport,
+    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, PreviewFetch, Refusal, Removal,
+    SearchDate, SearchKey, Section, SelectOptions, Transport,
 };
 
 /// A UID set as IMAP writes one: `4,7:9`.
@@ -120,8 +120,9 @@ fn notify(words: VecDeque<&str>) -> Notify {
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
-/// [modseq] [since=<modseq>] [vanished] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
-/// `notify-none`, `idle`, `done`, `logout`.
+/// [modseq] [since=<modseq>] [vanished] [preview|lazy-preview] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
+/// `notify-none`, `copy <set> <name>`, `move <set> <name>`,
+/// `expunge <set>`, `compress`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let mut words: VecDeque<&str> = rest.split_whitespace().collect();
@@ -154,6 +155,8 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
                     "size" => attributes.size = true,
                     "modseq" => attributes.modseq = true,
                     "vanished" => attributes.vanished = true,
+                    "preview" => attributes.preview = Some(PreviewFetch::Generate),
+                    "lazy-preview" => attributes.preview = Some(PreviewFetch::Lazy),
                     "full" => attributes.section = Some(Section::Full),
                     "header" => attributes.section = Some(Section::Header),
                     "text" => attributes.section = Some(Section::Text),
@@ -173,8 +176,18 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let key = if keys.len() == 1 { keys.remove(0) } else { SearchKey::And(keys) };
             client.uid_search(&key)
         }
+        "copy" => {
+            let set = uid_set(words.pop_front().unwrap());
+            client.uid_copy(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
+        }
+        "move" => {
+            let set = uid_set(words.pop_front().unwrap());
+            client.uid_move(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
+        }
+        "expunge" => client.uid_expunge(&uid_set(words.pop_front().unwrap())),
         "notify" => client.notify(&notify(words)),
         "notify-none" => client.notify_none(),
+        "compress" => client.compress(),
         "idle" => client.idle(),
         "done" => return client.done(),
         "logout" => client.logout(),
@@ -203,7 +216,7 @@ fn mailbox(entry: &ListEntry) -> String {
 fn status(status: &MailboxStatus) -> String {
     let some = |value: Option<String>| value.unwrap_or_else(|| "none".to_owned());
     format!(
-        "selected exists={} recent={} flags={} permanent={} uidvalidity={} uidnext={} unseen={} modseq={} read-only={}",
+        "selected exists={} recent={} flags={} permanent={} uidvalidity={} uidnext={} unseen={} modseq={} read-only={}{}",
         status.exists,
         status.recent,
         list_text(&status.flags),
@@ -212,8 +225,33 @@ fn status(status: &MailboxStatus) -> String {
         some(status.uid_next.map(|v| v.to_string())),
         some(status.unseen.map(|v| v.to_string())),
         some(status.highest_modseq.map(|v| v.to_string())),
-        status.read_only
+        status.read_only,
+        if status.uid_not_sticky { " uidnotsticky" } else { "" }
     )
+}
+
+/// Ranges as the server wrote them, backwards ones too: `304,6:4`.
+fn ranges_text(ranges: &[(Uid, Uid)]) -> String {
+    ranges.iter().map(|(a, b)| if a == b { a.to_string() } else { format!("{a}:{b}") }).collect::<Vec<_>>().join(",")
+}
+
+fn copy_uid(copy_uid: Option<&CopyUid>) -> String {
+    copy_uid.map_or(String::new(), |c| format!(" {} {} -> {}", c.uid_validity(), ranges_text(c.source()), ranges_text(c.destination())))
+}
+
+fn refusal_text(refusal: &Refusal) -> String {
+    let code = refusal.code.as_ref().map(|code| format!(" [{code}]")).unwrap_or_default();
+    format!("{:?}{code} {}", refusal.kind, refusal.text).trim_end().to_owned()
+}
+
+fn removal(removal: &Removal) -> String {
+    match removal {
+        Removal::Moved => "by move".to_owned(),
+        Removal::Expunged => "by copy and expunge".to_owned(),
+        Removal::MarkedDeleted => "marked deleted".to_owned(),
+        Removal::NotMarked(refusal) => format!("kept, not marked: {}", refusal_text(refusal)),
+        Removal::NotExpunged(refusal) => format!("kept, not expunged: {}", refusal_text(refusal)),
+    }
 }
 
 /// The lines an event is written as.
@@ -262,15 +300,15 @@ fn render(event: &Event) -> Vec<String> {
             if let Some(modseq) = item.modseq {
                 let _ = write!(line, " modseq={modseq}");
             }
+            if let Some(preview) = &item.preview {
+                let _ = write!(line, " preview={preview:?}");
+            }
             if let Some((section, bytes)) = &item.section {
                 let _ = write!(line, " {section:?}=\"{}\"", bytes.escape_ascii());
             }
             vec![line]
         }
-        Event::Completed { tag, outcome: Err(refusal) } => {
-            let code = refusal.code.as_ref().map(|code| format!(" [{code}]")).unwrap_or_default();
-            vec![format!("{tag} {:?}{code} {}", refusal.kind, refusal.text).trim_end().to_owned()]
-        }
+        Event::Completed { tag, outcome: Err(refusal) } => vec![format!("{tag} {}", refusal_text(refusal))],
         Event::Completed { tag, outcome: Ok(answer) } => match answer {
             Answer::Capabilities(caps) => vec![format!("{tag} capabilities {}", caps.iter().collect::<Vec<_>>().join(" ")).trim_end().to_owned()],
             Answer::StartTls => vec![format!("{tag} starttls")],
@@ -284,6 +322,10 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Selected(selected) => vec![format!("{tag} {}", status(selected))],
             Answer::Fetched => vec![format!("{tag} fetched")],
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
+            Answer::Copied(copied) => vec![format!("{tag} copied{}", copy_uid(copied.as_ref()))],
+            Answer::Moved(moved) => vec![format!("{tag} moved{} {}", copy_uid(moved.copy_uid.as_ref()), removal(&moved.removal))],
+            Answer::Expunged => vec![format!("{tag} expunged")],
+            Answer::Compressed(pending) => vec![format!("{tag} compressed \"{}\"", pending.escape_ascii())],
             Answer::Idled => vec![format!("{tag} idled")],
             Answer::Notified => vec![format!("{tag} notified")],
             Answer::LoggedOut => vec![format!("{tag} logged out")],

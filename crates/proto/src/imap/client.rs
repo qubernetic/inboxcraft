@@ -20,6 +20,7 @@ use super::sasl::{check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
 use super::sync::{Extension, SelectOptions, vanished};
 use super::text::Secrets;
+use super::uidplus::CopyUid;
 use super::value::{Piece, Status, StatusLine, Value, number};
 use crate::ProtoError;
 
@@ -153,6 +154,17 @@ pub enum Answer {
     Fetched,
     /// UID SEARCH: the UIDs found.
     Searched(UidSet),
+    /// UID COPY, with where the messages went when the server says so (UIDPLUS).
+    Copied(Option<CopyUid>),
+    /// UID MOVE, or the steps that stand in for it.
+    Moved(Moved),
+    /// UID EXPUNGE: the messages that went came as [`Event::Expunged`] or [`Event::Vanished`].
+    Expunged,
+    /// COMPRESS DEFLATE: from the byte after this answer on, both directions are compressed (RFC 4978, raw DEFLATE
+    /// as in RFC 1951). The caller deflates everything [`Client::take_output`] gives from now on and inflates what the
+    /// server sends before it goes to [`Client::receive`]. These are the bytes that came after the OK in the same
+    /// piece, still compressed: they go through the inflater first.
+    Compressed(Vec<u8>),
     /// IDLE, ended by DONE.
     Idled,
     /// NOTIFY SET or NOTIFY NONE.
@@ -182,6 +194,32 @@ pub struct Refusal {
     pub text: String,
 }
 
+/// What a [`Client::uid_move`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    /// Where the messages went, when the server said so (UIDPLUS) and it fits what was moved.
+    pub copy_uid: Option<CopyUid>,
+    /// Whether, and how, the messages left the mailbox they were in.
+    pub removal: Removal,
+}
+
+/// How moved messages left the mailbox they were in. Without MOVE the client copies them, marks them `\Deleted` and
+/// expunges them, and each of the later steps can be refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Removal {
+    /// MOVE (RFC 6851): they went in one step.
+    Moved,
+    /// UID COPY, UID STORE of `\Deleted`, UID EXPUNGE of only these messages (UIDPLUS): they are gone.
+    Expunged,
+    /// UID COPY and UID STORE of `\Deleted`, not expunged: without UIDPLUS, EXPUNGE would remove every message
+    /// marked `\Deleted`, not only these.
+    MarkedDeleted,
+    /// Copied, but the server refused to mark them `\Deleted`: they are still there, and in the other mailbox too.
+    NotMarked(Refusal),
+    /// Copied and marked `\Deleted`, but the server refused UID EXPUNGE: they are still there.
+    NotExpunged(Refusal),
+}
+
 /// What a command waits for.
 enum Kind {
     /// CAPABILITY; `after_sign_in` when this client sent it after a sign-in that did not list them, which completes
@@ -203,6 +241,11 @@ enum Kind {
     Select(Opening),
     Fetch,
     Search(Vec<Uid>),
+    /// UID COPY of these UIDs.
+    Copy(UidSet),
+    Move(Moving),
+    Expunge,
+    Compress,
     /// NOTIFY SET (`set`) or NOTIFY NONE.
     Notify {
         set: bool,
@@ -224,6 +267,38 @@ struct Opening {
     known: Option<UidValidity>,
     /// Responses still belong to the mailbox open before, until `[CLOSED]` (RFC 7162 section 3.2.11).
     closing: bool,
+}
+
+/// A move on its way: MOVE, or a step of the fallback.
+struct Moving {
+    /// The caller's tag, the first step's, once a later step is on its way.
+    tag: Option<Tag>,
+    set: UidSet,
+    step: MoveStep,
+    copy_uid: Option<CopyUid>,
+    /// A COPYUID came that did not fit: no other one is taken.
+    void: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MoveStep {
+    Move,
+    Copy,
+    Store,
+    Expunge,
+}
+
+impl Moving {
+    /// An untagged `COPYUID` during MOVE; a server that moves in parts sends one for each.
+    fn told(&mut self, arg: &str) {
+        let merged = match (self.copy_uid.take(), CopyUid::parse(arg, &self.set)) {
+            (None, Some(new)) if !self.void => Some(new),
+            (Some(old), Some(new)) => old.merged(new, &self.set),
+            _ => None,
+        };
+        self.void = merged.is_none();
+        self.copy_uid = merged;
+    }
 }
 
 /// The command waiting for its answer.
@@ -260,8 +335,12 @@ pub struct Client {
     qresync: bool,
     /// The open mailbox's UIDVALIDITY.
     uid_validity: Option<UidValidity>,
+    /// The open mailbox is read-only.
+    read_only: bool,
     /// NOTIFY SET is on.
     notifying: bool,
+    /// COMPRESS DEFLATE is on.
+    compressed: bool,
 }
 
 /// Neither the output (it may hold a password) nor anything secret is shown.
@@ -293,7 +372,9 @@ impl Client {
             condstore: false,
             qresync: false,
             uid_validity: None,
+            read_only: false,
             notifying: false,
+            compressed: false,
         }
     }
 
@@ -307,6 +388,12 @@ impl Client {
     #[must_use]
     pub fn is_encrypted(&self) -> bool {
         self.tls
+    }
+
+    /// Whether COMPRESS DEFLATE is on: what goes to and comes from the server is compressed.
+    #[must_use]
+    pub fn is_compressed(&self) -> bool {
+        self.compressed
     }
 
     /// What the server said it can do, `None` until it has (and again after STARTTLS and a sign-in, until read).
@@ -544,6 +631,7 @@ impl Client {
         // Whatever the answer, the mailbox open before is closed (RFC 9051 section 6.3.2).
         self.state = State::Authenticated;
         self.uid_validity = None;
+        self.read_only = read_only;
         let status = MailboxStatus { read_only, ..MailboxStatus::default() };
         Ok(self.start(command, Kind::Select(Opening { status, known: options.known.map(|known| known.uid_validity()), closing })))
     }
@@ -554,7 +642,8 @@ impl Client {
     ///
     /// [`ProtoError::BadArgument`] for an empty set or one of more than [`crate::imap::MAX_SET_RANGES`] ranges or
     /// VANISHED without CHANGEDSINCE, [`ProtoError::NotOffered`] for MODSEQ or CHANGEDSINCE from a server without
-    /// CONDSTORE, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is enabled, a state error.
+    /// CONDSTORE and for a preview from one without PREVIEW, [`ProtoError::NotEnabled`] for VANISHED before QRESYNC is
+    /// enabled, a state error.
     pub fn uid_fetch(&mut self, set: &UidSet, attributes: FetchAttributes) -> Result<Tag, ProtoError> {
         self.ready("UID FETCH", &[State::Selected])?;
         if attributes.modseq || attributes.changed_since.is_some() {
@@ -565,6 +654,9 @@ impl Client {
         }
         if attributes.vanished && !self.qresync {
             return Err(ProtoError::NotEnabled("QRESYNC"));
+        }
+        if attributes.preview.is_some() {
+            self.require("PREVIEW")?;
         }
         let mut command = Command::new("UID FETCH").arg(&set_text(set)?).arg(&attributes.items());
         if let Some(modifiers) = attributes.modifiers() {
@@ -582,6 +674,57 @@ impl Client {
         self.ready("UID SEARCH", &[State::Selected])?;
         let command = search::command(key)?;
         Ok(self.start(command, Kind::Search(Vec::new())))
+    }
+
+    /// UID COPY (RFC 9051 section 6.4.7) of the messages in `set` to `mailbox`, the name as the server wrote it. With
+    /// UIDPLUS the answer says which UIDs they got there.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::BadArgument`] for a set or mailbox name that cannot be sent, or a state error.
+    pub fn uid_copy(&mut self, set: &UidSet, mailbox: &str) -> Result<Tag, ProtoError> {
+        self.ready("UID COPY", &[State::Selected])?;
+        check_mailbox(mailbox)?;
+        let command = Command::new("UID COPY").arg(&set_text(set)?).string(mailbox.as_bytes());
+        Ok(self.start(command, Kind::Copy(set.clone())))
+    }
+
+    /// UID MOVE (RFC 6851) of the messages in `set` to `mailbox`, the name as the server wrote it. A server without
+    /// MOVE gets UID COPY, UID STORE `+FLAGS.SILENT (\Deleted)` and, with UIDPLUS, UID EXPUNGE of these messages,
+    /// one after the other under this one tag; [`Answer::Moved`] says how far that went.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::ReadOnly`], [`ProtoError::BadArgument`] for a set or mailbox
+    /// name that cannot be sent, or a state error.
+    pub fn uid_move(&mut self, set: &UidSet, mailbox: &str) -> Result<Tag, ProtoError> {
+        self.ready("UID MOVE", &[State::Selected])?;
+        check_mailbox(mailbox)?;
+        if self.capabilities.is_none() {
+            return Err(ProtoError::CapabilitiesUnknown);
+        }
+        if self.read_only {
+            return Err(ProtoError::ReadOnly);
+        }
+        let (verb, step) = if self.offers_in_rev2("MOVE") { ("UID MOVE", MoveStep::Move) } else { ("UID COPY", MoveStep::Copy) };
+        let command = Command::new(verb).arg(&set_text(set)?).string(mailbox.as_bytes());
+        Ok(self.start(command, Kind::Move(Moving { tag: None, set: set.clone(), step, copy_uid: None, void: false })))
+    }
+
+    /// UID EXPUNGE (UIDPLUS, RFC 4315 section 2.1): removes the messages in `set` that are marked `\Deleted`, and no
+    /// other.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without UIDPLUS or IMAP4rev2,
+    /// [`ProtoError::ReadOnly`], [`ProtoError::BadArgument`] for a set that cannot be sent, or a state error.
+    pub fn uid_expunge(&mut self, set: &UidSet) -> Result<Tag, ProtoError> {
+        self.ready("UID EXPUNGE", &[State::Selected])?;
+        self.require_in_rev2("UIDPLUS")?;
+        if self.read_only {
+            return Err(ProtoError::ReadOnly);
+        }
+        Ok(self.start(Command::new("UID EXPUNGE").arg(&set_text(set)?), Kind::Expunge))
     }
 
     /// NOTIFY SET (RFC 5465): the server tells of what `notify` names without being asked, until NOTIFY NONE or
@@ -607,6 +750,22 @@ impl Client {
         self.ready("NOTIFY", &[State::Authenticated, State::Selected])?;
         self.require("NOTIFY")?;
         Ok(self.start(Command::new("NOTIFY NONE"), Kind::Notify { set: false }))
+    }
+
+    /// COMPRESS DEFLATE (RFC 4978), after the sign-in, to a server that offers `COMPRESS=DEFLATE`. Only the
+    /// negotiation is here; see [`Answer::Compressed`] for what the caller does once the server agreed.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::AlreadyCompressed`], [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`], or a state
+    /// error.
+    pub fn compress(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("COMPRESS", &[State::Authenticated, State::Selected])?;
+        if self.compressed {
+            return Err(ProtoError::AlreadyCompressed);
+        }
+        self.require("COMPRESS=DEFLATE")?;
+        Ok(self.start(Command::new("COMPRESS DEFLATE"), Kind::Compress))
     }
 
     /// IDLE (RFC 2177) in the open mailbox: [`Event::Idling`] once the server agrees, then what changes, as events,
@@ -673,6 +832,16 @@ impl Client {
     fn require(&self, capability: &'static str) -> Result<(), ProtoError> {
         let capabilities = self.capabilities.as_ref().ok_or(ProtoError::CapabilitiesUnknown)?;
         if capabilities.has(capability) { Ok(()) } else { Err(ProtoError::NotOffered(capability)) }
+    }
+
+    /// Whether the server listed `capability`, or IMAP4rev2, which has it in it (RFC 9051 appendix E).
+    fn offers_in_rev2(&self, capability: &str) -> bool {
+        self.offers(capability) || self.offers("IMAP4rev2")
+    }
+
+    /// That the server listed `capability`, or IMAP4rev2.
+    fn require_in_rev2(&self, capability: &'static str) -> Result<(), ProtoError> {
+        self.require(capability).or_else(|error| if self.offers("IMAP4rev2") { Ok(()) } else { Err(error) })
     }
 
     /// That the server keeps modification sequences: CONDSTORE, or QRESYNC, which brings it (RFC 7162 section 3.2).
@@ -758,6 +927,9 @@ impl Client {
                     }
                     Some(InFlight { kind: Kind::Select(opening), .. }) if !opening.closing => opening.status.note_code(line),
                     Some(InFlight { kind: Kind::Select(_), .. }) => {}
+                    Some(InFlight { kind: Kind::Move(moving), .. }) if line.code == "COPYUID" && moving.step == MoveStep::Move => {
+                        moving.told(&line.arg);
+                    }
                     _ if self.state == State::Selected && line.code == "UIDVALIDITY" => {
                         self.uid_validity_told(number(&line.arg).and_then(UidValidity::new))
                     }
@@ -922,6 +1094,7 @@ impl Client {
                 self.state = State::Authenticated;
                 Err(refusal)
             }
+            (Kind::Move(moving), Some(refusal)) => return self.move_answered(tag, moving, line, Some(refusal)),
             (_, Some(refusal)) => Err(refusal),
             (kind, None) => match self.succeeded(kind, &tag, line, fresh)? {
                 Some(answer) => Ok(answer),
@@ -932,7 +1105,40 @@ impl Client {
         Ok(())
     }
 
-    /// The answer of a command the server completed with OK; `None` while a CAPABILITY must follow first.
+    /// The answer to a step of a move: the next step, or the caller's answer.
+    fn move_answered(&mut self, step_tag: Tag, mut moving: Moving, line: &StatusLine, refusal: Option<Refusal>) -> Result<(), ProtoError> {
+        let tag = moving.tag.take().unwrap_or(step_tag);
+        if refusal.is_none() && matches!(moving.step, MoveStep::Move | MoveStep::Copy) && moving.copy_uid.is_none() && !moving.void {
+            moving.copy_uid = copy_uid(line, &moving.set);
+        }
+        let removal = match (moving.step, refusal) {
+            (MoveStep::Move | MoveStep::Copy, Some(refusal)) => Err(refusal),
+            (MoveStep::Store, Some(refusal)) => Ok(Removal::NotMarked(refusal)),
+            (MoveStep::Expunge, Some(refusal)) => Ok(Removal::NotExpunged(refusal)),
+            (MoveStep::Move, None) => Ok(Removal::Moved),
+            (MoveStep::Store, None) if !self.offers_in_rev2("UIDPLUS") => Ok(Removal::MarkedDeleted),
+            (MoveStep::Expunge, None) => Ok(Removal::Expunged),
+            (step @ (MoveStep::Copy | MoveStep::Store), None) => {
+                let set = set_text(&moving.set)?;
+                let command = if step == MoveStep::Copy {
+                    moving.step = MoveStep::Store;
+                    Command::new("UID STORE").arg(&set).arg("+FLAGS.SILENT (\\Deleted)")
+                } else {
+                    moving.step = MoveStep::Expunge;
+                    Command::new("UID EXPUNGE").arg(&set)
+                };
+                moving.tag = Some(tag);
+                self.start(command, Kind::Move(moving));
+                return Ok(());
+            }
+        };
+        let outcome = removal.map(|removal| Answer::Moved(Moved { copy_uid: moving.copy_uid, removal }));
+        self.events.push_back(Event::Completed { tag, outcome });
+        Ok(())
+    }
+
+    /// The answer of a command the server completed with OK; `None` while a CAPABILITY or the next step of a move
+    /// must follow first, or when the move told the caller already.
     fn succeeded(&mut self, kind: Kind, tag: &Tag, line: &StatusLine, fresh: bool) -> Result<Option<Answer>, ProtoError> {
         let answer = match kind {
             Kind::Capability { .. } => {
@@ -978,11 +1184,23 @@ impl Client {
                     self.events.push_back(Event::UidValidityChanged { old, new: status.uid_validity });
                 }
                 self.uid_validity = status.uid_validity;
+                self.read_only = status.read_only;
                 self.state = State::Selected;
                 Answer::Selected(status)
             }
             Kind::Fetch => Answer::Fetched,
             Kind::Search(found) => Answer::Searched(found.into_iter().collect()),
+            Kind::Move(moving) => {
+                self.move_answered(tag.clone(), moving, line, None)?;
+                return Ok(None);
+            }
+            Kind::Copy(asked) => Answer::Copied(copy_uid(line, &asked)),
+            Kind::Expunge => Answer::Expunged,
+            Kind::Compress => {
+                self.compressed = true;
+                // Not read here: the caller inflates it first.
+                Answer::Compressed(self.framer.take_pending())
+            }
             Kind::Idle { .. } => Answer::Idled,
             Kind::Notify { set } => {
                 self.notifying = set;
@@ -995,6 +1213,11 @@ impl Client {
         };
         Ok(Some(answer))
     }
+}
+
+/// The COPYUID of a status line, when it has one that fits the UIDs `asked` for.
+fn copy_uid(line: &StatusLine, asked: &UidSet) -> Option<CopyUid> {
+    (line.code == "COPYUID").then(|| CopyUid::parse(&line.arg, asked)).flatten()
 }
 
 /// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`. EXISTS, EXPUNGE and FETCH belong to a mailbox

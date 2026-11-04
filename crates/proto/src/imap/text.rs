@@ -14,11 +14,16 @@ pub const MAX_TEXT_CHARS: usize = 300;
 /// Server text made fit for an error or a refusal: one line, no control characters, no invisible direction or
 /// zero-width marks ([`is_invisible_mark`]), at most [`MAX_TEXT_CHARS`] characters and a `...` when it was longer.
 pub(crate) fn tidy(text: &str) -> String {
+    one_line(text, MAX_TEXT_CHARS, "...")
+}
+
+/// `text` as one line as [`tidy`] makes it, of at most `max` characters, and `cut` after it when it was longer.
+pub(crate) fn one_line(text: &str, max: usize, cut: &str) -> String {
     let mut out = String::new();
     let mut space = false;
     for (n, c) in text.trim().chars().enumerate() {
-        if n >= MAX_TEXT_CHARS {
-            out.push_str("...");
+        if n >= max {
+            out.push_str(cut);
             break;
         }
         if is_invisible_mark(c) {

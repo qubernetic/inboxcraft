@@ -3,7 +3,8 @@
 
 //! The IMAP client and its response parser on any bytes, in any state: nothing panics, a receive that fails is fatal
 //! and closes the session, a refused command is not, lists stay within their caps, server text is clean and short,
-//! and once a password is given no error or event shows it.
+//! COPYUID names only UIDs that were asked for, previews are clean and short, and once a password is given no error
+//! or event shows it.
 //!
 //! The input is pieces separated by 0xFF: the first byte of each picks a command to start before the rest of the
 //! piece is received; the very first byte of the input also picks the transport and whether a valid greeting comes
@@ -14,8 +15,8 @@
 
 use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, MAX_FLAGS, MAX_MAILBOXES, MAX_TEXT_CHARS, Notify, NotifyMailboxes, SearchKey, Section,
-    SelectOptions, State, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, MAX_FLAGS, MAX_MAILBOXES, MAX_PREVIEW_CHARS, MAX_TEXT_CHARS, Moved, Notify, NotifyMailboxes,
+    PreviewFetch, SearchKey, Section, SelectOptions, State, Transport,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -34,7 +35,8 @@ fn start(client: &mut Client, command: u8) -> Option<bool> {
     let resync = SelectOptions { condstore: true, known, known_uids: Some(one.clone()) };
     let changed = FetchAttributes { modseq: true, changed_since: ModSeq::new(5), vanished: true, ..FetchAttributes::default() };
     let notify = Notify { selected: true, mailboxes: Some(NotifyMailboxes::Subtree(vec!["Lists".into()])), mailbox_names: true, status: true };
-    let result = match command % 20 {
+    let preview = FetchAttributes { preview: Some(PreviewFetch::Lazy), flags: true, ..FetchAttributes::default() };
+    let result = match command % 25 {
         16 => client.done(),
         17 => client.notify(&notify).map(drop),
         18 => client.notify_none().map(drop),
@@ -55,12 +57,17 @@ fn start(client: &mut Client, command: u8) -> Option<bool> {
             12 => client.enable(Extension::CondStore),
             13 => client.select_with("INBOX", &resync),
             14 => client.uid_fetch(&one, changed),
+            20 => client.uid_copy(&one, "Archive"),
+            21 => client.uid_move(&one, "Archive"),
+            22 => client.uid_expunge(&one),
+            23 => client.compress(),
+            24 => client.uid_fetch(&one, preview),
             _ => client.idle(),
         }
         .map(drop),
     };
     match result {
-        Ok(_) => Some(matches!(command % 20, 3 | 4)),
+        Ok(_) => Some(matches!(command % 25, 3 | 4)),
         Err(error) => {
             assert!(!error.is_fatal() || client.state() == State::Closed, "{error:?}");
             None
@@ -79,7 +86,15 @@ fn check(event: &Event, given: bool) {
                 assert!(entry.attributes.len() <= MAX_FLAGS);
             }
         }
-        Event::Fetched(item) => assert!(item.flags.as_ref().is_none_or(|flags| flags.len() <= MAX_FLAGS)),
+        Event::Fetched(item) => {
+            assert!(item.flags.as_ref().is_none_or(|flags| flags.len() <= MAX_FLAGS));
+            if let Some(preview) = &item.preview {
+                assert!(preview.chars().count() <= MAX_PREVIEW_CHARS && !preview.chars().any(char::is_control), "{preview:?}");
+            }
+        }
+        Event::Completed { outcome: Ok(Answer::Copied(Some(copy_uid)) | Answer::Moved(Moved { copy_uid: Some(copy_uid), .. })), .. } => {
+            assert!(copy_uid.pairs().all(|(source, _)| source.get() == 1), "{copy_uid:?}");
+        }
         Event::Status(counts) => assert!(!counts.raw.is_empty() && !counts.raw.chars().any(char::is_control), "{counts:?}"),
         Event::MailboxChanged(entry) => {
             assert!(!entry.raw.is_empty() && !entry.raw.chars().any(char::is_control), "{entry:?}");
@@ -100,7 +115,7 @@ fuzz_target!(|data: &[u8]| {
     let mut client = Client::new(if first & 1 == 0 { Transport::Tls } else { Transport::Plain });
     if first & 2 == 0 {
         let _ = client
-            .receive(b"* OK [CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN SASL-IR LIST-EXTENDED SPECIAL-USE ENABLE CONDSTORE QRESYNC IDLE NOTIFY] hi\r\n");
+            .receive(b"* OK [CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN SASL-IR LIST-EXTENDED SPECIAL-USE ENABLE CONDSTORE QRESYNC IDLE NOTIFY MOVE UIDPLUS PREVIEW COMPRESS=DEFLATE] hi\r\n");
     }
     let mut given = false;
     for piece in rest.split(|b| *b == 0xFF) {

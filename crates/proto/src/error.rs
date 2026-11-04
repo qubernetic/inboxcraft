@@ -19,6 +19,8 @@ pub enum ProtoError {
     NotEncrypted,
     /// STARTTLS on a connection that is encrypted already.
     AlreadyEncrypted,
+    /// COMPRESS on a connection that is compressed already.
+    AlreadyCompressed,
     /// The command is not allowed in the session's state (FETCH before SELECT, LOGIN after LOGIN).
     WrongState {
         /// The command, as IMAP names it.
@@ -36,6 +38,8 @@ pub enum ProtoError {
     NotEnabled(&'static str),
     /// An argument cannot be sent: it is empty, too long, or holds a character the command cannot carry.
     BadArgument(&'static str),
+    /// The open mailbox is read-only (EXAMINE, or `READ-ONLY`): nothing in it can be removed.
+    ReadOnly,
 
     /// The server sent a line, or the text of one response, longer than `limit` bytes.
     LineTooLong {
@@ -81,12 +85,14 @@ impl ProtoError {
             self,
             Self::NotEncrypted
                 | Self::AlreadyEncrypted
+                | Self::AlreadyCompressed
                 | Self::WrongState { .. }
                 | Self::Busy
                 | Self::NotOffered(_)
                 | Self::CapabilitiesUnknown
                 | Self::NotEnabled(_)
                 | Self::BadArgument(_)
+                | Self::ReadOnly
         )
     }
 }
@@ -96,12 +102,14 @@ impl fmt::Display for ProtoError {
         match self {
             Self::NotEncrypted => f.write_str("the connection is not encrypted, so no password is sent"),
             Self::AlreadyEncrypted => f.write_str("the connection is encrypted already"),
+            Self::AlreadyCompressed => f.write_str("the connection is compressed already"),
             Self::WrongState { command, state } => write!(f, "{command} cannot be sent in the {state} state"),
             Self::Busy => f.write_str("another command is waiting for its answer"),
             Self::NotOffered(what) => write!(f, "the server does not offer {what}"),
             Self::CapabilitiesUnknown => f.write_str("the server has not said what it can do yet"),
             Self::NotEnabled(what) => write!(f, "{what} is not enabled"),
             Self::BadArgument(what) => write!(f, "the {what} cannot be sent"),
+            Self::ReadOnly => f.write_str("the mailbox is open read-only"),
             Self::LineTooLong { limit } => write!(f, "the server sent a response longer than {limit} bytes"),
             Self::LiteralTooLarge { size, limit } => write!(f, "the server announced {size} bytes in one response, more than {limit}"),
             Self::TooManyLiterals { limit } => write!(f, "the server sent more than {limit} literals in one response"),

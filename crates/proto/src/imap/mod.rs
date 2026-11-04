@@ -5,7 +5,9 @@
 //!
 //! The commands of the read path: CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN (encrypted connections only),
 //! LIST with SPECIAL-USE, SELECT and EXAMINE, UID FETCH, UID SEARCH and LOGOUT; and to keep a mailbox in step, ENABLE
-//! (RFC 5161), CONDSTORE and QRESYNC (RFC 7162), IDLE (RFC 2177) and NOTIFY (RFC 5465).
+//! (RFC 5161), CONDSTORE and QRESYNC (RFC 7162), IDLE (RFC 2177) and NOTIFY (RFC 5465); and UID COPY, UID MOVE
+//! (RFC 6851, with a fallback for servers without it), UID EXPUNGE and COPYUID (UIDPLUS, RFC 4315), PREVIEW
+//! (RFC 8970) and the negotiation of COMPRESS=DEFLATE (RFC 4978).
 
 mod capability;
 mod client;
@@ -20,12 +22,13 @@ mod sasl;
 mod search;
 mod sync;
 mod text;
+mod uidplus;
 mod utf7;
 mod value;
 
 pub use capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN};
-pub use client::{Answer, Client, Event, Refusal, RefusalKind, State, Tag, Transport};
-pub use fetch::{FetchAttributes, FetchItem, Section};
+pub use client::{Answer, Client, Event, Moved, Refusal, RefusalKind, Removal, State, Tag, Transport};
+pub use fetch::{FetchAttributes, FetchItem, MAX_PREVIEW_CHARS, PreviewFetch, Section};
 pub use frame::{MAX_LINE, MAX_LITERAL, MAX_LITERALS};
 pub use list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
 pub use mailbox::{MAX_FLAG_LEN, MAX_FLAGS, MailboxStatus};
@@ -34,5 +37,6 @@ pub use sasl::MAX_CREDENTIALS;
 pub use search::{MAX_SEARCH_DEPTH, MAX_SEARCH_KEYS, MAX_SET_RANGES, SearchDate, SearchKey};
 pub use sync::{Extension, SelectOptions};
 pub use text::MAX_TEXT_CHARS;
+pub use uidplus::CopyUid;
 pub use utf7::{decode_utf7, encode_utf7};
 pub use value::MAX_DEPTH;

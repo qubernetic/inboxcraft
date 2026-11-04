@@ -1,0 +1,66 @@
+# COMPRESS=DEFLATE (RFC 4978): after the OK both directions are compressed. The client only negotiates it; `net`
+# deflates what take_output gives and inflates what the server sends before it goes to receive. Bytes that came after
+# the OK in the same piece are handed back with the answer, still compressed.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN COMPRESS=DEFLATE] ready
+= greeted
+> compress
+! WrongState { command: "COMPRESS", state: NotAuthenticated }
+> login ada@example.org secret
+C: A0001 LOGIN "ada@example.org" "secret"
+S: A0001 OK [CAPABILITY IMAP4rev1 COMPRESS=DEFLATE] done
+= A0001 authenticated IMAP4REV1 COMPRESS=DEFLATE
+> compress
+C: A0002 COMPRESS DEFLATE
+S: A0002 OK DEFLATE active
+= A0002 compressed ""
+> compress
+! AlreadyCompressed
+> select INBOX
+C: A0003 SELECT "INBOX"
+S: A0003 OK done
+= A0003 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+
+# The server's first compressed bytes in the same piece as the OK are not read as IMAP.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 COMPRESS=DEFLATE] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> compress
+C: A0002 COMPRESS DEFLATE
+S: A0002 OK DEFLATE active
+S: * 9 EXISTS
+= A0002 compressed "* 9 EXISTS\r\n"
+? Selected
+
+# A refusal leaves the session as it was.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 COMPRESS=DEFLATE] ready
+= greeted preauth
+> compress
+C: A0001 COMPRESS DEFLATE
+S: A0001 NO [COMPRESSIONACTIVE] DEFLATE active via TLS
+= A0001 No [COMPRESSIONACTIVE] DEFLATE active via TLS
+> compress
+C: A0002 COMPRESS DEFLATE
+S: A0002 BAD [CLIENTBUG] later
+= A0002 Bad [CLIENTBUG] later
+> list
+C: A0003 LIST "" "*"
+S: A0003 OK done
+= A0003 listed 0
+
+# A server that lacks COMPRESS=DEFLATE, and one that has not listed what it can do.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 COMPRESS=LZMA] ready
+= greeted preauth
+> compress
+! NotOffered("COMPRESS=DEFLATE")
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> compress
+! CapabilitiesUnknown
