@@ -92,7 +92,7 @@ layers: _up
 wasm: _up
     {{ exec }} cargo xtask wasm
 
-# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, wasm, deny)
+# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci
 
