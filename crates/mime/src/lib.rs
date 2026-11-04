@@ -8,12 +8,14 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod dsn;
 mod error;
 mod header;
 mod params;
 mod part;
 mod transfer;
 
+pub use dsn::{Action, DeliveryStatus, MAX_RECIPIENTS, RecipientStatus, Status, TypedValue};
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};
 pub use inboxcraft_charset::CharsetError;
