@@ -9,6 +9,7 @@
 
 mod account;
 mod address;
+mod event;
 mod flags;
 mod folder;
 mod id;
@@ -21,6 +22,7 @@ mod uid_set;
 
 pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
+pub use event::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
 pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};

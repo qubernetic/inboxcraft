@@ -61,10 +61,10 @@ impl FolderState {
 /// What to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobKind {
-    /// List the account's folders; answered with a `Folders` event.
+    /// List the account's folders; answered with [`crate::EventKind::Folders`].
     SyncFolderList,
     /// Bring one folder up to date from `known` (a full sync when `None`); answered with messages added, changed and
-    /// expunged, a UIDVALIDITY reset if there was one, and a `FolderSynced` event last.
+    /// expunged, a UIDVALIDITY reset if there was one, and [`crate::EventKind::FolderSynced`] last.
     SyncFolder {
         /// Our id of the folder.
         folder: FolderId,
@@ -73,7 +73,7 @@ pub enum JobKind {
         /// The state of the last sync.
         known: Option<FolderState>,
     },
-    /// Fetch the whole message `uid`; answered with a `BodyFetched` event. A changed UIDVALIDITY means
+    /// Fetch the whole message `uid`; answered with [`crate::EventKind::BodyFetched`]. A changed UIDVALIDITY means
     /// the message is gone.
     FetchBody {
         /// Our id of the folder.
