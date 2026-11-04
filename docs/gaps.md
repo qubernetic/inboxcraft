@@ -40,6 +40,15 @@ B = blocks the next stage.
   test certificates are made valid around the real now; it is not an `inboxcraft_time::Clock` (#15).
 - `fuzz/` resolves its dependencies afresh on every run: it has no committed `Cargo.lock` and `cargo deny` does
   not see it (#15).
+- `charset` reads the WHATWG charsets only: UTF-7 (RFC 2152), `unknown-8bit` and `x-unknown` are unknown labels,
+  and ISO-2022-KR, ISO-2022-CN and HZ are refused as unsupported. Text in them is not shown yet; `mime` decides
+  what to show instead (#16).
+- Encoded words are read more leniently than RFC 2047 allows, as real mail needs: words inside a longer word
+  (`Re:=?utf-8?q?x?=`), in quoted strings and longer than 75 characters, charset labels with any printable ASCII
+  but `?` and `=`, and base64 without its padding. Text decoded from a word is not cleaned: it may hold CR, LF or
+  control characters, which the reader and the header writer must handle (#16).
+- `encode_text` writes UTF-8 words only, and does not fold the header line: a long plain part stays as long as it
+  is, and folding at the spaces between words is left to the `mime` header writer (#16).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -58,4 +67,5 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the fake server frame (#8) |
 | 2026-11-04 | minor | Rough edges of the live test harness (#10) |
 | 2026-11-04 | minor | Rough edges of the clock and RFC 5322 dates (#15) |
+| 2026-11-04 | minor | Rough edges of charsets and encoded words (#16) |
 | 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |
