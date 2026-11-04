@@ -33,3 +33,11 @@ All notable changes to InboxCraft are listed here. The format follows
   and writes RFC 5322 dates, the obsolete forms of section 4.3 included (comments, two- and three-digit years,
   zone names, military zones and unknown names as `-0000`), refusing input over 998 bytes or comments nested
   deeper than 16; property tests and the first fuzz target, `fuzz/fuzz_targets/rfc5322_date.rs` (#15)
+- `inboxcraft-charset`: `Charset` and `decode` turn text in any WHATWG charset into UTF-8 through `encoding_rs`
+  (labels without case, `iso-8859-1` and `us-ascii` as `windows-1252`); an unknown label (`utf-7`, `x-unknown`) or
+  one WHATWG cannot decode (`iso-2022-kr`) is a `CharsetError`, broken bytes become U+FFFD and are reported.
+  RFC 2047 encoded words: `decode_text` reads them in header text (white space between words dropped, a character
+  split across words of one charset joined, the RFC 2231 language ignored, a broken word left as it stands and
+  reported), `decode_word` reads one strictly, `encode_text` writes the parts that need it as UTF-8 words of at
+  most 75 characters, Q or B by length, without CR, LF and NUL; property tests and the fuzz targets
+  `charset_decode` and `rfc2047_words` (#16)
