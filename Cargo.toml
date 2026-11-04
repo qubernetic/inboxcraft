@@ -43,6 +43,8 @@ inboxcraft-testkit = { path = "crates/testkit" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
+# charset only: the WHATWG character sets
+encoding_rs = "0.8"
 # property tests (dev-dependency only)
 proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3"
