@@ -190,7 +190,8 @@ impl Listen {
     /// Like [`Listen::start_imap`], but serves up to `connections` clients one after the other, as a client that
     /// reconnects meets the server: the mailboxes and the scripted points carry over, and a rule played on one
     /// connection is not played again on the next. Once one client has been served, a client that does not come within
-    /// the accept timeout ends the server quietly.
+    /// the accept timeout ends the server quietly. A failed connection does not stop it; the first error is reported
+    /// at the end.
     ///
     /// # Errors
     ///

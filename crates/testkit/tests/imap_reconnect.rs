@@ -54,13 +54,31 @@ fn without_any_client_the_server_reports_none() -> Result {
 }
 
 #[test]
-fn a_failed_connection_ends_the_server_with_its_error() -> Result {
-    let server = Listen::plain().start_imap_many(FakeImap::new(), 2)?;
+fn a_failed_connection_is_reported_at_the_end_and_the_next_is_served() -> Result {
+    let server = Listen::plain().accept_timeout(Duration::from_millis(500)).start_imap_many(FakeImap::new(), 3)?;
     let mut client = TestClient::plain(server.addr(), WAIT)?;
     client.read_line()?;
     client.send_bytes(&vec![b'a'; 70_000])?;
     drop(client);
-    assert!(server.finish().is_err());
+    let mut next = TestClient::plain(server.addr(), WAIT)?;
+    next.read_line()?;
+    assert_eq!(next.command("b1 LOGOUT")?, ["* BYE Logging out", "b1 OK LOGOUT completed"]);
+    drop(next);
+    let (transcript, ended) = server.finish_with_transcript();
+    assert!(matches!(ended, Err(Error::LineTooLong)), "{ended:?}");
+    assert_eq!(transcript.received().last().map(String::as_str), Some("b1 LOGOUT"));
+    Ok(())
+}
+
+#[test]
+fn dropping_the_server_stops_it_between_connections() -> Result {
+    let server = Listen::plain().accept_timeout(Duration::from_secs(30)).start_imap_many(FakeImap::new(), 3)?;
+    let mut client = TestClient::plain(server.addr(), WAIT)?;
+    client.read_line()?;
+    client.command("a1 LOGOUT")?;
+    drop(client);
+    // The server now waits for the next client; dropping it ends the wait at once.
+    drop(server);
     Ok(())
 }
 

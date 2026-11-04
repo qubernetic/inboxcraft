@@ -83,8 +83,8 @@ impl Listen {
     }
 
     /// Binds a free port on 127.0.0.1 and runs `session` with up to `connections` clients, one after the other, on a
-    /// thread of its own. Once one client has been served, a client that does not come ends the server quietly; a
-    /// failed session ends it with its error.
+    /// thread of its own. Once one client has been served, a client that does not come ends the server quietly. A
+    /// failed session does not stop the server, as a real one goes on too: its error is the one the end reports.
     pub(crate) fn spawn_many<F>(self, connections: usize, mut session: F) -> Result<FakeServer, Error>
     where
         F: FnMut(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>) + Send + 'static,
@@ -96,16 +96,20 @@ impl Listen {
         let flag = Arc::clone(&stop);
         let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || {
             let mut all = Transcript::default();
+            let mut first_error = None;
             for served in 0..connections {
                 let (transcript, ended) = self.serve(&listener, &mut session, &flag);
                 all.append(transcript);
                 match ended {
                     Err(Error::NoClient) if served > 0 => break,
-                    Err(err) => return (all, Err(err)),
+                    Err(Error::NoClient) => return (all, Err(Error::NoClient)),
+                    Err(err) => {
+                        first_error.get_or_insert(err);
+                    }
                     Ok(()) => {}
                 }
             }
-            (all, Ok(()))
+            (all, first_error.map_or(Ok(()), Err))
         })?;
         Ok(FakeServer { addr, stop, handle: Some(handle) })
     }
