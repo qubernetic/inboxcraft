@@ -99,9 +99,12 @@ included) and fails on:
   `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
+- `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
+- a testkit-only crate (`TESTKIT_ONLY_CRATES`: `rcgen`, `flate2`) as a normal or build dependency anywhere but
+  `testkit`; a dev-dependency on one is fine, and a crate that comes to need one lifts it in a reviewed change;
 - a dependency on an app or `xtask` from a library crate.
 
 Member patterns in the root `Cargo.toml` are directories or `<dir>/*`; `layers`, `wasm` and `stats` refuse other
@@ -223,7 +226,7 @@ branch, `main`, so the nightly run starts with the first release.
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
 runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
 `charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), and `imap_client` (#20).
+(#18), `imap_client` (#20), and `testkit_imap` (#23), the fake IMAP server's own command reader.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -258,3 +261,6 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the model values target (#17) |
 | 2026-11-04 | minor | Fuzzing: the message, header and delivery report targets (#18) |
 | 2026-11-04 | minor | Fuzzing: the IMAP client target (#20) |
+| 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |
+| 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |
+| 2026-11-04 | minor | The layering rule that keeps `rcgen` and `flate2` in `testkit` (#23) |

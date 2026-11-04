@@ -27,7 +27,7 @@ pub enum Error {
     },
     /// The client closed the connection while the script still expected a line.
     ClientGone,
-    /// The client sent a line longer than the server reads.
+    /// The client sent a line or a literal longer than the server reads, or a literal it refused.
     LineTooLong,
     /// The server thread ended without a result.
     Thread,
@@ -42,7 +42,7 @@ impl fmt::Display for Error {
             Self::NoClient => f.write_str("no client connected before the accept timeout"),
             Self::Unexpected { expected, got } => write!(f, "the script expected {expected:?}, the client sent {got:?}"),
             Self::ClientGone => f.write_str("the client closed the connection while the script expected a line"),
-            Self::LineTooLong => f.write_str("the client sent a line longer than the server reads"),
+            Self::LineTooLong => f.write_str("the client sent a line or literal longer than the server reads"),
             Self::Thread => f.write_str("the server thread ended without a result"),
         }
     }

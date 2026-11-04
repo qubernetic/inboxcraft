@@ -3,8 +3,9 @@
 
 //! The in-process fake server frame for tests.
 //!
-//! Dev-only: a dev-dependency of any crate, a normal dependency of none (`cargo xtask layers` enforces it). The fake
-//! IMAP, SMTP and CalDAV servers of later slices are scripts played by this frame.
+//! Dev-only: a dev-dependency of any crate, a normal dependency of none (`cargo xtask layers` enforces it, and that
+//! `testkit` never depends on `proto`). The [`imap`] module is the fake IMAP server; the fake SMTP and CalDAV
+//! servers of later slices follow.
 //!
 //! - [`Script`] is what the server does: lines to send, lines to expect, and the faults of [`Fault`] (drop, delay,
 //!   garbage).
@@ -46,15 +47,19 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod client;
+mod deflate;
 mod error;
+pub mod imap;
 mod line;
 pub mod live;
 mod pki;
 mod script;
 mod server;
+mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};
 pub use error::Error;
+pub use line::MAX_LINE;
 pub use pki::{CertFault, Clock, FAR_OFF, HOST, TestPki, TlsClient, WRONG_HOST};
 pub use script::{Fault, Script, Step};
 pub use server::{FakeServer, Listen, Transcript};
