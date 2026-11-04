@@ -49,17 +49,24 @@ pub(crate) fn remove(dir: &Path, id: i64) {
     let _ = fs::remove_file(path(dir, id));
 }
 
-/// Removes the source and partial files no body row in `kept` names; other files are left alone.
+/// The body row id in a name the store writes: a positive id, written the way [`path`] writes it.
+fn own_id(stem: &str) -> Option<i64> {
+    stem.parse::<i64>().ok().filter(|id| *id > 0 && id.to_string() == stem)
+}
+
+/// Removes the source and partial files no body row in `kept` names; other names, and anything that is not a
+/// regular file, are left alone.
 pub(crate) fn sweep(dir: &Path, kept: &BTreeSet<i64>) -> Result<(), StoreError> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        let orphan = match (name.strip_suffix(EXTENSION), name.strip_suffix(PARTIAL)) {
-            (Some(id), _) => id.parse::<i64>().is_ok_and(|id| !kept.contains(&id)),
-            (_, Some(id)) => id.parse::<i64>().is_ok(),
-            _ => false,
-        };
+        let orphan = entry.file_type()?.is_file()
+            && match (name.strip_suffix(EXTENSION), name.strip_suffix(PARTIAL)) {
+                (Some(stem), _) => own_id(stem).is_some_and(|id| !kept.contains(&id)),
+                (_, Some(stem)) => own_id(stem).is_some(),
+                _ => false,
+            };
         if orphan {
             fs::remove_file(entry.path())?;
         }

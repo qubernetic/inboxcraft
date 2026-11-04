@@ -109,6 +109,14 @@ fn opening_removes_the_files_a_kill_left_behind() {
     for name in ["7.eml", "8.partial", "notes.txt", "x.eml", "x.partial"] {
         fs::write(sources_dir.join(name), b"left over").unwrap();
     }
+    // Names the store never writes: not its own, so not its to remove.
+    let foreign = ["007.eml", "+7.eml", "0.eml", "-3.eml", "08.partial", "0.partial"];
+    for name in foreign {
+        fs::write(sources_dir.join(name), b"someone else's").unwrap();
+    }
+    for name in ["9.eml", "10.partial"] {
+        fs::create_dir(sources_dir.join(name)).unwrap();
+    }
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -117,7 +125,8 @@ fn opening_removes_the_files_a_kill_left_behind() {
     let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
     let mut left: Vec<_> = fs::read_dir(&sources_dir).unwrap().map(|entry| entry.unwrap().file_name()).collect();
     left.sort();
-    let mut expected: Vec<std::ffi::OsString> = ["1.eml", "notes.txt", "x.eml", "x.partial"].iter().map(Into::into).collect();
+    let mut expected: Vec<std::ffi::OsString> =
+        ["1.eml", "notes.txt", "x.eml", "x.partial", "9.eml", "10.partial"].iter().chain(&foreign).map(Into::into).collect();
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
