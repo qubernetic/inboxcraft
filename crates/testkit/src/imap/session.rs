@@ -122,6 +122,11 @@ impl Session {
         self.transcript.clone()
     }
 
+    /// The fake as the session left it: its mailboxes changed, its played rules gone.
+    pub(crate) fn into_fake(self) -> FakeImap {
+        self.fake
+    }
+
     /// Serves the client until the session ends or the connection has to change.
     pub(crate) fn run(&mut self, io: &mut (impl Read + Write), stop: &AtomicBool) -> Result<Effect, Error> {
         if !self.greeted {
@@ -356,6 +361,9 @@ impl Session {
             ("LIST", Phase::Authenticated | Phase::Selected) => self.list(&tag, &args, out),
             ("SELECT" | "EXAMINE", Phase::Authenticated | Phase::Selected) => self.select(&tag, &name, &args, out),
             ("STATUS", Phase::Authenticated | Phase::Selected) => self.status(&tag, &args, out),
+            ("CREATE", Phase::Authenticated | Phase::Selected) => self.create(&tag, &args, out),
+            ("DELETE", Phase::Authenticated | Phase::Selected) => self.delete(&tag, &args, out),
+            ("APPEND", Phase::Authenticated | Phase::Selected) => self.append(&tag, &args, out),
             ("CLOSE", Phase::Selected) => self.close(&tag, out),
             ("UID FETCH", Phase::Selected) => self.uid_fetch(&tag, &args, out),
             ("UID SEARCH", Phase::Selected) => self.uid_search(&tag, &args, out),

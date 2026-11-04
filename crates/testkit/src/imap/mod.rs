@@ -27,6 +27,7 @@ mod fetch;
 mod fixture;
 mod happen;
 mod mailbox;
+mod manage;
 mod notify;
 mod reader;
 mod search;
@@ -48,7 +49,7 @@ pub use fixture::{Mailbox, Message};
 pub use happen::{Action, When};
 
 use crate::Error;
-use crate::server::{Ending, FakeServer, Listen};
+use crate::server::{Ending, FakeServer, Listen, Transcript};
 use crate::wire::Wire;
 use happen::Rules;
 use session::{Effect, Session};
@@ -68,6 +69,8 @@ pub struct FakeImap {
     starttls: Option<Arc<ServerConfig>>,
     rules: Rules,
     mailboxes: Vec<Mailbox>,
+    /// The UIDVALIDITY of the mailbox CREATE made last.
+    last_created: u32,
 }
 
 impl Default for FakeImap {
@@ -88,6 +91,7 @@ impl FakeImap {
             starttls: None,
             rules: Rules::default(),
             mailboxes: vec![Mailbox::new("INBOX")],
+            last_created: 0,
         }
     }
 
@@ -178,6 +182,28 @@ impl Listen {
             let mut session = Session::new(fake, wire.is_tls());
             let ended = serve(&mut session, wire, stop);
             (session.transcript(), ended)
+        })
+    }
+}
+
+impl Listen {
+    /// Like [`Listen::start_imap`], but serves up to `connections` clients one after the other, as a client that
+    /// reconnects meets the server: the mailboxes and the scripted points carry over, and a rule played on one
+    /// connection is not played again on the next. Once one client has been served, a client that does not come within
+    /// the accept timeout ends the server quietly.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] when the port cannot be bound or the thread cannot be started.
+    pub fn start_imap_many(self, fake: FakeImap, connections: usize) -> Result<FakeServer, Error> {
+        let mut state = Some(fake);
+        self.spawn_many(connections, move |wire, stop| {
+            let Some(fake) = state.take() else { return (Transcript::default(), Err(Error::Thread)) };
+            let mut session = Session::new(fake, wire.is_tls());
+            let ended = serve(&mut session, wire, stop);
+            let transcript = session.transcript();
+            state = Some(session.into_fake());
+            (transcript, ended)
         })
     }
 }
