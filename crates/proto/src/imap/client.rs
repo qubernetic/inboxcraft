@@ -625,7 +625,13 @@ impl Client {
         let refusal = refusal.map(|kind| Refusal { kind, code: self.code(&line.code), text: self.words(&line.text) });
         let (tag, kind) = match flight.kind {
             Kind::Capability { after_sign_in: Some(sign_in) } => {
-                let capabilities = if refusal.is_none() { self.capabilities.get_or_insert_default().clone() } else { Capabilities::default() };
+                let capabilities = if refusal.is_none() {
+                    self.capabilities.get_or_insert_default().clone()
+                } else {
+                    // Not read after all: what came with the refusal is not taken either.
+                    self.capabilities = None;
+                    Capabilities::default()
+                };
                 self.events.push_back(Event::Completed { tag: sign_in, outcome: Ok(Answer::Authenticated(capabilities)) });
                 return Ok(());
             }

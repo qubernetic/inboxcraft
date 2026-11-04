@@ -168,6 +168,19 @@ fn a_response_code_is_kept_only_as_a_clean_word() {
     assert_eq!(refused_code(b"A0001 NO [XHUNTER2Y] no\r\n"), None);
 }
 
+#[test]
+fn a_refused_capability_after_the_sign_in_leaves_none_known() {
+    let mut client = greeted();
+    client.login("tim", "hunter2").unwrap();
+    client.receive(b"A0001 OK signed in\r\n").unwrap();
+    assert_eq!(client.take_output(), b"A0001 LOGIN \"tim\" \"hunter2\"\r\nA0002 CAPABILITY\r\n");
+    client.receive(b"* CAPABILITY IMAP4rev1 X\r\nA0002 NO not now\r\n").unwrap();
+    let Some(Event::Completed { outcome: Ok(Answer::Authenticated(capabilities)), .. }) = client.next_event() else { panic!("no sign-in") };
+    assert_eq!(capabilities.iter().count(), 0);
+    assert_eq!(client.capabilities(), None);
+    assert_eq!(client.state(), State::Authenticated);
+}
+
 /// Hostile bytes for a session in any state.
 fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
     let line = prop_oneof![
