@@ -11,10 +11,12 @@
 mod error;
 mod header;
 mod params;
+mod transfer;
 
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};
 pub use params::{ContentType, Disposition, MAX_PARAMS, Params};
+pub use transfer::{MAX_NAME_IN_ERROR, TransferEncoding};
 
 /// The crate's package name.
 ///
