@@ -324,13 +324,13 @@ fn this_workspace_names_every_core_crate_in_its_floors() {
     let root = crate::default_root();
     let floors = Floors::read(&root, &crate::workspace::members(&root).unwrap()).unwrap();
     assert_eq!(floors.workspace, 95.0);
-    for name in ["model", "mime", "charset", "time", "ical", "vcard", "proto", "dav", "store", "engine"] {
+    for name in ["model", "mime", "charset", "time", "ical", "vcard", "proto", "dav", "store", "engine", "testkit"] {
         assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&98.0), "{name}");
     }
     for name in ["ui-egui", "net"] {
         assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&80.0), "{name}");
     }
-    assert_eq!(floors.crates.len(), 12);
+    assert_eq!(floors.crates.len(), 13);
     assert_eq!(floors.exclude, ["xtask/src/main.rs"]);
     assert_eq!(floors.workspace_exclude, ["apps/*/src/main.rs"]);
 }

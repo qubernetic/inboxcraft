@@ -110,6 +110,10 @@ name = "inboxcraft-store"
 version = "0.1.0"
 
 [[package]]
+name = "inboxcraft-testkit"
+version = "0.1.0"
+
+[[package]]
 name = "inboxcraft-time"
 version = "0.1.0"
 
