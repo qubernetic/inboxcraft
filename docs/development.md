@@ -133,12 +133,50 @@ The floors live in one file, `.config/coverage.toml`:
   prints as on it.
 - A floor is never lowered in the PR that falls below it; lowering one needs the project owner.
 
+## CI
+`.github/workflows/ci.yml` runs `cargo xtask ci`, the same gates in the same order as `just ci`, on pull requests
+into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand (`gh workflow run ci.yml --ref
+<branch>`).
+
+| Job | What it does | Token |
+|---|---|---|
+| `draft` | on a draft PR only: one step, so the draft shows a check | read |
+| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml` as the `reports` artifact | read |
+| `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
+| `ci` | the gate: succeeds only when `test` and `codecov` did | read |
+
+- **Drafts get only the quick check.** The full run starts when the PR is marked ready (`gh pr ready`) and repeats
+  on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before marking a PR
+  ready.
+- `ci` is the check to require. A skipped check reports as passing, so a required check has to be a job that runs on
+  every full run.
+- `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
+  from `rust-toolchain.toml`, and nextest, cargo-llvm-cov and cargo-deny at the versions the `Dockerfile` pins: it
+  reads them from there, so a bump stays one change.
+- No cargo cache: nothing a PR run writes feeds a later run.
+- Every action is pinned by its full commit SHA with the tag in a comment; the workflow token is read-only and only
+  `codecov` widens it.
+
+`.github/workflows/fuzz.yml` runs every target in `fuzz/fuzz_targets/` with cargo-fuzz for 300 seconds each, nightly
+at 02:17 UTC, and for 30 seconds on a PR that touches `fuzz/` or the workflow. cargo-fuzz needs nightly Rust: the
+toolchain is pinned by date in the workflow. A crash fails the run and its input is kept as the `fuzz-artifacts`
+artifact; it becomes a regression test. With no targets the job passes. GitHub runs a schedule only from the default
+branch, `main`, so the nightly run starts with the first release.
+
+`.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
+merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
+
+`.github/dependabot.yml` opens weekly grouped PRs into `develop`: `cargo-dependencies` (prefix `chore(deps)`, only
+releases at least 7 days old) and `actions` (prefix `ci(deps)`).
+
 ## Bumping a pinned version
 - **Rust:** change `channel` in `rust-toolchain.toml` and the base image tag in the `Dockerfile` together; a new tag
   also needs its new multi-arch index digest.
 - **Downloaded tools:** every download in the `Dockerfile` is checked against a sha256 committed next to its version;
   a bump updates the version and both per-architecture checksums.
 - **cargo-nextest:** keep `CARGO_NEXTEST_VERSION` at or above `nextest-version` in `.config/nextest.toml`.
+- **Fuzzing:** `FUZZ_TOOLCHAIN` and `CARGO_FUZZ_VERSION` in `.github/workflows/fuzz.yml`.
+- **Actions:** Dependabot bumps the SHA and the tag comment together.
 
 After a `Dockerfile` change, run `just rebuild`.
 
@@ -149,3 +187,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | The workspace layout and the first `cargo xtask` gates: `ci`, `spdx`, `test-files` (#5) |
 | 2026-11-04 | minor | The `assets`, `layers`, `wasm` and `stats` gates and the layering rules (#6) |
 | 2026-11-04 | minor | The coverage gate `cov` and its floors (#7) |
+| 2026-11-04 | minor | CI: the workspace workflow with Codecov, nightly fuzzing, Dependabot (#9) |
