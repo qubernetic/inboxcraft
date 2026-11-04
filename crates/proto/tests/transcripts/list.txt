@@ -13,9 +13,7 @@ S: Bin 2
 S: * LIST (\HasNoChildren) "/" INBOX
 S: * LIST () NIL Notes ("CHILDINFO" ("SUBSCRIBED"))
 S: * LIST garbage
-S: * 4 EXISTS
 S: A0001 OK LIST completed
-= exists 4
 = A0001 listed 5
 =   mailbox "INBOX" name="INBOX" delimiter='/' attributes=\HasNoChildren special-use=- selectable=true
 =   mailbox "Elk&APw-ld&APY-tt" name="Elküldött" delimiter='/' attributes=\HasNoChildren,\Sent special-use=Sent selectable=true

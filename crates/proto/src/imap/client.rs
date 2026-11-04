@@ -102,7 +102,7 @@ pub enum Event {
     Exists(u32),
     /// The message with this sequence number is gone; the ones after it move up by one.
     Expunged(u32),
-    /// A text the server says must be shown to the person (`[ALERT]`), cleaned.
+    /// A text the server says must be shown to the person (`[ALERT]`), cleaned; only over TLS.
     Alert(String),
 }
 
@@ -543,7 +543,8 @@ impl Client {
                 self.capabilities = Some(Capabilities::from_words(line.arg.split_ascii_whitespace()));
                 self.fresh_capabilities = true;
             }
-            "ALERT" => self.events.push_back(Event::Alert(self.secrets.tidy(&line.text))),
+            // In the clear anyone on the way could have written it, and the person would take it for the server's.
+            "ALERT" if self.tls => self.events.push_back(Event::Alert(self.secrets.tidy(&line.text))),
             _ => {}
         }
     }
@@ -581,7 +582,8 @@ impl Client {
             }
             (word, flight) => {
                 if let Some(count) = number(word) {
-                    message_data(count, values, flight, &mut self.events)?;
+                    let open = self.state == State::Selected || matches!(flight, Some(Kind::Select(_) | Kind::Logout { previous: State::Selected }));
+                    message_data(count, values, flight, open, &mut self.events)?;
                 }
             }
         }
@@ -679,10 +681,14 @@ impl Client {
     }
 }
 
-/// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`.
-fn message_data(count: u32, values: Vec<Value>, flight: Option<&mut Kind>, events: &mut VecDeque<Event>) -> Result<(), ProtoError> {
+/// `* n EXISTS`, `* n RECENT`, `* n EXPUNGE`, `* n FETCH (...)`. EXISTS, EXPUNGE and FETCH belong to a mailbox
+/// that is `open` or being opened (RFC 9051 section 7.4); anywhere else, before TLS too, they end the session.
+fn message_data(count: u32, values: Vec<Value>, flight: Option<&mut Kind>, open: bool, events: &mut VecDeque<Event>) -> Result<(), ProtoError> {
     let word = values.get(1).and_then(Value::atom).map(str::to_ascii_uppercase).unwrap_or_default();
     match (word.as_str(), flight) {
+        ("EXISTS", _) if !open => return Err(ProtoError::Unexpected("EXISTS response")),
+        ("EXPUNGE", _) if !open => return Err(ProtoError::Unexpected("EXPUNGE response")),
+        ("FETCH", _) if !open => return Err(ProtoError::Unexpected("FETCH response")),
         ("EXISTS", Some(Kind::Select(status))) => status.exists = count,
         ("EXISTS", _) => events.push_back(Event::Exists(count)),
         ("RECENT", Some(Kind::Select(status))) => status.recent = count,

@@ -40,10 +40,18 @@ S: A0004 OK nothing there
 @ tls
 S: * PREAUTH [CAPABILITY IMAP4rev1] ready
 = greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
 S: * 1 FETCH UID 1
 ! Malformed("FETCH response")
 @ tls
 S: * PREAUTH [CAPABILITY IMAP4rev1] ready
 = greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
 S: * 0 EXPUNGE
 ! Malformed("EXPUNGE response")

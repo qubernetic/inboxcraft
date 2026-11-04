@@ -114,6 +114,9 @@ B = blocks the next stage.
   from before; `RECENT` is only kept during SELECT and EXAMINE (#20).
 - `proto` refuses PREAUTH on a connection that is not encrypted, which rules out a server that greets that way
   over a local tunnel (#20).
+- `proto` ends the session on an EXISTS, EXPUNGE or FETCH response when no mailbox is open or being opened (RFC 9051
+  section 7.4), also before TLS, rather than passing it over: a server that sends one after a refused SELECT is cut
+  off. `[ALERT]` text that comes before TLS is dropped, not shown later (#20).
 
 ## Revision history
 | Date | Change | Summary |
@@ -134,3 +137,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | What the message builder does not write (#19) |
 | 2026-11-04 | minor | The message builder refuses attached messages other than `message/global` (#19) |
 | 2026-11-04 | minor | Rough edges of the IMAP client core (#20) |
+| 2026-11-04 | minor | The IMAP client refuses message data outside a mailbox and drops alerts before TLS (#20) |

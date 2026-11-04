@@ -75,3 +75,34 @@ S: A0001 NO [UNAVAILABLE] TLS is not available
 ? NotAuthenticated
 > login ada@example.org secret
 ! NotEncrypted
+
+# Before TLS nothing is taken as mailbox content, and no alert is shown: anyone on the way could have written it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+S: * OK [ALERT] Your password expired, sign in at http://example.org/
+= greeted
+S: * 3 EXISTS
+! Unexpected("EXISTS response")
+? Closed
+@ plain
+S: * OK [ALERT] Your password expired, sign in at http://example.org/
+= greeted
+S: * 1 FETCH (UID 7 FLAGS (\Seen) BODY[] {5}
+S: hello)
+! Unexpected("FETCH response")
+
+# Over TLS the same alert is shown.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK go
+= A0001 starttls
+> tls
+C: A0002 CAPABILITY
+S: * OK [ALERT] Maintenance tonight
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+S: A0002 OK done
+= alert Maintenance tonight
+= A0002 capabilities IMAP4REV1 AUTH=PLAIN

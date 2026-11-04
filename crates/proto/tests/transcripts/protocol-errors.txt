@@ -73,3 +73,48 @@ S: * SEARCH 1 2
 S: * 1 STORE
 S: * x
 = alert Disk almost full
+
+# Message data only belongs to an open mailbox (RFC 9051 section 7.4): anywhere else it ends the session.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * 3 EXISTS
+! Unexpected("EXISTS response")
+? Closed
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * 2 EXPUNGE
+! Unexpected("EXPUNGE response")
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+S: * 1 FETCH (UID 7 FLAGS (\Seen))
+! Unexpected("FETCH response")
+
+# Also after a SELECT the server refused: no mailbox is open then.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 NO [NONEXISTENT] no such mailbox
+= A0001 No [NONEXISTENT] no such mailbox
+S: * 1 FETCH (UID 7 FLAGS (\Seen))
+! Unexpected("FETCH response")
+
+# While LOGOUT of an open mailbox is under way, the mailbox is still open.
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> logout
+C: A0002 LOGOUT
+S: * 2 EXPUNGE
+S: * BYE logging out
+S: A0002 OK done
+= expunged 2
+= A0002 logged out
