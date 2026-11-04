@@ -71,7 +71,8 @@ pub(crate) const CRATES: &[(&str, Class)] = &[
 ];
 
 /// The dependencies allowed inside one layer, as `(from, to)`.
-pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] = &[("inboxcraft-net", "inboxcraft-proto"), ("inboxcraft-net", "inboxcraft-dav")];
+pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] =
+    &[("inboxcraft-store", "inboxcraft-model"), ("inboxcraft-net", "inboxcraft-proto"), ("inboxcraft-net", "inboxcraft-dav")];
 
 /// The crates whose parsers the fake servers test: `testkit` never depends on them, not even for its own tests, so a
 /// parser bug cannot hide behind the same bug in the fake.
