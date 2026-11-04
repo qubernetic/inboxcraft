@@ -187,6 +187,13 @@ B = blocks the next stage.
   index at once (`secure-delete`), the write-ahead log is emptied after a batch that removed mail, and a removed
   source file is unlinked. What the file system or the disk kept of those bytes (journal, copy-on-write snapshots,
   SSD blocks not yet erased, backups) may still be there; only full-disk encryption covers that (#24).
+- `store` does not check its paths for symlinks. A link in place of `sources/` is followed, so the sweep at open
+  works in the link's target; a link at a `.partial` or `.eml` name is followed when the file is written or read,
+  and a FIFO there blocks `body()`. The sweep touches regular files only. Only something running as the owner
+  inside the store directory can place such a link, since the directory is `0700` (#24).
+- `store` reads a record and a body's text back from SQLite in full before it checks them; SQLite's default limit
+  on one value is 1 GB. `Body` cuts the text to `MAX_TEXT_BYTES` only after it was read. A source length is checked
+  before the file is read. Only something that writes the owner's database file can plant such a value (#24).
 
 ## Revision history
 | Date | Change | Summary |
@@ -215,3 +222,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Limits of the local-first store and its search (#24) |
 | 2026-11-04 | minor | Who may read the local-first store on unix and Windows (#24) |
 | 2026-11-04 | minor | What is left of removed mail on the disk (#24) |
+| 2026-11-04 | minor | Symlinks in the store and values read back unbounded (#24) |
