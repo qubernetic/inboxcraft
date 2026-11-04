@@ -81,11 +81,22 @@ fn manifest_writes_a_package_table() {
     assert!(text.starts_with("[package]\nname = \"x\"\n") && text.ends_with("[dependencies]\n"), "{text}");
 }
 
-/// A runner that starts nothing and passes every tool.
-pub struct Passing;
+/// Writes an empty lcov report to the `--output-path` in `args`, as `cargo llvm-cov` does with no lines to report.
+pub fn empty_report(args: &[&str]) {
+    if let Some(path) = args.iter().position(|arg| *arg == "--output-path").and_then(|at| args.get(at + 1)) {
+        std::fs::write(path, "").unwrap();
+    }
+}
+
+/// A runner that starts nothing and passes every tool; `cargo llvm-cov` reports no lines into a directory of its
+/// own, so no test touches the `lcov.info` of the workspace.
+pub struct Passing {
+    _report: tempfile::TempDir,
+}
 
 impl Runner for Passing {
-    fn run(&mut self, _: &OsStr, _: &[&str], _: &Path) -> Result<bool, Error> {
+    fn run(&mut self, _: &OsStr, args: &[&str], _: &Path) -> Result<bool, Error> {
+        empty_report(args);
         Ok(true)
     }
 }
@@ -98,7 +109,9 @@ fn passing_passes_every_tool() {
 
 /// A context rooted at `root` that starts no processes.
 pub fn context(root: PathBuf) -> Context {
-    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing) }
+    let report = tempfile::tempdir().unwrap();
+    let lcov = Some(report.path().join("lcov.info"));
+    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing { _report: report }), lcov }
 }
 
 /// Runs xtask with `args` against this workspace and returns the exit code, stdout and stderr.

@@ -12,6 +12,7 @@ mod assets;
 mod ci;
 mod cli;
 mod config;
+mod cov;
 mod error;
 mod layers;
 mod spdx;
@@ -54,6 +55,8 @@ pub struct Context {
     pub cargo: OsString,
     /// Starts the tools.
     pub runner: Box<dyn Runner>,
+    /// Where `cov` writes the lcov report; `None` is `lcov.info` in the root.
+    pub lcov: Option<PathBuf>,
 }
 
 impl Context {
@@ -61,7 +64,7 @@ impl Context {
     /// and real processes.
     #[must_use]
     pub fn from_env() -> Self {
-        Self { root: default_root(), cargo: cargo_or_default(std::env::var_os("CARGO")), runner: Box::new(ProcessRunner) }
+        Self { root: default_root(), cargo: cargo_or_default(std::env::var_os("CARGO")), runner: Box::new(ProcessRunner), lcov: None }
     }
 }
 

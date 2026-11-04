@@ -80,10 +80,9 @@ fmt-check: _up
 deny: _up
     {{ exec }} cargo deny check
 
-# Coverage with cargo-llvm-cov in the nextest ci profile: lcov in lcov.info, plus a summary
-cov: _up
-    {{ exec }} cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info
-    {{ exec }} cargo llvm-cov report --summary-only
+# Coverage per crate under cargo llvm-cov nextest, lcov in lcov.info; `just cov --check` fails below the floors
+cov *args: _up
+    {{ exec }} cargo xtask cov "$@"
 
 # Layering rules between the crates (xtask/src/layers.rs)
 layers: _up
@@ -93,7 +92,7 @@ layers: _up
 wasm: _up
     {{ exec }} cargo xtask wasm
 
-# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, wasm, deny)
+# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci
 

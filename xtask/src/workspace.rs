@@ -78,6 +78,11 @@ pub(crate) fn members(root: &Path) -> Result<Vec<Member>, Error> {
     Ok(found)
 }
 
+/// The member that owns the workspace-relative `file`, with its index: the one whose directory holds it most closely.
+pub(crate) fn owner<'a>(members: &'a [Member], file: &Path) -> Option<(usize, &'a Member)> {
+    members.iter().enumerate().filter(|(_, member)| file.starts_with(&member.dir)).max_by_key(|(_, member)| member.dir.components().count())
+}
+
 fn strings(table: &toml::Table, key: &str, path: &Path) -> Result<Vec<String>, Error> {
     let Some(value) = table.get(key) else { return Ok(Vec::new()) };
     value

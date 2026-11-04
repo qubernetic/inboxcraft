@@ -73,9 +73,10 @@ are empty so far; the apps answer `--version` and refuse everything else.
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cov --check`, `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
+| `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
@@ -84,8 +85,7 @@ are empty so far; the apps answer `--version` and refuse everything else.
 
 `ci` runs every gate even after one fails and names the failed ones at the end. Exit codes: 0 passed, 1 a gate
 failed, 2 a usage or setup error. `--root <dir>` points a gate at another workspace (the tests use it). The licence
-is written in one place, `workspace.package.license` in the root `Cargo.toml`; `spdx` reads it from there. The
-coverage gate is not part of `ci` yet.
+is written in one place, `workspace.package.license` in the root `Cargo.toml`; `spdx` reads it from there.
 
 ### The layering rules
 Every workspace crate has a class in `xtask/src/layers.rs`: `Layer(n)` (0 to 6), `Standalone` (`control-key`,
@@ -109,6 +109,30 @@ globs.
 Files the gates skip: hidden directories, `target/`, `target-*/` and `plan/`; `assets` also skips the gitignored
 local directories `corpus/`, `craft-fonts/`, `craft-i18n/`, `dist/` and `log/`.
 
+### The coverage gate
+`cargo xtask cov` runs `cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info`, so the
+tests run under coverage and a failing test fails the gate. It then prints one line per crate (lines, covered,
+cover, floor) and the workspace total. `just cov` runs it; `just cov --check` and `just ci` also fail below a floor.
+`lcov.info` stays in the root for the Codecov upload; a stale one is removed before the run.
+
+The floors live in one file, `.config/coverage.toml`:
+
+| Floor | Crates |
+|---|---|
+| 95 % | the workspace total |
+| 98 % | `charset`, `dav`, `engine`, `ical`, `mime`, `model`, `proto`, `store`, `time`, `vcard` |
+| 80 % | `net`, `ui-egui` |
+
+- A line is an lcov `DA` record (llvm-cov already leaves out the test files); it is covered when its count is not 0.
+  A file belongs to the member whose directory holds it most closely.
+- `exclude` lists files counted nowhere: `xtask/src/main.rs`, the `main` dispatch.
+- `workspace-exclude` lists files counted for their own crate but not for the workspace total: the apps' `main`
+  (`apps/*/src/main.rs`); the `ui-egui` drawing code joins it when it lands.
+- Patterns are paths of `/`-separated components: a name, `*` for one component, or `**` last for one or more.
+- A crate with no lines has nothing to fall below. Cover is printed rounded down, so a crate below its floor never
+  prints as on it.
+- A floor is never lowered in the PR that falls below it; lowering one needs the project owner.
+
 ## Bumping a pinned version
 - **Rust:** change `channel` in `rust-toolchain.toml` and the base image tag in the `Dockerfile` together; a new tag
   also needs its new multi-arch index digest.
@@ -124,3 +148,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-03 | major | First version: the two-layer model, the justfile, native mode (#1) |
 | 2026-11-04 | minor | The workspace layout and the first `cargo xtask` gates: `ci`, `spdx`, `test-files` (#5) |
 | 2026-11-04 | minor | The `assets`, `layers`, `wasm` and `stats` gates and the layering rules (#6) |
+| 2026-11-04 | minor | The coverage gate `cov` and its floors (#7) |
