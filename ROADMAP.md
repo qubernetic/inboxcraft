@@ -2,7 +2,7 @@
 
 **Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
 
-> **Last reviewed:** <date> · **Last updated:** <date> · **Change:** <kind>
+> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -33,9 +33,10 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 ## Progress log
 | Date | What landed |
 |---|---|
-| <date> | <what, with issue numbers> |
+| 2026-11-04 | Workspace skeleton: every crate and app as an empty crate, `cargo xtask ci`, `spdx`, `test-files` (#5) |
 
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
 | <date> | major | First version |
+| 2026-11-04 | minor | Progress log: workspace skeleton and first gates (#5) |
