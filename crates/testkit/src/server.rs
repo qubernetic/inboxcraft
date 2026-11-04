@@ -147,7 +147,8 @@ impl Transcript {
     }
 
     /// The first of [`Transcript::received`], those that came before the connection was encrypted: all of them over
-    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS.
+    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS. Lines a client pipelined behind
+    /// STARTTLS are among them, though the server does not answer them, and so is a last one without its end.
     #[must_use]
     pub fn in_clear(&self) -> &[String] {
         self.received.get(..self.clear).unwrap_or_default()

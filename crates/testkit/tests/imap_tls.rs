@@ -129,6 +129,23 @@ fn plaintext_after_the_starttls_answer_reaches_the_client_in_clear() -> Result<(
 }
 
 #[test]
+fn a_password_pipelined_behind_starttls_is_recorded_in_clear_and_not_answered() -> Result<(), Box<dyn std::error::Error>> {
+    let pki = TestPki::new()?;
+    let server = Listen::plain().start_imap(FakeImap::new().starttls(pki.server_config(None)?))?;
+    let mut client = TestClient::plain(server.addr(), TIMEOUT)?;
+    client.read_line()?;
+    client.send_bytes(format!("a1 STARTTLS\r\na2 LOGIN {USER} {PASSWORD}\r\na3 NO").as_bytes())?;
+    assert_eq!(client.read_line()?, "a1 OK Begin TLS negotiation now");
+    let mut client = client.start_tls(&pki.client(Clock::wall())?)?;
+    assert_eq!(client.command("a4 LOGOUT")?, ["* BYE Logging out", "a4 OK LOGOUT completed"]);
+    let transcript = server.finish()?;
+    let in_clear = ["a1 STARTTLS".to_owned(), format!("a2 LOGIN {USER} {PASSWORD}"), "a3 NO".to_owned()];
+    assert_eq!(transcript.in_clear(), in_clear);
+    assert_eq!(transcript.received().get(3).map(String::as_str), Some("a4 LOGOUT"));
+    Ok(())
+}
+
+#[test]
 fn a_dropped_greeting_is_dropped() -> Result<(), Box<dyn std::error::Error>> {
     let server = Listen::plain().start_imap(FakeImap::new().on(When::Greeting, [Action::Fault(Fault::Drop)]))?;
     let mut client = TestClient::plain(server.addr(), TIMEOUT)?;

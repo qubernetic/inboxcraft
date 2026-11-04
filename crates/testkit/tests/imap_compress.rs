@@ -58,3 +58,16 @@ fn a_compressed_line_that_inflates_past_the_cap_ends_the_session() -> Result<(),
     assert!(matches!(&err, Error::Io(io) if io.kind() == std::io::ErrorKind::InvalidData), "{err}");
     Ok(())
 }
+
+#[test]
+fn a_line_pipelined_behind_compress_is_recorded_and_not_answered() -> Result<(), Box<dyn std::error::Error>> {
+    let server = Listen::plain().start_imap(FakeImap::sample().preauth())?;
+    let mut client = TestClient::plain(server.addr(), TIMEOUT)?;
+    client.read_line()?;
+    client.send_bytes(b"a1 COMPRESS DEFLATE\r\na2 NOOP\r\n")?;
+    assert_eq!(client.read_line()?, "a1 OK DEFLATE active");
+    client.compress();
+    assert_eq!(client.command("a3 LOGOUT")?, ["* BYE Logging out", "a3 OK LOGOUT completed"]);
+    assert_eq!(server.finish()?.in_clear(), ["a1 COMPRESS DEFLATE", "a2 NOOP", "a3 LOGOUT"]);
+    Ok(())
+}

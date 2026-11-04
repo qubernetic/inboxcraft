@@ -63,8 +63,14 @@ impl LineReader {
         Ok(Some(self.buf.drain(..len).collect()))
     }
 
-    /// Forgets what was read past the last line: bytes a client sent in clear after STARTTLS.
-    pub(crate) fn discard(&mut self) {
-        self.buf.clear();
+    /// Takes what was read past the last line, such as bytes a client sent in clear after STARTTLS, split into lines
+    /// without their terminators; a last line without its end comes as it is.
+    pub(crate) fn discard(&mut self) -> Vec<Vec<u8>> {
+        let rest = std::mem::take(&mut self.buf);
+        let rest = rest.strip_suffix(b"\n").unwrap_or(&rest);
+        if rest.is_empty() {
+            return Vec::new();
+        }
+        rest.split(|&byte| byte == b'\n').map(|line| line.strip_suffix(b"\r").unwrap_or(line).to_vec()).collect()
     }
 }

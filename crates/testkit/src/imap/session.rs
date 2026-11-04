@@ -197,17 +197,25 @@ impl Session {
             }
             match next {
                 Next::StartTls(config) => {
+                    self.discard();
                     self.tls = true;
-                    self.reader.discard();
                     return Ok(Effect::StartTls(config));
                 }
                 Next::Compress => {
+                    self.discard();
                     self.compressed = true;
-                    self.reader.discard();
                     return Ok(Effect::Compress);
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Records what the client sent past the command that changes the connection, unanswered: it came before the
+    /// change, so after it the bytes mean nothing, yet a password among them went over the wire as it was.
+    fn discard(&mut self) {
+        for line in self.reader.discard() {
+            self.transcript.push(String::from_utf8_lossy(&line).into_owned(), self.tls);
         }
     }
 

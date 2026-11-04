@@ -258,8 +258,17 @@ impl TestClient {
     pub fn send_line(&mut self, line: &str) -> Result<(), ClientError> {
         let mut bytes: Vec<u8> = line.bytes().filter(|byte| !matches!(byte, b'\r' | b'\n' | b'\0')).collect();
         bytes.extend_from_slice(b"\r\n");
+        self.send_bytes(&bytes)
+    }
+
+    /// Sends `bytes` as they are in one write, such as several pipelined lines or a line without its end.
+    ///
+    /// # Errors
+    ///
+    /// A [`ClientError`] from the socket.
+    pub fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), ClientError> {
         let far_off = self.far_off;
-        self.link.write_all(&bytes).and_then(|()| self.link.flush()).map_err(|err| ClientError::from_io(&err, far_off))
+        self.link.write_all(bytes).and_then(|()| self.link.flush()).map_err(|err| ClientError::from_io(&err, far_off))
     }
 }
 
