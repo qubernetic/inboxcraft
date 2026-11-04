@@ -49,4 +49,22 @@ impl LineReader {
             self.buf.extend_from_slice(chunk.get(..read).unwrap_or_default());
         }
     }
+
+    /// Reads exactly `len` bytes, such as an IMAP literal; `None` when the peer closed the connection first.
+    pub(crate) fn read_bytes(&mut self, src: &mut impl Read, len: usize) -> io::Result<Option<Vec<u8>>> {
+        while self.buf.len() < len {
+            let mut chunk = [0_u8; 4096];
+            let read = src.read(&mut chunk)?;
+            if read == 0 {
+                return Ok(None);
+            }
+            self.buf.extend_from_slice(chunk.get(..read).unwrap_or_default());
+        }
+        Ok(Some(self.buf.drain(..len).collect()))
+    }
+
+    /// Forgets what was read past the last line: bytes a client sent in clear after STARTTLS.
+    pub(crate) fn discard(&mut self) {
+        self.buf.clear();
+    }
 }

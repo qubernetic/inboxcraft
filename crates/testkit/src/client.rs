@@ -156,10 +156,24 @@ impl TestClient {
     /// the certificate faults, [`ErrorKind::Tls`] for any other TLS failure (a host that is not a DNS name, a server
     /// that does not speak TLS), and the socket kinds of [`TestClient::plain`].
     pub fn tls(addr: SocketAddr, tls: &TlsClient, timeout: Duration) -> Result<Self, ClientError> {
+        let sock = connect(addr, timeout).map_err(|err| ClientError::from_io(&err, tls.clock.is_far_off()))?;
+        Self::handshake(sock, tls)
+    }
+
+    /// Turns a plain connection into TLS, after the server answered STARTTLS, and completes the handshake.
+    ///
+    /// # Errors
+    ///
+    /// The kinds of [`TestClient::tls`]; [`ErrorKind::Tls`] when the connection already is TLS.
+    pub fn start_tls(self, tls: &TlsClient) -> Result<Self, ClientError> {
+        let Stream::Plain(sock) = self.stream else { return Err(ClientError::new(ErrorKind::Tls, "the connection already is TLS")) };
+        Self::handshake(sock, tls)
+    }
+
+    fn handshake(mut sock: TcpStream, tls: &TlsClient) -> Result<Self, ClientError> {
         let far_off = tls.clock.is_far_off();
         let name = ServerName::try_from(tls.host.clone()).map_err(|err| ClientError::new(ErrorKind::Tls, err.to_string()))?;
         let mut conn = ClientConnection::new(Arc::clone(&tls.config), name).map_err(|err| ClientError::from_tls(&err, far_off))?;
-        let mut sock = connect(addr, timeout).map_err(|err| ClientError::from_io(&err, far_off))?;
         while conn.is_handshaking() {
             conn.complete_io(&mut sock).map_err(|err| ClientError::from_io(&err, far_off))?;
         }
@@ -178,6 +192,25 @@ impl TestClient {
             Line::Complete(bytes) => printable(bytes),
             Line::Eof => Err(ClientError::new(ErrorKind::Dropped, "the server closed the connection")),
             Line::TooLong => Err(ClientError::new(ErrorKind::Garbage, "the server sent a line that is too long")),
+        }
+    }
+
+    /// Sends a tagged command line and reads the server's lines up to and including the one with its tag.
+    ///
+    /// # Errors
+    ///
+    /// The kinds of [`TestClient::send_line`] and [`TestClient::read_line`].
+    pub fn command(&mut self, line: &str) -> Result<Vec<String>, ClientError> {
+        let tag = format!("{} ", line.split(' ').next().unwrap_or_default());
+        self.send_line(line)?;
+        let mut lines = Vec::new();
+        loop {
+            let got = self.read_line()?;
+            let done = got.starts_with(&tag);
+            lines.push(got);
+            if done {
+                return Ok(lines);
+            }
         }
     }
 

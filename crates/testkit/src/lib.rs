@@ -47,6 +47,7 @@
 
 mod client;
 mod error;
+pub mod imap;
 mod line;
 pub mod live;
 mod pki;
