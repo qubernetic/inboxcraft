@@ -205,9 +205,34 @@ struct RoleEntry {
 
 /// The roles of one account's folders, and which roles the owner was asked about.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "RawRoleMap")]
 pub struct RoleMap {
     entries: BTreeMap<Role, RoleEntry>,
     asked: BTreeSet<Role>,
+}
+
+/// A [`RoleMap`] as stored, before it is checked.
+#[derive(Deserialize)]
+struct RawRoleMap {
+    entries: BTreeMap<Role, RoleEntry>,
+    asked: BTreeSet<Role>,
+}
+
+impl From<RawRoleMap> for RoleMap {
+    /// Keeps what [`RoleMap`] itself allows: the inbox and our own folders by name only, and one role per folder (the
+    /// first in [`Role`] order).
+    fn from(raw: RawRoleMap) -> Self {
+        let mut map = Self { entries: BTreeMap::new(), asked: raw.asked };
+        for (role, entry) in raw.entries {
+            if own_or_inbox(role) && entry.source != RoleSource::Name {
+                continue;
+            }
+            if map.role_of(entry.folder).is_none() {
+                map.entries.insert(role, entry);
+            }
+        }
+        map
+    }
 }
 
 impl RoleMap {

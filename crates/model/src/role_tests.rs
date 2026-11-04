@@ -237,3 +237,22 @@ fn the_role_map_serialises() {
     let json = serde_json::to_string(&roles).unwrap();
     assert_eq!(serde_json::from_str::<RoleMap>(&json).unwrap(), roles);
 }
+
+#[test]
+fn a_stored_role_map_is_checked_on_the_way_in() {
+    let json = r#"{"entries":{
+        "Inbox":{"folder":3,"source":"Owner"},
+        "Sent":{"folder":1,"source":"SpecialUse"},
+        "Trash":{"folder":1,"source":"Name"},
+        "Screener":{"folder":2,"source":"Owner"},
+        "Snoozed":{"folder":4,"source":"Name"}
+    },"asked":["Junk"]}"#;
+    let roles: RoleMap = serde_json::from_str(json).unwrap();
+    assert_eq!(roles.folder(Role::Sent), Some(FolderId::new(1)));
+    assert_eq!(roles.role_of(FolderId::new(1)), Some(Role::Sent));
+    assert_eq!(roles.folder(Role::Trash), None, "a folder takes one role");
+    assert_eq!(roles.folder(Role::Screener), None, "our own folders are never the owner's choice");
+    assert_eq!(roles.folder(Role::Inbox), None, "the inbox is never the owner's choice");
+    assert_eq!(roles.folder(Role::Snoozed), Some(FolderId::new(4)));
+    assert!(roles.was_asked(Role::Junk));
+}
