@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-03 · **Last updated:** 2026-11-03 · **Change:** major
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-04 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -55,8 +55,36 @@ mode.
 
 The agent-horde sandbox image needs the same Debian packages as the `Dockerfile` (the egui and winit build
 prerequisites and `libdbus-1-dev`), plus the toolchain components, the `wasm32-unknown-unknown` target and the cargo
-tools pinned there. Today it carries only Go, Rust, just and uv, so `AGENT_HORDE=1 just ci` does not build the
-desktop crates in it yet.
+tools pinned there. As of 2026-11-04 it has them (cargo 1.98.0, nextest 0.9.150, cargo-deny 0.20.2, cargo-llvm-cov
+0.9.1), and `AGENT_HORDE=1 just ci` runs green in it.
+
+## The workspace
+| Directory | What is in it |
+|---|---|
+| `crates/<name>` | the library crates of the architecture (`docs/architecture.md`), package `inboxcraft-<name>` |
+| `apps/<name>` | the binaries: `inboxcraft`, `inboxcraft-cli`, `inboxcraft-web` |
+| `xtask/` | the gates behind `cargo xtask` |
+
+Every crate root starts with the SPDX lines and the deny header
+(`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`),
+and every crate has its tests in files of its own (`src/tests.rs`, `src/<module>_tests.rs`, `tests/`). The crates
+are empty so far; the apps answer `--version` and refuse everything else.
+
+## The gates (`cargo xtask`)
+| Command | What it checks |
+|---|---|
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cargo deny check` |
+| `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
+| `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
+| `cargo xtask help` | the commands and the exit codes |
+
+`ci` runs every gate even after one fails and names the failed ones at the end. Exit codes: 0 passed, 1 a gate
+failed, 2 a usage or setup error. `--root <dir>` points a gate at another workspace (the tests use it). The licence
+is written in one place, `workspace.package.license` in the root `Cargo.toml`; `spdx` reads it from there. The
+`layers`, `wasm` and `assets` gates and the coverage gate are not part of `ci` yet (their `just` recipes fail until
+they land).
+
+Files the gates skip: hidden directories, `target/`, `target-*/` and `plan/`.
 
 ## Bumping a pinned version
 - **Rust:** change `channel` in `rust-toolchain.toml` and the base image tag in the `Dockerfile` together; a new tag
@@ -71,3 +99,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-03 | major | First version: the two-layer model, the justfile, native mode (#1) |
+| 2026-11-04 | minor | The workspace layout and the first `cargo xtask` gates: `ci`, `spdx`, `test-files` (#5) |
