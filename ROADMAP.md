@@ -36,6 +36,7 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | Workspace skeleton: every crate and app as an empty crate, `cargo xtask ci`, `spdx`, `test-files` (#5) |
 | 2026-11-04 | The `layers`, `wasm`, `assets` and `stats` gates, all in `cargo xtask ci` (#6) |
 | 2026-11-04 | The coverage gate `cargo xtask cov --check`, floors in `.config/coverage.toml`, in `cargo xtask ci` (#7) |
+| 2026-11-04 | `testkit`: the fake server frame with the drop, delay, garbage and certificate faults (#8) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -44,3 +45,4 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | minor | Progress log: workspace skeleton and first gates (#5) |
 | 2026-11-04 | minor | Progress log: the remaining E0 gates (#6) |
 | 2026-11-04 | minor | Progress log: the coverage gate (#7) |
+| 2026-11-04 | minor | Progress log: the fake server frame (#8) |

@@ -16,3 +16,7 @@ All notable changes to InboxCraft are listed here. The format follows
 - `cargo xtask cov [--check]`: line coverage per crate under `cargo llvm-cov nextest`, checked against the
   floors in `.config/coverage.toml` (95 % workspace, 98 % core crates, 80 % `net` and `ui-egui`); part of
   `cargo xtask ci`, and `just cov` runs it (#7)
+- `inboxcraft-testkit`, the dev-only fake server frame: a scripted line-protocol server on a loopback port over
+  plain TCP or implicit TLS, a fault script (drop, delay, garbage), a test CA generated at test time, the
+  certificate faults (unknown CA, expired, wrong host name, client clock far off) and a test client that reports
+  each fault as its own error kind; 98 % coverage floor (#8)
