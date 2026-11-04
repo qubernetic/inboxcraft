@@ -57,6 +57,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # testkit only: COMPRESS=DEFLATE of the fake IMAP server and the test client (pure Rust, no network)
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 time = "0.3"
+# store only, native only: SQLite (public domain, compiled from the bundled amalgamation) with FTS5
+rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 
 # [patch.crates-io]
 # egui/eframe/winit forks, if the Craft forks are used: pin by rev

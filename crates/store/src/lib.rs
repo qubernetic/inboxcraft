@@ -38,6 +38,8 @@ mod entry;
 mod error;
 mod memory;
 mod search;
+#[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
+mod sqlite;
 
 pub use body::{Body, MAX_SOURCE_BYTES, MAX_TEXT_BYTES};
 pub use change::{Batch, Change};
@@ -48,6 +50,8 @@ use inboxcraft_model::{Account, AccountId, Folder, FolderId, FolderState, Messag
 use inboxcraft_time::Timestamp;
 pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
+#[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
+pub use sqlite::{DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Sqlite};
 
 /// The local-first store. Reads give accounts, folders and messages in id order, messages of a folder in UID order.
 pub trait Storage {

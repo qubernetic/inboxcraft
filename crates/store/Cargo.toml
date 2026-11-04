@@ -8,11 +8,22 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+default = ["sqlite"]
+# The native backend: SQLite with FTS5 and the sources as files. Never built for wasm32, whatever the features.
+sqlite = ["dep:rusqlite", "dep:serde", "dep:serde_json"]
+
 [dependencies]
 inboxcraft-model = { workspace = true }
 inboxcraft-time = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
 [dev-dependencies]
+rusqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]
