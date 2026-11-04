@@ -9,7 +9,7 @@ use std::fmt;
 use inboxcraft_model::{Uid, UidSet};
 
 use super::capability::Capabilities;
-use super::command::Command;
+use super::command::{Command, escaped};
 use super::fetch::{FetchAttributes, FetchItem};
 use super::frame::Framer;
 use super::list::{ListEntry, MAX_MAILBOX_NAME, MAX_MAILBOXES};
@@ -342,6 +342,8 @@ impl Client {
         }
         check_credentials(user, password)?;
         self.secrets.add(password);
+        // The form inside the quotes, when it differs: a server may write the argument back as it came.
+        self.secrets.add(&String::from_utf8_lossy(&escaped(password.as_bytes())));
         let command = Command::new("LOGIN").string(user.as_bytes()).string(password.as_bytes());
         Ok(self.start(command, Kind::SignIn))
     }

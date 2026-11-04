@@ -49,12 +49,7 @@ impl Command {
         if bytes.len() <= MAX_QUOTED && bytes.iter().all(|b| matches!(b, b' '..=b'~')) {
             let mut quoted = Vec::with_capacity(bytes.len().saturating_add(2));
             quoted.push(b'"');
-            for b in bytes {
-                if matches!(b, b'"' | b'\\') {
-                    quoted.push(b'\\');
-                }
-                quoted.push(*b);
-            }
+            quoted.extend(escaped(bytes));
             quoted.push(b'"');
             self.text(&quoted);
         } else {
@@ -74,6 +69,18 @@ impl Command {
         first.extend(chunks.pop_front().unwrap_or_default());
         (first, chunks)
     }
+}
+
+/// What goes between the quotes of a quoted string: `"` and `\` with a `\` before them.
+pub(crate) fn escaped(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for b in bytes {
+        if matches!(b, b'"' | b'\\') {
+            out.push(b'\\');
+        }
+        out.push(*b);
+    }
+    out
 }
 
 #[cfg(test)]

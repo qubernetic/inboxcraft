@@ -7,7 +7,7 @@
 
 use inboxcraft_model::{Uid, UidSet};
 use inboxcraft_proto::ProtoError;
-use inboxcraft_proto::imap::{Answer, Client, Event, FetchAttributes, MAX_LINE, MAX_MAILBOX_NAME, SearchKey, State, Transport};
+use inboxcraft_proto::imap::{Answer, Client, Event, FetchAttributes, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport};
 use proptest::prelude::*;
 
 /// A client over TLS, greeted and signed in with PREAUTH, with `INBOX` open.
@@ -104,6 +104,26 @@ fn a_fatal_error_drops_what_was_not_written_yet() {
     assert!(client.take_output().is_empty());
 }
 
+/// The text of an event that the server wrote for people.
+fn server_words(event: &Event) -> Option<&str> {
+    match event {
+        Event::Alert(text) | Event::Completed { outcome: Err(Refusal { text, .. }), .. } => Some(text),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_password_is_hidden_also_as_login_quotes_it() {
+    let mut client = Client::new(Transport::Tls);
+    client.receive(b"* OK [CAPABILITY IMAP4rev1] ready\r\n").unwrap();
+    client.next_event();
+    client.login("ada@example.org", "pa\"ss\\").unwrap();
+    assert_eq!(client.take_output(), b"A0001 LOGIN \"ada@example.org\" \"pa\\\"ss\\\\\"\r\n");
+    client.receive(b"A0001 NO [AUTHENTICATIONFAILED] bad password \"pa\\\"ss\\\\\" or pa\"ss\\\r\n").unwrap();
+    let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+    assert_eq!(refusal.text, "bad password \"***\" or ***");
+}
+
 /// Hostile bytes for a session in any state.
 fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
     let line = prop_oneof![
@@ -116,6 +136,11 @@ fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
         Just(b"* LIST (\\Sent) \"/\" {3}\r\nhun)\r\n".to_vec()),
         Just(b"* SEARCH 1 2 3\r\n".to_vec()),
         Just(b"* BYE hunter2\r\n".to_vec()),
+        Just(b"A0003 NO [AUTHENTICATIONFAILED] bad password \"hun\\\"ter\\\\2\" hun\"ter\\2\r\n".to_vec()),
+        Just(b"A0004 NO \"hun\\\\\\\\ter2\" hun\\\\ter2\r\n".to_vec()),
+        Just("* OK [ALERT] abc\u{202e}gpj.exe\u{200b}x\r\n".as_bytes().to_vec()),
+        Just("A0002 NO a\u{2066}b\u{feff}c\r\n".as_bytes().to_vec()),
+        Just("* BYE \u{061c}gone\u{200f}\r\n".as_bytes().to_vec()),
         proptest::collection::vec(any::<u8>(), 0..64),
         "[ -~]{0,40}\r\n".prop_map(String::into_bytes),
     ];
@@ -124,7 +149,13 @@ fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
 
 proptest! {
     #[test]
-    fn hostile_bytes_never_panic_and_never_show_the_password(pieces in session_bytes(), commands in proptest::collection::vec(0_u8..10, 0..8)) {
+    fn hostile_bytes_never_panic_and_never_show_the_password(
+        pieces in session_bytes(),
+        commands in proptest::collection::vec(0_u8..10, 0..8),
+        password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2")],
+    ) {
+        // The password as LOGIN quotes it; also how `Debug` writes it.
+        let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
         let mut client = Client::new(Transport::Tls);
         // The client can hide the password only once it has been given one.
         let mut given = false;
@@ -133,8 +164,8 @@ proptest! {
             if let Some(command) = commands.get(n) {
                 let result = match command {
                     0 => client.capability(),
-                    1 => client.login("tim", "hunter2"),
-                    2 => client.authenticate_plain("tim", "hunter2"),
+                    1 => client.login("tim", password),
+                    2 => client.authenticate_plain("tim", password),
                     3 => client.list(),
                     4 => client.select("INBOX"),
                     5 => client.uid_fetch(&UidSet::from_iter([Uid::new(1).unwrap()]), FetchAttributes::default()),
@@ -155,15 +186,25 @@ proptest! {
                 prop_assert_eq!(client.state(), State::Closed);
             }
             client.take_output();
-            if given {
-                shown.extend(received.err().map(|error| error.to_string()));
-                shown.extend(std::iter::from_fn(|| client.next_event()).map(|event| format!("{event:?}")));
+            let events: Vec<Event> = std::iter::from_fn(|| client.next_event()).collect();
+            // Whatever the server wrote for people is shown without invisible marks.
+            let mut words: Vec<&str> = events.iter().filter_map(server_words).collect();
+            if let Err(ProtoError::Bye(text)) = &received {
+                words.push(text);
             }
-            while client.next_event().is_some() {}
+            for text in &words {
+                prop_assert!(!text.chars().any(inboxcraft_model::is_invisible_mark), "{:?}", text);
+            }
+            if given {
+                shown.extend(words.iter().map(|text| (*text).to_owned()));
+                shown.extend(received.err().map(|error| error.to_string()));
+                shown.extend(events.iter().map(|event| format!("{event:?}")));
+            }
         }
         shown.push(format!("{client:?}"));
         for text in &shown {
-            prop_assert!(!text.contains("hunter2") && !text.contains("AHRpbQBodW50ZXIy"), "{}", text);
+            prop_assert!(!text.contains(password) && !text.contains(&quoted), "{}", text);
+            prop_assert!(!text.contains("AHRpbQBodW50ZXIy"), "{}", text);
         }
     }
 }
