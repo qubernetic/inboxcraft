@@ -43,6 +43,7 @@ pub struct Options {
     pub timeouts: Timeouts,
     /// The certificate fault the fake's certificate has.
     pub cert: Option<CertFault>,
+    pub compress: bool,
 }
 
 impl Default for Options {
@@ -55,6 +56,7 @@ impl Default for Options {
             connections: 1,
             timeouts: TIMEOUTS,
             cert: None,
+            compress: true,
         }
     }
 }
@@ -73,8 +75,13 @@ impl Run {
         let fake = if options.connections > 1 { listen.start_imap_many(fake, options.connections)? } else { listen.start_imap(fake)? };
         let account = Account::new(ACCOUNT, "Test", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?;
         let connector = connector(&pki, wall(), fake.addr()).with_timeouts(options.timeouts);
-        let settings =
-            WorkerSettings { sync: options.sync, backoff: options.backoff, max_queued: options.max_queued, ..WorkerSettings::new(connector) };
+        let settings = WorkerSettings {
+            sync: options.sync,
+            backoff: options.backoff,
+            max_queued: options.max_queued,
+            compress: options.compress,
+            ..WorkerSettings::new(connector)
+        };
         let (sender, events) = mpsc::channel();
         let worker = Worker::spawn(account, settings, Arc::new(Fixed(options.password)), sender)?;
         Ok(Self { worker, events, fake, next: 0 })

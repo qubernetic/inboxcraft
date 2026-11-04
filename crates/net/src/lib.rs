@@ -9,16 +9,19 @@
 //!   clock certificates are checked at; every certificate fault has its own [`inboxcraft_model::ErrorKind`].
 //! - [`Connector`] opens TCP connections with [`Timeouts`] and runs TLS over them.
 //! - [`ImapConnection`] drives `proto`'s IMAP client over a connection: implicit TLS, or STARTTLS before anything
-//!   else; a [`Password`] goes out only once the connection is encrypted.
+//!   else; a [`Password`] goes out only once the connection is encrypted. After the sign-in it switches QRESYNC on
+//!   and compresses the stream (COMPRESS=DEFLATE) where the server offers them.
 //! - [`Worker`]: one thread per account. It takes the engine's [`inboxcraft_model::Job`]s in order on one
 //!   signed-in connection and reports [`inboxcraft_model::Event`]s: the folder list, the first sync of a folder
 //!   (headers with PREVIEW, then the bodies of the messages of the last [`SyncConfig::body_days`] days), and the
 //!   body of a message the owner opens. Folders are opened read-only (EXAMINE): nothing changes on the server.
+//!   Without a connection, jobs wait in an offline queue while the worker reconnects after a [`Backoff`] wait.
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod backoff;
+mod compress;
 mod connect;
 pub mod envelope;
 mod error;

@@ -49,13 +49,15 @@ pub struct WorkerSettings {
     pub backoff: Backoff,
     /// The most jobs that wait for a connection; a job beyond them fails at once with [`ErrorKind::TooLarge`].
     pub max_queued: usize,
+    /// Compress the connection where the server offers COMPRESS=DEFLATE.
+    pub compress: bool,
 }
 
 impl WorkerSettings {
     /// The default settings with `connector`.
     #[must_use]
     pub fn new(connector: Connector) -> Self {
-        Self { connector, sync: SyncConfig::default(), backoff: Backoff::default(), max_queued: MAX_QUEUED }
+        Self { connector, sync: SyncConfig::default(), backoff: Backoff::default(), max_queued: MAX_QUEUED, compress: true }
     }
 }
 
@@ -309,10 +311,16 @@ impl Run<'_> {
     }
 }
 
-/// A signed-in connection for `account`; the password is asked for first, so none means no connection at all.
+/// A signed-in connection for `account`, with QRESYNC on and compressed where the server offers them; the password
+/// is asked for first, so none means no connection at all.
 fn sign_in(account: &Account, settings: &WorkerSettings, credentials: &dyn Credentials) -> Result<ImapConnection, NetError> {
     let password = credentials.password(account).ok_or_else(|| NetError::new(ErrorKind::CredentialMissing, "no password stored"))?;
     let mut connection = ImapConnection::open(account.imap(), &settings.connector)?;
     connection.login(account.username(), &password)?;
+    drop(password);
+    connection.enable_qresync()?;
+    if settings.compress {
+        connection.compress()?;
+    }
     Ok(connection)
 }

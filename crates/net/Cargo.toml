@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+flate2 = { workspace = true }
 inboxcraft-charset = { workspace = true }
 inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }

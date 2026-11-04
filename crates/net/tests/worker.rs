@@ -62,7 +62,7 @@ fn the_first_sync_brings_headers_previews_and_the_bodies_of_the_last_days() -> R
     // Read-only: EXAMINE and BODY.PEEK, nothing that sets a flag.
     assert!(lines.iter().any(|line| line.contains("EXAMINE \"INBOX\"") || line.contains("EXAMINE INBOX")), "{lines:?}");
     let verbs: Vec<String> = lines.iter().map(|line| line.split(' ').skip(1).take(2).collect::<Vec<_>>().join(" ")).collect();
-    assert_eq!(verbs, ["AUTHENTICATE PLAIN", "EXAMINE \"INBOX\"", "UID FETCH", "UID FETCH", "LOGOUT"]);
+    assert_eq!(verbs, ["AUTHENTICATE PLAIN", "ENABLE QRESYNC", "COMPRESS DEFLATE", "EXAMINE \"INBOX\"", "UID FETCH", "UID FETCH", "LOGOUT"]);
     assert!(lines.iter().all(|line| !line.contains("BODY[")), "{lines:?}");
     Ok(())
 }
