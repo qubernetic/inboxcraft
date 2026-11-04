@@ -25,6 +25,8 @@ inboxcraft-mime = 98
 inboxcraft-model = 98
 inboxcraft-proto = 98
 inboxcraft-store = 98
+# The fake server frame: the issue asks the core-crate floor of it.
+inboxcraft-testkit = 98
 inboxcraft-time = 98
 inboxcraft-vcard = 98
 # State and view-model logic tested headless, drawing through `ui_shot`; `net` against the fake servers.

@@ -120,7 +120,7 @@ The floors live in one file, `.config/coverage.toml`:
 | Floor | Crates |
 |---|---|
 | 95 % | the workspace total |
-| 98 % | `charset`, `dav`, `engine`, `ical`, `mime`, `model`, `proto`, `store`, `time`, `vcard` |
+| 98 % | `charset`, `dav`, `engine`, `ical`, `mime`, `model`, `proto`, `store`, `testkit`, `time`, `vcard` |
 | 80 % | `net`, `ui-egui` |
 
 - A line is an lcov `DA` record (llvm-cov already leaves out the test files); it is covered when its count is not 0.
@@ -188,3 +188,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | The `assets`, `layers`, `wasm` and `stats` gates and the layering rules (#6) |
 | 2026-11-04 | minor | The coverage gate `cov` and its floors (#7) |
 | 2026-11-04 | minor | CI: the workspace workflow with Codecov, nightly fuzzing, Dependabot (#9) |
+| 2026-11-04 | minor | The `testkit` coverage floor (#8) |
