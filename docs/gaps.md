@@ -71,7 +71,8 @@ B = blocks the next stage.
 - `MessageBuilder` makes no `Message-ID` or `Date` of its own and requires none; the composer (E2) has to set both.
   It writes no `Bcc` (blind copies belong to the SMTP envelope), no group syntax, no `multipart/related` with inline
   pictures, no `Content-ID` and no `name` parameter on an attachment's `Content-Type`; every attachment is base64,
-  an attached message included. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
+  so it refuses `message/rfc822` and every other `message` type but `message/global` (RFC 2046 allows those only
+  in an identity encoding): forwarding a message as an attachment needs a writer of its own. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
   server with `SMTPUTF8`; nothing checks that yet (#19).
 - `MessageBuilder` keeps a display name of printable ASCII as a quoted string and writes any other as `B` encoded
   words, which a person reading the raw source cannot read; the text of a long word without spaces becomes encoded
@@ -120,3 +121,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the message reader (#18) |
 | 2026-11-04 | minor | Message reader: whole-message errors, unsafe file names, reports read from direct parts (#18) |
 | 2026-11-04 | minor | What the message builder does not write (#19) |
+| 2026-11-04 | minor | The message builder refuses attached messages other than `message/global` (#19) |

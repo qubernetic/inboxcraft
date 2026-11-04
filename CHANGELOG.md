@@ -71,5 +71,6 @@ All notable changes to InboxCraft are listed here. The format follows
   or both as `multipart/alternative`, and attachments in `multipart/mixed` (base64, file names in RFC 2231 form when
   they are not plain ASCII); text in `7bit` or quoted-printable with CRLF line ends; boundaries that are in none of
   the parts. A header injection guard: text for people loses CR, LF and NUL, and addresses, message ids, field
-  names and media types that do not fit their grammar are refused (`MimeError::BadHeader`). What the reader could
+  names and media types that do not fit their grammar are refused (`MimeError::BadHeader`), as are media type names
+  over 127 characters and attached `message` types other than `message/global`. What the reader could
   not read back (a field over 256 KiB, a message over 128 MiB) is refused too; build-then-parse property tests (#19)
