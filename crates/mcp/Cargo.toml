@@ -1,0 +1,12 @@
+[package]
+name = "inboxcraft-mcp"
+description = "InboxCraft: the MCP server, headless or bridged to a running app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

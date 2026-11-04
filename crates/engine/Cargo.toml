@@ -1,0 +1,12 @@
+[package]
+name = "inboxcraft-engine"
+description = "InboxCraft: the `Session`, the command registry, undo and the triage rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
