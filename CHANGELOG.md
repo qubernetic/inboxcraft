@@ -74,3 +74,17 @@ All notable changes to InboxCraft are listed here. The format follows
   names and media types that do not fit their grammar are refused (`MimeError::BadHeader`), as are media type names
   over 127 characters and attached `message` types other than `message/global`. What the reader could
   not read back (a field over 256 KiB, a message over 128 MiB) is refused too; build-then-parse property tests (#19)
+- `inboxcraft-proto` has the sans-I/O IMAP client core, `imap::Client`: bytes from the server go in, bytes for the
+  server and events come out, the same on native and wasm. It reads the greeting (`OK`, `PREAUTH` over TLS only,
+  `BYE`), CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN (RFC 4616, with SASL-IR when offered), LIST with
+  `RETURN (SPECIAL-USE)` when the server has LIST-EXTENDED, names in modified UTF-7 and SPECIAL-USE attributes as
+  the model's `SpecialUse`, SELECT and EXAMINE with what the mailbox reports, UID FETCH of flags, arrival time,
+  size and the whole message, its header or its text, UID SEARCH with dates, flags, UID sets, texts (UTF-8 ones as
+  literals) and `NOT`, `OR` and `AND`, and LOGOUT. LOGIN and AUTHENTICATE are refused before TLS and under
+  `LOGINDISABLED`; the capabilities are forgotten after STARTTLS and read again after it and after a sign-in;
+  bytes after the STARTTLS go-ahead end the session; every form of the password is hidden in server text. Lines
+  over 1 MiB, literals over 64 MiB, more than 64 literals in a response, lists nested deeper than 32, LIST answers
+  over 10000 mailboxes and flag lists over 64 are capped or refused. Golden transcripts in
+  `crates/proto/tests/transcripts/`, property tests and the fuzz target `imap_client`. The response values, status
+  lines, modified UTF-7, the quoting of commands and the caps are adapted from UCS-Care-Group/mailcraft
+  (MIT OR Apache-2.0) (#20)
