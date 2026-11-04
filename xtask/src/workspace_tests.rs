@@ -137,6 +137,14 @@ fn too_many_members_is_a_config_error_not_an_unbounded_read() {
 }
 
 #[test]
+fn too_many_literal_members_is_a_config_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let list: Vec<String> = (0..=MAX_MEMBERS).map(|index| format!("\"m{index}\"")).collect();
+    write(dir.path(), "Cargo.toml", &format!("[workspace]\nmembers = [{}]\n", list.join(", ")));
+    assert!(matches!(members(dir.path()), Err(Error::Config { message, .. }) if message.contains("more than")));
+}
+
+#[test]
 fn this_workspace_has_every_crate() {
     let found = members(&crate::default_root()).unwrap();
     assert!(found.iter().any(|m| m.name == "inboxcraft-engine"));

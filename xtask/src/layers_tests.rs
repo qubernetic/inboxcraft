@@ -111,6 +111,13 @@ fn a_ui_crate_below_layer_6_fails() {
 }
 
 #[test]
+fn every_class_describes_itself() {
+    let described = [Class::Layer(3), Class::Standalone, Class::Testkit, Class::Exempt].map(Class::describe);
+    assert_eq!(described, ["layer 3", "standalone", "testkit", "app or tool"]);
+    fails_with(&[("inboxcraft-testkit", "[dependencies]\nrfd = \"1\"\n")], "`inboxcraft-testkit` (testkit) depends on the UI crate");
+}
+
+#[test]
 fn a_network_crate_outside_net_fails() {
     for net in NETWORK_CRATES {
         fails_with(
