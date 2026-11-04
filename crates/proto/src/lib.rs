@@ -11,7 +11,9 @@
 //!   as [`imap::Event`]s. LOGIN and AUTHENTICATE PLAIN are refused until the connection is encrypted; after STARTTLS
 //!   and after a sign-in the capabilities are read again. For keeping a mailbox in step it has ENABLE, CONDSTORE,
 //!   QRESYNC (VANISHED, and a changed UIDVALIDITY reported as [`imap::Event::UidValidityChanged`]), IDLE and
-//!   NOTIFY; each is sent only to a server that offers it.
+//!   NOTIFY; each is sent only to a server that offers it. UID MOVE falls back to UID COPY, a `\Deleted` flag
+//!   and UID EXPUNGE, and says how far it got ([`imap::Removal`]); COPYUID ([`imap::CopyUid`]) is kept only when it
+//!   fits what was asked for. COMPRESS=DEFLATE is negotiated here and run by `net`.
 //!
 //! Everything a server sends is hostile. Lines, literals, nesting and lists are capped; a server that breaks the
 //! protocol or a limit gets a fatal [`ProtoError`], never a panic. No error, event or `Debug` output carries a

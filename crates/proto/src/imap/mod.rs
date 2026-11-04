@@ -5,7 +5,9 @@
 //!
 //! The commands of the read path: CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN (encrypted connections only),
 //! LIST with SPECIAL-USE, SELECT and EXAMINE, UID FETCH, UID SEARCH and LOGOUT; and to keep a mailbox in step, ENABLE
-//! (RFC 5161), CONDSTORE and QRESYNC (RFC 7162), IDLE (RFC 2177) and NOTIFY (RFC 5465).
+//! (RFC 5161), CONDSTORE and QRESYNC (RFC 7162), IDLE (RFC 2177) and NOTIFY (RFC 5465); and UID COPY, UID MOVE
+//! (RFC 6851, with a fallback for servers without it), UID EXPUNGE and COPYUID (UIDPLUS, RFC 4315), PREVIEW
+//! (RFC 8970) and the negotiation of COMPRESS=DEFLATE (RFC 4978).
 
 mod capability;
 mod client;

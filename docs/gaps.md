@@ -104,10 +104,11 @@ B = blocks the next stage.
 - `cargo xtask test-files` reads lines, not a syntax tree: a module line inside a multi-line string counts as a
   module (#5).
 - The IMAP client in `proto` sends one command at a time and only synchronising literals (no pipelining, no
-  LITERAL+). It has no PREVIEW, COMPRESS, UTF8=ACCEPT, NOOP, CLOSE, UNSELECT, ESEARCH, XOAUTH2 or OAUTHBEARER
-  yet; they come with the rest of E1.4 and with OAuth (#20, #21).
+  LITERAL+). It has no UTF8=ACCEPT, NOOP, CLOSE, UNSELECT, ESEARCH, APPEND, STORE (other than inside a move),
+  XOAUTH2 or OAUTHBEARER yet; APPEND and APPENDUID come with drafts (E2), the rest when a caller needs them and with
+  OAuth (#20, #21, #22).
 - `proto` FETCH asks for UID, FLAGS, INTERNALDATE, RFC822.SIZE, MODSEQ and one of `BODY.PEEK[]`, `[HEADER]` and
-  `[TEXT]`; no ENVELOPE, BODYSTRUCTURE or partial bodies. A FETCH response comes as an event whether a command asked
+  `[TEXT]`, and PREVIEW; no ENVELOPE, BODYSTRUCTURE or partial bodies. A FETCH response comes as an event whether a command asked
   for it or the server told of a change; the caller tells them apart by UID (#20).
 - `proto` LIST always lists `""` `"*"`; names are decoded from modified UTF-7 only, and a name over 1024 bytes or
   with a control character is left out. A CAPABILITY that the server answers with OK and no list keeps the list
@@ -138,6 +139,19 @@ B = blocks the next stage.
   comes as the new name only (the `OLDNAME` extended data is not read). STATUS and LIST that come without NOTIFY on
   are passed over; mailbox names in them are server data and, as in a LIST answer, the password is not hidden in
   them (#21).
+- `proto` UID MOVE without MOVE: when the server refuses the STORE or the UID EXPUNGE after the copy was made, the
+  messages are in both mailboxes and the client does not undo the copy; the answer says so (`Removal::NotMarked`,
+  `NotExpunged`) and the caller decides. Without UIDPLUS the messages stay in the source marked `\Deleted` until
+  something expunges the mailbox. The client does not check that the source and the destination differ (#22).
+- `proto` COPYUID: one that does not fit what was asked for (UIDs not asked for, a UID twice, counts that differ,
+  another UIDVALIDITY between the parts of one move) is dropped as a whole, and a COPYUID on the tagged OK of a
+  MOVE is only taken when no untagged one came. The client does not check that the destination UIDs are new to the
+  destination mailbox (#22).
+- `proto` PREVIEW: the text is cut at 256 characters without a mark; it is not searched for the password, being
+  message data like a fetched body. No `PREVIEW` search key or `FUZZY` (#22).
+- `proto` COMPRESS=DEFLATE: only the negotiation; the stream, its inflate size cap and a server that sends a
+  compression bomb are `net`'s (E1.7b). The client cannot tell a server that compresses at the TLS layer already;
+  such a server answers `NO [COMPRESSIONACTIVE]` (#22).
 
 ## Revision history
 | Date | Change | Summary |
@@ -161,3 +175,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | The IMAP client refuses message data outside a mailbox and drops alerts before TLS (#20) |
 | 2026-11-04 | minor | IMAP server words before TLS, password pieces, capabilities during a sign-in (#20) |
 | 2026-11-04 | minor | Rough edges of the IMAP sync extensions (#21) |
+| 2026-11-04 | minor | Rough edges of IMAP move, UIDPLUS, preview and compression (#22) |
