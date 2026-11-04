@@ -7,13 +7,14 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, ci, spdx, test_files};
+use crate::{Context, Error, FAILED, OK, USAGE, ci, layers, spdx, test_files};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
   ci            every gate: fmt, clippy -D warnings, spdx, test-files, nextest (ci profile), doctests, deny
+  layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   test-files    no inline `mod tests { ... }`: tests live in files of their own
   help          print this text
@@ -28,6 +29,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 pub(crate) enum Command {
     Ci,
     Help,
+    Layers,
     Spdx { fix: bool },
     TestFiles,
 }
@@ -50,6 +52,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
         Some("ci") => Command::Ci,
+        Some("layers") => Command::Layers,
         Some("spdx") => Command::Spdx { fix: false },
         Some("test-files") => Command::TestFiles,
         Some(other) => return Err(format!("unknown command `{other}`")),
@@ -63,7 +66,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Ci | Command::Help | Command::TestFiles => return Err("`--fix` only goes with `spdx`".to_owned()),
+                Command::Ci | Command::Help | Command::Layers | Command::TestFiles => return Err("`--fix` only goes with `spdx`".to_owned()),
             },
             other => return Err(format!("unknown option `{other}`")),
         }
@@ -101,6 +104,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
             out.write_all(HELP.as_bytes())?;
             Ok(true)
         }
+        Command::Layers => layers::gate(&ctx.root, out),
         Command::Spdx { fix } => spdx::gate(&ctx.root, *fix, out),
         Command::TestFiles => test_files::gate(&ctx.root, out),
     }

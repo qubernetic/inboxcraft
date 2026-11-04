@@ -12,9 +12,11 @@ mod ci;
 mod cli;
 mod config;
 mod error;
+mod layers;
 mod spdx;
 mod test_files;
 mod walk;
+mod workspace;
 
 #[cfg(test)]
 mod test_support;
@@ -35,6 +37,11 @@ pub const OK: u8 = 0;
 pub const FAILED: u8 = 1;
 /// Exit code: bad arguments, or a gate could not run at all.
 pub const USAGE: u8 = 2;
+
+/// `n` and `noun`, the noun in the plural unless `n` is 1: `1 crate`, `3 crates`.
+pub(crate) fn count(n: usize, noun: &str) -> String {
+    if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") }
+}
 
 /// Where xtask runs and how it starts the cargo tools.
 pub struct Context {

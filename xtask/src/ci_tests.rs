@@ -53,12 +53,13 @@ fn ci_runs_every_gate_in_order() {
     .map(|args| format!("cargo {args} @ {}", root.display()))
     .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in ["fmt", "clippy", "spdx", "test-files", "nextest", "doctests", "deny"] {
+    for name in ["fmt", "clippy", "spdx", "test-files", "layers", "nextest", "doctests", "deny"] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
-    assert!(out.ends_with("ci: all 7 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 7);
+    assert!(out.contains("layers: "), "{out}");
+    assert!(out.ends_with("ci: all 8 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 8);
 }
 
 #[test]
@@ -67,7 +68,7 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert_eq!(calls.borrow().len(), 5, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 7 gates failed: clippy, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 2 of 8 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -76,7 +77,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 5 of 7 gates failed: fmt, clippy, nextest, doctests, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 5 of 8 gates failed: fmt, clippy, nextest, doctests, deny\n"), "{out}");
 }
 
 #[test]
@@ -87,7 +88,7 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 1 of 7 gates failed: spdx\n"), "{out}");
+    assert!(out.ends_with("ci: 2 of 8 gates failed: spdx, layers\n"), "{out}");
     assert_eq!(calls.borrow().len(), 5);
 }
 
