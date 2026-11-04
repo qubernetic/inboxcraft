@@ -6,7 +6,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
 
-use inboxcraft_model::{Uid, UidSet};
+use inboxcraft_model::{Uid, UidSet, UidValidity};
 
 use super::capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN, is_atom_char};
 use super::command::{Command, escaped};
@@ -17,7 +17,7 @@ use super::mailbox::{MailboxStatus, flag_list};
 use super::response::{Response, classify};
 use super::sasl::{check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
-use super::sync::{Extension, SelectOptions};
+use super::sync::{Extension, SelectOptions, vanished};
 use super::text::Secrets;
 use super::value::{Piece, Status, StatusLine, Value, number};
 use crate::ProtoError;
@@ -103,6 +103,23 @@ pub enum Event {
     Exists(u32),
     /// The message with this sequence number is gone; the ones after it move up by one.
     Expunged(u32),
+    /// The messages with these UIDs are gone (QRESYNC, in the place of EXPUNGE); `earlier` when they went before the
+    /// command that reports them (a resync), not just now. Sequence numbers are not told.
+    Vanished {
+        /// The UIDs.
+        uids: UidSet,
+        /// `(EARLIER)`.
+        earlier: bool,
+    },
+    /// The open mailbox's UIDVALIDITY is not the one known: every UID held for it is void. It comes before the answer
+    /// of a SELECT or EXAMINE given [`SelectOptions::known`], or when the server tells of a new one while the mailbox
+    /// is open.
+    UidValidityChanged {
+        /// The UIDVALIDITY known.
+        old: UidValidity,
+        /// The server's, `None` when it gave none (then no UID can be kept).
+        new: Option<UidValidity>,
+    },
     /// A text the server says must be shown to the person (`[ALERT]`), cleaned; only over TLS.
     Alert(String),
 }
@@ -169,12 +186,21 @@ enum Kind {
         entries: Vec<ListEntry>,
         seen: HashSet<String>,
     },
-    Select(MailboxStatus),
+    Select(Opening),
     Fetch,
     Search(Vec<Uid>),
     Logout {
         previous: State,
     },
+}
+
+/// A SELECT or EXAMINE on its way.
+struct Opening {
+    status: MailboxStatus,
+    /// The UIDVALIDITY the caller knew.
+    known: Option<UidValidity>,
+    /// Responses still belong to the mailbox open before, until `[CLOSED]` (RFC 7162 section 3.2.11).
+    closing: bool,
 }
 
 /// The command waiting for its answer.
@@ -209,6 +235,8 @@ pub struct Client {
     condstore: bool,
     /// QRESYNC is on.
     qresync: bool,
+    /// The open mailbox's UIDVALIDITY.
+    uid_validity: Option<UidValidity>,
 }
 
 /// Neither the output (it may hold a password) nor anything secret is shown.
@@ -239,6 +267,7 @@ impl Client {
             secrets: Secrets::default(),
             condstore: false,
             qresync: false,
+            uid_validity: None,
         }
     }
 
@@ -473,12 +502,24 @@ impl Client {
             return Err(ProtoError::NotOffered("CONDSTORE"));
         }
         let mut command = Command::new(verb).string(mailbox.as_bytes());
-        if options.condstore {
+        let resync = options.known.filter(|_| self.qresync).and_then(|known| Some((known.uid_validity(), known.highest_modseq()?)));
+        if let Some((uid_validity, modseq)) = resync {
+            let mut parameter = format!("(QRESYNC ({uid_validity} {modseq}");
+            if let Some(uids) = options.known_uids.as_ref().filter(|uids| !uids.is_empty()) {
+                parameter.push(' ');
+                parameter.push_str(&set_text(uids)?);
+            }
+            command = command.arg(&format!("{parameter}))"));
+        } else if options.condstore {
             command = command.arg("(CONDSTORE)");
         }
+        // With QRESYNC the server marks where the mailbox open before ends.
+        let closing = self.state == State::Selected && self.qresync;
         // Whatever the answer, the mailbox open before is closed (RFC 9051 section 6.3.2).
         self.state = State::Authenticated;
-        Ok(self.start(command, Kind::Select(MailboxStatus { read_only, ..MailboxStatus::default() })))
+        self.uid_validity = None;
+        let status = MailboxStatus { read_only, ..MailboxStatus::default() };
+        Ok(self.start(command, Kind::Select(Opening { status, known: options.known.map(|known| known.uid_validity()), closing })))
     }
 
     /// UID FETCH of the messages in `set`, with their UID and `attributes`; they come as [`Event::Fetched`].
@@ -614,12 +655,33 @@ impl Client {
             Status::Preauth => Err(ProtoError::Unexpected("PREAUTH")),
             Status::Ok | Status::No | Status::Bad => {
                 self.note_code(line);
-                if let Some(InFlight { kind: Kind::Select(status), .. }) = self.in_flight.as_mut() {
-                    status.note_code(line);
+                match self.in_flight.as_mut() {
+                    Some(InFlight { kind: Kind::Select(opening), .. }) if line.code == "CLOSED" => {
+                        // What came so far was about the mailbox open before.
+                        opening.status = MailboxStatus { read_only: opening.status.read_only, ..MailboxStatus::default() };
+                        opening.closing = false;
+                    }
+                    Some(InFlight { kind: Kind::Select(opening), .. }) if !opening.closing => opening.status.note_code(line),
+                    Some(InFlight { kind: Kind::Select(_), .. }) => {}
+                    _ if self.state == State::Selected && line.code == "UIDVALIDITY" => {
+                        self.uid_validity_told(number(&line.arg).and_then(UidValidity::new))
+                    }
+                    _ => {}
                 }
                 Ok(())
             }
         }
+    }
+
+    /// The server told the open mailbox's UIDVALIDITY.
+    fn uid_validity_told(&mut self, told: Option<UidValidity>) {
+        if told.is_none() || told == self.uid_validity {
+            return;
+        }
+        if let Some(old) = self.uid_validity {
+            self.events.push_back(Event::UidValidityChanged { old, new: told });
+        }
+        self.uid_validity = told;
     }
 
     /// Server text for people, cleaned and with the secrets hidden; empty before TLS, where anyone on the way could
@@ -674,9 +736,21 @@ impl Client {
             ("ENABLED", Some(Kind::Enable { words, .. })) => {
                 words.extend(values.iter().skip(1).filter_map(Value::atom).take(MAX_CAPABILITIES).map(str::to_owned));
             }
-            ("FLAGS", Some(Kind::Select(status))) => {
-                if let Some(Value::List(flags)) = values.into_iter().nth(1) {
-                    status.flags = flag_list(flags);
+            ("FLAGS", Some(Kind::Select(opening))) => {
+                if let Some(Value::List(flags)) = values.into_iter().nth(1)
+                    && !opening.closing
+                {
+                    opening.status.flags = flag_list(flags);
+                }
+            }
+            ("VANISHED", flight) => {
+                let open = self.state == State::Selected || matches!(flight, Some(Kind::Select(_)));
+                if !open || !self.qresync {
+                    return Err(ProtoError::Unexpected("VANISHED response"));
+                }
+                let (uids, earlier) = vanished(values).ok_or(ProtoError::Malformed("VANISHED response"))?;
+                if !matches!(flight, Some(Kind::Select(Opening { closing: true, .. }))) {
+                    self.events.push_back(Event::Vanished { uids, earlier });
                 }
             }
             ("SEARCH", Some(Kind::Search(found))) => {
@@ -729,6 +803,7 @@ impl Client {
                 Err(refusal)
             }
             (Kind::Select(_), Some(refusal)) => {
+                // Already `None`, from the SELECT on.
                 self.state = State::Authenticated;
                 Err(refusal)
             }
@@ -776,12 +851,18 @@ impl Client {
                 Answer::Enabled(enabled)
             }
             Kind::List { entries, .. } => Answer::Listed(entries),
-            Kind::Select(mut status) => {
+            Kind::Select(Opening { mut status, known, .. }) => {
                 match line.code.as_str() {
                     "READ-ONLY" => status.read_only = true,
                     "READ-WRITE" => status.read_only = false,
                     _ => {}
                 }
+                if let Some(old) = known
+                    && status.uid_validity != Some(old)
+                {
+                    self.events.push_back(Event::UidValidityChanged { old, new: status.uid_validity });
+                }
+                self.uid_validity = status.uid_validity;
                 self.state = State::Selected;
                 Answer::Selected(status)
             }
@@ -808,13 +889,17 @@ fn check_mailbox(mailbox: &str) -> Result<(), ProtoError> {
 /// that is `open` or being opened (RFC 9051 section 7.4); anywhere else, before TLS too, they end the session.
 fn message_data(count: u32, values: Vec<Value>, flight: Option<&mut Kind>, open: bool, events: &mut VecDeque<Event>) -> Result<(), ProtoError> {
     let word = values.get(1).and_then(Value::atom).map(str::to_ascii_uppercase).unwrap_or_default();
+    if let Some(Kind::Select(Opening { closing: true, .. })) = flight {
+        // About the mailbox being closed.
+        return Ok(());
+    }
     match (word.as_str(), flight) {
         ("EXISTS", _) if !open => return Err(ProtoError::Unexpected("EXISTS response")),
         ("EXPUNGE", _) if !open => return Err(ProtoError::Unexpected("EXPUNGE response")),
         ("FETCH", _) if !open => return Err(ProtoError::Unexpected("FETCH response")),
-        ("EXISTS", Some(Kind::Select(status))) => status.exists = count,
+        ("EXISTS", Some(Kind::Select(Opening { status, .. }))) => status.exists = count,
         ("EXISTS", _) => events.push_back(Event::Exists(count)),
-        ("RECENT", Some(Kind::Select(status))) => status.recent = count,
+        ("RECENT", Some(Kind::Select(Opening { status, .. }))) => status.recent = count,
         ("EXPUNGE", _) if count != 0 => events.push_back(Event::Expunged(count)),
         ("EXPUNGE", _) => return Err(ProtoError::Malformed("EXPUNGE response")),
         ("FETCH", _) => {

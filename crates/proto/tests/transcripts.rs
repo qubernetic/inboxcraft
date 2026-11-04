@@ -85,7 +85,7 @@ fn select_options(words: VecDeque<&str>) -> SelectOptions {
             let state = FolderState::new(UidValidity::new(validity.parse().unwrap()).unwrap());
             options.known = Some(state.with_highest_modseq(modseq.and_then(|m| ModSeq::new(m.parse().unwrap()))));
         } else if let Some(uids) = word.strip_prefix("uids=") {
-            options.known_uids = Some(uid_set(uids));
+            options.known_uids = Some(if uids.is_empty() { UidSet::default() } else { uid_set(uids) });
         } else {
             panic!("unknown select option {word}");
         }
@@ -195,6 +195,11 @@ fn render(event: &Event) -> Vec<String> {
         Event::Exists(count) => vec![format!("exists {count}")],
         Event::Expunged(seq) => vec![format!("expunged {seq}")],
         Event::Alert(text) => vec![format!("alert {text}")],
+        Event::Vanished { uids, earlier: true } => vec![format!("vanished earlier {}", set_text(uids))],
+        Event::Vanished { uids, earlier: false } => vec![format!("vanished {}", set_text(uids))],
+        Event::UidValidityChanged { old, new } => {
+            vec![format!("uidvalidity changed {old} -> {}", new.map_or("none".to_owned(), |new| new.to_string()))]
+        }
         Event::Fetched(item) => {
             let mut line = format!("fetch seq={}", item.seq);
             if let Some(uid) = item.uid {

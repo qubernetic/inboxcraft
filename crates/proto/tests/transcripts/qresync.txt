@@ -1,0 +1,117 @@
+# QRESYNC (RFC 7162 section 3.2): SELECT with what the last session knew, VANISHED, UID FETCH (CHANGEDSINCE ...
+# VANISHED), the [CLOSED] line between two mailboxes, and a changed UIDVALIDITY.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready
+= greeted preauth
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED QRESYNC
+S: A0001 OK enabled
+= A0001 enabled QRESYNC
+> select-with INBOX known=67890007/90060115194045000 uids=41,43:211,214:541
+C: A0002 SELECT "INBOX" (QRESYNC (67890007 90060115194045000 41,43:211,214:541))
+S: * 314 EXISTS
+S: * OK [UIDVALIDITY 67890007] UIDs valid
+S: * OK [UIDNEXT 567] Predicted next UID
+S: * OK [HIGHESTMODSEQ 90060115205545359] Highest
+S: * VANISHED (EARLIER) 41,43:116,118,120:211,214:540
+S: * 49 FETCH (UID 117 FLAGS (\Seen \Answered) MODSEQ (90060115194045001))
+S: A0002 OK [READ-WRITE] mailbox selected
+= vanished earlier 41,43:116,118,120:211,214:540
+= fetch seq=49 uid=117 flags=\Seen,\Answered modseq=90060115194045001
+= A0002 selected exists=314 recent=0 flags=- permanent=- uidvalidity=67890007 uidnext=567 unseen=none modseq=90060115205545359 read-only=false
+# Removed while the mailbox is open; a range may be written backwards.
+S: * VANISHED 405,409:407
+= vanished 405,407:409
+> fetch 300:500 flags since=12345 vanished
+C: A0003 UID FETCH 300:500 (UID FLAGS MODSEQ) (CHANGEDSINCE 12345 VANISHED)
+S: * VANISHED (EARLIER) 300:310,405,411
+S: * 1 FETCH (UID 404 MODSEQ (65402) FLAGS (\Seen))
+S: A0003 OK done
+= vanished earlier 300:310,405,411
+= fetch seq=1 uid=404 flags=\Seen modseq=65402
+= A0003 fetched
+# The UIDVALIDITY is the same: nothing to report.
+S: * OK [UIDVALIDITY 67890007] still
+# Another mailbox: what comes before [CLOSED] is about the one that is being closed and is passed over.
+> select-with Archive known=5/10
+C: A0004 SELECT "Archive" (QRESYNC (5 10))
+S: * VANISHED 412
+S: * 315 EXISTS
+S: * 7 FETCH (FLAGS (\Deleted))
+S: * OK [UIDVALIDITY 67890007] old
+S: * OK [CLOSED] Previous mailbox closed
+S: * 2 EXISTS
+S: * OK [UIDVALIDITY 5] UIDs valid
+S: A0004 OK [READ-WRITE] done
+= A0004 selected exists=2 recent=0 flags=- permanent=- uidvalidity=5 uidnext=none unseen=none modseq=none read-only=false
+# The mailbox was made anew: every UID the caller holds for it is void.
+> select-with INBOX known=67890007/90060115194045000
+C: A0005 SELECT "INBOX" (QRESYNC (67890007 90060115194045000))
+S: * OK [CLOSED]
+S: * 10 EXISTS
+S: * OK [UIDVALIDITY 67890008] UIDs valid
+S: A0005 OK [READ-WRITE] done
+= uidvalidity changed 67890007 -> 67890008
+= A0005 selected exists=10 recent=0 flags=- permanent=- uidvalidity=67890008 uidnext=none unseen=none modseq=none read-only=false
+# A server that changes it while the mailbox is open.
+S: * OK [UIDVALIDITY 67890009] recreated
+= uidvalidity changed 67890008 -> 67890009
+# Without a modification sequence there is nothing to resync from: CONDSTORE only, the UIDVALIDITY is still checked.
+> examine-with Drafts known=3 condstore
+C: A0006 EXAMINE "Drafts" (CONDSTORE)
+S: * OK [CLOSED]
+S: A0006 OK [READ-ONLY] done
+= uidvalidity changed 3 -> none
+= A0006 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+# Known UIDs that are an empty set are not sent.
+> select-with INBOX known=67890009/1 uids=
+C: A0007 SELECT "INBOX" (QRESYNC (67890009 1))
+S: * OK [CLOSED]
+S: * OK [UIDVALIDITY 67890009] UIDs valid
+S: A0007 OK done
+= A0007 selected exists=0 recent=0 flags=- permanent=- uidvalidity=67890009 uidnext=none unseen=none modseq=none read-only=false
+
+# A VANISHED that cannot be read ends the session.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready
+= greeted preauth
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED QRESYNC
+S: A0001 OK
+= A0001 enabled QRESYNC
+> select INBOX
+C: A0002 SELECT "INBOX"
+S: A0002 OK done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+S: * VANISHED 1:*
+! Malformed("VANISHED response")
+
+# A server that lacks QRESYNC: the resync falls back to CONDSTORE and the UIDVALIDITY check; a VANISHED it sends
+# anyway ends the session.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 CONDSTORE] ready
+= greeted preauth
+> select-with INBOX condstore known=67890007/90060115194045000 uids=1:9
+C: A0001 SELECT "INBOX" (CONDSTORE)
+S: * 3 EXPUNGE
+S: * OK [UIDVALIDITY 1] UIDs valid
+S: A0001 OK done
+= expunged 3
+= uidvalidity changed 67890007 -> 1
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=1 uidnext=none unseen=none modseq=none read-only=false
+S: * VANISHED 4
+! Unexpected("VANISHED response")
+
+# No VANISHED without an open mailbox.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready
+= greeted preauth
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED QRESYNC
+S: A0001 OK
+= A0001 enabled QRESYNC
+S: * VANISHED 4
+! Unexpected("VANISHED response")

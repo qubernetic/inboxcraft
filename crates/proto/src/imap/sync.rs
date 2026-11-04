@@ -3,7 +3,9 @@
 
 //! Quick resynchronisation: ENABLE (RFC 5161), CONDSTORE and QRESYNC (RFC 7162).
 
-use inboxcraft_model::{FolderState, ModSeq, UidSet};
+use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet};
+
+use super::value::{Value, number};
 
 /// An extension that [`Client::enable`](super::Client::enable) switches on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +47,38 @@ pub(crate) fn modseq(text: &str) -> Option<ModSeq> {
         return None;
     }
     text.parse().ok().and_then(ModSeq::new)
+}
+
+/// A UID set as a server writes one (`41,43:116`): ranges in any order and either direction, no `*`, no zero.
+pub(crate) fn uid_set(text: &str) -> Option<UidSet> {
+    let uid = |part: &str| number(part).and_then(Uid::new);
+    text.split(',')
+        .map(|range| match range.split_once(':') {
+            Some((first, last)) => Some((uid(first)?, uid(last)?)),
+            None => uid(range).map(|one| (one, one)),
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(UidSet::from)
+}
+
+/// `VANISHED [(EARLIER)] <uid set>` (RFC 7162 section 3.2.10): the UIDs, and whether they went before this command
+/// (`EARLIER`) rather than just now.
+pub(crate) fn vanished(values: Vec<Value>) -> Option<(UidSet, bool)> {
+    let mut values = values.into_iter();
+    if !values.next()?.atom()?.eq_ignore_ascii_case("VANISHED") {
+        return None;
+    }
+    let (earlier, set) = match values.next()? {
+        Value::List(tag) => match tag.as_slice() {
+            [Value::Atom(word)] if word.eq_ignore_ascii_case("EARLIER") => (true, values.next()?),
+            _ => return None,
+        },
+        set => (false, set),
+    };
+    if values.next().is_some() {
+        return None;
+    }
+    Some((uid_set(set.atom()?)?, earlier))
 }
 
 #[cfg(test)]

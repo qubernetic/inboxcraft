@@ -5,10 +5,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use inboxcraft_model::{Uid, UidSet};
+use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, Extension, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, MAX_SET_RANGES, Refusal, SearchKey,
+    SelectOptions, State, Transport,
 };
 use proptest::prelude::*;
 
@@ -196,6 +197,23 @@ fn only_what_was_asked_for_and_confirmed_is_enabled() {
     assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 OK\r\n", Extension::CondStore), (false, false));
     assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 NO\r\n", Extension::QResync), (false, false));
     assert_eq!(enabled(b"A0001 OK\r\n", Extension::QResync), (false, false));
+}
+
+#[test]
+fn known_uids_beyond_the_cap_are_refused_unsent() {
+    let mut client = Client::new(Transport::Tls);
+    client.receive(b"* PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready\r\n").unwrap();
+    client.enable(Extension::QResync).unwrap();
+    client.receive(b"* ENABLED QRESYNC\r\nA0001 OK\r\n").unwrap();
+    client.select("INBOX").unwrap();
+    client.receive(b"A0002 OK\r\n").unwrap();
+    client.take_output();
+    let known = FolderState::new(UidValidity::new(1).unwrap()).with_highest_modseq(ModSeq::new(9));
+    let uids: UidSet = (1..=u32::try_from(MAX_SET_RANGES).unwrap() + 1).filter_map(|n| Uid::new(n * 2)).collect();
+    let options = SelectOptions { known: Some(known), known_uids: Some(uids), ..SelectOptions::default() };
+    assert_eq!(client.select_with("Archive", &options), Err(ProtoError::BadArgument("UID set with too many ranges")));
+    assert!(client.take_output().is_empty());
+    assert_eq!(client.state(), State::Selected);
 }
 
 /// Hostile bytes for a session in any state.
