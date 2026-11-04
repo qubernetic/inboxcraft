@@ -61,6 +61,26 @@ fn broken_after_fails_once_full() {
     out.write_all(b"c").unwrap_err();
 }
 
+/// Writes `text` to `root/rel`, creating the directories on the way.
+pub fn write(root: &Path, rel: &str, text: &str) {
+    let path = root.join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// A package manifest called `name`, followed by `rest` (dependency tables and the like).
+pub fn manifest(name: &str, rest: &str) -> String {
+    format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{rest}")
+}
+
+#[test]
+fn manifest_writes_a_package_table() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a/b/Cargo.toml", &manifest("x", "[dependencies]\n"));
+    let text = std::fs::read_to_string(dir.path().join("a/b/Cargo.toml")).unwrap();
+    assert!(text.starts_with("[package]\nname = \"x\"\n") && text.ends_with("[dependencies]\n"), "{text}");
+}
+
 /// A runner that starts nothing and passes every tool.
 pub struct Passing;
 

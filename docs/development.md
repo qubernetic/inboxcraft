@@ -73,18 +73,41 @@ are empty so far; the apps answer `--version` and refuse everything else.
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cargo deny check` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
+| `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
+| `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
+| `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
+| `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
 | `cargo xtask help` | the commands and the exit codes |
 
 `ci` runs every gate even after one fails and names the failed ones at the end. Exit codes: 0 passed, 1 a gate
 failed, 2 a usage or setup error. `--root <dir>` points a gate at another workspace (the tests use it). The licence
 is written in one place, `workspace.package.license` in the root `Cargo.toml`; `spdx` reads it from there. The
-`layers`, `wasm` and `assets` gates and the coverage gate are not part of `ci` yet (their `just` recipes fail until
-they land).
+coverage gate is not part of `ci` yet.
 
-Files the gates skip: hidden directories, `target/`, `target-*/` and `plan/`.
+### The layering rules
+Every workspace crate has a class in `xtask/src/layers.rs`: `Layer(n)` (0 to 6), `Standalone` (`control-key`,
+`charset`), `Testkit` (`testkit`) or `Exempt` (the apps and `xtask`). A new crate is registered there in the commit
+that adds it. `layers` reads the direct dependencies of every member (normal, dev and build, target-specific ones
+included) and fails on:
+
+- a member that is not registered;
+- a dependency on a higher layer, or on a crate in its own layer that `INTRA_LAYER_ORDER` does not list (only
+  `net` -> `proto` and `net` -> `dav`);
+- a standalone crate with any workspace dependency;
+- `testkit` as a normal or build dependency (dev-dependencies only);
+- a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
+- a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
+  `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
+- a dependency on an app or `xtask` from a library crate.
+
+Member patterns in the root `Cargo.toml` are directories or `<dir>/*`; `layers`, `wasm` and `stats` refuse other
+globs.
+
+Files the gates skip: hidden directories, `target/`, `target-*/` and `plan/`; `assets` also skips the gitignored
+local directories `corpus/`, `craft-fonts/`, `craft-i18n/`, `dist/` and `log/`.
 
 ## Bumping a pinned version
 - **Rust:** change `channel` in `rust-toolchain.toml` and the base image tag in the `Dockerfile` together; a new tag
@@ -100,3 +123,4 @@ After a `Dockerfile` change, run `just rebuild`.
 |---|---|---|
 | 2026-11-03 | major | First version: the two-layer model, the justfile, native mode (#1) |
 | 2026-11-04 | minor | The workspace layout and the first `cargo xtask` gates: `ci`, `spdx`, `test-files` (#5) |
+| 2026-11-04 | minor | The `assets`, `layers`, `wasm` and `stats` gates and the layering rules (#6) |

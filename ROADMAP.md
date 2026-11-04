@@ -34,9 +34,11 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | Date | What landed |
 |---|---|
 | 2026-11-04 | Workspace skeleton: every crate and app as an empty crate, `cargo xtask ci`, `spdx`, `test-files` (#5) |
+| 2026-11-04 | The `layers`, `wasm`, `assets` and `stats` gates, all in `cargo xtask ci` (#6) |
 
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
 | <date> | major | First version |
 | 2026-11-04 | minor | Progress log: workspace skeleton and first gates (#5) |
+| 2026-11-04 | minor | Progress log: the remaining E0 gates (#6) |

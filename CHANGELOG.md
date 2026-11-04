@@ -11,3 +11,5 @@ All notable changes to InboxCraft are listed here. The format follows
 - Development container and justfile (#1)
 - Cargo workspace with every crate of the architecture as an empty skeleton, and the first `cargo xtask` gates:
   `ci`, `spdx [--fix]` and `test-files` (#5)
+- `cargo xtask` gates `layers` (the crate layering table in `xtask/src/layers.rs`), `wasm`, `assets` and `stats`,
+  all part of `cargo xtask ci` (#6)
