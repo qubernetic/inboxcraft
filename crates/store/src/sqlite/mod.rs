@@ -6,13 +6,16 @@
 mod private;
 mod schema;
 mod sources;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use inboxcraft_model::{Account, AccountId, Folder, FolderId, FolderState, Message, MessageId};
 use inboxcraft_time::Timestamp;
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
+use rusqlite::config::DbConfig;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 pub use schema::SCHEMA_VERSION;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -80,7 +83,12 @@ impl Sqlite {
         let (wal, shm) = (dir.join(format!("{DATABASE_FILE}-wal")), dir.join(format!("{DATABASE_FILE}-shm")));
         private::tighten(&[dir, &sources], &[&database, &wal, &shm])?;
         drop(private::create_file(&database, false)?);
-        let mut conn = Connection::open(database)?;
+        // No URI names, and nothing the file holds (triggers, views, schema) may call a function with side effects
+        // or write the schema: the file is outside data.
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let mut conn = Connection::open_with_flags(database, flags)?;
+        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
         conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;")?;
         schema::migrate(&mut conn)?;

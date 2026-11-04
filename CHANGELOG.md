@@ -137,9 +137,9 @@ All notable changes to InboxCraft are listed here. The format follows
 - `inboxcraft-store`, the local-first cache: the `Storage` trait over accounts, folders, messages, flags, bodies and
   folder sync state (UIDVALIDITY, UIDNEXT, HIGHESTMODSEQ), written as a `Batch` of changes that applies whole or not
   at all. Two backends: `Memory` (always built, the one on wasm) and `Sqlite` (native only, feature `sqlite`, on by
-  default): SQLite in WAL mode with `synchronous=FULL`, a schema version with migrations, an FTS5 index of the body
-  text, and the message sources as files beside the database, written and synced before their row commits and swept
-  when a kill left one behind; on unix the directories are `0700` and the files `0600`, wider ones narrowed at
+  default): SQLite in WAL mode with `synchronous=FULL`, in defensive mode and with no trusted schema, a schema version
+  with migrations, an FTS5 index of the body text, and the message sources as files beside the database, written
+  and synced before their row commits and swept when a kill left one behind; on unix the directories are `0700` and the files `0600`, wider ones narrowed at
   open. Bodies are kept for opened messages and for the last 30 days (`StoreConfig::body_days`); removed mail leaves
   no words in the database, its index or its write-ahead log. `Search` matches from, to and Cc, subject and date,
   and body words as a phrase, newest first. New dependency `rusqlite` with the bundled SQLite, native builds only
