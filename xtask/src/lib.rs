@@ -12,6 +12,7 @@ mod cli;
 mod config;
 mod error;
 mod spdx;
+mod test_files;
 mod walk;
 
 #[cfg(test)]

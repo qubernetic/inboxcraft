@@ -7,13 +7,14 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, spdx};
+use crate::{Context, Error, FAILED, OK, USAGE, spdx, test_files};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
+  test-files    no inline `mod tests { ... }`: tests live in files of their own
   help          print this text
 
 options:
@@ -26,6 +27,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 pub(crate) enum Command {
     Help,
     Spdx { fix: bool },
+    TestFiles,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
         Some("spdx") => Command::Spdx { fix: false },
+        Some("test-files") => Command::TestFiles,
         Some(other) => return Err(format!("unknown command `{other}`")),
     };
     let mut invocation = Invocation { command, root: None };
@@ -57,7 +60,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             }
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
-                Command::Help => return Err("`--fix` only goes with `spdx`".to_owned()),
+                Command::Help | Command::TestFiles => return Err("`--fix` only goes with `spdx`".to_owned()),
             },
             other => return Err(format!("unknown option `{other}`")),
         }
@@ -95,6 +98,7 @@ fn dispatch(command: &Command, ctx: &Context, out: &mut dyn Write) -> Result<boo
             Ok(true)
         }
         Command::Spdx { fix } => spdx::gate(&ctx.root, *fix, out),
+        Command::TestFiles => test_files::gate(&ctx.root, out),
     }
 }
 
