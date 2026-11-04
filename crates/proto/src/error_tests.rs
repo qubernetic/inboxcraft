@@ -13,6 +13,7 @@ fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
         ProtoError::Busy,
         ProtoError::NotOffered("STARTTLS"),
         ProtoError::CapabilitiesUnknown,
+        ProtoError::NotEnabled("QRESYNC"),
         ProtoError::BadArgument("mailbox name"),
     ];
     let fatal = [

@@ -7,10 +7,11 @@
 //! The reading of one response follows UCS-Care-Group/mailcraft `crates/proto/src/imap/mod.rs` (`Item`, see
 //! `PROVENANCE.md`).
 
-use inboxcraft_model::Uid;
+use inboxcraft_model::{ModSeq, Uid};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
 use super::mailbox::flag_list;
+use super::sync::modseq;
 use super::value::{Value, number};
 
 /// The part of a message a fetch takes, without setting `\Seen` (`BODY.PEEK`).
@@ -53,6 +54,14 @@ pub struct FetchAttributes {
     pub internal_date: bool,
     /// `RFC822.SIZE`.
     pub size: bool,
+    /// `MODSEQ` (CONDSTORE, RFC 7162): the message's modification sequence.
+    pub modseq: bool,
+    /// Only the messages changed after this modification sequence (`CHANGEDSINCE`, CONDSTORE); asks for `MODSEQ`
+    /// too.
+    pub changed_since: Option<ModSeq>,
+    /// With [`changed_since`](Self::changed_since): the UIDs of the messages removed since then come as
+    /// [`Event::Vanished`](super::Event::Vanished) (`VANISHED`, QRESYNC enabled).
+    pub vanished: bool,
     /// A part of the message.
     pub section: Option<Section>,
 }
@@ -61,7 +70,8 @@ impl FetchAttributes {
     /// The list of data items: `(UID FLAGS BODY.PEEK[])`.
     pub(crate) fn items(self) -> String {
         let mut items = vec!["UID"];
-        for (wanted, item) in [(self.flags, "FLAGS"), (self.internal_date, "INTERNALDATE"), (self.size, "RFC822.SIZE")] {
+        let modseq = self.modseq || self.changed_since.is_some();
+        for (wanted, item) in [(self.flags, "FLAGS"), (self.internal_date, "INTERNALDATE"), (self.size, "RFC822.SIZE"), (modseq, "MODSEQ")] {
             if wanted {
                 items.push(item);
             }
@@ -70,6 +80,12 @@ impl FetchAttributes {
             items.push(section.peek());
         }
         format!("({})", items.join(" "))
+    }
+
+    /// The fetch modifiers, `(CHANGEDSINCE 12345 VANISHED)`, when there are any.
+    pub(crate) fn modifiers(self) -> Option<String> {
+        let since = self.changed_since?;
+        Some(if self.vanished { format!("(CHANGEDSINCE {since} VANISHED)") } else { format!("(CHANGEDSINCE {since})") })
     }
 }
 
@@ -86,6 +102,8 @@ pub struct FetchItem {
     pub internal_date: Option<Timestamp>,
     /// Its size in bytes.
     pub size: Option<u32>,
+    /// Its modification sequence (CONDSTORE).
+    pub modseq: Option<ModSeq>,
     /// The part of the message the response carries, and its bytes.
     pub section: Option<(Section, Vec<u8>)>,
 }
@@ -110,6 +128,7 @@ impl FetchItem {
                 ("FLAGS", Value::List(flags)) => item.flags = Some(flag_list(flags)),
                 ("INTERNALDATE", Value::Str(date)) => item.internal_date = internal_date(&date),
                 ("RFC822.SIZE", value) => item.size = value.number(),
+                ("MODSEQ", Value::List(inner)) => item.modseq = inner.first().and_then(Value::atom).and_then(modseq),
                 (name, Value::Str(bytes)) => {
                     if let Some(section) = Section::named(name) {
                         item.section = Some((section, bytes));

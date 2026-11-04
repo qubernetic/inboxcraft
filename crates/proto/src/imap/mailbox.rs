@@ -6,6 +6,7 @@
 use inboxcraft_model::{ModSeq, Uid, UidValidity};
 
 use super::capability::is_atom_char;
+use super::sync::modseq;
 use super::value::{StatusLine, Value, number};
 
 /// Most flags kept for one message or mailbox.
@@ -43,7 +44,7 @@ impl MailboxStatus {
             "UIDVALIDITY" => self.uid_validity = number(&line.arg).and_then(UidValidity::new),
             "UIDNEXT" => self.uid_next = number(&line.arg).and_then(Uid::new),
             "UNSEEN" => self.unseen = number(&line.arg),
-            "HIGHESTMODSEQ" => self.highest_modseq = line.arg.parse::<u64>().ok().and_then(ModSeq::new),
+            "HIGHESTMODSEQ" => self.highest_modseq = modseq(&line.arg),
             "PERMANENTFLAGS" => self.permanent_flags = flag_words(line.arg.trim_start_matches('(').trim_end_matches(')')),
             _ => {}
         }

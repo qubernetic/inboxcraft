@@ -5,10 +5,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use inboxcraft_model::{Uid, UidSet};
+use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, Event, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport,
+    Answer, Client, Event, Extension, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, MAX_SET_RANGES, Notify, NotifyMailboxes,
+    Refusal, SearchKey, SelectOptions, State, Transport,
 };
 use proptest::prelude::*;
 
@@ -181,10 +182,54 @@ fn a_refused_capability_after_the_sign_in_leaves_none_known() {
     assert_eq!(client.state(), State::Authenticated);
 }
 
+#[test]
+fn only_what_was_asked_for_and_confirmed_is_enabled() {
+    let enabled = |reply: &[u8], extension| {
+        let mut client = Client::new(Transport::Tls);
+        client.receive(b"* PREAUTH [CAPABILITY IMAP4rev1 ENABLE CONDSTORE QRESYNC] ready\r\n").unwrap();
+        client.enable(extension).unwrap();
+        client.receive(reply).unwrap();
+        (client.is_enabled(Extension::CondStore), client.is_enabled(Extension::QResync))
+    };
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 OK\r\n", Extension::QResync), (true, true));
+    assert_eq!(enabled(b"* ENABLED condstore\r\nA0001 OK\r\n", Extension::CondStore), (true, false));
+    // Not what was asked for, or refused in the end.
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 OK\r\n", Extension::CondStore), (false, false));
+    assert_eq!(enabled(b"* ENABLED QRESYNC\r\nA0001 NO\r\n", Extension::QResync), (false, false));
+    assert_eq!(enabled(b"A0001 OK\r\n", Extension::QResync), (false, false));
+}
+
+#[test]
+fn known_uids_beyond_the_cap_are_refused_unsent() {
+    let mut client = Client::new(Transport::Tls);
+    client.receive(b"* PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready\r\n").unwrap();
+    client.enable(Extension::QResync).unwrap();
+    client.receive(b"* ENABLED QRESYNC\r\nA0001 OK\r\n").unwrap();
+    client.select("INBOX").unwrap();
+    client.receive(b"A0002 OK\r\n").unwrap();
+    client.take_output();
+    let known = FolderState::new(UidValidity::new(1).unwrap()).with_highest_modseq(ModSeq::new(9));
+    let uids: UidSet = (1..=u32::try_from(MAX_SET_RANGES).unwrap() + 1).filter_map(|n| Uid::new(n * 2)).collect();
+    let options = SelectOptions { known: Some(known), known_uids: Some(uids), ..SelectOptions::default() };
+    assert_eq!(client.select_with("Archive", &options), Err(ProtoError::BadArgument("UID set with too many ranges")));
+    assert!(client.take_output().is_empty());
+    assert_eq!(client.state(), State::Selected);
+}
+
 /// Hostile bytes for a session in any state.
 fn session_bytes() -> impl Strategy<Value = Vec<Vec<u8>>> {
     let line = prop_oneof![
-        Just(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR STARTTLS LIST-EXTENDED SPECIAL-USE] hi\r\n".to_vec()),
+        Just(
+            b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR STARTTLS LIST-EXTENDED SPECIAL-USE ENABLE CONDSTORE QRESYNC IDLE NOTIFY] hi\r\n".to_vec()
+        ),
+        Just(b"* ENABLED QRESYNC CONDSTORE\r\n".to_vec()),
+        Just(b"* VANISHED (EARLIER) 1:5,9\r\n".to_vec()),
+        Just(b"* VANISHED 1:*\r\n".to_vec()),
+        Just(b"* OK [CLOSED]\r\n".to_vec()),
+        Just(b"* OK [UIDVALIDITY 9] hunter2\r\n".to_vec()),
+        Just(b"* OK [NOTIFICATIONOVERFLOW]\r\n".to_vec()),
+        Just(b"* STATUS INBOX (MESSAGES 1 UIDNEXT 2 HIGHESTMODSEQ 3)\r\n".to_vec()),
+        Just(b"* 2 FETCH (UID 4 MODSEQ (77))\r\n".to_vec()),
         Just(b"* PREAUTH hi\r\n".to_vec()),
         Just(b"+ \r\n".to_vec()),
         Just(b"A0001 OK [CAPABILITY IMAP4rev1] done\r\n".to_vec()),
@@ -208,18 +253,23 @@ proptest! {
     #[test]
     fn hostile_bytes_never_panic_and_never_show_the_password(
         pieces in session_bytes(),
-        commands in proptest::collection::vec(0_u8..10, 0..8),
+        commands in proptest::collection::vec(0_u8..17, 0..8),
         password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2"), Just(" hunter2"), Just("hunter2\t"), Just(" hun\"ter\\2 ")],
     ) {
         // The password as LOGIN quotes it; also how `Debug` writes it.
         let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
         let mut client = Client::new(Transport::Tls);
+        let known = FolderState::new(UidValidity::new(9).unwrap()).with_highest_modseq(ModSeq::new(5));
+        let resync = SelectOptions { condstore: true, known: Some(known), known_uids: Some(UidSet::from_iter(Uid::new(3))) };
+        let changed = FetchAttributes { changed_since: ModSeq::new(5), vanished: true, ..FetchAttributes::default() };
         // The client can hide the password only once it has been given one.
         let mut given = false;
         let mut shown = Vec::new();
         for (n, piece) in pieces.iter().enumerate() {
             if let Some(command) = commands.get(n) {
                 let result = match command {
+                    13 => client.done().map(|()| None),
+                    _ => match command {
                     0 => client.capability(),
                     1 => client.login("tim", password),
                     2 => client.authenticate_plain("tim", password),
@@ -229,7 +279,15 @@ proptest! {
                     6 => client.uid_search(&SearchKey::Unseen),
                     7 => client.starttls(),
                     8 => client.tls_established(),
+                    9 => client.enable(Extension::QResync),
+                    10 => client.select_with("INBOX", &resync),
+                    11 => client.uid_fetch(&UidSet::from_iter([Uid::new(1).unwrap()]), changed),
+                    12 => client.idle(),
+                    14 => client.notify(&Notify { selected: true, mailboxes: Some(NotifyMailboxes::Personal), mailbox_names: true, status: true }),
+                    15 => client.notify_none(),
                     _ => client.logout(),
+                    }
+                    .map(Some),
                 };
                 match result {
                     Ok(_) if matches!(command, 1 | 2) => given = true,

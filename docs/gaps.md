@@ -104,10 +104,10 @@ B = blocks the next stage.
 - `cargo xtask test-files` reads lines, not a syntax tree: a module line inside a multi-line string counts as a
   module (#5).
 - The IMAP client in `proto` sends one command at a time and only synchronising literals (no pipelining, no
-  LITERAL+). It has no IDLE, ENABLE, CONDSTORE, QRESYNC, NOTIFY, PREVIEW, COMPRESS, UTF8=ACCEPT, NOOP, CLOSE,
-  UNSELECT, ESEARCH, XOAUTH2 or OAUTHBEARER yet; they come with the rest of E1.4 and with OAuth (#20).
-- `proto` FETCH asks for UID, FLAGS, INTERNALDATE, RFC822.SIZE and one of `BODY.PEEK[]`, `[HEADER]` and `[TEXT]`;
-  no ENVELOPE, BODYSTRUCTURE, partial bodies or MODSEQ. A FETCH response comes as an event whether a command asked
+  LITERAL+). It has no PREVIEW, COMPRESS, UTF8=ACCEPT, NOOP, CLOSE, UNSELECT, ESEARCH, XOAUTH2 or OAUTHBEARER
+  yet; they come with the rest of E1.4 and with OAuth (#20, #21).
+- `proto` FETCH asks for UID, FLAGS, INTERNALDATE, RFC822.SIZE, MODSEQ and one of `BODY.PEEK[]`, `[HEADER]` and
+  `[TEXT]`; no ENVELOPE, BODYSTRUCTURE or partial bodies. A FETCH response comes as an event whether a command asked
   for it or the server told of a change; the caller tells them apart by UID (#20).
 - `proto` LIST always lists `""` `"*"`; names are decoded from modified UTF-7 only, and a name over 1024 bytes or
   with a control character is left out. A CAPABILITY that the server answers with OK and no list keeps the list
@@ -124,6 +124,20 @@ B = blocks the next stage.
 - `proto` takes an untagged CAPABILITY that comes during LOGIN or AUTHENTICATE as the list after the sign-in: the
   client cannot tell whether the server sent it before or after it signed the session in. Over TLS that can only
   mean an extension goes unseen (#20).
+- `proto` CONDSTORE and QRESYNC: no STORE `UNCHANGEDSINCE` and `[MODIFIED]` (STORE is not there yet), no SEARCH
+  `MODSEQ`, no sequence match data in the QRESYNC parameter, and an untagged `[HIGHESTMODSEQ]` outside SELECT is not
+  passed on; the modification sequences of the FETCH responses are. With QRESYNC enabled an EXPUNGE is still taken
+  (RFC 7162 says a server must send VANISHED instead). Responses before `[CLOSED]` are passed over only with QRESYNC
+  enabled, where the server must send it; without it they count towards the new mailbox until `[CLOSED]` comes, and
+  a server that never sends it leaves them there (#21).
+- `proto` IDLE: the client does not end an IDLE by itself; renewing it before the server's limit (often 30 minutes)
+  is the caller's work, with its clock (#21).
+- `proto` NOTIFY asks for one set of events: for the open mailbox new messages with UID and flags (and MODSEQ with
+  CONDSTORE), removals and flag changes; for other mailboxes new and removed messages, and the names. No
+  `SELECTED-DELAYED`, annotation, metadata or subscription events, no fetch attributes beyond those, and a rename
+  comes as the new name only (the `OLDNAME` extended data is not read). STATUS and LIST that come without NOTIFY on
+  are passed over; mailbox names in them are server data and, as in a LIST answer, the password is not hidden in
+  them (#21).
 
 ## Revision history
 | Date | Change | Summary |
@@ -146,3 +160,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of the IMAP client core (#20) |
 | 2026-11-04 | minor | The IMAP client refuses message data outside a mailbox and drops alerts before TLS (#20) |
 | 2026-11-04 | minor | IMAP server words before TLS, password pieces, capabilities during a sign-in (#20) |
+| 2026-11-04 | minor | Rough edges of the IMAP sync extensions (#21) |

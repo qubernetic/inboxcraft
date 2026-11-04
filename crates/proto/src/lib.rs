@@ -9,7 +9,9 @@
 //! - [`imap::Client`]: an IMAP client core. Bytes from the server go into [`imap::Client::receive`], bytes for the
 //!   server come out of [`imap::Client::take_output`], and what happened comes out of [`imap::Client::next_event`]
 //!   as [`imap::Event`]s. LOGIN and AUTHENTICATE PLAIN are refused until the connection is encrypted; after STARTTLS
-//!   and after a sign-in the capabilities are read again.
+//!   and after a sign-in the capabilities are read again. For keeping a mailbox in step it has ENABLE, CONDSTORE,
+//!   QRESYNC (VANISHED, and a changed UIDVALIDITY reported as [`imap::Event::UidValidityChanged`]), IDLE and
+//!   NOTIFY; each is sent only to a server that offers it.
 //!
 //! Everything a server sends is hostile. Lines, literals, nesting and lists are capped; a server that breaks the
 //! protocol or a limit gets a fatal [`ProtoError`], never a panic. No error, event or `Debug` output carries a

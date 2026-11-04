@@ -32,6 +32,8 @@ pub enum ProtoError {
     NotOffered(&'static str),
     /// The command depends on the capabilities, and the server has not listed them yet: send CAPABILITY first.
     CapabilitiesUnknown,
+    /// The command needs an extension switched on with ENABLE first (`QRESYNC` for VANISHED).
+    NotEnabled(&'static str),
     /// An argument cannot be sent: it is empty, too long, or holds a character the command cannot carry.
     BadArgument(&'static str),
 
@@ -83,6 +85,7 @@ impl ProtoError {
                 | Self::Busy
                 | Self::NotOffered(_)
                 | Self::CapabilitiesUnknown
+                | Self::NotEnabled(_)
                 | Self::BadArgument(_)
         )
     }
@@ -97,6 +100,7 @@ impl fmt::Display for ProtoError {
             Self::Busy => f.write_str("another command is waiting for its answer"),
             Self::NotOffered(what) => write!(f, "the server does not offer {what}"),
             Self::CapabilitiesUnknown => f.write_str("the server has not said what it can do yet"),
+            Self::NotEnabled(what) => write!(f, "{what} is not enabled"),
             Self::BadArgument(what) => write!(f, "the {what} cannot be sent"),
             Self::LineTooLong { limit } => write!(f, "the server sent a response longer than {limit} bytes"),
             Self::LiteralTooLarge { size, limit } => write!(f, "the server announced {size} bytes in one response, more than {limit}"),
