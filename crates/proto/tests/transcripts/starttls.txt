@@ -1,0 +1,143 @@
+# STARTTLS on port 143: no password before TLS, the capabilities read again after it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS LOGINDISABLED] ready
+= greeted
+> login ada@example.org secret
+! NotEncrypted
+> authenticate ada@example.org secret
+! NotEncrypted
+> tls
+! WrongState { command: "STARTTLS", state: NotAuthenticated }
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] Begin TLS negotiation now
+= A0001 starttls
+? StartingTls
+> list
+! WrongState { command: "LIST", state: StartingTls }
+> tls
+C: A0002 CAPABILITY
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+S: A0002 OK done
+= A0002 capabilities IMAP4REV1 AUTH=PLAIN
+> starttls
+! AlreadyEncrypted
+> login ada@example.org secret
+C: A0003 LOGIN "ada@example.org" "secret"
+S: A0003 OK [CAPABILITY IMAP4rev1 IDLE] Logged in
+= A0003 authenticated IMAP4REV1 IDLE
+? Authenticated
+
+# Bytes after the go-ahead came before encryption: anyone on the way could have put them there.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK Begin TLS negotiation now
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+! PlaintextAfterStartTls
+? Closed
+
+# Also when they come in a later piece, before the handshake.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK Begin TLS negotiation now
+= A0001 starttls
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+! PlaintextAfterStartTls
+> tls
+! Closed
+
+# STARTTLS only when the server lists it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> starttls
+! NotOffered("STARTTLS")
+@ plain
+S: * OK ready
+= greeted
+> starttls
+! CapabilitiesUnknown
+
+# Refused: the session stays unencrypted, and no password goes out.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 NO [UNAVAILABLE] TLS is not available
+= A0001 No [UNAVAILABLE]
+? NotAuthenticated
+> login ada@example.org secret
+! NotEncrypted
+
+# Before TLS nothing is taken as mailbox content, and no alert is shown: anyone on the way could have written it.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+S: * OK [ALERT] Your password expired, sign in at http://example.org/
+= greeted
+S: * 3 EXISTS
+! Unexpected("EXISTS response")
+? Closed
+@ plain
+S: * OK [ALERT] Your password expired, sign in at http://example.org/
+= greeted
+S: * 1 FETCH (UID 7 FLAGS (\Seen) BODY[] {5}
+S: hello)
+! Unexpected("FETCH response")
+
+# Over TLS the same alert is shown.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK go
+= A0001 starttls
+> tls
+C: A0002 CAPABILITY
+S: * OK [ALERT] Maintenance tonight
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
+S: A0002 OK done
+= alert Maintenance tonight
+= A0002 capabilities IMAP4REV1 AUTH=PLAIN
+
+# Before TLS the server's words are not passed on either, in a BYE or a refusal: only what kind of answer it was.
+@ plain
+S: * BYE Sign in at http://example.org/
+! Bye("")
+? Closed
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+S: * BYE Sign in at http://example.org/
+! Bye("")
+@ plain
+S: * OK ready
+= greeted
+> capability
+C: A0001 CAPABILITY
+S: A0001 BAD Sign in at http://example.org/
+= A0001 Bad
+
+# Over TLS they are shown again.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK go
+= A0001 starttls
+> tls
+C: A0002 CAPABILITY
+S: A0002 NO [UNAVAILABLE] Not now
+= A0002 No [UNAVAILABLE] Not now
+> capability
+C: A0003 CAPABILITY
+S: * BYE Shutting down
+! Bye("Shutting down")

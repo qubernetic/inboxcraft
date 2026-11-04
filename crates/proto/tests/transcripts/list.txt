@@ -1,0 +1,45 @@
+# LIST with LIST-EXTENDED and SPECIAL-USE: RETURN (SPECIAL-USE), names in modified UTF-7 and as literals, each
+# mailbox once, and what is no mailbox left out.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 LIST-EXTENDED SPECIAL-USE] ready
+= greeted preauth
+> list
+C: A0001 LIST "" "*" RETURN (SPECIAL-USE)
+S: * LIST (\HasNoChildren) "/" INBOX
+S: * LIST (\HasNoChildren \Sent) "/" "Elk&APw-ld&APY-tt"
+S: * LIST (\Noselect \HasChildren) "/" Projects
+S: * LIST (\HasNoChildren \Trash \Junk) "/" {5}
+S: Bin 2
+S: * LIST (\HasNoChildren) "/" INBOX
+S: * LIST () NIL Notes ("CHILDINFO" ("SUBSCRIBED"))
+S: * LIST garbage
+S: A0001 OK LIST completed
+= A0001 listed 5
+=   mailbox "INBOX" name="INBOX" delimiter='/' attributes=\HasNoChildren special-use=- selectable=true
+=   mailbox "Elk&APw-ld&APY-tt" name="Elküldött" delimiter='/' attributes=\HasNoChildren,\Sent special-use=Sent selectable=true
+=   mailbox "Projects" name="Projects" delimiter='/' attributes=\Noselect,\HasChildren special-use=- selectable=false
+=   mailbox "Bin 2" name="Bin 2" delimiter='/' attributes=\HasNoChildren,\Trash,\Junk special-use=Trash,Junk selectable=true
+=   mailbox "Notes" name="Notes" delimiter=none attributes=- special-use=- selectable=true
+
+# SPECIAL-USE without LIST-EXTENDED: a plain LIST, whose attributes carry the special uses all the same.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 SPECIAL-USE] ready
+= greeted preauth
+> list
+C: A0001 LIST "" "*"
+S: * LIST (\Drafts) "." Drafts
+S: A0001 NO [CANNOT] not now
+= A0001 No [CANNOT] not now
+> list
+C: A0002 LIST "" "*"
+S: * LIST (\Drafts) "." Drafts
+S: A0002 OK done
+= A0002 listed 1
+=   mailbox "Drafts" name="Drafts" delimiter='.' attributes=\Drafts special-use=Drafts selectable=true
+
+# Not before the sign-in.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> list
+! WrongState { command: "LIST", state: NotAuthenticated }

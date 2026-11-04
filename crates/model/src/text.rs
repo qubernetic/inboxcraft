@@ -3,8 +3,11 @@
 
 //! Cleaning one line of text from outside (names, subjects, previews) before it is kept.
 
-/// A mark that changes how text runs or joins without showing itself (bidi controls, zero-width characters).
-pub(crate) fn is_invisible_mark(c: char) -> bool {
+/// A mark that changes how text runs or joins without showing itself (bidi controls, zero-width characters): U+061C,
+/// U+200B to U+200F, U+202A to U+202E, U+2060 to U+2069 and U+FEFF. Text from outside that is shown to people drops
+/// them, so that it cannot look like something it is not.
+#[must_use]
+pub fn is_invisible_mark(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
 }
 

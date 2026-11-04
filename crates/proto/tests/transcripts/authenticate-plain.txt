@@ -1,0 +1,45 @@
+# AUTHENTICATE PLAIN with the response on the command line (SASL-IR); the example of RFC 4616.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR] ready
+= greeted
+> authenticate tim tanstaaftanstaaf
+C: A0001 AUTHENTICATE PLAIN AHRpbQB0YW5zdGFhZnRhbnN0YWFm
+S: A0001 OK [CAPABILITY IMAP4rev1 IDLE] Authenticated
+= A0001 authenticated IMAP4REV1 IDLE
+? Authenticated
+
+# Without SASL-IR the response follows the go-ahead; every form of the password is hidden in the refusal.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready
+= greeted
+> authenticate tim tanstaaftanstaaf
+C: A0001 AUTHENTICATE PLAIN
+S: +
+C: AHRpbQB0YW5zdGFhZnRhbnN0YWFm
+S: A0001 NO [AUTHENTICATIONFAILED] Bad response AHRpbQB0YW5zdGFhZnRhbnN0YWFm for tanstaaftanstaaf
+= A0001 No [AUTHENTICATIONFAILED] Bad response *** for ***
+> authenticate tim tanstaaftanstaaf
+C: A0002 AUTHENTICATE PLAIN
+S: +
+C: AHRpbQB0YW5zdGFhZnRhbnN0YWFm
+S: +
+! Unexpected("continuation request")
+
+# The capabilities after the sign-in: refused, the sign-in still stands.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR] ready
+= greeted
+> authenticate tim tanstaaftanstaaf
+C: A0001 AUTHENTICATE PLAIN AHRpbQB0YW5zdGFhZnRhbnN0YWFm
+S: A0001 OK Authenticated
+C: A0002 CAPABILITY
+S: A0002 BAD not now
+= A0001 authenticated
+? Authenticated
+
+# Only when the server offers PLAIN.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> authenticate tim tanstaaftanstaaf
+! NotOffered("AUTH=PLAIN")

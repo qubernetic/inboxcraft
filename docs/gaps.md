@@ -103,6 +103,27 @@ B = blocks the next stage.
   exists (#6).
 - `cargo xtask test-files` reads lines, not a syntax tree: a module line inside a multi-line string counts as a
   module (#5).
+- The IMAP client in `proto` sends one command at a time and only synchronising literals (no pipelining, no
+  LITERAL+). It has no IDLE, ENABLE, CONDSTORE, QRESYNC, NOTIFY, PREVIEW, COMPRESS, UTF8=ACCEPT, NOOP, CLOSE,
+  UNSELECT, ESEARCH, XOAUTH2 or OAUTHBEARER yet; they come with the rest of E1.4 and with OAuth (#20).
+- `proto` FETCH asks for UID, FLAGS, INTERNALDATE, RFC822.SIZE and one of `BODY.PEEK[]`, `[HEADER]` and `[TEXT]`;
+  no ENVELOPE, BODYSTRUCTURE, partial bodies or MODSEQ. A FETCH response comes as an event whether a command asked
+  for it or the server told of a change; the caller tells them apart by UID (#20).
+- `proto` LIST always lists `""` `"*"`; names are decoded from modified UTF-7 only, and a name over 1024 bytes or
+  with a control character is left out. A CAPABILITY that the server answers with OK and no list keeps the list
+  from before; `RECENT` is only kept during SELECT and EXAMINE (#20).
+- `proto` refuses PREAUTH on a connection that is not encrypted, which rules out a server that greets that way
+  over a local tunnel (#20).
+- `proto` ends the session on an EXISTS, EXPUNGE or FETCH response when no mailbox is open or being opened (RFC 9051
+  section 7.4), also before TLS, rather than passing it over: a server that sends one after a refused SELECT is cut
+  off. `[ALERT]` text that comes before TLS is dropped, not shown later, and BYE and refusal texts before TLS are
+  empty: a server that explains in the clear why it has no STARTTLS is not heard, only that it refused (#20).
+- `proto` hides the password as it was given, quoted, trimmed and as the PLAIN response. A server that writes back
+  a cut or changed piece of it (a few characters, another case, other escapes) cannot be recognised, so that piece
+  shows; a response code is dropped when it holds the password in any case (#20).
+- `proto` takes an untagged CAPABILITY that comes during LOGIN or AUTHENTICATE as the list after the sign-in: the
+  client cannot tell whether the server sent it before or after it signed the session in. Over TLS that can only
+  mean an extension goes unseen (#20).
 
 ## Revision history
 | Date | Change | Summary |
@@ -122,3 +143,6 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Message reader: whole-message errors, unsafe file names, reports read from direct parts (#18) |
 | 2026-11-04 | minor | What the message builder does not write (#19) |
 | 2026-11-04 | minor | The message builder refuses attached messages other than `message/global` (#19) |
+| 2026-11-04 | minor | Rough edges of the IMAP client core (#20) |
+| 2026-11-04 | minor | The IMAP client refuses message data outside a mailbox and drops alerts before TLS (#20) |
+| 2026-11-04 | minor | IMAP server words before TLS, password pieces, capabilities during a sign-in (#20) |

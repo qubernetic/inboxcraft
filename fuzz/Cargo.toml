@@ -16,6 +16,7 @@ inboxcraft-time = { path = "../crates/time" }
 inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
+inboxcraft-proto = { path = "../crates/proto" }
 
 [workspace]
 members = ["."]
@@ -65,6 +66,13 @@ bench = false
 [[bin]]
 name = "mime_dsn"
 path = "fuzz_targets/mime_dsn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "imap_client"
+path = "fuzz_targets/imap_client.rs"
 test = false
 doc = false
 bench = false

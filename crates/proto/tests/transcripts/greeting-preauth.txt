@@ -1,0 +1,19 @@
+# PREAUTH over TLS: the session starts signed in.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] Welcome back
+= greeted preauth
+? Authenticated
+> login ada@example.org secret
+! WrongState { command: "LOGIN", state: Authenticated }
+> list
+C: A0001 LIST "" "*"
+S: A0001 OK done
+= A0001 listed 0
+
+# PREAUTH without encryption would rule STARTTLS out: refused.
+@ plain
+S: * PREAUTH [CAPABILITY IMAP4rev1] Welcome back
+! PreauthWithoutTls
+? Closed
+> list
+! Closed

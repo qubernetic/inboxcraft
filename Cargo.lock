@@ -308,6 +308,11 @@ version = "0.1.0"
 [[package]]
 name = "inboxcraft-proto"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-model",
+ "inboxcraft-time",
+ "proptest",
+]
 
 [[package]]
 name = "inboxcraft-store"
