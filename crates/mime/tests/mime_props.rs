@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Property tests of the message reader: no bytes make it panic, whatever reads holds no more parts than the cap,
-//! header text for people holds no control character, and a base64 body reads back as the bytes it was made of.
+//! header text for people holds no control character and no invisible direction mark, and a base64 body reads back
+//! as the bytes it was made of.
 
 use inboxcraft_mime::{ContentType, DeliveryStatus, Disposition, Headers, MAX_PARTS, Part, Status, TransferEncoding, parse};
 use proptest::prelude::*;
@@ -24,6 +25,7 @@ fn message_lines() -> impl Strategy<Value = Vec<u8>> {
         Just("Content-Transfer-Encoding: quoted-printable".to_owned()),
         Just("Content-Transfer-Encoding: x-uue".to_owned()),
         Just("Content-Disposition: attachment; filename=\"=?UTF-8?Q?a=0Ab?=\"".to_owned()),
+        Just("Content-Disposition: attachment; filename=\"a\u{202e}b.exe\"".to_owned()),
         Just("Content-ID: <x@example.org>".to_owned()),
         Just("Subject: =?UTF-8?B?w6l=?= =?ISO-8859-1?Q?=E9?=".to_owned()),
         Just("Reporting-MTA: dns; mx.example.org".to_owned()),
@@ -45,7 +47,14 @@ fn message_lines() -> impl Strategy<Value = Vec<u8>> {
     })
 }
 
-/// Everything the reader offers, on every part: none of it may panic, and header text holds no control character.
+/// A character that text for people must not hold: a control character, or a mark that changes how text runs or
+/// joins without showing itself.
+fn is_hidden(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+}
+
+/// Everything the reader offers, on every part: none of it may panic, and header text holds no control character and
+/// no invisible direction mark.
 fn touch_everything(message: &Part<'_>) -> Result<(), TestCaseError> {
     let parts = message.parts();
     prop_assert!(parts.len() <= MAX_PARTS);
@@ -56,7 +65,7 @@ fn touch_everything(message: &Part<'_>) -> Result<(), TestCaseError> {
         let _ = part.delivery_status();
         let _ = part.is_attachment();
         for text in [part.file_name(), part.content_id(), part.headers().text("subject")].into_iter().flatten() {
-            prop_assert!(!text.chars().any(char::is_control), "{text:?}");
+            prop_assert!(!text.chars().any(is_hidden), "{text:?}");
         }
     }
     let _ = message.attachments();
@@ -105,12 +114,15 @@ proptest! {
     }
 
     #[test]
-    fn header_text_holds_no_control_character(name in "[A-Za-z-]{1,12}", value in "\\PC{0,80}") {
+    fn header_text_holds_no_control_character(
+        name in "[A-Za-z-]{1,12}",
+        value in "[\\PC\u{061c}\u{200b}-\u{200f}\u{202a}-\u{202e}\u{2060}-\u{2069}\u{feff}]{0,80}",
+    ) {
         let block = format!("{name}: {value}\r\n");
         if let Ok(headers) = Headers::parse(block.as_bytes())
             && let Some(text) = headers.text(&name)
         {
-            prop_assert!(!text.chars().any(char::is_control), "{text:?}");
+            prop_assert!(!text.chars().any(is_hidden), "{text:?}");
         }
     }
 

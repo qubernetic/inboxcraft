@@ -17,7 +17,8 @@
 //! [`MAX_MESSAGE_BYTES`], more than [`MAX_FIELDS`] fields or a field over [`MAX_FIELD_BYTES`], nesting deeper than
 //! [`MAX_DEPTH`], more than [`MAX_PARTS`] parts, a missing or bad boundary, broken base64, an unknown transfer
 //! encoding or character set. Every allocation is bounded by the input, the work is linear in it for each level of
-//! nesting, and header text for people ([`Headers::text`], [`Part::file_name`]) holds no control character.
+//! nesting, and header text for people ([`Headers::text`], [`Part::file_name`]) holds no control character and no
+//! invisible direction mark.
 //!
 //! ```
 //! use inboxcraft_mime::{Body, MimeError, parse};

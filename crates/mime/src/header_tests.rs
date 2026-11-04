@@ -105,6 +105,12 @@ fn text_decodes_encoded_words_and_drops_control_characters() {
 }
 
 #[test]
+fn text_drops_invisible_direction_marks() {
+    let headers = Headers::parse("Subject: =?UTF-8?Q?pay_=E2=80=AEfdp.exe?= \u{200b}now\u{feff}\u{2066}!\u{061c}\r\n".as_bytes()).unwrap();
+    assert_eq!(headers.text("subject").as_deref(), Some("pay fdp.exe now!"));
+}
+
+#[test]
 fn too_many_fields_are_an_error() {
     let block = "X: y\r\n".repeat(MAX_FIELDS);
     assert_eq!(Headers::parse(block.as_bytes()).unwrap().fields().len(), MAX_FIELDS);

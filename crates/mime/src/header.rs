@@ -73,17 +73,24 @@ impl Headers {
         self.fields.iter().filter(move |field| field.name.eq_ignore_ascii_case(name)).map(|field| field.value.as_str())
     }
 
-    /// The first field called `name` as text for people: RFC 2047 encoded words decoded, and every control
-    /// character, CR, LF, NUL and tab included, a space. Broken words stay as they are written.
+    /// The first field called `name` as text for people: RFC 2047 encoded words decoded, every control character,
+    /// CR, LF, NUL and tab included, a space, and the invisible direction and joiner marks dropped. Broken words
+    /// stay as they are written.
     #[must_use]
     pub fn text(&self, name: &str) -> Option<String> {
         self.get(name).map(|value| clean(&decode_text(value).text))
     }
 }
 
-/// Every control character as a space, so text from a message cannot break a line or a header.
+/// Every control character as a space, so text from a message cannot break a line or a header, and the invisible
+/// direction and joiner marks dropped, so a file name written to read backwards cannot pass for another.
 pub(crate) fn clean(text: &str) -> String {
-    text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+    text.chars().filter(|c| !is_invisible_mark(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect()
+}
+
+/// A mark that changes how text runs or joins without showing itself (bidi controls, zero-width characters).
+fn is_invisible_mark(c: char) -> bool {
+    matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
 }
 
 /// The line that starts at `pos`, without its line break, and where the next one starts.
