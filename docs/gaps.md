@@ -11,7 +11,11 @@ B = blocks the next stage.
 
 ## Known rough edges (not ranked)
 - Every crate is an empty skeleton; the apps answer `--version` and refuse everything else (#5).
-- `cargo xtask ci` does not run the coverage gate yet (#5).
+- The `ui-egui` drawing code is not left out of the workspace coverage total yet: there is none. Its files join
+  `workspace-exclude` in `.config/coverage.toml` when it lands (#7).
+- The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
+- `cargo xtask ci` runs the tests twice, once under nextest and once under `cargo llvm-cov nextest` for the
+  coverage gate (#7).
 - The `justfile` has no `assets` and `stats` recipes; they run as part of `just ci` (#6).
 - `cargo xtask layers` checks direct dependencies only, and knows network and UI crates by name from two lists in
   `xtask/src/layers.rs`; a crate missing from them is not caught (#6).
@@ -26,3 +30,4 @@ B = blocks the next stage.
 | <date> | major | First version |
 | 2026-11-04 | minor | Rough edges of the workspace skeleton (#5) |
 | 2026-11-04 | minor | Rough edges of the `layers`, `wasm`, `assets` and `stats` gates (#6) |
+| 2026-11-04 | minor | Rough edges of the coverage gate (#7) |

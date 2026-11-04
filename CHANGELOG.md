@@ -13,3 +13,6 @@ All notable changes to InboxCraft are listed here. The format follows
   `ci`, `spdx [--fix]` and `test-files` (#5)
 - `cargo xtask` gates `layers` (the crate layering table in `xtask/src/layers.rs`), `wasm`, `assets` and `stats`,
   all part of `cargo xtask ci` (#6)
+- `cargo xtask cov [--check]`: line coverage per crate under `cargo llvm-cov nextest`, checked against the
+  floors in `.config/coverage.toml` (95 % workspace, 98 % core crates, 80 % `net` and `ui-egui`); part of
+  `cargo xtask ci`, and `just cov` runs it (#7)
