@@ -397,7 +397,7 @@ fn fixtures_keep_their_uids_flags_dates_and_previews() {
 #[test]
 fn select_takes_no_parameters_it_does_not_know() {
     let got = signed_in(&FakeImap::sample(), "a1 SELECT INBOX x\r\n");
-    assert_eq!(got, ["a1 BAD SELECT parameters are not offered"]);
+    assert_eq!(got, ["a1 BAD Bad SELECT parameters"]);
 }
 
 #[test]

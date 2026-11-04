@@ -73,6 +73,10 @@ enum Input {
 pub(crate) struct Session {
     pub(super) fake: FakeImap,
     pub(super) state: State,
+    /// CONDSTORE is enabled (RFC 7162 section 3.1): by ENABLE, a SELECT parameter, or a MODSEQ in a FETCH.
+    pub(super) condstore: bool,
+    /// QRESYNC is enabled (RFC 7162 section 3.2), always by ENABLE.
+    pub(super) qresync: bool,
     tls: bool,
     greeted: bool,
     bad: u32,
@@ -83,7 +87,17 @@ pub(crate) struct Session {
 impl Session {
     pub(crate) fn new(fake: FakeImap, tls: bool) -> Self {
         let state = if fake.preauth { State::Authenticated } else { State::NotAuthenticated };
-        Self { fake, state, tls, greeted: false, bad: 0, reader: LineReader::default(), transcript: Transcript::default() }
+        Self {
+            fake,
+            state,
+            condstore: false,
+            qresync: false,
+            tls,
+            greeted: false,
+            bad: 0,
+            reader: LineReader::default(),
+            transcript: Transcript::default(),
+        }
     }
 
     pub(crate) fn transcript(&self) -> Transcript {
@@ -240,6 +254,7 @@ impl Session {
             }
             ("LOGIN", Phase::NotAuthenticated) => self.login(&tag, &args, out),
             ("AUTHENTICATE", Phase::NotAuthenticated) => return self.authenticate(&tag, &args, out),
+            ("ENABLE", Phase::Authenticated) if self.fake.offers(Capability::Enable) => self.enable(&tag, &args, out),
             ("LIST", Phase::Authenticated | Phase::Selected) => self.list(&tag, &args, out),
             ("SELECT" | "EXAMINE", Phase::Authenticated | Phase::Selected) => self.select(&tag, &name, &args, out),
             ("STATUS", Phase::Authenticated | Phase::Selected) => self.status(&tag, &args, out),

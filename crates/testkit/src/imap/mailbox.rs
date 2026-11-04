@@ -6,7 +6,7 @@
 use crate::imap::Capability;
 use crate::imap::fixture::Mailbox;
 use crate::imap::reader::Token;
-use crate::imap::session::{Selected, Session, State};
+use crate::imap::session::{Phase, Selected, Session, State};
 use crate::imap::write::{flags, line, no, ok, string};
 
 /// The flags every fake mailbox knows.
@@ -70,8 +70,17 @@ impl Session {
         let Some(name) = args.first().and_then(Token::astring) else {
             return self.bad(out, Some(tag), &format!("{command} needs a mailbox name"));
         };
-        if args.len() > 1 {
-            return self.bad(out, Some(tag), &format!("{command} parameters are not offered"));
+        let params = match args.get(1..).unwrap_or_default() {
+            [] => &[][..],
+            [Token::List(params)] => params.as_slice(),
+            _ => return self.bad(out, Some(tag), &format!("Bad {command} parameters")),
+        };
+        let resync = match self.select_parameters(command, params) {
+            Ok(resync) => resync,
+            Err(reason) => return self.bad(out, Some(tag), &reason),
+        };
+        if self.qresync && self.phase() == Phase::Selected {
+            line(out, "* OK [CLOSED] Previous mailbox closed");
         }
         self.state = State::Authenticated;
         let Some(index) = self.find(name) else { return no(out, tag, "[NONEXISTENT] No such mailbox") };
@@ -91,6 +100,9 @@ impl Session {
         }
         if self.fake.offers(Capability::CondStore) {
             line(out, &format!("* OK [HIGHESTMODSEQ {}] Highest", mailbox.highest_modseq));
+        }
+        if let Some(resync) = resync {
+            resync.report(mailbox, out);
         }
         let view = mailbox.messages.iter().map(|message| message.uid).collect();
         self.state = State::Selected(Selected { index, read_only, view });
@@ -118,7 +130,7 @@ impl Session {
         if let State::Selected(Selected { index, read_only: false, .. }) = self.state
             && let Some(mailbox) = self.fake.mailboxes.get_mut(index)
         {
-            mailbox.messages.retain(|message| !message.has_flag("\\Deleted"));
+            mailbox.expunge(|message| message.has_flag("\\Deleted"));
         }
         self.state = State::Authenticated;
         ok(out, tag, "CLOSE completed");

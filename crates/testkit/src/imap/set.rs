@@ -40,3 +40,16 @@ fn number(text: &str, highest: u32) -> Option<u32> {
     }
     text.parse().ok().filter(|&number| number > 0)
 }
+
+/// `uids`, sorted, as a set with ranges (`3,5:7`).
+pub(super) fn compact(uids: &[u32]) -> String {
+    let mut ranges: Vec<(u32, u32)> = Vec::new();
+    for &uid in uids {
+        match ranges.last_mut() {
+            Some((_, last)) if last.checked_add(1) == Some(uid) => *last = uid,
+            _ => ranges.push((uid, uid)),
+        }
+    }
+    let text: Vec<String> = ranges.iter().map(|&(first, last)| if first == last { first.to_string() } else { format!("{first}:{last}") }).collect();
+    text.join(",")
+}

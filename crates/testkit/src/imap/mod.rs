@@ -31,6 +31,7 @@ mod reader;
 mod search;
 mod session;
 mod set;
+mod sync;
 mod write;
 
 use std::io::{self, Read, Write};

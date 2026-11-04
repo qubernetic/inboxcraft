@@ -82,6 +82,8 @@ pub struct Mailbox {
     pub(super) uid_next: u32,
     pub(super) highest_modseq: u64,
     pub(super) messages: Vec<Message>,
+    /// The UIDs removed so far, with the modification sequence of their removal, for QRESYNC.
+    pub(super) vanished: Vec<(u32, u64)>,
 }
 
 impl Mailbox {
@@ -89,7 +91,7 @@ impl Mailbox {
     #[must_use]
     pub fn new(name: &str) -> Self {
         let name = if name.eq_ignore_ascii_case("INBOX") { "INBOX".to_owned() } else { clean(name) };
-        Self { name, special_use: None, uid_validity: 1, uid_next: 1, highest_modseq: 1, messages: Vec::new() }
+        Self { name, special_use: None, uid_validity: 1, uid_next: 1, highest_modseq: 1, messages: Vec::new(), vanished: Vec::new() }
     }
 
     /// The SPECIAL-USE attribute (`\Sent`, `\Drafts`, `\Archive`, `\Junk`, `\Trash`, `\All`, `\Flagged`).
@@ -111,6 +113,17 @@ impl Mailbox {
         self
     }
 
+    /// Records `uids` as removed before the test, for QRESYNC to report as vanished; the next UID is above them.
+    #[must_use]
+    pub fn removed(mut self, uids: &[u32]) -> Self {
+        for &uid in uids {
+            let modseq = self.bump();
+            self.vanished.push((uid, modseq));
+            self.uid_next = self.uid_next.max(uid.saturating_add(1));
+        }
+        self
+    }
+
     /// The name.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -125,6 +138,24 @@ impl Mailbox {
         let uid = message.uid;
         self.messages.push(message);
         uid
+    }
+
+    /// Removes the messages `remove` picks and returns their UIDs, in UID order.
+    pub(super) fn expunge(&mut self, remove: impl Fn(&Message) -> bool) -> Vec<u32> {
+        let uids: Vec<u32> = self.messages.iter().filter(|message| remove(message)).map(|message| message.uid).collect();
+        self.messages.retain(|message| !uids.contains(&message.uid));
+        for &uid in &uids {
+            let modseq = self.bump();
+            self.vanished.push((uid, modseq));
+        }
+        uids
+    }
+
+    /// The UIDs removed after `modseq`, in UID order.
+    pub(super) fn vanished_since(&self, modseq: u64) -> Vec<u32> {
+        let mut uids: Vec<u32> = self.vanished.iter().filter(|(_, at)| *at > modseq).map(|(uid, _)| *uid).collect();
+        uids.sort_unstable();
+        uids
     }
 
     /// The next modification sequence, which is now the highest.
