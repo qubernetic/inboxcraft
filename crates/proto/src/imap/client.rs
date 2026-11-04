@@ -8,7 +8,7 @@ use std::fmt;
 
 use inboxcraft_model::{Uid, UidSet};
 
-use super::capability::Capabilities;
+use super::capability::{Capabilities, MAX_CAPABILITY_LEN, is_atom_char};
 use super::command::{Command, escaped};
 use super::fetch::{FetchAttributes, FetchItem};
 use super::frame::Framer;
@@ -141,9 +141,10 @@ pub enum RefusalKind {
 pub struct Refusal {
     /// `NO` or `BAD`.
     pub kind: RefusalKind,
-    /// The response code, upper-cased (`AUTHENTICATIONFAILED`), when there is one.
+    /// The response code, upper-cased (`AUTHENTICATIONFAILED`), when there is one made of atom characters, at most
+    /// [`MAX_CAPABILITY_LEN`] long and holding no password.
     pub code: Option<String>,
-    /// The server's words, cleaned and capped, with every form of the password hidden.
+    /// The server's words, cleaned and capped, with the password hidden; empty before TLS.
     pub text: String,
 }
 
@@ -515,7 +516,7 @@ impl Client {
             Status::Ok => self.state = State::NotAuthenticated,
             Status::Preauth if self.tls => self.state = State::Authenticated,
             Status::Preauth => return Err(ProtoError::PreauthWithoutTls),
-            Status::Bye => return Err(ProtoError::Bye(self.secrets.tidy(&line.text))),
+            Status::Bye => return Err(ProtoError::Bye(self.words(&line.text))),
             Status::No | Status::Bad => return Err(ProtoError::Malformed("greeting")),
         }
         self.note_code(line);
@@ -526,7 +527,7 @@ impl Client {
     fn untagged_status(&mut self, line: &StatusLine) -> Result<(), ProtoError> {
         match line.status {
             Status::Bye if self.state == State::LoggingOut => Ok(()),
-            Status::Bye => Err(ProtoError::Bye(self.secrets.tidy(&line.text))),
+            Status::Bye => Err(ProtoError::Bye(self.words(&line.text))),
             Status::Preauth => Err(ProtoError::Unexpected("PREAUTH")),
             Status::Ok | Status::No | Status::Bad => {
                 self.note_code(line);
@@ -536,6 +537,19 @@ impl Client {
                 Ok(())
             }
         }
+    }
+
+    /// Server text for people, cleaned and with the secrets hidden; empty before TLS, where anyone on the way could
+    /// have written it and the person would take it for the server's.
+    fn words(&self, text: &str) -> String {
+        if self.tls { self.secrets.tidy(text) } else { String::new() }
+    }
+
+    /// A response code for the caller: a word of atom characters at most [`MAX_CAPABILITY_LEN`] long that holds no
+    /// secret, or `None`.
+    fn code(&self, code: &str) -> Option<String> {
+        let clean = !code.is_empty() && code.len() <= MAX_CAPABILITY_LEN && code.bytes().all(is_atom_char);
+        (clean && !self.secrets.shows(code)).then(|| code.to_owned())
     }
 
     /// What a status line's response code says about the session.
@@ -608,8 +622,7 @@ impl Client {
             Status::No => Some(RefusalKind::No),
             _ => Some(RefusalKind::Bad),
         };
-        let refusal =
-            refusal.map(|kind| Refusal { kind, code: Some(line.code.clone()).filter(|code| !code.is_empty()), text: self.secrets.tidy(&line.text) });
+        let refusal = refusal.map(|kind| Refusal { kind, code: self.code(&line.code), text: self.words(&line.text) });
         let (tag, kind) = match flight.kind {
             Kind::Capability { after_sign_in: Some(sign_in) } => {
                 let capabilities = if refusal.is_none() { self.capabilities.get_or_insert_default().clone() } else { Capabilities::default() };

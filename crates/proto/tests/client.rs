@@ -7,7 +7,9 @@
 
 use inboxcraft_model::{Uid, UidSet};
 use inboxcraft_proto::ProtoError;
-use inboxcraft_proto::imap::{Answer, Client, Event, FetchAttributes, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport};
+use inboxcraft_proto::imap::{
+    Answer, Client, Event, FetchAttributes, MAX_CAPABILITY_LEN, MAX_LINE, MAX_MAILBOX_NAME, Refusal, SearchKey, State, Transport,
+};
 use proptest::prelude::*;
 
 /// A client over TLS, greeted and signed in with PREAUTH, with `INBOX` open.
@@ -148,6 +150,22 @@ fn a_password_with_edge_white_space_is_hidden_first_and_last() {
             assert_eq!(error, ProtoError::Bye("*** bad ***".to_owned()), "{password:?}");
         }
     }
+}
+
+#[test]
+fn a_response_code_is_kept_only_as_a_clean_word() {
+    let refused_code = |line: &[u8]| {
+        let mut client = greeted();
+        client.login("tim", "hunter2").unwrap();
+        client.receive(line).unwrap();
+        let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+        refusal.code
+    };
+    assert_eq!(refused_code(b"A0001 NO [AUTHENTICATIONFAILED] no\r\n"), Some("AUTHENTICATIONFAILED".to_owned()));
+    assert_eq!(refused_code(b"A0001 NO [X\x07\x1b[31M] no\r\n"), None);
+    assert_eq!(refused_code(format!("A0001 NO [{}] no\r\n", "X".repeat(MAX_CAPABILITY_LEN + 1)).as_bytes()), None);
+    assert_eq!(refused_code(b"A0001 NO [HUNTER2] no\r\n"), None);
+    assert_eq!(refused_code(b"A0001 NO [XHUNTER2Y] no\r\n"), None);
 }
 
 /// Hostile bytes for a session in any state.

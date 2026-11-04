@@ -65,7 +65,7 @@ pub enum ProtoError {
     PreauthWithoutTls,
     /// The server sent bytes after its go-ahead for STARTTLS, before the TLS handshake: they could be anyone's.
     PlaintextAfterStartTls,
-    /// The server ended the session (BYE) without being asked to; its words, cleaned.
+    /// The server ended the session (BYE) without being asked to; its words, cleaned, and empty before TLS.
     Bye(String),
     /// The session is over, after a fatal error or LOGOUT.
     Closed,

@@ -54,6 +54,12 @@ impl Secrets {
         self.0.sort_by_key(|s| std::cmp::Reverse(s.len()));
     }
 
+    /// Whether `text` holds a secret, in any case of ASCII letters: for words the server upper-cases.
+    pub(crate) fn shows(&self, text: &str) -> bool {
+        let text = text.to_ascii_uppercase();
+        self.0.iter().any(|secret| text.contains(&secret.to_ascii_uppercase()))
+    }
+
     /// `text` with every secret replaced by `***`, then tidied. Hidden before it is shortened: a secret cut in half
     /// would no longer be recognised. A secret's edge white space stays, so that `***` does not run into a word.
     pub(crate) fn tidy(&self, text: &str) -> String {

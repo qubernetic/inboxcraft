@@ -56,3 +56,13 @@ fn a_secret_with_edge_white_space_is_hidden_at_the_edge() {
         assert_eq!(secrets.tidy(&format!("wrong {password} here")), "wrong *** here", "{password:?}");
     }
 }
+
+#[test]
+fn a_secret_is_found_in_any_case() {
+    let mut secrets = Secrets::default();
+    secrets.add("hunter2");
+    assert!(secrets.shows("XHUNTER2"));
+    assert!(secrets.shows("hunter2"));
+    assert!(!secrets.shows("HUNTER"));
+    assert!(!Secrets::default().shows("HUNTER2"));
+}

@@ -71,7 +71,7 @@ S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
 > starttls
 C: A0001 STARTTLS
 S: A0001 NO [UNAVAILABLE] TLS is not available
-= A0001 No [UNAVAILABLE] TLS is not available
+= A0001 No [UNAVAILABLE]
 ? NotAuthenticated
 > login ada@example.org secret
 ! NotEncrypted
@@ -106,3 +106,38 @@ S: * CAPABILITY IMAP4rev1 AUTH=PLAIN
 S: A0002 OK done
 = alert Maintenance tonight
 = A0002 capabilities IMAP4REV1 AUTH=PLAIN
+
+# Before TLS the server's words are not passed on either, in a BYE or a refusal: only what kind of answer it was.
+@ plain
+S: * BYE Sign in at http://example.org/
+! Bye("")
+? Closed
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+S: * BYE Sign in at http://example.org/
+! Bye("")
+@ plain
+S: * OK ready
+= greeted
+> capability
+C: A0001 CAPABILITY
+S: A0001 BAD Sign in at http://example.org/
+= A0001 Bad
+
+# Over TLS they are shown again.
+@ plain
+S: * OK [CAPABILITY IMAP4rev1 STARTTLS] ready
+= greeted
+> starttls
+C: A0001 STARTTLS
+S: A0001 OK go
+= A0001 starttls
+> tls
+C: A0002 CAPABILITY
+S: A0002 NO [UNAVAILABLE] Not now
+= A0002 No [UNAVAILABLE] Not now
+> capability
+C: A0003 CAPABILITY
+S: * BYE Shutting down
+! Bye("Shutting down")
