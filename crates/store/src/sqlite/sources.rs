@@ -11,6 +11,7 @@ use std::fs::{self, File};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
+use super::private;
 use crate::{MAX_SOURCE_BYTES, StoreError};
 
 const EXTENSION: &str = ".eml";
@@ -23,7 +24,7 @@ fn path(dir: &Path, id: i64) -> PathBuf {
 /// Writes the source of body row `id`: into a partial file, synced, renamed into place, the directory synced.
 pub(crate) fn write(dir: &Path, id: i64, source: &[u8]) -> Result<(), StoreError> {
     let partial = dir.join(format!("{id}{PARTIAL}"));
-    let mut file = File::create(&partial)?;
+    let mut file = private::create_file(&partial, true)?;
     file.write_all(source)?;
     file.sync_all()?;
     drop(file);

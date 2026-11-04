@@ -3,11 +3,11 @@
 
 //! The native backend: SQLite with a full-text index, the message sources as files next to it.
 
+mod private;
 mod schema;
 mod sources;
 
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use inboxcraft_model::{Account, AccountId, Folder, FolderId, FolderState, Message, MessageId};
@@ -28,7 +28,7 @@ pub const DATABASE_FILE: &str = "store.sqlite3";
 pub const SOURCES_DIR: &str = "sources";
 
 /// A store in a directory: [`DATABASE_FILE`] (SQLite, WAL, `synchronous=FULL`, foreign keys on) and the message
-/// sources in [`SOURCES_DIR`].
+/// sources in [`SOURCES_DIR`], all of it readable by the owner's account alone (directories `0700`, files `0600` on unix).
 ///
 /// One process at a time may open a directory; the store takes no lock, the app's single instance guard is to see to it.
 #[derive(Debug)]
@@ -66,8 +66,10 @@ impl Sqlite {
     /// [`StoreError::NewerSchema`] for a store from a newer build; a database or file failure.
     pub fn open(dir: &Path, config: StoreConfig) -> Result<Self, StoreError> {
         let sources = dir.join(SOURCES_DIR);
-        fs::create_dir_all(&sources)?;
-        let mut conn = Connection::open(dir.join(DATABASE_FILE))?;
+        private::create_dir(&sources)?;
+        let database = dir.join(DATABASE_FILE);
+        drop(private::create_file(&database, false)?);
+        let mut conn = Connection::open(database)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))?;
         conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;")?;
         schema::migrate(&mut conn)?;

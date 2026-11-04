@@ -216,3 +216,22 @@ fn the_database_runs_in_wal_mode_with_full_sync() {
     let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0)).unwrap();
     assert_eq!(mode, "wal");
 }
+
+#[cfg(unix)]
+#[test]
+fn only_the_owner_can_read_the_store() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = dir();
+    let made = tmp.path().join("made");
+    let dir = made.join("store");
+    let store = with_body(&dir);
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&made), 0o700, "a directory made on the way");
+    assert_eq!(mode(&dir), 0o700, "the store directory");
+    assert_eq!(mode(&dir.join(SOURCES_DIR)), 0o700, "the sources directory");
+    for name in [DATABASE_FILE.to_owned(), format!("{DATABASE_FILE}-wal"), format!("{DATABASE_FILE}-shm")] {
+        assert_eq!(mode(&dir.join(&name)), 0o600, "{name}");
+    }
+    assert_eq!(mode(&dir.join(SOURCES_DIR).join("1.eml")), 0o600, "a source");
+    drop(store);
+}
