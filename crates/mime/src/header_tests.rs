@@ -43,6 +43,14 @@ fn folded_lines_are_unfolded_and_keep_their_white_space() {
 }
 
 #[test]
+fn a_bare_cr_in_a_field_is_a_space() {
+    // Found by the `mime_headers` fuzz target: a CR that ends no line stayed in the value.
+    let headers = Headers::parse(b"X: -\r\"\r\nY: a\r\r\n b\r\n").unwrap();
+    assert_eq!(headers.get("x"), Some("- \""));
+    assert_eq!(headers.get("y"), Some("a  b"));
+}
+
+#[test]
 fn white_space_before_the_colon_and_around_the_value_goes() {
     let headers = Headers::parse(b"Subject  :   spaced out   \r\n").unwrap();
     assert_eq!(names_and_values(&headers), [("Subject", "spaced out")]);

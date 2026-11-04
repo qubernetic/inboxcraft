@@ -31,7 +31,8 @@ impl Field {
         &self.name
     }
 
-    /// The value, unfolded: the line breaks of folding are gone, the white space after them is kept. Raw 8-bit
+    /// The value, unfolded: the line breaks of folding are gone, the white space after them is kept, a CR that ends
+    /// no line is a space, so no CR or LF is left. Raw 8-bit
     /// bytes are read as UTF-8 (RFC 6532) or, when they are not UTF-8, as windows-1252.
     #[must_use]
     pub fn value(&self) -> &str {
@@ -137,9 +138,13 @@ pub(crate) fn split(bytes: &[u8], top: bool) -> Result<(Headers, &[u8]), MimeErr
 }
 
 fn push(fields: &mut Vec<Field>, current: Option<(String, Vec<u8>)>) -> Result<(), MimeError> {
-    if let Some((name, value)) = current {
+    if let Some((name, mut value)) = current {
         if fields.len() >= MAX_FIELDS {
             return Err(MimeError::TooManyFields { limit: MAX_FIELDS });
+        }
+        // A CR that ends no line is no line break; it must not reach a value.
+        for byte in value.iter_mut().filter(|b| **b == b'\r') {
+            *byte = b' ';
         }
         fields.push(Field { name, value: text_of(value.trim_ascii()) });
     }
