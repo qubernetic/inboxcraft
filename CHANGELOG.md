@@ -94,3 +94,16 @@ All notable changes to InboxCraft are listed here. The format follows
   `crates/proto/tests/transcripts/`, property tests and the fuzz target `imap_client`. The response values, status
   lines, modified UTF-7, the quoting of commands and the caps are adapted from UCS-Care-Group/mailcraft
   (MIT OR Apache-2.0) (#20)
+- `inboxcraft-proto` speaks the IMAP sync extensions. ENABLE (RFC 5161) switches CONDSTORE or QRESYNC on, and only
+  what the server confirms counts. CONDSTORE (RFC 7162): SELECT and EXAMINE with `(CONDSTORE)`, `MODSEQ` in UID
+  FETCH and in FETCH responses, `CHANGEDSINCE`. QRESYNC: SELECT and EXAMINE with what the last session knew
+  (UIDVALIDITY, modification sequence, the UIDs held), VANISHED and VANISHED (EARLIER) as their own event, UID
+  FETCH with `(CHANGEDSINCE ... VANISHED)`, and the responses before `[CLOSED]` passed over when one mailbox is
+  opened after another. A UIDVALIDITY that is not the one known, at SELECT or while the mailbox is open, is reported
+  as `Event::UidValidityChanged`. IDLE (RFC 2177) with DONE, also asked for before the server's go-ahead. NOTIFY
+  (RFC 5465) for the open mailbox and for other mailboxes (personal, inboxes, subscribed, a subtree or a list of
+  names), with STATUS responses and mailboxes made, renamed or removed as events, NOTIFY NONE and
+  `[NOTIFICATIONOVERFLOW]`. Each needs the server to offer it; a server that lacks it gets nothing that needs it
+  (`ProtoError::NotOffered`, or `NotEnabled` for VANISHED before ENABLE QRESYNC), and a VANISHED it sends anyway
+  ends the session. Transcripts for each extension and for a server without it; the property test and the fuzz
+  target `imap_client` drive the new commands and responses (#21)

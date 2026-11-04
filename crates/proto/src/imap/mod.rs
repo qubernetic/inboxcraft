@@ -4,7 +4,8 @@
 //! An IMAP client core without I/O (RFC 9051 and RFC 3501): the [`Client`] state machine and what it reads.
 //!
 //! The commands of the read path: CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN (encrypted connections only),
-//! LIST with SPECIAL-USE, SELECT and EXAMINE, UID FETCH, UID SEARCH and LOGOUT.
+//! LIST with SPECIAL-USE, SELECT and EXAMINE, UID FETCH, UID SEARCH and LOGOUT; and to keep a mailbox in step, ENABLE
+//! (RFC 5161), CONDSTORE and QRESYNC (RFC 7162), IDLE (RFC 2177) and NOTIFY (RFC 5465).
 
 mod capability;
 mod client;
