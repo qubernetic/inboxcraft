@@ -219,6 +219,10 @@ toolchain is pinned by date in the workflow. A crash fails the run and its input
 artifact; it becomes a regression test. With no targets the job passes. GitHub runs a schedule only from the default
 branch, `main`, so the nightly run starts with the first release.
 
+`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
+new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
+runs with `cargo +nightly fuzz run <name>` from the repository root. The first target is `rfc5322_date` (#15).
+
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
 
@@ -247,3 +251,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | The `testkit` coverage floor (#8) |
 | 2026-11-04 | minor | Live tests: `just it-live`, the nextest `live` profile and `testkit::live` (#10) |
 | 2026-11-04 | minor | Live tests: build before reading the credentials, the wider leak scan, what is not redacted (#10) |
+| 2026-11-04 | minor | Fuzzing: the `fuzz/` workspace and how a target is added (#15) |

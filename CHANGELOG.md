@@ -28,3 +28,8 @@ All notable changes to InboxCraft are listed here. The format follows
   `just it-live` builds the live test archive first, reads the credentials from the OS credential store for the
   run from that archive only, passes on test name filters but no options, and fails when a secret, an address or a
   login name appears in the test output (#10)
+- `inboxcraft-time`: the injectable `Clock` with `SystemClock` (the browser's clock on wasm) and `FakeClock`, the
+  only clock tests use; `Timestamp` (years 0 to 10000), civil dates, weekdays and fixed offsets; `MailDate` reads
+  and writes RFC 5322 dates, the obsolete forms of section 4.3 included (comments, two- and three-digit years,
+  zone names, military zones and unknown names as `-0000`), refusing input over 998 bytes or comments nested
+  deeper than 16; property tests and the first fuzz target, `fuzz/fuzz_targets/rfc5322_date.rs` (#15)
