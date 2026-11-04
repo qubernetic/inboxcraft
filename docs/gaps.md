@@ -66,8 +66,16 @@ B = blocks the next stage.
   them starts a thread of its own; subjects are not used (#17).
 - `model` caps what one message keeps (1000 addresses per field, 64 references, 64 keywords, subject 1000 and
   preview 256 characters) but not the size of a body or of a folder list in an event; `net` sets those caps (#17).
-- `mime` reads messages only; building them is #19. It reads no address lists, `Message-ID` or `References`: the
-  read path takes those from the server's envelope (#18).
+- `mime` reads no address lists, `Message-ID` or `References`: the read path takes those from the server's
+  envelope (#18).
+- `MessageBuilder` makes no `Message-ID` or `Date` of its own and requires none; the composer (E2) has to set both.
+  It writes no `Bcc` (blind copies belong to the SMTP envelope), no group syntax, no `multipart/related` with inline
+  pictures, no `Content-ID` and no `name` parameter on an attachment's `Content-Type`; every attachment is base64,
+  an attached message included. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
+  server with `SMTPUTF8`; nothing checks that yet (#19).
+- `MessageBuilder` keeps a display name of printable ASCII as a quoted string and writes any other as `B` encoded
+  words, which a person reading the raw source cannot read; the text of a long word without spaces becomes encoded
+  words throughout so that it can be folded (#19).
 - `mime` refuses what it cannot read safely: a message over 128 MiB, a header block of more than 2000 fields or a
   field over 256 KiB, nesting deeper than 20, more than 1000 parts, a multipart without a boundary, with a boundary
   over 70 characters or one never found in its body, broken base64, an unknown transfer encoding or charset, and a
@@ -111,3 +119,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Invisible marks in addresses and folder names (#17) |
 | 2026-11-04 | minor | Rough edges of the message reader (#18) |
 | 2026-11-04 | minor | Message reader: whole-message errors, unsafe file names, reports read from direct parts (#18) |
+| 2026-11-04 | minor | What the message builder does not write (#19) |
