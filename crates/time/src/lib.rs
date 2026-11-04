@@ -9,7 +9,8 @@
 //!   [`FakeClock`] stands still until a test moves it, and is the only clock tests use. `std::time::Instant::now`
 //!   and `SystemTime::now` are banned everywhere else (`clippy.toml`): they trap on wasm and make tests depend on
 //!   the hour they run.
-//! - [`Timestamp`] is a point in time, UTC, from year 0 to year 10000.
+//! - [`Timestamp`] is a point in time, UTC, from year 0 to year 10000. [`CivilDateTime`] is what a wall clock shows at
+//!   an [`Offset`] from UTC.
 //!
 //! ```
 //! use std::time::Duration;
@@ -22,8 +23,10 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod civil;
 mod clock;
 mod timestamp;
 
+pub use civil::{CivilDateTime, Offset, Weekday, days_in_month, is_leap_year};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use timestamp::Timestamp;
