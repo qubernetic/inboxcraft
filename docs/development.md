@@ -224,7 +224,7 @@ branch, `main`, so the nightly run starts with the first release.
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
 runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
 `charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), and `imap_client` (#20).
+(#18), `imap_client` (#20), and `testkit_imap` (#23), the fake IMAP server's own command reader.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -260,3 +260,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | Fuzzing: the message, header and delivery report targets (#18) |
 | 2026-11-04 | minor | Fuzzing: the IMAP client target (#20) |
 | 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |
+| 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |

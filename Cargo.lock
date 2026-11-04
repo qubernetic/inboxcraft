@@ -348,6 +348,7 @@ name = "inboxcraft-testkit"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "proptest",
  "rcgen",
  "rustls",
  "time",
