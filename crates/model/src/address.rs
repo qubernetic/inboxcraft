@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::text::clean_line;
+use crate::text::{clean_line, is_invisible_mark};
 
 /// The longest display name kept, in characters; the rest is cut.
 pub const MAX_NAME_CHARS: usize = 256;
@@ -27,6 +27,8 @@ pub enum AddressError {
     TooLong,
     /// A control character (CR, LF, NUL and the like) anywhere.
     ControlCharacter,
+    /// An invisible direction or zero-width mark anywhere, which would let two addresses look the same.
+    InvisibleMark,
     /// No `@`.
     NoAtSign,
     /// Nothing before the `@`.
@@ -45,6 +47,7 @@ impl fmt::Display for AddressError {
             Self::Empty => "the address is empty",
             Self::TooLong => "the address is longer than 254 bytes",
             Self::ControlCharacter => "the address holds a control character",
+            Self::InvisibleMark => "the address holds an invisible direction or zero-width mark",
             Self::NoAtSign => "the address has no @",
             Self::EmptyLocalPart => "the address has nothing before the @",
             Self::BadLocalPart => "the address has white space or a special character before the @",
@@ -81,6 +84,9 @@ impl EmailAddress {
     pub fn new(text: &str) -> Result<Self, AddressError> {
         if text.chars().any(char::is_control) {
             return Err(AddressError::ControlCharacter);
+        }
+        if text.chars().any(is_invisible_mark) {
+            return Err(AddressError::InvisibleMark);
         }
         let text = text.trim_matches(' ');
         if text.is_empty() {

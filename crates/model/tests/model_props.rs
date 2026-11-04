@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Property tests of the model: no text from outside makes a check panic or lets CR, LF or NUL through, UID sets
-//! hold exactly the UIDs they were made of, and threads hold every message once.
+//! Property tests of the model: no text from outside makes a check panic or lets CR, LF or NUL through, no accepted
+//! address holds an invisible mark, UID sets hold exactly the UIDs they were made of, and threads hold every message
+//! once.
 
 use inboxcraft_model::{
     AccountId, Address, EmailAddress, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, Host, Keyword, Message, MessageId, MessageRef,
@@ -29,11 +30,17 @@ fn clean(text: &str) -> bool {
     !text.contains(['\r', '\n', '\0'])
 }
 
+/// Whether `text` holds none of the invisible direction and zero-width marks.
+fn visible(text: &str) -> bool {
+    !text.chars().any(|c| matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}'))
+}
+
 proptest! {
     #[test]
     fn no_text_panics_a_check_or_gets_a_line_break_through(text in hostile_text(), name in hostile_text()) {
         if let Ok(email) = EmailAddress::new(&text) {
             prop_assert!(clean(email.as_str()));
+            prop_assert!(visible(email.as_str()));
             let address = Address::new(Some(&name), email);
             prop_assert!(address.name().is_none_or(clean));
             for label in labels(&[address.clone(), address.with_name(Some(&text))]) {

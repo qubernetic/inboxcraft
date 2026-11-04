@@ -56,6 +56,12 @@ B = blocks the next stage.
 - Mail addresses are compared without case in the local part too, which RFC 5321 does not promise; a header
   entry without a usable address (`undisclosed-recipients:;`, a bare name) is not an `Address`, and `mime` decides
   what to show for it (#17).
+- A mail address with an invisible direction or zero-width mark (U+200B to U+200F, U+202A to U+202E, U+2060 to
+  U+2069, U+061C, U+FEFF) is refused, so two addresses cannot look the same; that also refuses the rare
+  internationalised domain that needs a zero-width joiner or non-joiner (#17).
+- A folder name keeps such marks: the folder is the server's, and refusing its name would hide it (a Persian name
+  may need a zero-width non-joiner). The sidebar must isolate each name and show the marks, or two folders can look
+  the same (#17).
 - Threads link by `Message-ID`, `In-Reply-To` and `References` only: a reply from a program that sends none of
   them starts a thread of its own; subjects are not used (#17).
 - `model` caps what one message keeps (1000 addresses per field, 64 references, 64 keywords, subject 1000 and
@@ -81,3 +87,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Rough edges of charsets and encoded words (#16) |
 | 2026-11-04 | minor | Live test harness: the wider leak scan, a server without a hierarchy delimiter (#10) |
 | 2026-11-04 | minor | Rough edges of the mailbox model (#17) |
+| 2026-11-04 | minor | Invisible marks in addresses and folder names (#17) |
