@@ -56,9 +56,14 @@ impl Framer {
     pub(crate) fn next(&mut self) -> Result<Option<Vec<Piece>>, ProtoError> {
         loop {
             if let Some(size) = self.literal {
-                let Some(bytes) = self.pending().get(..size) else { return Ok(None) };
-                let literal = bytes.to_vec();
-                self.start = self.start.saturating_add(size);
+                if self.pending().len() < size {
+                    return Ok(None);
+                }
+                // Moved out, not copied: the buffer must not hold the literal a second time.
+                self.buf.drain(..self.start.min(self.buf.len()));
+                let rest = self.buf.split_off(size.min(self.buf.len()));
+                let literal = std::mem::replace(&mut self.buf, rest);
+                self.start = 0;
                 self.pieces.push(Piece::Literal(literal));
                 self.literal = None;
                 continue;

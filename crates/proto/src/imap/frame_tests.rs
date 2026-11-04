@@ -133,3 +133,18 @@ fn a_literal_waits_for_all_its_bytes() {
     framer.push(b"cd)\r\n");
     assert_eq!(framer.next(), Ok(Some(vec![text("* 1 FETCH (BODY[] {4}"), literal("abcd"), text(")")])));
 }
+
+#[test]
+fn a_literal_is_moved_out_not_kept_twice() {
+    let size = 1 << 20;
+    let mut input = format!("* 1 FETCH (BODY[] {{{size}}}\r\n").into_bytes();
+    input.extend(std::iter::repeat_n(b'x', size));
+    input.extend_from_slice(b")\r\n* 2 EXISTS");
+    let mut framer = Framer::default();
+    framer.push(&input);
+    let response = framer.next().unwrap().unwrap();
+    assert!(matches!(response.get(1), Some(Piece::Literal(bytes)) if bytes.len() == size));
+    // What is left is the line after the literal and the bytes still pending, not the literal.
+    assert!(framer.buf.len() <= b")\r\n* 2 EXISTS".len(), "{}", framer.buf.len());
+    assert!(framer.has_pending());
+}
