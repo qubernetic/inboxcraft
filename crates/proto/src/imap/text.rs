@@ -6,11 +6,13 @@
 //!
 //! Adapted from UCS-Care-Group/mailcraft `crates/proto/src/lib.rs` (`tidy`, `Secrets`; see `PROVENANCE.md`).
 
+use inboxcraft_model::is_invisible_mark;
+
 /// Most characters kept of a text the server wrote for people.
 pub const MAX_TEXT_CHARS: usize = 300;
 
-/// Server text made fit for an error or a refusal: one line, no control characters, at most [`MAX_TEXT_CHARS`]
-/// characters and a `...` when it was longer.
+/// Server text made fit for an error or a refusal: one line, no control characters, no invisible direction or
+/// zero-width marks ([`is_invisible_mark`]), at most [`MAX_TEXT_CHARS`] characters and a `...` when it was longer.
 pub(crate) fn tidy(text: &str) -> String {
     let mut out = String::new();
     let mut space = false;
@@ -18,6 +20,9 @@ pub(crate) fn tidy(text: &str) -> String {
         if n >= MAX_TEXT_CHARS {
             out.push_str("...");
             break;
+        }
+        if is_invisible_mark(c) {
+            continue;
         }
         if c.is_control() || c.is_whitespace() {
             space = !out.is_empty();

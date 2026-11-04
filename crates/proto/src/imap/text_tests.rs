@@ -33,3 +33,14 @@ fn a_secret_at_the_cut_is_hidden_before_the_cut() {
     let shown = secrets.tidy(&text);
     assert!(!shown.contains("hun"), "{shown}");
 }
+
+#[test]
+fn invisible_direction_and_zero_width_marks_are_dropped() {
+    assert_eq!(tidy("abc\u{202e}gpj.exe\u{200b}x"), "abcgpj.exex");
+    for mark in ['\u{061c}', '\u{200b}', '\u{200f}', '\u{202a}', '\u{202e}', '\u{2060}', '\u{2069}', '\u{feff}'] {
+        assert_eq!(tidy(&format!("a{mark}b")), "ab", "{mark:?}");
+        assert!(inboxcraft_model::is_invisible_mark(mark), "{mark:?}");
+    }
+    // A mark between two words leaves one space, not two.
+    assert_eq!(tidy("a \u{200b} b"), "a b");
+}
