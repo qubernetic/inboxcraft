@@ -4,7 +4,8 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use super::{Command, Invocation, default_root, parse};
+use super::{Command, HELP, Invocation, default_root, parse};
+use crate::ci::GATES;
 use crate::test_support::run_xtask;
 use crate::{FAILED, OK, USAGE};
 
@@ -20,6 +21,15 @@ fn help_lists_every_command() {
         assert_eq!(err, "");
         assert!(out.contains("usage: cargo xtask <command>"), "{out}");
     }
+}
+
+#[test]
+fn the_ci_help_line_names_every_gate_in_order() {
+    let line = HELP.lines().find(|line| line.trim_start().starts_with("ci ")).unwrap_or_default();
+    let gates = line.split_once("every gate:").map(|(_, gates)| gates).unwrap_or_default();
+    let named: Vec<&str> = gates.split(',').filter_map(|gate| gate.split_whitespace().next()).collect();
+    let expected: Vec<&str> = GATES.iter().map(|(name, _)| *name).collect();
+    assert_eq!(named, expected, "{line}");
 }
 
 #[test]

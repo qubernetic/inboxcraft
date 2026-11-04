@@ -13,7 +13,7 @@ const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, nextest (ci profile), doctests, deny
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, nextest (ci profile), doctests, wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
   layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
