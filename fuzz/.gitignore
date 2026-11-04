@@ -1,0 +1,7 @@
+# cargo-fuzz output; a crash input worth keeping becomes a regression test in the crate it belongs to.
+target
+corpus
+artifacts
+coverage
+# Resolved afresh by every fuzz run (nightly toolchain, no cargo deny here).
+Cargo.lock

@@ -1,0 +1,25 @@
+# The fuzz targets, one per parser (docs/development.md, "CI"). An own workspace: cargo-fuzz needs nightly Rust
+# and libFuzzer, which the main workspace never sees. Run with `cargo +nightly fuzz run <target>`.
+[package]
+name = "inboxcraft-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+inboxcraft-time = { path = "../crates/time" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "rfc5322_date"
+path = "fuzz_targets/rfc5322_date.rs"
+test = false
+doc = false
+bench = false

@@ -2,7 +2,7 @@
 #
 # GitHub runs a schedule only from the default branch (main), so the nightly run starts with the first release; until
 # then a PR that touches fuzz/ or this file runs it, and so does a manual dispatch once the file is on main
-# (gh workflow run fuzz.yml --ref develop). No targets yet: the job lists none and passes.
+# (gh workflow run fuzz.yml --ref develop). With no targets the job lists none and passes.
 #
 # Hardening as in ci.yml: read-only token, no secrets, no cache, every action pinned by commit SHA.
 
