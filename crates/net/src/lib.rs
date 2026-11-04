@@ -18,6 +18,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod backoff;
 mod connect;
 pub mod envelope;
 mod error;
@@ -26,12 +27,13 @@ mod sync;
 mod tls;
 mod worker;
 
+pub use backoff::Backoff;
 pub use connect::{Connector, Timeouts};
 pub use error::NetError;
 pub use imap::{ImapConnection, Password};
 pub use sync::SyncConfig;
 pub use tls::{TlsSettings, Trust, classify};
-pub use worker::{Credentials, Worker, WorkerSettings};
+pub use worker::{Credentials, MAX_QUEUED, Worker, WorkerSettings};
 
 /// The crate's package name.
 ///

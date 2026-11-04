@@ -64,3 +64,36 @@ fn an_error_says_its_cause_and_detail() {
     assert_eq!(error.detail(), "read");
     assert_eq!(error.to_string(), "the server did not answer in time (read)");
 }
+
+#[test]
+fn what_a_later_attempt_may_get_over() {
+    let transient = [
+        ErrorKind::HostNotFound,
+        ErrorKind::ConnectionRefused,
+        ErrorKind::TimedOut,
+        ErrorKind::ConnectionDropped,
+        ErrorKind::CommandRefused,
+        ErrorKind::Protocol,
+        ErrorKind::TooLarge,
+    ];
+    for kind in transient {
+        assert!(NetError::new(kind, "").is_transient(), "{kind:?}");
+    }
+    let lasting = [
+        ErrorKind::CertificateUnknownIssuer,
+        ErrorKind::CertificateExpired,
+        ErrorKind::CertificateNotYetValid,
+        ErrorKind::CertificateWrongHost,
+        ErrorKind::ClockFarOff,
+        ErrorKind::Tls,
+        ErrorKind::StartTlsMissing,
+        ErrorKind::LoginRefused,
+        ErrorKind::NoLoginMethod,
+        ErrorKind::CredentialMissing,
+        ErrorKind::FolderGone,
+        ErrorKind::MessageGone,
+    ];
+    for kind in lasting {
+        assert!(!NetError::new(kind, "").is_transient(), "{kind:?}");
+    }
+}

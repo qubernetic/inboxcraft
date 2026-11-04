@@ -48,6 +48,23 @@ impl NetError {
         !matches!(self.kind, ErrorKind::CommandRefused | ErrorKind::FolderGone | ErrorKind::MessageGone | ErrorKind::CredentialMissing)
     }
 
+    /// Whether a later attempt may get over this error: the network, a timeout, a dropped connection, or a server
+    /// that refused or broke the protocol. A certificate fault, a refused sign-in and a missing password are not: they
+    /// need the owner.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self.kind,
+            ErrorKind::HostNotFound
+                | ErrorKind::ConnectionRefused
+                | ErrorKind::TimedOut
+                | ErrorKind::ConnectionDropped
+                | ErrorKind::CommandRefused
+                | ErrorKind::Protocol
+                | ErrorKind::TooLarge
+        )
+    }
+
     /// A socket error; a TLS error inside it is classified by its certificate fault at the clock's `now`.
     pub(crate) fn io(error: &io::Error, now: Timestamp) -> Self {
         if let Some(tls) = error.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>()) {

@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod run;
+
 use std::error::Error;
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
