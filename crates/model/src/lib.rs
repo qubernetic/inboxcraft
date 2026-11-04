@@ -3,10 +3,13 @@
 
 //! The mailbox model: accounts, folders, messages and threads.
 //!
-//! Layer 1. Nothing is implemented yet; the crate holds its place in the workspace (see
-//! `docs/architecture.md`).
+//! Layer 1 (see `docs/architecture.md`). No I/O.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+mod id;
+
+pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
 
 /// The crate's package name.
 ///
