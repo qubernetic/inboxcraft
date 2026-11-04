@@ -1,0 +1,138 @@
+# The workspace CI: `cargo xtask ci`, every gate `just ci` runs, in the same order (docs/development.md, "CI").
+#
+# Ready-only: a draft PR runs only the one-step `draft` job; the full run starts on ready_for_review, on every later
+# push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
+# (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
+#
+# Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, no cache a PR run could write
+# for a later one, every action pinned by commit SHA. Only the `codecov` job has `id-token: write`: it uploads the
+# coverage and test results with the job's GitHub OIDC token (the repository is private) and runs no repository
+# code.
+
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop, main, 'epic/**']
+  push:
+    branches: [develop, main, 'epic/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # A draft run with no job left would show no check at all.
+  draft:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "Draft PR - the full CI runs when the PR is marked ready (gh pr ready)."
+
+  test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Dockerfile's list without the base image's build-essential, ca-certificates, curl and git.
+      - name: Install the system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libgtk-3-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev mesa-vulkan-drivers
+      - name: Install the toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustc --version
+      # One source of truth: the versions the Dockerfile pins.
+      - name: Read the tool versions from the Dockerfile
+        id: tools
+        run: |
+          version() {
+            value=$(sed -n "s/^ARG $1=//p" Dockerfile)
+            if [ -z "$value" ]; then echo "ARG $1 is missing from the Dockerfile" >&2; exit 1; fi
+            echo "$value"
+          }
+          nextest=$(version CARGO_NEXTEST_VERSION)
+          llvm_cov=$(version CARGO_LLVM_COV_VERSION)
+          deny=$(version CARGO_DENY_VERSION)
+          echo "list=cargo-nextest@$nextest,cargo-llvm-cov@$llvm_cov,cargo-deny@$deny" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        with:
+          tool: ${{ steps.tools.outputs.list }}
+          fallback: none
+      - name: cargo xtask ci
+        run: cargo xtask ci
+      # lcov.info from the cov gate, junit.xml from the nextest gate (profile ci).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: reports
+          path: |
+            lcov.info
+            target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  codecov:
+    needs: test
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'failure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The upload maps the report paths onto the repository's files.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: reports
+          path: reports
+      - name: Coverage
+        if: needs.test.result == 'success'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: reports/lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+      - name: Test results
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        if: ${{ !cancelled() }}
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: reports/target/nextest/ci/junit.xml
+          disable_search: true
+
+  # The gate for the required-checks list: a skipped check reports as passing, so this job runs on every full run and
+  # fails unless every job before it succeeded.
+  ci:
+    needs: [test, codecov]
+    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Every job succeeded
+        env:
+          TEST: ${{ needs.test.result }}
+          CODECOV: ${{ needs.codecov.result }}
+        run: |
+          echo "test: $TEST, codecov: $CODECOV"
+          [ "$TEST" = success ] && [ "$CODECOV" = success ]
