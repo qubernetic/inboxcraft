@@ -320,6 +320,15 @@ B = blocks the next stage.
   E1.13c (#30).
 - `eframe` without its default features links `libwayland-client` at build time instead of loading it at run time
   (#30).
+- The Flatpak was never built in the agent sandbox, which has no `flatpak`. What was checked: every crate of
+  `cargo-sources.json` laid out as flatpak-builder lays it out, with its checksum, and an offline `cargo check` of
+  `inboxcraft` against that vendor folder with the manifest's `CARGO_HOME`. The first real build is the CI bundle
+  job (#32) and the owner's first launch (#35) (#31).
+- The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
+  it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
+- The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
+  findings and builds anyway. The Secret Service, notification and Background portal permissions are there before
+  the app uses them (#31).
 
 ## Revision history
 | Date | Change | Summary |
@@ -360,3 +369,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Rough edges of the safe HTML display (#29) |
 | 2026-11-05 | minor | What the link comparison reads past (#29) |
 | 2026-11-05 | minor | Rough edges of the first window and the sample mailbox (#30) |
+| 2026-11-05 | minor | Rough edges of the dev Flatpak (#31) |

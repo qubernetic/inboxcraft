@@ -61,6 +61,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | `html`: hostile HTML to display blocks with nothing that runs or submits, remote pictures blocked until consent, `cid:` pictures, link targets exposed and text/target mismatches flagged, capped input, nesting and tables, a hostile fixture set, fuzz target (#29) |
 | 2026-11-05 | Live tests on two throwaway accounts of the reference provider, `live-imap` and `live-imap2`; both sign in and list their folders; `just it-live` works on a fresh checkout (#57) |
 | 2026-11-05 | The first window: `inboxcraft --sample` with the unified list, per-account narrowing, the folder pane with roles and unread badges and the search field, in InboxCraft's own light and dark theme; `ui_shot` pictures (#30) |
+| 2026-11-05 | The dev Flatpak: `git pull && just flatpak` builds and installs InboxCraft with a menu entry (and the sample mailbox as its second action), offline from the checkout with the crates checked against `Cargo.lock` in `cargo xtask ci`; the app icon drawn in code (#31) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -89,3 +90,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | minor | Google Calendar moves to the later ideas; progress log: the second live account (#57) |
 | 2026-11-05 | minor | Progress log: safe HTML display (#29) |
 | 2026-11-05 | minor | Progress log: the first window with the sample mailbox (#30) |
+| 2026-11-05 | minor | Progress log: the dev Flatpak (#31) |

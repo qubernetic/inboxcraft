@@ -243,6 +243,16 @@ All notable changes to InboxCraft are listed here. The format follows
   state over the read commands, and `ui_shot` (`just shot`): headless pictures of the sample window filled on the
   CPU and written as PNG under `docs/images/`. New dependencies: `egui` and `eframe` 0.37 (OpenGL through glow,
   Wayland and X11, no wgpu, no `links`), `egui_kittest` for the UI tests, `png`.
+- The dev Flatpak (#31): `contrib/flatpak/` builds InboxCraft as `io.github.qubernetic.inboxcraft` from the checkout
+  without a network (the freedesktop 25.08 runtime, Rust from the SDK extension), with a menu entry whose second
+  action opens the sample mailbox, AppStream metainfo and the app icon. `just flatpak` on the host builds and
+  installs it for the user (and lints the manifest when `flatpak-builder-lint` is there). The permissions are the
+  network, Wayland with an X11 fallback, the GPU, the Secret Service and notifications, each with its reason; the
+  app's data stays under `~/.var/app/`. `cargo xtask flatpak-sources` (`just flatpak-sources`) writes the crates of
+  `Cargo.lock` into `contrib/flatpak/cargo-sources.json` (crates.io only), and the new `flatpak-sources-check` gate
+  of `cargo xtask ci` fails when they differ.
+- The app icon, drawn in code (`crates/ui-egui/src/icons.rs`): a letter in an inbox tray with an unread dot,
+  exported as `assets/app-icon/inboxcraft.svg` by `just icon` and used as the window icon (#31)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
