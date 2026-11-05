@@ -207,8 +207,9 @@ B = blocks the next stage.
   full sync, which reports every message as added again (#26).
 - `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
   not run again (the engine decides). The offline queue is in memory: what is queued when the app ends is gone. A
-  certificate fault, a refused sign-in or a server without a sign-in method stops the tries until the engine
-  starts a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
+  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
+  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
+  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
   (#26).
 - `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
@@ -273,3 +274,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Rough edges of TLS, the IMAP sign-in and the first sync (#25) |
 | 2026-11-05 | minor | Live updates, resync, back-off and COMPRESS in `net` (#26) |
 | 2026-11-05 | minor | The caps on what a resync keeps (#26) |
+| 2026-11-05 | minor | An unanswered sign-in halts the tries (#26) |

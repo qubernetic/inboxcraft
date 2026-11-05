@@ -169,7 +169,9 @@ All notable changes to InboxCraft are listed here. The format follows
   `WorkerSettings::max_queued`); a failure the network or the server may get over is retried after a back-off that
   doubles from 2 seconds to at most 5 minutes (`Backoff`), reported as `BackingOff`; a connection lost while
   watching is reconnected after it and the folder resynced. A certificate fault, a refused sign-in or a server
-  without a sign-in method stops the tries until the worker is started again. The connection is compressed with
+  without a sign-in method stops the tries until the worker is started again. So does a sign-in the server never
+  answered (new `ErrorKind::LoginUnanswered`): at once after a `BYE` or something that is not IMAP, and on the second
+  dropped or timed-out sign-in before one succeeds, so the password is not sent over and over. The connection is compressed with
   COMPRESS=DEFLATE after the sign-in where offered (`WorkerSettings::compress`), inflated in small steps. A resync
   keeps what the server tells bounded: QRESYNC's changes once per message and at most `SyncConfig::max_told` of them
   (past it the flags are fetched instead), the known messages still there as ranges, at most `SyncConfig::max_ranges`
