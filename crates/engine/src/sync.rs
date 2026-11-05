@@ -61,7 +61,14 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             }
             kept
         }
-        EventKind::CheckStep(report) => checked(&mut plan.state, account, event.job, report),
+        EventKind::CheckStep(report) => {
+            let kept = checked(&mut plan.state, account, event.job, report);
+            // A new account: its first sign-in that passes starts the sync, so the password goes out no sooner.
+            if kept && report.step() == CheckStep::ImapLogin && report.status().passed() && store.folders(account)?.is_empty() {
+                plan.job(account, JobKind::SyncFolderList);
+            }
+            kept
+        }
         EventKind::Connection(connection) => {
             let held = plan.state.accounts.entry(account).or_default();
             held.connection = Some(*connection);

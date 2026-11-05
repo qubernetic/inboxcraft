@@ -10,12 +10,16 @@
 
 use std::collections::BTreeMap;
 
-use inboxcraft_engine::{MAX_LIST, Session};
-use inboxcraft_model::Role;
+use inboxcraft_engine::{Applied, EngineError, MAX_LIST, Session};
+use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
 
+use crate::workers::Workers;
 use crate::{UiError, tr};
+
+/// The most rounds of jobs out and events in [`Mailbox::pump`] makes in one frame.
+pub const MAX_PUMP_ROUNDS: usize = 8;
 
 /// The longest search, in characters; the rest is cut off.
 pub const MAX_QUERY: usize = 256;
@@ -351,6 +355,51 @@ impl Mailbox {
         if let Some(row) = self.messages.get(next) {
             self.selected = Some(row.id);
         }
+    }
+
+    /// Hands the engine's queued jobs to `workers`, stops the workers of accounts that are gone, and applies the
+    /// events that came back; reads everything again when an event changed something. Applying an event can queue
+    /// the next jobs (the folder syncs after the folder list), so it goes round again, at most [`MAX_PUMP_ROUNDS`]
+    /// times a frame. Whether anything changed.
+    pub fn pump(&mut self, workers: &mut dyn Workers) -> bool {
+        let mut changed = false;
+        for _ in 0..MAX_PUMP_ROUNDS {
+            if !self.pump_once(workers) {
+                break;
+            }
+            changed = true;
+        }
+        if changed {
+            self.refresh();
+        }
+        changed
+    }
+
+    fn pump_once(&mut self, workers: &mut dyn Workers) -> bool {
+        let jobs = self.session.take_jobs();
+        let accounts = match self.session.store().accounts() {
+            Ok(accounts) => accounts,
+            Err(error) => {
+                self.error = Some(UiError::from(EngineError::from(error)).to_string());
+                return false;
+            }
+        };
+        for job in jobs {
+            // A job for an account that is gone has nobody to run it.
+            if let Some(account) = accounts.iter().find(|account| account.id() == job.account) {
+                workers.send(account, job);
+            }
+        }
+        workers.keep(&accounts.iter().map(Account::id).collect::<Vec<_>>());
+        let mut changed = false;
+        for event in workers.events() {
+            match self.session.apply(&event) {
+                Ok(Applied::Changed) => changed = true,
+                Ok(Applied::Dropped) => {}
+                Err(error) => self.error = Some(UiError::from(error).to_string()),
+            }
+        }
+        changed
     }
 
     fn settle(&mut self, result: Result<(), UiError>) {

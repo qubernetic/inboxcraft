@@ -106,16 +106,21 @@ fn row(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, message: &MessageRow, acco
     response
 }
 
-/// The rows, or what to say when there are none. Returns the message clicked this frame.
-pub(super) fn rows(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<u64> {
+/// The rows, or what to say when there are none. Returns the message clicked this frame, and whether Add account
+/// was (the empty window offers it when `can_add`).
+pub(super) fn rows(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, can_add: bool) -> (Option<u64>, bool) {
     if mailbox.accounts().is_empty() {
-        empty(
-            ui,
-            theme,
-            tr!("No accounts yet"),
-            tr!("Adding an account comes in a later version. Start InboxCraft with --sample to look around an invented mailbox."),
-        );
-        return None;
+        if !can_add {
+            empty(ui, theme, tr!("No accounts yet"), tr!("Start InboxCraft with --sample to look around an invented mailbox."));
+            return (None, false);
+        }
+        empty(ui, theme, tr!("No accounts yet"), tr!("Add an account to read its mail here. Nothing leaves this computer before you do."));
+        let mut add = false;
+        ui.vertical_centered(|ui| {
+            ui.add_space(theme.spacing.l);
+            add = ui.button(tr!("Add account")).clicked();
+        });
+        return (None, add);
     }
     if mailbox.messages().is_empty() {
         if mailbox.query().is_empty() {
@@ -123,7 +128,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<u64>
         } else {
             empty(ui, theme, tr!("No messages match"), &tr!("No subject, sender or recipient holds “{query}”.", query = mailbox.query()));
         }
-        return None;
+        return (None, false);
     }
     let account_marker = mailbox.narrowed().is_none() && mailbox.accounts().len() > 1;
     let mut clicked = None;
@@ -136,5 +141,5 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<u64>
             }
         }
     });
-    clicked
+    (clicked, false)
 }

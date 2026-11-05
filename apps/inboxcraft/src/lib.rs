@@ -3,10 +3,13 @@
 
 //! The desktop app: reads the command line and builds the window's content; `main` opens the window.
 //!
-//! `inboxcraft --sample` shows the invented sample mailbox, `inboxcraft` alone an empty one (adding an account comes
-//! with onboarding), `--version` and `--help` print and leave. The sample connects nowhere: its accounts point at
-//! `imap.example.org`, their workers are never started, and its remote pictures are drawn in code. The one request
-//! the window makes is for a remote picture the owner allowed, through `net`'s picture client.
+//! `inboxcraft --sample` shows the invented sample mailbox, `inboxcraft` alone an empty one where the owner adds
+//! accounts, `--version` and `--help` print and leave. The sample connects nowhere: its accounts point at
+//! `imap.example.org`, their workers are never started, and its remote pictures are drawn in code.
+//!
+//! The empty window adds accounts ([`accounts`]): each password goes into the OS credential store, Detect asks the
+//! system's name servers and the web, and every account runs on a `net` worker of its own. Besides those, the one
+//! request the window makes is for a remote picture the owner allowed, through `net`'s picture client.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -17,13 +20,16 @@ use std::time::Duration;
 
 use inboxcraft_engine::Session;
 use inboxcraft_net::picture::PictureClient;
-use inboxcraft_net::{TlsSettings, Trust};
+use inboxcraft_net::{Connector, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::{Fetch, Get, Threaded, Wake};
 use inboxcraft_ui_egui::mailbox::Mailbox;
+use inboxcraft_ui_egui::onboard::{self, Run};
 use inboxcraft_ui_egui::save::{Downloads, NoSave, Save};
 use inboxcraft_ui_egui::{InboxApp, UiError, sample};
+
+pub mod accounts;
 
 /// Which mailbox the window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,26 +97,31 @@ pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 ///
 /// The sample draws its remote pictures in code and connects nowhere. Otherwise a remote picture the owner allowed
 /// is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public addresses
-/// only) on threads of its own. Attachments are saved into the owner's downloads folder, never over a file.
+/// only) on threads of its own, and the window adds accounts: passwords into the OS credential store, Detect on a
+/// thread, one `net` worker per account. Attachments are saved into the owner's downloads folder, never over a file.
 ///
 /// # Errors
 ///
 /// A sample or a session that could not be built.
 pub fn app(source: Source, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>) -> Result<InboxApp, UiError> {
-    let (session, fetch): (Session, Box<dyn Fetch>) = match source {
-        Source::Sample => (sample::session(clock())?, Box::new(sample::Pictures::default())),
-        Source::Empty => {
-            let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
-            let client = PictureClient::new(tls, PICTURE_TIMEOUT);
-            let get: Get = Arc::new(move |url: &str| client.fetch(url).map(|picture| picture.bytes).map_err(|error| error.to_string()));
-            (Session::new(Box::new(Memory::new(StoreConfig::default())), clock())?, Box::new(Threaded::new(get, wake)))
-        }
-    };
     let save: Box<dyn Save> = match Downloads::of_owner() {
         Some(downloads) => Box::new(downloads),
         None => Box::new(NoSave),
     };
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save))
+    if source == Source::Sample {
+        let mailbox = Mailbox::new(sample::session(clock())?, clock());
+        return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save));
+    }
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
+    let get: Get = Arc::new(move |url: &str| client.fetch(url).map(|picture| picture.bytes).map_err(|error| error.to_string()));
+    let fetch: Box<dyn Fetch> = Box::new(Threaded::new(get, wake.clone()));
+    let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock())?;
+    let detecting = tls.clone();
+    let run: Run = Arc::new(move |address: &str, ispdb: bool| accounts::detect(&detecting, address, ispdb));
+    let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
+    let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(accounts::OsKeychain), wake));
+    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(Arc::new(accounts::OsKeychain), detect, workers))
 }
 
 #[cfg(test)]

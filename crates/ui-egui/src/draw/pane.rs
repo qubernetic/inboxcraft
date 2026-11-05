@@ -15,6 +15,7 @@ use crate::tr;
 pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
+    pub(super) add: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -55,12 +56,17 @@ fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.label(RichText::new(text).size(theme.type_scale.small).color(theme.palette.muted));
 }
 
-/// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Asked {
+/// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
+/// the Add account button.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, can_add: bool) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
     ui.label(RichText::new("InboxCraft").size(theme.type_scale.title).color(p.text));
+    if can_add {
+        ui.add_space(theme.spacing.s);
+        asked.add = ui.button(tr!("Add account")).clicked();
+    }
     if mailbox.accounts().is_empty() {
         return asked;
     }

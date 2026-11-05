@@ -24,6 +24,8 @@ pub struct Outcome {
     jobs: Vec<Pending>,
     /// Senders (lower case) whose remote pictures load without asking from now on (`true`) or no longer (`false`).
     senders: Vec<(String, bool)>,
+    /// Accounts removed: the session forgets what it knows of them and drops their queued jobs.
+    removed: Vec<AccountId>,
 }
 
 /// A job before it has an id.
@@ -39,7 +41,7 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new() }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new() }
     }
 
     /// The outcome with `change` to make in the store.
@@ -59,6 +61,13 @@ impl Outcome {
     /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
     pub(crate) fn with_sender(mut self, sender: String, allowed: bool) -> Self {
         self.senders.push((sender, allowed));
+        self
+    }
+
+    /// The outcome removing `account` from the store, and from what the session knows and has queued.
+    pub(crate) fn with_removed(mut self, account: AccountId) -> Self {
+        self.batch.push(Change::RemoveAccount(account));
+        self.removed.push(account);
         self
     }
 
@@ -121,6 +130,9 @@ pub(crate) struct State {
     /// The senders (addresses in lower case) whose remote pictures the owner lets load without asking. Kept for the
     /// session only until settings are kept on disk.
     pub(crate) remote_senders: BTreeSet<String>,
+    /// The id the next added account gets: past every id this session has held, so a removed account's id is not
+    /// given again and a late event of its worker cannot land on a new account.
+    pub(crate) next_account: u64,
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
@@ -158,7 +170,7 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -172,9 +184,16 @@ impl State {
                     state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
                 }
             }
+            state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
         }
         Ok(state)
+    }
+
+    /// The id for an account to add: past every account in `held` and every id given before.
+    pub(crate) fn next_account(&self, held: &[inboxcraft_model::Account]) -> AccountId {
+        let past = held.iter().map(|account| account.id().get().saturating_add(1)).max().unwrap_or(1);
+        AccountId::new(self.next_account.max(past))
     }
 
     pub(crate) fn folder_id(&mut self) -> FolderId {
@@ -280,8 +299,17 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders } = outcome;
+        let Outcome { value, batch, jobs, senders, removed } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
+        for change in batch.changes() {
+            if let Change::PutAccount(account) = change {
+                self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1));
+            }
+        }
+        for account in removed {
+            self.state.accounts.remove(&account);
+            self.jobs.retain(|job| job.account != account);
+        }
         for (sender, allowed) in senders {
             if allowed {
                 self.state.remote_senders.insert(sender);

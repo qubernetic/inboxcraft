@@ -3,24 +3,33 @@
 
 //! The window's content: the folder pane on the left, the header with the search field and the message list, the
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
-//! reader can fill the window (full width); Escape leaves that.
+//! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
+//! in the folder pane and in the empty list; the add-account page then takes the place of the list and the reader.
+//!
+//! Each frame the window hands the engine's jobs to the `net` workers and applies their events
+//! ([`Mailbox::pump`]), so the steps of an account check show as they come.
 //!
 //! Drawing only reads the [`Mailbox`] and the [`Reader`]; what the person asks for is applied after the frame's
 //! drawing, through their methods, which run the engine's commands.
 
 mod list;
+mod onboard;
 mod paint;
 mod pane;
 mod reader;
+
+use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel, RichText, Ui};
 
 use crate::fetch::{Fetch, Offline};
 use crate::mailbox::Mailbox;
+use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::theme::Theme;
 use crate::tr;
+use crate::workers::{NoWorkers, Workers};
 
 /// Focuses the search field.
 const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
@@ -36,11 +45,19 @@ pub struct InboxApp {
     hover: Option<String>,
     search: String,
     themed: bool,
+    onboarding: Onboarding,
+    /// Whether the window offers to add an account.
+    can_add: bool,
+    workers: Box<dyn Workers>,
 }
 
 impl std::fmt::Debug for InboxApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InboxApp").field("mailbox", &self.mailbox).field("reader", &self.reader).finish_non_exhaustive()
+        f.debug_struct("InboxApp")
+            .field("mailbox", &self.mailbox)
+            .field("reader", &self.reader)
+            .field("onboarding", &self.onboarding)
+            .finish_non_exhaustive()
     }
 }
 
@@ -60,7 +77,60 @@ impl InboxApp {
     /// attachments through `save`.
     #[must_use]
     pub fn with_outside(mailbox: Mailbox, fetch: Box<dyn Fetch>, save: Box<dyn Save>) -> Self {
-        Self { mailbox, reader: Reader::new(fetch, save), textures: reader::Textures::new(), hover: None, search: String::new(), themed: false }
+        Self {
+            mailbox,
+            reader: Reader::new(fetch, save),
+            textures: reader::Textures::new(),
+            hover: None,
+            search: String::new(),
+            themed: false,
+            onboarding: Onboarding::default(),
+            can_add: false,
+            workers: Box::new(NoWorkers),
+        }
+    }
+
+    /// The same window, offering to add accounts: their passwords go into `keychain`, Detect runs through `detect`,
+    /// and the engine's jobs go to `workers`, whose events come back each frame.
+    #[must_use]
+    pub fn with_accounts(mut self, keychain: Arc<dyn Keychain>, detect: Box<dyn Detect>, workers: Box<dyn Workers>) -> Self {
+        self.onboarding = Onboarding::new(keychain, detect);
+        self.can_add = true;
+        self.workers = workers;
+        self
+    }
+
+    /// Whether the window offers to add an account.
+    #[must_use]
+    pub fn can_add(&self) -> bool {
+        self.can_add
+    }
+
+    /// The add-account page.
+    #[must_use]
+    pub fn onboarding(&self) -> &Onboarding {
+        &self.onboarding
+    }
+
+    /// The add-account page and the mailbox, to fill in or press from outside (the `ui_shot` scripts, later the
+    /// control channel).
+    pub fn onboarding_mut(&mut self) -> (&mut Onboarding, &mut Mailbox) {
+        (&mut self.onboarding, &mut self.mailbox)
+    }
+
+    /// Hands the engine's jobs to the workers and applies their events; the check's steps are read again when
+    /// anything changed. Whether anything changed.
+    pub fn pump(&mut self) -> bool {
+        let changed = self.mailbox.pump(&mut *self.workers);
+        if changed {
+            self.onboarding.load(&mut self.mailbox);
+        }
+        changed
+    }
+
+    /// For the window's end: removes the passwords of the accounts added in it from the credential store.
+    pub fn on_exit(&mut self) {
+        self.onboarding.forget_passwords();
     }
 
     /// The reader.
@@ -120,7 +190,7 @@ impl InboxApp {
         let p = theme.palette;
         let s = theme.spacing;
         self.sync();
-        if self.reader.poll() {
+        if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
         if ui.input_mut(|input| input.consume_shortcut(&FIND)) {
@@ -151,33 +221,50 @@ impl InboxApp {
         let mut asked = pane::Asked::default();
         let mut searched = None;
         let mut clicked = None;
-        let full = self.reader.full_width();
-        if !full {
+        let mut page = None;
+        let adding = self.onboarding.stage() != Stage::Closed;
+        let full = self.reader.full_width() && !adding;
+        if adding {
             asked = Panel::left("folders")
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .frame(Frame::new().fill(p.panel).inner_margin(margin(s.m)))
-                .show(ui, |ui| pane::show(ui, &theme, &self.mailbox))
+                .show(ui, |ui| pane::show(ui, &theme, &self.mailbox, false))
                 .inner;
-            let (mailbox, search) = (&self.mailbox, &mut self.search);
+            let (mailbox, onboarding) = (&self.mailbox, &mut self.onboarding);
+            page = CentralPanel::no_frame()
+                .frame(Frame::new().fill(p.surface).inner_margin(margin(s.xl)))
+                .show(ui, |ui| onboard::show(ui, &theme, mailbox, onboarding))
+                .inner;
+        } else if !full {
+            asked = Panel::left("folders")
+                .resizable(true)
+                .default_size(s.folder_pane)
+                .frame(Frame::new().fill(p.panel).inner_margin(margin(s.m)))
+                .show(ui, |ui| pane::show(ui, &theme, &self.mailbox, self.can_add))
+                .inner;
+            let (mailbox, search, can_add) = (&self.mailbox, &mut self.search, self.can_add);
             let list = |ui: &mut Ui| {
                 let searched = Panel::top("list-header")
                     .frame(Frame::new().fill(p.surface).inner_margin(margin(s.l)))
                     .show(ui, |ui| list::header(ui, &theme, mailbox, search))
                     .inner;
-                let clicked = CentralPanel::no_frame().frame(Frame::new().fill(p.surface)).show(ui, |ui| list::rows(ui, &theme, mailbox)).inner;
-                (searched, clicked)
+                let (clicked, add) =
+                    CentralPanel::no_frame().frame(Frame::new().fill(p.surface)).show(ui, |ui| list::rows(ui, &theme, mailbox, can_add)).inner;
+                (searched, clicked, add)
             };
-            (searched, clicked) = if self.reader.open_id().is_some() {
+            let add;
+            (searched, clicked, add) = if self.reader.open_id().is_some() {
                 Panel::left("list").resizable(true).default_size(LIST_WIDTH).frame(Frame::new().fill(p.surface)).show(ui, list).inner
             } else {
                 CentralPanel::no_frame().show(ui, list).inner
             };
+            asked.add |= add;
         }
         let mut drawn = reader::Drawn::default();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if self.reader.open_id().is_some() {
+        if self.reader.open_id().is_some() && !adding {
             let hover = self.hover.take();
             drawn = CentralPanel::no_frame()
                 .frame(Frame::new().fill(p.background))
@@ -195,6 +282,8 @@ impl InboxApp {
             || asked.open.is_some()
             || searched.is_some()
             || clicked.is_some()
+            || asked.add
+            || page.is_some()
             || !drawn.asked.is_empty();
         if acted {
             // What changed shows in the next frame.
@@ -219,7 +308,27 @@ impl InboxApp {
         if clicked.is_some() {
             self.mailbox.select(clicked);
         }
+        if asked.add {
+            self.onboarding.open();
+        }
+        if let Some(page) = page {
+            self.apply_page(page);
+        }
         self.sync();
+    }
+
+    /// Applies what was asked for on the add-account page.
+    fn apply_page(&mut self, asked: onboard::Asked) {
+        let (onboarding, mailbox) = (&mut self.onboarding, &mut self.mailbox);
+        match asked {
+            onboard::Asked::Detect => onboarding.detect(),
+            onboard::Asked::Add => onboarding.add(mailbox),
+            onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
+            onboard::Asked::Change => onboarding.change(mailbox),
+            onboard::Asked::Close => onboarding.close(),
+        }
+        // The new account's jobs go out in this frame.
+        self.pump();
     }
 
     /// Applies what was asked for in the reader.
@@ -244,6 +353,9 @@ impl InboxApp {
     }
 }
 
+#[cfg(test)]
+#[path = "onboard_tests.rs"]
+mod onboard_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;

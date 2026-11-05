@@ -18,8 +18,10 @@ use crate::CommandSpec;
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
     vec![
+        account::ADD,
         account::CHECK,
         account::LIST,
+        account::REMOVE,
         folder::LIST,
         mail::ATTACHMENT,
         mail::LIST,
@@ -35,6 +37,9 @@ pub(crate) fn all() -> Vec<CommandSpec> {
 #[cfg(test)]
 #[path = "account_tests.rs"]
 mod account_tests;
+#[cfg(test)]
+#[path = "add_tests.rs"]
+mod add_tests;
 #[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;

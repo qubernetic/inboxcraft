@@ -21,6 +21,10 @@ impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.0.on_exit();
+    }
 }
 
 fn window(source: Source) -> ExitCode {

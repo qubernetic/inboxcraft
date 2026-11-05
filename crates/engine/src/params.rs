@@ -20,6 +20,23 @@ pub(crate) fn decode<T: DeserializeOwned>(command: &'static str, params: &Value)
     result.map_err(|error| EngineError::bad_params(command, &error.to_string()))
 }
 
+/// As [`decode`], but a complaint repeats nothing the caller sent: it ends before its first `"` or `` ` `` mark, where
+/// serde starts quoting a value or a field name. For a command whose parameters sit next to secrets, where a password
+/// typed into the wrong field must not come back in an error.
+pub(crate) fn decode_quietly<T: DeserializeOwned>(command: &'static str, params: &Value) -> Result<T, EngineError> {
+    decode(command, params).map_err(|error| match error {
+        EngineError::BadParams { command, reason } => EngineError::BadParams { command, reason: quiet(&reason) },
+        other => other,
+    })
+}
+
+/// `text` up to its first `"` or `` ` `` mark, without the spaces and punctuation before it. Nothing after the mark
+/// is read: a mark inside a quoted value cannot end the quote early.
+pub(crate) fn quiet(text: &str) -> String {
+    let cut = text.find(['"', '`']).map_or(text, |at| text.get(..at).unwrap_or_default());
+    cut.trim_end_matches([' ', ':', ',']).to_owned()
+}
+
 /// The parameters of a command that takes none.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

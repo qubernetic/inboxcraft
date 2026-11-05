@@ -114,11 +114,27 @@ the icon sits among others at the same size.
 - **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
   "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
 
+## Adding an account
+- **Where**: "Add account" sits under the app's name in the folder pane, and in the middle of the empty window. The
+  page takes the place of the list and the reader; the folder pane stays.
+- **Form**: one column of labelled fields at most 560 points wide: the address with Detect beside it, the box for
+  Mozilla's list of providers (off), what Detect found in small type (a redirect over plain HTTP or a guessed name in
+  the flag colour, so it gets a second look) with "What Detect asked (n)" folded, then the name for the account,
+  the name on sent mail, the user name, the password (dots), the IMAP server, the port and TLS or STARTTLS. A line
+  says the password goes into the system's credential store. Errors show above the form in the error colour.
+- **Check**: "Checking <address>", a one-line summary (muted while it runs, the accent colour when signed in, the
+  error colour when a step failed), then one line per step with a mark drawn in code: a ring in the accent colour
+  while waiting, a disc with a tick in the accent colour when passed, a disc with a cross in the error colour when
+  failed, a muted ring with a dash when skipped, held back or not built yet. Under each step the host and port it
+  tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
+  Check again, Change settings and Close after a failure; Close while it runs.
+
 ## Pictures
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
-search, and the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
-width), each in light and dark. Every UI change shows them in its PR.
+search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
+width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
+dark. Every UI change shows them in its PR.
 
 ## Revision history
 | Date | Change | Summary |
@@ -127,3 +143,4 @@ width), each in light and dark. Every UI change shows them in its PR.
 | 2026-11-05 | minor | The app icon (#31) |
 | 2026-11-05 | minor | The reader (#33) |
 | 2026-11-05 | minor | The page mark joins the app icon in `icons.rs` (#33) |
+| 2026-11-05 | minor | Adding an account (#34) |

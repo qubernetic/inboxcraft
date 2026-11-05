@@ -13,6 +13,9 @@
 //!   or not.
 //! - [`InboxApp`]: the window's content over a [`mailbox::Mailbox`]: the folder pane, the header with the search field
 //!   and the message list, drawn in the [`theme`], every control with an accessible name.
+//! - [`onboard`]: adding an account: the form, Detect's proposal, the password into the OS credential store
+//!   ([`onboard::Keychain`]) and nowhere else, and the account check's steps as they come.
+//! - [`workers`]: the seam to the `net` workers: the engine's jobs out, their events in, each frame.
 //! - [`picture`]: the PNG and JPEG pictures of a message decoded into RGBA, with their size checked first.
 //! - [`quote`]: a plain-text body split into what the sender wrote and the quotes the reader folds.
 //! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
@@ -26,6 +29,7 @@ pub mod fetch;
 pub mod i18n;
 pub mod icons;
 pub mod mailbox;
+pub mod onboard;
 pub mod picture;
 pub mod quote;
 pub mod reader;
@@ -33,6 +37,7 @@ pub mod sample;
 pub mod save;
 pub mod shot;
 pub mod theme;
+pub mod workers;
 
 pub use draw::InboxApp;
 pub use error::UiError;

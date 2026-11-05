@@ -7,7 +7,17 @@ Nothing. InboxCraft has no telemetry, no analytics and no crash reporting, and t
 
 ## Where your data is
 Your mail, calendars and settings are kept on your computer, in <settings/data paths per OS>. Passwords and tokens
-are kept by the operating system's credential store. Deleting InboxCraft's data folder removes everything it stored.
+are kept by the operating system's credential store (Secret Service, Keychain or Credential Manager), never in
+InboxCraft's files. Deleting InboxCraft's data folder removes everything it stored there, but not what is in the
+credential store.
+
+An account's password is one entry in the credential store: service `io.github.qubernetic.inboxcraft`, user name
+`account-<number>` (`account-1` for the first account added in a session). InboxCraft does not keep accounts from
+one start to the next yet, so it removes the entry again when you remove the account ("Change settings") or close
+the window. If InboxCraft crashes, is killed, or the credential store refuses at that moment, an entry can stay
+behind. You can see and remove it with your system's own tool: "Passwords and Keys" (Seahorse) or
+`secret-tool clear service io.github.qubernetic.inboxcraft` on Linux, Keychain Access on macOS, Credential Manager
+on Windows.
 
 ## What InboxCraft connects to, and when
 - Your own mail and calendar servers, with the settings you gave (IMAP, SMTP, CalDAV).
@@ -82,3 +92,4 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 | 2026-11-05 | minor | After a refused or unanswered sign-in, only the owner's check sends the password again (#28) |
 | 2026-11-05 | minor | The name lookups behind each URL, the redirect mark, which ports the check tries (#28) |
 | 2026-11-05 | minor | Remote pictures: when they are asked for, what a request carries, "always" for a sender, Save (#33) |
+| 2026-11-05 | minor | Where a password is kept, when it goes, and how to remove one by hand (#34) |
