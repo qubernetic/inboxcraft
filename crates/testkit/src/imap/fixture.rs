@@ -27,6 +27,11 @@ impl Message {
         Self { uid: 0, flags: Vec::new(), date: DEFAULT_DATE.to_owned(), raw, modseq: 0, preview: None }
     }
 
+    /// A message from its bytes as a client appends them, line ends untouched.
+    pub(super) fn from_raw(raw: Vec<u8>) -> Self {
+        Self { uid: 0, flags: Vec::new(), date: DEFAULT_DATE.to_owned(), raw, modseq: 0, preview: None }
+    }
+
     /// Takes this UID when the mailbox adds the message, unless that UID is below the mailbox's next one.
     #[must_use]
     pub fn uid(self, uid: u32) -> Self {

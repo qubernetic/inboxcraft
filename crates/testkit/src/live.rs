@@ -317,6 +317,33 @@ impl LiveConfig {
         Ok(format!("{RUN_ROOT}{delimiter}{}", self.run_id))
     }
 
+    /// The `number`th invented message of the run, for a live test to APPEND to the per-run folder: from and to
+    /// `live-test@example.org`, its subject naming the run and the number, CRLF line ends. Nothing in it is about a
+    /// real person, and APPEND sends it to nobody.
+    #[must_use]
+    pub fn invented_message(&self, number: u32) -> String {
+        let run = &self.run_id;
+        [
+            "From: InboxCraft live test <live-test@example.org>".to_owned(),
+            "To: InboxCraft live test <live-test@example.org>".to_owned(),
+            format!("Subject: {} {run} message {number}", self.message_subject_prefix()),
+            "Date: Thu, 05 Nov 2026 12:00:00 +0000".to_owned(),
+            format!("Message-ID: <{run}.{number}@live-test.example.org>"),
+            "MIME-Version: 1.0".to_owned(),
+            "Content-Type: text/plain; charset=utf-8".to_owned(),
+            String::new(),
+            format!("An invented message of the InboxCraft live tests, run {run}. It can be deleted."),
+            String::new(),
+        ]
+        .join("\r\n")
+    }
+
+    /// The start of the subject of every [`LiveConfig::invented_message`].
+    #[must_use]
+    pub fn message_subject_prefix(&self) -> &'static str {
+        "InboxCraft live test"
+    }
+
     /// The recipient allow-list: admits exactly the two run-time addresses, the domain compared without case.
     ///
     /// # Errors

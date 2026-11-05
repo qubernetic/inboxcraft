@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The fake server: one listener on the loopback interface, one client, one script.
+//! The fake server: one listener on the loopback interface, one client, one script; or, for the fake IMAP server,
+//! several clients one after the other.
 
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -81,6 +82,38 @@ impl Listen {
         Ok(FakeServer { addr, stop, handle: Some(handle) })
     }
 
+    /// Binds a free port on 127.0.0.1 and runs `session` with up to `connections` clients, one after the other, on a
+    /// thread of its own. Once one client has been served, a client that does not come ends the server quietly. A
+    /// failed session does not stop the server, as a real one goes on too: its error is the one the end reports.
+    pub(crate) fn spawn_many<F>(self, connections: usize, mut session: F) -> Result<FakeServer, Error>
+    where
+        F: FnMut(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>) + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let addr = listener.local_addr()?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || {
+            let mut all = Transcript::default();
+            let mut first_error = None;
+            for served in 0..connections {
+                let (transcript, ended) = self.serve(&listener, &mut session, &flag);
+                all.append(transcript);
+                match ended {
+                    Err(Error::NoClient) if served > 0 => break,
+                    Err(Error::NoClient) => return (all, Err(Error::NoClient)),
+                    Err(err) => {
+                        first_error.get_or_insert(err);
+                    }
+                    Ok(()) => {}
+                }
+            }
+            (all, first_error.map_or(Ok(()), Err))
+        })?;
+        Ok(FakeServer { addr, stop, handle: Some(handle) })
+    }
+
     fn serve<F>(&self, listener: &TcpListener, session: F, stop: &AtomicBool) -> (Transcript, Result<(), Error>)
     where
         F: FnOnce(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>),
@@ -133,6 +166,9 @@ impl FakeServer {
     ///
     /// The first thing that went wrong on the server side: no client, a line the script did not expect, a socket or
     /// TLS error (a client that refuses the certificate shows up here as a TLS error).
+    ///
+    /// A server of several connections ([`Listen::start_imap_many`](crate::Listen::start_imap_many)) waits up to its
+    /// accept timeout for a client that does not come.
     pub fn finish(self) -> Result<Transcript, Error> {
         let (transcript, ended) = self.finish_with_transcript();
         ended.map(|()| transcript)
@@ -173,13 +209,23 @@ impl Transcript {
     }
 
     /// The first of [`Transcript::received`], those that came before the connection was encrypted: all of them over
-    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS. Lines a client pipelined behind
+    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS. With several connections, the
+    /// lines of all of them are kept in order, and this speaks of the first connection only. Lines a client pipelined behind
     /// STARTTLS or sent after its answer but before the handshake are among them, though the server does not answer
     /// them, and so is a last one without its end. [`FakeServer::finish_with_transcript`] keeps them when the
     /// handshake then fails.
     #[must_use]
     pub fn in_clear(&self) -> &[String] {
         self.received.get(..self.clear).unwrap_or_default()
+    }
+
+    /// Adds the lines of the next connection; [`Transcript::in_clear`] keeps speaking of the first one.
+    pub(crate) fn append(&mut self, next: Self) {
+        let first = self.received.is_empty();
+        self.received.extend(next.received);
+        if first {
+            self.clear = next.clear;
+        }
     }
 
     /// Adds a line the client sent, over an encrypted connection or not.

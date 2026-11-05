@@ -425,3 +425,18 @@ fn a_failed_create_removes_nothing_and_a_failed_remove_is_reported() -> Result<(
     assert_eq!(folders.calls, ["CREATE InboxCraft-Test/20261104T120000Z-42", "DELETE InboxCraft-Test/20261104T120000Z-42"]);
     Ok(())
 }
+
+#[test]
+fn an_invented_message_names_the_run_and_its_number_and_no_real_person() -> Result<(), Box<dyn std::error::Error>> {
+    let config = config(&complete())?;
+    let message = config.invented_message(2);
+    assert!(message.starts_with("From: InboxCraft live test <live-test@example.org>\r\nTo: InboxCraft live test <live-test@example.org>\r\n"));
+    assert!(message.contains("\r\nSubject: InboxCraft live test 20261104T120000Z-42 message 2\r\n"), "{message}");
+    assert!(message.contains("\r\nMessage-ID: <20261104T120000Z-42.2@live-test.example.org>\r\n"), "{message}");
+    assert!(message.contains("\r\n\r\nAn invented message"), "{message}");
+    assert!(message.split("\r\n").all(|line| !line.contains('\n') && !line.contains('\r')));
+    assert!(config.leaked_identifier(&message).is_none() && config.leaked_secret(&message).is_none());
+    assert_ne!(message, config.invented_message(3));
+    assert!(message.contains(config.message_subject_prefix()));
+    Ok(())
+}

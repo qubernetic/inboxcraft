@@ -20,13 +20,15 @@ use crate::tls;
 pub struct NetError {
     kind: ErrorKind,
     detail: String,
+    /// A sign-in whose connection dropped or timed out before the answer: one more try may be made.
+    sign_in_lost: bool,
 }
 
 impl NetError {
     /// An error of `kind`, with `detail` for the log.
     #[must_use]
     pub fn new(kind: ErrorKind, detail: impl Into<String>) -> Self {
-        Self { kind, detail: detail.into() }
+        Self { kind, detail: detail.into(), sign_in_lost: false }
     }
 
     /// The cause.
@@ -46,6 +48,36 @@ impl NetError {
     #[must_use]
     pub fn ends_connection(&self) -> bool {
         !matches!(self.kind, ErrorKind::CommandRefused | ErrorKind::FolderGone | ErrorKind::MessageGone | ErrorKind::CredentialMissing)
+    }
+
+    /// Whether a later attempt may get over this error: the network, a timeout, a dropped connection, or a server
+    /// that refused or broke the protocol. A certificate fault, a refused sign-in and a missing password are not: they
+    /// need the owner.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self.kind,
+            ErrorKind::HostNotFound
+                | ErrorKind::ConnectionRefused
+                | ErrorKind::TimedOut
+                | ErrorKind::ConnectionDropped
+                | ErrorKind::CommandRefused
+                | ErrorKind::Protocol
+                | ErrorKind::TooLarge
+        )
+    }
+
+    /// `error` came after the password went out and before the server answered it: [`ErrorKind::LoginUnanswered`].
+    /// A connection that dropped or timed out may be signed in once more; a server that ended the session (`closed`,
+    /// a `BYE`) or broke the protocol gets no second password.
+    pub(crate) fn unanswered_sign_in(error: &Self, closed: bool) -> Self {
+        let lost = !closed && matches!(error.kind, ErrorKind::ConnectionDropped | ErrorKind::TimedOut);
+        Self { kind: ErrorKind::LoginUnanswered, detail: error.detail.clone(), sign_in_lost: lost }
+    }
+
+    /// Whether this is an unanswered sign-in that may be tried once more.
+    pub(crate) fn may_sign_in_again(&self) -> bool {
+        self.sign_in_lost
     }
 
     /// A socket error; a TLS error inside it is classified by its certificate fault at the clock's `now`.

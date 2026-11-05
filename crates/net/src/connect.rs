@@ -116,6 +116,15 @@ impl Connector {
 }
 
 impl Stream {
+    /// How long a read waits; `None` waits for ever.
+    pub(crate) fn set_read_timeout(&self, wait: Option<Duration>) -> io::Result<()> {
+        match self {
+            Self::Plain(socket) => socket.set_read_timeout(wait),
+            Self::Tls(stream) => stream.sock.set_read_timeout(wait),
+            Self::Closed => Err(io::ErrorKind::NotConnected.into()),
+        }
+    }
+
     /// Ends TLS with a `close_notify`, so the server knows the end was meant.
     pub(crate) fn close(&mut self) {
         if let Self::Tls(stream) = self {

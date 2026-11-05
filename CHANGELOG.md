@@ -159,3 +159,32 @@ All notable changes to InboxCraft are listed here. The format follows
   A refused password is not sent again by the same worker. `envelope` reads address lists (groups, quoted names,
   comments, encoded words) and message ids; fuzz target `net_envelope`. New dependency
   `rustls-platform-verifier`, native builds only (#25)
+- `net` keeps an account up to date by itself. A known folder is resynced: with QRESYNC (switched on with ENABLE
+  where offered) EXAMINE brings the flags changed and the UIDs removed since the last sync; without it the flags of
+  the known messages are fetched (only those changed are reported where the server keeps modification sequences)
+  and the UIDs that did not come back are reported removed; then the new messages. A changed UIDVALIDITY reloads
+  the folder. An `Idle` job names the folder to watch between jobs: IDLE where offered (renewed every 25 minutes,
+  ended by a job within a quarter of a second), a resync every 5 minutes otherwise, and a resync after each change
+  the server tells of (`WatchConfig`). Without a connection, jobs wait in an offline queue (at most 1000,
+  `WorkerSettings::max_queued`); a failure the network or the server may get over is retried after a back-off that
+  doubles from 2 seconds to at most 5 minutes (`Backoff`), reported as `BackingOff`; a connection lost while
+  watching is reconnected after it and the folder resynced. A certificate fault, a refused sign-in or a server
+  without a sign-in method stops the tries until the worker is started again. So does a sign-in the server never
+  answered (new `ErrorKind::LoginUnanswered`): at once after a `BYE` or something that is not IMAP, and on the second
+  dropped or timed-out sign-in before one succeeds, so the password is not sent over and over. The connection is compressed with
+  COMPRESS=DEFLATE after the sign-in where offered (`WorkerSettings::compress`), inflated in small steps. A resync
+  keeps what the server tells bounded: QRESYNC's changes once per message and at most `SyncConfig::max_told` of them
+  (past it the flags are fetched instead), the known messages still there as ranges, at most `SyncConfig::max_ranges`
+  (past it the sync fails with `TooLarge`). The back-off wait and the IDLE renewal are measured on the monotonic
+  clock, so a wall clock set back cannot stretch them. Live test
+  `live_imap_round_trip` on `live-imap`: sign-in, folder list, run folder, APPEND of an invented message, first
+  sync, IDLE, resync, folder removed; it skips with its reason printed without credentials, in the agent sandbox and
+  in CI (#26)
+- `inboxcraft-testkit`: the fake IMAP server answers CREATE, DELETE and APPEND (APPENDUID with UIDPLUS), and
+  `Listen::start_imap_many` serves several connections one after the other with the mailboxes and scripted points
+  carried over, for clients that reconnect; `LiveConfig::invented_message` gives a live run's invented messages
+  (#26)
+
+### Changed
+- `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
+  COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)

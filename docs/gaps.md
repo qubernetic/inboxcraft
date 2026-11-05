@@ -194,9 +194,35 @@ B = blocks the next stage.
 - `store` reads a record and a body's text back from SQLite in full before it checks them; SQLite's default limit
   on one value is 1 GB. `Body` cuts the text to `MAX_TEXT_BYTES` only after it was read. A source length is checked
   before the file is read. Only something that writes the owner's database file can plant such a value (#24).
-- `net` has no back-off, no IDLE or NOTIFY, no resync of flags and removed messages and no COMPRESS stream yet
-  (E1.7b): a sync of a known folder brings only the messages from its UIDNEXT on, an `Idle` job only waits for the
-  next job, and a failed job is reported and the next job connects again at once (#25).
+- `net` watches one folder per account, with IDLE; it does not use NOTIFY, so other folders change in the store
+  only when the engine syncs them (#26).
+- `net` resyncs a known folder without QRESYNC by fetching the flags of every known message. Without CONDSTORE too,
+  every one of them is reported in `MessagesChanged`, changed or not, and a large folder costs one flags line per
+  message at each resync (#26).
+- `net` looks for jobs between reads of a quarter of a second during IDLE, so a job waits up to that long. A
+  connection that dies without a word during IDLE is noticed when the IDLE is renewed (25 minutes) and the answer
+  to DONE does not come within the read timeout (two minutes) (#26).
+- `net` opens and resyncs the watched folder again after every job, also after a job that opened no other folder:
+  one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
+  full sync, which reports every message as added again (#26).
+- `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
+  not run again (the engine decides). The offline queue is in memory: what is queued when the app ends is gone. A
+  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
+  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
+  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
+  (#26).
+- `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
+  compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
+  traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`
+  switches it off (#26).
+- `net` keeps at most 10 000 changes and 10 000 removed-UID ranges from what QRESYNC tells while a known folder
+  opens (`SyncConfig::max_told`); past it a resync costs the full flags fetch of the known messages. A resync without
+  QRESYNC keeps the known messages still there as at most a million ranges (`SyncConfig::max_ranges`): a folder with
+  more gaps than that among its UIDs, or a server that answers far out of UID order, fails the sync with `TooLarge`
+  (#26).
+- The `live-imap` live test reaches the server over implicit TLS on port 993 and signs its helper client in with
+  LOGIN; a password with characters outside ASCII cannot be quoted there and fails the test. The fake serves one
+  connection at a time, so the step where another client appends while the worker idles runs only live (#26).
 - `net` tells a far-off clock from a bad certificate by the certificate's dates: it ended more than four years
   before the clock's time, or starts more than a day after it, or the clock is before 2026. Where the platform
   verifier gives no dates (Windows, Apple, Android) and checks at the system's own time, only the last test applies.
@@ -246,3 +272,6 @@ B = blocks the next stage.
 | 2026-11-04 | minor | What is left of removed mail on the disk (#24) |
 | 2026-11-04 | minor | Symlinks in the store and values read back unbounded (#24) |
 | 2026-11-05 | minor | Rough edges of TLS, the IMAP sign-in and the first sync (#25) |
+| 2026-11-05 | minor | Live updates, resync, back-off and COMPRESS in `net` (#26) |
+| 2026-11-05 | minor | The caps on what a resync keeps (#26) |
+| 2026-11-05 | minor | An unanswered sign-in halts the tries (#26) |

@@ -4,21 +4,41 @@
 //! One worker thread per account: it takes the engine's [`Job`]s in order, keeps one signed-in connection, and
 //! reports everything as [`Event`]s.
 //!
-//! The connection opens at the first job and again after a failure that ended it; there is no back-off yet (E1.7b),
-//! so a failed job is reported and the next job tries again. A server that refused the password, or offers no way to
-//! sign in, is not asked again: every later job fails with the same kind until the engine starts a new worker
-//! (after the owner changed the password), so a wrong password is never sent over and over. The password is asked
-//! for each time the worker signs in and is dropped right after.
+//! The connection opens at the first job and again after a failure that ended it. Jobs wait in an offline queue
+//! while there is no connection; a failure the network or the server may get over (no route, a refused or dropped
+//! connection, a timeout, a server that broke the protocol) is reported, and the worker tries again after a
+//! [`Backoff`] wait that doubles up to its cap, keeping the queue. A job that was running when its connection ended
+//! is reported failed and not run again: a job that breaks the connection every time cannot hold the queue up.
+//!
+//! An Idle job names the folder to watch between jobs: the worker resyncs it, then waits in IDLE (or polls a server
+//! without IDLE) until a job comes or the server tells of a change, which brings another resync. A connection that
+//! ends while watching is reconnected after the back-off and the folder resynced, so what changed while the worker
+//! was offline is reported like any other change. Another Idle job moves the watch; a folder that is gone ends it.
+//!
+//! A server that refused the password, offers no way to sign in, or failed the certificate check is not asked again:
+//! the queued jobs and every later job fail with the same kind until the engine starts a new worker (after the owner
+//! changed the settings), so a wrong password is never sent over and over. The same holds for a sign-in the server
+//! never answered: after a `BYE` or something that is not IMAP at once, after a dropped or timed-out connection on
+//! the second time before a sign-in succeeds. Without a stored password the queued jobs
+//! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
+//! right after.
 
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
-use inboxcraft_model::{Account, AccountId, ConnectionState, ErrorKind, Event, EventKind, Job};
+use inboxcraft_model::{Account, AccountId, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind};
 
+use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
+use crate::watch::{self, WatchConfig};
 use crate::{Connector, ImapConnection, NetError, Password};
+
+/// The most jobs the offline queue holds by default.
+pub const MAX_QUEUED: usize = 1_000;
 
 /// Where the worker gets an account's password: the OS credential store in the app, a fixed one in tests.
 pub trait Credentials: Send + Sync {
@@ -33,9 +53,33 @@ pub struct WorkerSettings {
     pub connector: Connector,
     /// How folders are synced.
     pub sync: SyncConfig,
+    /// How long to wait before connecting again after a failure.
+    pub backoff: Backoff,
+    /// The most jobs that wait for a connection; a job beyond them fails at once with [`ErrorKind::TooLarge`].
+    pub max_queued: usize,
+    /// Compress the connection where the server offers COMPRESS=DEFLATE.
+    pub compress: bool,
+    /// How a watched folder is waited on.
+    pub watch: WatchConfig,
 }
 
-/// The worker of one account; dropping it (or [`Worker::stop`]) lets the thread finish its jobs, sign out and end.
+impl WorkerSettings {
+    /// The default settings with `connector`.
+    #[must_use]
+    pub fn new(connector: Connector) -> Self {
+        Self {
+            connector,
+            sync: SyncConfig::default(),
+            backoff: Backoff::default(),
+            max_queued: MAX_QUEUED,
+            compress: true,
+            watch: WatchConfig::default(),
+        }
+    }
+}
+
+/// The worker of one account; dropping it (or [`Worker::stop`]) lets the thread finish its queued jobs while it is
+/// online, sign out and end. Offline, it ends at once and the queued jobs are dropped.
 pub struct Worker {
     account: AccountId,
     jobs: Option<Sender<Job>>,
@@ -85,7 +129,7 @@ impl Worker {
         }
     }
 
-    /// Lets the thread finish the queued jobs, sign out and end, and waits for it.
+    /// Lets the thread end as dropping the worker does, and waits for it.
     pub fn stop(mut self) {
         self.end();
     }
@@ -104,56 +148,310 @@ impl Drop for Worker {
     }
 }
 
-/// The thread: one job after the other, until the queue closes or nobody listens to the events.
+/// The thread: turn after turn, until the queue closes or nobody listens to the events.
 fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credentials, queue: &Receiver<Job>, events: &Sender<Event>) {
-    let mut connection: Option<ImapConnection> = None;
-    let mut refused: Option<NetError> = None;
-    for job in queue {
-        let mut listening = true;
-        let mut emit = |event: Event| listening &= events.send(event).is_ok();
-        let say = |emit: &mut dyn FnMut(Event), kind: EventKind| emit(Event::new(account.id(), Some(job.id), kind));
-        let failed = |error: &NetError| EventKind::Failed { kind: error.kind(), folder: job.kind.folder() };
-        if let Some(error) = &refused {
-            say(&mut emit, failed(error));
-        } else if connection.is_none() {
-            say(&mut emit, EventKind::Connection(ConnectionState::Connecting));
-            match sign_in(account, settings, credentials) {
-                Ok(open) => {
-                    connection = Some(open);
-                    say(&mut emit, EventKind::Connection(ConnectionState::Online));
-                }
-                Err(error) => {
-                    say(&mut emit, failed(&error));
-                    say(&mut emit, EventKind::Connection(ConnectionState::Offline));
-                    if matches!(error.kind(), ErrorKind::LoginRefused | ErrorKind::NoLoginMethod) {
-                        refused = Some(error);
-                    }
-                }
-            }
-        }
-        if let Some(open) = connection.as_mut() {
-            let now = settings.connector.tls().clock().now();
-            if let Err(error) = sync::run(open, &job, &settings.sync, now, &mut emit) {
-                say(&mut emit, failed(&error));
-                if error.ends_connection() {
-                    connection = None;
-                    say(&mut emit, EventKind::Connection(ConnectionState::Offline));
-                }
-            }
-        }
-        if !listening {
-            break;
-        }
-    }
-    if let Some(open) = connection {
+    let mut run = Run {
+        account,
+        settings,
+        credentials,
+        out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new() },
+        connection: None,
+        halted: None,
+        pending: VecDeque::new(),
+        open: true,
+        attempt: 0,
+        watch: None,
+        stale: false,
+        idle_refused: false,
+        sign_in_lost: false,
+    };
+    while run.turn(queue) {}
+    if let Some(open) = run.connection {
         open.logout();
     }
 }
 
-/// A signed-in connection for `account`; the password is asked for first, so none means no connection at all.
+/// Where the events go.
+struct Out<'a> {
+    account: AccountId,
+    events: &'a Sender<Event>,
+    /// The engine still takes events.
+    listening: bool,
+    /// The connection state told last.
+    reported: Option<ConnectionState>,
+    /// The state of each folder as the last sync left it, for the resync of a watched folder.
+    states: HashMap<FolderId, FolderState>,
+}
+
+impl Out<'_> {
+    /// Sends `event`, noting the folder state it carries.
+    fn emit(&mut self, event: Event) {
+        match &event.kind {
+            EventKind::FolderSynced { folder, state } => {
+                self.states.insert(*folder, *state);
+            }
+            EventKind::UidValidityReset { folder, .. } => {
+                self.states.remove(folder);
+            }
+            _ => {}
+        }
+        self.listening &= self.events.send(event).is_ok();
+    }
+
+    fn say(&mut self, job: Option<JobId>, kind: EventKind) {
+        self.emit(Event::new(self.account, job, kind));
+    }
+
+    /// Tells `state` unless it was the last one told.
+    fn report(&mut self, state: ConnectionState) {
+        if self.reported != Some(state) {
+            self.reported = Some(state);
+            self.say(None, EventKind::Connection(state));
+        }
+    }
+
+    fn failed(&mut self, job: &Job, error: &NetError) {
+        self.say(Some(job.id), EventKind::Failed { kind: error.kind(), folder: job.kind.folder() });
+    }
+}
+
+/// The folder an Idle job asked to watch.
+#[derive(Debug, Clone)]
+struct Watch {
+    job: JobId,
+    folder: FolderId,
+    path: FolderPath,
+}
+
+/// The worker's state.
+struct Run<'a> {
+    account: &'a Account,
+    settings: &'a WorkerSettings,
+    credentials: &'a dyn Credentials,
+    out: Out<'a>,
+    connection: Option<ImapConnection>,
+    /// Why the worker stopped trying for good.
+    halted: Option<NetError>,
+    /// The offline queue: jobs taken from the channel and not run yet.
+    pending: VecDeque<Job>,
+    /// The engine can still send jobs.
+    open: bool,
+    /// Failed attempts in a row: to connect, or to keep a connection that ended while watching.
+    attempt: u32,
+    /// The folder watched between jobs.
+    watch: Option<Watch>,
+    /// The watched folder needs a resync before the next wait: new watch, new connection, a change, or a job that
+    /// opened another folder.
+    stale: bool,
+    /// The server refused IDLE on this connection: poll instead.
+    idle_refused: bool,
+    /// A sign-in went unanswered since the last one that succeeded: the next one that does halts the tries.
+    sign_in_lost: bool,
+}
+
+impl Run<'_> {
+    /// One turn: takes the jobs that came, connects when there is none, runs the next job or watches the folder.
+    /// `false` when the worker ends.
+    fn turn(&mut self, queue: &Receiver<Job>) -> bool {
+        if self.pending.is_empty() && self.watch.is_none() {
+            match queue.recv() {
+                Ok(job) => self.take(job),
+                Err(_) => return false,
+            }
+        }
+        self.drain(queue);
+        // Stopped: the queued jobs run while online; offline, or with nothing queued, the worker ends.
+        if !self.open && (self.pending.is_empty() || self.connection.is_none()) {
+            return false;
+        }
+        if let Some(error) = self.halted.clone() {
+            self.fail_pending(&error);
+            self.watch = None;
+        } else if self.connection.is_some() || self.connect(queue) {
+            match self.pending.pop_front() {
+                Some(job) => self.run(&job),
+                None => self.watch(queue),
+            }
+        }
+        self.out.listening
+    }
+
+    /// Takes the jobs waiting in the channel without blocking.
+    fn drain(&mut self, queue: &Receiver<Job>) {
+        loop {
+            match queue.try_recv() {
+                Ok(job) => self.take(job),
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.open = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Queues `job`, or fails it when the queue is full.
+    fn take(&mut self, job: Job) {
+        if self.pending.len() >= self.settings.max_queued {
+            self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
+        } else {
+            self.pending.push_back(job);
+        }
+    }
+
+    fn fail_pending(&mut self, error: &NetError) {
+        for job in std::mem::take(&mut self.pending) {
+            self.out.failed(&job, error);
+        }
+    }
+
+    /// Opens and signs in a connection; whether it did. After a failure the network may get over, waits the back-off
+    /// while taking jobs; after any other failure, fails the queued jobs and ends the watch.
+    fn connect(&mut self, queue: &Receiver<Job>) -> bool {
+        self.out.report(ConnectionState::Connecting);
+        let error = match sign_in(self.account, self.settings, self.credentials) {
+            Ok(open) => {
+                self.connection = Some(open);
+                self.stale = self.watch.is_some();
+                self.idle_refused = false;
+                self.sign_in_lost = false;
+                self.out.report(ConnectionState::Online);
+                return true;
+            }
+            Err(error) => error,
+        };
+        self.out.say(None, EventKind::Failed { kind: error.kind(), folder: None });
+        // An unanswered sign-in gets one more try until a sign-in succeeds, and only after a dropped or timed-out
+        // connection.
+        let again = error.may_sign_in_again() && !self.sign_in_lost;
+        self.sign_in_lost |= error.may_sign_in_again();
+        if error.is_transient() || again {
+            self.back_off(queue);
+        } else {
+            self.out.report(ConnectionState::Offline);
+            if error.kind() != ErrorKind::CredentialMissing {
+                self.halted = Some(error.clone());
+            }
+            self.fail_pending(&error);
+            self.watch = None;
+        }
+        false
+    }
+
+    /// Counts a failed attempt, tells the wait, and waits it.
+    fn back_off(&mut self, queue: &Receiver<Job>) {
+        self.attempt = self.attempt.saturating_add(1);
+        let wait = self.settings.backoff.delay(self.attempt);
+        self.out.report(ConnectionState::BackingOff { attempt: self.attempt, retry_in_secs: whole_seconds(wait) });
+        self.wait(queue, wait);
+    }
+
+    /// Waits `wait`, taking the jobs that come meanwhile; ends early when the engine stops the worker. The wait is
+    /// measured on the monotonic clock, so a wall clock set back cannot stretch it past the back-off cap.
+    fn wait(&mut self, queue: &Receiver<Job>, wait: Duration) {
+        let clock = Arc::clone(self.settings.connector.tls().clock());
+        let started = clock.monotonic();
+        let mut left = wait;
+        loop {
+            match queue.recv_timeout(left) {
+                Ok(job) => self.take(job),
+                Err(RecvTimeoutError::Timeout) => return,
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.open = false;
+                    return;
+                }
+            }
+            match wait.checked_sub(clock.monotonic().saturating_sub(started)) {
+                Some(rest) if !rest.is_zero() => left = rest,
+                _ => return,
+            }
+        }
+    }
+
+    /// Runs `job` on the connection; a failure that ends the connection drops it. An Idle job only names the folder
+    /// to watch.
+    fn run(&mut self, job: &Job) {
+        if let JobKind::Idle { folder, path } = &job.kind {
+            self.watch = Some(Watch { job: job.id, folder: *folder, path: path.clone() });
+            self.stale = true;
+            return;
+        }
+        let Some(open) = self.connection.as_mut() else { return };
+        self.out.report(ConnectionState::Online);
+        // The job may open another folder: IDLE must open the watched one again.
+        self.stale |= self.watch.is_some();
+        let now = self.settings.connector.tls().clock().now();
+        let out = &mut self.out;
+        match sync::run(open, job, &self.settings.sync, now, &mut |event| out.emit(event)) {
+            Ok(()) => self.attempt = 0,
+            Err(error) => {
+                out.failed(job, &error);
+                if error.ends_connection() {
+                    self.connection = None;
+                    out.report(ConnectionState::Offline);
+                }
+            }
+        }
+    }
+
+    /// Watches the folder: resyncs it when it is stale, waits for a change otherwise. A connection that ends while
+    /// watching is reconnected after the back-off; a folder that is gone, or a command refused, ends the watch.
+    fn watch(&mut self, queue: &Receiver<Job>) {
+        let Some(watch) = self.watch.clone() else { return };
+        let done = if self.stale { self.resync(&watch) } else { self.wait_for_change(queue) };
+        let Err(error) = done else { return };
+        self.out.say(Some(watch.job), EventKind::Failed { kind: error.kind(), folder: Some(watch.folder) });
+        if error.ends_connection() {
+            self.connection = None;
+            self.out.report(ConnectionState::Offline);
+            self.back_off(queue);
+        } else {
+            self.watch = None;
+        }
+    }
+
+    /// A sync of the watched folder from the state the last sync left, its events under the Idle job's id.
+    fn resync(&mut self, watch: &Watch) -> Result<(), NetError> {
+        let Some(open) = self.connection.as_mut() else { return Ok(()) };
+        let known = self.out.states.get(&watch.folder).copied();
+        let job = Job::new(watch.job, self.account.id(), JobKind::SyncFolder { folder: watch.folder, path: watch.path.clone(), known });
+        let now = self.settings.connector.tls().clock().now();
+        let out = &mut self.out;
+        sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event))?;
+        self.stale = false;
+        self.attempt = 0;
+        Ok(())
+    }
+
+    /// IDLE in the watched folder, or a poll without it, until something wakes the worker.
+    fn wait_for_change(&mut self, queue: &Receiver<Job>) -> Result<(), NetError> {
+        let Some(open) = self.connection.as_mut() else { return Ok(()) };
+        self.out.report(ConnectionState::Watching);
+        let wake = if self.idle_refused || !open.offers_idle() {
+            watch::poll(&self.settings.watch, queue)
+        } else {
+            watch::idle(open, &self.settings.watch, queue)?
+        };
+        self.idle_refused |= wake.refused;
+        self.stale |= wake.changed;
+        self.open &= !wake.closed;
+        if let Some(job) = wake.job {
+            self.take(job);
+        }
+        Ok(())
+    }
+}
+
+/// A signed-in connection for `account`, with QRESYNC on and compressed where the server offers them; the password
+/// is asked for first, so none means no connection at all.
 fn sign_in(account: &Account, settings: &WorkerSettings, credentials: &dyn Credentials) -> Result<ImapConnection, NetError> {
     let password = credentials.password(account).ok_or_else(|| NetError::new(ErrorKind::CredentialMissing, "no password stored"))?;
     let mut connection = ImapConnection::open(account.imap(), &settings.connector)?;
     connection.login(account.username(), &password)?;
+    drop(password);
+    connection.enable_qresync()?;
+    if settings.compress {
+        connection.compress()?;
+    }
     Ok(connection)
 }

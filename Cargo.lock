@@ -380,6 +380,7 @@ dependencies = [
 name = "inboxcraft-net"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "inboxcraft-charset",
  "inboxcraft-mime",
  "inboxcraft-model",

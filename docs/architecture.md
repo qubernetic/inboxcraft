@@ -28,7 +28,7 @@ engine's state.
 | `SyncFolderList` | `LIST` with SPECIAL-USE | `Folders` (the whole list) |
 | `SyncFolder` | a full sync, or a resync from the known `FolderState` (CONDSTORE, QRESYNC) | `MessagesAdded`, `MessagesChanged`, `MessagesExpunged`, `UidValidityReset` if the UIDVALIDITY changed, `FolderSynced` last |
 | `FetchBody` | fetches one whole message | `BodyFetched` |
-| `Idle` | watches the folder (IDLE, or NOTIFY) until the next job | the same change events as `SyncFolder` |
+| `Idle` | watches the folder between jobs (IDLE, or a resync every few minutes without it) until another `Idle` moves the watch | the same change events as `SyncFolder`, after each change and each reconnect |
 
 On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
 and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
@@ -42,7 +42,10 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - The engine does no I/O; protocols are sans-I/O (`proto`, `dav`); sockets and TLS live only in `net`.
 - No async runtime; one worker thread per account (`net::Worker`). It opens one connection at its first job, signs
   in, runs the jobs in order and opens folders read-only (EXAMINE, `BODY.PEEK`), so the read path changes nothing on
-  the server. Answers stream out as events while they come in.
+  the server. Answers stream out as events while they come in. Jobs wait in an offline queue while it reconnects
+  after a back-off with a cap. Between jobs it watches one folder with IDLE, reading in short ticks so a job ends the
+  IDLE; every change, and every reconnect, brings a resync of the folder from the state the last sync left (QRESYNC
+  where offered), so a change seen live and one made while offline are reported the same way.
 - TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
   checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
   `proto` only on an encrypted connection, and `proto` refuses it before as well.
@@ -74,3 +77,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-04 | minor | The local-first store and its two backends (#24) |
 | 2026-11-04 | minor | The store zeroes removed mail (#24) |
 | 2026-11-05 | minor | The account worker and TLS in `net` (#25) |
+| 2026-11-05 | minor | Live updates, the offline queue and back-off in `net` (#26) |

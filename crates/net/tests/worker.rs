@@ -6,116 +6,12 @@
 
 mod support;
 
-use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
-
-use inboxcraft_model::{
-    Account, AccountId, ConnectionState, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind, Security,
-    SpecialUse, Summary, Uid, UidValidity,
-};
-use inboxcraft_net::{Credentials, Password, SyncConfig, Worker, WorkerSettings};
-use inboxcraft_testkit::imap::{Action, Capability, FakeImap, Mailbox, Message, PASSWORD, USER, When};
-use inboxcraft_testkit::{FakeServer, Fault, Listen, TestPki};
-use support::{Result, connector, days_ago, server, wall};
-
-const ACCOUNT: AccountId = AccountId::new(1);
-const INBOX: FolderId = FolderId::new(10);
-const WAIT: Duration = Duration::from_secs(10);
-
-/// A fixed password, or none.
-struct Fixed(Option<&'static str>);
-
-impl Credentials for Fixed {
-    fn password(&self, account: &Account) -> Option<Password> {
-        assert_eq!(account.id(), ACCOUNT);
-        self.0.map(|text| Password::new(text.to_owned()))
-    }
-}
-
-struct Run {
-    worker: Worker,
-    events: Receiver<Event>,
-    fake: FakeServer,
-    next: u64,
-}
-
-impl Run {
-    fn start(fake: FakeImap, password: Option<&'static str>, sync: SyncConfig) -> Result<Self> {
-        let pki = TestPki::new()?;
-        let fake = Listen::tls(pki.server_config(None)?).accept_timeout(Duration::from_secs(2)).start_imap(fake)?;
-        let account = Account::new(ACCOUNT, "Test", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?;
-        let settings = WorkerSettings { connector: connector(&pki, wall(), fake.addr()), sync };
-        let (sender, events) = mpsc::channel();
-        let worker = Worker::spawn(account, settings, Arc::new(Fixed(password)), sender)?;
-        Ok(Self { worker, events, fake, next: 0 })
-    }
-
-    fn sample() -> Result<Self> {
-        Self::start(FakeImap::sample(), Some(PASSWORD), SyncConfig::default())
-    }
-
-    /// Sends a job; its id.
-    fn job(&mut self, kind: JobKind) -> Result<JobId> {
-        self.next += 1;
-        let id = JobId::new(self.next);
-        self.worker.send(Job::new(id, ACCOUNT, kind)).map_err(|_| "job refused")?;
-        Ok(id)
-    }
-
-    /// The events up to and with the first one `last` takes.
-    fn until(&self, last: impl Fn(&EventKind) -> bool) -> Result<Vec<EventKind>> {
-        let mut seen = Vec::new();
-        loop {
-            let event = self.events.recv_timeout(WAIT)?;
-            assert_eq!(event.account, ACCOUNT);
-            let done = last(&event.kind);
-            seen.push(event.kind);
-            if done {
-                return Ok(seen);
-            }
-        }
-    }
-
-    /// The events of a folder sync, up to its end or its failure.
-    fn synced(&self) -> Result<Vec<EventKind>> {
-        self.until(|kind| matches!(kind, EventKind::FolderSynced { .. } | EventKind::Failed { .. }))
-    }
-
-    /// Stops the worker and returns the lines the server got.
-    fn finish(self) -> Result<Vec<String>> {
-        self.worker.stop();
-        Ok(self.fake.finish()?.received().to_vec())
-    }
-}
-
-fn path(name: &str) -> Result<FolderPath> {
-    Ok(FolderPath::new(name, Some('/'))?)
-}
-
-fn sync_inbox(known: Option<FolderState>) -> Result<JobKind> {
-    Ok(JobKind::SyncFolder { folder: INBOX, path: path("INBOX")?, known })
-}
-
-fn added(events: &[EventKind]) -> Vec<Summary> {
-    events
-        .iter()
-        .filter_map(|kind| if let EventKind::MessagesAdded { messages, .. } = kind { Some(messages.clone()) } else { None })
-        .flatten()
-        .collect()
-}
-
-fn bodies(events: &[EventKind]) -> Vec<(u32, Vec<u8>)> {
-    events.iter().filter_map(|kind| if let EventKind::BodyFetched { uid, raw, .. } = kind { Some((uid.get(), raw.clone())) } else { None }).collect()
-}
-
-fn uid(value: u32) -> Result<Uid> {
-    Ok(Uid::new(value).ok_or("uid")?)
-}
-
-fn validity(value: u32) -> Result<UidValidity> {
-    Ok(UidValidity::new(value).ok_or("uidvalidity")?)
-}
+use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse};
+use inboxcraft_net::SyncConfig;
+use inboxcraft_testkit::Fault;
+use inboxcraft_testkit::imap::{Action, Capability, FakeImap, Mailbox, Message, PASSWORD, When};
+use support::run::{ACCOUNT, INBOX, Run, added, bodies, path, sync_inbox, uid, validity};
+use support::{Result, days_ago};
 
 /// INBOX with a message from two days ago, one from forty days ago and one from yesterday.
 fn recent_and_old() -> Result<FakeImap> {
@@ -166,7 +62,7 @@ fn the_first_sync_brings_headers_previews_and_the_bodies_of_the_last_days() -> R
     // Read-only: EXAMINE and BODY.PEEK, nothing that sets a flag.
     assert!(lines.iter().any(|line| line.contains("EXAMINE \"INBOX\"") || line.contains("EXAMINE INBOX")), "{lines:?}");
     let verbs: Vec<String> = lines.iter().map(|line| line.split(' ').skip(1).take(2).collect::<Vec<_>>().join(" ")).collect();
-    assert_eq!(verbs, ["AUTHENTICATE PLAIN", "EXAMINE \"INBOX\"", "UID FETCH", "UID FETCH", "LOGOUT"]);
+    assert_eq!(verbs, ["AUTHENTICATE PLAIN", "ENABLE QRESYNC", "COMPRESS DEFLATE", "EXAMINE \"INBOX\"", "UID FETCH", "UID FETCH", "LOGOUT"]);
     assert!(lines.iter().all(|line| !line.contains("BODY[")), "{lines:?}");
     Ok(())
 }
@@ -259,7 +155,6 @@ fn a_folder_that_is_gone_fails_alone() -> Result {
     let failed = run.synced()?;
     assert_eq!(failed.last(), Some(&EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(FolderId::new(99)) }));
     // The connection stays: the next job runs on it without signing in again.
-    run.job(JobKind::Idle { folder: INBOX, path: path("INBOX")? })?;
     run.job(JobKind::SyncFolderList)?;
     let events = run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
     assert_eq!(events.len(), 1);
@@ -290,9 +185,18 @@ fn no_password_means_no_connection() -> Result {
 #[test]
 fn a_refused_password_is_not_sent_again() -> Result {
     let mut run = Run::start(FakeImap::new(), Some("a-wrong-invented-password"), SyncConfig::default())?;
-    run.job(JobKind::SyncFolderList)?;
-    let events = run.until(|kind| matches!(kind, EventKind::Connection(ConnectionState::Offline)))?;
-    assert!(events.contains(&EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None }));
+    let first = run.job(JobKind::SyncFolderList)?;
+    let events = run.events_until(|event| event.job == Some(first))?;
+    let kinds: Vec<_> = events.iter().map(|event| (event.job, event.kind.clone())).collect();
+    assert_eq!(
+        kinds,
+        [
+            (None, EventKind::Connection(ConnectionState::Connecting)),
+            (None, EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None }),
+            (None, EventKind::Connection(ConnectionState::Offline)),
+            (Some(first), EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None }),
+        ]
+    );
     run.job(sync_inbox(None)?)?;
     assert_eq!(run.until(|_| true)?, [EventKind::Failed { kind: ErrorKind::LoginRefused, folder: Some(INBOX) }]);
     run.worker.stop();

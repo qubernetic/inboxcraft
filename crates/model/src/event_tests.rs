@@ -12,7 +12,7 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 19] = [
+const EVERY_ERROR: [ErrorKind; 20] = [
     ErrorKind::HostNotFound,
     ErrorKind::ConnectionRefused,
     ErrorKind::TimedOut,
@@ -25,6 +25,7 @@ const EVERY_ERROR: [ErrorKind; 19] = [
     ErrorKind::Tls,
     ErrorKind::StartTlsMissing,
     ErrorKind::LoginRefused,
+    ErrorKind::LoginUnanswered,
     ErrorKind::NoLoginMethod,
     ErrorKind::CredentialMissing,
     ErrorKind::CommandRefused,

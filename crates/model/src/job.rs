@@ -85,8 +85,8 @@ pub enum JobKind {
         /// The message.
         uid: Uid,
     },
-    /// Watch the folder for changes (IDLE, or NOTIFY where the server has it) until the next job, reporting them as
-    /// events.
+    /// Watch the folder for changes between jobs (IDLE where the server has it), reporting them as the events of a
+    /// resync, until another `Idle` moves the watch.
     Idle {
         /// Our id of the folder.
         folder: FolderId,

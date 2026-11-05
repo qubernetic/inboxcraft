@@ -72,6 +72,8 @@ pub enum ErrorKind {
     StartTlsMissing,
     /// The server refused the user name or password.
     LoginRefused,
+    /// The password went out and the server never answered it; it is not sent again.
+    LoginUnanswered,
     /// The server offers no login method we use over TLS.
     NoLoginMethod,
     /// The OS credential store holds no password for the account.
@@ -112,6 +114,7 @@ impl fmt::Display for ErrorKind {
             Self::Tls => "the encrypted connection failed",
             Self::StartTlsMissing => "the server does not offer STARTTLS, so nothing was sent",
             Self::LoginRefused => "the server refused the user name or password",
+            Self::LoginUnanswered => "the server did not answer the sign-in, so the password is not sent again",
             Self::NoLoginMethod => "the server offers no login method this program uses",
             Self::CredentialMissing => "the password for this account is not in the credential store",
             Self::CommandRefused => "the server refused a command",

@@ -6,16 +6,20 @@
 
 #![allow(dead_code)]
 
+pub mod admin;
+pub mod run;
+
 use std::error::Error;
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use inboxcraft_model::{Host, Security, Server};
 use inboxcraft_net::{Connector, Timeouts, TlsSettings, Trust};
 use inboxcraft_testkit::{FAR_OFF, HOST, TestPki};
-use inboxcraft_time::{Clock, FakeClock, Offset, SystemClock};
+use inboxcraft_time::{Clock, FakeClock, Offset, SystemClock, Timestamp};
 
 pub type Result<T = ()> = std::result::Result<T, Box<dyn Error>>;
 
@@ -51,4 +55,29 @@ pub fn days_ago(days: u64) -> Result<String> {
 /// The server [`HOST`] with `security`.
 pub fn server(security: Security) -> Result<Server> {
     Ok(Server::new(Host::new(HOST)?, NonZeroU16::new(993).ok_or("port")?, security))
+}
+
+/// The computer's clock, which the test can set back as the owner or the network would; its monotonic time runs on.
+#[derive(Debug, Default)]
+pub struct SetBack {
+    system: SystemClock,
+    back: AtomicU64,
+}
+
+impl SetBack {
+    /// Sets the wall clock `by` behind the computer's.
+    pub fn set_back(&self, by: Duration) {
+        self.back.store(by.as_secs(), Ordering::SeqCst);
+    }
+}
+
+impl Clock for SetBack {
+    fn now(&self) -> Timestamp {
+        let back = Duration::from_secs(self.back.load(Ordering::SeqCst));
+        self.system.now().checked_sub(back).unwrap_or(Timestamp::MIN)
+    }
+
+    fn monotonic(&self) -> Duration {
+        self.system.monotonic()
+    }
 }
