@@ -323,6 +323,16 @@ fn apply_textures(textures: &mut HashMap<TextureId, Texture>, delta: &mut egui::
 ///
 /// [`UiError::Shot`] for a size of nothing, a scale outside 1 to 4, or a picture side over [`MAX_SIDE`].
 pub fn render(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode) -> Result<Picture, UiError> {
+    paint(size, scale, mode, |ui| app.ui(ui))
+}
+
+/// Runs `draw` for a few frames on a transparent window of `size` points at `scale` pixels per point in `mode`, and
+/// fills the last frame into a picture.
+///
+/// # Errors
+///
+/// [`UiError::Shot`] for a size of nothing, a scale outside 1 to 4, or a picture side over [`MAX_SIDE`].
+pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
     if !(1.0..=4.0).contains(&scale) {
         return Err(bad(format!("scale {scale} is not between 1 and 4")));
     }
@@ -343,7 +353,7 @@ pub fn render(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode) -> Result<
     let mut last = None;
     for _ in 0..4 {
         let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..RawInput::default() };
-        let mut output = ctx.run_ui(input, |ui| app.ui(ui));
+        let mut output = ctx.run_ui(input, &mut draw);
         apply_textures(&mut textures, &mut output.textures_delta);
         last = Some(output);
     }

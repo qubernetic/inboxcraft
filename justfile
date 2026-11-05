@@ -96,6 +96,10 @@ wasm: _up
 shot script="crates/ui-egui/shots.jsonl": _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
 
+# Export the app icon drawn in crates/ui-egui/src/icons.rs to assets/app-icon/inboxcraft.svg
+icon: _up
+    {{ exec }} cargo run -p inboxcraft-ui-egui --example app_icon
+
 # Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, flatpak-sources-check, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci

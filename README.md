@@ -2,7 +2,7 @@
 
 # InboxCraft
 
-<img src="assets/app-icon/hicolor/128x128/apps/com.qubernetic.InboxCraft.png" width="96" alt="The InboxCraft icon: <describe the icon in plain words>">
+<img src="assets/app-icon/inboxcraft.svg" width="96" alt="The InboxCraft icon: a white letter standing in a light teal inbox tray, with an orange unread dot, on a dark teal rounded square">
 
 **A local-first mail and calendar program for IMAP, SMTP and CalDAV, written from scratch in Rust.**
 
