@@ -3,10 +3,11 @@
 
 //! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw.
 
+use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, pos2, vec2};
 
 use crate::mailbox::Mailbox;
-use crate::onboard::{Onboarding, Outcome, Security, Stage, StepRow, StepState};
+use crate::onboard::{MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
 use crate::tr;
 
@@ -24,11 +25,29 @@ pub(super) enum Asked {
 }
 
 /// A labelled one-line field in the form grid.
-fn field(ui: &mut Ui, label: &str, text: &mut String, hint: &str, password: bool) -> Response {
+fn field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) -> Response {
     let label = ui.label(label);
-    let response = ui.add(TextEdit::singleline(text).hint_text(hint).password(password).desired_width(FORM_WIDTH - 200.0)).labelled_by(label.id);
+    let response = ui.add(TextEdit::singleline(text).hint_text(hint).desired_width(FORM_WIDTH - 200.0)).labelled_by(label.id);
     ui.end_row();
     response
+}
+
+/// The password field. egui's undo history keeps plain copies of what was typed, so it is emptied after every frame:
+/// undo never brings back a password that was cleared, nor an earlier account's. The field takes no more than its
+/// [`Secret`]'s buffer holds, so typing never moves the text.
+fn password(ui: &mut Ui, secret: &mut Secret) {
+    let label = ui.label(tr!("Password"));
+    let edit = TextEdit::singleline(secret.expose_mut())
+        .id_salt("account-password")
+        .password(true)
+        .char_limit(MAX_PASSWORD_CHARS)
+        .desired_width(FORM_WIDTH - 200.0);
+    let id = ui.add(edit).labelled_by(label.id).id;
+    if let Some(mut state) = TextEditState::load(ui.ctx(), id) {
+        state.clear_undoer();
+        state.store(ui.ctx(), id);
+    }
+    ui.end_row();
 }
 
 fn note(ui: &mut Ui, theme: &Theme, text: &str, colour: Color32) {
@@ -64,6 +83,22 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
         ui.label("");
         ui.checkbox(&mut form.ispdb, tr!("Detect also asks Mozilla's list of providers, which tells Mozilla your domain"));
         ui.end_row();
+        ui.label("");
+        ui.vertical(|ui| {
+            // A grid cell does not wrap on its own.
+            ui.set_max_width(FORM_WIDTH - 200.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(tr!(
+                        "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password."
+                    ))
+                    .size(theme.type_scale.small)
+                    .color(p.muted),
+                )
+                .wrap(),
+            );
+        });
+        ui.end_row();
         if let Some(found) = &found {
             ui.label("");
             ui.vertical(|ui| {
@@ -82,13 +117,13 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
             });
             ui.end_row();
         }
-        field(ui, tr!("Name for the account"), &mut form.label, tr!("the address"), false);
-        field(ui, tr!("Your name on sent mail"), &mut form.display_name, tr!("optional"), false);
-        field(ui, tr!("User name"), &mut form.username, tr!("the address"), false);
-        field(ui, tr!("Password"), form.password.expose_mut(), "", true);
-        field(ui, tr!("IMAP server"), &mut form.host, "imap.example.org", false);
+        field(ui, tr!("Name for the account"), &mut form.label, tr!("the address"));
+        field(ui, tr!("Your name on sent mail"), &mut form.display_name, tr!("optional"));
+        field(ui, tr!("User name"), &mut form.username, tr!("the address"));
+        password(ui, &mut form.password);
+        field(ui, tr!("IMAP server"), &mut form.host, "imap.example.org");
         let security = form.security.unwrap_or(Security::Tls);
-        field(ui, tr!("Port"), &mut form.port, &security.imap_port().to_string(), false);
+        field(ui, tr!("Port"), &mut form.port, &security.imap_port().to_string());
         ui.label(tr!("Encryption"));
         ui.horizontal(|ui| {
             for choice in [Security::Tls, Security::StartTls] {
@@ -101,6 +136,7 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
     });
     ui.add_space(theme.spacing.m);
     note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."), p.muted);
+    note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
     ui.add_space(theme.spacing.m);
     ui.horizontal(|ui| {
         if ui.button(tr!("Add and check")).clicked() {

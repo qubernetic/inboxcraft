@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inboxcraft_engine::Session;
@@ -11,7 +12,10 @@ use inboxcraft_store::{Memory, Sqlite, Storage, StoreConfig};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
-use super::{Form, Keychain, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Source, Stage, StepState, Suggestion};
+use super::{
+    Form, Keychain, MAX_PASSWORD_CHARS, NoDetect, NoKeychain, Onboarding, Outcome, Proposal, Proposed, Secret, Security, Source, Stage, StepState,
+    Suggestion,
+};
 use crate::mailbox::Mailbox;
 use crate::workers::{NoWorkers, Scripted, Workers};
 
@@ -35,6 +39,10 @@ pub(crate) fn mailbox() -> Mailbox {
 pub(crate) struct Kept {
     pub(crate) passwords: Arc<Mutex<BTreeMap<u64, String>>>,
     pub(crate) refuse: bool,
+    /// While on, only `forget` refuses.
+    pub(crate) refuse_forget: Arc<AtomicBool>,
+    /// Every account `forget` was asked for, in order.
+    pub(crate) forgotten: Arc<Mutex<Vec<u64>>>,
 }
 
 impl Keychain for Kept {
@@ -47,7 +55,8 @@ impl Keychain for Kept {
     }
 
     fn forget(&self, account: u64) -> Result<(), String> {
-        if self.refuse {
+        self.forgotten.lock().unwrap().push(account);
+        if self.refuse || self.refuse_forget.load(Ordering::SeqCst) {
             return Err("locked".to_owned());
         }
         self.passwords.lock().unwrap().remove(&account);
@@ -129,6 +138,45 @@ fn a_secret_hides_itself_and_is_overwritten_when_cleared() {
     assert_eq!(secret.expose(), "");
     secret.expose_mut().push('x');
     assert_eq!(secret.expose(), "x");
+}
+
+#[test]
+fn a_secret_keeps_one_buffer_for_its_longest_password() {
+    let mut secret = Secret::default();
+    let capacity = secret.expose_mut().capacity();
+    assert!(capacity >= MAX_PASSWORD_CHARS * 4);
+    let long = Secret::new(&"\u{1F512}".repeat(MAX_PASSWORD_CHARS + 1));
+    assert_eq!(long.expose().chars().count(), MAX_PASSWORD_CHARS, "cut to the field's limit");
+    secret.expose_mut().push_str(long.expose());
+    assert_eq!(secret.expose_mut().capacity(), capacity, "the longest password fits without a new buffer");
+    secret.clear();
+    assert!(secret.is_empty());
+    assert_eq!(secret.expose_mut().capacity(), capacity, "clearing keeps the buffer for the next password");
+}
+
+#[test]
+fn the_window_s_end_forgets_every_password_it_stored_and_keeps_what_the_store_refused() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&kept);
+    for address in ["carol@example.org", "dave@example.org"] {
+        onboarding.open();
+        filled(onboarding.form_mut());
+        onboarding.form_mut().address = address.to_owned();
+        onboarding.add(&mut mailbox);
+    }
+    assert_eq!(kept.passwords.lock().unwrap().len(), 2);
+    kept.refuse_forget.store(true, Ordering::SeqCst);
+    onboarding.forget_passwords();
+    assert_eq!(kept.passwords.lock().unwrap().len(), 2);
+    kept.refuse_forget.store(false, Ordering::SeqCst);
+    kept.forgotten.lock().unwrap().clear();
+    onboarding.forget_passwords();
+    assert_eq!(kept.forgotten.lock().unwrap().as_slice(), [1, 2], "both tried again");
+    assert!(kept.passwords.lock().unwrap().is_empty());
+    kept.forgotten.lock().unwrap().clear();
+    onboarding.forget_passwords();
+    assert!(kept.forgotten.lock().unwrap().is_empty(), "nothing left to forget");
 }
 
 #[test]
@@ -331,7 +379,7 @@ fn removing_whose_password_the_store_keeps_says_so() {
     let mut onboarding = onboarding(&kept);
     filled(onboarding.form_mut());
     onboarding.add(&mut mailbox);
-    let stuck = Kept { refuse: true, passwords: Arc::clone(&kept.passwords) };
+    let stuck = Kept { refuse: true, passwords: Arc::clone(&kept.passwords), ..Kept::default() };
     let mut other = Onboarding::new(Arc::new(stuck), Box::new(NoDetect::default()));
     other.stage = Stage::Checking(1);
     other.change(&mut mailbox);

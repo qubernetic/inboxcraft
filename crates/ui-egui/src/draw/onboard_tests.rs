@@ -4,8 +4,10 @@
 //! The add-account page driven through its AccessKit tree.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use egui::vec2;
+use egui::accesskit::Role;
+use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
@@ -14,7 +16,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, mailbox, proposal};
-use crate::onboard::{Proposed, Secret, Source, Stage};
+use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
 use crate::sample;
 
 fn clock() -> Box<FakeClock> {
@@ -143,4 +145,141 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         harness.run();
         harness.get_by_label("Enter the address.");
     }
+}
+
+/// Types `password` into the password field through the keyboard, as the owner would.
+fn type_password(harness: &mut Harness<'static, InboxApp>, password: &str) {
+    harness.get_by_role_and_label(Role::PasswordInput, "Password").focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::PasswordInput, "Password").type_text(password);
+    harness.run();
+}
+
+/// Presses Ctrl+Z (Cmd+Z on a Mac) in the password field.
+fn undo_in_password(harness: &mut Harness<'static, InboxApp>) {
+    harness.get_by_role_and_label(Role::PasswordInput, "Password").focus();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.run();
+}
+
+#[test]
+fn undo_brings_no_password_back_after_change_settings() {
+    let failed = FakeWorkers::answering(&[(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]);
+    let kept = Kept::default();
+    let mut harness = harness(app(&kept, failed), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    type_password(&mut harness, PASSWORD);
+    assert_eq!(harness.state().onboarding().form().password.expose(), PASSWORD);
+    harness.get_by_label("Add and check").click();
+    harness.run();
+    harness.run();
+    harness.get_by_label("Change settings").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    undo_in_password(&mut harness);
+    assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the password");
+}
+
+#[test]
+fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
+    let kept = Kept::default();
+    let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "carol@example.org".to_owned();
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    type_password(&mut harness, PASSWORD);
+    harness.get_by_label("Add and check").click();
+    harness.run();
+    harness.run();
+    harness.get_by_label("Done").click();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    undo_in_password(&mut harness);
+    assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the first account's password");
+    harness.get_by_label("Add and check").click();
+    harness.run();
+    harness.get_by_label("Enter the password.");
+    assert_eq!(kept.passwords.lock().unwrap().get(&2), None, "no password for the second account");
+}
+
+#[test]
+fn the_password_field_takes_no_more_than_its_limit_and_never_grows_its_buffer() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    let capacity = harness.state_mut().onboarding_mut().0.form_mut().password.expose_mut().capacity();
+    type_password(&mut harness, &"é".repeat(MAX_PASSWORD_CHARS + 10));
+    let password = &mut harness.state_mut().onboarding_mut().0.form_mut().password;
+    assert_eq!(password.expose().chars().count(), MAX_PASSWORD_CHARS);
+    assert_eq!(password.expose_mut().capacity(), capacity, "typing reallocated the password");
+}
+
+#[test]
+fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
+    for workers in [FakeWorkers::passing(), FakeWorkers::answering(&[(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))])] {
+        let kept = Kept::default();
+        let mut harness = harness(app(&kept, workers), egui::Theme::Light);
+        for address in ["carol@example.org", "dave@example.org"] {
+            harness.state_mut().onboarding_mut().0.open();
+            type_in(&mut harness);
+            harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
+            harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+            harness.run();
+            harness.get_by_label("Add and check").click();
+            harness.run();
+            harness.run();
+            let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Close" };
+            harness.get_by_label(close).click();
+            harness.run();
+        }
+        assert_eq!(kept.passwords.lock().unwrap().len(), 2);
+        harness.state_mut().on_exit();
+        assert!(kept.passwords.lock().unwrap().is_empty(), "a password outlived the window");
+    }
+}
+
+#[test]
+fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit() {
+    let failed = FakeWorkers::answering(&[(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]);
+    let kept = Kept::default();
+    let mut harness = harness(app(&kept, failed), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    type_in(&mut harness);
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    harness.get_by_label("Add and check").click();
+    harness.run();
+    harness.run();
+    kept.refuse_forget.store(true, Ordering::SeqCst);
+    harness.get_by_label("Change settings").click();
+    harness.run();
+    assert!(harness.state().onboarding().error().unwrap().starts_with("The password could not be removed"));
+    assert_eq!(kept.passwords.lock().unwrap().len(), 1);
+    kept.refuse_forget.store(false, Ordering::SeqCst);
+    kept.forgotten.lock().unwrap().clear();
+    harness.state_mut().on_exit();
+    assert_eq!(kept.forgotten.lock().unwrap().as_slice(), [1], "the exit tries that account again");
+    assert!(kept.passwords.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_form_says_what_detect_sends_before_it_is_pressed() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.get_by_label(
+        "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password.",
+    );
 }

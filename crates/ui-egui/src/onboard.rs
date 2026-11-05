@@ -8,6 +8,8 @@
 //! `account.add`, puts the password into the OS credential store ([`Keychain`]) under the new account's id and
 //! nowhere else, and forgets it here; the account's worker reads it from there for the check `account.add` started.
 //! When the credential store refuses it, the account is removed again: an account without its password is not kept.
+//! Accounts are not kept on disk yet, so [`Onboarding::forget_passwords`] removes every password stored here when the
+//! window closes.
 //!
 //! The steps show as they come, each with the host, port and (for the certificate) issuer it saw. After a failure the
 //! owner can check again, or change the settings, which removes the account and its password and opens the form
@@ -16,6 +18,7 @@
 //! The password lives in a [`Secret`]: no `Display`, a `Debug` that hides it, and its bytes overwritten when it is
 //! cleared or dropped. It never goes into a command's parameters, an answer, an error or the store.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -265,16 +268,30 @@ impl Detect for Proposed {
     }
 }
 
+/// The most characters the password field takes.
+pub const MAX_PASSWORD_CHARS: usize = 256;
+
+/// The bytes a password of [`MAX_PASSWORD_CHARS`] characters can take.
+const SECRET_CAPACITY: usize = MAX_PASSWORD_CHARS * 4;
+
 /// A password in memory: it has no `Display`, its `Debug` hides it, and its bytes are overwritten when it is cleared
-/// or dropped.
-#[derive(Default)]
+/// or dropped. Its buffer is made once, big enough for [`MAX_PASSWORD_CHARS`] characters, so typing never moves the
+/// text and leaves no copy behind in a freed buffer.
 pub struct Secret(String);
 
+impl Default for Secret {
+    fn default() -> Self {
+        Self(String::with_capacity(SECRET_CAPACITY))
+    }
+}
+
 impl Secret {
-    /// The secret `text`.
+    /// The secret `text`, cut to [`MAX_PASSWORD_CHARS`] characters.
     #[must_use]
     pub fn new(text: &str) -> Self {
-        Self(text.to_owned())
+        let mut secret = Self::default();
+        secret.0.extend(text.chars().take(MAX_PASSWORD_CHARS));
+        secret
     }
 
     /// Whether nothing was typed.
@@ -283,11 +300,15 @@ impl Secret {
         self.0.is_empty()
     }
 
-    /// Overwrites the bytes and leaves it empty.
+    /// Overwrites every byte of the buffer, the unused ones too, and leaves it empty, with the same buffer.
     pub fn clear(&mut self) {
         let mut bytes = std::mem::take(&mut self.0).into_bytes();
+        // Within the capacity: no new buffer.
+        bytes.resize(bytes.capacity(), 0);
         bytes.fill(0);
         std::hint::black_box(&bytes);
+        bytes.clear();
+        self.0 = String::from_utf8(bytes).unwrap_or_default();
     }
 
     /// The text, for the password field and the credential store.
@@ -479,6 +500,8 @@ pub struct Onboarding {
     running: bool,
     error: Option<String>,
     keychain: Arc<dyn Keychain>,
+    /// The accounts whose password this window put into the credential store and has not removed yet.
+    stored: BTreeSet<u64>,
     detect: Box<dyn Detect>,
 }
 
@@ -507,6 +530,7 @@ impl Onboarding {
             running: false,
             error: None,
             keychain,
+            stored: BTreeSet::new(),
             detect,
         }
     }
@@ -641,6 +665,7 @@ impl Onboarding {
             ));
             return;
         }
+        self.stored.insert(id);
         self.error = None;
         self.stage = Stage::Checking(id);
         mailbox.refresh();
@@ -684,6 +709,10 @@ impl Onboarding {
         let Stage::Checking(id) = self.stage else { return };
         let removed = mailbox.run("account.remove", &json!({ "account": id }));
         let forgotten = self.keychain.forget(id);
+        if forgotten.is_ok() {
+            // One the store refused is tried again by `forget_passwords`.
+            self.stored.remove(&id);
+        }
         mailbox.refresh();
         self.steps.clear();
         self.running = false;
@@ -695,6 +724,13 @@ impl Onboarding {
             }
             (Ok(_), Ok(())) => None,
         };
+    }
+
+    /// Removes from the credential store the password of every account added here, for the window's end: accounts
+    /// are not kept on disk yet, so their passwords would outlive them. One the store refuses again stays behind.
+    pub fn forget_passwords(&mut self) {
+        let keychain = &self.keychain;
+        self.stored.retain(|id| keychain.forget(*id).is_err());
     }
 }
 

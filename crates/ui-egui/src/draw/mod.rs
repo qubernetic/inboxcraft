@@ -128,6 +128,11 @@ impl InboxApp {
         changed
     }
 
+    /// For the window's end: removes the passwords of the accounts added in it from the credential store.
+    pub fn on_exit(&mut self) {
+        self.onboarding.forget_passwords();
+    }
+
     /// The reader.
     #[must_use]
     pub fn reader(&self) -> &Reader {
