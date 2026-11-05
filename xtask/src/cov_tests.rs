@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::{CONFIG, Floors, gate, matches, parse_lcov};
-use crate::test_support::{Broken, BrokenAfter, manifest, run_in, write};
+use crate::test_support::{Broken, BrokenAfter, TESTS_FAILED, manifest, run_in, write};
 use crate::{Context, Error, FAILED, OK, Runner, USAGE};
 
 const PASS: &str = include_str!("../tests/fixtures/cov/pass.info");
@@ -134,7 +134,8 @@ fn a_failed_test_run_fails_the_gate() {
     let (ctx, _) = cov_context(dir.path(), None, false);
     let (code, out, _) = run_in(ctx, &["cov", "--check"]);
     assert_eq!(code, FAILED);
-    assert!(out.ends_with("cov: cargo llvm-cov failed; see its output above\n"), "{out}");
+    assert!(out.ends_with(&format!("{TESTS_FAILED}\n")), "{out}");
+    assert!(!out.contains("below the floor"), "{out}");
 }
 
 #[test]

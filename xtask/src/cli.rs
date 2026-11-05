@@ -13,7 +13,7 @@ const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, flatpak-sources-check, nextest (ci profile), doctests, cov --check, wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
   cov [--check] line coverage per crate under cargo llvm-cov nextest; --check fails below the floors in .config/coverage.toml
   flatpak-sources        write contrib/flatpak/cargo-sources.json from Cargo.lock

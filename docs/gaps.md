@@ -12,8 +12,8 @@ B = blocks the next stage.
 ## Known rough edges (not ranked)
 - `inboxcraft-cli` and `inboxcraft-web` answer `--version` and refuse everything else (#5).
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
-- `cargo xtask ci` runs the tests twice, once under nextest and once under `cargo llvm-cov nextest` for the
-  coverage gate (#7).
+- `cargo xtask ci` runs the tests only in the coverage-instrumented build (`cov` gate); a bug that shows only in
+  an uninstrumented build goes unseen in CI (#66).
 - `testkit` serves one client per fake server. A line script speaks implicit TLS only and matches whole lines
   exactly (#8); the fake IMAP server also speaks STARTTLS (#23).
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
@@ -399,3 +399,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The reader forgets decoded pictures past a budget (#33) |
 | 2026-11-05 | minor | Picture limits per message: inline cap and decoded-bytes budget (#33) |
 | 2026-11-05 | minor | What a forged `From` of an allowed sender learns (#33) |
+| 2026-11-05 | minor | `cargo xtask ci` runs the tests once, under coverage (#66) |
