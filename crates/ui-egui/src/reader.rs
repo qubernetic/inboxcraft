@@ -587,4 +587,4 @@ impl Reader {
 
 #[cfg(test)]
 #[path = "reader_tests.rs"]
-mod tests;
+pub(crate) mod tests;
