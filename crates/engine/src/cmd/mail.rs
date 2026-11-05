@@ -3,7 +3,9 @@
 
 //! `mail.*`: lists of messages, one message, the search.
 
-use inboxcraft_model::{AccountId, FolderId, JobKind, MessageId, MessageRef, Role};
+use std::collections::BTreeMap;
+
+use inboxcraft_model::{AccountId, FolderId, JobKind, Message, MessageId, MessageRef, Role, group_threads};
 use inboxcraft_store::{Change, Search};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
@@ -130,6 +132,39 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         outcome = outcome.with_fetch(message.account(), kind, id);
     }
     Ok(outcome)
+}
+
+/// `mail.thread`: the thread a message is in, oldest first, across folders and accounts (linked by `Message-ID`,
+/// `In-Reply-To` and `References`, never by subject). A message that names no other is a thread of one. A thread of
+/// more than [`MAX_LIST`] messages gives its newest.
+pub(crate) const THREAD: CommandSpec =
+    CommandSpec { id: "mail.thread", class: Some(AgentClass::Safe), summary: "List the thread a message is in, oldest first", run: thread };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThreadParams {
+    /// The message.
+    id: u64,
+}
+
+fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: ThreadParams = decode(THREAD.id, params)?;
+    let id = MessageId::new(params.id);
+    let store = context.store();
+    store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let mut entries = BTreeMap::new();
+    for account in store.accounts()? {
+        for folder in store.folders(account.id())? {
+            for entry in store.messages(folder.id())? {
+                entries.insert(entry.message().id(), entry);
+            }
+        }
+    }
+    let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
+    let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
+    let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
+    let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
+    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown })))
 }
 
 /// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by

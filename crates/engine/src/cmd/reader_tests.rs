@@ -4,10 +4,10 @@
 //! What the reader asks for: the HTML part of a body, an attachment's content, a thread, and the senders whose
 //! remote pictures load without asking.
 
-use serde_json::json;
+use serde_json::{Value, json};
 
-use crate::test_support::session;
-use crate::{Caller, EngineError, Session};
+use crate::test_support::{NOW, at, mailbox, session, session_with};
+use crate::{Caller, EngineError, Registry, Session};
 
 fn put_body(session: &mut Session, id: u64, raw: &[u8]) {
     let uid = session.store().message(inboxcraft_model::MessageId::new(id)).unwrap().unwrap().message().summary().uid();
@@ -93,5 +93,54 @@ fn mail_attachment_refuses_what_is_not_there() {
         [json!({ "id": 1 }), json!({ "id": 1, "index": 0, "content_id": "x" }), json!({ "id": 1, "index": -1 }), json!({ "id": 1, "name": "x" })]
     {
         assert_eq!(session.run("mail.attachment", &params).unwrap_err().code(), "bad_params", "{params}");
+    }
+}
+
+/// A message of the test mailbox with its `Message-ID` and the one it answers.
+fn linked(id: u64, folder: u64, uid: u32, subject: &str, received: i64, message_id: &str, answers: Option<&str>) -> inboxcraft_model::Message {
+    use inboxcraft_model::{AccountId, Envelope, FolderId, Message, MessageId, MessageRef, Summary, Uid};
+    let account = if folder >= 4 { 2 } else { 1 };
+    let envelope = Envelope::new(subject)
+        .with_from(vec![crate::test_support::address("Anna Example", "anna@example.org")])
+        .with_message_id(MessageRef::new(message_id))
+        .with_in_reply_to(answers.and_then(MessageRef::new).into_iter().collect());
+    let summary = Summary::new(Uid::new(uid).unwrap(), envelope).with_received(Some(at(received)));
+    Message::new(MessageId::new(id), AccountId::new(account), FolderId::new(folder), summary)
+}
+
+fn threaded() -> Session {
+    use inboxcraft_store::{Batch, Change, Storage};
+    let mut store = mailbox();
+    let batch = Batch::new()
+        .with(Change::PutMessage(linked(1, 1, 10, "Budget for 2026", NOW - 3600, "budget@example.org", None)))
+        .with(Change::PutMessage(linked(5, 2, 3, "Re: Budget for 2026", NOW - 1800, "re1@example.org", Some("budget@example.org"))))
+        .with(Change::PutMessage(linked(3, 4, 7, "Re: Re: Budget for 2026", NOW - 600, "re2@example.org", Some("re1@example.org"))));
+    store.apply(&batch).unwrap();
+    session_with(store, Registry::builtin().unwrap())
+}
+
+fn subjects(answer: &Value) -> Vec<String> {
+    answer["messages"].as_array().unwrap().iter().map(|m| m["subject"].as_str().unwrap().to_owned()).collect()
+}
+
+#[test]
+fn mail_thread_lists_the_thread_oldest_first_across_folders_and_accounts() {
+    let mut session = threaded();
+    let answer = session.run_as(Caller::Agent, "mail.thread", &json!({ "id": 5 })).unwrap();
+    assert_eq!(subjects(&answer), ["Budget for 2026", "Re: Budget for 2026", "Re: Re: Budget for 2026"]);
+    assert_eq!(answer["total"], json!(3));
+    assert_eq!(answer["messages"][2]["account"], json!(2));
+    assert_eq!(session.run("mail.thread", &json!({ "id": 1 })).unwrap()["messages"], answer["messages"]);
+    // A message that names nothing is a thread of one.
+    assert_eq!(subjects(&session.run("mail.thread", &json!({ "id": 2 })).unwrap()), ["Lunch on Friday"]);
+    assert!(session.take_jobs().is_empty());
+}
+
+#[test]
+fn mail_thread_refuses_what_does_not_fit() {
+    let mut session = session();
+    assert_eq!(session.run("mail.thread", &json!({ "id": 99 })).unwrap_err(), EngineError::NotFound { what: "message", id: 99 });
+    for params in [json!({}), json!({ "id": "1" }), json!({ "id": 1, "limit": 3 })] {
+        assert_eq!(session.run("mail.thread", &params).unwrap_err().code(), "bad_params", "{params}");
     }
 }

@@ -16,7 +16,7 @@ use crate::CommandSpec;
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
-    vec![account::CHECK, account::LIST, folder::LIST, mail::ATTACHMENT, mail::LIST, mail::READ, mail::SEARCH]
+    vec![account::CHECK, account::LIST, folder::LIST, mail::ATTACHMENT, mail::LIST, mail::READ, mail::SEARCH, mail::THREAD]
 }
 
 #[cfg(test)]
