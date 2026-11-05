@@ -280,15 +280,15 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 
 | Job | What it does | Token |
 |---|---|---|
-| `draft` | on a draft PR only: one step, so the draft shows a check | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
 
-- **Drafts get only the quick check.** The full run starts when the PR is marked ready (`gh pr ready`) and repeats
-  on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before marking a PR
-  ready.
+- **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
+  merge anyway, as `ci` is the required check. The full run starts when the PR is marked ready (`gh pr ready`) and
+  repeats on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before
+  marking a PR ready.
 - `ci` is the check to require. A skipped check reports as passing, so a required check has to be a job that runs on
   every full run.
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
@@ -378,3 +378,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | The Flatpak opens the Downloads folder for Save (#33) |
 | 2026-11-05 | minor | CI: the `cov` gate is the one test run, no separate nextest gate (#66) |
 | 2026-11-05 | minor | CI: the dependency cache of the `test` job, saved by branch pushes only (#67) |
+| 2026-11-05 | minor | CI: no `draft` job, a draft starts no job (#68) |

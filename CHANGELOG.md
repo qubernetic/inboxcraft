@@ -297,6 +297,9 @@ All notable changes to InboxCraft are listed here. The format follows
   `[profile.*]` sections; `CARGO_INCREMENTAL=0` in that job; `gh cache delete --all` purges it. The `codecov`,
   `flatpak` and fuzz jobs use no cache (#67)
 
+### Removed
+- The `draft` CI job: a draft PR now starts no job at all (#68)
+
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)

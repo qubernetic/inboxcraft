@@ -1,7 +1,7 @@
 # The workspace CI: `cargo xtask ci`, every gate `just ci` runs, in the same order (docs/development.md, "CI").
 #
-# Ready-only: a draft PR runs only the one-step `draft` job; the full run starts on ready_for_review, on every later
-# push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
+# Ready-only: on a draft PR every job is skipped, so no runner starts; the full run starts on ready_for_review, on
+# every later push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
 # (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
 #
 # The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
@@ -38,14 +38,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # A draft run with no job left would show no check at all.
-  draft:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft
-    runs-on: ubuntu-24.04
-    timeout-minutes: 1
-    steps:
-      - run: echo "Draft PR - the full CI runs when the PR is marked ready (gh pr ready)."
-
   test:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
