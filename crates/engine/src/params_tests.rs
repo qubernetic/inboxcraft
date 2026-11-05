@@ -69,11 +69,38 @@ fn anything_else_is_not_a_date() {
 
 #[test]
 fn a_quiet_complaint_repeats_nothing_quoted() {
-    assert_eq!(quiet(r#"invalid type: string "hunter2", expected u16"#), "invalid type: string …, expected u16");
-    assert_eq!(quiet("unknown field `hunter2`, expected one of `a`, `b`"), "unknown field …, expected one of …, …");
-    assert_eq!(quiet(r#"string "a\"b" and "c"#), "string … and …");
+    assert_eq!(quiet(r#"invalid type: string "hunter2", expected u16"#), "invalid type: string");
+    assert_eq!(quiet("unknown field `hunter2`, expected one of `a`, `b`"), "unknown field");
+    assert_eq!(quiet(r#"string "a\"b" and "c"#), "string");
     assert_eq!(quiet("nothing quoted"), "nothing quoted");
+    assert_eq!(quiet("`all quoted`"), "");
     let error = decode_quietly::<NoParams>("test.none", &json!({ "hunter2": 1 })).unwrap_err();
     assert!(!error.to_string().contains("hunter2"), "{error}");
     assert_eq!(decode_quietly::<NoParams>("test.none", &json!(3)).unwrap_err().code(), "bad_params");
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code, reason = "only the refusal is looked at")]
+struct Choice {
+    security: Pick,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Pick {
+    Tls,
+}
+
+#[test]
+fn a_back_quote_inside_a_sent_value_brings_nothing_back() {
+    const SECRET: &str = "maple-Harbour-41";
+    let key = format!("x`, `{SECRET}`, `y");
+    let params = serde_json::Value::Object([(key, json!(1))].into_iter().collect());
+    let error = decode_quietly::<Choice>("test.choice", &params).unwrap_err();
+    assert!(!error.to_string().contains(SECRET), "{error}");
+    let error = decode_quietly::<Choice>("test.choice", &json!({ "security": format!("a`{SECRET}`b") })).unwrap_err();
+    assert!(!error.to_string().contains(SECRET), "{error}");
+    let error = decode_quietly::<Choice>("test.choice", &json!({ "security": format!("a\"{SECRET}\"b") })).unwrap_err();
+    assert!(!error.to_string().contains(SECRET), "{error}");
 }
