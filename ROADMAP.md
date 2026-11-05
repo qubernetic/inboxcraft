@@ -2,7 +2,7 @@
 
 **Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -20,7 +20,6 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | IMAP sync (IDLE, CONDSTORE/QRESYNC, offline queue) | <%> | <h> | |
 | SMTP sending | <%> | <h> | |
 | CalDAV calendars | <%> | <h> | |
-| Google Calendar | <%> | <h> | |
 | Account autodetect | <%> | <h> | |
 | Tray and background mode | <%> | <h> | |
 | Screener / grouped inbox / snooze / send later | <%> | <h> | |
@@ -30,6 +29,13 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 ## Upcoming
 1. <item> (<hours>)
 
+## Later ideas
+Not planned for now; the model keeps room for them.
+
+| Area | Note |
+|---|---|
+| Google Calendar | a vendor account through CalDAV with OAuth (PKCE); out of scope for now (2026-11-05) |
+
 ## Progress log
 | Date | What landed |
 |---|---|
@@ -38,6 +44,26 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | The coverage gate `cargo xtask cov --check`, floors in `.config/coverage.toml`, in `cargo xtask ci` (#7) |
 | 2026-11-04 | `testkit`: the fake server frame with the drop, delay, garbage and certificate faults (#8) |
 | 2026-11-04 | Opt-in live test harness: `just it-live`, nextest profile `live`, `testkit::live` (#10) |
+| 2026-11-04 | `time`: injectable clock (system and fake), RFC 5322 dates with the obsolete forms, first fuzz target (#15) |
+| 2026-11-04 | `charset`: WHATWG charsets to UTF-8, RFC 2047 encoded words read and written, two fuzz targets (#16) |
+| 2026-11-04 | `model`: accounts, folders with roles (SPECIAL-USE, English and Hungarian names, ask once), messages, threads, the read path jobs and events (#17) |
+| 2026-11-04 | `mime`: messages read into a tree of parts (headers, RFC 2231 parameters, base64 and quoted-printable, multiparts, attached messages, attachments, delivery reports), capped, three fuzz targets (#18) |
+| 2026-11-04 | `mime`: messages built (fields, text and HTML, attachments) behind a header injection guard, build-then-parse property tests (#19) |
+| 2026-11-04 | `proto`: the sans-I/O IMAP client core (greeting, CAPABILITY, STARTTLS, LOGIN and AUTHENTICATE PLAIN over TLS only, LIST with SPECIAL-USE, SELECT, EXAMINE, UID FETCH, UID SEARCH, LOGOUT), golden transcripts, fuzz target (#20) |
+| 2026-11-04 | `proto`: ENABLE, CONDSTORE, QRESYNC with VANISHED and the UIDVALIDITY check, IDLE, NOTIFY with STATUS and mailbox changes, transcripts with and without each (#21) |
+| 2026-11-04 | `proto`: UID COPY, UID MOVE with the copy and expunge fallback, UIDPLUS (UID EXPUNGE, COPYUID, UIDNOTSTICKY), PREVIEW, COMPRESS=DEFLATE negotiation (#22) |
+| 2026-11-04 | `testkit`: the fake IMAP server with its own command reader, invented mailboxes, every E1.4 extension switchable per test, scripted mail changes and faults, STARTTLS with the certificate faults, fuzz target (#23) |
+| 2026-11-04 | `store`: the local-first cache behind the `Storage` trait, a memory backend (wasm, tests) and a native SQLite backend with FTS5, sources as files, migrations, body retention and the simple search; a kill test in a child process (#24) |
+| 2026-11-05 | `net`: TLS with the platform verifier, implicit TLS and STARTTLS with no password before TLS, the IMAP sign-in, one worker thread per account, the first sync (folder list, headers with PREVIEW, bodies of the last 30 days, a body on demand), one error kind per cause, fuzz target (#25) |
+| 2026-11-05 | `net`: live updates with IDLE, resync of flags and removed messages (QRESYNC where offered, with what it keeps capped), a changed UIDVALIDITY reloads the folder, back-off with a cap, the offline queue, the COMPRESS=DEFLATE stream; the `live-imap` live test; the fake IMAP server reconnects and answers CREATE, DELETE and APPEND (#26) |
+| 2026-11-05 | `engine`: the `Session` and the command registry with agent classes (unclassified refused, panics caught), jobs out and events in, the unified folder views merged by date with the account filter, the read commands `account.list`, `folder.list`, `mail.list`, `mail.read` and `mail.search`, `hostile_params_never_panic`, fuzz target (#27) |
+| 2026-11-05 | `account.check` step by step (DNS, TCP with the blocked-mail-ports test, TLS, the certificate with its issuer and the clock check, the IMAP sign-in; SMTP and CalDAV not built yet), Detect (MX, autoconfig over HTTPS, the ISPDB off by default, SRV, host name hints) with no password to a detected server before the owner saw it, three fuzz targets, a live test (#28) |
+| 2026-11-05 | `html`: hostile HTML to display blocks with nothing that runs or submits, remote pictures blocked until consent, `cid:` pictures, link targets exposed and text/target mismatches flagged, capped input, nesting and tables, a hostile fixture set, fuzz target (#29) |
+| 2026-11-05 | Live tests on two throwaway accounts of the reference provider, `live-imap` and `live-imap2`; both sign in and list their folders; `just it-live` works on a fresh checkout (#57) |
+| 2026-11-05 | The first window: `inboxcraft --sample` with the unified list, per-account narrowing, the folder pane with roles and unread badges and the search field, in InboxCraft's own light and dark theme; `ui_shot` pictures (#30) |
+| 2026-11-05 | The dev Flatpak: `git pull && just flatpak` builds and installs InboxCraft with a menu entry (and the sample mailbox as its second action), offline from the checkout with the crates checked against `Cargo.lock` in `cargo xtask ci`; the app icon drawn in code (#31) |
+| 2026-11-05 | The reader: thread oldest first, short and full header, folded quotes, safe HTML, attachment tiles with Save, remote pictures only after consent (once or always for the sender) through `net` leaking only the URL, link targets on hover, the next-message rule, the full-width reader that Escape leaves (#33) |
+| 2026-11-05 | CI runs the tests once: the `cov` gate's run under coverage is the test run, no separate nextest gate (#66) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -48,3 +74,24 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | minor | Progress log: the coverage gate (#7) |
 | 2026-11-04 | minor | Progress log: the fake server frame (#8) |
 | 2026-11-04 | minor | Progress log: the live test harness (#10) |
+| 2026-11-04 | minor | Progress log: the clock and RFC 5322 dates (#15) |
+| 2026-11-04 | minor | Progress log: charsets and encoded words (#16) |
+| 2026-11-04 | minor | Progress log: the mailbox model (#17) |
+| 2026-11-04 | minor | Progress log: the message reader (#18) |
+| 2026-11-04 | minor | Progress log: the message builder (#19) |
+| 2026-11-04 | minor | Progress log: the IMAP client core (#20) |
+| 2026-11-04 | minor | Progress log: the IMAP sync extensions (#21) |
+| 2026-11-04 | minor | Progress log: IMAP move, UIDPLUS, preview and compression (#22) |
+| 2026-11-04 | minor | Progress log: the fake IMAP server (#23) |
+| 2026-11-04 | minor | Progress log: the local-first store (#24) |
+| 2026-11-05 | minor | Progress log: TLS, the IMAP sign-in and the first sync (#25) |
+| 2026-11-05 | minor | Progress log: live updates, resync and back-off (#26) |
+| 2026-11-05 | minor | Progress log: the resync caps what it keeps (#26) |
+| 2026-11-05 | minor | Progress log: the engine read path and the command registry (#27) |
+| 2026-11-05 | minor | Progress log: the account check and Detect (#28) |
+| 2026-11-05 | minor | Google Calendar moves to the later ideas; progress log: the second live account (#57) |
+| 2026-11-05 | minor | Progress log: safe HTML display (#29) |
+| 2026-11-05 | minor | Progress log: the first window with the sample mailbox (#30) |
+| 2026-11-05 | minor | Progress log: the dev Flatpak (#31) |
+| 2026-11-05 | minor | Progress log: the reader (#33) |
+| 2026-11-05 | minor | Progress log: the tests run once in CI (#66) |

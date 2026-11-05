@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-05 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -28,8 +28,10 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo volumes and `target/`) and, for the owner
-only, `it-live` (see "Live tests").
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `icon` (exports the app icon),
+`flatpak-sources` and `flatpak-sources-check`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo
+volumes and `target/`), on the host `flatpak` (see "The dev Flatpak") and, for the owner only, `it-live` (see "Live
+tests").
 `just run -- <args>` passes arguments to the app; `INBOXCRAFT_PROFILE=release just run` runs the release build.
 
 ### Podman
@@ -69,17 +71,19 @@ tools pinned there. As of 2026-11-04 it has them (cargo 1.98.0, nextest 0.9.150,
 Every crate root starts with the SPDX lines and the deny header
 (`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`),
 and every crate has its tests in files of its own (`src/tests.rs`, `src/<module>_tests.rs`, `tests/`). The crates
-are empty so far; the apps answer `--version` and refuse everything else.
+behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open the window; `inboxcraft-cli` and
+`inboxcraft-web` answer `--version` and refuse everything else.
 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cov --check`, `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
+| `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
 | `cargo xtask help` | the commands and the exit codes |
@@ -96,12 +100,17 @@ included) and fails on:
 
 - a member that is not registered;
 - a dependency on a higher layer, or on a crate in its own layer that `INTRA_LAYER_ORDER` does not list (only
-  `net` -> `proto` and `net` -> `dav`);
+  `store` -> `model`, `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
+- `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
+- a testkit-only crate (`TESTKIT_ONLY_CRATES`: `rcgen`) as a normal or build dependency anywhere but `testkit`; a
+  dev-dependency on one is fine, and a crate that comes to need one lifts it in a reviewed change;
+- a net-only crate (`NET_ONLY_CRATES`: `flate2`, the COMPRESS=DEFLATE stream) as a normal or build dependency
+  anywhere but `net` and `testkit`;
 - a dependency on an app or `xtask` from a library crate.
 
 Member patterns in the root `Cargo.toml` are directories or `<dir>/*`; `layers`, `wasm` and `stats` refuse other
@@ -112,7 +121,11 @@ local directories `corpus/`, `craft-fonts/`, `craft-i18n/`, `dist/` and `log/`.
 
 ### The coverage gate
 `cargo xtask cov` runs `cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info`, so the
-tests run under coverage and a failing test fails the gate. It then prints one line per crate (lines, covered,
+tests run under coverage and a failing test fails the gate. In `cargo xtask ci` this is the only test run: there is
+no separate nextest gate, so the tests run only in the coverage-instrumented build. When the run fails the gate says
+`cov: the tests failed (...); no coverage floor was checked`, so a red test never reads as a floor. nextest writes
+the JUnit report of profile `ci` to `target/nextest/ci/junit.xml` in the root, whatever target directory llvm-cov
+builds in. Otherwise it prints one line per crate (lines, covered,
 cover, floor) and the workspace total. `just cov` runs it; `just cov --check` and `just ci` also fail below a floor.
 `lcov.info` stays in the root for the Codecov upload; a stale one is removed before the run.
 
@@ -134,31 +147,102 @@ The floors live in one file, `.config/coverage.toml`:
   prints as on it.
 - A floor is never lowered in the PR that falls below it; lowering one needs the project owner.
 
+## The dev Flatpak
+`contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
+checkout and without a network during the build. After the first setup, `git pull && just flatpak` updates the
+installed app, and it starts from the desktop's menu like any other: the entry opens the app, its second action
+("Open the Sample Mailbox") starts it with `--sample`.
+
+| File | What it is |
+|---|---|
+| `io.github.qubernetic.inboxcraft.yml` | the manifest: the freedesktop 25.08 runtime with the `rust-stable` SDK extension, the build commands and the permissions |
+| `cargo-sources.json` | every crate of `Cargo.lock` as a download with its checksum, unpacked into a vendor folder for the offline build |
+| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, with the sample mailbox as its second action |
+| `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
+
+The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
+shapes are the window icon. After a change to the shapes, `just icon` exports the file again; a test fails while the
+file and the code differ.
+
+**Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
+network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
+GPU, the Secret Service for passwords and tokens, desktop notifications, and the Downloads folder, where Save puts
+attachments (under a new name, never over a file). The Background portal needs no permission. No other folder of
+yours is open to the app: everything it keeps lives in `~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails
+when a permission has no comment above it, or when the manifest opens a folder other than Downloads.
+
+**Dependencies.** A change to `Cargo.lock` needs `just flatpak-sources` (in the container, or natively), and the
+regenerated `contrib/flatpak/cargo-sources.json` goes into the same commit; the `flatpak-sources-check` gate of
+`cargo xtask ci` fails until it is there. Only crates.io crates are allowed: a git or other registry dependency is
+refused.
+
+### Build and install it locally
+On the host you need `flatpak` and `flatpak-builder` (the `flatpak-builder` package of your distribution, or the
+`org.flatpak.Builder` app from Flathub), and the Flathub remote for your user once:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+```
+
+Then, in the checkout:
+
+```sh
+git pull
+just flatpak
+```
+
+`just flatpak` lints the manifest with `flatpak-builder-lint` when it is installed (or the linter of the
+`org.flatpak.Builder` app); the linter's findings are shown and the build goes on, as Flathub's rules are stricter
+than a dev build needs. It then runs `flatpak-builder --user --install`, which fetches the runtime, the SDK and the
+Rust extension from Flathub the first time, builds in `target/flatpak/` and installs the app for your user. The
+first build compiles every crate and takes a while; later ones reuse the downloads. Run it with
+`flatpak run io.github.qubernetic.inboxcraft` (add `--sample` for the sample mailbox), and remove it with
+`flatpak uninstall --user io.github.qubernetic.inboxcraft`.
+
+### Install the bundle from CI
+The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every push to `develop`,
+`main` or an epic branch, and on a ready PR that changes a Flatpak input (see "CI"), and keeps it as an artifact of
+the run. Download it from the run's page, or with `gh run download <run-id>`, then install it for your user:
+
+```sh
+flatpak install --user <bundle>.flatpak
+```
+
+The bundle needs the same runtime; `flatpak install` offers to fetch it from Flathub. Until that job lands, build
+locally.
+
 ## Live tests
 The owner alone runs opt-in live tests, by hand, on two throwaway test accounts. Agents write and maintain these
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
 
-- **Where:** `crates/testkit/tests/live.rs`. Every live test is named `live_*` and starts with
+- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs`: both accounts sign in and
+  list their folders; the `live-imap` round trip (sign-in, folder list, run folder, APPEND of an invented message,
+  first sync, IDLE, resync, folder removed); the account check, whose every IMAP step must pass on the real chain.
+  All of them over implicit TLS on port 993. Every live test is named `live_*` and starts with
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
-- **Accounts:** `live-imap` (a plain IMAP and SMTP account) and `live-google`. The harness's own types name them
-  only by these names: their debug and error output never shows an address, a login name or a secret. Values a
-  test prints itself, or passes to an `assert_eq!` that fails, are not redacted; a live test never does either.
+- **Accounts:** `live-imap` and `live-imap2`, two throwaway IMAP and SMTP accounts on the reference provider. The
+  harness's own types name them only by these names: their debug and error output never shows an address, a login
+  name or a secret. Values a test prints itself, or passes to an `assert_eq!` that fails, are not redacted; a live
+  test never does either.
 - **Allow-list:** `LiveConfig::check_recipient` admits exactly the two addresses given at run time, each a plain
   dot-atom address; a live test that sends mail checks every recipient with it first.
 - **Run folder:** `InboxCraft-Test/<run id>` (with the server's hierarchy delimiter), created by
   `RunFolder::create` and removed by `RunFolder::remove`, or on drop when a test fails before it gets there.
   `RunFolder` builds the name itself and refuses a delimiter that could change it, so it deletes no other folder.
+  `LiveConfig::invented_message` gives the run's invented messages (from and to `live-test@example.org`); APPEND
+  puts them in the run folder and sends them to nobody.
 - **Profile:** `nextest --profile live` (`.config/nextest.toml`) runs only the `live_*` tests, one at a time.
 
 ### Running them (owner)
 `just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It works in two
 steps:
 
-1. It builds the live test binary into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
-   build script, proc macro or other test binary ever runs with the credentials.
+1. It makes `target/nextest` and builds the live test binaries (`testkit` and `net`) into an archive,
+   `target/nextest/live.tar.zst`, before it reads any value, so no build script, proc macro or other test binary
+   ever runs with the credentials.
 2. It reads eight values from the OS credential store, service `inboxcraft-live`, one entry per variable, and runs
    the `live` profile from the archive, which never compiles. The values reach the container through its own
    environment for that run only, never on a command line or in a file.
@@ -173,10 +257,10 @@ output yourself before you paste it anywhere, such as into an issue.
 
 | Variable | Meaning |
 |---|---|
-| `INBOXCRAFT_LIVE_IMAP_ADDRESS`, `INBOXCRAFT_LIVE_GOOGLE_ADDRESS` | the accounts' addresses: the recipient allow-list |
-| `INBOXCRAFT_LIVE_IMAP_HOST`, `INBOXCRAFT_LIVE_GOOGLE_HOST` | the servers' host names |
-| `INBOXCRAFT_LIVE_IMAP_USER`, `INBOXCRAFT_LIVE_GOOGLE_USER` | the login names |
-| `INBOXCRAFT_LIVE_IMAP_SECRET`, `INBOXCRAFT_LIVE_GOOGLE_SECRET` | the passwords or tokens |
+| `INBOXCRAFT_LIVE_IMAP_ADDRESS`, `INBOXCRAFT_LIVE_IMAP2_ADDRESS` | the accounts' addresses: the recipient allow-list |
+| `INBOXCRAFT_LIVE_IMAP_HOST`, `INBOXCRAFT_LIVE_IMAP2_HOST` | the servers' host names |
+| `INBOXCRAFT_LIVE_IMAP_USER`, `INBOXCRAFT_LIVE_IMAP2_USER` | the login names |
+| `INBOXCRAFT_LIVE_IMAP_SECRET`, `INBOXCRAFT_LIVE_IMAP2_SECRET` | the passwords or tokens |
 | `INBOXCRAFT_LIVE_RUN_ID` | set by `just it-live`: UTC time and process id |
 
 Storing a value (it prompts for it, so it never lands in the shell history):
@@ -196,20 +280,42 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 
 | Job | What it does | Token |
 |---|---|---|
-| `draft` | on a draft PR only: one step, so the draft shows a check | read |
-| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml` as the `reports` artifact | read |
+| `changes` | decides whether `flatpak` runs: always on a push or a manual run; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
+| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
-| `ci` | the gate: succeeds only when `test` and `codecov` did | read |
+| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
+| `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` found no Flatpak input in the PR | read |
 
-- **Drafts get only the quick check.** The full run starts when the PR is marked ready (`gh pr ready`) and repeats
-  on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before marking a PR
-  ready.
+- **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
+  merge anyway, as `ci` is the required check. The full run starts when the PR is marked ready (`gh pr ready`) and
+  repeats on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before
+  marking a PR ready.
+- **The Flatpak inputs.** A PR runs `flatpak` only when it changes one of these, the files the manifest builds from
+  apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
+  metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
+  `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
+  `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to the base
+  branch, not in its own PR.
 - `ci` is the check to require. A skipped check reports as passing, so a required check has to be a job that runs on
   every full run.
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
   from `rust-toolchain.toml`, and nextest, cargo-llvm-cov and cargo-deny at the versions the `Dockerfile` pins: it
   reads them from there, so a bump stays one change.
-- No cargo cache: nothing a PR run writes feeds a later run.
+- **One cache, written only by merged code.** The `test` job caches the compiled third-party dependencies
+  (`deps`, `build` and `.fingerprint` of every profile under `target/`) and the cargo registry
+  (`~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`; the unpacked sources are not cached,
+  cargo unpacks them again from the `.crate` files). Every full run restores it with `actions/cache/restore`; only a
+  `push` run, that is a push to `develop`, `main` or `epic/**`, saves it with `actions/cache/save`, after a green
+  run, so a `pull_request` or `workflow_dispatch` run never writes it. Before the save, every package and target
+  name of this workspace is deleted from `target/`, with the binaries, reports and coverage data: no artifact of
+  our own code is cached. The job sets `CARGO_INCREMENTAL=0`.
+- The key is `deps-v1-<os>-<ISO week>-<hash of rust-toolchain.toml>-<hash of the [profile.*] sections>-<hash of
+  Cargo.lock>`, so it rotates every week and a toolchain or profile change starts from nothing. A run whose
+  `Cargo.lock` has no entry yet restores the newest entry of the same week, toolchain and profiles and rebuilds what
+  changed; that entry can carry old dependency versions until the week ends. A PR restores the entries of its base
+  branch and of `main`.
+- Purge the cache with `gh cache delete --all` (one entry: `gh cache list`, then `gh cache delete <key>`). The
+  `codecov` and `flatpak` jobs and `fuzz.yml` use no cache.
 - Every action is pinned by its full commit SHA with the tag in a comment; the workflow token is read-only and only
   `codecov` widens it.
 
@@ -218,6 +324,15 @@ at 02:17 UTC, and for 30 seconds on a PR that touches `fuzz/` or the workflow. c
 toolchain is pinned by date in the workflow. A crash fails the run and its input is kept as the `fuzz-artifacts`
 artifact; it becomes a regression test. With no targets the job passes. GitHub runs a schedule only from the default
 branch, `main`, so the nightly run starts with the first release.
+
+`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
+new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
+runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
+`charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
+(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
+(#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
+(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations, and
+`html_display` (#29), the safe HTML display.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -247,3 +362,28 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | The `testkit` coverage floor (#8) |
 | 2026-11-04 | minor | Live tests: `just it-live`, the nextest `live` profile and `testkit::live` (#10) |
 | 2026-11-04 | minor | Live tests: build before reading the credentials, the wider leak scan, what is not redacted (#10) |
+| 2026-11-04 | minor | Fuzzing: the `fuzz/` workspace and how a target is added (#15) |
+| 2026-11-04 | minor | Fuzzing: the charset and encoded word targets (#16) |
+| 2026-11-04 | minor | Fuzzing: the model values target (#17) |
+| 2026-11-04 | minor | Fuzzing: the message, header and delivery report targets (#18) |
+| 2026-11-04 | minor | Fuzzing: the IMAP client target (#20) |
+| 2026-11-04 | minor | The layering rule that keeps `proto` out of `testkit` (#23) |
+| 2026-11-04 | minor | Fuzzing: the fake IMAP server target (#23) |
+| 2026-11-04 | minor | The layering rule that keeps `rcgen` and `flate2` in `testkit` (#23) |
+| 2026-11-04 | minor | `store` may depend on `model` inside layer 1 (#24) |
+| 2026-11-05 | minor | Fuzzing: the envelope target of `net` (#25) |
+| 2026-11-05 | minor | `flate2` moves from the testkit-only to the net-only crates (#26) |
+| 2026-11-05 | minor | Live tests: the `net` round trip on `live-imap`, invented messages (#26) |
+| 2026-11-05 | minor | Fuzzing: the certificate, autoconfig and DNS targets of `net`; live test of the account check (#28) |
+| 2026-11-05 | minor | Live tests: `just it-live` makes the archive's folder first (#57) |
+| 2026-11-05 | minor | Live tests: the second account is `live-imap2` on the reference provider (#57) |
+| 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |
+| 2026-11-05 | minor | Fuzzing: the safe HTML display target (#29) |
+| 2026-11-05 | minor | The `shot` recipe; the desktop app opens the window (#30) |
+| 2026-11-05 | minor | The dev Flatpak: `just flatpak`, the CI bundle, `flatpak-sources-check`, `just icon` (#31) |
+| 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |
+| 2026-11-05 | minor | The Flatpak opens the Downloads folder for Save (#33) |
+| 2026-11-05 | minor | CI: the `cov` gate is the one test run, no separate nextest gate (#66) |
+| 2026-11-05 | minor | CI: the dependency cache of the `test` job, saved by branch pushes only (#67) |
+| 2026-11-05 | minor | CI: no `draft` job, a draft starts no job (#68) |
+| 2026-11-05 | minor | CI: `flatpak` on a PR only when its inputs change; the list of inputs (#68) |

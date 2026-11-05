@@ -15,7 +15,9 @@ PROVENANCE.md.
 - WordCraft (https://github.com/storytold/wordcraft), Copyright (c) 2026 ArtCraft Team and the WordCraft
   contributors: <workspace tooling (xtask), packaging scripts, control channel, MCP framing, design-token scheme …>
 - MailCraft (https://github.com/UCS-Care-Group/mailcraft), Copyright (c) 2026 the MailCraft contributors:
-  <crates/html, crates/mime …>
+  the header field, parameter, transfer encoding and multipart reading in crates/mime, and the IMAP response
+  values, status lines, modified UTF-7, command quoting and caps in crates/proto, and the HTML tokenizer and
+  character references in crates/html (adapted, commit e92228cf05362ac76df40d103b929a8506257395)
 - MailCraft (https://github.com/ZIDAN44/mailcraft), Copyright (c) 2026 <holder as written in its LICENSE>:
   <IMAP sync, CalDAV …>
 
@@ -24,5 +26,11 @@ above.
 
 Third-party material
 --------------------
-- <font or asset>, <licence>, licence text in <path>
+- egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
+  (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0), Hack
+  (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from), Noto
+  Emoji (Copyright 2013 Google LLC, SIL Open Font Licence 1.1) and the emoji icon font with egui's subset of it
+  (Copyright 2014 John Slegers, MIT). The licence texts ship in that crate's `fonts/` directory.
+- SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
+  the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

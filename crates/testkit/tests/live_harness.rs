@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use inboxcraft_testkit::live::{self, Folders, Live, LiveConfig, LiveError, RUN_ROOT, RunFolder, RunFolderError};
 
 const IMAP_SECRET: &str = "imap-secret-Zq81vX";
-const GOOGLE_SECRET: &str = "google-secret-Wk27pL";
+const IMAP2_SECRET: &str = "imap2-secret-Wk27pL";
 
 fn complete() -> HashMap<&'static str, String> {
     HashMap::from([
@@ -19,10 +19,10 @@ fn complete() -> HashMap<&'static str, String> {
         ("INBOXCRAFT_LIVE_IMAP_HOST", "imap.example.org".to_owned()),
         ("INBOXCRAFT_LIVE_IMAP_USER", "first-login".to_owned()),
         ("INBOXCRAFT_LIVE_IMAP_SECRET", IMAP_SECRET.to_owned()),
-        ("INBOXCRAFT_LIVE_GOOGLE_ADDRESS", "second@example.org".to_owned()),
-        ("INBOXCRAFT_LIVE_GOOGLE_HOST", "mail.example.org".to_owned()),
-        ("INBOXCRAFT_LIVE_GOOGLE_USER", "second-login".to_owned()),
-        ("INBOXCRAFT_LIVE_GOOGLE_SECRET", GOOGLE_SECRET.to_owned()),
+        ("INBOXCRAFT_LIVE_IMAP2_ADDRESS", "second@example.org".to_owned()),
+        ("INBOXCRAFT_LIVE_IMAP2_HOST", "mail.example.org".to_owned()),
+        ("INBOXCRAFT_LIVE_IMAP2_USER", "second-login".to_owned()),
+        ("INBOXCRAFT_LIVE_IMAP2_SECRET", IMAP2_SECRET.to_owned()),
         ("INBOXCRAFT_LIVE_RUN_ID", "20261104T120000Z-42".to_owned()),
     ])
 }
@@ -104,23 +104,23 @@ fn an_empty_ci_or_agent_variable_does_not_skip() -> Result<(), Box<dyn std::erro
 #[test]
 fn partial_credentials_fail_and_name_only_the_missing_variables() -> Result<(), Box<dyn std::error::Error>> {
     let mut vars = complete();
-    vars.remove("INBOXCRAFT_LIVE_GOOGLE_SECRET");
+    vars.remove("INBOXCRAFT_LIVE_IMAP2_SECRET");
     vars.remove("INBOXCRAFT_LIVE_IMAP_HOST");
     let err = load(&vars).err().ok_or("loaded")?;
-    assert_eq!(err.to_string(), "live test configuration is incomplete, missing: INBOXCRAFT_LIVE_IMAP_HOST, INBOXCRAFT_LIVE_GOOGLE_SECRET");
+    assert_eq!(err.to_string(), "live test configuration is incomplete, missing: INBOXCRAFT_LIVE_IMAP_HOST, INBOXCRAFT_LIVE_IMAP2_SECRET");
     Ok(())
 }
 
 #[test]
-fn the_accounts_are_named_live_imap_and_live_google() -> Result<(), Box<dyn std::error::Error>> {
+fn the_accounts_are_named_live_imap_and_live_imap2() -> Result<(), Box<dyn std::error::Error>> {
     let config = config(&complete())?;
-    let [imap, google] = config.accounts();
-    assert_eq!((imap.name(), google.name()), ("live-imap", "live-google"));
+    let [imap, imap2] = config.accounts();
+    assert_eq!((imap.name(), imap2.name()), ("live-imap", "live-imap2"));
     assert_eq!(imap.address(), "first@example.org");
     assert_eq!(imap.host(), "imap.example.org");
     assert_eq!(imap.user(), "first-login");
     assert_eq!(imap.secret().expose(), IMAP_SECRET);
-    assert_eq!(google.secret().expose(), GOOGLE_SECRET);
+    assert_eq!(imap2.secret().expose(), IMAP2_SECRET);
     Ok(())
 }
 
@@ -166,7 +166,7 @@ fn a_plain_dot_atom_address_is_accepted() -> Result<(), Box<dyn std::error::Erro
 #[test]
 fn the_two_accounts_need_two_addresses() -> Result<(), Box<dyn std::error::Error>> {
     let mut vars = complete();
-    vars.insert("INBOXCRAFT_LIVE_GOOGLE_ADDRESS", "first@EXAMPLE.org".to_owned());
+    vars.insert("INBOXCRAFT_LIVE_IMAP2_ADDRESS", "first@EXAMPLE.org".to_owned());
     let err = load(&vars).err().ok_or("loaded")?;
     assert!(matches!(err, LiveError::SameAddress), "{err}");
     Ok(())
@@ -177,8 +177,8 @@ fn hostile_values_are_refused_without_echoing_them() -> Result<(), Box<dyn std::
     for (variable, value) in [
         ("INBOXCRAFT_LIVE_IMAP_SECRET", format!("{IMAP_SECRET}\r\nA1 LOGOUT")),
         ("INBOXCRAFT_LIVE_IMAP_SECRET", String::new()),
-        ("INBOXCRAFT_LIVE_GOOGLE_SECRET", format!("{GOOGLE_SECRET}\0")),
-        ("INBOXCRAFT_LIVE_GOOGLE_SECRET", "x".repeat(4097)),
+        ("INBOXCRAFT_LIVE_IMAP2_SECRET", format!("{IMAP2_SECRET}\0")),
+        ("INBOXCRAFT_LIVE_IMAP2_SECRET", "x".repeat(4097)),
         ("INBOXCRAFT_LIVE_IMAP_ADDRESS", "two@at@example.org".to_owned()),
         ("INBOXCRAFT_LIVE_IMAP_ADDRESS", "no-at-sign".to_owned()),
         ("INBOXCRAFT_LIVE_IMAP_ADDRESS", "@example.org".to_owned()),
@@ -202,7 +202,7 @@ fn hostile_values_are_refused_without_echoing_them() -> Result<(), Box<dyn std::
         ("INBOXCRAFT_LIVE_IMAP_ADDRESS", format!("first@{}.org", "x".repeat(64))),
         ("INBOXCRAFT_LIVE_IMAP_ADDRESS", "fürst@example.org".to_owned()),
         ("INBOXCRAFT_LIVE_IMAP_HOST", "imap.example.org\n".to_owned()),
-        ("INBOXCRAFT_LIVE_GOOGLE_USER", "second\tuser".to_owned()),
+        ("INBOXCRAFT_LIVE_IMAP2_USER", "second\tuser".to_owned()),
     ] {
         let mut vars = complete();
         vars.insert(variable, value.clone());
@@ -255,7 +255,7 @@ fn start_prints_the_skip_reason_and_returns_none() -> Result<(), Box<dyn std::er
     let vars = complete();
     let config = live::start_from("a_live_test", |name| vars.get(name).cloned())?.ok_or("skipped")?;
     assert_eq!(config.imap().name(), "live-imap");
-    assert_eq!(config.google().name(), "live-google");
+    assert_eq!(config.imap2().name(), "live-imap2");
     Ok(())
 }
 
@@ -270,7 +270,7 @@ fn from_env_reads_the_process_environment() -> Result<(), Box<dyn std::error::Er
 #[test]
 fn debug_and_display_never_show_a_secret_or_an_address() -> Result<(), Box<dyn std::error::Error>> {
     let config = config(&complete())?;
-    let mut text = format!("{config:?} {:?} {}", config.imap().secret(), config.google().secret());
+    let mut text = format!("{config:?} {:?} {}", config.imap().secret(), config.imap2().secret());
     for err in [
         LiveError::RecipientRefused,
         LiveError::SameAddress,
@@ -283,7 +283,7 @@ fn debug_and_display_never_show_a_secret_or_an_address() -> Result<(), Box<dyn s
     assert_eq!(config.leaked_secret(&text), None, "{text}");
     assert_eq!(config.leaked_identifier(&text), None, "{text}");
     assert!(!text.contains("example.org") && !text.contains("-login"), "{text}");
-    assert!(text.contains("live-imap") && text.contains("live-google"), "{text}");
+    assert!(text.contains("live-imap") && text.contains("live-imap2"), "{text}");
     Ok(())
 }
 
@@ -317,7 +317,7 @@ fn the_leak_scan_finds_a_secret_in_a_log() -> Result<(), Box<dyn std::error::Err
     let config = config(&complete())?;
     let log = format!("C: A1 LOGIN first {IMAP_SECRET}\nS: A1 OK\n");
     assert_eq!(config.leaked_secret(&log), Some("live-imap"));
-    assert_eq!(config.leaked_secret(&format!("token={GOOGLE_SECRET}")), Some("live-google"));
+    assert_eq!(config.leaked_secret(&format!("token={IMAP2_SECRET}")), Some("live-imap2"));
     assert_eq!(config.leaked_secret("S: * OK ready"), None);
     Ok(())
 }
@@ -331,7 +331,7 @@ fn the_leak_scan_finds_a_secret_in_its_debug_form() -> Result<(), Box<dyn std::e
     let log = format!("assertion failed: left: {secret:?}");
     assert!(!log.contains(secret), "{log}");
     assert_eq!(config.leaked_secret(&log), Some("live-imap"));
-    assert_eq!(config.leaked_secret(&format!("{GOOGLE_SECRET:?}")), Some("live-google"));
+    assert_eq!(config.leaked_secret(&format!("{IMAP2_SECRET:?}")), Some("live-imap2"));
     Ok(())
 }
 
@@ -341,13 +341,13 @@ fn the_leak_scan_finds_an_address_and_a_login_name_in_a_log() -> Result<(), Box<
     for (planted, found) in [
         ("first@example.org", ("live-imap", "address")),
         ("first-login", ("live-imap", "user")),
-        ("second@example.org", ("live-google", "address")),
-        ("second-login", ("live-google", "user")),
+        ("second@example.org", ("live-imap2", "address")),
+        ("second-login", ("live-imap2", "user")),
     ] {
         let log = format!("S: * OK ready\nleft: {planted:?}\nS: A1 OK\n");
         assert_eq!(config.leaked_identifier(&log), Some(found), "{planted}");
     }
-    assert_eq!(config.leaked_identifier("S: * OK ready, live-imap and live-google"), None);
+    assert_eq!(config.leaked_identifier("S: * OK ready, live-imap and live-imap2"), None);
     assert_eq!(config.leaked_identifier(IMAP_SECRET), None, "a secret is not an identifier");
     Ok(())
 }
@@ -423,5 +423,20 @@ fn a_failed_create_removes_nothing_and_a_failed_remove_is_reported() -> Result<(
     let run = RunFolder::create(&mut folders, &config, '/')?;
     assert_eq!(run.remove().err(), Some("delete refused".to_owned()));
     assert_eq!(folders.calls, ["CREATE InboxCraft-Test/20261104T120000Z-42", "DELETE InboxCraft-Test/20261104T120000Z-42"]);
+    Ok(())
+}
+
+#[test]
+fn an_invented_message_names_the_run_and_its_number_and_no_real_person() -> Result<(), Box<dyn std::error::Error>> {
+    let config = config(&complete())?;
+    let message = config.invented_message(2);
+    assert!(message.starts_with("From: InboxCraft live test <live-test@example.org>\r\nTo: InboxCraft live test <live-test@example.org>\r\n"));
+    assert!(message.contains("\r\nSubject: InboxCraft live test 20261104T120000Z-42 message 2\r\n"), "{message}");
+    assert!(message.contains("\r\nMessage-ID: <20261104T120000Z-42.2@live-test.example.org>\r\n"), "{message}");
+    assert!(message.contains("\r\n\r\nAn invented message"), "{message}");
+    assert!(message.split("\r\n").all(|line| !line.contains('\n') && !line.contains('\r')));
+    assert!(config.leaked_identifier(&message).is_none() && config.leaked_secret(&message).is_none());
+    assert_ne!(message, config.invented_message(3));
+    assert!(message.contains(config.message_subject_prefix()));
     Ok(())
 }

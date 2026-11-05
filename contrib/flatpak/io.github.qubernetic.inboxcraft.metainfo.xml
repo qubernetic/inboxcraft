@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.qubernetic.inboxcraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>InboxCraft</name>
+  <summary>Read your mail on your own computer</summary>
+  <developer id="io.github.qubernetic">
+    <name>Qubernetic</name>
+  </developer>
+  <description>
+    <p>
+      InboxCraft is an open-source mail and calendar program for IMAP, SMTP and CalDAV. It runs on your own
+      computer and keeps a local copy of your mail.
+    </p>
+    <p>
+      This is a development build. It shows the mail list; the reader, adding an account and sending come later.
+      Start it with the sample mailbox to look around without an account: nothing connects anywhere.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.qubernetic.inboxcraft.desktop</launchable>
+  <url type="homepage">https://github.com/qubernetic/inboxcraft</url>
+  <url type="bugtracker">https://github.com/qubernetic/inboxcraft/issues</url>
+  <url type="vcs-browser">https://github.com/qubernetic/inboxcraft</url>
+  <provides>
+    <binary>inboxcraft</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">720</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+</component>

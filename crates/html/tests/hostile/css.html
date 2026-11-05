@@ -1,0 +1,16 @@
+<style>
+@import url("https://evil.example/EVIL.css");
+body { background: url(https://evil.example/EVIL.png); }
+p::after { content: "EVIL"; }
+.x { behavior: url(EVIL.htc); -moz-binding: url(EVIL.xml#x); width: expression(EVIL()); }
+</style>
+<p style="background-image:url('https://evil.example/EVIL.png')">SHOWN one</p>
+<p style="width: expression(EVIL())">SHOWN two</p>
+<span style="display:none">EVIL hidden preheader</span>
+<span style="DISPLAY:NONE!important;mso-hide:all">EVIL hidden two</span>
+<div style="visibility : hidden">EVIL hidden three</div>
+<div hidden>EVIL hidden four</div>
+<table background="https://evil.example/EVIL.png"><tr><td background="https://evil.example/EVIL2.png">SHOWN three</td></tr></table>
+<div style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999">SHOWN four</div>
+<font color="#ffffff" style="font-size:0">SHOWN five</font>
+<p style="color:red; display:block">SHOWN six</p>

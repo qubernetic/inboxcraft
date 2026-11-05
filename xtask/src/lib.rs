@@ -14,6 +14,7 @@ mod cli;
 mod config;
 mod cov;
 mod error;
+mod flatpak;
 mod layers;
 mod spdx;
 mod stats;

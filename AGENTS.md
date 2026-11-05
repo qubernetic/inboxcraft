@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -80,9 +80,14 @@ invented.
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
-  layers, wasm, deny, and the coverage floors in `.config/coverage.toml` (`cargo xtask cov --check`).
-- CI (`.github/workflows/ci.yml`) runs `cargo xtask ci` on ready PRs only: a draft gets only the quick `draft`
-  check, so run `just ci` locally before `gh pr ready`. The `ci` job is the gate.
+  layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
+  (`cargo xtask cov --check`).
+- The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
+  new permission goes into the manifest's `finish-args` with its reason in a comment above it
+  (`contrib/flatpak/`).
+- CI (`.github/workflows/ci.yml`) runs `cargo xtask ci` on ready PRs only: a draft starts no job, so run `just ci`
+  locally before `gh pr ready`. The `ci` job is the gate. On a PR, the `flatpak` job runs only when the PR changes a
+  Flatpak input (list in `docs/development.md`, "CI").
 - The host has no Rust toolchain: every `cargo` command runs in the dev container (`just shell`) or in native mode.
 - Every source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Git: Gitflow (`main` and `develop` are protected; work on `feature/<issue>-<slug>`, `fix/…`, `hotfix/…`,
@@ -94,7 +99,8 @@ invented.
 - `just build`, then `just run-sample` runs the container-built app on the host with the sample mailbox;
   `just run -- --sample --control 7981` adds the control channel, driven with JSON-line control requests
   (`docs/control-protocol.md`).
-- Headless screenshots: `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`.
+- Headless screenshots: `just shot` runs `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`
+  (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`; the look is in `docs/design.md`).
 - For UI work, look at the result, in light and dark.
 - Parallel agents each use their own `CARGO_TARGET_DIR`.
 
@@ -118,3 +124,7 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-04 | minor | The coverage gate joins the `just ci` list (#7) |
 | 2026-11-04 | minor | CI runs on ready PRs only, drafts get the quick check (#9) |
 | 2026-11-04 | minor | Real accounts: agents never touch one; the owner alone runs the opt-in live tests (#10) |
+| 2026-11-05 | minor | `just shot` for the headless pictures; the look lives in `docs/design.md` (#30) |
+| 2026-11-05 | minor | The Flatpak keeps building: `flatpak-sources-check` and reasons for permissions (#31) |
+| 2026-11-05 | minor | CI: a draft starts no job (#68) |
+| 2026-11-05 | minor | CI: `flatpak` runs on a PR only when its inputs change (#68) |

@@ -1,0 +1,57 @@
+# UID FETCH of flags, arrival time, size and the whole message; changes the server tells of on the way.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> examine INBOX
+C: A0001 EXAMINE "INBOX"
+S: * 2 EXISTS
+S: * OK [UIDVALIDITY 1] UIDs valid
+S: A0001 OK [READ-ONLY] EXAMINE completed
+= A0001 selected exists=2 recent=0 flags=- permanent=- uidvalidity=1 uidnext=none unseen=none modseq=none read-only=true
+> fetch 1:2 flags date size full
+C: A0002 UID FETCH 1:2 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])
+S: * 1 FETCH (UID 1 FLAGS (\Seen) INTERNALDATE "17-Jul-1996 02:44:25 -0700" RFC822.SIZE 46 BODY[] {46}
+S: From: anna@example.org
+S: Subject: Hi
+S:
+S: Hello
+S: )
+S: * 2 FETCH (UID 2 FLAGS (\Seen \Flagged))
+S: * 3 EXISTS
+S: * 1 EXPUNGE
+S: A0002 OK FETCH completed
+= fetch seq=1 uid=1 flags=\Seen date=837596665 size=46 Full="From: anna@example.org\r\nSubject: Hi\r\n\r\nHello\r\n"
+= fetch seq=2 uid=2 flags=\Seen,\Flagged
+= exists 3
+= expunged 1
+= A0002 fetched
+> fetch 2,5:7 header
+C: A0003 UID FETCH 2,5:7 (UID BODY.PEEK[HEADER])
+S: * 1 FETCH (UID 2 BODY[HEADER] "Subject: \"Hi\"")
+S: A0003 NO [EXPUNGEISSUED] Some messages were removed
+= fetch seq=1 uid=2 Header="Subject: \"Hi\""
+= A0003 No [EXPUNGEISSUED] Some messages were removed
+> fetch 9 text
+C: A0004 UID FETCH 9 (UID BODY.PEEK[TEXT])
+S: A0004 OK nothing there
+= A0004 fetched
+
+# A FETCH or EXPUNGE that cannot be read ends the session.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+S: * 1 FETCH UID 1
+! Malformed("FETCH response")
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+S: * 0 EXPUNGE
+! Malformed("EXPUNGE response")
