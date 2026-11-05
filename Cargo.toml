@@ -69,6 +69,16 @@ time = "0.3"
 # store only, native only: SQLite (public domain, compiled from the bundled amalgamation) with FTS5
 rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 
+# ui-egui and the desktop app only (layer 6): the immediate-mode UI with its bundled fonts (OFL and the Ubuntu Font
+# Licence, see NOTICE). No `links` feature: a link in the UI never opens a browser on its own.
+egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
+# the desktop app only: the window, through OpenGL (glow) on Wayland or X11; no wgpu, no persistence, no links
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
+# ui-egui tests only: drives the UI through its AccessKit tree and refuses controls without an accessible name
+egui_kittest = { version = "0.37", default-features = false }
+# ui-egui only: writes the `ui_shot` pictures
+png = "0.18"
+
 # [patch.crates-io]
 # egui/eframe/winit forks, if the Craft forks are used: pin by rev
 

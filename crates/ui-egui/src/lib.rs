@@ -3,10 +3,15 @@
 
 //! The egui front end.
 //!
-//! Layer 6: the only layer that may depend on UI crates. Nothing is implemented yet; the crate holds its place in the workspace (see
-//! `docs/architecture.md`).
+//! Layer 6: the only layer that may depend on UI crates (see `docs/architecture.md`).
+//!
+//! - [`theme`]: InboxCraft's own colours, spacing and type sizes for light and dark (`docs/design.md`).
+//! - [`i18n`] and [`tr!`]: every text the person reads goes through them.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+pub mod i18n;
+pub mod theme;
 
 /// The crate's package name.
 ///
