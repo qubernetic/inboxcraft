@@ -252,7 +252,7 @@ B = blocks the next stage.
   call, and `folder.list` reads every message to count them; a large unified inbox costs that much per list until
   the store gives sorted pages and counts (#27).
 - `engine`'s `mail.read` shows the plain text part only; a message with HTML alone shows no text (`has_html` says
-  so) until the safe HTML of `html` and the reader come. Its body words are not searched either (#27).
+  so) until the reader shows the display blocks of `html`. Its body words are not searched either (#27).
 - `engine` asks for a body once per message while that `FetchBody` job is out; a job the worker never answers
   (neither the body nor a failure) keeps the next `mail.read` from asking again until the session restarts. A body
   over 64 MiB is not kept and not asked for again until the session restarts, so such a message cannot be read in
@@ -291,6 +291,18 @@ B = blocks the next stage.
 - The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
   domain whose provider publishes no autoconfig and no SRV records gets only the common host names as hints (#28).
 
+- `html` reads no CSS beyond whether an element is hidden: colours, fonts, sizes, alignment and the message's
+  `<style>` blocks are ignored, so a message keeps its words and structure but not its look. Text hidden by other
+  tricks (a zero font size, white on white, off-screen positions) is shown (#29).
+- `html` keeps no `data:` pictures (shown as unsupported, with their text) and no CSS background pictures, even
+  with consent. `srcset`, `width` and `height` are not read, so a tracking pixel the owner allowed is a picture
+  like any other (#29).
+- `html` resolves no relative link (there is no base address), so a relative or fragment link is refused. Hosts
+  are compared as written, without Punycode or the public suffix list: `bank.example` and its subdomains are
+  the same site, a look-alike name in another script is not caught (#29).
+- `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
+  stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
+
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
@@ -327,3 +339,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Rough edges of the account check and Detect (#28) |
 | 2026-11-05 | minor | An agent's check after a refused sign-in waits for the owner (#28) |
 | 2026-11-05 | minor | The live tests use port 993 on both accounts (#57) |
+| 2026-11-05 | minor | Rough edges of the safe HTML display (#29) |
