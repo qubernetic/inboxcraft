@@ -11,10 +11,12 @@ publish = false
 [dependencies]
 eframe = { workspace = true }
 inboxcraft-engine = { workspace = true }
+inboxcraft-model = { workspace = true }
 inboxcraft-net = { workspace = true }
 inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
 inboxcraft-ui-egui = { workspace = true }
+keyring = { workspace = true }
 
 [lints]
 workspace = true

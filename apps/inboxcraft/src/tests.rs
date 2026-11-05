@@ -100,3 +100,9 @@ fn the_sample_window_shows_the_sample_mailbox_and_the_empty_one_nothing() {
     assert!(empty.mailbox().accounts().is_empty());
     assert_eq!(empty.mailbox().error(), None);
 }
+
+#[test]
+fn only_the_empty_window_adds_accounts() {
+    assert!(!app(Source::Sample, clock, None).unwrap().can_add(), "the sample connects nowhere");
+    assert!(app(Source::Empty, clock, None).unwrap().can_add());
+}
