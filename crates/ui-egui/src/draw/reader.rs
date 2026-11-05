@@ -19,6 +19,7 @@ use egui::{
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
+use crate::icons;
 use crate::mailbox::{After, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
@@ -79,26 +80,6 @@ fn after_text(after: After) -> &'static str {
 
 fn names(people: &[Person]) -> String {
     people.iter().map(Person::shown).collect::<Vec<_>>().join(", ")
-}
-
-/// A page with a folded corner: the attachment tile's mark, drawn in code.
-fn file_icon(ui: &Ui, rect: Rect, colour: Color32) {
-    let painter = ui.painter();
-    let fold = rect.width() * 0.35;
-    let stroke = Stroke::new(1.5, colour);
-    let points = vec![
-        rect.left_top(),
-        pos2(rect.right() - fold, rect.top()),
-        pos2(rect.right(), rect.top() + fold),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ];
-    painter.add(egui::Shape::line(points, stroke));
-    painter.add(egui::Shape::line(
-        vec![pos2(rect.right() - fold, rect.top()), pos2(rect.right() - fold, rect.top() + fold), pos2(rect.right(), rect.top() + fold)],
-        stroke,
-    ));
 }
 
 /// The toolbar: the subject, the next-message rule, full width and close.
@@ -494,7 +475,7 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
             Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(18.0, 22.0), Sense::hover());
-                    file_icon(ui, rect.shrink(1.0), p.accent);
+                    ui.painter().extend(icons::page_mark(rect.shrink(1.0), p.accent));
                     ui.vertical(|ui| {
                         ui.add(egui::Label::new(RichText::new(&file.name).size(theme.type_scale.body).color(p.text)).truncate());
                         ui.label(RichText::new(size_text(file.size)).size(theme.type_scale.small).color(p.muted));

@@ -109,8 +109,8 @@ the icon sits among others at the same size.
   muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
   list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
   way.
-- **Attachments**: tiles with a page mark drawn in code (a page with a folded corner, in the accent colour), the name,
-  the size and Save.
+- **Attachments**: tiles with a page mark drawn in code beside the app icon (`icons.rs`: a page with a folded corner,
+  in the accent colour), the name, the size and Save.
 - **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
   "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
 
@@ -126,3 +126,4 @@ width), each in light and dark. Every UI change shows them in its PR.
 | 2026-11-05 | major | First version: colours, distances, type and the mail list window (#30) |
 | 2026-11-05 | minor | The app icon (#31) |
 | 2026-11-05 | minor | The reader (#33) |
+| 2026-11-05 | minor | The page mark joins the app icon in `icons.rs` (#33) |
