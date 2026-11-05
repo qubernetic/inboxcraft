@@ -60,6 +60,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | `account.check` step by step (DNS, TCP with the blocked-mail-ports test, TLS, the certificate with its issuer and the clock check, the IMAP sign-in; SMTP and CalDAV not built yet), Detect (MX, autoconfig over HTTPS, the ISPDB off by default, SRV, host name hints) with no password to a detected server before the owner saw it, three fuzz targets, a live test (#28) |
 | 2026-11-05 | `html`: hostile HTML to display blocks with nothing that runs or submits, remote pictures blocked until consent, `cid:` pictures, link targets exposed and text/target mismatches flagged, capped input, nesting and tables, a hostile fixture set, fuzz target (#29) |
 | 2026-11-05 | Live tests on two throwaway accounts of the reference provider, `live-imap` and `live-imap2`; both sign in and list their folders; `just it-live` works on a fresh checkout (#57) |
+| 2026-11-05 | The first window: `inboxcraft --sample` with the unified list, per-account narrowing, the folder pane with roles and unread badges and the search field, in InboxCraft's own light and dark theme; `ui_shot` pictures (#30) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -87,3 +88,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | minor | Progress log: the account check and Detect (#28) |
 | 2026-11-05 | minor | Google Calendar moves to the later ideas; progress log: the second live account (#57) |
 | 2026-11-05 | minor | Progress log: safe HTML display (#29) |
+| 2026-11-05 | minor | Progress log: the first window with the sample mailbox (#30) |

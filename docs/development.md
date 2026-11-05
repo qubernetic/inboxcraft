@@ -28,8 +28,8 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo volumes and `target/`) and, for the owner
-only, `it-live` (see "Live tests").
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `shell`, `dev`, `down`,
+`rebuild`, `clean` (removes the cargo volumes and `target/`) and, for the owner only, `it-live` (see "Live tests").
 `just run -- <args>` passes arguments to the app; `INBOXCRAFT_PROFILE=release just run` runs the release build.
 
 ### Podman
@@ -69,7 +69,8 @@ tools pinned there. As of 2026-11-04 it has them (cargo 1.98.0, nextest 0.9.150,
 Every crate root starts with the SPDX lines and the deny header
 (`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`),
 and every crate has its tests in files of its own (`src/tests.rs`, `src/<module>_tests.rs`, `tests/`). The crates
-are empty so far; the apps answer `--version` and refuse everything else.
+behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open the window; `inboxcraft-cli` and
+`inboxcraft-web` answer `--version` and refuse everything else.
 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
@@ -285,3 +286,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Live tests: the second account is `live-imap2` on the reference provider (#57) |
 | 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |
 | 2026-11-05 | minor | Fuzzing: the safe HTML display target (#29) |
+| 2026-11-05 | minor | The `shot` recipe; the desktop app opens the window (#30) |
