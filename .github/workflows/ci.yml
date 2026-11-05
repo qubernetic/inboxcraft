@@ -1,10 +1,12 @@
 # The workspace CI: `cargo xtask ci`, every gate `just ci` runs, in the same order (docs/development.md, "CI").
 #
-# Ready-only: a draft PR runs only the one-step `draft` job; the full run starts on ready_for_review, on every later
-# push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
+# Ready-only: on a draft PR every job is skipped, so no runner starts; the full run starts on ready_for_review, on
+# every later push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
 # (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
 #
 # The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
+# It runs on every push and manual run, and on a PR only when the PR changes one of the Flatpak inputs (the `changes`
+# job; docs/development.md, "CI").
 #
 # Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, every action pinned by commit
 # SHA. Only the `codecov` job has `id-token: write`: it uploads the coverage and test results with the job's GitHub
@@ -38,13 +40,41 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # A draft run with no job left would show no check at all.
-  draft:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+  # Whether this run builds the Flatpak: always on a push or a manual run; on a PR only when the PR changes what the
+  # manifest builds from, apart from our own Rust sources (a Rust change that breaks only the Flatpak build shows on
+  # the next push to the base branch). For a PR, GitHub checks out a merge commit whose first parent is the base tip,
+  # so its diff against that parent is the PR's change. No third-party action.
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 1
+    timeout-minutes: 5
+    outputs:
+      flatpak: ${{ steps.flatpak.outputs.run }}
     steps:
-      - run: echo "Draft PR - the full CI runs when the PR is marked ready (gh pr ready)."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Did the Flatpak inputs change
+        id: flatpak
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          # The manifest folder (manifest, cargo-sources.json, desktop file, metainfo), the workspace's Cargo files
+          # and .cargo/, the app's Cargo.toml, the icon the manifest installs, and this workflow.
+          inputs=(contrib/flatpak Cargo.toml Cargo.lock .cargo apps/inboxcraft/Cargo.toml assets/app-icon
+            .github/workflows/ci.yml)
+          if [ "$EVENT" != pull_request ]; then
+            run=true
+          elif ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not the PR's merge commit, so the Flatpak builds" >&2
+            run=true
+          else
+            changed=$(git diff --name-only 'HEAD^1' HEAD -- "${inputs[@]}")
+            echo "Flatpak inputs this PR changes: ${changed:-none}"
+            if [ -n "$changed" ]; then run=true; else run=false; fi
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
 
   test:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -185,7 +215,8 @@ jobs:
   # Build proof for the dev Flatpak: the manifest `just flatpak` builds on the host, built offline from this checkout
   # and cargo-sources.json into a single-file bundle (docs/development.md, "Install the bundle from CI").
   flatpak:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: changes
+    if: needs.changes.outputs.flatpak == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # Flathub's builder image with the 25.08 runtime and SDK, pinned by digest. Privileged because flatpak-builder runs
@@ -215,18 +246,21 @@ jobs:
           retention-days: 7
 
   # The gate for the required-checks list: a skipped check reports as passing, so this job runs on every full run and
-  # fails unless every job before it succeeded.
+  # fails unless every job before it succeeded. `flatpak` may be skipped only when `changes` said it was not needed.
   ci:
-    needs: [test, codecov, flatpak]
+    needs: [changes, test, codecov, flatpak]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - name: Every job succeeded
         env:
+          CHANGES: ${{ needs.changes.result }}
+          FLATPAK_NEEDED: ${{ needs.changes.outputs.flatpak }}
           TEST: ${{ needs.test.result }}
           CODECOV: ${{ needs.codecov.result }}
           FLATPAK: ${{ needs.flatpak.result }}
         run: |
-          echo "test: $TEST, codecov: $CODECOV, flatpak: $FLATPAK"
-          [ "$TEST" = success ] && [ "$CODECOV" = success ] && [ "$FLATPAK" = success ]
+          echo "changes: $CHANGES (flatpak needed: $FLATPAK_NEEDED), test: $TEST, codecov: $CODECOV, flatpak: $FLATPAK"
+          [ "$CHANGES" = success ] && [ "$TEST" = success ] && [ "$CODECOV" = success ] || exit 1
+          [ "$FLATPAK" = success ] || { [ "$FLATPAK_NEEDED" = false ] && [ "$FLATPAK" = skipped ]; }

@@ -296,6 +296,13 @@ All notable changes to InboxCraft are listed here. The format follows
   from `target/` first; the key rotates weekly and follows `rust-toolchain.toml`, `Cargo.lock` and the
   `[profile.*]` sections; `CARGO_INCREMENTAL=0` in that job; `gh cache delete --all` purges it. The `codecov`,
   `flatpak` and fuzz jobs use no cache (#67)
+- CI builds the `flatpak` bundle on every push and manual run, and on a PR only when the PR changes a Flatpak
+  input (`contrib/flatpak/`, `Cargo.toml`, `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
+  `assets/app-icon/`, `.github/workflows/ci.yml`); a new `changes` job decides with `git diff` against the PR base,
+  and the `ci` gate accepts a skipped `flatpak` only when `changes` said so (#68)
+
+### Removed
+- The `draft` CI job: a draft PR now starts no job at all (#68)
 
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
