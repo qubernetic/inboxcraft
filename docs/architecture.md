@@ -35,6 +35,30 @@ and `Failed` with one `ErrorKind` per cause (host not found, each certificate fa
 refused, folder gone, ...), so the owner is told the cause. Every event with UIDs carries the UIDVALIDITY they
 belong to; the engine drops an event for an older one.
 
+The engine (`inboxcraft-engine`) is the `Session`. Every command is a `CommandSpec` in `crates/engine/src/cmd/*.rs`
+with a stable id, an agent class (`safe`, `owner` or `never`) and a function; the `Registry` refuses a command
+without a class, so an unclassified command never runs, and an agent (`Caller::Agent`) runs `safe` commands only.
+Parameters are a JSON object (unknown fields refused), answers are JSON (snake_case keys, ISO 8601 dates in UTC).
+A command only reads (`Context`: the store, the session's state, the time) and returns an `Outcome`: the answer,
+the store changes as one batch and the jobs. The session makes them after the command returned, so a failed
+command changes nothing; a command that panics despite the rules is caught and becomes `EngineError::Panicked`,
+with nothing changed. Events go the same way: `Session::apply` plans the changes, then makes them.
+
+| Event | What the engine does |
+|---|---|
+| `Folders` | held folders keep their ids (by name, the inbox in any case), new ones get one, missing ones go; roles are detected again; every folder that holds mail is synced from its known state, the inbox first, and the inbox is watched (`Idle`) |
+| `MessagesAdded`, `MessagesChanged`, `MessagesExpunged` | messages put (a known UID keeps its id), flags set, messages removed |
+| `UidValidityReset` | every message of the folder removed; the new UIDVALIDITY is the current one |
+| `BodyFetched` | the body kept with its plain text for the search |
+| `FolderSynced` | the folder's state recorded for the next sync |
+| `Connection`, `Failed` | shown by `account.list`; online again clears the failure |
+
+An event for an account or folder the store does not hold, or with UIDs of another UIDVALIDITY than the folder's
+current one, is dropped. The read commands are `account.list`, `folder.list` (with the unified views: one role
+across every account), `mail.list` (one folder or one view, merged by date, newest first, narrowed to one account
+with `account`), `mail.read` and `mail.search`, all `safe`. Opening a message changes nothing on the server; it
+marks the message opened in the store so its body is kept, and asks the worker for a body not kept yet, once.
+
 Folder roles come from `model::RoleMap`: SPECIAL-USE first, then the English and Hungarian names, then the owner,
 asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and Archive can be changed.
 
@@ -78,3 +102,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-04 | minor | The store zeroes removed mail (#24) |
 | 2026-11-05 | minor | The account worker and TLS in `net` (#25) |
 | 2026-11-05 | minor | Live updates, the offline queue and back-off in `net` (#26) |
+| 2026-11-05 | minor | The engine: the `Session`, commands with agent classes, events applied (#27) |
