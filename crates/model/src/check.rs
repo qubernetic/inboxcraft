@@ -22,7 +22,7 @@ pub enum CheckStep {
     Dns,
     /// A TCP connection to the port opens.
     Tcp,
-    /// The TLS handshake completes (after STARTTLS on a STARTTLS port).
+    /// The server speaks TLS (after STARTTLS on a STARTTLS port) up to its certificate, which the next step checks.
     Tls,
     /// The certificate is trusted, valid at this computer's clock and for the server's name.
     Certificate,

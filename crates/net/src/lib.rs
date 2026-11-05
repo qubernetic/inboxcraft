@@ -19,11 +19,17 @@
 //!   A known folder is resynced: changed flags, removed and new messages (QRESYNC where the server offers it). The
 //!   folder of an Idle job is watched between jobs with IDLE ([`WatchConfig`]) and resynced after each change and
 //!   each reconnect; a folder whose UIDVALIDITY changed is reloaded.
+//! - [`check_account`] runs the account check step by step ([`inboxcraft_model::CheckStep`]): DNS, TCP (with the
+//!   blocked-mail-ports test), TLS, the certificate (its issuer from [`certificate`], and the clock check) and the
+//!   IMAP sign-in, which sends a password only after the certificate verified and only to a [`CheckTarget`] the owner
+//!   has seen. A worker runs it for its account on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod backoff;
+pub mod certificate;
+mod check;
 mod compress;
 mod connect;
 pub mod envelope;
@@ -35,7 +41,8 @@ mod watch;
 mod worker;
 
 pub use backoff::Backoff;
-pub use connect::{Connector, Timeouts};
+pub use check::{CheckTarget, HTTPS_PORT, MAIL_PORTS, check_account};
+pub use connect::{Connector, Dialer, SystemDialer, Timeouts};
 pub use error::NetError;
 pub use imap::{ImapConnection, Password};
 pub use sync::SyncConfig;

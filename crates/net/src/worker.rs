@@ -22,6 +22,9 @@
 //! the second time before a sign-in succeeds. Without a stored password the queued jobs
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
+//!
+//! A Check job runs at once on a connection of its own, also while the worker is offline, backing off or halted: it
+//! reports each step of the account check (see [`crate::check_account`]) under the job's id.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -35,7 +38,7 @@ use inboxcraft_model::{Account, AccountId, ConnectionState, ErrorKind, Event, Ev
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
-use crate::{Connector, ImapConnection, NetError, Password};
+use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
@@ -290,9 +293,17 @@ impl Run<'_> {
         }
     }
 
-    /// Queues `job`, or fails it when the queue is full.
+    /// Queues `job`, or fails it when the queue is full. A check runs at once, on a connection of its own: it is how
+    /// the owner finds out why the worker cannot connect, so it waits for neither the connection nor the back-off,
+    /// and runs also after the worker stopped trying.
     fn take(&mut self, job: Job) {
-        if self.pending.len() >= self.settings.max_queued {
+        if job.kind == JobKind::Check {
+            let (account, credentials) = (self.account, self.credentials);
+            let out = &mut self.out;
+            check_account(&CheckTarget::of(account), &self.settings.connector, &mut || credentials.password(account), &mut |report| {
+                out.say(Some(job.id), EventKind::CheckStep(report));
+            });
+        } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
             self.pending.push_back(job);

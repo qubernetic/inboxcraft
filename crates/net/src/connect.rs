@@ -3,6 +3,7 @@
 
 //! Opening a connection: the address, TCP with timeouts, and TLS over it, at once or after STARTTLS.
 
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
@@ -37,19 +38,47 @@ enum Dial {
     To(Vec<SocketAddr>),
 }
 
+/// What opens a TCP connection to an address: the operating system, or a test's stand-in that makes a port time out
+/// or refuse without waiting for a real network.
+pub trait Dialer: fmt::Debug + Send + Sync {
+    /// A connection to `address`, waiting at most `timeout`.
+    ///
+    /// # Errors
+    ///
+    /// The socket's error: refused, timed out, unreachable.
+    fn dial(&self, address: SocketAddr, timeout: Duration) -> io::Result<TcpStream>;
+}
+
+/// The operating system's [`Dialer`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemDialer;
+
+impl Dialer for SystemDialer {
+    fn dial(&self, address: SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
+        TcpStream::connect_timeout(&address, timeout)
+    }
+}
+
 /// Opens connections: TCP with [`Timeouts`], then TLS with the [`TlsSettings`].
 #[derive(Debug, Clone)]
 pub struct Connector {
     tls: TlsSettings,
     timeouts: Timeouts,
     dial: Dial,
+    dialer: Arc<dyn Dialer>,
 }
 
 impl Connector {
     /// A connector that looks host names up with the system's resolver.
     #[must_use]
     pub fn new(tls: TlsSettings) -> Self {
-        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup }
+        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, dialer: Arc::new(SystemDialer) }
+    }
+
+    /// With another [`Dialer`].
+    #[must_use]
+    pub fn with_dialer(self, dialer: Arc<dyn Dialer>) -> Self {
+        Self { dialer, ..self }
     }
 
     /// With other timeouts.
@@ -79,27 +108,39 @@ impl Connector {
 
     /// A TCP connection to `server`, not encrypted yet.
     pub(crate) fn tcp(&self, server: &Server) -> Result<Stream, NetError> {
-        let now = self.tls.clock().now();
-        let addresses = match &self.dial {
+        let mut last = NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host()));
+        for address in self.resolve(server)? {
+            match self.dial(address) {
+                Ok(stream) => return Ok(stream),
+                Err(error) => last = error,
+            }
+        }
+        Err(last)
+    }
+
+    /// The addresses of `server`: given, or looked up by the system; at least one.
+    pub(crate) fn resolve(&self, server: &Server) -> Result<Vec<SocketAddr>, NetError> {
+        let addresses: Vec<SocketAddr> = match &self.dial {
             Dial::To(addresses) => addresses.clone(),
             Dial::Lookup => (server.host().as_str(), server.port().get())
                 .to_socket_addrs()
                 .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
                 .collect(),
         };
-        let mut last = NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host()));
-        for address in addresses {
-            match TcpStream::connect_timeout(&address, self.timeouts.connect) {
-                Ok(socket) => {
-                    socket.set_read_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
-                    socket.set_write_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
-                    socket.set_nodelay(true).map_err(|error| NetError::io(&error, now))?;
-                    return Ok(Stream::Plain(socket));
-                }
-                Err(error) => last = NetError::io(&error, now),
-            }
+        if addresses.is_empty() {
+            return Err(NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host())));
         }
-        Err(last)
+        Ok(addresses)
+    }
+
+    /// A TCP connection to `address` with the timeouts set, not encrypted yet.
+    pub(crate) fn dial(&self, address: SocketAddr) -> Result<Stream, NetError> {
+        let now = self.tls.clock().now();
+        let socket = self.dialer.dial(address, self.timeouts.connect).map_err(|error| NetError::io(&error, now))?;
+        socket.set_read_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
+        socket.set_write_timeout(Some(self.timeouts.io)).map_err(|error| NetError::io(&error, now))?;
+        socket.set_nodelay(true).map_err(|error| NetError::io(&error, now))?;
+        Ok(Stream::Plain(socket))
     }
 
     /// `stream` encrypted for `host`: the TLS handshake runs here, so a certificate fault comes out of this call.

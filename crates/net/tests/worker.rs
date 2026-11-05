@@ -6,11 +6,13 @@
 
 mod support;
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse};
+use inboxcraft_model::{
+    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus,
+};
 use inboxcraft_net::SyncConfig;
 use inboxcraft_testkit::Fault;
 use inboxcraft_testkit::imap::{Action, Capability, FakeImap, Mailbox, Message, PASSWORD, When};
-use support::run::{ACCOUNT, INBOX, Run, added, bodies, path, sync_inbox, uid, validity};
+use support::run::{ACCOUNT, INBOX, Options, Run, added, bodies, path, sync_inbox, uid, validity};
 use support::{Result, days_ago};
 
 /// INBOX with a message from two days ago, one from forty days ago and one from yesterday.
@@ -202,6 +204,23 @@ fn a_refused_password_is_not_sent_again() -> Result {
     run.worker.stop();
     let (transcript, _ended) = run.fake.finish_with_transcript();
     assert_eq!(transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).count(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_check_runs_after_a_refused_password_and_reports_every_step() -> Result {
+    let options = Options { password: Some("a-wrong-invented-password"), connections: 2, ..Options::default() };
+    let mut run = Run::with(FakeImap::new(), options)?;
+    let first = run.job(JobKind::SyncFolderList)?;
+    run.events_until(|event| event.job == Some(first))?;
+    let check = run.job(JobKind::Check)?;
+    let events = run.events_until(|event| matches!(&event.kind, EventKind::CheckStep(report) if report.step() == CheckStep::CaldavDiscovery))?;
+    assert!(events.iter().all(|event| event.job == Some(check)), "{events:?}");
+    let statuses: Vec<StepStatus> =
+        events.iter().filter_map(|event| if let EventKind::CheckStep(report) = &event.kind { Some(report.status()) } else { None }).collect();
+    let passed = StepStatus::Passed;
+    assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::Failed(ErrorKind::LoginRefused), StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    run.worker.stop();
     Ok(())
 }
 
