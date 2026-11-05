@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use super::{NoParams, decode, parse_date};
+use super::{NoParams, decode, decode_quietly, parse_date, quiet};
 use crate::{EngineError, MAX_ERROR_TEXT};
 
 #[test]
@@ -65,4 +65,15 @@ fn anything_else_is_not_a_date() {
     ] {
         assert_eq!(parse_date(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn a_quiet_complaint_repeats_nothing_quoted() {
+    assert_eq!(quiet(r#"invalid type: string "hunter2", expected u16"#), "invalid type: string …, expected u16");
+    assert_eq!(quiet("unknown field `hunter2`, expected one of `a`, `b`"), "unknown field …, expected one of …, …");
+    assert_eq!(quiet(r#"string "a\"b" and "c"#), "string … and …");
+    assert_eq!(quiet("nothing quoted"), "nothing quoted");
+    let error = decode_quietly::<NoParams>("test.none", &json!({ "hunter2": 1 })).unwrap_err();
+    assert!(!error.to_string().contains("hunter2"), "{error}");
+    assert_eq!(decode_quietly::<NoParams>("test.none", &json!(3)).unwrap_err().code(), "bad_params");
 }

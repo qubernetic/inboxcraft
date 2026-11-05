@@ -26,6 +26,10 @@
 //!   the IMAP sign-in; SMTP and CalDAV listed as not built yet). The steps land as the worker reports them and
 //!   `account.list` shows them, each with its cause and an English sentence; while a check of the account runs, another
 //!   one starts nothing.
+//! - `account.add` and `account.remove` (`owner`): an account from the settings the owner entered or saw, never with
+//!   a password (the front end keeps it in the OS credential store under the account's id), with the owner's first
+//!   check queued; a new account's first check that signs in starts its sync. Removing drops the account's mail,
+//!   state and queued jobs; an id is never given twice in a session.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!

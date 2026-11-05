@@ -14,7 +14,7 @@ use crate::test_support::session;
 use crate::{Caller, EngineError, Session};
 
 /// Every parameter name any command reads, and a few it does not.
-const FIELDS: [&str; 19] = [
+const FIELDS: [&str; 26] = [
     "account",
     "folder",
     "role",
@@ -32,6 +32,13 @@ const FIELDS: [&str; 19] = [
     "index",
     "content_id",
     "address",
+    "label",
+    "display_name",
+    "username",
+    "imap",
+    "host",
+    "port",
+    "security",
     "",
     "\u{0}",
 ];
