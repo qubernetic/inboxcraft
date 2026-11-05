@@ -85,6 +85,9 @@ pub enum JobKind {
         /// The message.
         uid: Uid,
     },
+    /// Check the account step by step on a connection of its own, with the settings as saved; answered with one
+    /// [`crate::EventKind::CheckStep`] per step.
+    Check,
     /// Watch the folder for changes between jobs (IDLE where the server has it), reporting them as the events of a
     /// resync, until another `Idle` moves the watch.
     Idle {
@@ -100,7 +103,7 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList => None,
+            Self::SyncFolderList | Self::Check => None,
             Self::SyncFolder { folder, .. } | Self::FetchBody { folder, .. } | Self::Idle { folder, .. } => Some(*folder),
         }
     }

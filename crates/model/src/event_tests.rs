@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
-use crate::{AccountId, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, Summary, Uid, UidSet, UidValidity};
+use crate::{
+    AccountId, CheckStep, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, StepStatus, Summary,
+    Uid, UidSet, UidValidity,
+};
 
 fn uid(n: u32) -> Uid {
     Uid::new(n).unwrap()
@@ -12,10 +15,12 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 20] = [
+const EVERY_ERROR: [ErrorKind; 22] = [
     ErrorKind::HostNotFound,
     ErrorKind::ConnectionRefused,
     ErrorKind::TimedOut,
+    ErrorKind::PortTimedOut,
+    ErrorKind::MailPortsBlocked,
     ErrorKind::ConnectionDropped,
     ErrorKind::CertificateUnknownIssuer,
     ErrorKind::CertificateExpired,
@@ -54,6 +59,7 @@ fn every_event_kind_round_trips_and_names_its_folder() {
         (EventKind::Connection(ConnectionState::Online), None),
         (EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(folder) }, Some(folder)),
         (EventKind::Failed { kind: ErrorKind::TimedOut, folder: None }, None),
+        (EventKind::CheckStep(StepReport::new(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))), None),
     ];
     for (kind, expected) in kinds {
         assert_eq!(kind.folder(), expected, "{kind:?}");

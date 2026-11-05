@@ -60,6 +60,8 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             }
             kept
         }
+        // `account.check` keeps the steps; until then they are dropped.
+        EventKind::CheckStep(_) => false,
         EventKind::Connection(connection) => {
             let held = plan.state.accounts.entry(account).or_default();
             held.connection = Some(*connection);

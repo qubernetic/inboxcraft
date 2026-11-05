@@ -11,7 +11,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, Flags, FolderId, FolderListing, FolderState, JobId, ModSeq, Summary, Uid, UidSet, UidValidity};
+use crate::{AccountId, Flags, FolderId, FolderListing, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet, UidValidity};
 
 /// New flags for one message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +54,10 @@ pub enum ErrorKind {
     ConnectionRefused,
     /// The server did not answer in time.
     TimedOut,
+    /// The server answers on other ports, but not on this one: the port is likely wrong.
+    PortTimedOut,
+    /// Port 443 of the server connects, but the mail ports (993, 465, 587) time out: the network blocks mail.
+    MailPortsBlocked,
     /// The connection closed in the middle.
     ConnectionDropped,
     /// The certificate chain ends in an issuer the trust store does not hold.
@@ -105,6 +109,8 @@ impl fmt::Display for ErrorKind {
             Self::HostNotFound => "the server name was not found",
             Self::ConnectionRefused => "the server refused the connection",
             Self::TimedOut => "the server did not answer in time",
+            Self::PortTimedOut => "the server answers on other ports but not on this one, so the port is likely wrong",
+            Self::MailPortsBlocked => "the network this computer is on blocks the mail ports of the server",
             Self::ConnectionDropped => "the connection closed in the middle",
             Self::CertificateUnknownIssuer => "the server's certificate comes from an issuer this computer does not trust",
             Self::CertificateExpired => "the server's certificate has expired",
@@ -188,6 +194,9 @@ pub enum EventKind {
         /// The state now.
         state: FolderState,
     },
+    /// One step of an account check ([`crate::JobKind::Check`]); every step of [`crate::CheckStep::ALL`] comes, in
+    /// order.
+    CheckStep(StepReport),
     /// The connection changed.
     Connection(ConnectionState),
     /// A job or the connection failed.
@@ -204,7 +213,7 @@ impl EventKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::Folders { .. } | Self::Connection(_) => None,
+            Self::Folders { .. } | Self::CheckStep(_) | Self::Connection(_) => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
             | Self::MessagesExpunged { folder, .. }
