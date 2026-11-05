@@ -204,3 +204,20 @@ fn rendering_any_app_needs_a_sane_size() {
     let canvas = Canvas::new(0, 0);
     assert_eq!(canvas.picture().width(), 0);
 }
+
+#[test]
+fn a_shot_shows_the_add_account_page_in_each_state_and_refuses_another() {
+    for state in ["form", "detected", "checking", "passed", "failed"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [700, 500], "onboard": "{state}"}}"#))).unwrap();
+        assert_eq!((picture.width(), picture.height()), (700, 500), "{state}");
+    }
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "onboard": "half"}"#)).unwrap_err().to_string();
+    assert!(error.contains("onboard \"half\" is not form, detected, checking, passed or failed"), "{error}");
+}
+
+#[test]
+fn the_picture_credential_store_takes_and_keeps_nothing() {
+    use crate::onboard::Keychain as _;
+    assert_eq!(super::Pictured.store(1, "invented-pass"), Ok(()));
+    assert_eq!(super::Pictured.forget(1), Ok(()));
+}

@@ -14,20 +14,25 @@
 //!
 //! `mode` is `light` or `dark`, `size` the window in points (1200 by 760 when left out), `scale` the pixels per
 //! point (1 to 4, 1 when left out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
-//! the search field and `select` the subject of the row to select.
+//! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
+//! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
+//! (the certificate refused); the check is scripted and nothing connects.
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
-use inboxcraft_model::Role;
+use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
 use crate::mailbox::{Mailbox, Place};
+use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::Mode;
+use crate::workers::Scripted;
 use crate::{InboxApp, UiError, sample};
 
 /// The largest picture side in pixels.
@@ -85,6 +90,73 @@ pub struct Shot {
     /// Whether the selected message shows its quotes.
     #[serde(default)]
     pub quotes: Option<bool>,
+    /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
+    #[serde(default)]
+    pub onboard: Option<String>,
+}
+
+/// The credential store of a picture: it takes the password and keeps nothing.
+struct Pictured;
+
+impl Keychain for Pictured {
+    fn store(&self, _account: u64, _password: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn forget(&self, _account: u64) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// What Detect proposes in a picture: the invented provider's autoconfig file.
+fn pictured_proposal() -> Proposal {
+    let suggestion = |host: &str, port, security| Suggestion {
+        host: host.to_owned(),
+        port,
+        security,
+        username: "robin@example.org".to_owned(),
+        source: Source::Autoconfig,
+    };
+    Proposal {
+        imap: vec![suggestion("imap.example.org", 993, Security::Tls), suggestion("imap.example.org", 143, Security::StartTls)],
+        asked: vec!["dns MX example.org".to_owned(), "https://autoconfig.example.org/mail/config-v1.1.xml".to_owned()],
+        failed: Vec::new(),
+    }
+}
+
+/// Puts the sample window on the add-account page in `state`.
+fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
+    let passed = |step| (step, StepStatus::Passed);
+    let workers = match state {
+        "form" | "detected" | "passed" => Scripted::passing(),
+        "checking" => Scripted::answering(&[passed(CheckStep::Dns), passed(CheckStep::Tcp), passed(CheckStep::Tls)]).unfinished(),
+        "failed" => Scripted::answering(&[
+            passed(CheckStep::Dns),
+            passed(CheckStep::Tcp),
+            passed(CheckStep::Tls),
+            (CheckStep::Certificate, StepStatus::Failed(ErrorKind::CertificateExpired)),
+        ]),
+        other => return Err(bad(format!("{out}: onboard {other:?} is not form, detected, checking, passed or failed"))),
+    };
+    let mut app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(workers));
+    let (onboarding, mailbox) = app.onboarding_mut();
+    onboarding.open();
+    let form = onboarding.form_mut();
+    form.address = "robin@example.org".to_owned();
+    form.display_name = "Robin Example".to_owned();
+    form.password = Secret::new("invented-pass");
+    if state == "form" {
+        form.host = "mail.example.org".to_owned();
+        form.security = Some(Security::StartTls);
+        return Ok(app);
+    }
+    onboarding.detect();
+    onboarding.poll();
+    if state != "detected" {
+        onboarding.add(mailbox);
+        app.pump();
+    }
+    Ok(app)
 }
 
 fn bad(detail: impl Into<String>) -> UiError {
@@ -428,6 +500,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
     } else if shot.pictures.is_some() || shot.full_width.is_some() || shot.details.is_some() || shot.quotes.is_some() {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
+    }
+    if let Some(state) = &shot.onboard {
+        app = onboard(app, &shot.out, state)?;
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)

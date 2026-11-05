@@ -15,3 +15,15 @@
 {"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
 {"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
+# failed at the certificate. The check is scripted; nothing connects.
+{"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-form-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-detected-light.png", "mode": "light", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-detected-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-checking-light.png", "mode": "light", "size": [1200, 820], "onboard": "checking"}
+{"out": "docs/images/onboard-checking-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "checking"}
+{"out": "docs/images/onboard-passed-light.png", "mode": "light", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-passed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-failed-light.png", "mode": "light", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "failed"}
