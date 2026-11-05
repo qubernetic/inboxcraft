@@ -27,6 +27,7 @@ pub mod mailbox;
 pub mod picture;
 pub mod quote;
 pub mod sample;
+pub mod save;
 pub mod shot;
 pub mod theme;
 
