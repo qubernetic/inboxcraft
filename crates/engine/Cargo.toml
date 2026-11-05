@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }

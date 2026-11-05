@@ -11,6 +11,11 @@
 //! - A command only reads ([`Context`]) and returns an [`Outcome`]: its JSON answer, the store changes and the jobs
 //!   it asks for. The session makes them after the command returned, so a failed command changes nothing, and a
 //!   command that panics despite the rules becomes [`EngineError::Panicked`] with the session as it was.
+//! - Jobs out, events in: [`Session::start`] asks each account's `net` worker for its folder list,
+//!   [`Session::take_jobs`] hands the queued [`inboxcraft_model::Job`]s over, and [`Session::apply`] turns each
+//!   [`inboxcraft_model::Event`] into store changes and the next jobs (a folder list brings the folder syncs, the
+//!   inbox first, and the watch on the inbox). Events for something the session does not hold, or with UIDs of an
+//!   older UIDVALIDITY, are dropped.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -35,11 +40,12 @@ mod json;
 mod params;
 mod registry;
 mod session;
+mod sync;
 
 pub use class::{AgentClass, Caller};
 pub use error::{EngineError, MAX_ERROR_TEXT};
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
-pub use session::{Context, Outcome, Session};
+pub use session::{Applied, Context, Outcome, Session};
 
 /// The crate's package name.
 ///

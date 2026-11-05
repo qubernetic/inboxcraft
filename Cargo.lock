@@ -345,6 +345,7 @@ version = "0.1.0"
 name = "inboxcraft-engine"
 version = "0.1.0"
 dependencies = [
+ "inboxcraft-mime",
  "inboxcraft-model",
  "inboxcraft-store",
  "inboxcraft-time",

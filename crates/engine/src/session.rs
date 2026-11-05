@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The `Session`: the one place commands run.
+//! The `Session`: the one place commands run and events land.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, FolderId, Job, JobId, JobKind};
+use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, RoleMap, UidValidity};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Timestamp};
 use serde_json::Value;
@@ -87,12 +87,18 @@ impl<'a> Context<'a> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct State {
     pub(crate) accounts: BTreeMap<AccountId, AccountState>,
+    /// The UIDVALIDITY the UIDs we hold of each folder belong to.
+    pub(crate) validity: BTreeMap<FolderId, UidValidity>,
+    pub(crate) next_folder: u64,
+    pub(crate) next_message: u64,
     pub(crate) next_job: u64,
 }
 
 /// What the session knows of one account.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AccountState {
+    /// The folder roles: SPECIAL-USE, then names, then the owner.
+    pub(crate) roles: RoleMap,
     pub(crate) connection: Option<ConnectionState>,
     /// The last failure, until the account is online again.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
@@ -101,11 +107,35 @@ pub(crate) struct AccountState {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_job: 1, ..Self::default() };
+        let mut state = Self { next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
         for account in store.accounts()? {
-            state.accounts.insert(account.id(), AccountState::default());
+            let folders = store.folders(account.id())?;
+            let mut roles = RoleMap::default();
+            roles.detect(&folders);
+            for folder in &folders {
+                state.next_folder = state.next_folder.max(folder.id().get().saturating_add(1));
+                if let Some(folder_state) = store.folder_state(folder.id())? {
+                    state.validity.insert(folder.id(), folder_state.uid_validity());
+                }
+                for entry in store.messages(folder.id())? {
+                    state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
+                }
+            }
+            state.accounts.insert(account.id(), AccountState { roles, ..AccountState::default() });
         }
         Ok(state)
+    }
+
+    pub(crate) fn folder_id(&mut self) -> FolderId {
+        let id = FolderId::new(self.next_folder);
+        self.next_folder = self.next_folder.saturating_add(1);
+        id
+    }
+
+    pub(crate) fn message_id(&mut self) -> MessageId {
+        let id = MessageId::new(self.next_message);
+        self.next_message = self.next_message.saturating_add(1);
+        id
     }
 
     fn job_id(&mut self) -> JobId {
@@ -115,7 +145,16 @@ impl State {
     }
 }
 
-/// The engine: commands in by id, jobs out to the `net` workers.
+/// Whether an applied event changed anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applied {
+    /// The event was applied.
+    Changed,
+    /// The event was stale or named something the session does not hold, and was dropped.
+    Dropped,
+}
+
+/// The engine: commands in by id, jobs out to the `net` workers, events back in.
 ///
 /// Every command runs through [`Session::run`]. A command only reads; the session makes the store changes it
 /// returns as one batch and queues its jobs, so a command that fails changes nothing. A command that panics, despite
@@ -191,8 +230,16 @@ impl Session {
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
         let Outcome { value, batch, jobs } = outcome;
-        self.commit(spec.id, &batch, jobs)?;
+        self.commit(spec.id, None, &batch, jobs)?;
         Ok(value)
+    }
+
+    /// Asks every account's worker for its folder list; the answers bring the folder syncs.
+    pub fn start(&mut self) {
+        let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
+        for account in accounts {
+            self.queue(Pending { account, kind: JobKind::SyncFolderList });
+        }
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
@@ -200,11 +247,27 @@ impl Session {
         std::mem::take(&mut self.jobs)
     }
 
-    /// Makes `batch`, then queues `jobs`; nothing of it when the batch fails.
-    fn commit(&mut self, what: &'static str, batch: &Batch, jobs: Vec<Pending>) -> Result<(), EngineError> {
+    /// Applies an event from a `net` worker.
+    ///
+    /// # Errors
+    ///
+    /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
+    pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
+        let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
+        let Some(plan) = plan else { return Ok(Applied::Dropped) };
+        self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
+        Ok(Applied::Changed)
+    }
+
+    /// Makes `batch`, then takes `state` and queues `jobs`; nothing of it when the batch fails.
+    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, jobs: Vec<Pending>) -> Result<(), EngineError> {
         if !batch.is_empty() {
             let store = &mut self.store;
             catch_unwind(AssertUnwindSafe(|| store.apply(batch))).map_err(|_| EngineError::Panicked(what))??;
+        }
+        if let Some(state) = state {
+            self.state = state;
         }
         for job in jobs {
             self.queue(job);
