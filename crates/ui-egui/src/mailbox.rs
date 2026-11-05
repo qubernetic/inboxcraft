@@ -166,6 +166,7 @@ pub struct Mailbox {
     selected: Option<u64>,
     after: After,
     error: Option<String>,
+    runs: u64,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -304,6 +305,7 @@ impl Mailbox {
             selected: None,
             after: After::Next,
             error: None,
+            runs: 0,
         };
         mailbox.refresh();
         mailbox
@@ -356,7 +358,14 @@ impl Mailbox {
     }
 
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
+        self.runs = self.runs.saturating_add(1);
         Ok(self.session.run(command, params)?)
+    }
+
+    /// How many commands ran through [`Mailbox::run`] so far.
+    #[cfg(test)]
+    pub(crate) fn runs(&self) -> u64 {
+        self.runs
     }
 
     fn load_accounts(&mut self) -> Result<(), UiError> {

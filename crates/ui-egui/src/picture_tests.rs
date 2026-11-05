@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use super::{MAX_PIXELS, MAX_SIDE, decode};
+use super::{MAX_PIXELS, MAX_SIDE, decode, decode_within};
 
 fn encoded(width: u32, height: u32, colour: png::ColorType, data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -86,4 +86,13 @@ fn a_picture_too_large_to_show_is_refused_before_it_is_decoded() {
     let sof = jpeg.windows(2).position(|pair| pair == [0xFF, 0xC0]).unwrap();
     jpeg[sof + 5..sof + 9].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
     assert!(decode(&jpeg).is_err());
+}
+
+#[test]
+fn a_picture_larger_than_the_room_left_is_refused_before_it_is_decoded() {
+    let png = encoded(2, 2, png::ColorType::Rgb, &[0; 12]);
+    assert_eq!(decode_within(&png, 16).unwrap().rgba.len(), 16);
+    assert!(decode_within(&png, 15).unwrap_err().to_string().contains("no room"));
+    assert!(decode_within(&tiny_jpeg(), 255).unwrap_err().to_string().contains("no room"));
+    assert!(decode_within(&tiny_jpeg(), 256).is_ok());
 }

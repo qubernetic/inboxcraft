@@ -271,7 +271,8 @@ All notable changes to InboxCraft are listed here. The format follows
   referrer, `Accept` or proxy, at most 3 redirects (each HTTPS), `image/*` answers of at most 10 MiB, and no host
   that resolves only to this computer or the local network (an IPv4 address inside an IPv6 one, mapped, compatible,
   NAT64 or 6to4, is judged as IPv4). `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`, already in the dependency
-  graph) with the size checked before anything is allocated. Fuzz target `ui_reader`.
+  graph) with the size checked before anything is allocated. One message asks for at most 32 inline and 64 remote
+  pictures and holds at most 64 MiB of them decoded; all messages together at most 256 MiB. Fuzz target `ui_reader`.
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

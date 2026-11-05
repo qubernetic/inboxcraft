@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::fetch::Fetch;
 use crate::mailbox::{Mailbox, parse_date, sender, shown};
-use crate::picture::{Decoded, decode};
+use crate::picture::{Decoded, decode_within};
 use crate::quote::{MAX_TEXT, Segment, split};
 use crate::save::Save;
 use crate::{UiError, tr};
@@ -31,8 +31,15 @@ pub const MAX_THREAD: usize = 100;
 /// The most remote pictures one message may ask for.
 pub const MAX_REMOTE: usize = 64;
 
-/// The most bytes of decoded pictures the reader keeps; past it, opening a message forgets them (a forgotten remote
-/// picture is asked for again when its message shows it).
+/// The most inline pictures one message may ask for: each is one `mail.attachment`, which reads the message again.
+pub const MAX_INLINE: usize = 32;
+
+/// The most bytes of decoded pictures one message may hold, inline and remote together; a picture past it fails.
+pub const MAX_MESSAGE_PICTURES: usize = 64 * 1024 * 1024;
+
+/// The most bytes of decoded pictures the reader keeps. A picture that would pass it first makes room by forgetting
+/// the pictures of messages no longer unfolded (a forgotten remote picture is asked for again when its message shows
+/// it), and fails when that is not enough.
 pub const MAX_KEPT: usize = 256 * 1024 * 1024;
 
 /// A person in a header: the name (perhaps empty) and the address, both made fit for one line.
@@ -121,6 +128,7 @@ pub struct Opened {
     /// Whether the owner lets the sender's remote pictures load always.
     pub sender_allowed: bool,
     html: Option<String>,
+    inline: BTreeSet<String>,
 }
 
 /// A message of the thread: what the folded row shows, and the message once read.
@@ -257,6 +265,7 @@ pub struct Reader {
     fetch: Box<dyn Fetch>,
     save: Box<dyn Save>,
     pictures: BTreeMap<String, PictureState>,
+    owners: BTreeMap<String, u64>,
     notice: Option<String>,
 }
 
@@ -285,6 +294,7 @@ impl Reader {
             fetch,
             save,
             pictures: BTreeMap::new(),
+            owners: BTreeMap::new(),
             notice: None,
         }
     }
@@ -299,10 +309,6 @@ impl Reader {
         self.quotes.clear();
         self.once.clear();
         self.notice = None;
-        let kept = self.pictures.values().filter_map(|state| if let PictureState::Ready(picture) = state { Some(picture.rgba.len()) } else { None });
-        if kept.fold(0, usize::saturating_add) > MAX_KEPT {
-            self.pictures.retain(|_, state| matches!(state, PictureState::Waiting));
-        }
         let Some(id) = id else {
             self.full_width = false;
             return;
@@ -372,7 +378,12 @@ impl Reader {
         let text = body.and_then(|body| body.get("text")).and_then(Value::as_str);
         let html = body.and_then(|body| body.get("html")).and_then(Value::as_str).map(|html| crate::quote::cut(html, 4 * MAX_TEXT).to_owned());
         let sender_allowed = answer.get("remote_allowed").and_then(Value::as_bool).unwrap_or(false);
-        let mut opened = Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, html: None };
+        let inline = body
+            .and_then(|body| body.get("inline"))
+            .and_then(Value::as_array)
+            .map(|parts| parts.iter().filter_map(|part| part.get("content_id").and_then(Value::as_str)).map(str::to_owned).collect())
+            .unwrap_or_default();
+        let mut opened = Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, html: None, inline };
         opened.content = match body {
             None if answer.get("fetching").and_then(Value::as_bool) == Some(true) => Content::Loading,
             None if answer.get("body_error").and_then(Value::as_str) == Some("too_large") => Content::TooLarge,
@@ -414,7 +425,13 @@ impl Reader {
         let Some(html) = opened.html.as_deref() else { return };
         let remote_content = if allowed { RemoteContent::Allowed } else { RemoteContent::Blocked };
         let document = display(html, &Options { remote_content });
-        let inline = document.inline_images.clone();
+        // Only the parts the message has, each once, up to the cap: a `cid:` naming nothing costs nothing.
+        let mut inline: Vec<String> = Vec::new();
+        for content_id in &document.inline_images {
+            if inline.len() < MAX_INLINE && opened.inline.contains(content_id) && !inline.contains(content_id) {
+                inline.push(content_id.clone());
+            }
+        }
         let mut remote = Vec::new();
         remote_pictures(&document.blocks, &mut remote);
         let remote: Vec<String> = remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect();
@@ -424,18 +441,20 @@ impl Reader {
             if self.pictures.contains_key(&key) {
                 continue;
             }
+            let room = self.room(id);
             let state = match mailbox.run("mail.attachment", &json!({ "id": id, "content_id": content_id })) {
                 Ok(answer) => match answer.get("data").and_then(Value::as_str).and_then(unbase64) {
-                    Some(bytes) => {
-                        decode(&bytes).map_or_else(|error| PictureState::Failed(error.to_string()), |picture| PictureState::Ready(Arc::new(picture)))
-                    }
+                    Some(bytes) => decode_within(&bytes, room)
+                        .map_or_else(|error| PictureState::Failed(error.to_string()), |picture| PictureState::Ready(Arc::new(picture))),
                     None => PictureState::Failed(tr!("The picture could not be read.").to_owned()),
                 },
                 Err(error) => PictureState::Failed(error.to_string()),
             };
+            self.owners.insert(key.clone(), id);
             self.pictures.insert(key, state);
         }
         for url in remote {
+            self.owners.insert(url.clone(), id);
             if !self.pictures.contains_key(&url) {
                 self.pictures.insert(url.clone(), PictureState::Waiting);
                 self.fetch.start(&url);
@@ -499,14 +518,41 @@ impl Reader {
         let any = !done.is_empty();
         for (url, answer) in done {
             // An answer for a picture nobody asked for (any more) is dropped.
-            if let Some(state) = self.pictures.get_mut(&url) {
-                *state = match answer.map_err(|error| shown(&error)).and_then(|bytes| decode(&bytes).map_err(|error| error.to_string())) {
-                    Ok(picture) => PictureState::Ready(Arc::new(picture)),
-                    Err(error) => PictureState::Failed(error),
-                };
+            let Some(owner) = self.owners.get(&url).copied().filter(|_| self.pictures.contains_key(&url)) else { continue };
+            let room = self.room(owner);
+            let state = match answer.map_err(|error| shown(&error)).and_then(|bytes| decode_within(&bytes, room).map_err(|error| error.to_string())) {
+                Ok(picture) => PictureState::Ready(Arc::new(picture)),
+                Err(error) => PictureState::Failed(error),
+            };
+            if let Some(slot) = self.pictures.get_mut(&url) {
+                *slot = state;
             }
         }
         any
+    }
+
+    /// The bytes of the decoded pictures kept: those of message `owner`, or all of them.
+    fn kept_bytes(&self, owner: Option<u64>) -> usize {
+        self.pictures
+            .iter()
+            .filter(|(key, _)| owner.is_none_or(|owner| self.owners.get(*key) == Some(&owner)))
+            .filter_map(|(_, state)| if let PictureState::Ready(picture) = state { Some(picture.rgba.len()) } else { None })
+            .fold(0, usize::saturating_add)
+    }
+
+    /// The bytes one more picture of message `id` may decode into: what is left of the message's
+    /// [`MAX_MESSAGE_PICTURES`] and of [`MAX_KEPT`]. When the second is the tighter, the pictures of messages no longer
+    /// unfolded are forgotten first.
+    fn room(&mut self, id: u64) -> usize {
+        let message = MAX_MESSAGE_PICTURES.saturating_sub(self.kept_bytes(Some(id)));
+        if MAX_KEPT.saturating_sub(self.kept_bytes(None)) < message {
+            let (owners, expanded) = (&self.owners, &self.expanded);
+            self.pictures
+                .retain(|key, state| !matches!(state, PictureState::Ready(_)) || owners.get(key).is_some_and(|owner| expanded.contains(owner)));
+            let pictures = &self.pictures;
+            self.owners.retain(|key, _| pictures.contains_key(key));
+        }
+        message.min(MAX_KEPT.saturating_sub(self.kept_bytes(None)))
     }
 
     /// The picture at `key`: a remote address, or [`inline_key`].

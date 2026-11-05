@@ -7,7 +7,7 @@ use inboxcraft_html::{Link, LinkTarget};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
-use super::{Content, MAX_KEPT, PictureState, Reader, inline_key, link_status, size_text, unbase64};
+use super::{Content, MAX_INLINE, MAX_KEPT, MAX_MESSAGE_PICTURES, MAX_REMOTE, PictureState, Reader, inline_key, link_status, size_text, unbase64};
 use crate::fetch::{Fetch, Fetched};
 use crate::mailbox::Mailbox;
 use crate::picture::Decoded;
@@ -25,12 +25,18 @@ pub(crate) struct Recorder {
     pub(crate) asked: Arc<Mutex<Vec<String>>>,
     done: Arc<Mutex<Vec<Fetched>>>,
     fail: bool,
+    /// What every fetch answers instead of a small drawn picture.
+    answer: Option<Vec<u8>>,
 }
 
 impl Fetch for Recorder {
     fn start(&mut self, url: &str) {
         self.asked.lock().unwrap().push(url.to_owned());
-        let answer = if self.fail { Err("refused\u{202e}".to_owned()) } else { sample::scene(1, 40, 20).map_err(|e| e.to_string()) };
+        let answer = match (&self.answer, self.fail) {
+            (_, true) => Err("refused\u{202e}".to_owned()),
+            (Some(bytes), false) => Ok(bytes.clone()),
+            (None, false) => sample::scene(1, 40, 20).map_err(|e| e.to_string()),
+        };
         self.done.lock().unwrap().push((url.to_owned(), answer));
     }
 
@@ -155,28 +161,135 @@ fn always_for_this_sender_loads_now_and_next_time_without_asking() {
 }
 
 #[test]
-fn pictures_past_the_budget_are_forgotten_when_another_message_opens() {
+fn pictures_of_folded_messages_make_room_once_all_pictures_pass_the_budget() {
     let (fetch, kept) = (Recorder::default(), Kept::default());
     let mut mailbox = mailbox();
-    let junk = id_of(&mut mailbox, "You have won a lighthouse");
+    let newsletter = id_of(&mut mailbox, "Your bike is due for a service");
     let mut reader = reader(&fetch, &kept);
-    reader.open(&mut mailbox, Some(junk));
-    reader.allow_always(&mut mailbox, junk);
-    reader.poll();
-    let url = "https://track.example.net/open.png?id=4417";
-    assert!(matches!(reader.picture(url), Some(PictureState::Ready(_))));
-    // Within the budget a picture is kept, and opening the message again asks nothing.
-    reader.open(&mut mailbox, Some(junk));
-    assert_eq!(fetch.asked.lock().unwrap().len(), 1);
-    let big = Decoded { width: 1, height: 1, rgba: vec![0; MAX_KEPT] };
-    reader.pictures.insert("https://pictures.example.org/big.png".to_owned(), PictureState::Ready(Arc::new(big)));
+    // Pictures of a message no longer unfolded fill the budget; one is still on its way.
+    let big = |bytes: usize| PictureState::Ready(Arc::new(Decoded { width: 1, height: 1, rgba: vec![0; bytes] }));
+    reader.pictures.insert("https://pictures.example.org/big.png".to_owned(), big(MAX_KEPT));
+    reader.owners.insert("https://pictures.example.org/big.png".to_owned(), 4242);
     reader.pictures.insert("https://pictures.example.org/slow.png".to_owned(), PictureState::Waiting);
-    reader.open(&mut mailbox, None);
-    assert!(reader.picture("https://pictures.example.org/big.png").is_none(), "past the budget the decoded pictures go");
-    assert!(reader.picture(url).is_none());
+    reader.owners.insert("https://pictures.example.org/slow.png".to_owned(), 4242);
+    reader.open(&mut mailbox, Some(newsletter));
+    assert!(reader.picture("https://pictures.example.org/big.png").is_some(), "nothing is forgotten before room is needed");
+    reader.allow_once(&mut mailbox, newsletter);
+    reader.poll();
+    let url = "https://pictures.example.org/cycles/workshop.png";
+    assert!(matches!(reader.picture(url), Some(PictureState::Ready(_))), "{:?}", reader.picture(url));
+    assert!(reader.picture("https://pictures.example.org/big.png").is_none(), "the folded message's picture made room");
     assert!(matches!(reader.picture("https://pictures.example.org/slow.png"), Some(PictureState::Waiting)), "a picture on its way stays");
-    reader.open(&mut mailbox, Some(junk));
-    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "a forgotten picture is asked for again");
+    // A picture of the open message is never forgotten to make room: the new one fails instead.
+    reader.pictures.insert("https://pictures.example.org/open.png".to_owned(), big(MAX_KEPT));
+    reader.owners.insert("https://pictures.example.org/open.png".to_owned(), newsletter);
+    reader.pictures.remove(url);
+    reader.open(&mut mailbox, Some(newsletter));
+    reader.allow_once(&mut mailbox, newsletter);
+    reader.poll();
+    assert!(matches!(reader.picture(url), Some(PictureState::Failed(_))), "{:?}", reader.picture(url));
+    assert!(reader.picture("https://pictures.example.org/open.png").is_some());
+}
+
+/// A mailbox whose message 1 has the body `raw`.
+fn with_body(raw: String) -> Mailbox {
+    use inboxcraft_engine::Session;
+    use inboxcraft_store::{Batch, Body, Change, Storage};
+    let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    store.apply(&Batch::new().with(Change::PutBody(inboxcraft_model::MessageId::new(1), Body::new(raw.into_bytes(), "").unwrap()))).unwrap();
+    Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock())
+}
+
+/// A message with `html` and an inline part `<n@example.org>` of `png` for every `n` below `parts`.
+fn related(html: &str, png: &[u8], parts: usize) -> String {
+    let encoded: String = png.chunks(57).map(|chunk| format!("{}\r\n", b64(chunk))).collect();
+    let mut raw = format!(
+        "From: Anna <anna@example.org>\r\nSubject: Inline\r\nContent-Type: multipart/related; boundary=b\r\n\r\n--b\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\r\n{html}\r\n"
+    );
+    for n in 0..parts {
+        raw.push_str(&format!(
+            "--b\r\nContent-Type: image/png\r\nContent-ID: <{n}@example.org>\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}"
+        ));
+    }
+    raw.push_str("--b--\r\n");
+    raw
+}
+
+/// A flat grey PNG of `side` by `side` pixels: small to send, large once decoded.
+fn flat_png(side: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, side, side);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&vec![128; (side * side) as usize]).unwrap();
+    out
+}
+
+fn ready_bytes(reader: &Reader) -> (usize, usize) {
+    let ready: Vec<usize> =
+        reader.pictures.values().filter_map(|state| if let PictureState::Ready(p) = state { Some(p.rgba.len()) } else { None }).collect();
+    (ready.len(), ready.iter().sum())
+}
+
+#[test]
+fn a_message_asks_for_at_most_the_cap_of_inline_pictures() {
+    let parts = MAX_INLINE + 8;
+    let html: String = (0..parts).map(|n| format!("<img src=\"cid:{n}@example.org\">")).collect();
+    let mut mailbox = with_body(related(&html, &sample::scene(2, 8, 8).unwrap(), parts));
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(1));
+    assert_eq!(ready_bytes(&reader).0, MAX_INLINE);
+    assert!(reader.picture(&inline_key(1, &format!("{}@example.org", parts - 1))).is_none(), "past the cap nothing is asked");
+}
+
+#[test]
+fn the_inline_pictures_of_one_message_stay_within_its_budget() {
+    let side = 1024_u32;
+    let each = (side * side * 4) as usize;
+    let parts = MAX_MESSAGE_PICTURES / each + 4;
+    let html: String = (0..parts).map(|n| format!("<img src=\"cid:{n}@example.org\">")).collect();
+    let mut mailbox = with_body(related(&html, &flat_png(side), parts));
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(1));
+    let (count, bytes) = ready_bytes(&reader);
+    assert_eq!(count, MAX_MESSAGE_PICTURES / each);
+    assert!(bytes <= MAX_MESSAGE_PICTURES, "{bytes}");
+    let Some(PictureState::Failed(reason)) = reader.picture(&inline_key(1, &format!("{}@example.org", parts - 1))) else { panic!() };
+    assert!(reason.contains("no room"), "{reason}");
+}
+
+#[test]
+fn a_cid_the_message_has_no_part_for_is_never_asked() {
+    let html: String = (0..300).map(|n| format!("<img src=\"cid:unknown{n}@example.org\">")).collect();
+    let mut mailbox = with_body(related(&html, &sample::scene(2, 8, 8).unwrap(), 1));
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut reader = reader(&fetch, &kept);
+    let before = mailbox.runs();
+    reader.open(&mut mailbox, Some(1));
+    assert_eq!(mailbox.runs() - before, 2, "mail.thread and mail.read, and no mail.attachment");
+    assert!(reader.picture(&inline_key(1, "unknown0@example.org")).is_none());
+}
+
+#[test]
+fn remote_pictures_of_one_message_stay_within_its_budget() {
+    let side = 1024_u32;
+    let each = (side * side * 4) as usize;
+    let count = (MAX_MESSAGE_PICTURES / each + 4).min(MAX_REMOTE);
+    let html: String = (0..count).map(|n| format!("<img src=\"https://pictures.example.org/{n}.png\">")).collect();
+    let mut mailbox = with_body(related(&html, &sample::scene(2, 8, 8).unwrap(), 0));
+    let fetch = Recorder { answer: Some(flat_png(side)), ..Recorder::default() };
+    let kept = Kept::default();
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(1));
+    reader.allow_once(&mut mailbox, 1);
+    assert_eq!(fetch.asked.lock().unwrap().len(), count);
+    reader.poll();
+    let (ready, bytes) = ready_bytes(&reader);
+    assert_eq!(ready, MAX_MESSAGE_PICTURES / each);
+    assert!(bytes <= MAX_MESSAGE_PICTURES, "{bytes}");
 }
 
 #[test]
@@ -279,7 +392,7 @@ fn inline_pictures_come_from_the_message_and_never_from_the_network() {
     let mut reader = reader(&fetch, &kept);
     reader.open(&mut mailbox, Some(id));
     assert!(matches!(reader.picture(&inline_key(id, "pic@example.org")), Some(PictureState::Ready(p)) if p.width == 8));
-    assert!(matches!(reader.picture(&inline_key(id, "missing@example.org")), Some(PictureState::Failed(_))));
+    assert!(reader.picture(&inline_key(id, "missing@example.org")).is_none(), "a cid with no part is not asked");
     assert!(fetch.asked.lock().unwrap().is_empty());
 }
 
