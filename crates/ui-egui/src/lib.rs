@@ -11,15 +11,19 @@
 //! - [`mailbox`]: what the mail list shows, read from the engine's commands: the accounts, the unified views, the
 //!   folders with their roles and unread counts, the list of a view, a folder or the search, narrowed to one account
 //!   or not.
+//! - [`InboxApp`]: the window's content over a [`mailbox::Mailbox`]: the folder pane, the header with the search field
+//!   and the message list, drawn in the [`theme`], every control with an accessible name.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod draw;
 mod error;
 pub mod i18n;
 pub mod mailbox;
 pub mod sample;
 pub mod theme;
 
+pub use draw::InboxApp;
 pub use error::UiError;
 
 /// The crate's package name.

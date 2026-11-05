@@ -46,6 +46,9 @@ fn controls_and_markers_meet_three_to_one() {
         for (name, colour, background) in [
             ("accent on surface", p.accent, p.surface),
             ("unread marker on surface", p.unread, p.surface),
+            ("flag on surface", p.flag, p.surface),
+            ("flag on selection", p.flag, p.selection),
+            ("unread sender on selection", p.accent, p.selection),
             ("focus ring on surface", p.focus, p.surface),
             ("focus ring on panel", p.focus, p.panel),
             ("field border on surface", p.field_border, p.surface),

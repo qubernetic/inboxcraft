@@ -332,7 +332,7 @@ fn this_workspace_names_every_core_crate_in_its_floors() {
     }
     assert_eq!(floors.crates.len(), 13);
     assert_eq!(floors.exclude, ["xtask/src/main.rs"]);
-    assert_eq!(floors.workspace_exclude, ["apps/*/src/main.rs"]);
+    assert_eq!(floors.workspace_exclude, ["apps/*/src/main.rs", "crates/ui-egui/src/draw/**"]);
 }
 
 #[test]

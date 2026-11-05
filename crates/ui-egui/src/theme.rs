@@ -55,6 +55,8 @@ pub struct Palette {
     pub on_accent: Color32,
     /// The unread marker.
     pub unread: Color32,
+    /// The flag marker of a flagged message.
+    pub flag: Color32,
     /// The keyboard focus ring.
     pub focus: Color32,
     /// The unread count badge.
@@ -143,6 +145,7 @@ impl Theme {
                 accent: rgb(0x1D6A64),
                 on_accent: rgb(0xFFFFFF),
                 unread: rgb(0x1D6A64),
+                flag: rgb(0xB5541A),
                 focus: rgb(0x0F5C8C),
                 badge: rgb(0x1D6A64),
                 on_badge: rgb(0xFFFFFF),
@@ -172,6 +175,7 @@ impl Theme {
                 accent: rgb(0x6CC4BA),
                 on_accent: rgb(0x10201E),
                 unread: rgb(0x6CC4BA),
+                flag: rgb(0xF0A06A),
                 focus: rgb(0x7FB8F0),
                 badge: rgb(0x6CC4BA),
                 on_badge: rgb(0x10201E),
