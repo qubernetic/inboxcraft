@@ -288,6 +288,9 @@ All notable changes to InboxCraft are listed here. The format follows
   0371 and 0372: zbus 5 parts merged into zbus 6) that come with the screen reader bridge `accesskit_unix`; the
   `ui-egui` drawing code (`crates/ui-egui/src/draw/`)
   counts for its crate's 80 % floor and no longer for the workspace total (#30)
+- `cargo xtask ci` (and `just ci`) runs the tests once: the separate `nextest` gate is gone and the `cov` gate's
+  `cargo llvm-cov nextest` run is the test run, with its JUnit report still in `target/nextest/ci/junit.xml`; a
+  failed run says the tests failed and that no coverage floor was checked (#66)
 
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout

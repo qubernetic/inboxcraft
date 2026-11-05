@@ -78,7 +78,7 @@ jobs:
           fallback: none
       - name: cargo xtask ci
         run: cargo xtask ci
-      # lcov.info from the cov gate, junit.xml from the nextest gate (profile ci).
+      # lcov.info and junit.xml (nextest profile ci) both from the cov gate, the one test run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:

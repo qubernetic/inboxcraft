@@ -53,7 +53,8 @@ pub(crate) enum Gate {
     Wasm,
 }
 
-/// The gates of `cargo xtask ci`, cheap ones first; `stats` only reports.
+/// The gates of `cargo xtask ci`, cheap ones first; `stats` only reports. `cov` is the one test run: the tests run
+/// only under coverage.
 pub(crate) const GATES: &[(&str, Gate)] = &[
     ("fmt", Gate::Cargo(&["fmt", "--all", "--", "--check"])),
     ("clippy", Gate::Cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])),
@@ -62,7 +63,6 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("assets", Gate::Assets),
     ("layers", Gate::Layers),
     ("flatpak-sources-check", Gate::FlatpakSources),
-    ("nextest", Gate::Cargo(&["nextest", "run", "--workspace", "--profile", "ci"])),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
     ("cov", Gate::Cov),
     ("wasm", Gate::Wasm),

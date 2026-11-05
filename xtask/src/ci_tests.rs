@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::{GATES, ProcessRunner, Runner};
-use crate::test_support::{Broken, empty_report, run_in};
+use crate::test_support::{Broken, TESTS_FAILED, empty_report, run_in};
 use crate::{Context, Error, FAILED, OK};
 
 /// Records every call and fails the calls whose first argument is in `failing`; `"spawn"` in `failing` makes the
@@ -53,28 +53,20 @@ fn ci_runs_every_gate_in_order() {
         .map(|name| format!(" -p inboxcraft-{name}"))
         .concat();
     let wasm = format!("build --target wasm32-unknown-unknown{wasm}");
-    let expected: Vec<String> = [
-        "fmt --all -- --check",
-        "clippy --workspace --all-targets -- -D warnings",
-        "nextest run --workspace --profile ci",
-        "test --workspace --doc",
-        &cov,
-        &wasm,
-        "deny check",
-    ]
-    .iter()
-    .map(|args| format!("cargo {args} @ {}", root.display()))
-    .collect();
+    let expected: Vec<String> =
+        ["fmt --all -- --check", "clippy --workspace --all-targets -- -D warnings", "test --workspace --doc", &cov, &wasm, "deny check"]
+            .iter()
+            .map(|args| format!("cargo {args} @ {}", root.display()))
+            .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in
-        ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "flatpak-sources-check", "nextest", "doctests", "cov", "wasm", "deny", "stats"]
-    {
+    for name in ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "flatpak-sources-check", "doctests", "cov", "wasm", "deny", "stats"] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
     assert!(out.contains("layers: ") && out.contains("assets: ") && out.contains("flatpak-sources-check: ") && out.contains("stats: total"), "{out}");
-    assert!(out.ends_with("ci: all 13 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 13);
+    assert!(!out.contains("ci: nextest"), "the cov gate is the test run: {out}");
+    assert!(out.ends_with("ci: all 12 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 12);
 }
 
 #[test]
@@ -82,8 +74,19 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (ctx, calls) = ci_context(vec!["clippy", "deny"]);
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
-    assert_eq!(calls.borrow().len(), 7, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 13 gates failed: clippy, deny\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 6, "every gate still ran");
+    assert!(out.ends_with("ci: 2 of 12 gates failed: clippy, deny\n"), "{out}");
+}
+
+#[test]
+fn a_failing_test_fails_ci_as_a_test_not_a_floor() {
+    let (ctx, calls) = ci_context(vec!["llvm-cov"]);
+    let (code, out, _) = run_in(ctx, &["ci"]);
+    assert_eq!(code, FAILED);
+    assert_eq!(calls.borrow().iter().filter(|call| call.contains("nextest")).count(), 1, "the tests run once");
+    assert!(out.contains(&format!("{TESTS_FAILED}\n")), "{out}");
+    assert!(!out.contains("below the floor"), "{out}");
+    assert!(out.ends_with("ci: 1 of 12 gates failed: cov\n"), "{out}");
 }
 
 #[test]
@@ -92,7 +95,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 7 of 13 gates failed: fmt, clippy, nextest, doctests, cov, wasm, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 6 of 12 gates failed: fmt, clippy, doctests, cov, wasm, deny\n"), "{out}");
 }
 
 #[test]
@@ -103,8 +106,8 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 7 of 13 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
-    assert_eq!(calls.borrow().len(), 5);
+    assert!(out.ends_with("ci: 7 of 12 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 4);
 }
 
 #[test]

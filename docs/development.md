@@ -77,7 +77,7 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cov --check`, `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
@@ -121,7 +121,11 @@ local directories `corpus/`, `craft-fonts/`, `craft-i18n/`, `dist/` and `log/`.
 
 ### The coverage gate
 `cargo xtask cov` runs `cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov.info`, so the
-tests run under coverage and a failing test fails the gate. It then prints one line per crate (lines, covered,
+tests run under coverage and a failing test fails the gate. In `cargo xtask ci` this is the only test run: there is
+no separate nextest gate, so the tests run only in the coverage-instrumented build. When the run fails the gate says
+`cov: the tests failed (...); no coverage floor was checked`, so a red test never reads as a floor. nextest writes
+the JUnit report of profile `ci` to `target/nextest/ci/junit.xml` in the root, whatever target directory llvm-cov
+builds in. Otherwise it prints one line per crate (lines, covered,
 cover, floor) and the workspace total. `just cov` runs it; `just cov --check` and `just ci` also fail below a floor.
 `lcov.info` stays in the root for the Codecov upload; a stale one is removed before the run.
 
@@ -277,7 +281,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | Job | What it does | Token |
 |---|---|---|
 | `draft` | on a draft PR only: one step, so the draft shows a check | read |
-| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml` as the `reports` artifact | read |
+| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
@@ -358,3 +362,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | The dev Flatpak: `just flatpak`, the CI bundle, `flatpak-sources-check`, `just icon` (#31) |
 | 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |
 | 2026-11-05 | minor | The Flatpak opens the Downloads folder for Save (#33) |
+| 2026-11-05 | minor | CI: the `cov` gate is the one test run, no separate nextest gate (#66) |
