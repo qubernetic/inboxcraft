@@ -186,6 +186,26 @@ fn only_public_addresses_are_asked() {
 }
 
 #[test]
+fn an_ipv6_form_that_carries_an_ipv4_address_is_judged_by_that_address() {
+    // IPv4-compatible (deprecated), NAT64, 6to4; the local-use NAT64 prefix is never public.
+    for ip in [
+        "::10.0.0.1",
+        "::127.0.0.1",
+        "64:ff9b::10.0.0.1",
+        "64:ff9b::127.0.0.1",
+        "64:ff9b::169.254.169.254",
+        "2002:a00:1::1",
+        "2002:7f00:1::",
+        "64:ff9b:1::1.1.1.1",
+    ] {
+        assert!(!is_public(ip.parse::<Ipv6Addr>().unwrap().into()), "{ip}");
+    }
+    for ip in ["64:ff9b::1.1.1.1", "2002:101:101::1", "::1.1.1.1"] {
+        assert!(is_public(ip.parse::<Ipv6Addr>().unwrap().into()), "{ip}");
+    }
+}
+
+#[test]
 fn a_host_on_this_computer_or_the_local_network_is_never_asked() {
     let client = PictureClient::new(TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new())), Duration::from_secs(2));
     assert!(format!("{client:?}").contains("Platform"));

@@ -269,8 +269,9 @@ All notable changes to InboxCraft are listed here. The format follows
   (owner), `remote.list` (safe); `mail.read` also answers the HTML part, the inline parts by Content-ID, numbered
   attachments and `remote_allowed`. `net::picture`: HTTPS only, a fixed `User-Agent: InboxCraft`, no cookies,
   referrer, `Accept` or proxy, at most 3 redirects (each HTTPS), `image/*` answers of at most 10 MiB, and no host
-  that resolves only to this computer or the local network. `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`,
-  already in the dependency graph) with the size checked before anything is allocated. Fuzz target `ui_reader`.
+  that resolves only to this computer or the local network (an IPv4 address inside an IPv6 one, mapped, compatible,
+  NAT64 or 6to4, is judged as IPv4). `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`, already in the dependency
+  graph) with the size checked before anything is allocated. Fuzz target `ui_reader`.
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

@@ -12,7 +12,7 @@
 //! end decodes it.
 
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use inboxcraft_model::ErrorKind;
@@ -124,13 +124,38 @@ fn config(tls: &TlsSettings, timeout: Duration) -> Config {
 pub fn is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => is_public_v4(ip),
-        IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
-            Some(mapped) => is_public_v4(mapped),
+        IpAddr::V6(ip) => match carried_v4(ip) {
+            Some(carried) => is_public_v4(carried),
             None => {
-                let documentation = ip.segments().first() == Some(&0x2001) && ip.segments().get(1) == Some(&0x0db8);
-                !(ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || ip.is_unique_local() || ip.is_unicast_link_local() || documentation)
+                let [first, second, third, ..] = ip.segments();
+                let documentation = first == 0x2001 && second == 0x0db8;
+                let local_nat64 = first == 0x0064 && second == 0xff9b && third == 0x0001;
+                !(ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_multicast()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                    || documentation
+                    || local_nat64)
             }
         },
+    }
+}
+
+/// The IPv4 address an IPv6 form carries: IPv4-mapped (`::ffff:0:0/96`), IPv4-compatible (`::/96`, deprecated, which
+/// also holds `::` and `::1`), NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`).
+fn carried_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let [s0, s1, s2, s3, s4, s5, ..] = ip.segments();
+    let [.., a, b, c, d] = ip.octets();
+    let last = Ipv4Addr::new(a, b, c, d);
+    match (s0, s1, s2, s3, s4, s5) {
+        (0, 0, 0, 0, 0, 0xffff | 0) | (0x0064, 0xff9b, 0, 0, 0, 0) => Some(last),
+        (0x2002, ..) => {
+            let [high_a, high_b] = s1.to_be_bytes();
+            let [low_a, low_b] = s2.to_be_bytes();
+            Some(Ipv4Addr::new(high_a, high_b, low_a, low_b))
+        }
+        _ => None,
     }
 }
 
