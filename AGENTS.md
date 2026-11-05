@@ -80,7 +80,11 @@ invented.
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
   `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
-  layers, wasm, deny, and the coverage floors in `.config/coverage.toml` (`cargo xtask cov --check`).
+  layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
+  (`cargo xtask cov --check`).
+- The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
+  new permission goes into the manifest's `finish-args` with its reason in a comment above it
+  (`contrib/flatpak/`).
 - CI (`.github/workflows/ci.yml`) runs `cargo xtask ci` on ready PRs only: a draft gets only the quick `draft`
   check, so run `just ci` locally before `gh pr ready`. The `ci` job is the gate.
 - The host has no Rust toolchain: every `cargo` command runs in the dev container (`just shell`) or in native mode.
@@ -120,3 +124,4 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-04 | minor | CI runs on ready PRs only, drafts get the quick check (#9) |
 | 2026-11-04 | minor | Real accounts: agents never touch one; the owner alone runs the opt-in live tests (#10) |
 | 2026-11-05 | minor | `just shot` for the headless pictures; the look lives in `docs/design.md` (#30) |
+| 2026-11-05 | minor | The Flatpak keeps building: `flatpak-sources-check` and reasons for permissions (#31) |

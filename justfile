@@ -96,9 +96,21 @@ wasm: _up
 shot script="crates/ui-egui/shots.jsonl": _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
 
-# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, cov, wasm, deny)
+# Export the app icon drawn in crates/ui-egui/src/icons.rs to assets/app-icon/inboxcraft.svg
+icon: _up
+    {{ exec }} cargo run -p inboxcraft-ui-egui --example app_icon
+
+# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, flatpak-sources-check, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci
+
+# Write contrib/flatpak/cargo-sources.json from Cargo.lock (after every dependency change; ci checks it)
+flatpak-sources: _up
+    {{ exec }} cargo xtask flatpak-sources
+
+# Check that contrib/flatpak/cargo-sources.json matches Cargo.lock
+flatpak-sources-check: _up
+    {{ exec }} cargo xtask flatpak-sources-check
 
 # ---- Host (display, tray, notifications, Secret Service) -------------------
 
@@ -113,6 +125,35 @@ run-sample profile="debug": _host_only
     @bin="target/{{ profile }}/inboxcraft"; \
     [ -x "$bin" ] || { echo "$bin is missing: run 'just build' first" >&2; exit 1; }; \
     exec "$bin" --sample
+
+# Build the dev Flatpak from this checkout and install it for your user (docs/development.md, "The dev Flatpak")
+flatpak: _host_only
+    #!/usr/bin/env bash
+    set -euo pipefail
+    manifest=contrib/flatpak/io.github.qubernetic.inboxcraft.yml
+    if command -v flatpak-builder >/dev/null 2>&1; then
+        builder=(flatpak-builder)
+    elif command -v flatpak >/dev/null 2>&1 && flatpak info org.flatpak.Builder >/dev/null 2>&1; then
+        builder=(flatpak run org.flatpak.Builder)
+    else
+        echo "flatpak: needs flatpak and flatpak-builder (docs/development.md, \"The dev Flatpak\")" >&2; exit 1
+    fi
+    # The lint only reports: Flathub's rules are stricter than a dev build needs.
+    if command -v flatpak-builder-lint >/dev/null 2>&1; then
+        lint=(flatpak-builder-lint)
+    elif flatpak info org.flatpak.Builder >/dev/null 2>&1; then
+        lint=(flatpak run --command=flatpak-builder-lint org.flatpak.Builder)
+    else
+        lint=()
+    fi
+    if [ "${#lint[@]}" -gt 0 ]; then
+        "${lint[@]}" manifest "$manifest" || echo "flatpak: the linter has findings (above); the build goes on" >&2
+    else
+        echo "flatpak: flatpak-builder-lint is not installed, so no lint" >&2
+    fi
+    "${builder[@]}" --user --install --install-deps-from=flathub --force-clean \
+        --state-dir=target/flatpak/state target/flatpak/build "$manifest"
+    echo "flatpak: installed; start InboxCraft from the menu or with 'flatpak run io.github.qubernetic.inboxcraft'"
 
 # Opt-in live tests on the owner's two throwaway test accounts (owner only; docs/development.md, "Live tests")
 it-live *args: _host_only _up

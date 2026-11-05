@@ -29,11 +29,15 @@ fn window(source: Source) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let viewport = egui::ViewportBuilder::default()
+    let mut viewport = egui::ViewportBuilder::default()
         .with_title("InboxCraft")
         .with_app_id("io.github.qubernetic.inboxcraft")
         .with_inner_size([1200.0, 760.0])
         .with_min_inner_size([720.0, 480.0]);
+    // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
+    if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
     match eframe::run_native("InboxCraft", options, Box::new(|_| Ok(Box::new(Desktop(app))))) {
         Ok(()) => ExitCode::SUCCESS,

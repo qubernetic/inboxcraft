@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 InboxCraft's own look: the colours, distances and type sizes of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -85,6 +85,13 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
 - **Empty states** say what is going on: no accounts yet (with the `--sample` hint), an empty folder, no match.
 - **Errors** show in a banner on top until the next command succeeds or the person dismisses them.
 
+## The app icon
+A white letter stands in a light teal inbox tray, with an orange unread dot at its corner, on a dark teal rounded
+square (the light theme's accent). It is drawn in code from rectangles, convex polygons and circles on a 256-unit
+square (`crates/ui-egui/src/icons.rs`); the same shapes give the SVG the desktop shows
+(`assets/app-icon/inboxcraft.svg`, written by `just icon`) and the window icon. The square keeps a 16-unit margin, so
+the icon sits among others at the same size.
+
 ## Pictures
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
@@ -94,3 +101,4 @@ search, each in light and dark. Every UI change shows them in its PR.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-05 | major | First version: colours, distances, type and the mail list window (#30) |
+| 2026-11-05 | minor | The app icon (#31) |
