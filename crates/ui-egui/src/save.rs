@@ -118,15 +118,28 @@ pub fn safe_name(name: &str) -> String {
         let stem: String = trimmed.chars().take(room).collect();
         if extension.is_empty() { trimmed.chars().take(MAX_NAME).collect() } else { format!("{}.{extension}", stem.trim_end_matches('.')) }
     };
-    let reserved = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2", "LPT3"];
     let stem = cut.split('.').next().unwrap_or_default();
     if cut.is_empty() {
         tr!("attachment").to_owned()
-    } else if reserved.iter().any(|word| word.eq_ignore_ascii_case(stem)) {
+    } else if reserved_on_windows(stem.trim_end()) {
         format!("_{cut}")
     } else {
         cut
     }
+}
+
+/// Whether Windows keeps `stem` for a device: CON, PRN, AUX, NUL, CONIN$, CONOUT$, and COM or LPT with a digit
+/// (0 to 9, or a superscript 1 to 3), in any case.
+fn reserved_on_windows(stem: &str) -> bool {
+    let upper = stem.to_ascii_uppercase();
+    if ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&upper.as_str()) {
+        return true;
+    }
+    let Some(rest) = upper.strip_prefix("COM").or_else(|| upper.strip_prefix("LPT")) else {
+        return false;
+    };
+    let mut chars = rest.chars();
+    matches!((chars.next(), chars.next()), (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
 }
 
 #[cfg(test)]

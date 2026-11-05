@@ -37,6 +37,14 @@ fn a_file_name_from_a_sender_becomes_one_plain_name() {
     assert_eq!(safe_name("..."), "attachment");
     assert_eq!(safe_name("CON.txt"), "_CON.txt");
     assert_eq!(safe_name("nul"), "_nul");
+    for reserved in
+        ["COM0.txt", "com5", "COM9.log", "LPT4.txt", "lpt9", "COM\u{b9}.txt", "LPT\u{b3}", "CONIN$", "conout$.txt", "NUL .txt", "aux.tar.gz"]
+    {
+        assert_eq!(safe_name(reserved), format!("_{reserved}"), "{reserved}");
+    }
+    for allowed in ["COM10.txt", "LPT.txt", "CONSOLE.txt", "COMA", "NULL"] {
+        assert_eq!(safe_name(allowed), allowed);
+    }
     let long = format!("{}.pdf", "é".repeat(500));
     let cut = safe_name(&long);
     assert_eq!(cut.chars().count(), MAX_NAME);
