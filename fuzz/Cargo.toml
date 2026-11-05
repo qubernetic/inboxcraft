@@ -97,6 +97,27 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_certificate"
+path = "fuzz_targets/net_certificate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_autoconfig"
+path = "fuzz_targets/net_autoconfig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_dns"
+path = "fuzz_targets/net_dns.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "engine_params"
 path = "fuzz_targets/engine_params.rs"
 test = false

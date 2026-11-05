@@ -22,6 +22,12 @@
 //! the second time before a sign-in succeeds. Without a stored password the queued jobs
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
+//!
+//! A Check job runs at once on a connection of its own, also while the worker is offline, backing off or halted: it
+//! reports each step of the account check (see [`crate::check_account`]) under the job's id. After a refused or
+//! unanswered sign-in (the worker halted for it, or the last check's sign-in ended so), a check the owner did not
+//! start stops before the sign-in with [`inboxcraft_model::StepStatus::NeedsOwner`]: an agent that checks in a loop
+//! cannot send the password again and lock the account at the provider.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -30,12 +36,14 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use inboxcraft_model::{Account, AccountId, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind};
+use inboxcraft_model::{
+    Account, AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
+};
 
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
-use crate::{Connector, ImapConnection, NetError, Password};
+use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
@@ -290,12 +298,41 @@ impl Run<'_> {
         }
     }
 
-    /// Queues `job`, or fails it when the queue is full.
+    /// Queues `job`, or fails it when the queue is full. A check runs at once, on a connection of its own: it is how
+    /// the owner finds out why the worker cannot connect, so it waits for neither the connection nor the back-off,
+    /// and runs also after the worker stopped trying.
     fn take(&mut self, job: Job) {
-        if self.pending.len() >= self.settings.max_queued {
+        if let JobKind::Check { by_owner } = job.kind {
+            self.check(job.id, by_owner);
+        } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
             self.pending.push_back(job);
+        }
+    }
+
+    /// Runs a check; it signs in only when the owner started it or the worker has not halted for a refused or
+    /// unanswered sign-in. A check whose sign-in ends so halts the worker like its own would; one that signs in ends
+    /// such a halt, as the password works again.
+    fn check(&mut self, job: JobId, by_owner: bool) {
+        let refused = self.halted.as_ref().is_some_and(|error| refuses_the_password(error.kind()));
+        let target = CheckTarget::of(self.account);
+        let target = if refused && !by_owner { target.held() } else { target };
+        let (account, credentials) = (self.account, self.credentials);
+        let mut signed_in = None;
+        let out = &mut self.out;
+        check_account(&target, &self.settings.connector, &mut || credentials.password(account), &mut |report| {
+            if report.step() == CheckStep::ImapLogin {
+                signed_in = Some(report.status());
+            }
+            out.say(Some(job), EventKind::CheckStep(report));
+        });
+        match signed_in {
+            Some(StepStatus::Passed) if refused => self.halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => {
+                self.halted = Some(NetError::new(kind, "the check's sign-in was refused or went unanswered"));
+            }
+            _ => {}
         }
     }
 
@@ -440,6 +477,11 @@ impl Run<'_> {
         }
         Ok(())
     }
+}
+
+/// A sign-in that ended so is sent again only by a check the owner started: refused, or sent and never answered.
+const fn refuses_the_password(kind: ErrorKind) -> bool {
+    matches!(kind, ErrorKind::LoginRefused | ErrorKind::LoginUnanswered)
 }
 
 /// A signed-in connection for `account`, with QRESYNC on and compressed where the server offers them; the password

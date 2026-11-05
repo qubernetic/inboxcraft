@@ -51,6 +51,7 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-05 | `net`: TLS with the platform verifier, implicit TLS and STARTTLS with no password before TLS, the IMAP sign-in, one worker thread per account, the first sync (folder list, headers with PREVIEW, bodies of the last 30 days, a body on demand), one error kind per cause, fuzz target (#25) |
 | 2026-11-05 | `net`: live updates with IDLE, resync of flags and removed messages (QRESYNC where offered, with what it keeps capped), a changed UIDVALIDITY reloads the folder, back-off with a cap, the offline queue, the COMPRESS=DEFLATE stream; the `live-imap` live test; the fake IMAP server reconnects and answers CREATE, DELETE and APPEND (#26) |
 | 2026-11-05 | `engine`: the `Session` and the command registry with agent classes (unclassified refused, panics caught), jobs out and events in, the unified folder views merged by date with the account filter, the read commands `account.list`, `folder.list`, `mail.list`, `mail.read` and `mail.search`, `hostile_params_never_panic`, fuzz target (#27) |
+| 2026-11-05 | `account.check` step by step (DNS, TCP with the blocked-mail-ports test, TLS, the certificate with its issuer and the clock check, the IMAP sign-in; SMTP and CalDAV not built yet), Detect (MX, autoconfig over HTTPS, the ISPDB off by default, SRV, host name hints) with no password to a detected server before the owner saw it, three fuzz targets, a live test (#28) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -75,3 +76,4 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-05 | minor | Progress log: live updates, resync and back-off (#26) |
 | 2026-11-05 | minor | Progress log: the resync caps what it keeps (#26) |
 | 2026-11-05 | minor | Progress log: the engine read path and the command registry (#27) |
+| 2026-11-05 | minor | Progress log: the account check and Detect (#28) |

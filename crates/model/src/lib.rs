@@ -16,6 +16,8 @@
 //!   that are told apart by the address ([`labels`]); [`group_threads`] links replies into threads.
 //! - The read path: the [`Job`]s the engine gives a `net` worker and the [`Event`]s it reports back, with one
 //!   [`ErrorKind`] per cause. They live here because `net` (layer 3) may not depend on `engine` (layer 4).
+//! - The account check: its [`CheckStep`]s in order and the [`StepReport`] of each (host, port, the certificate's
+//!   issuer and a [`StepStatus`]).
 //!
 //! Every text from outside is checked or cleaned on the way in, also when read back from storage: CR, LF, NUL and
 //! the other control characters never reach a name, subject, preview, address, flag, host or folder name, and every
@@ -47,6 +49,7 @@
 
 mod account;
 mod address;
+mod check;
 mod event;
 mod flags;
 mod folder;
@@ -60,6 +63,7 @@ mod uid_set;
 
 pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
+pub use check::{CheckStep, MAX_ISSUER_CHARS, StepReport, StepStatus};
 pub use event::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
 pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};

@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, UidValidity};
+use inboxcraft_model::{
+    AccountId, CheckStep, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, StepReport, UidValidity,
+};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Timestamp};
 use serde_json::Value;
@@ -65,12 +67,13 @@ impl Outcome {
     }
 }
 
-/// What a command may read: the store, the session's state and the time.
+/// What a command may read: the store, the session's state, the time and who asked.
 #[derive(Clone, Copy)]
 pub struct Context<'a> {
     store: &'a dyn Storage,
     state: &'a State,
     now: Timestamp,
+    caller: Caller,
 }
 
 impl<'a> Context<'a> {
@@ -84,6 +87,12 @@ impl<'a> Context<'a> {
     #[must_use]
     pub fn now(&self) -> Timestamp {
         self.now
+    }
+
+    /// Who asked for the command; [`Caller::Agent`] while an event from a worker is applied, which nobody asked for.
+    #[must_use]
+    pub fn caller(&self) -> Caller {
+        self.caller
     }
 
     pub(crate) fn state(&self) -> &'a State {
@@ -116,6 +125,23 @@ pub(crate) struct AccountState {
     pub(crate) connection: Option<ConnectionState>,
     /// The last failure, until the account is online again.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The last account check, running or done.
+    pub(crate) check: Option<Check>,
+}
+
+/// An account check: every step as it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Check {
+    /// The Check job while the check runs; `None` once its last step came.
+    pub(crate) job: Option<JobId>,
+    /// Every step of [`CheckStep::ALL`], in order.
+    pub(crate) steps: Vec<StepReport>,
+}
+
+impl Check {
+    pub(crate) fn is_running(&self) -> bool {
+        self.job.is_some()
+    }
 }
 
 impl State {
@@ -241,15 +267,21 @@ impl Session {
         if !class.allows(caller) {
             return Err(EngineError::NotAllowed { command: spec.id, class });
         }
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
         let Outcome { value, batch, jobs } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         Ok(value)
     }
 
-    /// Asks every account's worker for its folder list; the answers bring the folder syncs.
+    /// Asks every account's worker for its folder list; the answers bring the folder syncs. A check still running is
+    /// over: the worker that ran it is gone, so its last step never comes, and the account can be checked again.
     pub fn start(&mut self) {
+        for held in self.state.accounts.values_mut() {
+            if let Some(check) = held.check.as_mut() {
+                check.job = None;
+            }
+        }
         let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
         for account in accounts {
             self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None });
@@ -267,7 +299,7 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
     pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let Some(plan) = plan else { return Ok(Applied::Dropped) };
         self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
@@ -298,6 +330,9 @@ impl Session {
         let id = self.state.job_id();
         if let Some(message) = pending.message {
             self.state.fetching.insert(id, message);
+        }
+        if matches!(pending.kind, JobKind::Check { .. }) {
+            self.state.accounts.entry(pending.account).or_default().check = Some(Check { job: Some(id), steps: CheckStep::plan() });
         }
         self.jobs.push(Job::new(id, pending.account, pending.kind));
     }

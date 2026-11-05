@@ -6,11 +6,13 @@
 
 mod support;
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse};
+use inboxcraft_model::{
+    AccountId, CheckStep, ConnectionState, ErrorKind, EventKind, FolderId, FolderState, Job, JobId, JobKind, SpecialUse, StepStatus,
+};
 use inboxcraft_net::SyncConfig;
 use inboxcraft_testkit::Fault;
 use inboxcraft_testkit::imap::{Action, Capability, FakeImap, Mailbox, Message, PASSWORD, When};
-use support::run::{ACCOUNT, INBOX, Run, added, bodies, path, sync_inbox, uid, validity};
+use support::run::{ACCOUNT, INBOX, Options, Run, added, bodies, path, sync_inbox, uid, validity};
 use support::{Result, days_ago};
 
 /// INBOX with a message from two days ago, one from forty days ago and one from yesterday.
@@ -203,6 +205,81 @@ fn a_refused_password_is_not_sent_again() -> Result {
     let (transcript, _ended) = run.fake.finish_with_transcript();
     assert_eq!(transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).count(), 1);
     Ok(())
+}
+
+#[test]
+fn after_a_refused_password_only_a_check_by_the_owner_signs_in() -> Result {
+    let options = Options { password: Some("a-wrong-invented-password"), connections: 5, ..Options::default() };
+    let mut run = Run::with(FakeImap::new(), options)?;
+    let first = run.job(JobKind::SyncFolderList)?;
+    run.events_until(|event| event.job == Some(first))?;
+    let passed = StepStatus::Passed;
+    for _ in 0..3 {
+        let check = run.job(JobKind::Check { by_owner: false })?;
+        let statuses = check_statuses(&mut run, check)?;
+        assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::NeedsOwner, StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    }
+    let check = run.job(JobKind::Check { by_owner: true })?;
+    let statuses = check_statuses(&mut run, check)?;
+    assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::Failed(ErrorKind::LoginRefused), StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    run.worker.stop();
+    let (transcript, _ended) = run.fake.finish_with_transcript();
+    assert_eq!(transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).count(), 2);
+    Ok(())
+}
+
+#[test]
+fn a_check_refused_by_the_server_holds_the_next_agent_check() -> Result {
+    let options = Options { password: Some("a-wrong-invented-password"), connections: 3, ..Options::default() };
+    let mut run = Run::with(FakeImap::new(), options)?;
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(check_statuses(&mut run, check)?[4], StepStatus::Failed(ErrorKind::LoginRefused));
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(check_statuses(&mut run, check)?[4], StepStatus::NeedsOwner);
+    run.worker.stop();
+    let (transcript, _ended) = run.fake.finish_with_transcript();
+    assert_eq!(transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).count(), 1);
+    Ok(())
+}
+
+#[test]
+fn an_agent_check_signs_in_while_the_password_was_not_refused() -> Result {
+    let options = Options { password: Some(PASSWORD), connections: 3, ..Options::default() };
+    let mut run = Run::with(FakeImap::new(), options)?;
+    for _ in 0..2 {
+        let check = run.job(JobKind::Check { by_owner: false })?;
+        assert_eq!(check_statuses(&mut run, check)?[4], StepStatus::Passed);
+    }
+    run.worker.stop();
+    Ok(())
+}
+
+#[test]
+fn a_check_by_the_owner_that_signs_in_ends_the_halt() -> Result {
+    let fake = FakeImap::sample().on(When::command("AUTHENTICATE"), [Action::Bye("going away".to_owned())]);
+    let options = Options { password: Some(PASSWORD), connections: 4, ..Options::default() };
+    let mut run = Run::with(fake, options)?;
+    let first = run.job(JobKind::SyncFolderList)?;
+    let events = run.events_until(|event| event.job == Some(first))?;
+    assert!(events.iter().any(|event| event.kind == EventKind::Failed { kind: ErrorKind::LoginUnanswered, folder: None }), "{events:?}");
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(check_statuses(&mut run, check)?[4], StepStatus::NeedsOwner);
+    let check = run.job(JobKind::Check { by_owner: true })?;
+    assert_eq!(check_statuses(&mut run, check)?[4], StepStatus::Passed);
+    let next = run.job(JobKind::SyncFolderList)?;
+    let events = run.events_until(|event| event.job == Some(next))?;
+    assert!(events.iter().any(|event| matches!(event.kind, EventKind::Folders { .. })), "{events:?}");
+    run.worker.stop();
+    Ok(())
+}
+
+/// The status of every step of `check`, in order, as the worker reported them; the worker's own connection may report
+/// in between.
+fn check_statuses(run: &mut Run, check: JobId) -> Result<Vec<StepStatus>> {
+    let events = run.events_until(|event| matches!(&event.kind, EventKind::CheckStep(report) if report.step() == CheckStep::CaldavDiscovery))?;
+    let steps: Vec<_> = events.iter().filter(|event| matches!(event.kind, EventKind::CheckStep(_))).collect();
+    assert!(steps.iter().all(|event| event.job == Some(check)), "{events:?}");
+    Ok(steps.iter().filter_map(|event| if let EventKind::CheckStep(report) = &event.kind { Some(report.status()) } else { None }).collect())
 }
 
 #[test]

@@ -17,6 +17,7 @@ use inboxcraft_model::{ErrorKind, Security, Server};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{Answer, Capabilities, Client, Event, Extension, Refusal, State, Tag, Transport};
 use inboxcraft_time::Clock;
+use rustls::ClientConfig;
 
 use crate::NetError;
 use crate::compress::Deflate;
@@ -88,10 +89,15 @@ impl ImapConnection {
     /// STARTTLS account, or a server that breaks the protocol.
     pub fn open(server: &Server, connector: &Connector) -> Result<Self, NetError> {
         let config = connector.tls().client_config()?;
-        let mut stream = connector.tcp(server)?;
+        let stream = connector.tcp(server)?;
+        Self::over(stream, server, connector, &config)
+    }
+
+    /// As [`ImapConnection::open`], over the TCP connection `stream` that is open already, encrypted with `config`.
+    pub(crate) fn over(mut stream: Stream, server: &Server, connector: &Connector, config: &Arc<ClientConfig>) -> Result<Self, NetError> {
         let transport = match server.security() {
             Security::Tls => {
-                stream = connector.encrypt(stream, server.host(), &config)?;
+                stream = connector.encrypt(stream, server.host(), config)?;
                 Transport::Tls
             }
             Security::StartTls => Transport::Plain,
@@ -116,7 +122,7 @@ impl ImapConnection {
                 Err(refusal) => return Err(NetError::new(ErrorKind::StartTlsMissing, refusal.code.unwrap_or_default())),
             }
             let plain = std::mem::replace(&mut connection.stream, Stream::Closed);
-            connection.stream = connector.encrypt(plain, server.host(), &config)?;
+            connection.stream = connector.encrypt(plain, server.host(), config)?;
             let tag = connection.client.tls_established().map_err(|error| NetError::proto(&error))?;
             connection.wait(&tag, &mut |_| {})?.map_err(|refusal| refused(&refusal))?;
         }

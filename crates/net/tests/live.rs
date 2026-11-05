@@ -3,7 +3,8 @@
 
 //! The opt-in live test of `net` on the owner's throwaway account `live-imap` (`just it-live`, profile `live`): sign
 //! in, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
-//! IDLE, the resync of a new worker, and the folder removed.
+//! IDLE, the resync of a new worker, and the folder removed; and `account.check`, whose every IMAP step passes on the
+//! real chain.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
 //! agent sandbox and in CI. Agents never run it. The account is reached over implicit TLS on port 993, checked by the
@@ -18,9 +19,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security, Server,
+    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security,
+    Server, StepReport, StepStatus,
 };
-use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings};
+use inboxcraft_net::{CheckTarget, Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings, check_account};
 use inboxcraft_testkit::live::{self, LiveConfig, RunFolder};
 use inboxcraft_time::SystemClock;
 use support::Result;
@@ -152,5 +154,27 @@ fn live_imap_round_trip() -> Result {
     again.worker.stop();
     admin.logout();
     println!("live: run folder removed");
+    Ok(())
+}
+
+#[test]
+fn live_account_check_passes_every_imap_step() -> Result {
+    let Some(config) = live::start("live_account_check_passes_every_imap_step")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let imap = config.imap();
+    let server = Server::new(Host::new(imap.host())?, NonZeroU16::new(993).ok_or("port")?, Security::Tls);
+    let target = CheckTarget::new(server, imap.user());
+    let mut reports = Vec::new();
+    check_account(&target, &Connector::new(tls), &mut || Some(Password::new(imap.secret().expose().to_owned())), &mut |report| {
+        // The step and its status only: no host, no issuer, nothing of the account.
+        println!("live: {:?} {:?}", report.step(), report.status());
+        reports.push(report);
+    });
+    let statuses: Vec<StepStatus> = reports.iter().map(StepReport::status).collect();
+    let passed = StepStatus::Passed;
+    assert_eq!(statuses, [passed, passed, passed, passed, passed, StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    assert!(reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer).is_some());
     Ok(())
 }

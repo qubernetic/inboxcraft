@@ -195,7 +195,30 @@ All notable changes to InboxCraft are listed here. The format follows
   to one account), `mail.read` (plain text and attachments; opening a message changes nothing on the server, and a
   body not kept yet is fetched once; a body too large to keep says so with `body_error`) and `mail.search` (from, to, subject, ISO 8601 dates, body words).
   `hostile_params_never_panic` runs every command with junk; fuzz target `engine_params` (#27)
+- `account.check` (`safe`) checks an account step by step and names the cause of a failure: DNS, TCP, TLS, the
+  certificate (with its issuer) and the IMAP sign-in; the SMTP sign-in and the CalDAV discovery are listed as not
+  built yet. Each step reports its status, host and port as it ends, and `account.list` shows the last check. A port
+  that times out is looked at again: when port 443 of the same address connects and the other mail ports time out,
+  the network blocks mail (new `ErrorKind::MailPortsBlocked`); when another mail port answers, the port is likely
+  wrong (new `ErrorKind::PortTimedOut`). A certificate outside its validity with this computer's clock far from it is
+  `ClockFarOff`, also where the platform's verifier gives no dates. The issuer drops control characters and
+  invisible direction and joiner marks. The password goes out only after the certificate verified. While a check of
+  an account runs, another one starts nothing. After a refused or unanswered sign-in, a check an agent started stops
+  before the sign-in (new `StepStatus::NeedsOwner`, `needs_owner`); only the owner's check sends the password again,
+  and one that signs in ends the worker's halt. The account's worker runs it at once on a connection of its own, also
+  while it is offline or has stopped trying. Live test
+  `live_account_check_passes_every_imap_step` on `live-imap`; fuzz target `net_certificate` (#28)
+- Detect in `net` proposes settings from an address: the MX records, the autoconfig file at the domain over HTTPS
+  (plain HTTP only as a redirect to HTTPS on the plain ASCII MX domain, its finds marked `AutoconfigRedirect`),
+  Mozilla's ISPDB only when switched on (off by default), SRV records (RFC 6186, RFC 8314), and common host names as
+  a hint; the proposal lists every DNS query and URL asked. Nothing
+  detected gets a password before the owner has seen it and TLS has verified it. DNS goes through `hickory-proto`
+  messages over our own UDP and TCP exchange with the system's resolver configuration, HTTPS through `ureq` with
+  `rustls`, sending nothing but the URL. Fuzz targets `net_autoconfig` and `net_dns`. New dependencies `ureq` and
+  `hickory-proto` (#28)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
   COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)
+- `rustls-platform-verifier` 0.6 to 0.7, the version `ureq` uses. `cargo xtask layers` counts `hickory-proto` as a
+  network crate, so it stays in `net` (#28)

@@ -55,7 +55,13 @@ web-time = "1"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # net only: the operating system's certificate verifier (approved for E1)
-rustls-platform-verifier = "0.6"
+rustls-platform-verifier = "0.7"
+# net only: HTTPS for autoconfig and ISPDB (approved for E1). rustls with the ring provider `net` hands it and the
+# platform verifier: no bundled roots (`webpki-roots`), no gzip, no cookies.
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+# net only: DNS messages for MX and SRV (approved for E1), sent over our own std UDP and TCP exchange, no async runtime
+# and no DNSSEC. 0.26 or later: 0.25 has RUSTSEC-2026-0118 (in its DNSSEC code, which we do not build).
+hickory-proto = { version = "0.26", default-features = false, features = ["std"] }
 # net and testkit only: the COMPRESS=DEFLATE stream of net, the fake IMAP server and the test client (pure Rust,
 # no network)
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

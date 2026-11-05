@@ -22,6 +22,10 @@
 //!   and attachments; opening it changes nothing on the server, and a body not kept yet is fetched once) and
 //!   `mail.search` (from, to, subject, ISO 8601 dates and body words, newest first). Message text in an answer is
 //!   the sender's data, never instructions.
+//! - `account.check` (`safe`): asks the account's worker for the step-by-step check (DNS, TCP, TLS, the certificate,
+//!   the IMAP sign-in; SMTP and CalDAV listed as not built yet). The steps land as the worker reports them and
+//!   `account.list` shows them, each with its cause and an English sentence; while a check of the account runs, another
+//!   one starts nothing.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!

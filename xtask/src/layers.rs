@@ -95,6 +95,7 @@ pub(crate) const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "egui_kittest
 
 /// Crates that open sockets, speak TLS or make requests: `net` only (and `testkit` and the apps).
 pub(crate) const NETWORK_CRATES: &[&str] = &[
+    "hickory-proto",
     "hickory-resolver",
     "hyper",
     "hyper-util",

@@ -9,7 +9,8 @@
 use std::collections::BTreeMap;
 
 use inboxcraft_model::{
-    AccountId, Event, EventKind, FlagChange, Folder, FolderId, FolderListing, FolderPath, JobKind, Message, Role, Summary, Uid, UidSet, UidValidity,
+    AccountId, CheckStep, Event, EventKind, FlagChange, Folder, FolderId, FolderListing, FolderPath, JobId, JobKind, Message, Role, StepReport,
+    Summary, Uid, UidSet, UidValidity,
 };
 use inboxcraft_store::{Batch, Body, Change, Storage};
 
@@ -60,6 +61,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             }
             kept
         }
+        EventKind::CheckStep(report) => checked(&mut plan.state, account, event.job, report),
         EventKind::Connection(connection) => {
             let held = plan.state.accounts.entry(account).or_default();
             held.connection = Some(*connection);
@@ -86,6 +88,22 @@ fn ended(context: &Context<'_>, event: &Event) -> Option<Plan> {
     let mut state = context.state().clone();
     state.fetching.remove(&job);
     Some(Plan { state, batch: Batch::new(), jobs: Vec::new() })
+}
+
+/// A step of the running check of `account`, from its job: it takes the step's place, and the last step ends the
+/// check. A step of another job, or with no check running, is stale.
+fn checked(state: &mut State, account: AccountId, job: Option<JobId>, report: &StepReport) -> bool {
+    let Some(check) = state.accounts.get_mut(&account).and_then(|held| held.check.as_mut()) else { return false };
+    if job.is_none() || check.job != job {
+        return false;
+    }
+    if let Some(entry) = check.steps.iter_mut().find(|entry| entry.step() == report.step()) {
+        *entry = report.clone();
+    }
+    if CheckStep::ALL.last() == Some(&report.step()) {
+        check.job = None;
+    }
+    true
 }
 
 /// Whether UIDs of `uid_validity` belong to what we hold of `folder`; the first UIDVALIDITY seen is taken.

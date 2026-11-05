@@ -8,15 +8,16 @@
 //! own. TLS 1.2 and 1.3 only, with `ring`'s safe defaults.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use inboxcraft_model::ErrorKind;
 use inboxcraft_time::{Clock, Timestamp};
 use rustls::client::WebPkiServerVerifier;
-use rustls::pki_types::{CertificateDer, UnixTime};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::time_provider::TimeProvider;
-use rustls::{CertificateError, ClientConfig, RootCertStore};
+use rustls::{CertificateError, ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, SignatureScheme};
 
 use crate::NetError;
 
@@ -81,30 +82,118 @@ impl TlsSettings {
     ///
     /// [`ErrorKind::Tls`] when the trust store cannot be loaded or a root is no certificate.
     pub fn client_config(&self) -> Result<Arc<ClientConfig>, NetError> {
+        self.config(None)
+    }
+
+    /// As [`TlsSettings::client_config`], keeping the server's certificate in `seen` before it is verified, so that
+    /// `account.check` can name its issuer also when the verification fails. The verification is the same.
+    pub(crate) fn client_config_seeing(&self, seen: &Seen) -> Result<Arc<ClientConfig>, NetError> {
+        self.config(Some(seen))
+    }
+
+    fn config(&self, seen: Option<&Seen>) -> Result<Arc<ClientConfig>, NetError> {
         let now = self.clock.now();
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let time = Arc::new(TimeOf(Arc::clone(&self.clock)));
         let builder = ClientConfig::builder_with_details(Arc::clone(&provider), time)
             .with_safe_default_protocol_versions()
             .map_err(|error| NetError::tls(&error, now))?;
-        let config = match &self.trust {
-            Trust::Platform => {
-                let verifier = rustls_platform_verifier::Verifier::new(provider).map_err(|error| NetError::tls(&error, now))?;
-                builder.dangerous().with_custom_certificate_verifier(Arc::new(verifier)).with_no_client_auth()
-            }
+        let verifier: Arc<dyn ServerCertVerifier> = match &self.trust {
+            Trust::Platform => Arc::new(rustls_platform_verifier::Verifier::new(provider).map_err(|error| NetError::tls(&error, now))?),
             Trust::Roots(roots) => {
                 let mut store = RootCertStore::empty();
                 for root in roots {
                     store.add(root.clone()).map_err(|error| NetError::tls(&error, now))?;
                 }
-                let verifier = WebPkiServerVerifier::builder_with_provider(Arc::new(store), provider)
+                WebPkiServerVerifier::builder_with_provider(Arc::new(store), provider)
                     .build()
-                    .map_err(|error| NetError::new(ErrorKind::Tls, error.to_string()))?;
-                builder.dangerous().with_custom_certificate_verifier(verifier).with_no_client_auth()
+                    .map_err(|error| NetError::new(ErrorKind::Tls, error.to_string()))?
             }
         };
-        Ok(Arc::new(config))
+        let verifier = match seen {
+            Some(seen) => Arc::new(Recorder { inner: verifier, seen: seen.clone() }),
+            None => verifier,
+        };
+        Ok(Arc::new(builder.dangerous().with_custom_certificate_verifier(verifier).with_no_client_auth()))
     }
+}
+
+/// The certificate a server presented last, as DER.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Seen(Arc<Mutex<Option<Vec<u8>>>>);
+
+impl Seen {
+    fn put(&self, der: &[u8]) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(der.to_vec());
+    }
+
+    /// The certificate, if a server presented one.
+    pub(crate) fn get(&self) -> Option<Vec<u8>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+}
+
+/// A verifier that keeps the end-entity certificate in [`Seen`], then asks the real verifier.
+#[derive(Debug)]
+struct Recorder {
+    inner: Arc<dyn ServerCertVerifier>,
+    seen: Seen,
+}
+
+impl ServerCertVerifier for Recorder {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        self.seen.put(end_entity.as_ref());
+        self.inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+
+    fn requires_raw_public_keys(&self) -> bool {
+        self.inner.requires_raw_public_keys()
+    }
+
+    fn root_hint_subjects(&self) -> Option<&[DistinguishedName]> {
+        self.inner.root_hint_subjects()
+    }
+}
+
+/// Whether a certificate valid from `not_before` to `not_after` points at the clock rather than at itself when it is
+/// checked at `now`: the clock is before this program existed, the certificate ended more than four years ago, or it
+/// starts more than a day ahead. The same test as [`classify`], with the dates read from the certificate, for the
+/// platform verifiers that give none.
+pub(crate) fn clock_far_off(now: Timestamp, not_before: Timestamp, not_after: Timestamp) -> bool {
+    let seconds = |duration: Duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX);
+    let now = now.unix_seconds();
+    now < EARLIEST
+        || now.saturating_sub(not_after.unix_seconds()) > seconds(LONG_EXPIRED)
+        || not_before.unix_seconds().saturating_sub(now) > seconds(FAR_AHEAD)
 }
 
 /// A [`Clock`] as `rustls` asks for the time.
