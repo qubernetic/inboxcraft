@@ -144,3 +144,59 @@ fn mail_thread_refuses_what_does_not_fit() {
         assert_eq!(session.run("mail.thread", &params).unwrap_err().code(), "bad_params", "{params}");
     }
 }
+
+#[test]
+fn remote_pictures_of_a_sender_load_once_the_owner_allows_them_always() {
+    let mut session = session();
+    let allowed = |session: &mut Session, id: u64| session.run("mail.read", &json!({ "id": id })).unwrap()["remote_allowed"].clone();
+    assert_eq!(allowed(&mut session, 1), json!(false), "blocked until the owner says otherwise");
+    let answer = session.run("remote.allow", &json!({ "address": "ANNA@Example.org" })).unwrap();
+    assert_eq!(answer, json!({ "address": "anna@example.org", "allowed": true }));
+    assert_eq!(allowed(&mut session, 1), json!(true));
+    assert_eq!(allowed(&mut session, 3), json!(true), "the same sender in another account");
+    session.run("remote.allow", &json!({ "address": "anna@example.org" })).unwrap();
+    assert_eq!(session.run("remote.list", &json!({})).unwrap(), json!({ "senders": ["anna@example.org"] }));
+    let answer = session.run("remote.forget", &json!({ "address": "anna@example.org" })).unwrap();
+    assert_eq!(answer, json!({ "address": "anna@example.org", "allowed": false }));
+    assert_eq!(allowed(&mut session, 1), json!(false));
+    assert_eq!(session.run("remote.list", &json!({})).unwrap(), json!({ "senders": [] }));
+    session.run("remote.forget", &json!({ "address": "anna@example.org" })).unwrap();
+    assert!(session.take_jobs().is_empty(), "allowing fetches nothing by itself");
+}
+
+#[test]
+fn only_the_owner_allows_remote_pictures() {
+    let mut session = session();
+    for id in ["remote.allow", "remote.forget"] {
+        let refused = session.run_as(Caller::Agent, id, &json!({ "address": "anna@example.org" })).unwrap_err();
+        assert_eq!(refused.code(), "not_allowed", "{id}");
+    }
+    assert_eq!(session.run("mail.read", &json!({ "id": 1 })).unwrap()["remote_allowed"], json!(false));
+    assert_eq!(session.run_as(Caller::Agent, "remote.list", &json!({})).unwrap(), json!({ "senders": [] }));
+}
+
+#[test]
+fn remote_allow_refuses_what_is_no_address() {
+    let mut session = session();
+    for params in [json!({}), json!({ "address": "no at sign" }), json!({ "address": 3 }), json!({ "address": "a@example.org", "x": 1 })] {
+        assert_eq!(session.run("remote.allow", &params).unwrap_err().code(), "bad_params", "{params}");
+        assert_eq!(session.run("remote.forget", &params).unwrap_err().code(), "bad_params", "{params}");
+    }
+    assert_eq!(session.run("remote.list", &json!({ "x": 1 })).unwrap_err().code(), "bad_params");
+}
+
+#[test]
+fn a_message_without_a_sender_never_has_remote_pictures_allowed() {
+    use inboxcraft_store::{Batch, Change, Storage};
+    let mut store = mailbox();
+    let nobody = inboxcraft_model::Message::new(
+        inboxcraft_model::MessageId::new(9),
+        inboxcraft_model::AccountId::new(1),
+        inboxcraft_model::FolderId::new(1),
+        inboxcraft_model::Summary::new(inboxcraft_model::Uid::new(30).unwrap(), inboxcraft_model::Envelope::new("No sender")),
+    );
+    store.apply(&Batch::new().with(Change::PutMessage(nobody))).unwrap();
+    let mut session = session_with(store, Registry::builtin().unwrap());
+    session.run("remote.allow", &json!({ "address": "anna@example.org" })).unwrap();
+    assert_eq!(session.run("mail.read", &json!({ "id": 9 })).unwrap()["remote_allowed"], json!(false));
+}

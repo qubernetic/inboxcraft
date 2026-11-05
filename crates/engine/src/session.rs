@@ -22,6 +22,8 @@ pub struct Outcome {
     value: Value,
     batch: Batch,
     jobs: Vec<Pending>,
+    /// Senders (lower case) whose remote pictures load without asking from now on (`true`) or no longer (`false`).
+    senders: Vec<(String, bool)>,
 }
 
 /// A job before it has an id.
@@ -37,7 +39,7 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new() }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new() }
     }
 
     /// The outcome with `change` to make in the store.
@@ -51,6 +53,12 @@ impl Outcome {
     #[must_use]
     pub fn with_job(mut self, account: AccountId, kind: JobKind) -> Self {
         self.jobs.push(Pending { account, kind, message: None });
+        self
+    }
+
+    /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
+    pub(crate) fn with_sender(mut self, sender: String, allowed: bool) -> Self {
+        self.senders.push((sender, allowed));
         self
     }
 
@@ -110,6 +118,9 @@ pub(crate) struct State {
     pub(crate) fetching: BTreeMap<JobId, MessageId>,
     /// The messages whose body came back too large to keep; not asked for again in this session.
     pub(crate) too_large: BTreeSet<MessageId>,
+    /// The senders (addresses in lower case) whose remote pictures the owner lets load without asking. Kept for the
+    /// session only until settings are kept on disk.
+    pub(crate) remote_senders: BTreeSet<String>,
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
@@ -269,8 +280,15 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs } = outcome;
+        let Outcome { value, batch, jobs, senders } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
+        for (sender, allowed) in senders {
+            if allowed {
+                self.state.remote_senders.insert(sender);
+            } else {
+                self.state.remote_senders.remove(&sender);
+            }
+        }
         Ok(value)
     }
 

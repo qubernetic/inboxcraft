@@ -124,7 +124,9 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
     }
     let body_error = too_large.then_some("too_large");
-    let mut outcome = Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error }));
+    let remote_allowed = super::remote::allowed(context, envelope.from());
+    let mut outcome =
+        Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error, "remote_allowed": remote_allowed }));
     if !entry.opened() {
         outcome = outcome.with_change(Change::MarkOpened(id));
     }
