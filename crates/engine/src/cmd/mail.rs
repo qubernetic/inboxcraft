@@ -75,7 +75,8 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 }
 
 /// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the
-/// store keeps its body from now on, and a body not kept yet is fetched (`fetching` in the answer).
+/// store keeps its body from now on, and a body not kept yet is fetched (`fetching` in the answer). A body the
+/// worker sent but the store could not keep is not asked for again in this session (`body_error`: `too_large`).
 pub(crate) const READ: CommandSpec = CommandSpec {
     id: "mail.read",
     class: Some(AgentClass::Safe),
@@ -97,8 +98,9 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
     let message = entry.message();
     let body = store.body(id)?;
+    let too_large = body.is_none() && context.state().too_large.contains(&id);
     let fetch = match (&body, context.state().validity.get(&message.folder())) {
-        (None, Some(uid_validity)) => {
+        (None, Some(uid_validity)) if !too_large => {
             store.folders(message.account())?.into_iter().find(|folder| folder.id() == message.folder()).map(|folder| JobKind::FetchBody {
                 folder: folder.id(),
                 path: folder.listing().path().clone(),
@@ -119,7 +121,8 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
     }
-    let mut outcome = Outcome::new(json!({ "message": shown, "fetching": fetch.is_some() }));
+    let body_error = too_large.then_some("too_large");
+    let mut outcome = Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error }));
     if !entry.opened() {
         outcome = outcome.with_change(Change::MarkOpened(id));
     }

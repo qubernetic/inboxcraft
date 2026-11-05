@@ -43,7 +43,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
     if let Some(folder) = event.kind.folder()
         && !store.folders(account)?.iter().any(|held| held.id() == folder)
     {
-        return Ok(None);
+        return Ok(ended(context, event));
     }
     let mut plan = Plan { state: context.state().clone(), batch: Batch::new(), jobs: Vec::new() };
     let kept = match &event.kind {
@@ -77,6 +77,15 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
     };
     Ok(kept.then_some(plan))
+}
+
+/// For an event about a folder we no longer hold: a failure still ends the `FetchBody` job it answers, and nothing
+/// else of the event is kept.
+fn ended(context: &Context<'_>, event: &Event) -> Option<Plan> {
+    let job = event.job.filter(|job| matches!(event.kind, EventKind::Failed { .. }) && context.state().fetching.contains_key(job))?;
+    let mut state = context.state().clone();
+    state.fetching.remove(&job);
+    Some(Plan { state, batch: Batch::new(), jobs: Vec::new() })
 }
 
 /// Whether UIDs of `uid_validity` belong to what we hold of `folder`; the first UIDVALIDITY seen is taken.
@@ -193,16 +202,20 @@ fn reset(store: &dyn Storage, plan: &mut Plan, folder: FolderId, new: UidValidit
     Ok(true)
 }
 
-/// A whole message: kept with its plain text for the search. A message we do not hold, or one too large to keep, is
-/// dropped.
+/// A whole message: kept with its plain text for the search. A message we do not hold is dropped; for one we hold,
+/// the answer ends the fetch, and a body too large to keep is marked so it is not asked for again.
 fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity: UidValidity, uid: Uid, raw: &[u8]) -> Result<bool, EngineError> {
     if !current(&mut plan.state, folder, uid_validity) {
         return Ok(false);
     }
     let Some(message) = held(store, folder)?.remove(&uid) else { return Ok(false) };
-    let Ok(body) = Body::new(raw.to_vec(), &plain_text(raw)) else { return Ok(false) };
-    plan.change(Change::PutBody(message.id(), body));
     plan.state.fetching.retain(|_, out| *out != message.id());
+    match Body::new(raw.to_vec(), &plain_text(raw)) {
+        Ok(body) => plan.change(Change::PutBody(message.id(), body)),
+        Err(_) => {
+            plan.state.too_large.insert(message.id());
+        }
+    }
     Ok(true)
 }
 

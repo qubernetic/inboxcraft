@@ -193,7 +193,7 @@ All notable changes to InboxCraft are listed here. The format follows
   an older UIDVALIDITY are dropped. The read commands, all `safe`: `account.list`, `folder.list` (roles, unified
   views, roles to ask about), `mail.list` (one folder or one role across every account, merged by date, narrowed
   to one account), `mail.read` (plain text and attachments; opening a message changes nothing on the server, and a
-  body not kept yet is fetched once) and `mail.search` (from, to, subject, ISO 8601 dates, body words).
+  body not kept yet is fetched once; a body too large to keep says so with `body_error`) and `mail.search` (from, to, subject, ISO 8601 dates, body words).
   `hostile_params_never_panic` runs every command with junk; fuzz target `engine_params` (#27)
 
 ### Changed

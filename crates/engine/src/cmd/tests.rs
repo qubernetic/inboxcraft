@@ -236,6 +236,35 @@ fn mail_read_fetches_a_body_not_kept_once() {
 }
 
 #[test]
+fn mail_read_of_a_body_too_large_to_keep_stops_fetching_and_says_so() {
+    let mut session = session();
+    let synced = inboxcraft_model::EventKind::FolderSynced {
+        folder: inboxcraft_model::FolderId::new(4),
+        state: inboxcraft_model::FolderState::new(inboxcraft_model::UidValidity::new(6).unwrap()),
+    };
+    session.apply(&inboxcraft_model::Event::new(inboxcraft_model::AccountId::new(2), None, synced)).unwrap();
+    let answer = session.run("mail.read", &json!({ "id": 3 })).unwrap();
+    assert_eq!(answer["body_error"], json!(null));
+    let jobs = session.take_jobs();
+    assert_eq!(jobs.len(), 1);
+    // The worker answers with a body the store refuses: the answer still ends the fetch.
+    let fetched = inboxcraft_model::EventKind::BodyFetched {
+        folder: inboxcraft_model::FolderId::new(4),
+        uid_validity: inboxcraft_model::UidValidity::new(6).unwrap(),
+        uid: inboxcraft_model::Uid::new(7).unwrap(),
+        raw: vec![b'a'; inboxcraft_store::MAX_SOURCE_BYTES + 1],
+    };
+    session.apply(&inboxcraft_model::Event::new(inboxcraft_model::AccountId::new(2), Some(jobs[0].id), fetched)).unwrap();
+    for _ in 0..2 {
+        let answer = session.run("mail.read", &json!({ "id": 3 })).unwrap();
+        assert_eq!(answer["fetching"], json!(false));
+        assert_eq!(answer["body_error"], json!("too_large"));
+        assert_eq!(answer["message"]["body"], json!(null));
+    }
+    assert!(session.take_jobs().is_empty(), "not asked for again in this session");
+}
+
+#[test]
 fn mail_read_of_an_unreadable_body_says_so() {
     let mut session = session();
     put_body(&mut session, 2, b"Content-Type: multipart/mixed\r\n\r\nno boundary");

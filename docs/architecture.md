@@ -49,15 +49,16 @@ with nothing changed. Events go the same way: `Session::apply` plans the changes
 | `Folders` | held folders keep their ids (by name, the inbox in any case), new ones get one, missing ones go; roles are detected again; every folder that holds mail is synced from its known state, the inbox first, and the inbox is watched (`Idle`) |
 | `MessagesAdded`, `MessagesChanged`, `MessagesExpunged` | messages put (a known UID keeps its id), flags set, messages removed |
 | `UidValidityReset` | every message of the folder removed; the new UIDVALIDITY is the current one |
-| `BodyFetched` | the body kept with its plain text for the search |
+| `BodyFetched` | the body kept with its plain text for the search; the fetch ends; a body over 64 MiB is not kept, and the message is marked so it is not asked for again in this session |
 | `FolderSynced` | the folder's state recorded for the next sync |
-| `Connection`, `Failed` | shown by `account.list`; online again clears the failure |
+| `Connection`, `Failed` | shown by `account.list`; online again clears the failure; a failed `FetchBody` job ends its fetch |
 
 An event for an account or folder the store does not hold, or with UIDs of another UIDVALIDITY than the folder's
-current one, is dropped. The read commands are `account.list`, `folder.list` (with the unified views: one role
+current one, is dropped; only a failure of a `FetchBody` job still ends its fetch. The read commands are `account.list`, `folder.list` (with the unified views: one role
 across every account), `mail.list` (one folder or one view, merged by date, newest first, narrowed to one account
 with `account`), `mail.read` and `mail.search`, all `safe`. Opening a message changes nothing on the server; it
-marks the message opened in the store so its body is kept, and asks the worker for a body not kept yet, once.
+marks the message opened in the store so its body is kept, and asks the worker for a body not kept yet, once. A
+body too large to keep is not asked for again; `mail.read` then answers `body_error: "too_large"`.
 
 Folder roles come from `model::RoleMap`: SPECIAL-USE first, then the English and Hungarian names, then the owner,
 asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and Archive can be changed.

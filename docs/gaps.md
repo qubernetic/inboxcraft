@@ -253,7 +253,9 @@ B = blocks the next stage.
 - `engine`'s `mail.read` shows the plain text part only; a message with HTML alone shows no text (`has_html` says
   so) until the safe HTML of `html` and the reader come. Its body words are not searched either (#27).
 - `engine` asks for a body once per message while that `FetchBody` job is out; a job the worker never answers
-  (neither the body nor a failure) keeps the next `mail.read` from asking again until the session restarts. Opening a
+  (neither the body nor a failure) keeps the next `mail.read` from asking again until the session restarts. A body
+  over 64 MiB is not kept and not asked for again until the session restarts, so such a message cannot be read in
+  InboxCraft. Opening a
   message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
 - `engine` lets an agent run `safe` commands only; per-account access levels and the owner's approval for `owner`
   commands come with the first `owner` command (#27).

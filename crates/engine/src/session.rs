@@ -3,7 +3,7 @@
 
 //! The `Session`: the one place commands run and events land.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -99,6 +99,8 @@ pub(crate) struct State {
     pub(crate) validity: BTreeMap<FolderId, UidValidity>,
     /// The `FetchBody` jobs out, by job.
     pub(crate) fetching: BTreeMap<JobId, MessageId>,
+    /// The messages whose body came back too large to keep; not asked for again in this session.
+    pub(crate) too_large: BTreeSet<MessageId>,
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,

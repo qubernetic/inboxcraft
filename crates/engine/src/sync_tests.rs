@@ -164,8 +164,26 @@ fn a_body_for_no_message_or_too_large_is_dropped() {
     let unknown = EventKind::BodyFetched { folder: FolderId::new(1), uid_validity: validity(1), uid: uid(99), raw: b"x".to_vec() };
     assert_eq!(session.apply(&event(1, unknown)).unwrap(), Applied::Dropped);
     let huge = EventKind::BodyFetched { folder: FolderId::new(1), uid_validity: validity(1), uid: uid(10), raw: vec![b'a'; MAX_SOURCE_BYTES + 1] };
-    assert_eq!(session.apply(&event(1, huge)).unwrap(), Applied::Dropped);
+    assert_eq!(session.apply(&event(1, huge)).unwrap(), Applied::Changed, "not kept, but the answer is recorded");
     assert!(session.store().body(MessageId::new(1)).unwrap().is_none());
+}
+
+#[test]
+fn a_failed_fetch_for_a_removed_folder_ends_the_fetch() {
+    let mut session = session();
+    session.apply(&event(1, EventKind::FolderSynced { folder: FolderId::new(2), state: FolderState::new(validity(1)) })).unwrap();
+    let id = session.store().messages(FolderId::new(2)).unwrap()[0].message().id().get();
+    session.run("mail.read", &json!({ "id": id })).unwrap();
+    let jobs = session.take_jobs();
+    assert_eq!(jobs.len(), 1);
+    // The folder goes while the job is out; its failure still ends the fetch, and nothing else of it is kept.
+    session.apply(&event(1, EventKind::Folders { listings: vec![listing("INBOX", vec![], true)] })).unwrap();
+    session.take_jobs();
+    let failed = Event::new(AccountId::new(1), Some(jobs[0].id), EventKind::Failed { kind: ErrorKind::TimedOut, folder: Some(FolderId::new(2)) });
+    assert_eq!(session.apply(&failed).unwrap(), Applied::Changed);
+    assert_eq!(session.run("account.list", &json!({})).unwrap()["accounts"][0]["failure"], json!(null));
+    // A failure for a removed folder that ends no fetch is dropped.
+    assert_eq!(session.apply(&failed).unwrap(), Applied::Dropped);
 }
 
 #[test]
