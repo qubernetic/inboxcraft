@@ -24,6 +24,7 @@ fn account_list_shows_every_account_without_a_secret() {
             "submission": null,
             "connection": null,
             "failure": null,
+            "check": null,
         })
     );
     assert_eq!(accounts[1]["address"], json!("bob@example.net"));

@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, UidValidity};
+use inboxcraft_model::{
+    AccountId, CheckStep, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, StepReport, UidValidity,
+};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Timestamp};
 use serde_json::Value;
@@ -116,6 +118,23 @@ pub(crate) struct AccountState {
     pub(crate) connection: Option<ConnectionState>,
     /// The last failure, until the account is online again.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The last account check, running or done.
+    pub(crate) check: Option<Check>,
+}
+
+/// An account check: every step as it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Check {
+    /// The Check job while the check runs; `None` once its last step came.
+    pub(crate) job: Option<JobId>,
+    /// Every step of [`CheckStep::ALL`], in order.
+    pub(crate) steps: Vec<StepReport>,
+}
+
+impl Check {
+    pub(crate) fn is_running(&self) -> bool {
+        self.job.is_some()
+    }
 }
 
 impl State {
@@ -298,6 +317,9 @@ impl Session {
         let id = self.state.job_id();
         if let Some(message) = pending.message {
             self.state.fetching.insert(id, message);
+        }
+        if pending.kind == JobKind::Check {
+            self.state.accounts.entry(pending.account).or_default().check = Some(Check { job: Some(id), steps: CheckStep::plan() });
         }
         self.jobs.push(Job::new(id, pending.account, pending.kind));
     }

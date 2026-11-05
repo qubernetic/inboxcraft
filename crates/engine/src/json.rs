@@ -3,7 +3,7 @@
 
 //! The commands' answers as JSON: snake_case keys, ISO 8601 dates in UTC, full values, fields only ever added.
 
-use inboxcraft_model::{Account, Address, ConnectionState, ErrorKind, Folder, FolderId, Role, Server, ThreadId};
+use inboxcraft_model::{Account, Address, ConnectionState, ErrorKind, Folder, FolderId, Host, Role, Server, StepReport, StepStatus, ThreadId};
 use inboxcraft_store::Entry;
 use inboxcraft_time::{Offset, Timestamp};
 use serde_json::{Value, json};
@@ -62,6 +62,37 @@ pub(crate) fn account(account: &Account, state: Option<&AccountState>) -> Value 
         "submission": account.submission().map(server),
         "connection": state.and_then(|state| state.connection).map(connection),
         "failure": state.and_then(|state| state.failure).map(|(kind, folder)| failure(kind, folder)),
+        "check": state.and_then(|state| state.check.as_ref()).map(|check| json!({ "running": check.is_running(), "steps": steps(&check.steps) })),
+    })
+}
+
+/// The steps of an account check: each with its status, the cause and an English sentence for logs and agents, the
+/// host and port it tried, and the certificate's issuer.
+pub(crate) fn steps(reports: &[StepReport]) -> Value {
+    Value::Array(reports.iter().map(step).collect())
+}
+
+fn step(report: &StepReport) -> Value {
+    let (status, kind, message) = match report.status() {
+        StepStatus::Failed(kind) => (Value::String("failed".to_owned()), name(kind), Value::String(kind.to_string())),
+        other => {
+            let message = match other {
+                StepStatus::Skipped => Some("skipped, because an earlier step failed"),
+                StepStatus::NeedsReview => Some("not run: the settings were detected and the owner has not seen them yet, so no password was sent"),
+                StepStatus::NotBuilt => Some("not built yet"),
+                StepStatus::Pending | StepStatus::Passed | StepStatus::Failed(_) => None,
+            };
+            (name(other), Value::Null, message.map_or(Value::Null, |text| Value::String(text.to_owned())))
+        }
+    };
+    json!({
+        "step": name(report.step()),
+        "status": status,
+        "kind": kind,
+        "message": message,
+        "host": report.host().map(Host::as_str),
+        "port": report.port(),
+        "issuer": report.issuer(),
     })
 }
 
