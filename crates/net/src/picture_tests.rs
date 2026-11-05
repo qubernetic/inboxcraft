@@ -96,6 +96,18 @@ fn a_cookie_the_server_sets_is_never_sent_back() {
 }
 
 #[test]
+fn a_redirect_to_a_private_address_is_never_followed() {
+    let pki = TestPki::new().unwrap();
+    for target in ["https://10.0.0.1/x.png", "https://127.0.0.1:1/x.png", "https://[::1]/x.png", "https://[64:ff9b::a00:1]/x.png"] {
+        let moved = format!("HTTP/1.1 302 Found\r\nLocation: {target}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes();
+        let (addr, server) = serve(pki.server_config(None).unwrap(), vec![moved]);
+        let error = client(&pki, addr).fetch(&format!("https://{HOST}/p.png")).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::HostNotFound, "{target}: {error}");
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn every_fetch_is_a_new_connection_with_a_full_handshake() {
     let pki = TestPki::new().unwrap();
     let tls = pki.server_config(None).unwrap();
@@ -226,10 +238,16 @@ fn an_ipv6_form_that_carries_an_ipv4_address_is_judged_by_that_address() {
         "2002:a00:1::1",
         "2002:7f00:1::",
         "64:ff9b:1::1.1.1.1",
+        "::ffff:0:10.0.0.1",
+        "::ffff:0:127.0.0.1",
     ] {
         assert!(!is_public(ip.parse::<Ipv6Addr>().unwrap().into()), "{ip}");
     }
-    for ip in ["64:ff9b::1.1.1.1", "2002:101:101::1", "::1.1.1.1"] {
+    // Site-local (deprecated), discard-only, benchmarking, the second documentation prefix, SRv6 segment ids.
+    for ip in ["fec0::1", "feff::1", "100::1", "2001:2::1", "3fff::1", "3fff:fff::1", "5f00::1"] {
+        assert!(!is_public(ip.parse::<Ipv6Addr>().unwrap().into()), "{ip}");
+    }
+    for ip in ["64:ff9b::1.1.1.1", "2002:101:101::1", "::1.1.1.1", "::ffff:0:1.1.1.1", "100:0:0:1::1", "2001:3::1", "3fff:1000::1", "5f01::1"] {
         assert!(is_public(ip.parse::<Ipv6Addr>().unwrap().into()), "{ip}");
     }
 }

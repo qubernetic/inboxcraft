@@ -22,7 +22,9 @@ use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver
 use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 use ureq::{Agent, Error};
 
-use crate::web::{Fixed, failed, tls_config};
+#[cfg(test)]
+use crate::web::Fixed;
+use crate::web::{failed, tls_config};
 use crate::{NetError, TlsSettings};
 
 /// The largest picture taken, in bytes.
@@ -50,7 +52,8 @@ pub struct Picture {
 pub struct PictureClient {
     tls: TlsSettings,
     timeout: Duration,
-    addresses: Option<Vec<SocketAddr>>,
+    #[cfg(test)]
+    pinned: Vec<SocketAddr>,
 }
 
 impl fmt::Debug for PictureClient {
@@ -64,23 +67,31 @@ impl PictureClient {
     /// system and only public addresses are asked.
     #[must_use]
     pub fn new(tls: TlsSettings, timeout: Duration) -> Self {
-        Self { tls, timeout, addresses: None }
+        Self {
+            tls,
+            timeout,
+            #[cfg(test)]
+            pinned: Vec::new(),
+        }
     }
 
-    /// As [`PictureClient::new`], connecting to `addresses` whatever the host: for the tests, whose fake servers
-    /// listen on 127.0.0.1. The certificate is still checked for the URL's host.
-    #[must_use]
-    pub fn with_addresses(tls: TlsSettings, timeout: Duration, addresses: Vec<SocketAddr>) -> Self {
-        Self { tls, timeout, addresses: Some(addresses) }
+    /// As [`PictureClient::new`], for the tests, whose fake servers listen on 127.0.0.1: a host name goes to
+    /// `addresses`, and those exact addresses pass the filter; an address in the URL itself is looked up as usual and
+    /// filtered as usual. The certificate is still checked for the URL's host.
+    #[cfg(test)]
+    fn with_addresses(tls: TlsSettings, timeout: Duration, addresses: Vec<SocketAddr>) -> Self {
+        Self { tls, timeout, pinned: addresses }
     }
 
     /// A new agent, with a new TLS session cache, for one fetch.
     fn agent(&self) -> Agent {
         let config = config(&self.tls, self.timeout);
-        match &self.addresses {
-            Some(addresses) => Agent::with_parts(config, DefaultConnector::default(), Fixed(addresses.clone())),
-            None => Agent::with_parts(config, DefaultConnector::default(), Public),
+        #[cfg(test)]
+        if !self.pinned.is_empty() {
+            let resolver = Public { inner: Pinned(self.pinned.clone()), trusted: self.pinned.clone() };
+            return Agent::with_parts(config, DefaultConnector::default(), resolver);
         }
+        Agent::with_parts(config, DefaultConnector::default(), Public::new(DefaultResolver::default()))
     }
 
     /// GETs the picture at `url`.
@@ -131,8 +142,8 @@ fn config(tls: &TlsSettings, timeout: Duration) -> Config {
         .build()
 }
 
-/// Whether `ip` is an address on the internet: not this computer, the local network, link-local, shared (CGNAT),
-/// multicast, broadcast, documentation, benchmarking or reserved space.
+/// Whether `ip` is an address on the internet: not this computer, the local network, link-local, site-local, shared
+/// (CGNAT), multicast, broadcast, discard-only, documentation, benchmarking, SRv6 segment ids or reserved space.
 #[must_use]
 pub fn is_public(ip: IpAddr) -> bool {
     match ip {
@@ -140,29 +151,38 @@ pub fn is_public(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => match carried_v4(ip) {
             Some(carried) => is_public_v4(carried),
             None => {
-                let [first, second, third, ..] = ip.segments();
-                let documentation = first == 0x2001 && second == 0x0db8;
+                let [first, second, third, fourth, ..] = ip.segments();
+                let documentation = (first == 0x2001 && second == 0x0db8) || (first == 0x3fff && second < 0x1000);
                 let local_nat64 = first == 0x0064 && second == 0xff9b && third == 0x0001;
+                let site_local = (first & 0xffc0) == 0xfec0;
+                let discard = first == 0x0100 && second == 0 && third == 0 && fourth == 0;
+                let benchmarking = first == 0x2001 && second == 0x0002 && third == 0;
+                let segment_ids = first == 0x5f00;
                 !(ip.is_loopback()
                     || ip.is_unspecified()
                     || ip.is_multicast()
                     || ip.is_unique_local()
                     || ip.is_unicast_link_local()
                     || documentation
-                    || local_nat64)
+                    || local_nat64
+                    || site_local
+                    || discard
+                    || benchmarking
+                    || segment_ids)
             }
         },
     }
 }
 
-/// The IPv4 address an IPv6 form carries: IPv4-mapped (`::ffff:0:0/96`), IPv4-compatible (`::/96`, deprecated, which
-/// also holds `::` and `::1`), NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`).
+/// The IPv4 address an IPv6 form carries: IPv4-mapped (`::ffff:0:0/96`), IPv4-translated (`::ffff:0:0:0/96`),
+/// IPv4-compatible (`::/96`, deprecated, which also holds `::` and `::1`), NAT64 (`64:ff9b::/96`) and 6to4
+/// (`2002::/16`).
 fn carried_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
     let [s0, s1, s2, s3, s4, s5, ..] = ip.segments();
     let [.., a, b, c, d] = ip.octets();
     let last = Ipv4Addr::new(a, b, c, d);
     match (s0, s1, s2, s3, s4, s5) {
-        (0, 0, 0, 0, 0, 0xffff | 0) | (0x0064, 0xff9b, 0, 0, 0, 0) => Some(last),
+        (0, 0, 0, 0, 0, 0xffff | 0) | (0, 0, 0, 0, 0xffff, 0) | (0x0064, 0xff9b, 0, 0, 0, 0) => Some(last),
         (0x2002, ..) => {
             let [high_a, high_b] = s1.to_be_bytes();
             let [low_a, low_b] = s2.to_be_bytes();
@@ -191,20 +211,57 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
         || reserved)
 }
 
-/// The system's resolver, keeping only public addresses; a host without one is not found.
+/// The `inner` resolver (the system's), keeping only public addresses; a host without one is not found. Every
+/// address is filtered, the first request's and every redirect's alike.
 #[derive(Debug)]
-struct Public;
+struct Public<R> {
+    inner: R,
+    /// For the tests: the fake servers' exact addresses, let through.
+    #[cfg(test)]
+    trusted: Vec<SocketAddr>,
+}
 
-impl Resolver for Public {
+impl<R> Public<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            #[cfg(test)]
+            trusted: Vec::new(),
+        }
+    }
+
+    fn lets_through(&self, address: SocketAddr) -> bool {
+        #[cfg(test)]
+        if self.trusted.contains(&address) {
+            return true;
+        }
+        is_public(address.ip())
+    }
+}
+
+impl<R: Resolver> Resolver for Public<R> {
     fn resolve(&self, uri: &Uri, config: &Config, timeout: NextTimeout) -> Result<ResolvedSocketAddrs, Error> {
-        let all = DefaultResolver::default().resolve(uri, config, timeout)?;
+        let all = self.inner.resolve(uri, config, timeout)?;
         let mut found = self.empty();
-        for address in all.iter().filter(|address| is_public(address.ip())) {
+        for address in all.iter().filter(|address| self.lets_through(**address)) {
             if found.try_push(*address).is_err() {
                 break;
             }
         }
         if found.is_empty() { Err(Error::HostNotFound) } else { Ok(found) }
+    }
+}
+
+/// For the tests: a host name resolves to the fake servers' addresses, an address in the URL to itself.
+#[cfg(test)]
+#[derive(Debug)]
+struct Pinned(Vec<SocketAddr>);
+
+#[cfg(test)]
+impl Resolver for Pinned {
+    fn resolve(&self, uri: &Uri, config: &Config, timeout: NextTimeout) -> Result<ResolvedSocketAddrs, Error> {
+        let literal = uri.host().is_some_and(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().is_ok());
+        if literal { DefaultResolver::default().resolve(uri, config, timeout) } else { Fixed(self.0.clone()).resolve(uri, config, timeout) }
     }
 }
 
