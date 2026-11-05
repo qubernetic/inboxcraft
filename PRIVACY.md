@@ -25,7 +25,8 @@ what it found; it asks, in this order, and stops at the first answer that names 
    (the part after the `@`).
 2. Your domain's web server, over HTTPS, for its autoconfig file: `autoconfig.<domain>` and
    `<domain>/.well-known/autoconfig/`. Plain HTTP is asked once, at `autoconfig.<domain>`, and only a redirect to
-   HTTPS on your mail provider's domain is followed.
+   HTTPS on your mail provider's domain is followed; what it finds is marked as reached through an unencrypted
+   redirect, as anyone on the network could have sent that redirect.
 3. Mozilla's ISPDB (`autoconfig.thunderbird.net`), for your domain and your mail provider's domain. **Off unless
    you switch it on**: it tells Mozilla which domain you are setting up.
 4. Your name servers again, for SRV records (`_imaps._tcp.<domain>` and the like).

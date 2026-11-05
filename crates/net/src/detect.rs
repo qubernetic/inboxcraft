@@ -77,8 +77,11 @@ impl Lookup for Resolver {
 /// Where a candidate came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Source {
-    /// The provider's autoconfig file.
+    /// The provider's autoconfig file, over HTTPS at the address's domain.
     Autoconfig,
+    /// An autoconfig file over HTTPS on the MX domain, reached through an unencrypted HTTP redirect from the
+    /// address's domain: anyone on the network could have sent that redirect.
+    AutoconfigRedirect,
     /// Mozilla's ISPDB.
     Ispdb,
     /// An SRV record.
@@ -183,7 +186,7 @@ impl Run<'_> {
             return false;
         }
         if let Some(found) = self.fetch(&redirect) {
-            self.take(found, Source::Autoconfig);
+            self.take(found, Source::AutoconfigRedirect);
         }
         !self.proposal.imap.is_empty()
     }

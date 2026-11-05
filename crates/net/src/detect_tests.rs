@@ -164,7 +164,7 @@ fn plain_http_counts_only_as_a_redirect_to_https_on_the_mx_domain() {
     let target = "https://autoconfig.provider.example.net/mail/config-v1.1.xml?emailaddress=x";
     let web = FakeWeb::default().redirect(PLAIN, target).page(target, &config("imap.provider.example.net", 993, "SSL"));
     let proposal = detect(&address(), &DetectConfig::default(), &dns, &web);
-    assert_eq!(imap(&proposal), ["imap.provider.example.net:993 (TLS) Autoconfig"]);
+    assert_eq!(imap(&proposal), ["imap.provider.example.net:993 (TLS) AutoconfigRedirect"]);
     assert_eq!(web.asked().last().map(String::as_str), Some(target));
 
     for elsewhere in [
@@ -175,7 +175,7 @@ fn plain_http_counts_only_as_a_redirect_to_https_on_the_mx_domain() {
     ] {
         let web = FakeWeb::default().redirect(PLAIN, elsewhere).page(elsewhere, &config("imap.evil.example.com", 993, "SSL"));
         let proposal = detect(&address(), &DetectConfig::default(), &dns, &web);
-        assert!(proposal.imap.iter().all(|candidate| candidate.source != Source::Autoconfig), "{elsewhere}");
+        assert!(proposal.imap.iter().all(|candidate| candidate.source == Source::Guess), "{elsewhere}");
         assert!(!web.asked().contains(&elsewhere.to_owned()), "{elsewhere}");
     }
 
