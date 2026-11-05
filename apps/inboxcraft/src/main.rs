@@ -6,11 +6,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::process::ExitCode;
+use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
 use inboxcraft::{Source, Step};
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::InboxApp;
+use inboxcraft_ui_egui::fetch::Wake;
 
 /// The window's content as eframe draws it.
 struct Desktop(InboxApp);
@@ -22,7 +24,15 @@ impl eframe::App for Desktop {
 }
 
 fn window(source: Source) -> ExitCode {
-    let app = match inboxcraft::app(source, || Box::new(SystemClock::new())) {
+    // The window's context exists once eframe made it; a picture that arrives before then needs no redraw.
+    let context: Arc<OnceLock<egui::Context>> = Arc::new(OnceLock::new());
+    let woken = Arc::clone(&context);
+    let wake: Wake = Arc::new(move || {
+        if let Some(context) = woken.get() {
+            context.request_repaint();
+        }
+    });
+    let app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake)) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");
@@ -35,7 +45,11 @@ fn window(source: Source) -> ExitCode {
         .with_inner_size([1200.0, 760.0])
         .with_min_inner_size([720.0, 480.0]);
     let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
-    match eframe::run_native("InboxCraft", options, Box::new(|_| Ok(Box::new(Desktop(app))))) {
+    let made = move |creation: &eframe::CreationContext<'_>| {
+        let _ = context.set(creation.egui_ctx.clone());
+        Ok(Box::new(Desktop(app)) as Box<dyn eframe::App>)
+    };
+    match eframe::run_native("InboxCraft", options, Box::new(made)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("inboxcraft: the window could not open: {error}");

@@ -1653,6 +1653,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "inboxcraft-engine",
+ "inboxcraft-net",
  "inboxcraft-store",
  "inboxcraft-time",
  "inboxcraft-ui-egui",
