@@ -21,6 +21,7 @@
 
 mod draw;
 mod error;
+pub mod fetch;
 pub mod i18n;
 pub mod mailbox;
 pub mod picture;
