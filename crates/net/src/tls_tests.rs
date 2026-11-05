@@ -5,12 +5,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inboxcraft_model::ErrorKind;
+use inboxcraft_testkit::{HOST, TestPki};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
-use rustls::pki_types::{CertificateDer, UnixTime};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::time_provider::TimeProvider;
-use rustls::{CertificateError, Error};
+use rustls::{
+    CertificateError, ClientConfig, ClientConnection, DigitallySignedStruct, DistinguishedName, Error, ServerConnection, SignatureScheme,
+    SupportedProtocolVersion,
+};
 
-use super::{EARLIEST, TimeOf, TlsSettings, Trust, classify};
+use super::{EARLIEST, Recorder, Seen, TimeOf, TlsSettings, Trust, classify};
 
 const DAY: u64 = 86_400;
 
@@ -94,4 +99,100 @@ fn a_root_that_is_no_certificate_is_refused() {
     // No root at all: nothing can be verified.
     let settings = TlsSettings::new(Trust::Roots(Vec::new()), clock);
     assert_eq!(settings.client_config().map(|_| ()).map_err(|error| error.kind()), Err(ErrorKind::Tls));
+}
+
+/// A verifier whose every answer can be told apart: a [`Recorder`] around it must hand each one on unchanged.
+#[derive(Debug)]
+struct Stub {
+    hints: Vec<DistinguishedName>,
+    /// A handshake with the test server needs `false`: it has no raw public key.
+    raw_keys: bool,
+}
+
+const REFUSED_HOST: &str = "refused.example.org";
+
+impl ServerCertVerifier for Stub {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        if server_name.to_str() == REFUSED_HOST { Err(Error::General("stub: certificate".to_owned())) } else { Ok(ServerCertVerified::assertion()) }
+    }
+
+    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+        Err(Error::General("stub: TLS 1.2 signature".to_owned()))
+    }
+
+    fn verify_tls13_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+        Err(Error::General("stub: TLS 1.3 signature".to_owned()))
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes()
+    }
+
+    fn requires_raw_public_keys(&self) -> bool {
+        self.raw_keys
+    }
+
+    fn root_hint_subjects(&self) -> Option<&[DistinguishedName]> {
+        Some(&self.hints)
+    }
+}
+
+fn recorder(raw_keys: bool) -> Recorder {
+    Recorder { inner: Arc::new(Stub { hints: vec![DistinguishedName::from(b"stub hint".to_vec())], raw_keys }), seen: Seen::default() }
+}
+
+/// A handshake in memory between the test PKI's server and a client verifying with `recorder` over `version`; the
+/// client's error.
+fn handshake(recorder: Recorder, version: &'static SupportedProtocolVersion) -> Result<(), Error> {
+    let pki = TestPki::new().unwrap();
+    let mut server = ServerConnection::new(pki.server_config(None).unwrap()).unwrap();
+    let config = ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_protocol_versions(&[version])
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(recorder))
+        .with_no_client_auth();
+    let mut client = ClientConnection::new(Arc::new(config), ServerName::try_from(HOST).unwrap()).unwrap();
+    for _ in 0..16 {
+        let mut bytes = Vec::new();
+        client.write_tls(&mut bytes).unwrap();
+        server.read_tls(&mut bytes.as_slice()).unwrap();
+        // The server's own error is the client's alert; the client's error is the point.
+        server.process_new_packets().ok();
+        let mut bytes = Vec::new();
+        server.write_tls(&mut bytes).unwrap();
+        client.read_tls(&mut bytes.as_slice()).unwrap();
+        client.process_new_packets()?;
+        if !client.is_handshaking() {
+            return Ok(());
+        }
+    }
+    Err(Error::General("the handshake did not end".to_owned()))
+}
+
+#[test]
+fn the_recorder_hands_every_signature_check_to_the_real_verifier() {
+    assert_eq!(handshake(recorder(false), &rustls::version::TLS13), Err(Error::General("stub: TLS 1.3 signature".to_owned())));
+    assert_eq!(handshake(recorder(false), &rustls::version::TLS12), Err(Error::General("stub: TLS 1.2 signature".to_owned())));
+}
+
+#[test]
+fn the_recorder_keeps_the_certificate_and_hands_on_every_other_answer() {
+    let recorder = recorder(true);
+    let der = CertificateDer::from(b"a certificate".to_vec());
+    let refused = ServerName::try_from(REFUSED_HOST).unwrap();
+    let answer = recorder.verify_server_cert(&der, &[], &refused, &[], unix(NOW));
+    assert_eq!(answer.err(), Some(Error::General("stub: certificate".to_owned())));
+    assert_eq!(recorder.seen.get(), Some(b"a certificate".to_vec()));
+    assert_eq!(recorder.supported_verify_schemes(), recorder.inner.supported_verify_schemes());
+    assert!(recorder.requires_raw_public_keys());
+    let hints: Vec<&[u8]> = recorder.root_hint_subjects().unwrap_or_default().iter().map(AsRef::as_ref).collect();
+    assert_eq!(hints, [b"stub hint".as_slice()]);
 }
