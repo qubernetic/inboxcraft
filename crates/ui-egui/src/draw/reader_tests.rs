@@ -187,7 +187,7 @@ fn saving_an_attachment_says_where_it_went_or_why_not() {
 fn the_next_message_rule_is_picked_in_the_toolbar_and_arrows_step_through_the_list() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Allotment rota for November");
-    harness.get_by_label("Then").click();
+    harness.get_by_label("When a message leaves the list").click();
     harness.run();
     harness.get_by_label("Go back to the list").click();
     harness.run();

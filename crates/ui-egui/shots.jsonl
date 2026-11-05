@@ -5,3 +5,13 @@
 {"out": "docs/images/narrowed-dark.png", "mode": "dark", "narrow": 2}
 {"out": "docs/images/search-light.png", "mode": "light", "search": "odile"}
 {"out": "docs/images/search-dark.png", "mode": "dark", "search": "odile"}
+# The reader (E1.12b): a reply with its thread and quote, a newsletter before and after its pictures are allowed, a
+# link that says one place and goes to another, attachments in the full-width reader.
+{"out": "docs/images/reader-thread-light.png", "mode": "light", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-dark.png", "mode": "dark", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-blocked-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-blocked-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-pictures-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
+{"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
+{"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}

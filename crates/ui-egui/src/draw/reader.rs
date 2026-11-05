@@ -118,7 +118,6 @@ fn toolbar(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, drawn
             if ui.button(text).clicked() {
                 drawn.asked.push(Asked::FullWidth(full));
             }
-            let label = ui.label(RichText::new(tr!("Then")).size(theme.type_scale.small).color(theme.palette.muted));
             let response = ComboBox::from_id_salt("after-rule")
                 .selected_text(after_text(mailbox.after()))
                 .show_ui(ui, |ui| {
@@ -129,6 +128,8 @@ fn toolbar(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, drawn
                     }
                 })
                 .response;
+            // Right to left: the label comes after the picker in code and before it on screen.
+            let label = ui.label(RichText::new(tr!("When a message leaves the list")).size(theme.type_scale.small).color(theme.palette.muted));
             let _ = response.labelled_by(label.id);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.add(egui::Label::new(RichText::new(subject).size(theme.type_scale.title).color(theme.palette.text)).truncate());
@@ -488,7 +489,7 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
     }
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.horizontal_wrapped(|ui| {
+    ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
         for file in files {
             Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
                 ui.horizontal(|ui| {

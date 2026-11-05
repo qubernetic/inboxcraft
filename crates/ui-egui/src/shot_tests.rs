@@ -66,6 +66,9 @@ fn a_shot_can_narrow_open_search_and_select() {
         r#"{"out": "x.png", "mode": "dark", "size": [600, 400], "narrow": 2, "open": {"role": "inbox"}, "select": "Draft logo for the bakery"}"#,
         r#"{"out": "x.png", "mode": "light", "size": [600, 400], "open": {"folder": 7}}"#,
         r#"{"out": "x.png", "mode": "light", "size": [600, 400], "search": "logo"}"#,
+        r#"{"out": "x.png", "mode": "light", "size": [900, 500], "select": "Your bike is due for a service", "pictures": "once", "details": true}"#,
+        r#"{"out": "x.png", "mode": "dark", "size": [900, 500], "open": {"folder": 5}, "select": "You have won a lighthouse", "pictures": "always"}"#,
+        r#"{"out": "x.png", "mode": "dark", "size": [900, 500], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true, "full_width": true}"#,
     ] {
         shoot(&shot(json)).unwrap();
     }
@@ -77,6 +80,8 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),
         (r#"{"out": "x.png", "mode": "light", "open": {"role": "attic"}}"#, "attic"),
         (r#"{"out": "x.png", "mode": "light", "select": "No such subject"}"#, "No such subject"),
+        (r#"{"out": "x.png", "mode": "light", "select": "Your bike is due for a service", "pictures": "maybe"}"#, "maybe"),
+        (r#"{"out": "x.png", "mode": "light", "full_width": true}"#, "need a selected row"),
         (r#"{"out": "x.png", "mode": "light", "scale": 0.5}"#, "scale"),
         (r#"{"out": "x.png", "mode": "light", "scale": 9}"#, "scale"),
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
