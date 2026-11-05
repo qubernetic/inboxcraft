@@ -318,6 +318,9 @@ All notable changes to InboxCraft are listed here. The format follows
   input (`contrib/flatpak/`, `Cargo.toml`, `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
   `assets/app-icon/`, `.github/workflows/ci.yml`); a new `changes` job decides with `git diff` against the PR base,
   and the `ci` gate accepts a skipped `flatpak` only when `changes` said so (#68)
+- The fuzz workflow builds every target on every run, but a PR fuzzes for 30 s only the targets whose file under
+  `fuzz/fuzz_targets/` is new or changed in the PR (`git diff` against the PR base); a push to `develop` now runs it
+  too and fuzzes every target for 30 s; the nightly schedule and a manual dispatch are unchanged (#69)
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)
