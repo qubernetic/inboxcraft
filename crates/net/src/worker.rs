@@ -17,7 +17,9 @@
 //!
 //! A server that refused the password, offers no way to sign in, or failed the certificate check is not asked again:
 //! the queued jobs and every later job fail with the same kind until the engine starts a new worker (after the owner
-//! changed the settings), so a wrong password is never sent over and over. Without a stored password the queued jobs
+//! changed the settings), so a wrong password is never sent over and over. The same holds for a sign-in the server
+//! never answered: after a `BYE` or something that is not IMAP at once, after a dropped or timed-out connection on
+//! the second time before a sign-in succeeds. Without a stored password the queued jobs
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
 
@@ -161,6 +163,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         watch: None,
         stale: false,
         idle_refused: false,
+        sign_in_lost: false,
     };
     while run.turn(queue) {}
     if let Some(open) = run.connection {
@@ -242,6 +245,8 @@ struct Run<'a> {
     stale: bool,
     /// The server refused IDLE on this connection: poll instead.
     idle_refused: bool,
+    /// A sign-in went unanswered since the last one that succeeded: the next one that does halts the tries.
+    sign_in_lost: bool,
 }
 
 impl Run<'_> {
@@ -309,13 +314,18 @@ impl Run<'_> {
                 self.connection = Some(open);
                 self.stale = self.watch.is_some();
                 self.idle_refused = false;
+                self.sign_in_lost = false;
                 self.out.report(ConnectionState::Online);
                 return true;
             }
             Err(error) => error,
         };
         self.out.say(None, EventKind::Failed { kind: error.kind(), folder: None });
-        if error.is_transient() {
+        // An unanswered sign-in gets one more try until a sign-in succeeds, and only after a dropped or timed-out
+        // connection.
+        let again = error.may_sign_in_again() && !self.sign_in_lost;
+        self.sign_in_lost |= error.may_sign_in_again();
+        if error.is_transient() || again {
             self.back_off(queue);
         } else {
             self.out.report(ConnectionState::Offline);

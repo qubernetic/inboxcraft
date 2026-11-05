@@ -88,6 +88,7 @@ fn what_a_later_attempt_may_get_over() {
         ErrorKind::Tls,
         ErrorKind::StartTlsMissing,
         ErrorKind::LoginRefused,
+        ErrorKind::LoginUnanswered,
         ErrorKind::NoLoginMethod,
         ErrorKind::CredentialMissing,
         ErrorKind::FolderGone,
@@ -96,4 +97,23 @@ fn what_a_later_attempt_may_get_over() {
     for kind in lasting {
         assert!(!NetError::new(kind, "").is_transient(), "{kind:?}");
     }
+}
+
+#[test]
+fn a_sign_in_without_an_answer_is_not_transient() {
+    let lost = |kind| NetError::unanswered_sign_in(&NetError::new(kind, "read"), false);
+    for kind in [ErrorKind::ConnectionDropped, ErrorKind::TimedOut] {
+        let error = lost(kind);
+        assert_eq!(error.kind(), ErrorKind::LoginUnanswered);
+        assert_eq!(error.detail(), "read");
+        assert!(!error.is_transient() && error.ends_connection() && error.may_sign_in_again(), "{kind:?}");
+    }
+    // A server that said BYE, or broke the protocol, after the password gets no second one.
+    assert!(!NetError::unanswered_sign_in(&NetError::new(ErrorKind::ConnectionDropped, "bye"), true).may_sign_in_again());
+    for kind in [ErrorKind::Protocol, ErrorKind::TooLarge] {
+        let error = lost(kind);
+        assert_eq!(error.kind(), ErrorKind::LoginUnanswered);
+        assert!(!error.may_sign_in_again(), "{kind:?}");
+    }
+    assert!(!NetError::new(ErrorKind::ConnectionDropped, "").may_sign_in_again());
 }

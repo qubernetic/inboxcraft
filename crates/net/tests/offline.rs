@@ -9,9 +9,9 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use inboxcraft_model::{ConnectionState, ErrorKind, EventKind, JobKind};
+use inboxcraft_model::{ConnectionState, ErrorKind, EventKind, JobId, JobKind};
 use inboxcraft_net::{Backoff, Timeouts};
-use inboxcraft_testkit::imap::{Action, FakeImap, When};
+use inboxcraft_testkit::imap::{Action, Capability, FakeImap, When};
 use inboxcraft_testkit::{CertFault, Fault};
 use inboxcraft_time::{Clock, SystemClock};
 use support::run::{INBOX, Options, Run, sync_inbox};
@@ -176,5 +176,72 @@ fn a_certificate_fault_stops_the_tries_for_good() -> Result {
     run.worker.stop();
     let (transcript, _refused) = run.fake.finish_with_transcript();
     assert!(transcript.received().is_empty());
+    Ok(())
+}
+
+/// The lines with `word` the fake got.
+fn sent(run: Run, word: &str) -> usize {
+    run.worker.stop();
+    let (transcript, _ended) = run.fake.finish_with_transcript();
+    transcript.received().iter().filter(|line| line.contains(word)).count()
+}
+
+/// The fake answers `command` with `action` on each of four connections.
+fn at_every_sign_in(fake: FakeImap, command: &str, action: &Action) -> FakeImap {
+    (0..4).fold(fake, |fake, _| fake.on(When::command(command), [action.clone()]))
+}
+
+/// Runs a folder list job against `fake` and returns the events until the worker gives up, and the job.
+fn sign_in_until_offline(fake: FakeImap) -> Result<(Run, Vec<EventKind>, JobId)> {
+    let mut run = Run::with(fake, Options { connections: 4, ..Options::default() })?;
+    let job = run.job(JobKind::SyncFolderList)?;
+    let events = run.events_until(|event| event.job == Some(job))?.into_iter().map(|event| event.kind).collect();
+    Ok((run, events, job))
+}
+
+fn halted(events: &[EventKind]) {
+    let offline = events.iter().rposition(|kind| *kind == EventKind::Connection(ConnectionState::Offline));
+    let backing_off = events.iter().rposition(|kind| matches!(kind, EventKind::Connection(ConnectionState::BackingOff { .. })));
+    assert!(offline.is_some() && backing_off < offline, "{events:?}");
+    assert_eq!(events.last(), Some(&EventKind::Failed { kind: ErrorKind::LoginUnanswered, folder: None }), "{events:?}");
+}
+
+#[test]
+fn a_sign_in_dropped_without_an_answer_is_tried_once_more_then_halts() -> Result {
+    let fake = at_every_sign_in(FakeImap::sample(), "AUTHENTICATE", &Action::Fault(Fault::Drop));
+    let (mut run, events, _job) = sign_in_until_offline(fake)?;
+    halted(&events);
+    // Later jobs fail at once: the password is not sent again.
+    run.job(sync_inbox(None)?)?;
+    assert_eq!(run.until(|_| true)?, [EventKind::Failed { kind: ErrorKind::LoginUnanswered, folder: Some(INBOX) }]);
+    assert_eq!(sent(run, "AUTHENTICATE"), 2);
+    Ok(())
+}
+
+#[test]
+fn a_bye_in_answer_to_the_sign_in_halts_at_once() -> Result {
+    let fake = at_every_sign_in(FakeImap::sample(), "AUTHENTICATE", &Action::Bye("going away".to_owned()));
+    let (run, events, _job) = sign_in_until_offline(fake)?;
+    halted(&events);
+    assert!(!events.iter().any(|kind| matches!(kind, EventKind::Connection(ConnectionState::BackingOff { .. }))), "{events:?}");
+    assert_eq!(sent(run, "AUTHENTICATE"), 1);
+    Ok(())
+}
+
+#[test]
+fn garbage_in_answer_to_the_sign_in_halts_at_once() -> Result {
+    let fake = at_every_sign_in(FakeImap::sample(), "AUTHENTICATE", &Action::Fault(Fault::Garbage(b"\x00\xff not imap\r\n".to_vec())));
+    let (run, events, _job) = sign_in_until_offline(fake)?;
+    halted(&events);
+    assert_eq!(sent(run, "AUTHENTICATE"), 1);
+    Ok(())
+}
+
+#[test]
+fn a_login_dropped_without_an_answer_is_tried_once_more_then_halts() -> Result {
+    let fake = at_every_sign_in(FakeImap::sample().without(Capability::AuthPlain), "LOGIN", &Action::Fault(Fault::Drop));
+    let (run, events, _job) = sign_in_until_offline(fake)?;
+    halted(&events);
+    assert_eq!(sent(run, " LOGIN "), 2);
     Ok(())
 }

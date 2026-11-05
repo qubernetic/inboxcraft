@@ -129,7 +129,8 @@ impl ImapConnection {
     ///
     /// # Errors
     ///
-    /// [`ErrorKind::LoginRefused`], [`ErrorKind::NoLoginMethod`], or a connection error.
+    /// [`ErrorKind::LoginRefused`], [`ErrorKind::NoLoginMethod`], a connection error before the password went out,
+    /// or [`ErrorKind::LoginUnanswered`] for any failure after it and before the server's answer.
     pub fn login(&mut self, user: &str, password: &Password) -> Result<(), NetError> {
         if self.preauth || self.client.state() != State::NotAuthenticated {
             return Ok(());
@@ -137,9 +138,10 @@ impl ImapConnection {
         let plain = self.client.capabilities().is_some_and(|caps| caps.has("AUTH=PLAIN"));
         let tag = if plain { self.client.authenticate_plain(user, password.expose()) } else { self.client.login(user, password.expose()) }
             .map_err(|error| NetError::proto(&error))?;
-        match self.wait(&tag, &mut |_| {})? {
-            Ok(_) => Ok(()),
-            Err(refusal) => Err(NetError::new(ErrorKind::LoginRefused, refusal.code.unwrap_or_default())),
+        match self.wait(&tag, &mut |_| {}) {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(refusal)) => Err(NetError::new(ErrorKind::LoginRefused, refusal.code.unwrap_or_default())),
+            Err(error) => Err(NetError::unanswered_sign_in(&error, self.client.state() == State::Closed)),
         }
     }
 
