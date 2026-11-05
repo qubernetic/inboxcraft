@@ -1789,6 +1789,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "inboxcraft-engine",
+ "inboxcraft-mime",
  "inboxcraft-model",
  "inboxcraft-store",
  "inboxcraft-time",
