@@ -184,6 +184,17 @@ All notable changes to InboxCraft are listed here. The format follows
   `Listen::start_imap_many` serves several connections one after the other with the mailboxes and scripted points
   carried over, for clients that reconnect; `LiveConfig::invented_message` gives a live run's invented messages
   (#26)
+- `inboxcraft-engine`: the `Session` and the command registry. Every command has an id, an agent class (`safe`,
+  `owner`, `never`) and runs through `Session::run`; a command without a class is refused when registered, so it
+  never runs, and an agent runs `safe` commands only. A command only reads and returns its JSON answer with the
+  store changes and jobs it asks for, made after it returned, so a failed command changes nothing and a command
+  that panics becomes an error with the session as it was. Jobs out and events in: the folder list brings the
+  folder syncs (the inbox first) and the watch on the inbox, events become store changes, and events with UIDs of
+  an older UIDVALIDITY are dropped. The read commands, all `safe`: `account.list`, `folder.list` (roles, unified
+  views, roles to ask about), `mail.list` (one folder or one role across every account, merged by date, narrowed
+  to one account), `mail.read` (plain text and attachments; opening a message changes nothing on the server, and a
+  body not kept yet is fetched once; a body too large to keep says so with `body_error`) and `mail.search` (from, to, subject, ISO 8601 dates, body words).
+  `hostile_params_never_panic` runs every command with junk; fuzz target `engine_params` (#27)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

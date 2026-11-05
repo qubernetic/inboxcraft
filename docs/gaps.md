@@ -242,6 +242,23 @@ B = blocks the next stage.
 - `net` keeps the Mozilla roots of `rustls-platform-verifier` (CDLA-Permissive-2.0, pulled only on wasm32, where
   `net` is never built) out of `cargo deny`'s graph with `[graph] exclude` in `deny.toml`, rather than allowing the
   licence (#25).
+- `engine` keeps the folder roles and the roles to ask the owner about in memory: after a restart they are found
+  again from SPECIAL-USE and the names, and a role the owner answered is asked about again. Nothing answers a
+  question yet; that command comes with the folder pane (#27).
+- `engine` turns an escaped panic into an error only where panics unwind; on wasm32 a panic still aborts. The
+  default panic hook still prints the panic's message to standard error (#27).
+- `engine`'s `mail.list` reads every message of the view's folders from the store and sorts them by date at each
+  call, and `folder.list` reads every message to count them; a large unified inbox costs that much per list until
+  the store gives sorted pages and counts (#27).
+- `engine`'s `mail.read` shows the plain text part only; a message with HTML alone shows no text (`has_html` says
+  so) until the safe HTML of `html` and the reader come. Its body words are not searched either (#27).
+- `engine` asks for a body once per message while that `FetchBody` job is out; a job the worker never answers
+  (neither the body nor a failure) keeps the next `mail.read` from asking again until the session restarts. A body
+  over 64 MiB is not kept and not asked for again until the session restarts, so such a message cannot be read in
+  InboxCraft. Opening a
+  message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
+- `engine` lets an agent run `safe` commands only; per-account access levels and the owner's approval for `owner`
+  commands come with the first `owner` command (#27).
 
 ## Revision history
 | Date | Change | Summary |
@@ -275,3 +292,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Live updates, resync, back-off and COMPRESS in `net` (#26) |
 | 2026-11-05 | minor | The caps on what a resync keeps (#26) |
 | 2026-11-05 | minor | An unanswered sign-in halts the tries (#26) |
+| 2026-11-05 | minor | The engine read path and the command registry (#27) |

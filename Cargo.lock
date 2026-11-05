@@ -344,6 +344,15 @@ version = "0.1.0"
 [[package]]
 name = "inboxcraft-engine"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-mime",
+ "inboxcraft-model",
+ "inboxcraft-store",
+ "inboxcraft-time",
+ "proptest",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "inboxcraft-html"
