@@ -170,7 +170,11 @@ All notable changes to InboxCraft are listed here. The format follows
   doubles from 2 seconds to at most 5 minutes (`Backoff`), reported as `BackingOff`; a connection lost while
   watching is reconnected after it and the folder resynced. A certificate fault, a refused sign-in or a server
   without a sign-in method stops the tries until the worker is started again. The connection is compressed with
-  COMPRESS=DEFLATE after the sign-in where offered (`WorkerSettings::compress`), inflated in small steps. Live test
+  COMPRESS=DEFLATE after the sign-in where offered (`WorkerSettings::compress`), inflated in small steps. A resync
+  keeps what the server tells bounded: QRESYNC's changes once per message and at most `SyncConfig::max_told` of them
+  (past it the flags are fetched instead), the known messages still there as ranges, at most `SyncConfig::max_ranges`
+  (past it the sync fails with `TooLarge`). The back-off wait and the IDLE renewal are measured on the monotonic
+  clock, so a wall clock set back cannot stretch them. Live test
   `live_imap_round_trip` on `live-imap`: sign-in, folder list, run folder, APPEND of an invented message, first
   sync, IDLE, resync, folder removed; it skips with its reason printed without credentials, in the agent sandbox and
   in CI (#26)

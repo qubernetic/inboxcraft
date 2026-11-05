@@ -214,6 +214,11 @@ B = blocks the next stage.
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
   traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`
   switches it off (#26).
+- `net` keeps at most 10 000 changes and 10 000 removed-UID ranges from what QRESYNC tells while a known folder
+  opens (`SyncConfig::max_told`); past it a resync costs the full flags fetch of the known messages. A resync without
+  QRESYNC keeps the known messages still there as at most a million ranges (`SyncConfig::max_ranges`): a folder with
+  more gaps than that among its UIDs, or a server that answers far out of UID order, fails the sync with `TooLarge`
+  (#26).
 - The `live-imap` live test reaches the server over implicit TLS on port 993 and signs its helper client in with
   LOGIN; a password with characters outside ASCII cannot be quoted there and fails the test. The fake serves one
   connection at a time, so the step where another client appends while the worker idles runs only live (#26).
@@ -267,3 +272,4 @@ B = blocks the next stage.
 | 2026-11-04 | minor | Symlinks in the store and values read back unbounded (#24) |
 | 2026-11-05 | minor | Rough edges of TLS, the IMAP sign-in and the first sync (#25) |
 | 2026-11-05 | minor | Live updates, resync, back-off and COMPRESS in `net` (#26) |
+| 2026-11-05 | minor | The caps on what a resync keeps (#26) |
