@@ -166,8 +166,9 @@ servers and `example.org` addresses.
 `just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It works in two
 steps:
 
-1. It builds the live test binaries (`testkit` and `net`) into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
-   build script, proc macro or other test binary ever runs with the credentials.
+1. It makes `target/nextest` and builds the live test binaries (`testkit` and `net`) into an archive,
+   `target/nextest/live.tar.zst`, before it reads any value, so no build script, proc macro or other test binary
+   ever runs with the credentials.
 2. It reads eight values from the OS credential store, service `inboxcraft-live`, one entry per variable, and runs
    the `live` profile from the archive, which never compiles. The values reach the container through its own
    environment for that run only, never on a command line or in a file.
@@ -277,3 +278,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | `flate2` moves from the testkit-only to the net-only crates (#26) |
 | 2026-11-05 | minor | Live tests: the `net` round trip on `live-imap`, invented messages (#26) |
 | 2026-11-05 | minor | Fuzzing: the certificate, autoconfig and DNS targets of `net`; live test of the account check (#28) |
+| 2026-11-05 | minor | Live tests: `just it-live` makes the archive's folder first (#57) |

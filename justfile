@@ -124,6 +124,8 @@ it-live *args: _host_only _up
     done
     # Build first, before any value is read: no build script, proc macro or other test binary ever sees one.
     archive=target/nextest/live.tar.zst
+    # `nextest archive` does not make the archive's folder; on a fresh checkout it would exit with 103.
+    {{ dc }} exec {{ service }} mkdir -p target/nextest
     {{ dc }} exec {{ service }} cargo nextest archive -p inboxcraft-testkit -p inboxcraft-net --test live --archive-file "$archive"
     lookup() {
         if command -v secret-tool >/dev/null 2>&1; then

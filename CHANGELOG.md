@@ -222,3 +222,7 @@ All notable changes to InboxCraft are listed here. The format follows
   COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)
 - `rustls-platform-verifier` 0.6 to 0.7, the version `ureq` uses. `cargo xtask layers` counts `hickory-proto` as a
   network crate, so it stays in `net` (#28)
+
+### Fixed
+- `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
+  `nextest archive` exited with 103 because the folder was missing (#57)

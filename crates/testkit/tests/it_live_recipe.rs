@@ -54,6 +54,16 @@ fn the_build_runs_before_any_credential_is_read() -> Result<(), Box<dyn std::err
 }
 
 #[test]
+fn the_archive_folder_is_made_before_the_build() -> Result<(), Box<dyn std::error::Error>> {
+    // A fresh checkout has no `target/nextest`, and `nextest archive` does not make it (exit 103).
+    let body = recipe()?;
+    let mkdir = position(&body, "mkdir -p target/nextest")?;
+    assert!(mkdir < position(&body, "nextest archive")?, "{body:#?}");
+    assert!(position(&body, "archive=target/nextest/")? < position(&body, "nextest archive")?, "{body:#?}");
+    Ok(())
+}
+
+#[test]
 fn the_credentials_pass_by_name_only() -> Result<(), Box<dyn std::error::Error>> {
     let body = recipe()?;
     let passes: Vec<&String> = body.iter().filter(|line| line.contains("pass+=(")).collect();
