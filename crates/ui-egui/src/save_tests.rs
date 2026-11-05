@@ -24,6 +24,24 @@ impl Drop for Folder {
 }
 
 #[test]
+fn a_file_name_keeps_no_invisible_character_and_ends_in_neither_a_dot_nor_a_space() {
+    // Format characters (soft hyphen, Arabic number signs, Mongolian vowel separator, tags, the shorthand and musical
+    // format controls), the line and paragraph separators, and the Hangul fillers.
+    let invisible =
+        "\u{AD}\u{600}\u{6DD}\u{180E}\u{2064}\u{FFF9}\u{110BD}\u{1BCA0}\u{1D173}\u{E0001}\u{E0041}\u{2028}\u{2029}\u{115F}\u{1160}\u{3164}\u{FFA0}";
+    assert_eq!(safe_name(&format!("in{invisible}voice.pdf")), "invoice.pdf");
+    assert_eq!(safe_name("a \u{3000}\u{A0}  b.txt"), "a b.txt");
+    assert_eq!(safe_name("report\u{3164}.pdf"), "report.pdf");
+    assert_eq!(safe_name("\u{3164} . \u{2028}"), "attachment");
+    let long = format!("{}  . .pdf", "x".repeat(MAX_NAME - 6));
+    let cut = safe_name(&long);
+    assert!(!cut.contains(" .") && !cut.ends_with('.') && !cut.ends_with(' '), "{cut:?}");
+    let no_extension = format!("{} . y", "x".repeat(MAX_NAME - 2));
+    let cut = safe_name(&no_extension);
+    assert!(!cut.ends_with('.') && !cut.ends_with(' '), "{cut:?}");
+}
+
+#[test]
 fn a_file_name_from_a_sender_becomes_one_plain_name() {
     assert_eq!(safe_name("rota.csv"), "rota.csv");
     assert_eq!(safe_name("../../.bashrc"), "bashrc");

@@ -97,27 +97,33 @@ impl Save for Downloads {
     }
 }
 
-/// `name` made fit to be one file in a folder: the last part of a path, without control, bidi or format
-/// characters and the characters Windows refuses, without dots and spaces at either end, cut to [`MAX_NAME`]
-/// characters with the extension kept; `attachment` when nothing is left.
+/// `name` made fit to be one file in a folder: the last part of a path, without control, bidi, format or other
+/// invisible characters and the characters Windows refuses, white space runs as one space, without dots and spaces at
+/// either end (before and after the cut), cut to [`MAX_NAME`] characters with the extension kept; `attachment` when
+/// nothing is left.
 #[must_use]
 pub fn safe_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
-    let kept: String = last
-        .chars()
-        .filter(|c| !c.is_control())
-        .filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
-        .filter(|c| !matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{061C}' | '\u{FEFF}'))
-        .collect();
-    let trimmed = kept.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let mut kept = String::new();
+    for c in last.chars().filter(|c| !c.is_control() && !invisible(*c)).filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+        // A run of white space of any kind becomes one plain space.
+        if !c.is_whitespace() {
+            kept.push(c);
+        } else if !kept.ends_with(' ') {
+            kept.push(' ');
+        }
+    }
+    let edge = |c: char| c == '.' || c == ' ';
+    let trimmed = kept.trim_matches(edge);
     let cut: String = if trimmed.chars().count() <= MAX_NAME {
         trimmed.to_owned()
     } else {
         let extension = trimmed.rsplit_once('.').map(|(_, extension)| extension).filter(|extension| extension.chars().count() <= 16).unwrap_or("");
         let room = MAX_NAME.saturating_sub(extension.chars().count().saturating_add(1));
         let stem: String = trimmed.chars().take(room).collect();
-        if extension.is_empty() { trimmed.chars().take(MAX_NAME).collect() } else { format!("{}.{extension}", stem.trim_end_matches('.')) }
+        if extension.is_empty() { trimmed.chars().take(MAX_NAME).collect() } else { format!("{}.{extension}", stem.trim_end_matches(edge)) }
     };
+    let cut = cut.trim_matches(edge).to_owned();
     let stem = cut.split('.').next().unwrap_or_default();
     if cut.is_empty() {
         tr!("attachment").to_owned()
@@ -126,6 +132,38 @@ pub fn safe_name(name: &str) -> String {
     } else {
         cut
     }
+}
+
+/// Whether `c` shows nothing on its own: a format character (Unicode category Cf), the line or paragraph separator
+/// (Zl, Zp), or a Hangul filler.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{AD}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61C}'
+            | '\u{6DD}'
+            | '\u{70F}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+    )
 }
 
 /// Whether Windows keeps `stem` for a device: CON, PRN, AUX, NUL, CONIN$, CONOUT$, and COM or LPT with a digit
