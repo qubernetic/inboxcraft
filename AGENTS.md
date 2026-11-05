@@ -86,7 +86,8 @@ invented.
   new permission goes into the manifest's `finish-args` with its reason in a comment above it
   (`contrib/flatpak/`).
 - CI (`.github/workflows/ci.yml`) runs `cargo xtask ci` on ready PRs only: a draft starts no job, so run `just ci`
-  locally before `gh pr ready`. The `ci` job is the gate.
+  locally before `gh pr ready`. The `ci` job is the gate. On a PR, the `flatpak` job runs only when the PR changes a
+  Flatpak input (list in `docs/development.md`, "CI").
 - The host has no Rust toolchain: every `cargo` command runs in the dev container (`just shell`) or in native mode.
 - Every source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Git: Gitflow (`main` and `develop` are protected; work on `feature/<issue>-<slug>`, `fix/…`, `hotfix/…`,
@@ -126,3 +127,4 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-05 | minor | `just shot` for the headless pictures; the look lives in `docs/design.md` (#30) |
 | 2026-11-05 | minor | The Flatpak keeps building: `flatpak-sources-check` and reasons for permissions (#31) |
 | 2026-11-05 | minor | CI: a draft starts no job (#68) |
+| 2026-11-05 | minor | CI: `flatpak` runs on a PR only when its inputs change (#68) |

@@ -200,9 +200,9 @@ first build compiles every crate and takes a while; later ones reuse the downloa
 `flatpak uninstall --user io.github.qubernetic.inboxcraft`.
 
 ### Install the bundle from CI
-The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every ready PR run and
-keeps it as an artifact of the run. Download it from the run's page, or with `gh run download <run-id>`, then
-install it for your user:
+The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every push to `develop`,
+`main` or an epic branch, and on a ready PR that changes a Flatpak input (see "CI"), and keeps it as an artifact of
+the run. Download it from the run's page, or with `gh run download <run-id>`, then install it for your user:
 
 ```sh
 flatpak install --user <bundle>.flatpak
@@ -280,15 +280,22 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 
 | Job | What it does | Token |
 |---|---|---|
+| `changes` | decides whether `flatpak` runs: always on a push or a manual run; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
-| `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
+| `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` found no Flatpak input in the PR | read |
 
 - **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
   merge anyway, as `ci` is the required check. The full run starts when the PR is marked ready (`gh pr ready`) and
   repeats on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before
   marking a PR ready.
+- **The Flatpak inputs.** A PR runs `flatpak` only when it changes one of these, the files the manifest builds from
+  apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
+  metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
+  `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
+  `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to the base
+  branch, not in its own PR.
 - `ci` is the check to require. A skipped check reports as passing, so a required check has to be a job that runs on
   every full run.
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
@@ -379,3 +386,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: the `cov` gate is the one test run, no separate nextest gate (#66) |
 | 2026-11-05 | minor | CI: the dependency cache of the `test` job, saved by branch pushes only (#67) |
 | 2026-11-05 | minor | CI: no `draft` job, a draft starts no job (#68) |
+| 2026-11-05 | minor | CI: `flatpak` on a PR only when its inputs change; the list of inputs (#68) |
