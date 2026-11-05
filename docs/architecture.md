@@ -71,6 +71,17 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
+Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
+entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
+no account had in this session and queues the owner's first check. The front end puts the password into the OS
+credential store (`ui_egui::onboard::Keychain`; `keyring` in the desktop app) under the account's id, and the
+worker reads it from there each time it signs in, so a password never passes through a command, an answer, the
+store or the log. A new account's first check that signs in queues its folder list, so the sync starts after the
+password was accepted and not before. `account.remove` removes the account with its mail and drops its state and
+queued jobs. Each frame the window hands the queued jobs to the app's workers (`ui_egui::workers::Workers`; one
+`net::Worker` per account, started at its first job, stopped off the window's thread when its account is gone) and
+applies their events; Detect runs on a thread of its own in the window, outside the engine.
+
 Folder roles come from `model::RoleMap`: SPECIAL-USE first, then the English and Hungarian names, then the owner,
 asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and Archive can be changed.
 
@@ -128,3 +139,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | The engine: the `Session`, commands with agent classes, events applied (#27) |
 | 2026-11-05 | minor | The account check, its job and events, and Detect (#28) |
 | 2026-11-05 | minor | The reader commands and where remote pictures are fetched (#33) |
+| 2026-11-05 | minor | Adding an account: `account.add`, `account.remove`, the credential store and the window's workers (#34) |

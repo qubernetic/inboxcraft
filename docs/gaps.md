@@ -258,10 +258,10 @@ B = blocks the next stage.
   message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
 - `engine` lets an agent run `safe` commands only; per-account access levels and the owner's approval for `owner`
   commands come with the first `owner` command (#27).
-- `account.check` runs for saved accounts only, as a job of the account's worker: there is no command yet that
-  checks settings before they are saved, or that runs Detect. Both need a job without an account, which comes with
-  onboarding and `account.add` (E1.11). The SMTP sign-in and the CalDAV discovery report "not built yet" until E2.2
-  and E4.2 (#28).
+- `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
+  first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
+  it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
+  cannot run it. The SMTP sign-in and the CalDAV discovery report "not built yet" until E2.2 and E4.2 (#28, #34).
 - `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
   stays running until the workers are started again (`Session::start`), which forgets it (#28).
 - After a refused or unanswered sign-in, an agent's `account.check` stops before the sign-in (`needs_owner`) and only
@@ -303,7 +303,9 @@ B = blocks the next stage.
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 - The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit, and adding an account comes with onboarding (E1.11) (#30).
+  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, while its password
+  stays in the OS credential store under `io.github.qubernetic.inboxcraft`, `account-<id>`; the next account with
+  that id in a later session overwrites it, and nothing removes it otherwise until accounts are kept on disk (#34).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
@@ -332,8 +334,7 @@ B = blocks the next stage.
 - `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
   mailboxes, an index comes with the store on disk (#33).
 - The next-message rule applies when the open message leaves the list after a refresh; archive and delete, which
-  will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened: the
-  window does not apply worker events yet (#33).
+  will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened (#33).
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
 - The window uses egui's bundled fonts: Ubuntu Light (Ubuntu Font Licence 1.0, which is not an OSI licence; allowed
@@ -350,8 +351,24 @@ B = blocks the next stage.
 - The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
   it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
 - The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
-  findings and builds anyway. The Secret Service, notification and Background portal permissions are there before
-  the app uses them (#31).
+  findings and builds anyway. The notification and Background portal permissions are there before the app uses
+  them; the Secret Service one is used for the account passwords since #34 (#31).
+
+- Onboarding (#34):
+  - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and
+    E4.2. Detect fills in its first IMAP proposal; the others are not offered to choose from.
+  - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
+    not yet through the i18n macros.
+  - The password field is egui's `String`: the window overwrites the password's bytes when it is added or the page
+    closes, but egui may have copied it while drawing (its text layout caches), and those copies are freed without
+    being overwritten.
+  - A new account starts syncing when its first check signs in; a refused first sign-in leaves it unsynced until a
+    check signs in. Without a running credential store (no Secret Service on the desktop) no account can be added.
+  - Workers stop off the window's thread when their account is removed, so a closing worker can still finish its
+    last job for a moment; its late events name an account the session no longer holds and are dropped. Account ids
+    are never given twice in a session.
+  - The window wakes on each worker event; the events channel has no bound (#25), and the window applies at most
+    eight rounds of jobs and events a frame.
 
 ## Revision history
 | Date | Change | Summary |
@@ -400,3 +417,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Picture limits per message: inline cap and decoded-bytes budget (#33) |
 | 2026-11-05 | minor | What a forged `From` of an allowed sender learns (#33) |
 | 2026-11-05 | minor | `cargo xtask ci` runs the tests once, under coverage (#66) |
+| 2026-11-05 | minor | Onboarding's rough edges; the window applies worker events (#34) |

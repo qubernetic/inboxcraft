@@ -64,6 +64,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | The dev Flatpak: `git pull && just flatpak` builds and installs InboxCraft with a menu entry (and the sample mailbox as its second action), offline from the checkout with the crates checked against `Cargo.lock` in `cargo xtask ci`; the app icon drawn in code (#31) |
 | 2026-11-05 | The reader: thread oldest first, short and full header, folded quotes, safe HTML, attachment tiles with Save, remote pictures only after consent (once or always for the sender) through `net` leaking only the URL, link targets on hover, the next-message rule, the full-width reader that Escape leaves (#33) |
 | 2026-11-05 | CI runs the tests once: the `cov` gate's run under coverage is the test run, no separate nextest gate (#66) |
+| 2026-11-05 | Adding an account: the manual form with Detect's proposal, the password into the OS credential store only, `account.add` and `account.remove` (owner), the check's steps live with host, port and issuer; one `net` worker per account in the app (#34) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -95,3 +96,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | minor | Progress log: the dev Flatpak (#31) |
 | 2026-11-05 | minor | Progress log: the reader (#33) |
 | 2026-11-05 | minor | Progress log: the tests run once in CI (#66) |
+| 2026-11-05 | minor | Progress log: adding an account (#34) |

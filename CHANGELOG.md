@@ -274,8 +274,23 @@ All notable changes to InboxCraft are listed here. The format follows
   NAT64 or 6to4, is judged as IPv4). `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`, already in the dependency
   graph) with the size checked before anything is allocated. One message asks for at most 32 inline and 64 remote
   pictures and holds at most 64 MiB of them decoded; all messages together at most 256 MiB. Fuzz target `ui_reader`.
+- Adding an account (#34): "Add account" in the folder pane and in the empty window opens a form, manual by
+  default (address, names, user name, password, IMAP server, port, TLS or STARTTLS). Detect fills in its best
+  proposal and says where it came from (a redirect over plain HTTP and a guessed host name are marked for a second
+  look), what it asked and what failed; the ISPDB is asked only when the box is ticked. "Add and check" runs the new
+  `account.add` command (owner) and puts the password into the OS credential store (`keyring`: Secret Service,
+  Keychain or Credential Manager) under the account's id, and nowhere else: not in a command's parameters, an
+  answer, an error, the log or the store. When the credential store refuses it, the account is removed again. The
+  account check's steps then show as the worker reports them, each with the host and port it tried and the
+  certificate's issuer; after a failure the owner checks again or changes the settings, which removes the account
+  and its password and opens the form again. A new account starts syncing once its first check signs in. New
+  commands: `account.add` and `account.remove` (owner); a complaint about `account.add`'s parameters repeats
+  nothing that was sent. The desktop app runs one `net` worker per account and applies their events each frame;
+  `ui_shot` draws the page in each state (`onboard`)
 
 ### Changed
+- `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
+  `--sample` still connects nowhere and offers no "Add account" (#34)
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
   COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)
 - `rustls-platform-verifier` 0.6 to 0.7, the version `ureq` uses. `cargo xtask layers` counts `hickory-proto` as a
