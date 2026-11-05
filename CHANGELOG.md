@@ -222,6 +222,9 @@ All notable changes to InboxCraft are listed here. The format follows
   COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)
 - `rustls-platform-verifier` 0.6 to 0.7, the version `ureq` uses. `cargo xtask layers` counts `hickory-proto` as a
   network crate, so it stays in `net` (#28)
+- The second live test account is `live-imap2`, a throwaway account on the reference provider like `live-imap`,
+  read from `INBOXCRAFT_LIVE_IMAP2_ADDRESS`, `_HOST`, `_USER` and `_SECRET`; the recipient allow-list and the
+  leak scan of `just it-live` cover its values. No Google account takes part in the live tests (#57)
 
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout

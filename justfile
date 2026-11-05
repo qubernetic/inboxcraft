@@ -137,7 +137,7 @@ it-live *args: _host_only _up
         fi
     }
     vars=()
-    for account in IMAP GOOGLE; do
+    for account in IMAP IMAP2; do
         for field in ADDRESS HOST USER SECRET; do vars+=("INBOXCRAFT_LIVE_${account}_${field}"); done
     done
     pass=()
@@ -163,8 +163,8 @@ it-live *args: _host_only _up
     # so no value is ever an argument of an external command, and it looks for each value raw and as Rust's
     # `{:?}` prints it (with `\` and `"` escaped).
     output="$(<"$log")"
-    for var in INBOXCRAFT_LIVE_IMAP_SECRET INBOXCRAFT_LIVE_GOOGLE_SECRET INBOXCRAFT_LIVE_IMAP_ADDRESS \
-        INBOXCRAFT_LIVE_GOOGLE_ADDRESS INBOXCRAFT_LIVE_IMAP_USER INBOXCRAFT_LIVE_GOOGLE_USER; do
+    for var in INBOXCRAFT_LIVE_IMAP_SECRET INBOXCRAFT_LIVE_IMAP2_SECRET INBOXCRAFT_LIVE_IMAP_ADDRESS \
+        INBOXCRAFT_LIVE_IMAP2_ADDRESS INBOXCRAFT_LIVE_IMAP_USER INBOXCRAFT_LIVE_IMAP2_USER; do
         value="${!var}"
         escaped="${value//\\/\\\\}"
         escaped="${escaped//\"/\\\"}"
