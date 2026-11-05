@@ -242,6 +242,18 @@ fn only_https_hosts_without_user_information_count() {
     assert_eq!(https_host("https://a@example.net/"), None);
     assert_eq!(https_host("https:"), None);
     assert_eq!(https_host("https://"), None);
+    for url in [
+        "https://evil.example\\@mx.example.net/",
+        "https://mx.example.net\\.evil.example/",
+        "https://mx.\u{ff45}xample.net/",
+        "https://[::1]/",
+        "https://mx%2eexample.net/",
+        "https://mx.example.net./",
+        "https://.example.net/",
+        "https://mx.example .net/",
+    ] {
+        assert_eq!(https_host(url), None, "{url}");
+    }
     assert!(within("a.example.net", "example.net"));
     assert!(within("example.net", "example.net"));
     assert!(!within("badexample.net", "example.net"));

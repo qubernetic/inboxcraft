@@ -289,7 +289,8 @@ fn base_domain(host: &Host) -> Option<String> {
     Some(labels.get(count.saturating_sub(keep)..)?.join("."))
 }
 
-/// The host of an `https://` URL, lowercase; `None` for any other URL, or one with user information.
+/// The host of an `https://` URL, lowercase; `None` for any other URL, one with user information, or a host that is
+/// not plain ASCII letters, digits, hyphens and inner dots (no IP literal, escape, trailing dot or Unicode look-alike).
 fn https_host(url: &str) -> Option<String> {
     let rest = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).and_then(|_| url.get(8..))?;
     let authority = rest.split(['/', '?', '#']).next()?;
@@ -297,6 +298,10 @@ fn https_host(url: &str) -> Option<String> {
         return None;
     }
     let host = authority.rsplit_once(':').map_or(authority, |(host, port)| if port.chars().all(|c| c.is_ascii_digit()) { host } else { authority });
+    let plain = host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+    if !plain || host.starts_with('.') || host.ends_with('.') {
+        return None;
+    }
     Host::new(host).ok().map(|host| host.as_str().to_lowercase())
 }
 
