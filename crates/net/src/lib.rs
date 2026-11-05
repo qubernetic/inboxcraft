@@ -25,6 +25,9 @@
 //!   has seen. A worker runs it for its account on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 //! - [`autoconfig`] reads Mozilla's autoconfig file: the encrypted IMAP and submission servers a provider publishes.
+//! - [`detect`] proposes settings from an address: MX ([`dns`]), autoconfig at the domain over HTTPS ([`web`]), the
+//!   ISPDB only when switched on, SRV, and common host names as a hint. A proposal is detected settings: no password
+//!   goes to them before the owner has seen them and TLS has verified.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -34,6 +37,7 @@ pub mod certificate;
 mod check;
 mod compress;
 mod connect;
+pub mod detect;
 pub mod dns;
 pub mod envelope;
 mod error;
@@ -41,6 +45,7 @@ mod imap;
 mod sync;
 mod tls;
 mod watch;
+pub mod web;
 mod worker;
 
 pub use backoff::Backoff;
