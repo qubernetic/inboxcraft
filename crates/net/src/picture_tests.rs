@@ -110,7 +110,7 @@ fn plain_http_and_other_schemes_are_refused_before_any_connection() {
 #[test]
 fn a_redirect_is_followed_over_https_only() {
     let pki = TestPki::new().unwrap();
-    let moved = format!("HTTP/1.1 302 Found\r\nLocation: https://{HOST}/real.png\r\nContent-Length: 0\r\n\r\n").into_bytes();
+    let moved = format!("HTTP/1.1 302 Found\r\nLocation: https://{HOST}/real.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes();
     let (addr, server) = serve(pki.server_config(None).unwrap(), vec![moved, answer("200 OK", "image/jpeg", b"\xff\xd8\xff")]);
     let picture = client(&pki, addr).fetch(&format!("https://{HOST}/p.png")).unwrap();
     assert_eq!(picture.media_type, "image/jpeg");
@@ -118,7 +118,7 @@ fn a_redirect_is_followed_over_https_only() {
     assert!(heads[1].starts_with("GET /real.png HTTP/1.1\r\n"), "{heads:?}");
     assert!(!heads[1].to_lowercase().contains("referer"), "{heads:?}");
 
-    let down = format!("HTTP/1.1 302 Found\r\nLocation: http://{HOST}/plain.png\r\nContent-Length: 0\r\n\r\n").into_bytes();
+    let down = format!("HTTP/1.1 302 Found\r\nLocation: http://{HOST}/plain.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes();
     let (addr, server) = serve(pki.server_config(None).unwrap(), vec![down]);
     let error = client(&pki, addr).fetch(&format!("https://{HOST}/p.png")).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Protocol, "{error}");
@@ -128,7 +128,7 @@ fn a_redirect_is_followed_over_https_only() {
 #[test]
 fn too_many_redirects_are_refused() {
     let pki = TestPki::new().unwrap();
-    let moved = format!("HTTP/1.1 302 Found\r\nLocation: https://{HOST}/again.png\r\nContent-Length: 0\r\n\r\n").into_bytes();
+    let moved = format!("HTTP/1.1 302 Found\r\nLocation: https://{HOST}/again.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes();
     let (addr, _server) = serve(pki.server_config(None).unwrap(), vec![moved; 6]);
     let error = client(&pki, addr).fetch(&format!("https://{HOST}/p.png")).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Protocol, "{error}");
