@@ -14,7 +14,7 @@ are kept by the operating system's credential store. Deleting InboxCraft's data 
 - When you use "Try to detect" (see below): your domain's DNS records and autoconfig address, and Mozilla's ISPDB
   only if you switch it on.
 - When you check an account: the account's own IMAP server, as for reading mail (see below).
-- Pictures in a message, only when you ask to show them.
+- Pictures in a message, only when you ask to show them (see "Remote pictures" below).
 - <Update checks: GitHub Releases, if switched on.>
 
 ## Detecting settings
@@ -46,6 +46,27 @@ certificate verified, as when reading mail. After the server refused the passwor
 check an agent asks for stops before the sign-in and says it needs you; only a check you start sends the password
 again, so an agent cannot get the account locked at your provider by checking over and over.
 
+## Remote pictures
+A message can name pictures on someone else's server. InboxCraft shows none of them until you ask: the reader shows
+a banner saying how many are blocked, with "Load once" (this message, this time) and "Always for <address>".
+
+- **When you allow them**, each picture is asked for at that moment, so its server learns that the message was
+  opened and when, and from which network address. A sender can make each picture address unique to you.
+- **What the request carries**: the picture's address and nothing else of yours. It goes over HTTPS only, with the
+  same `User-Agent: InboxCraft` for everyone and no version, and with no cookies, no `Referer`, no `Accept` and no
+  proxy. Every picture has a new connection and a full TLS handshake, so the server cannot tie two pictures to one
+  another by the connection.
+- **Redirects**: up to 3 are followed, over HTTPS only. A redirect can lead to another host, which then learns the
+  same as the first one.
+- **Name lookups**: the picture's host name is looked up by your system's resolver, so your DNS server sees it too.
+  A host that resolves only to this computer or your local network is not asked.
+- **"Always for <address>"** is kept for this session only, until settings are kept on disk. It goes by the `From`
+  address, which a forged message can carry: its pictures then load without asking.
+- **Pictures inside the message** (`cid:`) come from the message itself and never from the network.
+
+Saving an attachment writes it into your Downloads folder, under a new name if a file of that name is there; it
+never overwrites a file.
+
 ## Scripts and agents
 The control channel listens only on 127.0.0.1 and needs a key from a file only you can read. The MCP server sees what
 you allow; sending mail needs your explicit permission.
@@ -60,3 +81,4 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 | 2026-11-05 | minor | What Detect asks and the ISPDB switch (off by default); what the account check connects to (#28) |
 | 2026-11-05 | minor | After a refused or unanswered sign-in, only the owner's check sends the password again (#28) |
 | 2026-11-05 | minor | The name lookups behind each URL, the redirect mark, which ports the check tries (#28) |
+| 2026-11-05 | minor | Remote pictures: when they are asked for, what a request carries, "always" for a sender, Save (#33) |

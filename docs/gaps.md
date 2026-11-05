@@ -314,8 +314,9 @@ B = blocks the next stage.
   turning it on is the project owner's call), so a click copies the address and the line under the reader shows
   where it goes. Plain-text bodies show web addresses as text, not as links (#33).
 - "Always for this sender" is kept for the session only (`remote.allow` keeps it in the engine's memory) until
-  settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: that loads the
-  forger's pictures, and tells them no more than a picture would (#33).
+  settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: a forger who
+  puts an allowed sender's address on a message has its pictures load when it is opened, and so learns when it was
+  opened and from which network address, without the owner being asked (#33).
 - Saving goes into the downloads folder (`XDG_DOWNLOAD_DIR` or `~/Downloads`) without a file dialog; the Flatpak
   opens that folder (`--filesystem=xdg-download`) instead of asking through the file chooser portal (#33).
 - Pictures: PNG and JPEG only (GIF, WebP and SVG show as a box with their alternative text), at most 8192 pixels a
@@ -397,3 +398,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The Flatpak opens Downloads for Save (#33) |
 | 2026-11-05 | minor | The reader forgets decoded pictures past a budget (#33) |
 | 2026-11-05 | minor | Picture limits per message: inline cap and decoded-bytes budget (#33) |
+| 2026-11-05 | minor | What a forged `From` of an allowed sender learns (#33) |
