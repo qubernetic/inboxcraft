@@ -319,11 +319,18 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - Every action is pinned by its full commit SHA with the tag in a comment; the workflow token is read-only and only
   `codecov` widens it.
 
-`.github/workflows/fuzz.yml` runs every target in `fuzz/fuzz_targets/` with cargo-fuzz for 300 seconds each, nightly
-at 02:17 UTC, and for 30 seconds on a PR that touches `fuzz/` or the workflow. cargo-fuzz needs nightly Rust: the
-toolchain is pinned by date in the workflow. A crash fails the run and its input is kept as the `fuzz-artifacts`
-artifact; it becomes a regression test. With no targets the job passes. GitHub runs a schedule only from the default
-branch, `main`, so the nightly run starts with the first release.
+`.github/workflows/fuzz.yml` builds every target in `fuzz/fuzz_targets/` with `cargo fuzz build` on every run, so a
+target that does not build fails the run, and then fuzzes them with cargo-fuzz:
+- nightly at 02:17 UTC and on a manual dispatch: every target for 300 seconds;
+- on a push to `develop`: every target for 30 seconds;
+- on a PR that touches `fuzz/` or the workflow: for 30 seconds only the targets whose file under `fuzz/fuzz_targets/`
+  is new or changed in the PR (`git diff` of the PR's merge commit against its first parent, the base tip). A PR
+  that changes a parser but not its target does not fuzz it: the target meets the change on the next push to
+  `develop`.
+
+cargo-fuzz needs nightly Rust: the toolchain is pinned by date in the workflow. A crash fails the run and its input is
+kept as the `fuzz-artifacts` artifact; it becomes a regression test. With no targets the job passes. GitHub runs a
+schedule only from the default branch, `main`, so the nightly run starts with the first release.
 
 `fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
@@ -387,3 +394,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: the dependency cache of the `test` job, saved by branch pushes only (#67) |
 | 2026-11-05 | minor | CI: no `draft` job, a draft starts no job (#68) |
 | 2026-11-05 | minor | CI: `flatpak` on a PR only when its inputs change; the list of inputs (#68) |
+| 2026-11-05 | minor | CI: fuzz builds every target, a PR fuzzes only new or changed targets, a push to `develop` all (#69) |
