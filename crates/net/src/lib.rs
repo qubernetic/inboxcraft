@@ -34,6 +34,7 @@ pub mod certificate;
 mod check;
 mod compress;
 mod connect;
+pub mod dns;
 pub mod envelope;
 mod error;
 mod imap;
