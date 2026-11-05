@@ -144,9 +144,10 @@ The owner alone runs opt-in live tests, by hand, on two throwaway test accounts.
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
 
-- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs` (the `live-imap` round trip:
-  sign-in, folder list, run folder, APPEND of an invented message, first sync, IDLE, resync, folder removed, over
-  implicit TLS on port 993; and the account check, whose every IMAP step must pass on the real chain). Every live test is named `live_*` and starts with
+- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs`: both accounts sign in and
+  list their folders; the `live-imap` round trip (sign-in, folder list, run folder, APPEND of an invented message,
+  first sync, IDLE, resync, folder removed); the account check, whose every IMAP step must pass on the real chain.
+  All of them over implicit TLS on port 993. Every live test is named `live_*` and starts with
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
@@ -281,3 +282,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Fuzzing: the certificate, autoconfig and DNS targets of `net`; live test of the account check (#28) |
 | 2026-11-05 | minor | Live tests: `just it-live` makes the archive's folder first (#57) |
 | 2026-11-05 | minor | Live tests: the second account is `live-imap2` on the reference provider (#57) |
+| 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |

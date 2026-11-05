@@ -216,6 +216,9 @@ All notable changes to InboxCraft are listed here. The format follows
   messages over our own UDP and TCP exchange with the system's resolver configuration, HTTPS through `ureq` with
   `rustls`, sending nothing but the URL. Fuzz targets `net_autoconfig` and `net_dns`. New dependencies `ureq` and
   `hickory-proto` (#28)
+- Live test `live_both_accounts_sign_in_and_list_folders` in `crates/net/tests/live.rs`: `live-imap` and
+  `live-imap2` each sign in over IMAP and list their folders, named only by those names in the output; it skips
+  cleanly without `INBOXCRAFT_LIVE_*`, in the sandbox and in CI (#57)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

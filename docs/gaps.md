@@ -220,9 +220,10 @@ B = blocks the next stage.
   QRESYNC keeps the known messages still there as at most a million ranges (`SyncConfig::max_ranges`): a folder with
   more gaps than that among its UIDs, or a server that answers far out of UID order, fails the sync with `TooLarge`
   (#26).
-- The `live-imap` live test reaches the server over implicit TLS on port 993 and signs its helper client in with
-  LOGIN; a password with characters outside ASCII cannot be quoted there and fails the test. The fake serves one
-  connection at a time, so the step where another client appends while the worker idles runs only live (#26).
+- The live tests reach the server over implicit TLS on port 993 only; the `live-imap` round trip signs its helper
+  client in with LOGIN; a password with characters outside ASCII cannot be quoted there and fails the test. The fake
+  serves one connection at a time, so the step where another client appends while the worker idles runs only live
+  (#26, #57).
 - `net` tells a far-off clock from a bad certificate by the certificate's dates: it ended more than four years
   before the clock's time, or starts more than a day after it, or the clock is before 2026. Where the platform
   verifier gives no dates (Windows, Apple, Android) and checks at the system's own time, only the last test applies.
@@ -325,3 +326,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The engine read path and the command registry (#27) |
 | 2026-11-05 | minor | Rough edges of the account check and Detect (#28) |
 | 2026-11-05 | minor | An agent's check after a refused sign-in waits for the owner (#28) |
+| 2026-11-05 | minor | The live tests use port 993 on both accounts (#57) |
