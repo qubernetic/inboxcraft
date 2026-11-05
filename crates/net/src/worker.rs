@@ -336,10 +336,11 @@ impl Run<'_> {
         self.wait(queue, wait);
     }
 
-    /// Waits `wait`, taking the jobs that come meanwhile; ends early when the engine stops the worker.
+    /// Waits `wait`, taking the jobs that come meanwhile; ends early when the engine stops the worker. The wait is
+    /// measured on the monotonic clock, so a wall clock set back cannot stretch it past the back-off cap.
     fn wait(&mut self, queue: &Receiver<Job>, wait: Duration) {
-        let clock = self.settings.connector.tls().clock();
-        let until = clock.now().saturating_add(wait);
+        let clock = Arc::clone(self.settings.connector.tls().clock());
+        let started = clock.monotonic();
         let mut left = wait;
         loop {
             match queue.recv_timeout(left) {
@@ -350,7 +351,7 @@ impl Run<'_> {
                     return;
                 }
             }
-            match until.duration_since(clock.now()) {
+            match wait.checked_sub(clock.monotonic().saturating_sub(started)) {
                 Some(rest) if !rest.is_zero() => left = rest,
                 _ => return,
             }

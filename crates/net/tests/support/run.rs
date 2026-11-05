@@ -14,6 +14,7 @@ use inboxcraft_model::{
 use inboxcraft_net::{Backoff, Credentials, Password, SyncConfig, Timeouts, WatchConfig, Worker, WorkerSettings};
 use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
 use inboxcraft_testkit::{CertFault, FakeServer, Listen, TestPki};
+use inboxcraft_time::Clock;
 
 use super::{Result, TIMEOUTS, connector, server, wall};
 
@@ -45,6 +46,8 @@ pub struct Options {
     pub cert: Option<CertFault>,
     pub compress: bool,
     pub watch: WatchConfig,
+    /// The clock the worker reads.
+    pub clock: Arc<dyn Clock>,
 }
 
 impl Default for Options {
@@ -59,6 +62,7 @@ impl Default for Options {
             cert: None,
             compress: true,
             watch: WatchConfig { tick: Duration::from_millis(20), ..WatchConfig::default() },
+            clock: wall(),
         }
     }
 }
@@ -81,7 +85,7 @@ impl Run {
     /// A worker on a fake that runs already, with a certificate of `pki`.
     pub fn on(fake: FakeServer, pki: &TestPki, options: Options) -> Result<Self> {
         let account = Account::new(ACCOUNT, "Test", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?;
-        let connector = connector(pki, wall(), fake.addr()).with_timeouts(options.timeouts);
+        let connector = connector(pki, options.clock, fake.addr()).with_timeouts(options.timeouts);
         let settings = WorkerSettings {
             sync: options.sync,
             backoff: options.backoff,

@@ -6,6 +6,7 @@
 
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use inboxcraft_model::{ConnectionState, ErrorKind, EventKind, JobKind};
@@ -14,7 +15,7 @@ use inboxcraft_testkit::imap::{Action, FakeImap, When};
 use inboxcraft_testkit::{CertFault, Fault};
 use inboxcraft_time::{Clock, SystemClock};
 use support::run::{INBOX, Options, Run, sync_inbox};
-use support::{Result, TIMEOUTS};
+use support::{Result, SetBack, TIMEOUTS};
 
 fn drop_at(when: When) -> FakeImap {
     FakeImap::sample().on(when, [Action::Fault(Fault::Drop)])
@@ -88,6 +89,26 @@ fn the_wait_takes_new_jobs_and_keeps_its_length() -> Result {
     assert!(took >= Duration::from_millis(250), "a new job cut the wait short: {took:?}");
     let folders = run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
     assert_eq!(folders.len(), 1);
+    run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
+    run.finish()?;
+    Ok(())
+}
+
+#[test]
+fn a_clock_set_back_during_the_wait_does_not_stretch_it() -> Result {
+    let backoff = Backoff { first: Duration::from_millis(400), cap: Duration::from_millis(400) };
+    let clock = Arc::new(SetBack::default());
+    let options = Options { backoff, connections: 2, clock: clock.clone(), ..Options::default() };
+    let mut run = Run::with(drop_at(When::Greeting), options)?;
+    run.job(JobKind::SyncFolderList)?;
+    run.until(|kind| matches!(kind, EventKind::Connection(ConnectionState::BackingOff { .. })))?;
+    let stopwatch = SystemClock::new();
+    clock.set_back(Duration::from_secs(30 * 60));
+    run.job(JobKind::SyncFolderList)?;
+    run.until(|kind| *kind == EventKind::Connection(ConnectionState::Online))?;
+    let took = stopwatch.monotonic();
+    assert!(took < Duration::from_secs(5), "the wait went past its cap: {took:?}");
+    run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
     run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
     run.finish()?;
     Ok(())

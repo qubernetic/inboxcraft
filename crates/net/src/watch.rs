@@ -55,7 +55,7 @@ pub(crate) struct Wake {
 /// time to renew it; then DONE and its answer.
 pub(crate) fn idle(connection: &mut ImapConnection, config: &WatchConfig, queue: &Receiver<Job>) -> Result<Wake, NetError> {
     let clock = Arc::clone(connection.clock());
-    let started = clock.now();
+    let started = clock.monotonic();
     let tag = connection.start(Client::idle)?;
     let mut wake = Wake::default();
     let mut ended = false;
@@ -86,7 +86,7 @@ pub(crate) fn idle(connection: &mut ImapConnection, config: &WatchConfig, queue:
             }
             Err(TryRecvError::Empty) => {}
         }
-        if clock.now().duration_since(started).is_none_or(|idled| idled >= config.renew) {
+        if clock.monotonic().saturating_sub(started) >= config.renew {
             break;
         }
     }
