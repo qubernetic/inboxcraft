@@ -1,8 +1,9 @@
 # Temporary, for #70 only, removed again before the PR is ready: measures the dependency opt-level of the CI build.
 #
-# One leg per level. Each leg starts with no cache (cold), runs `cargo xtask ci`, drops our own crates from target/
-# exactly as ci.yml does before its cache save, and runs `cargo xtask ci` again (warm, without the cache download).
-# The level goes into ~/.cargo/config.toml, whose [profile] settings take precedence over Cargo.toml's.
+# All three levels on one runner, one after another, so the runner's speed is the same for each. For every level:
+# no target/ and no registry (cold), `cargo xtask ci`, drop our own crates from target/ exactly as ci.yml does before
+# its cache save, `cargo xtask ci` again (warm, without the cache download). The level goes into
+# ~/.cargo/config.toml, whose [profile] settings take precedence over Cargo.toml's.
 #
 # Hardening as in ci.yml: read-only token, no secrets, no cache, every action pinned by commit SHA.
 
@@ -25,17 +26,18 @@ env:
 jobs:
   measure:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        level: [2, 1, 0]
+    timeout-minutes: 150
     env:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: The runner
+        run: |
+          nproc
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          free -h
       - name: Install the system packages
         run: |
           sudo apt-get update
@@ -62,27 +64,34 @@ jobs:
         with:
           tool: ${{ steps.tools.outputs.list }}
           fallback: none
-      - name: Set the dependency opt-level
-        env:
-          LEVEL: ${{ matrix.level }}
+      - name: Measure levels 0, 1 and 2
         run: |
-          mkdir -p ~/.cargo
-          printf '\n[profile.dev.package."*"]\nopt-level = %s\n' "$LEVEL" >> ~/.cargo/config.toml
-          cat ~/.cargo/config.toml
-      - name: Cold cargo xtask ci
-        run: cargo xtask ci
-      - name: Drop our own crates from target/
-        run: |
-          names=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '[.packages[] | .name, .targets[].name | ., gsub("-"; "_")] | unique | join("|")')
-          ours=".*/(lib)?($names)-[0-9a-f]{16}(\..+)?"
-          rm -rf target/nextest target/tmp target/doc
-          find target -maxdepth 2 -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*-profraw-list' \) -delete
-          profiles=$(find target -type d -name .fingerprint -prune -printf '%h\n')
-          for profile in $profiles; do
-            find "$profile" -mindepth 1 -maxdepth 1 ! -name deps ! -name build ! -name .fingerprint -exec rm -rf {} +
-            find "$profile" -mindepth 2 -maxdepth 2 -regextype posix-extended -regex "$ours" -exec rm -rf {} +
+          prune() {
+            names=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '[.packages[] | .name, .targets[].name | ., gsub("-"; "_")] | unique | join("|")')
+            ours=".*/(lib)?($names)-[0-9a-f]{16}(\..+)?"
+            rm -rf target/nextest target/tmp target/doc
+            find target -maxdepth 2 -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*-profraw-list' \) -delete
+            profiles=$(find target -type d -name .fingerprint -prune -printf '%h\n')
+            for profile in $profiles; do
+              find "$profile" -mindepth 1 -maxdepth 1 ! -name deps ! -name build ! -name .fingerprint -exec rm -rf {} +
+              find "$profile" -mindepth 2 -maxdepth 2 -regextype posix-extended -regex "$ours" -exec rm -rf {} +
+            done
+            du -sh target
+          }
+          cp ~/.cargo/config.toml ~/.cargo/config.toml.orig 2>/dev/null || touch ~/.cargo/config.toml.orig
+          results=()
+          for level in 0 1 2; do
+            rm -rf target ~/.cargo/registry ~/.cargo/git
+            cp ~/.cargo/config.toml.orig ~/.cargo/config.toml
+            printf '\n[profile.dev.package."*"]\nopt-level = %s\n' "$level" >> ~/.cargo/config.toml
+            echo "::group::level $level cold"
+            start=$SECONDS; cargo xtask ci; cold=$((SECONDS - start))
+            echo "::endgroup::"
+            prune
+            echo "::group::level $level warm"
+            start=$SECONDS; cargo xtask ci; warm=$((SECONDS - start))
+            echo "::endgroup::"
+            results+=("level $level: cold ${cold}s, warm ${warm}s")
           done
-          du -sh target ~/.cargo/registry/index ~/.cargo/registry/cache
-      - name: Warm cargo xtask ci
-        run: cargo xtask ci
+          printf '%s\n' "${results[@]}"
