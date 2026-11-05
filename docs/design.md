@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 InboxCraft's own look: the colours, distances and type sizes of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -85,12 +85,36 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
 - **Empty states** say what is going on: no accounts yet (with the `--sample` hint), an empty folder, no match.
 - **Errors** show in a banner on top until the next command succeeds or the person dismisses them.
 
+## The reader
+- **Where**: selecting a row opens the message to the right of the list, which narrows to a column. "Full width"
+  hides the folder pane and the list; Escape, "Leave full width" or Ctrl+F (for the search) bring them back. Close
+  ends the selection. The arrow keys step through the list while no field has the focus.
+- **Toolbar**: the subject, the next-message rule ("When a message leaves the list": show the next, show the
+  previous, go back to the list), Full width and Close.
+- **Thread**: oldest first. The open message is unfolded; the others are one line (sender, the first words, the
+  date) on the panel colour and unfold on a click; an unfolded older message has Fold.
+- **Header**: the sender's name large with the address muted, the date on the right, "to ..." under it; Details
+  shows From, Reply to, To, Copy and the date in full.
+- **Remote content**: while remote pictures are blocked, a banner on the panel colour says how many and that loading
+  them tells the sender the message was opened, with "Load once" and "Always for <address>". A blocked picture is a
+  muted box with its alternative text, so the layout shows where it was.
+- **Body**: plain text in the body size; a quote is a "Show quoted text (n lines)" button, and once shown it is
+  muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
+  list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
+  way.
+- **Attachments**: tiles with a page mark drawn in code (a page with a folded corner, in the accent colour), the name,
+  the size and Save.
+- **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
+  "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
+
 ## Pictures
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
-search, each in light and dark. Every UI change shows them in its PR.
+search, and the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
+width), each in light and dark. Every UI change shows them in its PR.
 
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
 | 2026-11-05 | major | First version: colours, distances, type and the mail list window (#30) |
+| 2026-11-05 | minor | The reader (#33) |

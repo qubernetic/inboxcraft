@@ -243,6 +243,22 @@ All notable changes to InboxCraft are listed here. The format follows
   state over the read commands, and `ui_shot` (`just shot`): headless pictures of the sample window filled on the
   CPU and written as PNG under `docs/images/`. New dependencies: `egui` and `eframe` 0.37 (OpenGL through glow,
   Wayland and X11, no wgpu, no `links`), `egui_kittest` for the UI tests, `png`.
+- The reader (#33): selecting a row opens the message beside the list with its thread oldest first (the older
+  messages folded to one line, unfolded on a click), a short header (sender, date, recipients) and the full one on
+  Details, plain text with its quotes folded behind "Show quoted text", HTML as `html`'s safe display blocks, and
+  attachment tiles with the name, the size and Save (into the downloads folder, under a cleaned name, never over a
+  file). Remote pictures stay blocked behind a banner until the owner loads them once or always for the sender; the
+  request then goes through `net` and tells the server nothing but the URL. The line under the reader shows where
+  the link under the pointer goes and warns when its text names another place; a click copies the address. "Full
+  width" lets the reader fill the window and Escape leaves it; the arrow keys step through the list; the
+  next-message rule (next, previous or back to the list) picks what shows when the open message leaves the list.
+  The sample mailbox has bodies, two reply threads, pictures drawn in code, a newsletter and a junk message with
+  remote pictures. New commands: `mail.thread` and `mail.attachment` (safe), `remote.allow` and `remote.forget`
+  (owner), `remote.list` (safe); `mail.read` also answers the HTML part, the inline parts by Content-ID, numbered
+  attachments and `remote_allowed`. `net::picture`: HTTPS only, a fixed `User-Agent: InboxCraft`, no cookies,
+  referrer, `Accept` or proxy, at most 3 redirects (each HTTPS), `image/*` answers of at most 10 MiB, and no host
+  that resolves only to this computer or the local network. `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`,
+  already in the dependency graph) with the size checked before anything is allocated. Fuzz target `ui_reader`.
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

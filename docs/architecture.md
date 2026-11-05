@@ -62,6 +62,15 @@ with `account`), `mail.read` and `mail.search`, all `safe`. Opening a message ch
 marks the message opened in the store so its body is kept, and asks the worker for a body not kept yet, once. A
 body too large to keep is not asked for again; `mail.read` then answers `body_error: "too_large"`.
 
+The reader adds `mail.thread` (the thread of a message oldest first, linked by `Message-ID`, `In-Reply-To` and
+`References` across folders and accounts), `mail.attachment` (one attachment or inline part of a kept body, in
+base64) and `remote.list`, all `safe`, and `remote.allow` and `remote.forget`, `owner`: whether a sender's remote
+pictures load without asking changes what leaves the computer. `mail.read` answers the HTML part as text (for
+`html`'s display, never run), the inline parts by Content-ID, numbered attachments and `remote_allowed`. No command
+fetches a remote picture: the front end asks its fetch for the pictures the owner allowed, and the desktop app's
+fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
+addresses only), so the engine stays free of network I/O.
+
 Folder roles come from `model::RoleMap`: SPECIAL-USE first, then the English and Hungarian names, then the owner,
 asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and Archive can be changed.
 
@@ -118,3 +127,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | Live updates, the offline queue and back-off in `net` (#26) |
 | 2026-11-05 | minor | The engine: the `Session`, commands with agent classes, events applied (#27) |
 | 2026-11-05 | minor | The account check, its job and events, and Detect (#28) |
+| 2026-11-05 | minor | The reader commands and where remote pictures are fetched (#33) |
