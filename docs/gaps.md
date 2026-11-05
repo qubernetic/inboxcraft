@@ -299,7 +299,9 @@ B = blocks the next stage.
   like any other (#29).
 - `html` resolves no relative link (there is no base address), so a relative or fragment link is refused. Hosts
   are compared as written, without Punycode or the public suffix list: `bank.example` and its subdomains are
-  the same site, a look-alike name in another script is not caught (#29).
+  the same site, a look-alike name in another script is not caught. Invisible format characters (Unicode's
+  default ignorables) and the full-stop look-alikes are the only characters the comparison reads past; the
+  shown text keeps the joiners, variation selectors and tag characters emoji and flags need (#29).
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 
@@ -340,3 +342,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | An agent's check after a refused sign-in waits for the owner (#28) |
 | 2026-11-05 | minor | The live tests use port 993 on both accounts (#57) |
 | 2026-11-05 | minor | Rough edges of the safe HTML display (#29) |
+| 2026-11-05 | minor | What the link comparison reads past (#29) |

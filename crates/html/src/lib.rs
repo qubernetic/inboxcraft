@@ -16,7 +16,8 @@
 //! - remote pictures are [`ImageSource::Blocked`] until the owner gives consent
 //!   ([`Options::remote_content`]); `cid:` pictures point at the message's own parts;
 //! - every link's target is exposed ([`Link`]), only `http`, `https` and `mailto` targets are kept,
-//!   and a link whose text names another place than its target is flagged ([`Link::mismatch`]);
+//!   and a link whose text names another place than its target is flagged ([`Link::mismatch`]),
+//!   invisible characters and full-stop look-alikes in the text making no difference;
 //! - the work is bounded: input over [`MAX_INPUT`] bytes is cut, nesting over [`MAX_DEPTH`] is
 //!   flattened, tables are capped ([`MAX_TABLE_DEPTH`], [`MAX_TABLE_ROWS`], [`MAX_TABLE_COLUMNS`]),
 //!   and so are blocks, links and pictures.

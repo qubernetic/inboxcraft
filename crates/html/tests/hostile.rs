@@ -51,12 +51,12 @@ fn nothing_marked_evil_survives_and_everything_marked_shown_does() {
 #[test]
 fn hostile_link_targets_are_refused_and_phishing_is_flagged() {
     let doc = display(include_str!("hostile/links.html"), &Options::default());
-    assert_eq!(doc.links.len(), 10);
+    assert_eq!(doc.links.len(), 13);
     for link in &doc.links[..6] {
         assert_eq!(link.target, LinkTarget::Refused, "{}", link.text);
     }
-    assert!(doc.links[6..9].iter().all(|l| l.mismatch));
-    assert!(!doc.links[9].mismatch);
+    assert!(doc.links[6..12].iter().all(|l| l.mismatch));
+    assert!(!doc.links[12].mismatch);
     assert!(matches!(&doc.links[6].target, LinkTarget::Web { host, .. } if host == "evil.example"));
 }
 

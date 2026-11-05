@@ -226,7 +226,9 @@ All notable changes to InboxCraft are listed here. The format follows
   not shown. Remote pictures are blocked until the owner's consent flag (`RemoteContent::Allowed`) and counted;
   `cid:` pictures point at the message's parts. Every link exposes its target; only `http`, `https` and
   `mailto` are kept, and a link whose text names another host or address is flagged (`Link::mismatch`), with
-  bidi overrides removed from all text. Input, nesting, tables, blocks, links and pictures are capped. The
+  invisible format characters ignored and full-stop look-alikes read as dots in the comparison; a web address
+  with a user name, in the target or the text, is always flagged. Bidi overrides and invisible format
+  characters other than the joiners are removed from all text. Input, nesting, tables, blocks, links and pictures are capped. The
   tokenizer and the character references are adapted from UCS-Care-Group/mailcraft `html` (MIT OR Apache-2.0).
   A hostile fixture set and the fuzz target `html_display` (#29)
 

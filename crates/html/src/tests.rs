@@ -376,6 +376,76 @@ fn a_bidi_override_cannot_disguise_the_text() {
 }
 
 #[test]
+fn invisible_characters_cannot_hide_a_mismatch() {
+    let texts = [
+        "bank&#x200B;.example",
+        "ba&#x200D;nk.example",
+        "ba&#x200C;nk.example",
+        "ba&shy;nk.example",
+        "bank.exa&#x2060;mple",
+        "&#xFEFF;bank.example",
+        "bank.example&#x200E;",
+        "ban&#x61C;k.example",
+        "bank&#x3002;example",
+        "bank&#xFF0E;example",
+        "bank&#xFF61;example",
+    ];
+    for text in texts {
+        let d = doc(&format!("<a href=\"https://evil.example/\">{text}</a>"));
+        assert!(d.links[0].mismatch, "{text}");
+        let same = doc(&format!("<a href=\"https://bank.example/\">{text}</a>"));
+        assert!(!same.links[0].mismatch, "{text}");
+    }
+    let d = doc("<a href=\"mailto:help@bank.example\">help&#x200B;@bank&#xFF0E;example</a>");
+    assert!(!d.links[0].mismatch);
+    let d = doc("<a href=\"mailto:thief@evil.example\">help&#x200B;@bank.example</a>");
+    assert!(d.links[0].mismatch);
+}
+
+#[test]
+fn any_invisible_character_anywhere_is_ignored_in_the_comparison() {
+    let invisible = ["&shy;", "&#x61C;", "&#x180E;", "&#x200B;", "&#x200C;", "&#x200D;", "&#x200E;", "&#x200F;", "&#x2060;", "&#x2064;", "&#xFEFF;"];
+    let dots = [".", "&#x3002;", "&#xFF0E;", "&#xFF61;"];
+    for at in 0..="bank.example".len() {
+        for (hidden, dot) in invisible.iter().zip(dots.iter().cycle()) {
+            let (head, tail) = "bank.example".split_at(at);
+            let text = format!("{head}{hidden}{tail}").replace('.', dot);
+            for (href, mismatch) in [("https://evil.example/", true), ("https://bank.example/", false)] {
+                let d = doc(&format!("<a href=\"{href}\">{text}</a>"));
+                assert_eq!(d.links[0].mismatch, mismatch, "{text} -> {href}");
+            }
+        }
+    }
+}
+
+#[test]
+fn invisible_characters_are_not_shown_but_joiners_stay() {
+    let d = doc("<p>a&shy;b&#x200B;c&#xFEFF;d&#x2060;e&#x200E;f&#x61C;g&#x180E;h</p>");
+    assert_eq!(texts(&d.blocks), ["abcdefgh"]);
+    // The joiners hold emoji sequences and some scripts together.
+    let d = doc("<p>&#x1F469;&#x200D;&#x1F4BB; &#x645;&#x200C;&#x627;</p>");
+    assert_eq!(texts(&d.blocks), ["\u{1f469}\u{200d}\u{1f4bb} \u{645}\u{200c}\u{627}"]);
+}
+
+#[test]
+fn user_info_in_the_target_or_the_text_is_a_mismatch() {
+    let cases = [
+        ("Click here", "https://bank.example@evil.example/"),
+        ("evil.example", "https://bank.example@evil.example/"),
+        ("https://bank.example@evil.example", "https://evil.example/"),
+        ("https://bank.example@evil.example", "https://bank.example@evil.example/"),
+        ("Click here", "https://u:p@bank.example/"),
+    ];
+    for (text, href) in cases {
+        let d = doc(&format!("<a href=\"{href}\">{text}</a>"));
+        assert!(d.links[0].mismatch, "{text} -> {href}");
+    }
+    // A backslash ends the authority the way a browser reads it, so this `@` is in the path.
+    let d = doc("<a href=\"https://bank.example\\@evil.example/\">bank.example</a>");
+    assert!(!d.links[0].mismatch);
+}
+
+#[test]
 fn link_text_is_capped() {
     let d = doc(&format!("<a href=https://a.example>{}</a>", "x".repeat(5_000)));
     assert_eq!(d.links[0].text.chars().count(), 1_024);

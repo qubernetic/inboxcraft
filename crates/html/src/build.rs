@@ -736,10 +736,11 @@ fn span_style(s: &Span) -> Style {
     Style { bold: s.bold, italic: s.italic, underline: s.underline, strike: s.strike, code: s.code, link: s.link }
 }
 
-/// Characters never shown: controls other than white space, and the bidi overrides and isolates
-/// that can make text read differently from what it is.
+/// Characters never shown: controls other than white space, and invisible characters (among them
+/// the bidi overrides and isolates that can make text read differently from what it is) other than
+/// the joiners emoji and some scripts need.
 fn removed(c: char) -> bool {
-    (c.is_control() && !matches!(c, '\t' | '\n' | '\r')) || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    (c.is_control() && !matches!(c, '\t' | '\n' | '\r')) || (link::invisible(c) && !link::joins(c))
 }
 
 /// Attribute text as shown: removed characters dropped, white space collapsed, at most `max`

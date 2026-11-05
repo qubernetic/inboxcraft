@@ -160,7 +160,10 @@ pub struct Link {
     /// Its visible text (at most 1,024 characters), for comparing with the target.
     pub text: String,
     /// The text names a web address, host or mail address other than the target, or the target is
-    /// refused while the text looks like an address: a likely phishing link.
+    /// refused while the text looks like an address, or the target or the text is a web address
+    /// with a user name (`https://bank.example@evil.example/`): a likely phishing link. The text is
+    /// compared as a reader sees it: invisible format characters ignored, the ideographic,
+    /// fullwidth and halfwidth full stops read as dots.
     pub mismatch: bool,
 }
 

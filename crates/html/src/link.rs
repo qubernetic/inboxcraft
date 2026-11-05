@@ -50,9 +50,16 @@ pub(crate) fn image_source(src: &str, options: &Options) -> ImageSource {
     }
 }
 
-/// Whether a link's visible text names another place than its target.
+/// Whether a link's visible text names another place than its target. A web target with a user
+/// name (`https://bank.example@evil.example/`) is always a mismatch: a reader takes the part before
+/// the `@` for the host, and a real link almost never carries one.
 pub(crate) fn mismatch(text: &str, target: &LinkTarget) -> bool {
-    let text = text.trim().to_lowercase();
+    if let LinkTarget::Web { url, .. } = target
+        && has_user_info(url)
+    {
+        return true;
+    }
+    let text = comparable(text);
     let Some(named) = named_place(&text) else { return false };
     match (named, target) {
         (Place::Host(named), LinkTarget::Web { host, .. }) => !same_site(&named, host),
@@ -61,10 +68,55 @@ pub(crate) fn mismatch(text: &str, target: &LinkTarget) -> bool {
     }
 }
 
+/// Whether a character takes no room when shown: Unicode's default ignorable code points (format
+/// characters such as the soft hyphen, the zero-width space and joiners, the bidi marks, the byte
+/// order mark, fillers and variation selectors).
+pub(crate) fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{34f}'
+            | '\u{61c}'
+            | '\u{115f}'..='\u{1160}'
+            | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{fff0}'..='\u{fff8}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e0fff}'
+    )
+}
+
+/// The invisible characters shown text keeps, because emoji sequences, flags and some scripts need
+/// them: the zero-width joiner and non-joiner, the variation selectors and the tag characters.
+pub(crate) fn joins(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200c}' | '\u{200d}' | '\u{180b}'..='\u{180d}' | '\u{180f}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0020}'..='\u{e007f}' | '\u{e0100}'..='\u{e01ef}'
+    )
+}
+
+/// A link text as a reader takes it: invisible characters dropped, the ideographic, fullwidth and
+/// halfwidth full stops read as dots (a browser's host parser does the same), trimmed, in lower case.
+fn comparable(text: &str) -> String {
+    let text: String =
+        text.chars().filter(|c| !invisible(*c)).map(|c| if matches!(c, '\u{3002}' | '\u{ff0e}' | '\u{ff61}') { '.' } else { c }).collect();
+    text.trim().to_lowercase()
+}
+
 /// A place a link text names.
 enum Place {
     Host(String),
     Mail(String),
+    /// A web address with a user name: it names one host and goes to another.
+    Disguised,
 }
 
 /// The web host or mail address a link text names, if it looks like one at all.
@@ -76,6 +128,9 @@ fn named_place(text: &str) -> Option<Place> {
         return Some(Place::Mail(rest.split('?').next().unwrap_or("").to_owned()));
     }
     if text.starts_with("http://") || text.starts_with("https://") {
+        if has_user_info(text) {
+            return Some(Place::Disguised);
+        }
         return web_host(text).map(Place::Host);
     }
     if let Some((local, domain)) = text.split_once('@') {
@@ -133,11 +188,22 @@ fn scheme(url: &str) -> Option<String> {
     valid.then(|| scheme.to_ascii_lowercase())
 }
 
-/// The host of an `http` or `https` address in lower case, without user name, port or trailing dot.
-fn web_host(url: &str) -> Option<String> {
+/// The authority of an `http` or `https` address: what follows `//` up to the path, query or
+/// fragment. A browser ends it at a backslash too.
+fn authority(url: &str) -> Option<&str> {
     let (_, rest) = url.split_once(':')?;
     let rest = rest.strip_prefix("//")?;
-    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or("");
+    rest.split(['/', '?', '#', '\\']).next()
+}
+
+/// Whether an `http` or `https` address carries a user name (an `@` in its authority).
+fn has_user_info(url: &str) -> bool {
+    authority(url).is_some_and(|a| a.contains('@'))
+}
+
+/// The host of an `http` or `https` address in lower case, without user name, port or trailing dot.
+fn web_host(url: &str) -> Option<String> {
+    let authority = authority(url)?;
     let host_port = authority.rsplit('@').next().unwrap_or("");
     let host =
         if let Some(v6) = host_port.strip_prefix('[') { v6.split(']').next().unwrap_or("") } else { host_port.split(':').next().unwrap_or("") };
