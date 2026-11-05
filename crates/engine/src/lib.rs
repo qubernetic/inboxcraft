@@ -16,6 +16,9 @@
 //!   [`inboxcraft_model::Event`] into store changes and the next jobs (a folder list brings the folder syncs, the
 //!   inbox first, and the watch on the inbox). Events for something the session does not hold, or with UIDs of an
 //!   older UIDVALIDITY, are dropped.
+//! - The read commands, all `safe`: `account.list`, `folder.list` (folders with their roles, the unified views by
+//!   role and the roles to ask the owner about) and `mail.list` (one folder, or one role across every account merged
+//!   by date, newest first; both narrowed to one account with `account`).
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -41,8 +44,10 @@ mod params;
 mod registry;
 mod session;
 mod sync;
+mod view;
 
 pub use class::{AgentClass, Caller};
+pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
 pub use session::{Applied, Context, Outcome, Session};

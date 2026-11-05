@@ -106,9 +106,11 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
         plan.change(Change::RemoveFolder(gone.id()));
         plan.state.validity.remove(&gone.id());
     }
-    let roles = &mut plan.state.accounts.entry(account).or_default().roles;
-    roles.detect(&next);
-    let inbox = roles.folder(Role::Inbox);
+    let held_state = plan.state.accounts.entry(account).or_default();
+    let questions = held_state.roles.detect(&next);
+    held_state.ask.extend(questions);
+    held_state.ask.retain(|role| held_state.roles.folder(*role).is_none());
+    let inbox = held_state.roles.folder(Role::Inbox);
     let mut order: Vec<&Folder> = next.iter().filter(|folder| folder.listing().is_selectable()).collect();
     order.sort_by_key(|folder| Some(folder.id()) != inbox);
     for folder in order {

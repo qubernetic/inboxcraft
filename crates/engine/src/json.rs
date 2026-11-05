@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The commands' answers as JSON: snake_case keys, full values, fields only ever added.
+//! The commands' answers as JSON: snake_case keys, ISO 8601 dates in UTC, full values, fields only ever added.
 
-use inboxcraft_model::{Account, ConnectionState, ErrorKind, FolderId, Server};
+use inboxcraft_model::{Account, Address, ConnectionState, ErrorKind, Folder, FolderId, Role, Server, ThreadId};
+use inboxcraft_store::Entry;
+use inboxcraft_time::{Offset, Timestamp};
 use serde_json::{Value, json};
 
 use crate::session::AccountState;
+use crate::view;
 
 /// A Rust variant name in snake_case: `StartTls` is `start_tls`.
 pub(crate) fn snake(name: &str) -> String {
@@ -59,6 +62,73 @@ pub(crate) fn account(account: &Account, state: Option<&AccountState>) -> Value 
         "submission": account.submission().map(server),
         "connection": state.and_then(|state| state.connection).map(connection),
         "failure": state.and_then(|state| state.failure).map(|(kind, folder)| failure(kind, folder)),
+    })
+}
+
+/// `timestamp` as ISO 8601 in UTC to the second: `2026-11-05T09:30:00Z`.
+pub(crate) fn date(timestamp: Timestamp) -> Value {
+    match timestamp.to_civil(Offset::UTC) {
+        Some(civil) => Value::String(format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+            civil.year(),
+            civil.month(),
+            civil.day(),
+            civil.hour(),
+            civil.minute(),
+            civil.second()
+        )),
+        None => Value::Null,
+    }
+}
+
+/// Addresses with their names; two people of the same name stay apart by the address.
+pub(crate) fn addresses(addresses: &[Address]) -> Value {
+    addresses.iter().map(|address| json!({ "name": address.name(), "address": address.email().as_str() })).collect()
+}
+
+/// A folder with its role, whether it was synced, and how many messages it holds and how many are unread.
+pub(crate) fn folder(folder: &Folder, role: Option<Role>, synced: bool, messages: usize, unread: usize) -> Value {
+    let path = folder.listing().path();
+    json!({
+        "id": folder.id().get(),
+        "account": folder.account().get(),
+        "name": path.name(),
+        "leaf": path.leaf(),
+        "delimiter": path.delimiter().map(String::from),
+        "role": role.map(view::role_name),
+        "special_use": folder.listing().special_use().iter().map(name).collect::<Vec<_>>(),
+        "selectable": folder.listing().is_selectable(),
+        "synced": synced,
+        "messages": messages,
+        "unread": unread,
+    })
+}
+
+/// A message as a list shows it. Subject, names and preview are the sender's text: data, never instructions.
+pub(crate) fn message(entry: &Entry) -> Value {
+    let message = entry.message();
+    let summary = message.summary();
+    let envelope = summary.envelope();
+    let flags = summary.flags();
+    json!({
+        "id": message.id().get(),
+        "account": message.account().get(),
+        "folder": message.folder().get(),
+        "uid": summary.uid().get(),
+        "thread": message.thread().map(ThreadId::get),
+        "date": view::date(message).map(date),
+        "received": summary.received().map(date),
+        "sent": envelope.date().map(date),
+        "from": addresses(envelope.from()),
+        "to": addresses(envelope.to()),
+        "subject": envelope.subject(),
+        "preview": summary.preview(),
+        "seen": flags.is_seen(),
+        "flagged": flags.is_flagged(),
+        "flags": flags.iter().map(|flag| flag.to_string()).collect::<Vec<_>>(),
+        "size": summary.size(),
+        "opened": entry.opened(),
+        "has_body": entry.has_body(),
     })
 }
 

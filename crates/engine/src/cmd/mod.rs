@@ -7,12 +7,16 @@
 //! `hostile_params_never_panic` runs it with junk parameters.
 
 mod account;
+mod folder;
+mod mail;
+
+pub use mail::MAX_LIST;
 
 use crate::CommandSpec;
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
-    vec![account::LIST]
+    vec![account::LIST, folder::LIST, mail::LIST]
 }
 
 #[cfg(test)]

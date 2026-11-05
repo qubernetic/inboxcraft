@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, RoleMap, UidValidity};
+use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, UidValidity};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Timestamp};
 use serde_json::Value;
@@ -99,6 +99,8 @@ pub(crate) struct State {
 pub(crate) struct AccountState {
     /// The folder roles: SPECIAL-USE, then names, then the owner.
     pub(crate) roles: RoleMap,
+    /// The roles no folder has, to ask the owner about.
+    pub(crate) ask: Vec<Role>,
     pub(crate) connection: Option<ConnectionState>,
     /// The last failure, until the account is online again.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
@@ -111,7 +113,7 @@ impl State {
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
-            roles.detect(&folders);
+            let ask = roles.detect(&folders);
             for folder in &folders {
                 state.next_folder = state.next_folder.max(folder.id().get().saturating_add(1));
                 if let Some(folder_state) = store.folder_state(folder.id())? {
@@ -121,7 +123,7 @@ impl State {
                     state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
                 }
             }
-            state.accounts.insert(account.id(), AccountState { roles, ..AccountState::default() });
+            state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
         }
         Ok(state)
     }

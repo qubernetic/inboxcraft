@@ -226,3 +226,16 @@ fn a_message_for_a_removed_folder_is_dropped() {
     let added = EventKind::MessagesAdded { folder: FolderId::new(2), uid_validity: validity(1), messages: vec![summary(1, "Late")] };
     assert_eq!(session.apply(&event(1, added)).unwrap(), Applied::Dropped, "the folder is gone");
 }
+
+#[test]
+fn a_role_question_goes_once_a_folder_has_the_role() {
+    let mut session = session();
+    let asked = |session: &mut crate::Session| -> Vec<String> {
+        let answer = session.run("folder.list", &json!({ "account": 1 })).unwrap();
+        answer["roles_to_ask"].as_array().unwrap().iter().map(|ask| ask["role"].as_str().unwrap().to_owned()).collect()
+    };
+    assert_eq!(asked(&mut session), ["drafts", "trash", "junk"]);
+    let listings = vec![listing("INBOX", vec![], true), listing("Drafts", vec![SpecialUse::Drafts], true), listing("Archive", vec![], true)];
+    session.apply(&event(1, EventKind::Folders { listings })).unwrap();
+    assert_eq!(asked(&mut session), ["trash", "junk", "sent"], "drafts found its folder; sent lost its folder and is asked about now");
+}

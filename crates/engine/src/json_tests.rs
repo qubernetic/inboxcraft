@@ -2,10 +2,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use inboxcraft_model::{ConnectionState, ErrorKind, FolderId, Security};
+use inboxcraft_time::Timestamp;
 use serde_json::json;
 
-use super::{account, failure, name, snake};
+use super::{account, date, failure, name, snake};
 use crate::session::AccountState;
+use crate::test_support::{NOW, at};
+
+#[test]
+fn dates_are_iso_8601_in_utc() {
+    assert_eq!(date(at(NOW)), json!("2026-11-05T09:00:00Z"));
+    assert_eq!(date(Timestamp::UNIX_EPOCH), json!("1970-01-01T00:00:00Z"));
+    assert_eq!(date(Timestamp::MIN), json!("0000-01-01T00:00:00Z"));
+    assert_eq!(date(Timestamp::MAX), json!("10000-12-31T23:59:59Z"));
+}
 
 #[test]
 fn names_are_snake_case() {
