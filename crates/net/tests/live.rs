@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The opt-in live test of `net` on the owner's throwaway account `live-imap` (`just it-live`, profile `live`): sign
-//! in, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
+//! The opt-in live tests of `net` on the owner's two throwaway accounts on the reference provider (`just it-live`,
+//! profile `live`): both `live-imap` and `live-imap2` sign in and list their folders; on `live-imap`, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
 //! IDLE, the resync of a new worker, and the folder removed; and `account.check`, whose every IMAP step passes on the
 //! real chain.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
-//! agent sandbox and in CI. Agents never run it. The account is reached over implicit TLS on port 993, checked by the
-//! operating system's verifier. Nothing here prints an address, a login name or the secret; the `it-live` recipe
+//! agent sandbox and in CI. Agents never run it. The accounts are reached over implicit TLS on port 993, checked by
+//! the operating system's verifier. Nothing here prints an address, a login name or a secret; output names the
+//! accounts only as `live-imap` and `live-imap2`; the `it-live` recipe
 //! scans the output for them all the same.
 
 mod support;
@@ -34,7 +35,7 @@ const RUN: FolderId = FolderId::new(1);
 /// How long a step may take on a real server.
 const STEP: Duration = Duration::from_secs(120);
 
-/// The secret of `live-imap`, in memory only.
+/// The secret of a live account, in memory only.
 struct Secret(String);
 
 impl Credentials for Secret {
@@ -43,7 +44,7 @@ impl Credentials for Secret {
     }
 }
 
-/// A worker on the live account and its events.
+/// A worker on a live account and its events.
 struct Live {
     worker: Worker,
     events: Receiver<Event>,
@@ -51,8 +52,7 @@ struct Live {
 }
 
 impl Live {
-    fn start(config: &LiveConfig, tls: &TlsSettings) -> Result<Self> {
-        let imap = config.imap();
+    fn start(imap: &live::Account, tls: &TlsSettings) -> Result<Self> {
         let port = NonZeroU16::new(993).ok_or("port")?;
         let server = Server::new(Host::new(imap.host())?, port, Security::Tls);
         let account = Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?;
@@ -99,6 +99,26 @@ fn subject(config: &LiveConfig, number: u32) -> String {
 }
 
 #[test]
+fn live_both_accounts_sign_in_and_list_folders() -> Result {
+    let Some(config) = live::start("live_both_accounts_sign_in_and_list_folders")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    for account in config.accounts() {
+        // Errors and output name the account as `live-imap` or `live-imap2` only.
+        let name = account.name();
+        let mut worker = Live::start(account, &tls).map_err(|err| format!("{name}: {err}"))?;
+        worker.job(JobKind::SyncFolderList)?;
+        let events = worker.until(|kind| matches!(kind, EventKind::Folders { .. })).map_err(|err| format!("{name}: {err}"))?;
+        let Some(EventKind::Folders { listings }) = events.last() else { return Err(format!("{name}: no folder list").into()) };
+        assert!(listings.iter().any(|listing| listing.path().is_inbox()), "{name}: no inbox in the folder list");
+        worker.worker.stop();
+        println!("live: {name} signed in, {} folders", listings.len());
+    }
+    Ok(())
+}
+
+#[test]
 fn live_imap_round_trip() -> Result {
     let Some(config) = live::start("live_imap_round_trip")? else {
         return Ok(());
@@ -106,7 +126,7 @@ fn live_imap_round_trip() -> Result {
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
 
     // Sign in and list the folders; the run folder takes the server's hierarchy delimiter.
-    let mut worker = Live::start(&config, &tls)?;
+    let mut worker = Live::start(config.imap(), &tls)?;
     worker.job(JobKind::SyncFolderList)?;
     let events = worker.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
     let Some(EventKind::Folders { listings }) = events.last() else { return Err("no folder list".into()) };
@@ -139,7 +159,7 @@ fn live_imap_round_trip() -> Result {
 
     // A new worker resyncs from the state the last one left: only what came since.
     folder.folders().append(&name, &config.invented_message(3))?;
-    let mut again = Live::start(&config, &tls)?;
+    let mut again = Live::start(config.imap(), &tls)?;
     again.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(known) })?;
     let events = again.synced()?;
     assert_eq!(subjects(&events), [subject(&config, 3)]);

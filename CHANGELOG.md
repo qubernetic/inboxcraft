@@ -216,9 +216,19 @@ All notable changes to InboxCraft are listed here. The format follows
   messages over our own UDP and TCP exchange with the system's resolver configuration, HTTPS through `ureq` with
   `rustls`, sending nothing but the URL. Fuzz targets `net_autoconfig` and `net_dns`. New dependencies `ureq` and
   `hickory-proto` (#28)
+- Live test `live_both_accounts_sign_in_and_list_folders` in `crates/net/tests/live.rs`: `live-imap` and
+  `live-imap2` each sign in over IMAP and list their folders, named only by those names in the output; it skips
+  cleanly without `INBOXCRAFT_LIVE_*`, in the sandbox and in CI (#57)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
   COMPRESS=DEFLATE stream of `net`; `just it-live` archives the live tests of `net` too (#26)
 - `rustls-platform-verifier` 0.6 to 0.7, the version `ureq` uses. `cargo xtask layers` counts `hickory-proto` as a
   network crate, so it stays in `net` (#28)
+- The second live test account is `live-imap2`, a throwaway account on the reference provider like `live-imap`,
+  read from `INBOXCRAFT_LIVE_IMAP2_ADDRESS`, `_HOST`, `_USER` and `_SECRET`; the recipient allow-list and the
+  leak scan of `just it-live` cover its values. No Google account takes part in the live tests (#57)
+
+### Fixed
+- `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
+  `nextest archive` exited with 103 because the folder was missing (#57)

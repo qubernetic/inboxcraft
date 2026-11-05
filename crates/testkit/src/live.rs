@@ -10,7 +10,7 @@
 //! - [`start`] reads the `INBOXCRAFT_LIVE_*` variables. Without any of them, and always when `AGENT_HORDE` (the
 //!   agent sandbox) or `CI` is set, it prints the reason and returns `None`, and the test returns early. A partial
 //!   or malformed configuration is an error, which names the variable and never its value.
-//! - The two accounts are called `live-imap` and `live-google` in output; their addresses, user names and secrets
+//! - The two accounts, both on the reference provider, are called `live-imap` and `live-imap2` in output; their addresses, user names and secrets
 //!   never appear in a [`fmt::Debug`] or [`fmt::Display`] of anything here. A [`Secret`] prints `[redacted]`.
 //!   Values a test prints itself, or passes to a failing `assert_eq!`, are not redacted.
 //! - [`LiveConfig::check_recipient`] is the recipient allow-list: exactly the two addresses given at run time, each
@@ -22,10 +22,10 @@
 //!
 //! | Variable | Meaning |
 //! |---|---|
-//! | `INBOXCRAFT_LIVE_{IMAP,GOOGLE}_ADDRESS` | the account's mail address, one of the two allowed recipients |
-//! | `INBOXCRAFT_LIVE_{IMAP,GOOGLE}_HOST` | the server's host name |
-//! | `INBOXCRAFT_LIVE_{IMAP,GOOGLE}_USER` | the login name |
-//! | `INBOXCRAFT_LIVE_{IMAP,GOOGLE}_SECRET` | the password or token |
+//! | `INBOXCRAFT_LIVE_{IMAP,IMAP2}_ADDRESS` | the account's mail address, one of the two allowed recipients |
+//! | `INBOXCRAFT_LIVE_{IMAP,IMAP2}_HOST` | the server's host name |
+//! | `INBOXCRAFT_LIVE_{IMAP,IMAP2}_USER` | the login name |
+//! | `INBOXCRAFT_LIVE_{IMAP,IMAP2}_SECRET` | the password or token |
 //! | `INBOXCRAFT_LIVE_RUN_ID` | optional: the run id; without it, the UTC time and the process id |
 //!
 //! ```
@@ -69,12 +69,12 @@ const IMAP: AccountVars = AccountVars {
     secret: "INBOXCRAFT_LIVE_IMAP_SECRET",
 };
 
-const GOOGLE: AccountVars = AccountVars {
-    name: "live-google",
-    address: "INBOXCRAFT_LIVE_GOOGLE_ADDRESS",
-    host: "INBOXCRAFT_LIVE_GOOGLE_HOST",
-    user: "INBOXCRAFT_LIVE_GOOGLE_USER",
-    secret: "INBOXCRAFT_LIVE_GOOGLE_SECRET",
+const IMAP2: AccountVars = AccountVars {
+    name: "live-imap2",
+    address: "INBOXCRAFT_LIVE_IMAP2_ADDRESS",
+    host: "INBOXCRAFT_LIVE_IMAP2_HOST",
+    user: "INBOXCRAFT_LIVE_IMAP2_USER",
+    secret: "INBOXCRAFT_LIVE_IMAP2_SECRET",
 };
 
 impl AccountVars {
@@ -114,7 +114,7 @@ impl fmt::Display for LiveError {
                 write!(f, "live test configuration is incomplete, missing: {}", missing.join(", "))
             }
             Self::Invalid { variable, why } => write!(f, "{variable} {why}"),
-            Self::SameAddress => f.write_str("live-imap and live-google have the same address"),
+            Self::SameAddress => f.write_str("live-imap and live-imap2 have the same address"),
             Self::RecipientRefused => f.write_str("recipient refused: not one of the two live test accounts"),
             Self::Delimiter => f.write_str("the hierarchy delimiter is a letter, a digit, -, _, white space, a control character, * or %"),
         }
@@ -158,7 +158,7 @@ pub struct Account {
 }
 
 impl Account {
-    /// The name in output: `live-imap` or `live-google`.
+    /// The name in output: `live-imap` or `live-imap2`.
     #[must_use]
     pub fn name(&self) -> &'static str {
         self.name
@@ -250,7 +250,7 @@ impl Live {
         if set("CI") {
             return Ok(Self::Skip(SkipReason::Ci));
         }
-        let names = IMAP.all().into_iter().chain(GOOGLE.all());
+        let names = IMAP.all().into_iter().chain(IMAP2.all());
         let missing: Vec<&'static str> = names.clone().filter(|name| get(name).is_none()).collect();
         if missing.len() == names.count() {
             return Ok(Self::Skip(SkipReason::NoCredentials));
@@ -259,15 +259,15 @@ impl Live {
             return Err(LiveError::Incomplete { missing });
         }
         let imap = account(&IMAP, &get)?;
-        let google = account(&GOOGLE, &get)?;
-        if same_address(&imap.address, &google.address) {
+        let imap2 = account(&IMAP2, &get)?;
+        if same_address(&imap.address, &imap2.address) {
             return Err(LiveError::SameAddress);
         }
         let run_id = match get(RUN_ID) {
             Some(id) => run_id(id)?,
             None => made_run_id(),
         };
-        Ok(Self::Run(Box::new(LiveConfig { imap, google, run_id })))
+        Ok(Self::Run(Box::new(LiveConfig { imap, imap2, run_id })))
     }
 }
 
@@ -275,27 +275,27 @@ impl Live {
 #[derive(Debug, Clone)]
 pub struct LiveConfig {
     imap: Account,
-    google: Account,
+    imap2: Account,
     run_id: String,
 }
 
 impl LiveConfig {
-    /// The plain IMAP account, `live-imap`.
+    /// The first account, `live-imap`.
     #[must_use]
     pub fn imap(&self) -> &Account {
         &self.imap
     }
 
-    /// The Google account, `live-google`.
+    /// The second account on the reference provider, `live-imap2`.
     #[must_use]
-    pub fn google(&self) -> &Account {
-        &self.google
+    pub fn imap2(&self) -> &Account {
+        &self.imap2
     }
 
     /// Both accounts, `live-imap` first.
     #[must_use]
     pub fn accounts(&self) -> [&Account; 2] {
-        [&self.imap, &self.google]
+        [&self.imap, &self.imap2]
     }
 
     /// The run id: letters, digits, `-` and `_`.

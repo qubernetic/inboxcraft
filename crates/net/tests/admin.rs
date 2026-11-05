@@ -30,10 +30,10 @@ fn invented() -> Result<LiveConfig> {
         ("INBOXCRAFT_LIVE_IMAP_HOST", "imap.example.org"),
         ("INBOXCRAFT_LIVE_IMAP_USER", "first-login"),
         ("INBOXCRAFT_LIVE_IMAP_SECRET", "imap-secret-invented"),
-        ("INBOXCRAFT_LIVE_GOOGLE_ADDRESS", "second@example.org"),
-        ("INBOXCRAFT_LIVE_GOOGLE_HOST", "mail.example.org"),
-        ("INBOXCRAFT_LIVE_GOOGLE_USER", "second-login"),
-        ("INBOXCRAFT_LIVE_GOOGLE_SECRET", "google-secret-invented"),
+        ("INBOXCRAFT_LIVE_IMAP2_ADDRESS", "second@example.org"),
+        ("INBOXCRAFT_LIVE_IMAP2_HOST", "mail.example.org"),
+        ("INBOXCRAFT_LIVE_IMAP2_USER", "second-login"),
+        ("INBOXCRAFT_LIVE_IMAP2_SECRET", "imap2-secret-invented"),
         ("INBOXCRAFT_LIVE_RUN_ID", "20261105T120000Z-7"),
     ]);
     match Live::from_vars(|name| vars.get(name).map(|value| (*value).to_owned()))? {

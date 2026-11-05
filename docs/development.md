@@ -144,15 +144,17 @@ The owner alone runs opt-in live tests, by hand, on two throwaway test accounts.
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
 
-- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs` (the `live-imap` round trip:
-  sign-in, folder list, run folder, APPEND of an invented message, first sync, IDLE, resync, folder removed, over
-  implicit TLS on port 993; and the account check, whose every IMAP step must pass on the real chain). Every live test is named `live_*` and starts with
+- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs`: both accounts sign in and
+  list their folders; the `live-imap` round trip (sign-in, folder list, run folder, APPEND of an invented message,
+  first sync, IDLE, resync, folder removed); the account check, whose every IMAP step must pass on the real chain.
+  All of them over implicit TLS on port 993. Every live test is named `live_*` and starts with
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
-- **Accounts:** `live-imap` (a plain IMAP and SMTP account) and `live-google`. The harness's own types name them
-  only by these names: their debug and error output never shows an address, a login name or a secret. Values a
-  test prints itself, or passes to an `assert_eq!` that fails, are not redacted; a live test never does either.
+- **Accounts:** `live-imap` and `live-imap2`, two throwaway IMAP and SMTP accounts on the reference provider. The
+  harness's own types name them only by these names: their debug and error output never shows an address, a login
+  name or a secret. Values a test prints itself, or passes to an `assert_eq!` that fails, are not redacted; a live
+  test never does either.
 - **Allow-list:** `LiveConfig::check_recipient` admits exactly the two addresses given at run time, each a plain
   dot-atom address; a live test that sends mail checks every recipient with it first.
 - **Run folder:** `InboxCraft-Test/<run id>` (with the server's hierarchy delimiter), created by
@@ -166,8 +168,9 @@ servers and `example.org` addresses.
 `just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It works in two
 steps:
 
-1. It builds the live test binaries (`testkit` and `net`) into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
-   build script, proc macro or other test binary ever runs with the credentials.
+1. It makes `target/nextest` and builds the live test binaries (`testkit` and `net`) into an archive,
+   `target/nextest/live.tar.zst`, before it reads any value, so no build script, proc macro or other test binary
+   ever runs with the credentials.
 2. It reads eight values from the OS credential store, service `inboxcraft-live`, one entry per variable, and runs
    the `live` profile from the archive, which never compiles. The values reach the container through its own
    environment for that run only, never on a command line or in a file.
@@ -182,10 +185,10 @@ output yourself before you paste it anywhere, such as into an issue.
 
 | Variable | Meaning |
 |---|---|
-| `INBOXCRAFT_LIVE_IMAP_ADDRESS`, `INBOXCRAFT_LIVE_GOOGLE_ADDRESS` | the accounts' addresses: the recipient allow-list |
-| `INBOXCRAFT_LIVE_IMAP_HOST`, `INBOXCRAFT_LIVE_GOOGLE_HOST` | the servers' host names |
-| `INBOXCRAFT_LIVE_IMAP_USER`, `INBOXCRAFT_LIVE_GOOGLE_USER` | the login names |
-| `INBOXCRAFT_LIVE_IMAP_SECRET`, `INBOXCRAFT_LIVE_GOOGLE_SECRET` | the passwords or tokens |
+| `INBOXCRAFT_LIVE_IMAP_ADDRESS`, `INBOXCRAFT_LIVE_IMAP2_ADDRESS` | the accounts' addresses: the recipient allow-list |
+| `INBOXCRAFT_LIVE_IMAP_HOST`, `INBOXCRAFT_LIVE_IMAP2_HOST` | the servers' host names |
+| `INBOXCRAFT_LIVE_IMAP_USER`, `INBOXCRAFT_LIVE_IMAP2_USER` | the login names |
+| `INBOXCRAFT_LIVE_IMAP_SECRET`, `INBOXCRAFT_LIVE_IMAP2_SECRET` | the passwords or tokens |
 | `INBOXCRAFT_LIVE_RUN_ID` | set by `just it-live`: UTC time and process id |
 
 Storing a value (it prompts for it, so it never lands in the shell history):
@@ -277,3 +280,6 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | `flate2` moves from the testkit-only to the net-only crates (#26) |
 | 2026-11-05 | minor | Live tests: the `net` round trip on `live-imap`, invented messages (#26) |
 | 2026-11-05 | minor | Fuzzing: the certificate, autoconfig and DNS targets of `net`; live test of the account check (#28) |
+| 2026-11-05 | minor | Live tests: `just it-live` makes the archive's folder first (#57) |
+| 2026-11-05 | minor | Live tests: the second account is `live-imap2` on the reference provider (#57) |
+| 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |
