@@ -76,8 +76,10 @@ egui = { version = "0.37", default-features = false, features = ["default_fonts"
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
 # ui-egui tests only: drives the UI through its AccessKit tree and refuses controls without an accessible name
 egui_kittest = { version = "0.37", default-features = false }
-# ui-egui only: writes the `ui_shot` pictures
+# ui-egui only: writes the `ui_shot` pictures and reads the PNG pictures of a message
 png = "0.18"
+# ui-egui only: reads the JPEG pictures of a message (already in the graph through `image`, so no new crate)
+zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
 
 # [patch.crates-io]
 # egui/eframe/winit forks, if the Craft forks are used: pin by rev

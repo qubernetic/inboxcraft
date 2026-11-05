@@ -1795,6 +1795,7 @@ dependencies = [
  "png",
  "serde",
  "serde_json",
+ "zune-jpeg",
 ]
 
 [[package]]
