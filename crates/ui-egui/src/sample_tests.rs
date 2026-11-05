@@ -99,3 +99,74 @@ fn a_mailbox_at_the_start_of_time_still_builds() {
     let store = mailbox(Timestamp::MIN).unwrap();
     assert_eq!(store.accounts().unwrap().len(), 2);
 }
+
+#[test]
+fn every_sample_message_has_a_body_to_read() {
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    for id in 1..=MESSAGES.len() {
+        let answer = session.run("mail.read", &json!({ "id": id })).unwrap();
+        assert_eq!(answer["fetching"], json!(false), "message {id}");
+        let body = &answer["message"]["body"];
+        assert_eq!(body["readable"], json!(true), "message {id}");
+        assert!(body["text"].as_str().is_some_and(|text| !text.trim().is_empty()), "message {id}");
+    }
+    assert!(session.take_jobs().is_empty(), "the sample fetches nothing");
+}
+
+#[test]
+fn the_replies_share_a_thread_with_what_they_answer() {
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    let found = session.run("mail.search", &json!({ "subject": "Re: Allotment rota" })).unwrap();
+    let reply = found["messages"][0]["id"].as_u64().unwrap();
+    let thread = session.run("mail.thread", &json!({ "id": reply })).unwrap();
+    let subjects: Vec<&str> = thread["messages"].as_array().unwrap().iter().map(|m| m["subject"].as_str().unwrap()).collect();
+    assert_eq!(subjects, ["Allotment rota for November", "Re: Allotment rota for November"]);
+    let text = session.run("mail.read", &json!({ "id": reply })).unwrap()["message"]["body"]["text"].as_str().unwrap().to_owned();
+    assert!(text.contains("Odile Brannock wrote:\r\n> Hi all,"), "{text}");
+}
+
+#[test]
+fn links_and_pictures_stay_on_invented_hosts() {
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    let mut html_seen = 0;
+    for id in 1..=MESSAGES.len() {
+        let body = session.run("mail.read", &json!({ "id": id })).unwrap()["message"]["body"].clone();
+        for text in [&body["text"], &body["html"]].into_iter().filter_map(Value::as_str) {
+            for (at, _) in text.match_indices("://") {
+                let host: String = text[at + 3..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
+                assert!(host.ends_with("example.org") || host.ends_with("example.net"), "{host} in message {id}");
+            }
+        }
+        html_seen += usize::from(body["html"].is_string());
+    }
+    assert_eq!(html_seen, 2);
+}
+
+#[test]
+fn the_logo_sketches_are_pictures_drawn_in_code() {
+    let mut session = session(Box::new(FakeClock::new(now()))).unwrap();
+    let found = session.run("mail.search", &json!({ "subject": "Draft logo", "from": "petra" })).unwrap();
+    let id = found["messages"][0]["id"].as_u64().unwrap();
+    let attachments = session.run("mail.read", &json!({ "id": id })).unwrap()["message"]["body"]["attachments"].clone();
+    let names: Vec<&str> = attachments.as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["sketch-1.png", "sketch-2.png", "sketch-3.png"]);
+    assert!(attachments.as_array().unwrap().iter().all(|a| a["type"] == "image/png" && a["size"].as_u64().unwrap() > 100));
+}
+
+#[test]
+fn the_sample_draws_its_remote_pictures_and_asks_nobody() {
+    use crate::fetch::Fetch as _;
+    let mut pictures = super::Pictures::default();
+    assert!(pictures.finished().is_empty());
+    pictures.start("https://pictures.example.org/cycles/workshop.png");
+    pictures.start("https://track.example.net/open.png?id=4417");
+    pictures.start("https://elsewhere.example.com/a.png");
+    pictures.start("http://pictures.example.org/plain.png");
+    let done = pictures.finished();
+    assert_eq!(done.len(), 4);
+    for (url, answer) in done.iter().take(2) {
+        let picture = crate::picture::decode(answer.as_ref().unwrap()).unwrap();
+        assert_eq!((picture.width, picture.height), (480, 200), "{url}");
+    }
+    assert!(done.iter().skip(2).all(|(_, answer)| answer.is_err()));
+}

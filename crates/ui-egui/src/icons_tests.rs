@@ -4,7 +4,9 @@
 use egui::epaint::CornerRadiusF32;
 use egui::{Color32, Rect, Shape, pos2, vec2};
 
-use super::{DOT, EXPORTED, PAPER, Part, SIDE, TILE, TRAY, WINDOW_ICON_SIDE, app_icon, number, picture, shapes, svg, svg_rect, window_icon};
+use super::{
+    DOT, EXPORTED, PAPER, Part, SIDE, TILE, TRAY, WINDOW_ICON_SIDE, app_icon, number, page_mark, picture, shapes, svg, svg_rect, window_icon,
+};
 use crate::shot::MAX_SIDE;
 
 fn workspace_file(rel: &str) -> std::path::PathBuf {
@@ -126,4 +128,19 @@ fn the_window_icon_has_straight_alpha() {
     for (got, want) in edge.iter().zip([TILE.r(), TILE.g(), TILE.b()]) {
         assert!(got.abs_diff(want) <= 4, "{edge:?}: the edge keeps the tile colour, not a darker premultiplied one");
     }
+}
+
+#[test]
+fn the_page_mark_is_an_outline_and_a_fold_inside_its_rect() {
+    let rect = Rect::from_min_max(pos2(10.0, 20.0), pos2(26.0, 40.0));
+    let shapes = page_mark(rect, Color32::RED);
+    assert_eq!(shapes.len(), 2);
+    let inside = rect.expand(1.0);
+    for shape in &shapes {
+        assert!(inside.contains_rect(shape.visual_bounding_rect()), "{shape:?} leaves {rect:?}");
+    }
+    let Shape::Path(outline) = &shapes[0] else { panic!("{:?}", shapes[0]) };
+    assert_eq!(outline.points.len(), 6, "a closed page with one corner cut");
+    assert_eq!(outline.points.first(), outline.points.last());
+    assert_eq!(outline.stroke.color, egui::epaint::ColorMode::Solid(Color32::RED));
 }

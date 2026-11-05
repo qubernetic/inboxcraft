@@ -242,6 +242,13 @@ fn every_finish_arg_of_the_manifest_has_a_reason() {
 }
 
 #[test]
+fn the_only_folder_the_manifest_opens_is_downloads_for_save() {
+    let manifest = repo_file(MANIFEST);
+    let folders: Vec<&str> = manifest.lines().filter_map(|line| line.trim_start().strip_prefix("- --filesystem=")).collect();
+    assert_eq!(folders, ["xdg-download"], "{manifest}");
+}
+
+#[test]
 fn the_manifest_installs_files_that_exist_under_the_app_id() {
     let manifest = repo_file(MANIFEST);
     assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");

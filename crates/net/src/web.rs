@@ -78,19 +78,37 @@ impl Https {
     }
 }
 
+/// A `ureq` error as a [`NetError`] with its cause, certificates judged at `now`.
+pub(crate) fn failed(error: Error, now: inboxcraft_time::Timestamp) -> NetError {
+    match error {
+        Error::Timeout(_) => NetError::new(ErrorKind::TimedOut, "the server did not answer in time"),
+        Error::HostNotFound => NetError::new(ErrorKind::HostNotFound, "the host name was not found"),
+        Error::ConnectionFailed => NetError::new(ErrorKind::ConnectionRefused, "the connection failed"),
+        Error::Io(io) => NetError::io(&io, now),
+        Error::Rustls(tls) => NetError::new(tls::classify(&tls, now), tls.to_string()),
+        Error::Tls(text) => NetError::new(ErrorKind::Tls, text),
+        Error::BodyExceedsLimit(limit) => NetError::new(ErrorKind::TooLarge, format!("the answer is larger than {limit} bytes")),
+        other => NetError::new(ErrorKind::Protocol, other.to_string()),
+    }
+}
+
+/// `ureq`'s TLS settings for `tls`'s trust, with the `ring` provider.
+pub(crate) fn tls_config(tls: &TlsSettings) -> TlsConfig {
+    let roots = match tls.trust() {
+        Trust::Platform => RootCerts::PlatformVerifier,
+        Trust::Roots(roots) => RootCerts::Specific(Arc::new(roots.iter().map(|root| Certificate::from_der(root.as_ref()).to_owned()).collect())),
+    };
+    TlsConfig::builder()
+        .provider(TlsProvider::Rustls)
+        .root_certs(roots)
+        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .build()
+}
+
 impl Web for Https {
     fn get(&self, url: &str) -> Result<WebAnswer, NetError> {
         let now = self.tls.clock().now();
-        let failed = |error: Error| match error {
-            Error::Timeout(_) => NetError::new(ErrorKind::TimedOut, "the server did not answer in time"),
-            Error::HostNotFound => NetError::new(ErrorKind::HostNotFound, "the host name was not found"),
-            Error::ConnectionFailed => NetError::new(ErrorKind::ConnectionRefused, "the connection failed"),
-            Error::Io(io) => NetError::io(&io, now),
-            Error::Rustls(tls) => NetError::new(tls::classify(&tls, now), tls.to_string()),
-            Error::Tls(text) => NetError::new(ErrorKind::Tls, text),
-            Error::BodyExceedsLimit(limit) => NetError::new(ErrorKind::TooLarge, format!("the answer is larger than {limit} bytes")),
-            other => NetError::new(ErrorKind::Protocol, other.to_string()),
-        };
+        let failed = |error: Error| failed(error, now);
         let mut response = self.agent.get(url).call().map_err(failed)?;
         let status = response.status().as_u16();
         let location = response.headers().get("location").and_then(|value| value.to_str().ok()).map(str::to_owned);
@@ -100,17 +118,8 @@ impl Web for Https {
 }
 
 fn config(tls: &TlsSettings, timeout: Duration) -> Config {
-    let roots = match tls.trust() {
-        Trust::Platform => RootCerts::PlatformVerifier,
-        Trust::Roots(roots) => RootCerts::Specific(Arc::new(roots.iter().map(|root| Certificate::from_der(root.as_ref()).to_owned()).collect())),
-    };
-    let tls = TlsConfig::builder()
-        .provider(TlsProvider::Rustls)
-        .root_certs(roots)
-        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
     Agent::config_builder()
-        .tls_config(tls)
+        .tls_config(tls_config(tls))
         .max_redirects(0)
         .http_status_as_error(false)
         .timeout_global(Some(timeout))
@@ -123,7 +132,7 @@ fn config(tls: &TlsSettings, timeout: Duration) -> Config {
 
 /// A resolver that gives the same addresses for every host.
 #[derive(Debug)]
-struct Fixed(Vec<SocketAddr>);
+pub(crate) struct Fixed(pub(crate) Vec<SocketAddr>);
 
 impl Resolver for Fixed {
     fn resolve(&self, uri: &Uri, config: &Config, timeout: NextTimeout) -> Result<ResolvedSocketAddrs, Error> {

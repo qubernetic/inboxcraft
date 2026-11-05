@@ -93,10 +93,10 @@ fn clock() -> Box<dyn Clock> {
 
 #[test]
 fn the_sample_window_shows_the_sample_mailbox_and_the_empty_one_nothing() {
-    let sample = app(Source::Sample, clock).unwrap();
+    let sample = app(Source::Sample, clock, None).unwrap();
     assert_eq!(sample.mailbox().accounts().len(), 2);
     assert_eq!(sample.mailbox().messages().len(), 11);
-    let empty = app(Source::Empty, clock).unwrap();
+    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {}))).unwrap();
     assert!(empty.mailbox().accounts().is_empty());
     assert_eq!(empty.mailbox().error(), None);
 }

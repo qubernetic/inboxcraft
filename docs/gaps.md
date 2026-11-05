@@ -303,14 +303,39 @@ B = blocks the next stage.
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 - The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit, and adding an account comes with onboarding (E1.11). Selecting a row only
-  selects it; the reader comes with E1.12b (#30).
+  one that is forgotten on exit, and adding an account comes with onboarding (E1.11) (#30).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
   with E5.1 (#30).
-- The list has no arrow-key navigation; Tab moves the focus through every folder and row, and Enter or Space
-  selects (#30).
+- The arrow keys step through the list only while no control has the keyboard focus; Tab moves the focus through
+  every folder and row, and Enter or Space selects (#30, #33).
+- A link in a message is never opened: the window has no browser hand-off (egui's `links` feature is off, and
+  turning it on is the project owner's call), so a click copies the address and the line under the reader shows
+  where it goes. Plain-text bodies show web addresses as text, not as links (#33).
+- "Always for this sender" is kept for the session only (`remote.allow` keeps it in the engine's memory) until
+  settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: a forger who
+  puts an allowed sender's address on a message has its pictures load when it is opened, and so learns when it was
+  opened and from which network address, without the owner being asked (#33).
+- Saving goes into the downloads folder (`XDG_DOWNLOAD_DIR` or `~/Downloads`) without a file dialog; the Flatpak
+  opens that folder (`--filesystem=xdg-download`) instead of asking through the file chooser portal (#33).
+- Pictures: PNG and JPEG only (GIF, WebP and SVG show as a box with their alternative text), at most 8192 pixels a
+  side and 8 Mi pixels; remote pictures over plain `http`, or on a host with only local addresses, are not fetched.
+  Inline pictures show only from HTML bodies; a plain-text body's image parts are tiles (#33).
+- Picture limits: one message asks for at most 32 inline pictures (only Content-IDs it has a part for) and 64 remote
+  ones, and holds at most 64 MiB of decoded pixels; a picture past that shows as a box with "no room left". All
+  messages together keep at most 256 MiB: a new picture first forgets the pictures of folded messages, and a
+  forgotten remote picture is fetched again when its message shows it. Each inline picture is one `mail.attachment`,
+  which reads the whole message again, so a large message with 32 inline pictures opens slowly (#33).
+- The reader shows no bold type (the bundled font has one weight); bold text is drawn in the full text colour.
+  Tables are laid out as a grid without borders, four deep at most (#33).
+- `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
+  mailboxes, an index comes with the store on disk (#33).
+- The next-message rule applies when the open message leaves the list after a refresh; archive and delete, which
+  will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened: the
+  window does not apply worker events yet (#33).
+- The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
+  full width; the Full width button is the way (#33).
 - The window uses egui's bundled fonts: Ubuntu Light (Ubuntu Font Licence 1.0, which is not an OSI licence; allowed
   in `deny.toml` for that crate only, the project owner's to confirm) with no bold weight, so unread rows are marked
   by a dot and the accent colour. Scripts the font lacks (CJK and others) show as boxes, and right-to-left text is
@@ -369,3 +394,8 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Rough edges of the first window and the sample mailbox (#30) |
 | 2026-11-05 | minor | Rough edges of the dev Flatpak (#31) |
 | 2026-11-05 | minor | The Flatpak is built by the CI bundle job (#32) |
+| 2026-11-05 | minor | Rough edges of the reader and remote pictures (#33) |
+| 2026-11-05 | minor | The Flatpak opens Downloads for Save (#33) |
+| 2026-11-05 | minor | The reader forgets decoded pictures past a budget (#33) |
+| 2026-11-05 | minor | Picture limits per message: inline cap and decoded-bytes budget (#33) |
+| 2026-11-05 | minor | What a forged `From` of an allowed sender learns (#33) |

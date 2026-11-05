@@ -3,7 +3,9 @@
 
 //! `mail.*`: lists of messages, one message, the search.
 
-use inboxcraft_model::{AccountId, FolderId, JobKind, MessageId, MessageRef, Role};
+use std::collections::BTreeMap;
+
+use inboxcraft_model::{AccountId, FolderId, JobKind, Message, MessageId, MessageRef, Role, group_threads};
 use inboxcraft_store::{Change, Search};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
@@ -122,7 +124,9 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
     }
     let body_error = too_large.then_some("too_large");
-    let mut outcome = Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error }));
+    let remote_allowed = super::remote::allowed(context, envelope.from());
+    let mut outcome =
+        Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error, "remote_allowed": remote_allowed }));
     if !entry.opened() {
         outcome = outcome.with_change(Change::MarkOpened(id));
     }
@@ -130,6 +134,85 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         outcome = outcome.with_fetch(message.account(), kind, id);
     }
     Ok(outcome)
+}
+
+/// `mail.thread`: the thread a message is in, oldest first, across folders and accounts (linked by `Message-ID`,
+/// `In-Reply-To` and `References`, never by subject). A message that names no other is a thread of one. A thread of
+/// more than [`MAX_LIST`] messages gives its newest.
+pub(crate) const THREAD: CommandSpec =
+    CommandSpec { id: "mail.thread", class: Some(AgentClass::Safe), summary: "List the thread a message is in, oldest first", run: thread };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThreadParams {
+    /// The message.
+    id: u64,
+}
+
+fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: ThreadParams = decode(THREAD.id, params)?;
+    let id = MessageId::new(params.id);
+    let store = context.store();
+    store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let mut entries = BTreeMap::new();
+    for account in store.accounts()? {
+        for folder in store.folders(account.id())? {
+            for entry in store.messages(folder.id())? {
+                entries.insert(entry.message().id(), entry);
+            }
+        }
+    }
+    let messages: Vec<Message> = entries.values().map(|entry| entry.message().clone()).collect();
+    let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
+    let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
+    let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
+    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown })))
+}
+
+/// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by
+/// its `content_id`), its content in base64: what the reader saves or shows as a picture. Nothing is fetched for it.
+pub(crate) const ATTACHMENT: CommandSpec = CommandSpec {
+    id: "mail.attachment",
+    class: Some(AgentClass::Safe),
+    summary: "Give one attachment or inline part of a kept message, in base64",
+    run: attachment,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentParams {
+    /// The message.
+    id: u64,
+    /// The attachment's place in `mail.read`'s list.
+    index: Option<u64>,
+    /// The inline part's Content-ID, without the angle brackets.
+    content_id: Option<String>,
+}
+
+fn attachment(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AttachmentParams = decode(ATTACHMENT.id, params)?;
+    let id = MessageId::new(params.id);
+    context.store().message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let body = context.store().body(id)?.ok_or(EngineError::NotFound { what: "body", id: params.id })?;
+    let message = inboxcraft_mime::parse(body.source()).ok();
+    let part = match (params.index, params.content_id.as_deref()) {
+        (Some(index), None) => message
+            .as_ref()
+            .and_then(|message| message.attachments().into_iter().nth(usize::try_from(index).unwrap_or(usize::MAX)))
+            .ok_or(EngineError::NotFound { what: "attachment", id: index })?,
+        (None, Some(content_id)) => message
+            .as_ref()
+            .and_then(|message| json::inline_parts(message).into_iter().find(|part| part.content_id().as_deref() == Some(content_id)))
+            .ok_or(EngineError::NotFound { what: "inline part", id: params.id })?,
+        _ => return Err(EngineError::bad_params(ATTACHMENT.id, "give an index or a content_id, one of them")),
+    };
+    let data = part.decoded().map_err(|error| EngineError::bad_params(ATTACHMENT.id, &format!("the part cannot be decoded: {error}")))?;
+    Ok(Outcome::new(json!({
+        "name": part.file_name(),
+        "type": part.content_type().essence(),
+        "size": data.len(),
+        "data": json::base64(&data),
+    })))
 }
 
 /// `mail.search`: the simple offline search over from, to, subject, date and body words, newest first.

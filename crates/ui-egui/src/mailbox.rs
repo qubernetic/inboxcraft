@@ -75,6 +75,18 @@ pub enum Place {
     Folder(u64),
 }
 
+/// What is selected after the open message leaves the list (a sync removed it; later also archive and delete).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum After {
+    /// The message below it, the next older one (the one above when it was the last).
+    #[default]
+    Next,
+    /// The message above it, the next newer one (the one below when it was the first).
+    Previous,
+    /// Nothing: back to the list.
+    List,
+}
+
 /// An account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRow {
@@ -152,7 +164,9 @@ pub struct Mailbox {
     query: String,
     messages: Vec<MessageRow>,
     selected: Option<u64>,
+    after: After,
     error: Option<String>,
+    runs: u64,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -201,7 +215,7 @@ pub(crate) fn sender(from: &Value) -> String {
 }
 
 /// An ISO 8601 date as the engine writes it (`2026-11-05T09:30:00Z`).
-fn parse_date(text: &str) -> Option<Timestamp> {
+pub(crate) fn parse_date(text: &str) -> Option<Timestamp> {
     let number = |from: usize, to: usize| text.get(from..to).filter(|digits| digits.bytes().all(|b| b.is_ascii_digit()))?.parse::<u16>().ok();
     let small = |from: usize, to: usize| number(from, to).and_then(|n| u8::try_from(n).ok());
     if text.len() != 20 || !text.ends_with('Z') {
@@ -289,24 +303,69 @@ impl Mailbox {
             query: String::new(),
             messages: Vec::new(),
             selected: None,
+            after: After::Next,
             error: None,
+            runs: 0,
         };
         mailbox.refresh();
         mailbox
     }
 
-    /// Reads the accounts, the folders and the list again.
+    /// Reads the accounts, the folders and the list again. When the selected message has left the list, the
+    /// next-message rule ([`After`]) picks what is selected instead.
     pub fn refresh(&mut self) {
+        let was = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
         let result = self.load_accounts().and_then(|()| self.load_folders()).and_then(|()| self.load_list(self.place));
+        if let (Some(at), None) = (was, self.selected) {
+            let last = self.messages.len().checked_sub(1);
+            let pick = match self.after {
+                After::Next => last.map(|last| at.min(last)),
+                After::Previous => last.map(|last| at.saturating_sub(1).min(last)),
+                After::List => None,
+            };
+            self.selected = pick.and_then(|at| self.messages.get(at)).map(|row| row.id);
+        }
         self.settle(result);
+    }
+
+    /// The next-message rule.
+    #[must_use]
+    pub fn after(&self) -> After {
+        self.after
+    }
+
+    /// Sets the next-message rule.
+    pub fn set_after(&mut self, after: After) {
+        self.after = after;
+    }
+
+    /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at
+    /// either end.
+    pub fn step(&mut self, forward: bool) {
+        let at = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
+        let next = match at {
+            None => 0,
+            Some(at) if forward => at.saturating_add(1).min(self.messages.len().saturating_sub(1)),
+            Some(at) => at.saturating_sub(1),
+        };
+        if let Some(row) = self.messages.get(next) {
+            self.selected = Some(row.id);
+        }
     }
 
     fn settle(&mut self, result: Result<(), UiError>) {
         self.error = result.err().map(|error| error.to_string());
     }
 
-    fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
+    pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
+        self.runs = self.runs.saturating_add(1);
         Ok(self.session.run(command, params)?)
+    }
+
+    /// How many commands ran through [`Mailbox::run`] so far.
+    #[cfg(test)]
+    pub(crate) fn runs(&self) -> u64 {
+        self.runs
     }
 
     fn load_accounts(&mut self) -> Result<(), UiError> {
@@ -531,6 +590,26 @@ impl Mailbox {
     #[must_use]
     pub fn when(&self, row: &MessageRow) -> String {
         row.date.map(|date| when(date, self.clock.now(), self.offset)).unwrap_or_default()
+    }
+
+    /// `date` in full, as the expanded header shows it: `Thursday 5 Nov 2026, 08:35`.
+    #[must_use]
+    pub fn full_date(&self, date: Timestamp) -> String {
+        let Some(civil) = date.to_civil(self.offset) else { return String::new() };
+        tr!(
+            "{weekday} {day} {month} {year}, {time}",
+            weekday = weekday_text(civil.weekday()),
+            day = civil.day(),
+            month = month_text(civil.month()),
+            year = civil.year(),
+            time = format!("{:02}:{:02}", civil.hour(), civil.minute())
+        )
+    }
+
+    /// `date` as the list shows it.
+    #[must_use]
+    pub fn short_date(&self, date: Timestamp) -> String {
+        when(date, self.clock.now(), self.offset)
     }
 
     /// The row as a screen reader says it: sender, subject, date, and whether it is unread or flagged.

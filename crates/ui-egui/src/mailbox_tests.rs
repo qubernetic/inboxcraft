@@ -7,7 +7,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Offset, Timestamp};
 use serde_json::{Value, json};
 
-use super::{MAX_QUERY, MAX_SHOWN, Mailbox, Place, shown, when};
+use super::{After, MAX_QUERY, MAX_SHOWN, Mailbox, Place, shown, when};
 use crate::sample;
 
 /// 2026-11-05T09:00:00Z, a Thursday.
@@ -297,4 +297,71 @@ fn server_text_is_flattened_to_one_line_without_bidi_controls_and_cut() {
     assert_eq!(shown(&"x".repeat(MAX_SHOWN * 2)).len(), MAX_SHOWN);
     assert_eq!(shown("Ünnep ✓ 🌊"), "Ünnep ✓ 🌊");
     assert_eq!(super::sender(&json!([{ "name": "Eve\nAdmin", "address": "eve@example.org" }])), "Eve Admin");
+}
+
+/// The sample inbox with the library notice selected, then that notice expunged on the server and the list read
+/// again under `after`.
+fn removed_under(after: After) -> Mailbox {
+    use inboxcraft_model::{AccountId, Event, EventKind, FolderId, FolderState, Uid, UidSet, UidValidity};
+    let mut mailbox = mailbox();
+    let library = mailbox.messages().iter().find(|row| row.subject.starts_with("Your library loan")).unwrap().id;
+    mailbox.select(Some(library));
+    mailbox.set_after(after);
+    assert_eq!(mailbox.after(), after);
+    let validity = UidValidity::new(1).unwrap();
+    let synced = EventKind::FolderSynced { folder: FolderId::new(1), state: FolderState::new(validity) };
+    mailbox.session.apply(&Event::new(AccountId::new(1), None, synced)).unwrap();
+    let gone = EventKind::MessagesExpunged { folder: FolderId::new(1), uid_validity: validity, uids: UidSet::from_iter([Uid::new(2).unwrap()]) };
+    mailbox.session.apply(&Event::new(AccountId::new(1), None, gone)).unwrap();
+    mailbox.refresh();
+    assert!(mailbox.messages().iter().all(|row| row.id != library));
+    mailbox
+}
+
+fn selected_subject(mailbox: &Mailbox) -> Option<String> {
+    let id = mailbox.selected()?;
+    mailbox.messages().iter().find(|row| row.id == id).map(|row| row.subject.clone())
+}
+
+#[test]
+fn a_message_that_leaves_the_list_gives_way_by_the_next_message_rule() {
+    assert_eq!(Mailbox::new(sample::session(clock()).unwrap(), clock()).after(), After::Next, "next by default");
+    assert_eq!(selected_subject(&removed_under(After::Next)).as_deref(), Some("Invoice 2026-031 is paid"));
+    assert_eq!(selected_subject(&removed_under(After::Previous)).as_deref(), Some("Draft logo for the bakery"));
+    assert_eq!(removed_under(After::List).selected(), None);
+}
+
+#[test]
+fn the_rule_stays_inside_the_list_at_either_end() {
+    let mut mailbox = mailbox();
+    mailbox.open(Place::Folder(9));
+    let only = mailbox.messages()[0].id;
+    mailbox.select(Some(only));
+    mailbox.refresh();
+    assert_eq!(mailbox.selected(), Some(only), "a message still there stays selected");
+}
+
+#[test]
+fn step_moves_the_selection_down_and_up_and_stops_at_the_ends() {
+    let mut mailbox = mailbox();
+    mailbox.step(false);
+    assert_eq!(selected_subject(&mailbox).as_deref(), Some("Allotment rota for November"), "the first row without a selection");
+    mailbox.step(false);
+    assert_eq!(selected_subject(&mailbox).as_deref(), Some("Allotment rota for November"));
+    mailbox.step(true);
+    assert_eq!(selected_subject(&mailbox).as_deref(), Some("Draft logo for the bakery"));
+    for _ in 0..20 {
+        mailbox.step(true);
+    }
+    assert_eq!(mailbox.selected(), mailbox.messages().last().map(|row| row.id));
+    mailbox.open(Place::Folder(8));
+    mailbox.step(true);
+    assert_eq!(mailbox.selected(), None, "an empty list selects nothing");
+}
+
+#[test]
+fn the_expanded_header_gives_the_date_in_full() {
+    let mailbox = mailbox();
+    assert_eq!(mailbox.full_date(at(NOW - 25 * 60)), "Thursday 5 Nov 2026, 08:35");
+    assert_eq!(mailbox.short_date(at(NOW - 25 * 60)), "08:35");
 }

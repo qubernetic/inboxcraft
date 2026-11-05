@@ -9,6 +9,7 @@
 mod account;
 mod folder;
 mod mail;
+mod remote;
 
 pub use mail::MAX_LIST;
 
@@ -16,7 +17,19 @@ use crate::CommandSpec;
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
-    vec![account::CHECK, account::LIST, folder::LIST, mail::LIST, mail::READ, mail::SEARCH]
+    vec![
+        account::CHECK,
+        account::LIST,
+        folder::LIST,
+        mail::ATTACHMENT,
+        mail::LIST,
+        mail::READ,
+        mail::SEARCH,
+        mail::THREAD,
+        remote::ALLOW,
+        remote::FORGET,
+        remote::LIST,
+    ]
 }
 
 #[cfg(test)]
@@ -25,6 +38,9 @@ mod account_tests;
 #[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;
+#[cfg(test)]
+#[path = "reader_tests.rs"]
+mod reader_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

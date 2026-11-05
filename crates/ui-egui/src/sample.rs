@@ -4,21 +4,25 @@
 //! The invented sample mailbox behind `--sample`: two accounts of one invented person, their folders and a few
 //! dozen messages, all on `example.org`.
 //!
-//! Every name, address, subject and preview here is made up for InboxCraft. The dates count back from the `now`
-//! given, so the sample always looks recent. Nothing in it connects anywhere: the accounts point at
-//! `imap.example.org`, and the sample session never starts their workers.
+//! Every name, address, subject, text and picture here is made up for InboxCraft; the pictures are drawn in code.
+//! The dates count back from the `now` given, so the sample always looks recent. Two replies quote what they answer
+//! and share a thread with it; a newsletter and a junk message carry remote pictures and links on `example.org` and
+//! `example.net`. Nothing in it connects anywhere: the accounts point at `imap.example.org`, the sample session never
+//! starts their workers, and [`Pictures`] draws the remote pictures instead of fetching them.
 
 use std::time::Duration;
 
 use inboxcraft_engine::Session;
+use inboxcraft_mime::{Attachment, Mailbox as Sender, MessageBuilder};
 use inboxcraft_model::{
     Account, AccountId, Address, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Message, MessageId,
-    Security, Server, SpecialUse, Summary, Uid,
+    MessageRef, Security, Server, SpecialUse, Summary, Uid,
 };
-use inboxcraft_store::{Batch, Change, Memory, Storage, StoreConfig};
+use inboxcraft_store::{Batch, Body, Change, Memory, Storage, StoreConfig};
 use inboxcraft_time::{Clock, Timestamp};
 
 use crate::UiError;
+use crate::fetch::{Fetch, Fetched};
 
 /// A person: a name and an address on `example.org`.
 #[derive(Debug, Clone, Copy)]
@@ -286,6 +290,176 @@ const MESSAGES: &[Sample] = &[
     ),
 ];
 
+/// The thread links: a subject, its `Message-ID` and the `Message-ID` it answers.
+const LINKS: &[(&str, &str, Option<&str>)] = &[
+    ("Allotment rota for November", "rota.1@example.org", None),
+    ("Re: Allotment rota for November", "rota.2@example.org", Some("rota.1@example.org")),
+    ("Draft logo for the bakery", "logo.1@example.org", None),
+    ("Re: Draft logo for the bakery", "logo.2@example.org", Some("logo.1@example.org")),
+];
+
+/// What a message says beyond its preview: its subject, its plain text, its HTML and the pictures attached to it.
+struct Text {
+    subject: &'static str,
+    plain: &'static str,
+    html: Option<&'static str>,
+    files: &'static [&'static str],
+}
+
+const TEXTS: &[Text] = &[
+    Text {
+        subject: "Allotment rota for November",
+        plain: "Hi all,\n\nI have pinned the watering rota to the shed door. Could you take the second week? The tap by the gate is \
+                fixed now, so no more buckets from the stream.\n\nSee you at the plot,\nOdile\n",
+        html: None,
+        files: &[],
+    },
+    Text {
+        subject: "Re: Allotment rota for November",
+        plain: "The second week works for me. I can also cover the Sunday after.\n\nMira\n\nOdile Brannock wrote:\n> Hi all,\n>\n\
+                > I have pinned the watering rota to the shed door. Could you take the\n> second week? The tap by the gate is fixed \
+                now, so no more buckets from\n> the stream.\n>\n> See you at the plot,\n> Odile\n",
+        html: None,
+        files: &[],
+    },
+    Text {
+        subject: "Photos from the coast walk",
+        plain: "Here are the ones from the cliff path. The fog lifted just in time near the lighthouse.\n\nThe second one is my \
+                favourite.\n\nTeodor\n",
+        html: None,
+        files: &["cliff-path.png", "lighthouse.png"],
+    },
+    Text {
+        subject: "Draft logo for the bakery",
+        plain: "Hi Mira,\n\nAttached are three sketches. We like the second one, but the wheat looks a little heavy. Could you try a \
+                lighter stroke?\n\nPetra\n",
+        html: None,
+        files: &["sketch-1.png", "sketch-2.png", "sketch-3.png"],
+    },
+    Text {
+        subject: "Re: Draft logo for the bakery",
+        plain: "Thanks, Petra. I will lighten the wheat and send a new version tomorrow.\n\nMira\n\nPetra Harbour wrote:\n> Hi Mira,\n>\n\
+                > Attached are three sketches. We like the second one, but the wheat looks\n> a little heavy. Could you try a lighter \
+                stroke?\n>\n> Petra\n",
+        html: None,
+        files: &[],
+    },
+    Text {
+        subject: "Your bike is due for a service",
+        plain: "It has been a year since the last check. Book a slot and we will look at the brakes, the chain and the gears.\n\n\
+                Book a slot: https://cycles.example.org/book\n",
+        html: Some(
+            "<h1>Time for a check-up</h1><p><img src=\"https://pictures.example.org/cycles/workshop.png\" alt=\"The workshop bench\"></p>\
+             <p>It has been a year since the last check. Book a slot and we will look at the <b>brakes</b>, the <b>chain</b> and the \
+             gears.</p><ul><li>Brakes and pads</li><li>Chain and gears</li><li>Tyres and lights</li></ul>\
+             <p><a href=\"https://cycles.example.org/book\">Book a slot</a> or call in at the shop.</p><p>Wheelwright Cycles</p>",
+        ),
+        files: &[],
+    },
+    Text {
+        subject: "You have won a lighthouse",
+        plain: "Claim your prize today by sending your bank details. This offer expires soon.\n",
+        html: Some(
+            "<p><img src=\"https://track.example.net/open.png?id=4417\" alt=\"\"></p><h2>Congratulations!</h2>\
+             <p>Claim your prize today by sending your bank details. This offer expires soon.</p>\
+             <p><a href=\"https://prize-desk.example.net/claim\">https://bank.example.org/login</a></p>",
+        ),
+        files: &[],
+    },
+];
+
+/// A PNG of `width` by `height` pixels, each painted by `paint`.
+fn drawn(width: u32, height: u32, paint: impl Fn(u32, u32) -> [u8; 3]) -> Result<Vec<u8>, UiError> {
+    let mut data = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            data.extend(paint(x, y));
+        }
+    }
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().and_then(|mut writer| writer.write_image_data(&data)).map_err(UiError::sample)?;
+    Ok(out)
+}
+
+/// A small landscape drawn in code, its colours and sun picked by `seed`: sky, a hill or the sea, a round sun.
+pub(crate) fn scene(seed: u64, width: u32, height: u32) -> Result<Vec<u8>, UiError> {
+    let palettes: [([u8; 3], [u8; 3], [u8; 3]); 4] = [
+        ([186, 214, 226], [70, 122, 140], [242, 200, 120]),
+        ([236, 214, 182], [148, 108, 72], [214, 120, 72]),
+        ([206, 222, 196], [96, 136, 92], [250, 236, 170]),
+        ([214, 206, 230], [92, 96, 140], [244, 214, 160]),
+    ];
+    let pick = usize::try_from(seed % 4).unwrap_or(0);
+    let (sky, ground, sun) = palettes.get(pick).copied().unwrap_or(palettes[0]);
+    let (w, h) = (f64::from(width.max(1)), f64::from(height.max(1)));
+    let sun_x = w * (0.25 + 0.15 * f64::from(u32::try_from(seed % 3).unwrap_or(0)));
+    drawn(width, height, |x, y| {
+        let (x, y) = (f64::from(x), f64::from(y));
+        let horizon = h * (0.62 + 0.08 * (x / w * std::f64::consts::PI * 2.0 + f64::from(u32::try_from(seed % 5).unwrap_or(0))).sin());
+        if y > horizon {
+            ground
+        } else if (x - sun_x).hypot(y - h * 0.3) < h * 0.14 {
+            sun
+        } else {
+            let fade = (y / h * 40.0).clamp(0.0, 40.0) as u8;
+            [sky[0].saturating_add(fade / 2), sky[1].saturating_add(fade / 3), sky[2]]
+        }
+    })
+}
+
+/// The remote pictures of the sample, drawn instead of fetched: every `https` address on `example.org` or
+/// `example.net` gives a picture, anything else fails. Nothing connects anywhere.
+#[derive(Debug, Default)]
+pub struct Pictures {
+    done: Vec<Fetched>,
+}
+
+impl Fetch for Pictures {
+    fn start(&mut self, url: &str) {
+        let host = url.strip_prefix("https://").and_then(|rest| rest.split(['/', '?', '#']).next()).unwrap_or_default();
+        let answer = if host.ends_with(".example.org") || host.ends_with(".example.net") {
+            let seed = url.bytes().fold(0_u64, |sum, byte| sum.wrapping_mul(31).wrapping_add(u64::from(byte)));
+            scene(seed, 480, 200).map_err(|error| error.to_string())
+        } else {
+            Err(crate::tr!("The sample draws only its own pictures.").to_owned())
+        };
+        self.done.push((url.to_owned(), answer));
+    }
+
+    fn finished(&mut self) -> Vec<Fetched> {
+        std::mem::take(&mut self.done)
+    }
+}
+
+/// The source of a sample message: its headers, its text (the preview when it has no text of its own), its HTML and
+/// its pictures; and the plain text for the search.
+fn source(sample: &Sample) -> Result<(Vec<u8>, String), UiError> {
+    let text = TEXTS.iter().find(|text| text.subject == sample.subject);
+    let mut builder = MessageBuilder::new()
+        .from(Sender::named(sample.from.name, sample.from.address))
+        .to(Sender::named(sample.to.name, sample.to.address))
+        .subject(sample.subject);
+    if let Some((_, id, answers)) = LINKS.iter().find(|(subject, ..)| *subject == sample.subject) {
+        builder = builder.message_id(id);
+        if let Some(answers) = answers {
+            builder = builder.in_reply_to(answers).reference(answers);
+        }
+    }
+    let plain = text.map_or_else(|| format!("{}\n", sample.preview), |text| text.plain.to_owned());
+    builder = builder.text(&plain);
+    if let Some(html) = text.and_then(|text| text.html) {
+        builder = builder.html(html);
+    }
+    for (index, file) in text.map(|text| text.files).unwrap_or_default().iter().enumerate() {
+        let picture = scene(u64::try_from(index).unwrap_or(0).saturating_add(u64::try_from(file.len()).unwrap_or(0)), 320, 200)?;
+        builder = builder.attach(Attachment::new(file, "image/png", picture));
+    }
+    Ok((builder.build().map_err(UiError::sample)?, plain))
+}
+
 fn address(person: Person) -> Result<Address, UiError> {
     Ok(Address::new(Some(person.name), EmailAddress::new(person.address).map_err(UiError::sample)?))
 }
@@ -298,7 +472,11 @@ fn account(id: u64, label: &str, owner: Person) -> Result<Account, UiError> {
 
 fn message(id: u64, uid: u32, account: u64, sample: &Sample, now: Timestamp) -> Result<Message, UiError> {
     let received = now.checked_sub(Duration::from_secs(sample.minutes_ago.saturating_mul(60)));
-    let envelope = Envelope::new(sample.subject).with_date(received).with_from(vec![address(sample.from)?]).with_to(vec![address(sample.to)?]);
+    let mut envelope = Envelope::new(sample.subject).with_date(received).with_from(vec![address(sample.from)?]).with_to(vec![address(sample.to)?]);
+    if let Some((_, id, answers)) = LINKS.iter().find(|(subject, ..)| *subject == sample.subject) {
+        let answers: Vec<MessageRef> = answers.and_then(MessageRef::new).into_iter().collect();
+        envelope = envelope.with_message_id(MessageRef::new(id)).with_in_reply_to(answers.clone()).with_references(answers);
+    }
     let mut flags = Flags::default();
     if sample.seen {
         flags.insert(Flag::Seen);
@@ -342,6 +520,8 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
         };
         let id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
         batch.push(Change::PutMessage(message(id, uid, account, sample, now)?));
+        let (source, text) = source(sample)?;
+        batch.push(Change::PutBody(MessageId::new(id), Body::new(source, &text).map_err(UiError::sample)?));
     }
     let mut store = Memory::new(StoreConfig::default());
     store.apply(&batch).map_err(UiError::sample)?;

@@ -28,6 +28,8 @@
 //! - [`detect`] proposes settings from an address: MX ([`dns`]), autoconfig at the domain over HTTPS ([`web`]), the
 //!   ISPDB only when switched on, SRV, and common host names as a hint. A proposal is detected settings: no password
 //!   goes to them before the owner has seen them and TLS has verified.
+//! - [`picture`] fetches a remote picture the owner allowed, so that the request tells the server nothing but the
+//!   URL: HTTPS only, a fixed user agent, no cookies, referrer or proxy, public addresses only, capped.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -42,6 +44,7 @@ pub mod dns;
 pub mod envelope;
 mod error;
 mod imap;
+pub mod picture;
 mod sync;
 mod tls;
 mod watch;

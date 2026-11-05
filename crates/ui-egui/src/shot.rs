@@ -26,6 +26,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
 use crate::mailbox::{Mailbox, Place};
+use crate::save::NoSave;
 use crate::theme::Mode;
 use crate::{InboxApp, UiError, sample};
 
@@ -68,9 +69,22 @@ pub struct Shot {
     /// The search text.
     #[serde(default)]
     pub search: Option<String>,
-    /// The subject of the row to select.
+    /// The subject of the row to select, which opens it in the reader.
     #[serde(default)]
     pub select: Option<String>,
+    /// The remote pictures of the selected message: `once`, or `always` for its sender (drawn by the sample, never
+    /// fetched).
+    #[serde(default)]
+    pub pictures: Option<String>,
+    /// Whether the reader fills the window.
+    #[serde(default)]
+    pub full_width: Option<bool>,
+    /// Whether the selected message shows its full header.
+    #[serde(default)]
+    pub details: Option<bool>,
+    /// Whether the selected message shows its quotes.
+    #[serde(default)]
+    pub quotes: Option<bool>,
 }
 
 fn bad(detail: impl Into<String>) -> UiError {
@@ -375,7 +389,8 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     };
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
     let session = sample::session(Box::new(FakeClock::new(time)))?;
-    let mut app = InboxApp::new(Mailbox::new(session, Box::new(FakeClock::new(time))));
+    let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
+    let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     if let Some(account) = shot.narrow {
         app.mailbox_mut().narrow(Some(account));
     }
@@ -397,6 +412,22 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         let id = app.mailbox().messages().iter().find(|row| row.subject == *subject).map(|row| row.id);
         let Some(id) = id else { return Err(bad(format!("{}: no row with the subject {subject:?}", shot.out))) };
         app.mailbox_mut().select(Some(id));
+        let (reader, mailbox) = app.reader_mut();
+        match shot.pictures.as_deref() {
+            Some("once") => reader.allow_once(mailbox, id),
+            Some("always") => reader.allow_always(mailbox, id),
+            Some(other) => return Err(bad(format!("{}: pictures {other:?} is not once or always", shot.out))),
+            None => {}
+        }
+        reader.set_full_width(shot.full_width.unwrap_or(false));
+        if shot.details == Some(true) {
+            reader.toggle_details(id);
+        }
+        if shot.quotes == Some(true) {
+            reader.toggle_quotes(id);
+        }
+    } else if shot.pictures.is_some() || shot.full_width.is_some() || shot.details.is_some() || shot.quotes.is_some() {
+        return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)
