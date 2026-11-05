@@ -10,10 +10,13 @@
 
 use std::fmt;
 use std::io::{Read, Write};
+use std::sync::Arc;
+use std::time::Duration;
 
 use inboxcraft_model::{ErrorKind, Security, Server};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{Answer, Capabilities, Client, Event, Extension, Refusal, State, Tag, Transport};
+use inboxcraft_time::Clock;
 
 use crate::NetError;
 use crate::compress::Deflate;
@@ -221,6 +224,50 @@ impl ImapConnection {
         self.stream.close();
     }
 
+    /// Whether the server offers IDLE.
+    pub(crate) fn offers_idle(&self) -> bool {
+        self.client.capabilities().is_some_and(|caps| caps.has("IDLE"))
+    }
+
+    /// The clock of the connection's TLS settings.
+    pub(crate) fn clock(&self) -> &Arc<dyn Clock> {
+        self.connector.tls().clock()
+    }
+
+    /// Starts a command with `start` and sends it, without waiting for its answer.
+    pub(crate) fn start(&mut self, start: impl FnOnce(&mut Client) -> Result<Tag, ProtoError>) -> Result<Tag, NetError> {
+        let tag = start(&mut self.client).map_err(|error| NetError::proto(&error))?;
+        self.flush()?;
+        Ok(tag)
+    }
+
+    /// Sends DONE to end the IDLE in flight; its answer comes with [`wait`](Self::wait).
+    pub(crate) fn done(&mut self) -> Result<(), NetError> {
+        self.client.done().map_err(|error| NetError::proto(&error))?;
+        self.flush()
+    }
+
+    /// Hands the events waiting to `on_event`, then reads what the server sends within `wait` once and hands those on
+    /// too. Nothing to read in time is no error.
+    pub(crate) fn listen(&mut self, wait: Duration, on_event: &mut dyn FnMut(Event)) -> Result<(), NetError> {
+        while let Some(event) = self.client.next_event() {
+            on_event(event);
+        }
+        let now = self.clock().now();
+        // A zero wait would mean no timeout at all.
+        self.stream.set_read_timeout(Some(wait.max(Duration::from_millis(1)))).map_err(|error| NetError::io(&error, now))?;
+        let read = self.pump();
+        self.stream.set_read_timeout(Some(self.connector.timeouts().io)).map_err(|error| NetError::io(&error, now))?;
+        match read {
+            Err(error) if error.kind() == ErrorKind::TimedOut => {}
+            other => other?,
+        }
+        while let Some(event) = self.client.next_event() {
+            on_event(event);
+        }
+        Ok(())
+    }
+
     /// Starts a command with `start` and waits for its answer, handing every other event to `on_event`.
     pub(crate) fn run(
         &mut self,
@@ -261,7 +308,7 @@ impl ImapConnection {
     }
 
     /// Writes what the client has for the server and reads until the command `tag` is answered.
-    fn wait(&mut self, tag: &Tag, on_event: &mut dyn FnMut(Event)) -> Result<Outcome, NetError> {
+    pub(crate) fn wait(&mut self, tag: &Tag, on_event: &mut dyn FnMut(Event)) -> Result<Outcome, NetError> {
         loop {
             self.flush()?;
             while let Some(event) = self.client.next_event() {

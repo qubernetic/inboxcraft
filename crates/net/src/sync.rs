@@ -83,7 +83,7 @@ pub(crate) fn run(
             say(EventKind::BodyFetched { folder: *folder, uid_validity: *uid_validity, uid: *uid, raw });
             Ok(())
         }
-        // Watching a folder comes with E1.7b; until then the worker waits for the next job.
+        // The worker watches the folder between jobs (see `watch`); there is nothing to run here.
         JobKind::Idle { .. } => Ok(()),
     }
 }

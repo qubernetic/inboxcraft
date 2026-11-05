@@ -11,7 +11,7 @@ use inboxcraft_model::{
     Account, AccountId, EmailAddress, Event, EventKind, FlagChange, FolderId, FolderPath, FolderState, Job, JobId, JobKind, Security, Summary, Uid,
     UidValidity,
 };
-use inboxcraft_net::{Backoff, Credentials, Password, SyncConfig, Timeouts, Worker, WorkerSettings};
+use inboxcraft_net::{Backoff, Credentials, Password, SyncConfig, Timeouts, WatchConfig, Worker, WorkerSettings};
 use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
 use inboxcraft_testkit::{CertFault, FakeServer, Listen, TestPki};
 
@@ -44,6 +44,7 @@ pub struct Options {
     /// The certificate fault the fake's certificate has.
     pub cert: Option<CertFault>,
     pub compress: bool,
+    pub watch: WatchConfig,
 }
 
 impl Default for Options {
@@ -57,6 +58,7 @@ impl Default for Options {
             timeouts: TIMEOUTS,
             cert: None,
             compress: true,
+            watch: WatchConfig { tick: Duration::from_millis(20), ..WatchConfig::default() },
         }
     }
 }
@@ -80,6 +82,7 @@ impl Run {
             backoff: options.backoff,
             max_queued: options.max_queued,
             compress: options.compress,
+            watch: options.watch,
             ..WorkerSettings::new(connector)
         };
         let (sender, events) = mpsc::channel();
