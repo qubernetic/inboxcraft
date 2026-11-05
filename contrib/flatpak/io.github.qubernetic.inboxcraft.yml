@@ -1,0 +1,56 @@
+# The dev Flatpak of InboxCraft, built offline from this checkout: `just flatpak` on the host
+# (docs/development.md, "The dev Flatpak"). The crates come from cargo-sources.json, which
+# `just flatpak-sources` writes from Cargo.lock and `cargo xtask ci` checks.
+app-id: io.github.qubernetic.inboxcraft
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: inboxcraft
+# As few permissions as the app needs, each with its reason. No --filesystem: mail, settings and
+# caches stay in the app's own folder under ~/.var/app/io.github.qubernetic.inboxcraft/.
+# The Background portal (keep syncing with the window closed, start at login) needs no
+# finish-arg: every sandbox reaches the portals.
+finish-args:
+  # Network: InboxCraft talks IMAP, SMTP and CalDAV to the person's own mail servers.
+  - --share=network
+  # Display: a Wayland window first.
+  - --socket=wayland
+  # Display: X11 only in a session without Wayland.
+  - --socket=fallback-x11
+  # X11 shared memory, which the X11 fallback needs to draw at a usable speed.
+  - --share=ipc
+  # GPU: egui draws the window with OpenGL.
+  - --device=dri
+  # Secret Service: account passwords and tokens live in the OS credential store, never in files.
+  - --talk-name=org.freedesktop.secrets
+  # Notifications: new mail is announced on the desktop.
+  - --talk-name=org.freedesktop.Notifications
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    # cargo-sources.json puts the crates and a config.toml that points crates.io at them here.
+    CARGO_HOME: /run/build/inboxcraft/cargo
+modules:
+  - name: inboxcraft
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked -p inboxcraft
+      - install -Dm755 target/release/inboxcraft /app/bin/inboxcraft
+      - install -Dm644 contrib/flatpak/io.github.qubernetic.inboxcraft.desktop /app/share/applications/io.github.qubernetic.inboxcraft.desktop
+      - install -Dm644 contrib/flatpak/io.github.qubernetic.inboxcraft.metainfo.xml /app/share/metainfo/io.github.qubernetic.inboxcraft.metainfo.xml
+      - install -Dm644 assets/app-icon/inboxcraft.svg /app/share/icons/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg
+    sources:
+      # The checkout itself, without build output, git data or local private folders.
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - fuzz/target
+          - fuzz/corpus
+          - fuzz/artifacts
+          - plan
+          - .flatpak-builder
+      - cargo-sources.json

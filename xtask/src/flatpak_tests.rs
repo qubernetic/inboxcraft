@@ -193,3 +193,82 @@ fn the_commands_write_and_check_through_the_cli() {
     assert_eq!(code, USAGE);
     assert!(err.contains("Cargo.lock"), "{err}");
 }
+
+const APP_ID: &str = "io.github.qubernetic.inboxcraft";
+const MANIFEST: &str = "contrib/flatpak/io.github.qubernetic.inboxcraft.yml";
+
+fn repo_file(rel: &str) -> String {
+    std::fs::read_to_string(crate::default_root().join(rel)).unwrap_or_else(|error| panic!("{rel}: {error}"))
+}
+
+/// The finish-args of the manifest `text` without a comment line right above them.
+fn finish_args_without_reason(text: &str) -> Vec<String> {
+    let mut missing = Vec::new();
+    let mut inside = false;
+    let mut reason = false;
+    for line in text.lines() {
+        if !inside {
+            inside = line == "finish-args:";
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if !line.starts_with(' ') {
+            break;
+        }
+        if trimmed.starts_with('#') {
+            reason = true;
+        } else if let Some(arg) = trimmed.strip_prefix("- ") {
+            if !reason {
+                missing.push(arg.to_owned());
+            }
+            reason = false;
+        }
+    }
+    missing
+}
+
+#[test]
+fn a_finish_arg_without_its_own_comment_is_found() {
+    let text = "app-id: x\nfinish-args:\n  # Network: mail servers.\n  - --share=network\n  - --socket=wayland\n\n  # GPU.\n  - --device=dri\nmodules: []\n  - --not-an-arg\n";
+    assert_eq!(finish_args_without_reason(text), ["--socket=wayland"]);
+    assert!(finish_args_without_reason("app-id: x\n").is_empty());
+}
+
+#[test]
+fn every_finish_arg_of_the_manifest_has_a_reason() {
+    let manifest = repo_file(MANIFEST);
+    assert!(manifest.contains("\n  - --share=network\n"), "{manifest}");
+    assert_eq!(finish_args_without_reason(&manifest), Vec::<String>::new());
+}
+
+#[test]
+fn the_manifest_installs_files_that_exist_under_the_app_id() {
+    let manifest = repo_file(MANIFEST);
+    assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");
+    assert!(manifest.contains("\n      - cargo-sources.json\n"), "the crates come from {SOURCES}");
+    let installs: Vec<(&str, &str)> =
+        manifest.lines().filter_map(|line| line.trim_start().strip_prefix("- install -Dm644 ")).filter_map(|rest| rest.split_once(' ')).collect();
+    assert_eq!(installs.len(), 3, "{manifest}");
+    for (from, to) in installs {
+        assert!(crate::default_root().join(from).is_file(), "{from} is missing");
+        assert!(to.rsplit('/').next().is_some_and(|name| name.starts_with(APP_ID)), "{to} is not named after the app id");
+    }
+}
+
+#[test]
+fn the_desktop_file_opens_the_app_and_its_second_action_the_sample() {
+    let desktop = repo_file(&format!("contrib/flatpak/{APP_ID}.desktop"));
+    assert!(desktop.contains("\nExec=inboxcraft\n") && desktop.contains(&format!("\nIcon={APP_ID}\n")), "{desktop}");
+    assert!(desktop.contains("\nActions=sample;\n") && desktop.contains("\n[Desktop Action sample]\n"), "{desktop}");
+    assert!(desktop.ends_with("\nExec=inboxcraft --sample\n"), "{desktop}");
+    let metainfo = repo_file(&format!("contrib/flatpak/{APP_ID}.metainfo.xml"));
+    assert!(
+        metainfo.contains(&format!("<id>{APP_ID}</id>"))
+            && metainfo.contains(&format!("<launchable type=\"desktop-id\">{APP_ID}.desktop</launchable>"))
+    );
+}
+
+#[test]
+fn the_window_carries_the_app_id_so_the_desktop_finds_its_entry() {
+    assert!(repo_file("apps/inboxcraft/src/main.rs").contains(&format!(".with_app_id(\"{APP_ID}\")")));
+}
