@@ -193,11 +193,61 @@ fn pictures_of_folded_messages_make_room_once_all_pictures_pass_the_budget() {
 
 /// A mailbox whose message 1 has the body `raw`.
 fn with_body(raw: String) -> Mailbox {
+    with_bodies(vec![(1, raw)])
+}
+
+/// A mailbox whose messages have the bodies in `bodies`, by id.
+fn with_bodies(bodies: Vec<(u64, String)>) -> Mailbox {
     use inboxcraft_engine::Session;
     use inboxcraft_store::{Batch, Body, Change, Storage};
     let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
-    store.apply(&Batch::new().with(Change::PutBody(inboxcraft_model::MessageId::new(1), Body::new(raw.into_bytes(), "").unwrap()))).unwrap();
+    let mut batch = Batch::new();
+    for (id, raw) in bodies {
+        batch = batch.with(Change::PutBody(inboxcraft_model::MessageId::new(id), Body::new(raw.into_bytes(), "").unwrap()));
+    }
+    store.apply(&batch).unwrap();
     Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock())
+}
+
+/// An HTML message from `from` with one remote picture at `url`.
+fn remote_html(from: &str, url: &str) -> String {
+    format!("From: {from}\r\nSubject: Pictures\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Hello <img src=\"{url}\"></p>\r\n")
+}
+
+#[test]
+fn consent_reaches_no_other_message_of_the_thread_no_other_sender_and_no_next_message() {
+    let (original, reply, newsletter) = {
+        let mut sample = mailbox();
+        let original = id_of(&mut sample, "Allotment rota for November");
+        let reply = id_of(&mut sample, "Re: Allotment rota for November");
+        (original, reply, id_of(&mut sample, "Your bike is due for a service"))
+    };
+    let (odile, mira) = ("https://pictures.example.org/odile.png", "https://pictures.example.org/mira.png");
+    let mut mailbox = with_bodies(vec![
+        (original, remote_html("Odile Brannock <odile@example.org>", odile)),
+        (reply, remote_html("Mira Holloway <mira@example.org>", mira)),
+    ]);
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(reply));
+    assert_eq!(reader.thread().len(), 2);
+    // Once for the reply: unfolding the older message of the thread asks nothing for it.
+    reader.allow_once(&mut mailbox, reply);
+    assert_eq!(*fetch.asked.lock().unwrap(), [mira]);
+    reader.expand(&mut mailbox, original);
+    assert!(reader.opened(original).is_some());
+    assert_eq!(*fetch.asked.lock().unwrap(), [mira], "once is for the reply only");
+    // Always for Mira: Odile's message in the same thread still asks nothing.
+    reader.open(&mut mailbox, Some(reply));
+    reader.allow_always(&mut mailbox, reply);
+    reader.expand(&mut mailbox, original);
+    assert!(!reader.remote_allowed(original));
+    assert!(!fetch.asked.lock().unwrap().iter().any(|url| url == odile), "always for one sender is not for another");
+    // The next message (as the next-message rule opens it) asks nothing without its own consent.
+    let before = fetch.asked.lock().unwrap().len();
+    reader.open(&mut mailbox, Some(newsletter));
+    assert_eq!(fetch.asked.lock().unwrap().len(), before);
+    assert!(!reader.remote_allowed(newsletter));
 }
 
 /// A message with `html` and an inline part `<n@example.org>` of `png` for every `n` below `parts`.
