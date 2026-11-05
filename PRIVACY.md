@@ -33,7 +33,8 @@ what it found; it asks, in this order, and stops at the first answer that names 
 5. Nothing more: common host names such as `imap.<domain>` are offered as a guess for you to confirm.
 
 These requests carry the domain in the name or the URL and nothing else: no address, no user name, no password, no
-`User-Agent`, no cookies, and no proxy. The proposal lists every request that was made. Nothing detected gets your
+`User-Agent`, no cookies, and no proxy. The proposal lists every DNS query and URL that was asked; each URL also
+means a name lookup of its host by your system. Nothing detected gets your
 password before you have seen the settings and the server's certificate has verified.
 
 ## Checking an account

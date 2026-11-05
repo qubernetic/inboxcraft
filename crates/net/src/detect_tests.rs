@@ -146,10 +146,11 @@ fn with_the_ispdb_on_it_is_asked_for_the_domain_then_the_mx_domain() {
     let dns = FakeDns { mx: vec!["mx1.mail.example.net"], ..FakeDns::default() };
     let proposal = detect(&address(), &config_on, &dns, &web);
     assert_eq!(imap(&proposal), ["imap.example.net:993 (TLS) Ispdb"]);
-    assert_eq!(
-        web.asked(),
-        [AUTOCONFIG.to_owned(), WELL_KNOWN.to_owned(), PLAIN.to_owned(), format!("{ISPDB}example.org"), format!("{ISPDB}example.net")]
-    );
+    let urls = [AUTOCONFIG.to_owned(), WELL_KNOWN.to_owned(), PLAIN.to_owned(), format!("{ISPDB}example.org"), format!("{ISPDB}example.net")];
+    assert_eq!(web.asked(), urls);
+    let mut asked = vec!["dns MX example.org".to_owned()];
+    asked.extend(urls);
+    assert_eq!(proposal.asked, asked);
 
     // Found for the domain: the MX domain is not asked.
     let web = FakeWeb::default().page(&format!("{ISPDB}example.org"), &config("imap.example.org", 993, "SSL"));

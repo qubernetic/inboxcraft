@@ -119,7 +119,8 @@ pub struct Proposal {
     pub imap: Vec<Candidate>,
     /// Submission (SMTP) servers, the best first.
     pub submission: Vec<Candidate>,
-    /// Every request made, in order: `dns MX example.org`, `https://...`. What left the computer, for the owner.
+    /// Every DNS query and URL, in order: `dns MX example.org`, `https://...`. What left the computer, for the owner;
+    /// each URL also means a name lookup of its host by the system.
     pub asked: Vec<String>,
     /// The lookups that failed, with their cause.
     pub failed: Vec<(String, ErrorKind)>,
