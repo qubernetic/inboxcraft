@@ -27,6 +27,8 @@ pub struct Outcome {
 pub(crate) struct Pending {
     pub(crate) account: AccountId,
     pub(crate) kind: JobKind,
+    /// The message a `FetchBody` job is for, so the same body is not asked for twice while one job is out.
+    pub(crate) message: Option<MessageId>,
 }
 
 impl Outcome {
@@ -46,7 +48,13 @@ impl Outcome {
     /// The outcome with a job for the `net` worker of `account`.
     #[must_use]
     pub fn with_job(mut self, account: AccountId, kind: JobKind) -> Self {
-        self.jobs.push(Pending { account, kind });
+        self.jobs.push(Pending { account, kind, message: None });
+        self
+    }
+
+    /// The outcome with a `FetchBody` job for `message`, unless one is already out.
+    pub(crate) fn with_fetch(mut self, account: AccountId, kind: JobKind, message: MessageId) -> Self {
+        self.jobs.push(Pending { account, kind, message: Some(message) });
         self
     }
 
@@ -89,6 +97,8 @@ pub(crate) struct State {
     pub(crate) accounts: BTreeMap<AccountId, AccountState>,
     /// The UIDVALIDITY the UIDs we hold of each folder belong to.
     pub(crate) validity: BTreeMap<FolderId, UidValidity>,
+    /// The `FetchBody` jobs out, by job.
+    pub(crate) fetching: BTreeMap<JobId, MessageId>,
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
@@ -240,7 +250,7 @@ impl Session {
     pub fn start(&mut self) {
         let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
         for account in accounts {
-            self.queue(Pending { account, kind: JobKind::SyncFolderList });
+            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None });
         }
     }
 
@@ -278,7 +288,15 @@ impl Session {
     }
 
     fn queue(&mut self, pending: Pending) {
+        if let Some(message) = pending.message
+            && self.state.fetching.values().any(|out| *out == message)
+        {
+            return;
+        }
         let id = self.state.job_id();
+        if let Some(message) = pending.message {
+            self.state.fetching.insert(id, message);
+        }
         self.jobs.push(Job::new(id, pending.account, pending.kind));
     }
 }

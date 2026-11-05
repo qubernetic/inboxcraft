@@ -19,6 +19,9 @@ inboxcraft-mime = { path = "../crates/mime" }
 inboxcraft-proto = { path = "../crates/proto" }
 inboxcraft-net = { path = "../crates/net" }
 inboxcraft-testkit = { path = "../crates/testkit" }
+inboxcraft-store = { path = "../crates/store" }
+inboxcraft-engine = { path = "../crates/engine" }
+serde_json = "1"
 
 [workspace]
 members = ["."]
@@ -89,6 +92,13 @@ bench = false
 [[bin]]
 name = "net_envelope"
 path = "fuzz_targets/net_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "engine_params"
+path = "fuzz_targets/engine_params.rs"
 test = false
 doc = false
 bench = false

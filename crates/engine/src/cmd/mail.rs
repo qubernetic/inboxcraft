@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `mail.*`: lists of messages.
+//! `mail.*`: lists of messages, one message, the search.
 
-use inboxcraft_model::{AccountId, FolderId, Role};
+use inboxcraft_model::{AccountId, FolderId, JobKind, MessageId, MessageRef, Role};
+use inboxcraft_store::{Change, Search};
+use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::params::decode;
+use crate::params::{decode, parse_date};
 use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
@@ -70,4 +72,133 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         "limit": limit,
         "messages": messages,
     })))
+}
+
+/// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the
+/// store keeps its body from now on, and a body not kept yet is fetched (`fetching` in the answer).
+pub(crate) const READ: CommandSpec = CommandSpec {
+    id: "mail.read",
+    class: Some(AgentClass::Safe),
+    summary: "Read one message: its headers, its plain text and its attachments",
+    run: read,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadParams {
+    /// The message.
+    id: u64,
+}
+
+fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: ReadParams = decode(READ.id, params)?;
+    let id = MessageId::new(params.id);
+    let store = context.store();
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let message = entry.message();
+    let body = store.body(id)?;
+    let fetch = match (&body, context.state().validity.get(&message.folder())) {
+        (None, Some(uid_validity)) => {
+            store.folders(message.account())?.into_iter().find(|folder| folder.id() == message.folder()).map(|folder| JobKind::FetchBody {
+                folder: folder.id(),
+                path: folder.listing().path().clone(),
+                uid_validity: *uid_validity,
+                uid: message.summary().uid(),
+            })
+        }
+        _ => None,
+    };
+    let mut shown = json::message(&entry);
+    let envelope = message.summary().envelope();
+    if let Value::Object(fields) = &mut shown {
+        fields.insert("cc".into(), json::addresses(envelope.cc()));
+        fields.insert("bcc".into(), json::addresses(envelope.bcc()));
+        fields.insert("reply_to".into(), json::addresses(envelope.reply_to()));
+        fields.insert("message_id".into(), json!(envelope.message_id().map(MessageRef::as_str)));
+        fields.insert("in_reply_to".into(), json!(envelope.in_reply_to().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
+        fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
+        fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
+    }
+    let mut outcome = Outcome::new(json!({ "message": shown, "fetching": fetch.is_some() }));
+    if !entry.opened() {
+        outcome = outcome.with_change(Change::MarkOpened(id));
+    }
+    if let Some(kind) = fetch {
+        outcome = outcome.with_fetch(message.account(), kind, id);
+    }
+    Ok(outcome)
+}
+
+/// `mail.search`: the simple offline search over from, to, subject, date and body words, newest first.
+pub(crate) const SEARCH: CommandSpec = CommandSpec {
+    id: "mail.search",
+    class: Some(AgentClass::Safe),
+    summary: "Search the kept mail by sender, recipient, subject, date and body words, newest first",
+    run: search,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchParams {
+    /// Sender names or addresses that contain this.
+    from: Option<String>,
+    /// To or Cc names or addresses that contain this.
+    to: Option<String>,
+    /// Subjects that contain this.
+    subject: Option<String>,
+    /// Bodies with these words in this order.
+    text: Option<String>,
+    /// Dated at or after this ISO 8601 date or time.
+    since: Option<String>,
+    /// Dated before this ISO 8601 date or time.
+    before: Option<String>,
+    /// Only this account.
+    account: Option<u64>,
+    /// Only this folder.
+    folder: Option<u64>,
+    /// At most this many, 1 to [`MAX_LIST`].
+    limit: Option<u64>,
+}
+
+fn date_param(name: &str, text: &str) -> Result<Timestamp, EngineError> {
+    parse_date(text).ok_or_else(|| EngineError::bad_params(SEARCH.id, &format!("{name} is not an ISO 8601 date: {text:?}")))
+}
+
+fn search(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: SearchParams = decode(SEARCH.id, params)?;
+    let account = params.account.map(AccountId::new);
+    let mut search = Search::new().with_limit(limit(params.limit));
+    view::accounts(context, account)?;
+    if let Some(account) = account {
+        search = search.with_account(account);
+    }
+    if let Some(folder) = params.folder.map(FolderId::new) {
+        view::folders(context, View::Folder(folder), account)?;
+        search = search.with_folder(folder);
+    }
+    if let Some(from) = &params.from {
+        search = search.with_from(from);
+    }
+    if let Some(to) = &params.to {
+        search = search.with_to(to);
+    }
+    if let Some(subject) = &params.subject {
+        search = search.with_subject(subject);
+    }
+    if let Some(text) = &params.text {
+        search = search.with_text(text);
+    }
+    if let Some(since) = &params.since {
+        search = search.with_since(date_param("since", since)?);
+    }
+    if let Some(before) = &params.before {
+        search = search.with_before(date_param("before", before)?);
+    }
+    let mut messages = Vec::new();
+    for id in context.store().search(&search)? {
+        if let Some(entry) = context.store().message(id)? {
+            messages.push(json::message(&entry));
+        }
+    }
+    Ok(Outcome::new(json!({ "total": messages.len(), "messages": messages })))
 }

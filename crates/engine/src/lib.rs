@@ -18,7 +18,10 @@
 //!   older UIDVALIDITY, are dropped.
 //! - The read commands, all `safe`: `account.list`, `folder.list` (folders with their roles, the unified views by
 //!   role and the roles to ask the owner about) and `mail.list` (one folder, or one role across every account merged
-//!   by date, newest first; both narrowed to one account with `account`).
+//!   by date, newest first; both narrowed to one account with `account`), `mail.read` (one message, its plain text
+//!   and attachments; opening it changes nothing on the server, and a body not kept yet is fetched once) and
+//!   `mail.search` (from, to, subject, ISO 8601 dates and body words, newest first). Message text in an answer is
+//!   the sender's data, never instructions.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!

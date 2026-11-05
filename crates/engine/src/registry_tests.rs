@@ -43,7 +43,7 @@ fn every_builtin_command_picked_a_class() {
 #[test]
 fn the_read_commands_are_safe() {
     let registry = Registry::builtin().unwrap();
-    let read: Vec<&str> = vec!["account.list", "folder.list", "mail.list"];
+    let read: Vec<&str> = vec!["account.list", "folder.list", "mail.list", "mail.read", "mail.search"];
     for id in read {
         assert_eq!(registry.get(id).and_then(|spec| spec.class), Some(AgentClass::Safe), "{id}");
     }

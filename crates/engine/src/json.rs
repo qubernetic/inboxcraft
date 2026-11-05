@@ -132,6 +132,31 @@ pub(crate) fn message(entry: &Entry) -> Value {
     })
 }
 
+/// A kept body: its plain text, whether it has an HTML part (shown through `html`, never run) and its attachments.
+/// Nothing in it runs and nothing is fetched for it.
+pub(crate) fn body(source: &[u8]) -> Value {
+    let Ok(message) = inboxcraft_mime::parse(source) else {
+        return json!({ "readable": false, "text": null, "has_html": false, "attachments": [] });
+    };
+    let attachments: Vec<Value> = message
+        .attachments()
+        .iter()
+        .map(|part| {
+            json!({
+                "name": part.file_name(),
+                "type": part.content_type().essence(),
+                "size": part.decoded().ok().map(|bytes| bytes.len()),
+            })
+        })
+        .collect();
+    json!({
+        "readable": true,
+        "text": message.text_body().and_then(|part| part.text().ok()),
+        "has_html": message.html_body().is_some(),
+        "attachments": attachments,
+    })
+}
+
 #[cfg(test)]
 #[path = "json_tests.rs"]
 mod tests;

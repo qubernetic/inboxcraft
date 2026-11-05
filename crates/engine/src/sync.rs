@@ -29,7 +29,7 @@ impl Plan {
     }
 
     fn job(&mut self, account: AccountId, kind: JobKind) {
-        self.jobs.push(Pending { account, kind });
+        self.jobs.push(Pending { account, kind, message: None });
     }
 }
 
@@ -70,6 +70,9 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::Failed { kind, folder } => {
             plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
+            if let Some(job) = event.job {
+                plan.state.fetching.remove(&job);
+            }
             true
         }
     };
@@ -199,6 +202,7 @@ fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity:
     let Some(message) = held(store, folder)?.remove(&uid) else { return Ok(false) };
     let Ok(body) = Body::new(raw.to_vec(), &plain_text(raw)) else { return Ok(false) };
     plan.change(Change::PutBody(message.id(), body));
+    plan.state.fetching.retain(|_, out| *out != message.id());
     Ok(true)
 }
 

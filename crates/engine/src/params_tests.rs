@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use super::{NoParams, decode};
+use super::{NoParams, decode, parse_date};
 use crate::{EngineError, MAX_ERROR_TEXT};
 
 #[test]
@@ -27,4 +27,42 @@ fn a_complaint_repeats_little_of_the_params() {
     let Err(EngineError::BadParams { reason, .. }) = decode::<NoParams>("test.none", &params) else { panic!("refused") };
     assert!(reason.chars().count() <= MAX_ERROR_TEXT, "{reason}");
     assert!(!reason.contains('\r') && !reason.contains('\n'), "{reason}");
+}
+
+#[test]
+fn iso_dates_and_times_are_read() {
+    use crate::test_support::{NOW, at};
+    assert_eq!(parse_date("2026-11-05T09:00:00Z"), Some(at(NOW)));
+    assert_eq!(parse_date("2026-11-05T10:00:00+01:00"), Some(at(NOW)));
+    assert_eq!(parse_date("2026-11-05T08:30:00-00:30"), Some(at(NOW)));
+    assert_eq!(parse_date("2026-11-05"), Some(at(NOW - 9 * 3600)));
+    assert_eq!(parse_date("0000-01-01"), Some(inboxcraft_time::Timestamp::MIN));
+}
+
+#[test]
+fn anything_else_is_not_a_date() {
+    for bad in [
+        "",
+        "2026",
+        "2026-11-5",
+        "2026/11/05",
+        "2026-13-01",
+        "2026-02-30",
+        "+026-11-05",
+        "2026-11-05T09:00",
+        "2026-11-05T09:00:00",
+        "2026-11-05 09:00:00Z",
+        "2026-11-05T25:00:00Z",
+        "2026-11-05T09:00:60Z",
+        "2026-11-05T09:00:00z",
+        "2026-11-05T09:00:00+0100",
+        "2026-11-05T09:00:00+01-00",
+        "2026-11-05T09:00:00*01:00",
+        "2026-11-05T09:00:00+99:99",
+        "2026-11-05T09:00:00Z ",
+        "2026-11-0é",
+        "２０２６-11-05",
+    ] {
+        assert_eq!(parse_date(bad), None, "{bad:?}");
+    }
 }
