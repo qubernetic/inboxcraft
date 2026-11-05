@@ -281,7 +281,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | Job | What it does | Token |
 |---|---|---|
 | `draft` | on a draft PR only: one step, so the draft shows a check | read |
-| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact | read |
+| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
@@ -294,7 +294,21 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
   from `rust-toolchain.toml`, and nextest, cargo-llvm-cov and cargo-deny at the versions the `Dockerfile` pins: it
   reads them from there, so a bump stays one change.
-- No cargo cache: nothing a PR run writes feeds a later run.
+- **One cache, written only by merged code.** The `test` job caches the compiled third-party dependencies
+  (`deps`, `build` and `.fingerprint` of every profile under `target/`) and the cargo registry
+  (`~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`; the unpacked sources are not cached,
+  cargo unpacks them again from the `.crate` files). Every full run restores it with `actions/cache/restore`; only a
+  `push` run, that is a push to `develop`, `main` or `epic/**`, saves it with `actions/cache/save`, after a green
+  run, so a `pull_request` or `workflow_dispatch` run never writes it. Before the save, every package and target
+  name of this workspace is deleted from `target/`, with the binaries, reports and coverage data: no artifact of
+  our own code is cached. The job sets `CARGO_INCREMENTAL=0`.
+- The key is `deps-v1-<os>-<ISO week>-<hash of rust-toolchain.toml>-<hash of the [profile.*] sections>-<hash of
+  Cargo.lock>`, so it rotates every week and a toolchain or profile change starts from nothing. A run whose
+  `Cargo.lock` has no entry yet restores the newest entry of the same week, toolchain and profiles and rebuilds what
+  changed; that entry can carry old dependency versions until the week ends. A PR restores the entries of its base
+  branch and of `main`.
+- Purge the cache with `gh cache delete --all` (one entry: `gh cache list`, then `gh cache delete <key>`). The
+  `codecov` and `flatpak` jobs and `fuzz.yml` use no cache.
 - Every action is pinned by its full commit SHA with the tag in a comment; the workflow token is read-only and only
   `codecov` widens it.
 
@@ -363,3 +377,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |
 | 2026-11-05 | minor | The Flatpak opens the Downloads folder for Save (#33) |
 | 2026-11-05 | minor | CI: the `cov` gate is the one test run, no separate nextest gate (#66) |
+| 2026-11-05 | minor | CI: the dependency cache of the `test` job, saved by branch pushes only (#67) |

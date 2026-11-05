@@ -6,10 +6,16 @@
 #
 # The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
 #
-# Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, no cache a PR run could write
-# for a later one, every action pinned by commit SHA. Only the `codecov` job has `id-token: write`: it uploads the
-# coverage and test results with the job's GitHub OIDC token (the repository is private) and runs no repository
-# code.
+# Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, every action pinned by commit
+# SHA. Only the `codecov` job has `id-token: write`: it uploads the coverage and test results with the job's GitHub
+# OIDC token (the repository is private) and runs no repository code.
+#
+# The one cache, in the `test` job only: compiled third-party dependencies and the cargo registry. Every full run
+# restores it; only a push to develop, main or an epic branch saves it, so only reviewed, merged code writes it. A
+# pull_request or workflow_dispatch run never saves. Our own crates are deleted from target/ before the save, so no
+# artifact of this repository's code is cached. The key rotates weekly and changes with rust-toolchain.toml,
+# Cargo.lock and the [profile.*] sections of Cargo.toml. The `codecov` and `flatpak` jobs and fuzz.yml use no cache.
+# Purge every entry with `gh cache delete --all`.
 
 name: ci
 
@@ -44,10 +50,36 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # Incremental data only pays off on a warm machine, and it would hold our own code: never built, never cached.
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The cache key: ISO week, toolchain, [profile.*] sections, Cargo.lock. A run whose Cargo.lock has no entry yet
+      # restores the newest one of the same week, toolchain and profiles and rebuilds only what changed.
+      - name: Compute the cache key
+        id: cache-key
+        env:
+          TOOLCHAIN: ${{ hashFiles('rust-toolchain.toml') }}
+          LOCK: ${{ hashFiles('Cargo.lock') }}
+        run: |
+          profiles=$(awk '/^\[/ { keep = /^\[profile\./ } keep' Cargo.toml | sha256sum | cut -d' ' -f1)
+          prefix="deps-v1-$RUNNER_OS-$(date -u +%G-W%V)-$TOOLCHAIN-$profiles-"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "key=$prefix$LOCK" >> "$GITHUB_OUTPUT"
+      # Every run restores; the save step at the end runs on pushes only. The paths match the save step's.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ${{ steps.cache-key.outputs.prefix }}
       # The Dockerfile's list without the base image's build-essential, ca-certificates, curl and git.
       - name: Install the system packages
         run: |
@@ -88,6 +120,33 @@ jobs:
             target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 7
+      # Pushes to develop, main and epic/** only (the push trigger names no other branch), and only after a green
+      # run. What stays in target/: deps, build and .fingerprint of each profile, minus every package and target
+      # name of this workspace; reports, binaries, examples and coverage data go.
+      - name: Drop our own crates from target/
+        if: github.event_name == 'push'
+        run: |
+          # Exact names only: a target called `wasm` must not take `wasm-bindgen` with it.
+          names=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[] | .name, .targets[].name | ., gsub("-"; "_")] | unique | join("|")')
+          ours=".*/(lib)?($names)-[0-9a-f]{16}(\..+)?"
+          rm -rf target/nextest target/tmp target/doc
+          find target -maxdepth 2 -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*-profraw-list' \) -delete
+          profiles=$(find target -type d -name .fingerprint -prune -printf '%h\n')
+          for profile in $profiles; do
+            find "$profile" -mindepth 1 -maxdepth 1 ! -name deps ! -name build ! -name .fingerprint -exec rm -rf {} +
+            find "$profile" -mindepth 2 -maxdepth 2 -regextype posix-extended -regex "$ours" -exec rm -rf {} +
+          done
+          du -sh target ~/.cargo/registry/index ~/.cargo/registry/cache
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache-key.outputs.key }}
 
   codecov:
     needs: test
