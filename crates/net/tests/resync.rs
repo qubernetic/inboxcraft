@@ -6,7 +6,7 @@
 
 mod support;
 
-use inboxcraft_model::{EventKind, Flag, JobKind};
+use inboxcraft_model::{ErrorKind, EventKind, Flag, FolderState, JobKind, ModSeq};
 use inboxcraft_testkit::imap::{Action, Capability, FakeImap, Message, When};
 use support::Result;
 use support::run::{INBOX, Run, added, changed, expunged, state, sync_inbox, uid, validity};
@@ -112,5 +112,74 @@ fn an_emptied_folder_reports_every_known_message_removed() -> Result {
     assert!(added(&events).is_empty());
     let lines = run.finish()?;
     assert_eq!(lines.iter().filter(|line| line.contains("UID FETCH")).count(), 2, "{lines:?}");
+    Ok(())
+}
+
+/// The sample with `lines` sent as they are just before the server answers its first `command`.
+fn with_lines(fake: FakeImap, command: &str, lines: impl IntoIterator<Item = String>) -> FakeImap {
+    fake.on(When::command(command), lines.into_iter().map(Action::Send).collect::<Vec<_>>())
+}
+
+/// Resyncs the unchanged sample INBOX from its known state on a fresh connection, with `config`: the folder is the
+/// first one opened, so everything the server sends before its answer belongs to it. The resync's events and the
+/// lines the server got.
+fn resync_known(fake: FakeImap, config: inboxcraft_net::SyncConfig) -> Result<(Vec<EventKind>, Vec<String>)> {
+    let known = FolderState::new(validity(1)?).with_uid_next(Some(uid(4)?)).with_highest_modseq(ModSeq::new(4));
+    let mut run = Run::start(fake, Some(inboxcraft_testkit::imap::PASSWORD), config)?;
+    run.job(sync_inbox(Some(known))?)?;
+    let events = run.synced()?;
+    Ok((events, run.finish()?))
+}
+
+#[test]
+fn a_flag_change_qresync_repeats_is_kept_once() -> Result {
+    let repeated = (2..5_000).map(|modseq| format!("* 1 FETCH (UID 1 FLAGS (\\Seen \\Flagged) MODSEQ ({modseq}))"));
+    let config = inboxcraft_net::SyncConfig { max_told: 2, ..inboxcraft_net::SyncConfig::default() };
+    let (events, lines) = resync_known(with_lines(FakeImap::sample(), "EXAMINE", repeated), config)?;
+    let changes = changed(&events);
+    assert_eq!(changes.iter().map(|change| change.uid.get()).collect::<Vec<_>>(), [1], "{events:?}");
+    // The latest one is kept.
+    assert!(changes[0].flags.contains(&Flag::Flagged) && changes[0].modseq == ModSeq::new(4_999), "{changes:?}");
+    assert!(expunged(&events).is_empty() && state(&events).is_some(), "{events:?}");
+    assert!(!lines.iter().any(|line| line.contains("UID FETCH 1:3 (UID FLAGS")), "{lines:?}");
+    Ok(())
+}
+
+#[test]
+fn more_than_qresync_may_tell_falls_back_to_the_flags_fetch() -> Result {
+    let ranges = (0..50).map(|step| format!("* VANISHED (EARLIER) {}", 1 + 2 * step));
+    let config = inboxcraft_net::SyncConfig { max_told: 10, ..inboxcraft_net::SyncConfig::default() };
+    let (events, lines) = resync_known(with_lines(FakeImap::sample(), "EXAMINE", ranges), config)?;
+    // Nothing QRESYNC told is reported; the flags fetch finds every known message still there.
+    assert!(expunged(&events).is_empty() && changed(&events).is_empty(), "{events:?}");
+    assert!(state(&events).is_some(), "{events:?}");
+    assert!(lines.iter().any(|line| line.contains("UID FETCH 1:3 (UID FLAGS MODSEQ)")), "{lines:?}");
+    Ok(())
+}
+
+#[test]
+fn a_flags_answer_the_server_repeats_in_order_stays_small() -> Result {
+    let repeated = std::iter::repeat_n("* 1 FETCH (UID 1 FLAGS (\\Seen))".to_owned(), 5_000);
+    let fake = with_lines(FakeImap::sample().without(Capability::QResync), "UID FETCH", repeated);
+    let config = inboxcraft_net::SyncConfig { max_ranges: 1, ..inboxcraft_net::SyncConfig::default() };
+    let (events, lines) = resync_known(fake, config)?;
+    assert!(expunged(&events).is_empty() && state(&events).is_some(), "{events:?}");
+    assert!(lines.iter().any(|line| line.contains("UID FETCH 1:3 (UID FLAGS MODSEQ)")), "{lines:?}");
+    Ok(())
+}
+
+#[test]
+fn a_flags_answer_out_of_order_past_the_cap_is_too_large() -> Result {
+    let jumping = (0..5_000).map(|step| format!("* 1 FETCH (UID {} FLAGS (\\Seen))", 1 + 2 * (step % 2)));
+    let fake = with_lines(FakeImap::sample().without(Capability::QResync), "UID FETCH", jumping);
+    let config = inboxcraft_net::SyncConfig { max_ranges: 100, ..inboxcraft_net::SyncConfig::default() };
+    let known = FolderState::new(validity(1)?).with_uid_next(Some(uid(4)?)).with_highest_modseq(ModSeq::new(4));
+    let mut run = Run::start(fake, Some(inboxcraft_testkit::imap::PASSWORD), config)?;
+    run.job(sync_inbox(Some(known))?)?;
+    let events = run.synced()?;
+    assert!(events.contains(&EventKind::Failed { kind: ErrorKind::TooLarge, folder: Some(INBOX) }), "{events:?}");
+    assert!(state(&events).is_none() && expunged(&events).is_empty(), "{events:?}");
+    // The worker drops a connection whose job failed, so the fake sees no LOGOUT.
+    run.worker.stop();
     Ok(())
 }
