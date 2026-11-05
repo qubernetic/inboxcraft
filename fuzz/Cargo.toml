@@ -14,6 +14,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
 inboxcraft-charset = { path = "../crates/charset" }
+inboxcraft-html = { path = "../crates/html" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
 inboxcraft-proto = { path = "../crates/proto" }
@@ -120,6 +121,13 @@ bench = false
 [[bin]]
 name = "engine_params"
 path = "fuzz_targets/engine_params.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html_display"
+path = "fuzz_targets/html_display.rs"
 test = false
 doc = false
 bench = false

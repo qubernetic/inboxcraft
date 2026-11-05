@@ -219,6 +219,18 @@ All notable changes to InboxCraft are listed here. The format follows
 - Live test `live_both_accounts_sign_in_and_list_folders` in `crates/net/tests/live.rs`: `live-imap` and
   `live-imap2` each sign in over IMAP and list their folders, named only by those names in the output; it skips
   cleanly without `INBOXCRAFT_LIVE_*`, in the sandbox and in CI (#57)
+- `inboxcraft-html`: `display` turns hostile message HTML into display blocks (paragraphs, headings, list items
+  with their markers, quotes, preformatted text, rules, pictures and tables) and runs nothing: scripts, style
+  sheets, frames, objects, SVG, the head and event attributes are dropped, forms keep their visible text and
+  lose everything that could submit, and elements marked `hidden`, `display: none` or `visibility: hidden` are
+  not shown. Remote pictures are blocked until the owner's consent flag (`RemoteContent::Allowed`) and counted;
+  `cid:` pictures point at the message's parts. Every link exposes its target; only `http`, `https` and
+  `mailto` are kept, and a link whose text names another host or address is flagged (`Link::mismatch`), with
+  invisible format characters ignored and full-stop look-alikes read as dots in the comparison; a web address
+  with a user name, in the target or the text, is always flagged. Bidi overrides and invisible format
+  characters other than the joiners are removed from all text. Input, nesting, tables, blocks, links and pictures are capped. The
+  tokenizer and the character references are adapted from UCS-Care-Group/mailcraft `html` (MIT OR Apache-2.0).
+  A hostile fixture set and the fuzz target `html_display` (#29)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

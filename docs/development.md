@@ -237,7 +237,8 @@ runs with `cargo +nightly fuzz run <name>` from the repository root. The targets
 `charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
 (#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
 (#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
-(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations.
+(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations, and
+`html_display` (#29), the safe HTML display.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -283,3 +284,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Live tests: `just it-live` makes the archive's folder first (#57) |
 | 2026-11-05 | minor | Live tests: the second account is `live-imap2` on the reference provider (#57) |
 | 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |
+| 2026-11-05 | minor | Fuzzing: the safe HTML display target (#29) |

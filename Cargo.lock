@@ -511,6 +511,9 @@ dependencies = [
 [[package]]
 name = "inboxcraft-html"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "inboxcraft-ical"
