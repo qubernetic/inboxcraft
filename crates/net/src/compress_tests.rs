@@ -80,3 +80,14 @@ fn garbage_is_a_protocol_error() {
     assert_eq!(error.kind(), ErrorKind::Protocol);
     assert!(error.detail().starts_with("the compressed stream is broken"), "{error}");
 }
+
+#[test]
+fn bytes_after_the_end_of_the_stream_are_a_protocol_error() {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(b"* BYE done\r\n").unwrap();
+    let mut data = encoder.finish().unwrap();
+    data.extend_from_slice(b"more");
+    let mut deflate = Deflate::new();
+    assert_eq!(inflate_all(&mut deflate, &data).unwrap_err().kind(), ErrorKind::Protocol);
+    assert_eq!(inflate_all(&mut deflate, b"and more").unwrap_err().kind(), ErrorKind::Protocol);
+}
