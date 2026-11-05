@@ -98,7 +98,7 @@ pub(crate) fn run(
         // The worker watches the folder between jobs (see `watch`); there is nothing to run here.
         JobKind::Idle { .. } => Ok(()),
         // The worker checks the account on a connection of its own (see `check`), never on this one.
-        JobKind::Check => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
+        JobKind::Check { .. } => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
     }
 }
 

@@ -265,6 +265,10 @@ B = blocks the next stage.
   and E4.2 (#28).
 - `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
   stays running until the workers are started again (`Session::start`), which forgets it (#28).
+- After a refused or unanswered sign-in, an agent's `account.check` stops before the sign-in (`needs_owner`) and only
+  the owner's check sends the password again; a check that signs in ends the worker's halt. There is no minimum
+  interval between an agent's checks of an account whose password works, so a looping agent still signs in once
+  per check (#28).
 - The TLS step of `account.check` passes when the server speaks TLS up to its certificate; a fault of the
   certificate is the certificate step's. On a STARTTLS port the greeting and the STARTTLS exchange count as part of
   the TLS step (#28).
@@ -320,3 +324,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | An unanswered sign-in halts the tries (#26) |
 | 2026-11-05 | minor | The engine read path and the command registry (#27) |
 | 2026-11-05 | minor | Rough edges of the account check and Detect (#28) |
+| 2026-11-05 | minor | An agent's check after a refused sign-in waits for the owner (#28) |

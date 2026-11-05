@@ -40,7 +40,9 @@ The account check connects to the account's IMAP server with the saved settings,
 connection fails: the name, the connection, TLS, the certificate, the sign-in. When the mail port does not answer,
 it also tries to open (and closes at once, sending nothing) port 443 and the other mail ports (993, 465, 587) of the
 same server, to tell a network that blocks mail from a server that is down. The password goes out only after the
-certificate verified, as when reading mail.
+certificate verified, as when reading mail. After the server refused the password or never answered the sign-in, a
+check an agent asks for stops before the sign-in and says it needs you; only a check you start sends the password
+again, so an agent cannot get the account locked at your provider by checking over and over.
 
 ## Scripts and agents
 The control channel listens only on 127.0.0.1 and needs a key from a file only you can read. The MCP server sees what
@@ -54,3 +56,4 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 |---|---|---|
 | <date> | major | First version |
 | 2026-11-05 | minor | What Detect asks and the ISPDB switch (off by default); what the account check connects to (#28) |
+| 2026-11-05 | minor | After a refused or unanswered sign-in, only the owner's check sends the password again (#28) |

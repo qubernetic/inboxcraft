@@ -64,6 +64,9 @@ pub enum StepStatus {
     Skipped,
     /// Not run: the settings were detected and the owner has not seen them yet, so no password went out.
     NeedsReview,
+    /// Not run: the last sign-in was refused or went unanswered, and only a check the owner starts sends the
+    /// password again.
+    NeedsOwner,
     /// Not run: this version does not have the step yet.
     NotBuilt,
 }

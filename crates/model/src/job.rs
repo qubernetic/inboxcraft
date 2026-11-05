@@ -87,7 +87,12 @@ pub enum JobKind {
     },
     /// Check the account step by step on a connection of its own, with the settings as saved; answered with one
     /// [`crate::EventKind::CheckStep`] per step.
-    Check,
+    Check {
+        /// The owner started the check: it signs in also after the last sign-in was refused or went unanswered. A
+        /// check an agent started stops before the sign-in then ([`crate::StepStatus::NeedsOwner`]), so an agent
+        /// cannot send a refused password over and over.
+        by_owner: bool,
+    },
     /// Watch the folder for changes between jobs (IDLE where the server has it), reporting them as the events of a
     /// resync, until another `Idle` moves the watch.
     Idle {
@@ -103,7 +108,7 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList | Self::Check => None,
+            Self::SyncFolderList | Self::Check { .. } => None,
             Self::SyncFolder { folder, .. } | Self::FetchBody { folder, .. } | Self::Idle { folder, .. } => Some(*folder),
         }
     }

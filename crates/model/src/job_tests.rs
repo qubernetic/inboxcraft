@@ -38,7 +38,7 @@ fn every_job_names_its_account_and_folder() {
             Some(folder),
         ),
         (Job::new(JobId::new(4), account, JobKind::Idle { folder, path: inbox() }), Some(folder)),
-        (Job::new(JobId::new(5), account, JobKind::Check), None),
+        (Job::new(JobId::new(5), account, JobKind::Check { by_owner: false }), None),
     ];
     for (job, expected) in jobs {
         assert_eq!(job.account, account);

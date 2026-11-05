@@ -16,7 +16,8 @@
 //!   outside its validity with this computer's clock far from it is [`ErrorKind::ClockFarOff`].
 //! - The password is asked for and sent only after the TLS handshake verified the certificate, and only to settings
 //!   the owner has seen: detected settings that were not reviewed stop before the sign-in with
-//!   [`StepStatus::NeedsReview`].
+//!   [`StepStatus::NeedsReview`]. A check that may not send the password again, because the last sign-in was refused
+//!   or went unanswered and the owner did not start it, stops there with [`StepStatus::NeedsOwner`].
 
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
@@ -35,19 +36,21 @@ pub const MAIL_PORTS: [u16; 3] = [993, 465, 587];
 /// The port that tells a network that blocks mail from a server that is down: HTTPS, which networks let through.
 pub const HTTPS_PORT: u16 = 443;
 
-/// What to check: the IMAP server and the user name, and whether the owner has seen them.
+/// What to check: the IMAP server and the user name, whether the owner has seen them, and whether the password may go
+/// out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckTarget {
     imap: Server,
     username: String,
     reviewed: bool,
+    held: bool,
 }
 
 impl CheckTarget {
     /// Settings the owner entered or saved.
     #[must_use]
     pub fn new(imap: Server, username: &str) -> Self {
-        Self { imap, username: username.to_owned(), reviewed: true }
+        Self { imap, username: username.to_owned(), reviewed: true, held: false }
     }
 
     /// Settings Detect proposed: no password goes to them until the owner has seen them ([`CheckTarget::reviewed`]).
@@ -68,6 +71,13 @@ impl CheckTarget {
         Self { reviewed: true, ..self }
     }
 
+    /// The same settings, with no sign-in: the last one was refused or went unanswered, and the owner did not ask
+    /// for this check ([`StepStatus::NeedsOwner`]).
+    #[must_use]
+    pub fn held(self) -> Self {
+        Self { held: true, ..self }
+    }
+
     /// The IMAP server.
     #[must_use]
     pub fn imap(&self) -> &Server {
@@ -84,6 +94,12 @@ impl CheckTarget {
     #[must_use]
     pub fn is_reviewed(&self) -> bool {
         self.reviewed
+    }
+
+    /// Whether the sign-in waits for the owner.
+    #[must_use]
+    pub fn is_held(&self) -> bool {
+        self.held
     }
 }
 
@@ -159,15 +175,17 @@ fn steps(target: &CheckTarget, connector: &Connector, password: &mut dyn FnMut()
     };
     out.say(CheckStep::Tls, StepStatus::Passed, None);
     out.say(CheckStep::Certificate, StepStatus::Passed, issuer);
-    let signed_in = if target.is_reviewed() {
+    let signed_in = if !target.is_reviewed() {
+        StepStatus::NeedsReview
+    } else if target.is_held() {
+        StepStatus::NeedsOwner
+    } else {
         match password() {
             Some(password) => {
                 connection.login(target.username(), &password).map_or_else(|error| StepStatus::Failed(error.kind()), |()| StepStatus::Passed)
             }
             None => StepStatus::Failed(ErrorKind::CredentialMissing),
         }
-    } else {
-        StepStatus::NeedsReview
     };
     connection.logout();
     out.say(CheckStep::ImapLogin, signed_in, None);

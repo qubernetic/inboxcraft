@@ -79,6 +79,9 @@ fn step(report: &StepReport) -> Value {
             let message = match other {
                 StepStatus::Skipped => Some("skipped, because an earlier step failed"),
                 StepStatus::NeedsReview => Some("not run: the settings were detected and the owner has not seen them yet, so no password was sent"),
+                StepStatus::NeedsOwner => {
+                    Some("not run: the last sign-in was refused or went unanswered, so only a check the owner starts sends the password again")
+                }
                 StepStatus::NotBuilt => Some("not built yet"),
                 StepStatus::Pending | StepStatus::Passed | StepStatus::Failed(_) => None,
             };

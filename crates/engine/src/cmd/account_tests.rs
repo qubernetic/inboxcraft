@@ -21,7 +21,7 @@ fn start(session: &mut Session) -> JobId {
     assert_eq!(answer["started"], json!(true));
     let jobs = session.take_jobs();
     assert_eq!(jobs.len(), 1);
-    assert_eq!((jobs[0].account, &jobs[0].kind), (AccountId::new(1), &JobKind::Check));
+    assert_eq!((jobs[0].account, &jobs[0].kind), (AccountId::new(1), &JobKind::Check { by_owner: false }));
     jobs[0].id
 }
 
@@ -40,7 +40,7 @@ fn a_check_lists_every_step_and_queues_one_job() {
     let statuses: Vec<&str> = steps.iter().map(|step| step["status"].as_str().unwrap()).collect();
     assert_eq!(statuses, ["pending", "pending", "pending", "pending", "pending", "not_built", "not_built"]);
     assert_eq!(steps[5]["message"], json!("not built yet"));
-    assert_eq!(session.take_jobs().iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::Check]);
+    assert_eq!(session.take_jobs().iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::Check { by_owner: false }]);
     assert_eq!(listed_check(&mut session)["running"], json!(true));
 }
 
@@ -77,7 +77,8 @@ fn the_steps_land_as_the_worker_reports_them_and_the_last_ends_the_check() {
     let check = listed_check(&mut session);
     assert_eq!(check["running"], json!(false));
     assert_eq!(check["steps"][2]["message"], json!("skipped, because an earlier step failed"));
-    // Done: a new check starts, with every step pending again.
+    // Done: a new check starts, with every step pending again; the worker holds its sign-in when the last one was
+    // refused (see `a_check_after_a_refused_sign_in_signs_in_only_for_the_owner`).
     let again = start(&mut session);
     assert_ne!(again, job);
     assert_eq!(listed_check(&mut session)["steps"][0]["status"], json!("pending"));
@@ -120,6 +121,23 @@ fn a_detected_server_not_seen_yet_reads_as_such() {
     let step = &listed_check(&mut session)["steps"][4];
     assert_eq!(step["status"], json!("needs_review"));
     assert!(step["message"].as_str().unwrap().contains("no password was sent"));
+}
+
+#[test]
+fn a_check_after_a_refused_sign_in_signs_in_only_for_the_owner() {
+    let mut session = session();
+    let refused = Event::new(AccountId::new(1), None, EventKind::Failed { kind: ErrorKind::LoginRefused, folder: None });
+    session.apply(&refused).unwrap();
+    let job = start(&mut session);
+    session.apply(&step_event(job, CheckStep::ImapLogin, StepStatus::NeedsOwner)).unwrap();
+    let step = &listed_check(&mut session)["steps"][4];
+    assert_eq!(step["status"], json!("needs_owner"));
+    assert!(step["message"].as_str().unwrap().contains("only a check the owner starts"));
+    for step in [CheckStep::SmtpLogin, CheckStep::CaldavDiscovery] {
+        session.apply(&step_event(job, step, StepStatus::NotBuilt)).unwrap();
+    }
+    assert_eq!(session.run("account.check", &json!({ "account": 1 })).unwrap()["started"], json!(true));
+    assert_eq!(session.take_jobs().iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::Check { by_owner: true }]);
 }
 
 #[test]

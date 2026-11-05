@@ -67,12 +67,13 @@ impl Outcome {
     }
 }
 
-/// What a command may read: the store, the session's state and the time.
+/// What a command may read: the store, the session's state, the time and who asked.
 #[derive(Clone, Copy)]
 pub struct Context<'a> {
     store: &'a dyn Storage,
     state: &'a State,
     now: Timestamp,
+    caller: Caller,
 }
 
 impl<'a> Context<'a> {
@@ -86,6 +87,12 @@ impl<'a> Context<'a> {
     #[must_use]
     pub fn now(&self) -> Timestamp {
         self.now
+    }
+
+    /// Who asked for the command; [`Caller::Agent`] while an event from a worker is applied, which nobody asked for.
+    #[must_use]
+    pub fn caller(&self) -> Caller {
+        self.caller
     }
 
     pub(crate) fn state(&self) -> &'a State {
@@ -260,7 +267,7 @@ impl Session {
         if !class.allows(caller) {
             return Err(EngineError::NotAllowed { command: spec.id, class });
         }
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
         let Outcome { value, batch, jobs } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
@@ -292,7 +299,7 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
     pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now() };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let Some(plan) = plan else { return Ok(Applied::Dropped) };
         self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
@@ -324,7 +331,7 @@ impl Session {
         if let Some(message) = pending.message {
             self.state.fetching.insert(id, message);
         }
-        if pending.kind == JobKind::Check {
+        if matches!(pending.kind, JobKind::Check { .. }) {
             self.state.accounts.entry(pending.account).or_default().check = Some(Check { job: Some(id), steps: CheckStep::plan() });
         }
         self.jobs.push(Job::new(id, pending.account, pending.kind));

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::params::{NoParams, decode};
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
+use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome, json};
 
 /// `account.list`: every account, with how its connection stands, its last failure and its last check.
 pub(crate) const LIST: CommandSpec =
@@ -24,7 +24,8 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 /// `account.check`: checks an account step by step on a connection of its own (DNS, TCP, TLS, the certificate, the
 /// IMAP sign-in; SMTP and CalDAV are listed as not built yet). The answer lists the steps as they stand; the worker
 /// reports each as it ends, and `account.list` shows them. While a check of the account runs, another one starts
-/// nothing (`started`: false), so the password is not sent over and over.
+/// nothing (`started`: false), so the password is not sent over and over. After a refused or unanswered sign-in, a
+/// check an agent asked for stops before the sign-in (`needs_owner`); only the owner's check sends the password again.
 pub(crate) const CHECK: CommandSpec = CommandSpec {
     id: "account.check",
     class: Some(AgentClass::Safe),
@@ -49,5 +50,5 @@ fn check(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
         return Ok(Outcome::new(json!({ "account": params.account, "started": false, "steps": json::steps(&running.steps) })));
     }
     let answer = json!({ "account": params.account, "started": true, "steps": json::steps(&CheckStep::plan()) });
-    Ok(Outcome::new(answer).with_job(id, JobKind::Check))
+    Ok(Outcome::new(answer).with_job(id, JobKind::Check { by_owner: context.caller() == Caller::Owner }))
 }

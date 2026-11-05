@@ -72,6 +72,7 @@ fn reports_round_trip_and_are_cleaned_when_read_back() {
         StepStatus::Failed(ErrorKind::MailPortsBlocked),
         StepStatus::Skipped,
         StepStatus::NeedsReview,
+        StepStatus::NeedsOwner,
         StepStatus::NotBuilt,
     ] {
         let report = StepReport::new(CheckStep::Tcp, status).with_server(Host::new("imap.example.org").unwrap(), 993);
