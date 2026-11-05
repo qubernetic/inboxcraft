@@ -8,8 +8,9 @@ sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: inboxcraft
-# As few permissions as the app needs, each with its reason. No --filesystem: mail, settings and
-# caches stay in the app's own folder under ~/.var/app/io.github.qubernetic.inboxcraft/.
+# As few permissions as the app needs, each with its reason. Mail, settings and caches stay in
+# the app's own folder under ~/.var/app/io.github.qubernetic.inboxcraft/; the one folder outside
+# it is Downloads, where Save puts attachments.
 # The Background portal (keep syncing with the window closed, start at login) needs no
 # finish-arg: every sandbox reaches the portals.
 finish-args:
@@ -27,6 +28,8 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   # Notifications: new mail is announced on the desktop.
   - --talk-name=org.freedesktop.Notifications
+  # Downloads: Save writes an attachment there, under a new name, never over a file.
+  - --filesystem=xdg-download
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:

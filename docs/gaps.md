@@ -317,7 +317,7 @@ B = blocks the next stage.
   settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: that loads the
   forger's pictures, and tells them no more than a picture would (#33).
 - Saving goes into the downloads folder (`XDG_DOWNLOAD_DIR` or `~/Downloads`) without a file dialog; the Flatpak
-  needs `--filesystem=xdg-download` for it once its manifest lands (E1.13a) (#33).
+  opens that folder (`--filesystem=xdg-download`) instead of asking through the file chooser portal (#33).
 - Pictures: PNG and JPEG only (GIF, WebP and SVG show as a box with their alternative text), at most 8192 pixels a
   side and 8 Mi pixels; remote pictures over plain `http`, or on a host with only local addresses, are not fetched.
   Inline pictures show only from HTML bodies; a plain-text body's image parts are tiles (#33).
@@ -389,3 +389,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Rough edges of the dev Flatpak (#31) |
 | 2026-11-05 | minor | The Flatpak is built by the CI bundle job (#32) |
 | 2026-11-05 | minor | Rough edges of the reader and remote pictures (#33) |
+| 2026-11-05 | minor | The Flatpak opens Downloads for Save (#33) |

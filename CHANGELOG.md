@@ -259,8 +259,8 @@ All notable changes to InboxCraft are listed here. The format follows
   messages folded to one line, unfolded on a click), a short header (sender, date, recipients) and the full one on
   Details, plain text with its quotes folded behind "Show quoted text", HTML as `html`'s safe display blocks, and
   attachment tiles with the name, the size and Save (into the downloads folder, under a cleaned name, never over a
-  file). Remote pictures stay blocked behind a banner until the owner loads them once or always for the sender; the
-  request then goes through `net` and tells the server nothing but the URL. The line under the reader shows where
+  file; the Flatpak opens the Downloads folder for it, `--filesystem=xdg-download`). Remote pictures stay blocked
+  behind a banner until the owner loads them once or always for the sender; the request then goes through `net` and tells the server nothing but the URL. The line under the reader shows where
   the link under the pointer goes and warns when its text names another place; a click copies the address. "Full
   width" lets the reader fill the window and Escape leaves it; the arrow keys step through the list; the
   next-message rule (next, previous or back to the list) picks what shows when the open message leaves the list.

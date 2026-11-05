@@ -162,9 +162,10 @@ file and the code differ.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
-GPU, the Secret Service for passwords and tokens, and desktop notifications. The Background portal needs no
-permission. There is no access to your files: everything the app keeps lives in
-`~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails when a permission has no comment above it.
+GPU, the Secret Service for passwords and tokens, desktop notifications, and the Downloads folder, where Save puts
+attachments (under a new name, never over a file). The Background portal needs no permission. No other folder of
+yours is open to the app: everything it keeps lives in `~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails
+when a permission has no comment above it, or when the manifest opens a folder other than Downloads.
 
 **Dependencies.** A change to `Cargo.lock` needs `just flatpak-sources` (in the container, or natively), and the
 regenerated `contrib/flatpak/cargo-sources.json` goes into the same commit; the `flatpak-sources-check` gate of
@@ -356,3 +357,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | The `shot` recipe; the desktop app opens the window (#30) |
 | 2026-11-05 | minor | The dev Flatpak: `just flatpak`, the CI bundle, `flatpak-sources-check`, `just icon` (#31) |
 | 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |
+| 2026-11-05 | minor | The Flatpak opens the Downloads folder for Save (#33) |
