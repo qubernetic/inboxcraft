@@ -291,6 +291,11 @@ All notable changes to InboxCraft are listed here. The format follows
 - `cargo xtask ci` (and `just ci`) runs the tests once: the separate `nextest` gate is gone and the `cov` gate's
   `cargo llvm-cov nextest` run is the test run, with its JUnit report still in `target/nextest/ci/junit.xml`; a
   failed run says the tests failed and that no coverage floor was checked (#66)
+- CI caches the compiled third-party dependencies and the cargo registry in the `test` job: every full run restores
+  the cache, only a push to `develop`, `main` or an epic branch saves it, with this workspace's own crates removed
+  from `target/` first; the key rotates weekly and follows `rust-toolchain.toml`, `Cargo.lock` and the
+  `[profile.*]` sections; `CARGO_INCREMENTAL=0` in that job; `gh cache delete --all` purges it. The `codecov`,
+  `flatpak` and fuzz jobs use no cache (#67)
 
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
