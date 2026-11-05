@@ -146,7 +146,7 @@ servers and `example.org` addresses.
 
 - **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs` (the `live-imap` round trip:
   sign-in, folder list, run folder, APPEND of an invented message, first sync, IDLE, resync, folder removed, over
-  implicit TLS on port 993). Every live test is named `live_*` and starts with
+  implicit TLS on port 993; and the account check, whose every IMAP step must pass on the real chain). Every live test is named `live_*` and starts with
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
@@ -232,8 +232,9 @@ branch, `main`, so the nightly run starts with the first release.
 new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
 runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
 `charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, and `net_envelope`
-(#25), the envelope of a header block.
+(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
+(#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
+(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -275,3 +276,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Fuzzing: the envelope target of `net` (#25) |
 | 2026-11-05 | minor | `flate2` moves from the testkit-only to the net-only crates (#26) |
 | 2026-11-05 | minor | Live tests: the `net` round trip on `live-imap`, invented messages (#26) |
+| 2026-11-05 | minor | Fuzzing: the certificate, autoconfig and DNS targets of `net`; live test of the account check (#28) |

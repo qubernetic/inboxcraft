@@ -259,6 +259,32 @@ B = blocks the next stage.
   message marks it opened in the store, so its body is kept, also when an agent opens it (#27).
 - `engine` lets an agent run `safe` commands only; per-account access levels and the owner's approval for `owner`
   commands come with the first `owner` command (#27).
+- `account.check` runs for saved accounts only, as a job of the account's worker: there is no command yet that
+  checks settings before they are saved, or that runs Detect. Both need a job without an account, which comes with
+  onboarding and `account.add` (E1.11). The SMTP sign-in and the CalDAV discovery report "not built yet" until E2.2
+  and E4.2 (#28).
+- `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
+  stays running until the workers are started again (`Session::start`), which forgets it (#28).
+- The TLS step of `account.check` passes when the server speaks TLS up to its certificate; a fault of the
+  certificate is the certificate step's. On a STARTTLS port the greeting and the STARTTLS exchange count as part of
+  the TLS step (#28).
+- The blocked-mail-ports test opens TCP connections to ports 443, 993, 465 and 587 of the address that timed out
+  and sends nothing on them; it can take up to four connect timeouts (30 seconds each by default) before it
+  answers (#28).
+- The clock check compares the clock with the certificate's own dates; there is no second reference such as the
+  `Date` of an HTTPS answer yet, so a clock off by less than four years with a certificate expired in that time
+  still reads as an expired certificate (#28).
+- DNS for Detect reads `/etc/resolv.conf` (Linux, the BSDs, macOS). Windows has no resolver configuration yet, so
+  Detect there goes on without MX and SRV records. No EDNS, no DNSSEC, no DNS over TLS or HTTPS; the answer is as
+  trustworthy as the network, which is why nothing detected gets a password before the owner has seen it and TLS
+  verified it (#28).
+- Detect's MX domain is the MX host's last two labels, or three under a two-letter country label: a rule of thumb
+  without the public suffix list, so a provider under a longer public suffix is not recognised by its MX (#28).
+- Detect stops at the first source that names an IMAP server and does not probe the candidates; the common host
+  names are hints, never checked until the owner asks. `/.well-known/caldav` and `carddav` with
+  `current-user-principal`, and the CalDAV SRV records (RFC 6764), come with CalDAV (E4.2) (#28).
+- The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
+  domain whose provider publishes no autoconfig and no SRV records gets only the common host names as hints (#28).
 
 ## Revision history
 | Date | Change | Summary |
@@ -293,3 +319,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The caps on what a resync keeps (#26) |
 | 2026-11-05 | minor | An unanswered sign-in halts the tries (#26) |
 | 2026-11-05 | minor | The engine read path and the command registry (#27) |
+| 2026-11-05 | minor | Rough edges of the account check and Detect (#28) |

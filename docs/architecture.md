@@ -29,6 +29,7 @@ engine's state.
 | `SyncFolder` | a full sync, or a resync from the known `FolderState` (CONDSTORE, QRESYNC) | `MessagesAdded`, `MessagesChanged`, `MessagesExpunged`, `UidValidityReset` if the UIDVALIDITY changed, `FolderSynced` last |
 | `FetchBody` | fetches one whole message | `BodyFetched` |
 | `Idle` | watches the folder between jobs (IDLE, or a resync every few minutes without it) until another `Idle` moves the watch | the same change events as `SyncFolder`, after each change and each reconnect |
+| `Check` | the account check, at once and on a connection of its own, also while offline or halted: DNS, TCP, TLS, the certificate, the IMAP sign-in | one `CheckStep` per step of `CheckStep::ALL`, in order |
 
 On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
 and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
@@ -52,6 +53,7 @@ with nothing changed. Events go the same way: `Session::apply` plans the changes
 | `BodyFetched` | the body kept with its plain text for the search; the fetch ends; a body over 64 MiB is not kept, and the message is marked so it is not asked for again in this session |
 | `FolderSynced` | the folder's state recorded for the next sync |
 | `Connection`, `Failed` | shown by `account.list`; online again clears the failure; a failed `FetchBody` job ends its fetch |
+| `CheckStep` | the step takes its place in the account's running check (from `account.check`), shown by `account.list`; the last step ends the check; a step of another job is dropped |
 
 An event for an account or folder the store does not hold, or with UIDs of another UIDVALIDITY than the folder's
 current one, is dropped; only a failure of a `FetchBody` job still ends its fetch. The read commands are `account.list`, `folder.list` (with the unified views: one role
@@ -74,6 +76,17 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
   checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
   `proto` only on an encrypted connection, and `proto` refuses it before as well.
+- The account check (`net::check_account`, behind `account.check`) runs the steps one after the other and reports
+  each as it ends, so a failure is named by its cause. A port that times out is told apart by trying port 443 and
+  the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).
+  The certificate's issuer and dates come from our own small DER reader, fed by a verifier that keeps the
+  certificate and asks the real one; the dates give the clock check where the platform's verifier gives none.
+- Detect (`net::detect`) only proposes: MX, autoconfig at the domain over HTTPS, the ISPDB when switched on (off by
+  default), SRV, and common host names as a hint. DNS is `hickory-proto` messages over our own blocking UDP and TCP
+  exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
+  mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
+  (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate
+  verified.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
@@ -104,3 +117,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | The account worker and TLS in `net` (#25) |
 | 2026-11-05 | minor | Live updates, the offline queue and back-off in `net` (#26) |
 | 2026-11-05 | minor | The engine: the `Session`, commands with agent classes, events applied (#27) |
+| 2026-11-05 | minor | The account check, its job and events, and Detect (#28) |
