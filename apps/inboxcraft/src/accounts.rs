@@ -4,8 +4,8 @@
 //! What the window needs to add and run accounts: the OS credential store, the `net` workers and Detect.
 //!
 //! - [`OsKeychain`]: the passwords, in the system's credential store (Secret Service, Keychain, Credential Manager)
-//!   through `keyring`, one entry per account id under [`SERVICE`]. The window only writes and removes them; the
-//!   workers read them, each time they sign in. Never a file, never the log.
+//!   through `keyring`, one entry per account id under [`SERVICE`]. The window only writes and removes them (all of
+//!   them when it closes); the workers read them, each time they sign in. Never a file, never the log.
 //! - [`NetWorkers`]: one `net` worker per account, started at the account's first job; their events wake the window.
 //! - [`detect`]: Detect over the system's name servers and HTTPS, as the form's proposal.
 
