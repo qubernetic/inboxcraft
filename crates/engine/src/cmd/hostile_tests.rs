@@ -14,8 +14,27 @@ use crate::test_support::session;
 use crate::{Caller, EngineError, Session};
 
 /// Every parameter name any command reads, and a few it does not.
-const FIELDS: [&str; 16] =
-    ["account", "folder", "role", "limit", "offset", "id", "from", "to", "subject", "text", "since", "before", "message", "view", "", "\u{0}"];
+const FIELDS: [&str; 19] = [
+    "account",
+    "folder",
+    "role",
+    "limit",
+    "offset",
+    "id",
+    "from",
+    "to",
+    "subject",
+    "text",
+    "since",
+    "before",
+    "message",
+    "view",
+    "index",
+    "content_id",
+    "address",
+    "",
+    "\u{0}",
+];
 
 fn junk() -> Vec<Value> {
     let mut deep = json!(1);

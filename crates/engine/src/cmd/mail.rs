@@ -132,6 +132,52 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(outcome)
 }
 
+/// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by
+/// its `content_id`), its content in base64: what the reader saves or shows as a picture. Nothing is fetched for it.
+pub(crate) const ATTACHMENT: CommandSpec = CommandSpec {
+    id: "mail.attachment",
+    class: Some(AgentClass::Safe),
+    summary: "Give one attachment or inline part of a kept message, in base64",
+    run: attachment,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentParams {
+    /// The message.
+    id: u64,
+    /// The attachment's place in `mail.read`'s list.
+    index: Option<u64>,
+    /// The inline part's Content-ID, without the angle brackets.
+    content_id: Option<String>,
+}
+
+fn attachment(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AttachmentParams = decode(ATTACHMENT.id, params)?;
+    let id = MessageId::new(params.id);
+    context.store().message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let body = context.store().body(id)?.ok_or(EngineError::NotFound { what: "body", id: params.id })?;
+    let message = inboxcraft_mime::parse(body.source()).ok();
+    let part = match (params.index, params.content_id.as_deref()) {
+        (Some(index), None) => message
+            .as_ref()
+            .and_then(|message| message.attachments().into_iter().nth(usize::try_from(index).unwrap_or(usize::MAX)))
+            .ok_or(EngineError::NotFound { what: "attachment", id: index })?,
+        (None, Some(content_id)) => message
+            .as_ref()
+            .and_then(|message| json::inline_parts(message).into_iter().find(|part| part.content_id().as_deref() == Some(content_id)))
+            .ok_or(EngineError::NotFound { what: "inline part", id: params.id })?,
+        _ => return Err(EngineError::bad_params(ATTACHMENT.id, "give an index or a content_id, one of them")),
+    };
+    let data = part.decoded().map_err(|error| EngineError::bad_params(ATTACHMENT.id, &format!("the part cannot be decoded: {error}")))?;
+    Ok(Outcome::new(json!({
+        "name": part.file_name(),
+        "type": part.content_type().essence(),
+        "size": data.len(),
+        "data": json::base64(&data),
+    })))
+}
+
 /// `mail.search`: the simple offline search over from, to, subject, date and body words, newest first.
 pub(crate) const SEARCH: CommandSpec = CommandSpec {
     id: "mail.search",

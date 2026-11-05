@@ -5,7 +5,7 @@ use inboxcraft_model::{ConnectionState, ErrorKind, FolderId, Security};
 use inboxcraft_time::Timestamp;
 use serde_json::json;
 
-use super::{account, date, failure, name, snake};
+use super::{account, base64, date, failure, name, snake};
 use crate::session::AccountState;
 use crate::test_support::{NOW, at};
 
@@ -42,4 +42,14 @@ fn an_account_shows_its_servers_connection_and_failure() {
     assert_eq!(shown["failure"]["message"], json!("the folder no longer exists on the server"));
     let unknown = account(&crate::test_support::account(1, "anna@example.org"), None);
     assert_eq!(unknown["connection"], json!(null));
+}
+
+#[test]
+fn base64_follows_rfc_4648() {
+    for (bytes, encoded) in
+        [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")]
+    {
+        assert_eq!(base64(bytes.as_bytes()), encoded);
+    }
+    assert_eq!(base64(&[0xfb, 0xff, 0xfe]), "+//+");
 }

@@ -3,6 +3,7 @@
 
 //! The commands' answers as JSON: snake_case keys, ISO 8601 dates in UTC, full values, fields only ever added.
 
+use inboxcraft_mime::{Body, Part};
 use inboxcraft_model::{Account, Address, ConnectionState, ErrorKind, Folder, FolderId, Host, Role, Server, StepReport, StepStatus, ThreadId};
 use inboxcraft_store::Entry;
 use inboxcraft_time::{Offset, Timestamp};
@@ -166,29 +167,62 @@ pub(crate) fn message(entry: &Entry) -> Value {
     })
 }
 
-/// A kept body: its plain text, whether it has an HTML part (shown through `html`, never run) and its attachments.
-/// Nothing in it runs and nothing is fetched for it.
+/// A kept body: its plain text, its HTML (as text, to show through `html`, never run), its attachments numbered for
+/// `mail.attachment`, and its inline parts by Content-ID (what the HTML's `cid:` pictures name). Nothing in it runs
+/// and nothing is fetched for it.
 pub(crate) fn body(source: &[u8]) -> Value {
     let Ok(message) = inboxcraft_mime::parse(source) else {
-        return json!({ "readable": false, "text": null, "has_html": false, "attachments": [] });
+        return json!({ "readable": false, "text": null, "has_html": false, "html": null, "attachments": [], "inline": [] });
     };
+    let size = |part: &Part<'_>| part.decoded().ok().map(|bytes| bytes.len());
     let attachments: Vec<Value> = message
         .attachments()
         .iter()
-        .map(|part| {
+        .enumerate()
+        .map(|(index, part)| {
             json!({
+                "index": index,
                 "name": part.file_name(),
                 "type": part.content_type().essence(),
-                "size": part.decoded().ok().map(|bytes| bytes.len()),
+                "size": size(part),
+                "content_id": part.content_id(),
             })
         })
         .collect();
+    let inline: Vec<Value> = inline_parts(&message)
+        .into_iter()
+        .filter_map(|part| Some(json!({ "content_id": part.content_id()?, "type": part.content_type().essence(), "size": size(part) })))
+        .collect();
+    let html = message.html_body();
     json!({
         "readable": true,
         "text": message.text_body().and_then(|part| part.text().ok()),
-        "has_html": message.html_body().is_some(),
+        "has_html": html.is_some(),
+        "html": html.and_then(|part| part.text().ok()),
         "attachments": attachments,
+        "inline": inline,
     })
+}
+
+/// The parts with a Content-ID that are bodies of their own and no attachment: what a `cid:` address names.
+pub(crate) fn inline_parts<'m, 'a>(message: &'m Part<'a>) -> Vec<&'m Part<'a>> {
+    message.parts().into_iter().filter(|part| matches!(part.body(), Body::Leaf) && !part.is_attachment() && part.content_id().is_some()).collect()
+}
+
+/// `bytes` in base64 (RFC 4648, padded).
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let symbol = |group: u32, shift: u32| char::from(ALPHABET.get(usize::try_from((group >> shift) & 63).unwrap_or(0)).copied().unwrap_or(b'A'));
+    let mut out = String::with_capacity(bytes.len().div_ceil(3).saturating_mul(4));
+    for chunk in bytes.chunks(3) {
+        let byte = |at: usize| u32::from(chunk.get(at).copied().unwrap_or(0));
+        let group = (byte(0) << 16) | (byte(1) << 8) | byte(2);
+        out.push(symbol(group, 18));
+        out.push(symbol(group, 12));
+        out.push(if chunk.len() > 1 { symbol(group, 6) } else { '=' });
+        out.push(if chunk.len() > 2 { symbol(group, 0) } else { '=' });
+    }
+    out
 }
 
 #[cfg(test)]
