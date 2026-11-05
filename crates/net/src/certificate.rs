@@ -8,6 +8,7 @@
 //! anything that is not DER as RFC 5280 writes it, and never trusts a length: every read is checked against what is
 //! there. Nothing here decides whether a certificate is trusted; `rustls` and the platform's verifier do that.
 
+use inboxcraft_model::is_invisible_mark;
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
 /// The most characters taken of one name attribute.
@@ -174,7 +175,9 @@ fn text(tag: u8, value: &[u8]) -> Option<String> {
             .collect(),
         _ => return None,
     };
-    Some(decoded.chars().take(MAX_VALUE_CHARS).map(|c| if c.is_control() { ' ' } else { c }).collect())
+    // A control character, and an invisible direction or joiner mark that could make the issuer read as another,
+    // becomes a space.
+    Some(decoded.chars().take(MAX_VALUE_CHARS).map(|c| if c.is_control() || is_invisible_mark(c) { ' ' } else { c }).collect())
 }
 
 /// A `Time`: UTCTime (`YYMMDDHHMMSSZ`, years 1950 to 2049) or GeneralizedTime (`YYYYMMDDHHMMSSZ`), both in UTC.

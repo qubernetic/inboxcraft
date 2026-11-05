@@ -98,6 +98,13 @@ fn every_string_type_is_decoded_and_control_characters_go() {
 }
 
 #[test]
+fn direction_and_joiner_marks_in_the_issuer_become_spaces() {
+    let value = "Good\u{202e}AC live\u{200b}x\u{2066}y\u{feff}z";
+    let read = read(&certificate(true, &attribute(CN, 0x0c, value.as_bytes()), &validity())).unwrap();
+    assert_eq!(read.issuer(), "CN=Good AC live x y z");
+}
+
+#[test]
 fn long_values_and_many_attributes_are_capped() {
     let long = "A".repeat(500);
     let read_long = read(&certificate(true, &attribute(CN, 0x0c, long.as_bytes()), &validity())).unwrap();
