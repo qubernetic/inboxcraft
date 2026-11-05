@@ -44,9 +44,13 @@ pub struct Picture {
 }
 
 /// Fetches remote pictures through `ureq` with `rustls`, the `ring` provider and the trust of the mail connections.
+///
+/// Every fetch has an agent of its own and keeps no connection: no TCP connection and no TLS session outlives one
+/// picture, so a picture host cannot tie two fetches together by the connection or a resumed session.
 pub struct PictureClient {
-    agent: Agent,
     tls: TlsSettings,
+    timeout: Duration,
+    addresses: Option<Vec<SocketAddr>>,
 }
 
 impl fmt::Debug for PictureClient {
@@ -60,16 +64,23 @@ impl PictureClient {
     /// system and only public addresses are asked.
     #[must_use]
     pub fn new(tls: TlsSettings, timeout: Duration) -> Self {
-        let agent = Agent::with_parts(config(&tls, timeout), DefaultConnector::default(), Public);
-        Self { agent, tls }
+        Self { tls, timeout, addresses: None }
     }
 
     /// As [`PictureClient::new`], connecting to `addresses` whatever the host: for the tests, whose fake servers
     /// listen on 127.0.0.1. The certificate is still checked for the URL's host.
     #[must_use]
     pub fn with_addresses(tls: TlsSettings, timeout: Duration, addresses: Vec<SocketAddr>) -> Self {
-        let agent = Agent::with_parts(config(&tls, timeout), DefaultConnector::default(), Fixed(addresses));
-        Self { agent, tls }
+        Self { tls, timeout, addresses: Some(addresses) }
+    }
+
+    /// A new agent, with a new TLS session cache, for one fetch.
+    fn agent(&self) -> Agent {
+        let config = config(&self.tls, self.timeout);
+        match &self.addresses {
+            Some(addresses) => Agent::with_parts(config, DefaultConnector::default(), Fixed(addresses.clone())),
+            None => Agent::with_parts(config, DefaultConnector::default(), Public),
+        }
     }
 
     /// GETs the picture at `url`.
@@ -85,7 +96,7 @@ impl PictureClient {
             return Err(NetError::new(ErrorKind::Protocol, "a remote picture is fetched over https only"));
         }
         let now = self.tls.clock().now();
-        let mut response = self.agent.get(url).call().map_err(|error| failed(error, now))?;
+        let mut response = self.agent().get(url).call().map_err(|error| failed(error, now))?;
         let status = response.status().as_u16();
         if status != 200 {
             return Err(NetError::new(ErrorKind::Protocol, format!("the server answered {status}")));
@@ -115,6 +126,8 @@ fn config(tls: &TlsSettings, timeout: Duration) -> Config {
         .accept(AutoHeaderValue::None)
         .accept_encoding(AutoHeaderValue::None)
         .proxy(None)
+        .max_idle_connections(0)
+        .max_idle_connections_per_host(0)
         .build()
 }
 

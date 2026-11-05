@@ -96,6 +96,35 @@ fn a_cookie_the_server_sets_is_never_sent_back() {
 }
 
 #[test]
+fn every_fetch_is_a_new_connection_with_a_full_handshake() {
+    let pki = TestPki::new().unwrap();
+    let tls = pki.server_config(None).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let mut kinds = Vec::new();
+        for _ in 0..2 {
+            let Ok((socket, _)) = listener.accept() else { break };
+            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut stream = StreamOwned::new(ServerConnection::new(tls.clone()).unwrap(), socket);
+            head(&mut stream);
+            kinds.push(stream.conn.handshake_kind());
+            // Keep-alive: an answer that would let the client keep the connection for the next picture.
+            let _written = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 1\r\n\r\nx");
+            let _flushed = stream.flush();
+            let mut rest = [0; 1];
+            let _ = stream.read(&mut rest);
+        }
+        kinds
+    });
+    let client = client(&pki, addr);
+    client.fetch(&format!("https://{HOST}/a.png")).unwrap();
+    client.fetch(&format!("https://{HOST}/b.png")).unwrap();
+    let kinds = server.join().unwrap();
+    assert_eq!(kinds, [Some(rustls::HandshakeKind::Full), Some(rustls::HandshakeKind::Full)], "no reused connection, no resumed session");
+}
+
+#[test]
 fn plain_http_and_other_schemes_are_refused_before_any_connection() {
     let closed = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
     let pki = TestPki::new().unwrap();

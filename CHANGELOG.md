@@ -268,7 +268,8 @@ All notable changes to InboxCraft are listed here. The format follows
   remote pictures. New commands: `mail.thread` and `mail.attachment` (safe), `remote.allow` and `remote.forget`
   (owner), `remote.list` (safe); `mail.read` also answers the HTML part, the inline parts by Content-ID, numbered
   attachments and `remote_allowed`. `net::picture`: HTTPS only, a fixed `User-Agent: InboxCraft`, no cookies,
-  referrer, `Accept` or proxy, at most 3 redirects (each HTTPS), `image/*` answers of at most 10 MiB, and no host
+  referrer, `Accept` or proxy, a new connection and a full TLS handshake for every picture (nothing kept to tie two
+  fetches together), at most 3 redirects (each HTTPS), `image/*` answers of at most 10 MiB, and no host
   that resolves only to this computer or the local network (an IPv4 address inside an IPv6 one, mapped, compatible,
   NAT64 or 6to4, is judged as IPv4). `ui-egui` decodes PNG and JPEG (`png`, `zune-jpeg`, already in the dependency
   graph) with the size checked before anything is allocated. One message asks for at most 32 inline and 64 remote
