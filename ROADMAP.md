@@ -49,6 +49,7 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | `testkit`: the fake IMAP server with its own command reader, invented mailboxes, every E1.4 extension switchable per test, scripted mail changes and faults, STARTTLS with the certificate faults, fuzz target (#23) |
 | 2026-11-04 | `store`: the local-first cache behind the `Storage` trait, a memory backend (wasm, tests) and a native SQLite backend with FTS5, sources as files, migrations, body retention and the simple search; a kill test in a child process (#24) |
 | 2026-11-05 | `net`: TLS with the platform verifier, implicit TLS and STARTTLS with no password before TLS, the IMAP sign-in, one worker thread per account, the first sync (folder list, headers with PREVIEW, bodies of the last 30 days, a body on demand), one error kind per cause, fuzz target (#25) |
+| 2026-11-05 | `net`: live updates with IDLE, resync of flags and removed messages (QRESYNC where offered), a changed UIDVALIDITY reloads the folder, back-off with a cap, the offline queue, the COMPRESS=DEFLATE stream; the `live-imap` live test; the fake IMAP server reconnects and answers CREATE, DELETE and APPEND (#26) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -70,3 +71,4 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 | 2026-11-04 | minor | Progress log: the fake IMAP server (#23) |
 | 2026-11-04 | minor | Progress log: the local-first store (#24) |
 | 2026-11-05 | minor | Progress log: TLS, the IMAP sign-in and the first sync (#25) |
+| 2026-11-05 | minor | Progress log: live updates, resync and back-off (#26) |

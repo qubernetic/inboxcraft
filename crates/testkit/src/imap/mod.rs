@@ -7,6 +7,10 @@
 //! parser, so a parser bug there cannot hide behind the same bug here. A test switches capabilities off with
 //! [`FakeImap::without`], and scripts faults and server-side lines with [`FakeImap::on`].
 //!
+//! Besides the read path it answers CREATE, DELETE and APPEND, so a test can change the mailboxes the way another
+//! client would. [`crate::Listen::start_imap_many`] serves several connections one after the other, for a client
+//! that reconnects.
+//!
 //! [`crate::Listen::start_imap`] serves it on a loopback port, over plain TCP (with STARTTLS when
 //! [`FakeImap::starttls`] gave it a configuration) or implicit TLS, with the certificate faults of
 //! [`crate::CertFault`]. [`FakeImap::answer`] plays it without a socket, as over implicit TLS.
