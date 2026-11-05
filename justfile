@@ -124,7 +124,7 @@ it-live *args: _host_only _up
     done
     # Build first, before any value is read: no build script, proc macro or other test binary ever sees one.
     archive=target/nextest/live.tar.zst
-    {{ dc }} exec {{ service }} cargo nextest archive -p inboxcraft-testkit --test live --archive-file "$archive"
+    {{ dc }} exec {{ service }} cargo nextest archive -p inboxcraft-testkit -p inboxcraft-net --test live --archive-file "$archive"
     lookup() {
         if command -v secret-tool >/dev/null 2>&1; then
             secret-tool lookup service inboxcraft-live variable "$1"

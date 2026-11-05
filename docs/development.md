@@ -144,7 +144,9 @@ The owner alone runs opt-in live tests, by hand, on two throwaway test accounts.
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
 
-- **Where:** `crates/testkit/tests/live.rs`. Every live test is named `live_*` and starts with
+- **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs` (the `live-imap` round trip:
+  sign-in, folder list, run folder, APPEND of an invented message, first sync, IDLE, resync, folder removed, over
+  implicit TLS on port 993). Every live test is named `live_*` and starts with
   `inboxcraft_testkit::live::start`, which returns the configuration or prints `SKIP <test>: <reason>` and lets the
   test return early. They skip cleanly without credentials, and always when `AGENT_HORDE` or `CI` is set, so
   `just test` and `just ci` run them as skipped tests with the reason in the output.
@@ -156,13 +158,15 @@ servers and `example.org` addresses.
 - **Run folder:** `InboxCraft-Test/<run id>` (with the server's hierarchy delimiter), created by
   `RunFolder::create` and removed by `RunFolder::remove`, or on drop when a test fails before it gets there.
   `RunFolder` builds the name itself and refuses a delimiter that could change it, so it deletes no other folder.
+  `LiveConfig::invented_message` gives the run's invented messages (from and to `live-test@example.org`); APPEND
+  puts them in the run folder and sends them to nobody.
 - **Profile:** `nextest --profile live` (`.config/nextest.toml`) runs only the `live_*` tests, one at a time.
 
 ### Running them (owner)
 `just it-live` runs on the host. It refuses in native mode and when `AGENT_HORDE` or `CI` is set. It works in two
 steps:
 
-1. It builds the live test binary into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
+1. It builds the live test binaries (`testkit` and `net`) into an archive, `target/nextest/live.tar.zst`, before it reads any value, so no
    build script, proc macro or other test binary ever runs with the credentials.
 2. It reads eight values from the OS credential store, service `inboxcraft-live`, one entry per variable, and runs
    the `live` profile from the archive, which never compiles. The values reach the container through its own
@@ -270,3 +274,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-04 | minor | `store` may depend on `model` inside layer 1 (#24) |
 | 2026-11-05 | minor | Fuzzing: the envelope target of `net` (#25) |
 | 2026-11-05 | minor | `flate2` moves from the testkit-only to the net-only crates (#26) |
+| 2026-11-05 | minor | Live tests: the `net` round trip on `live-imap`, invented messages (#26) |

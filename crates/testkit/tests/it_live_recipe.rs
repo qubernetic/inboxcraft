@@ -40,7 +40,7 @@ fn only_the_run_from_the_archive_carries_the_credentials() -> Result<(), Box<dyn
         assert!(!run.contains(refused), "the run with the credentials has {refused:?}: {run}");
     }
     let build = execs.iter().find(|line| line.contains("nextest archive")).ok_or("no build step")?;
-    assert!(build.contains("-p inboxcraft-testkit --test live --archive-file \"$archive\""), "{build}");
+    assert!(build.contains("-p inboxcraft-testkit -p inboxcraft-net --test live --archive-file \"$archive\""), "{build}");
     Ok(())
 }
 

@@ -6,6 +6,7 @@
 
 #![allow(dead_code)]
 
+pub mod admin;
 pub mod run;
 
 use std::error::Error;

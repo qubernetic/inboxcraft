@@ -75,8 +75,13 @@ impl Run {
         let pki = TestPki::new()?;
         let listen = Listen::tls(pki.server_config(options.cert)?).accept_timeout(Duration::from_secs(2));
         let fake = if options.connections > 1 { listen.start_imap_many(fake, options.connections)? } else { listen.start_imap(fake)? };
+        Self::on(fake, &pki, options)
+    }
+
+    /// A worker on a fake that runs already, with a certificate of `pki`.
+    pub fn on(fake: FakeServer, pki: &TestPki, options: Options) -> Result<Self> {
         let account = Account::new(ACCOUNT, "Test", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?;
-        let connector = connector(&pki, wall(), fake.addr()).with_timeouts(options.timeouts);
+        let connector = connector(pki, wall(), fake.addr()).with_timeouts(options.timeouts);
         let settings = WorkerSettings {
             sync: options.sync,
             backoff: options.backoff,

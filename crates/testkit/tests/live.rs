@@ -5,7 +5,8 @@
 //!
 //! Every test here is named `live_*` and starts with [`live::start`]: without the `INBOXCRAFT_LIVE_*` credentials,
 //! and always in the agent sandbox and in CI, it prints the skip reason and the test passes. Only the owner runs
-//! them with credentials. The IMAP, SMTP and CalDAV round trips join this file with `net`.
+//! them with credentials. The IMAP round trip lives with `net` (`crates/net/tests/live.rs`); SMTP and CalDAV join it
+//! there.
 
 use inboxcraft_testkit::live;
 
