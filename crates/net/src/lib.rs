@@ -42,6 +42,7 @@ pub mod dns;
 pub mod envelope;
 mod error;
 mod imap;
+pub mod picture;
 mod sync;
 mod tls;
 mod watch;
