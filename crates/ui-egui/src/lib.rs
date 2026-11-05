@@ -13,6 +13,7 @@
 //!   or not.
 //! - [`InboxApp`]: the window's content over a [`mailbox::Mailbox`]: the folder pane, the header with the search field
 //!   and the message list, drawn in the [`theme`], every control with an accessible name.
+//! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -21,6 +22,7 @@ mod error;
 pub mod i18n;
 pub mod mailbox;
 pub mod sample;
+pub mod shot;
 pub mod theme;
 
 pub use draw::InboxApp;

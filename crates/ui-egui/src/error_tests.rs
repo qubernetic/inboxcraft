@@ -15,6 +15,9 @@ fn every_error_reads_as_a_sentence_and_only_an_engine_error_has_a_source() {
     let answer = UiError::Answer { command: "mail.list", detail: "no messages".to_owned() };
     assert_eq!(answer.to_string(), "mail.list answered in an unexpected shape: no messages");
     assert!(answer.source().is_none());
+    let shot = UiError::Shot("line 2: bad".to_owned());
+    assert_eq!(shot.to_string(), "ui_shot: line 2: bad");
+    assert!(shot.source().is_none());
     let engine = UiError::from(EngineError::NotFound { what: "message", id: 7 });
     assert_eq!(engine.to_string(), EngineError::NotFound { what: "message", id: 7 }.to_string());
     assert!(engine.source().is_some());

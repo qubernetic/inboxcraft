@@ -14,6 +14,8 @@ inboxcraft-engine = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
+png = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

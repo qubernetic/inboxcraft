@@ -92,6 +92,10 @@ layers: _up
 wasm: _up
     {{ exec }} cargo xtask wasm
 
+# Headless pictures of the sample window (ui_shot), one per line of the script
+shot script="crates/ui-egui/shots.jsonl": _up
+    {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
+
 # Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci

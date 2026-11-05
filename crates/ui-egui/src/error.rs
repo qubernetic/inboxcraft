@@ -14,6 +14,8 @@ pub enum UiError {
     Sample(String),
     /// A command failed.
     Engine(EngineError),
+    /// A `ui_shot` script or picture failed.
+    Shot(String),
     /// A command answered in a shape the front end does not read.
     Answer {
         /// The command.
@@ -35,6 +37,7 @@ impl fmt::Display for UiError {
         match self {
             Self::Sample(detail) => write!(f, "the sample mailbox could not be built: {detail}"),
             Self::Engine(error) => write!(f, "{error}"),
+            Self::Shot(detail) => write!(f, "ui_shot: {detail}"),
             Self::Answer { command, detail } => write!(f, "{command} answered in an unexpected shape: {detail}"),
         }
     }
@@ -44,7 +47,7 @@ impl std::error::Error for UiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Engine(error) => Some(error),
-            Self::Sample(_) | Self::Answer { .. } => None,
+            Self::Sample(_) | Self::Shot(_) | Self::Answer { .. } => None,
         }
     }
 }

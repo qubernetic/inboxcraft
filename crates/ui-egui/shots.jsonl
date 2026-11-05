@@ -1,0 +1,7 @@
+# The pictures of the mail list for docs/images and the PR (ui_shot, see crates/ui-egui/src/shot.rs).
+{"out": "docs/images/list-light.png", "mode": "light", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-dark.png", "mode": "dark", "select": "Photos from the coast walk"}
+{"out": "docs/images/narrowed-light.png", "mode": "light", "narrow": 2}
+{"out": "docs/images/narrowed-dark.png", "mode": "dark", "narrow": 2}
+{"out": "docs/images/search-light.png", "mode": "light", "search": "odile"}
+{"out": "docs/images/search-dark.png", "mode": "dark", "search": "odile"}
