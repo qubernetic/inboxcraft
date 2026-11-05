@@ -76,7 +76,8 @@ entered or saw (address, names, user name, the IMAP server) and never a password
 no account had in this session and queues the owner's first check. The front end puts the password into the OS
 credential store (`ui_egui::onboard::Keychain`; `keyring` in the desktop app) under the account's id, and the
 worker reads it from there each time it signs in, so a password never passes through a command, an answer, the
-store or the log. A new account's first check that signs in queues its folder list, so the sync starts after the
+store or the log. Until accounts are kept on disk, the window removes the passwords of the accounts added in it
+when it closes (`InboxApp::on_exit`). A new account's first check that signs in queues its folder list, so the sync starts after the
 password was accepted and not before. `account.remove` removes the account with its mail and drops its state and
 queued jobs. Each frame the window hands the queued jobs to the app's workers (`ui_egui::workers::Workers`; one
 `net::Worker` per account, started at its first job, stopped off the window's thread when its account is gone) and
@@ -140,3 +141,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | The account check, its job and events, and Detect (#28) |
 | 2026-11-05 | minor | The reader commands and where remote pictures are fetched (#33) |
 | 2026-11-05 | minor | Adding an account: `account.add`, `account.remove`, the credential store and the window's workers (#34) |
+| 2026-11-05 | minor | The window removes the session's passwords when it closes (#34) |

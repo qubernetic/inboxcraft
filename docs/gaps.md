@@ -303,9 +303,11 @@ B = blocks the next stage.
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
 - The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, while its password
-  stays in the OS credential store under `io.github.qubernetic.inboxcraft`, `account-<id>`; the next account with
-  that id in a later session overwrites it, and nothing removes it otherwise until accounts are kept on disk (#34).
+  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, and so is its
+  password: when the window closes, it removes the credential store entry (`io.github.qubernetic.inboxcraft`,
+  `account-<id>`) of every account added in it, trying again one the store refused to remove in "Change settings".
+  A crash, a killed process or a store that refuses at exit leaves the entry behind; the next account with that id
+  in a later session overwrites it, and `PRIVACY.md` says how to remove one by hand (#34).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
@@ -359,9 +361,11 @@ B = blocks the next stage.
     E4.2. Detect fills in its first IMAP proposal; the others are not offered to choose from.
   - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
     not yet through the i18n macros.
-  - The password field is egui's `String`: the window overwrites the password's bytes when it is added or the page
-    closes, but egui may have copied it while drawing (its text layout caches), and those copies are freed without
-    being overwritten.
+  - The password field edits a buffer made once for 256 characters, so typing never moves it, and the window
+    overwrites the whole buffer when the password is added or the page closes. egui's text layout caches hold only
+    the mask. The field keeps no undo history (it is emptied after every frame), so undo cannot bring back a cleared
+    password or an earlier account's. What remains: egui's undo history holds plain copies for the rest of a frame,
+    and those, like any other short-lived copy egui makes, are freed without being overwritten.
   - A new account starts syncing when its first check signs in; a refused first sign-in leaves it unsynced until a
     check signs in. Without a running credential store (no Secret Service on the desktop) no account can be added.
   - Workers stop off the window's thread when their account is removed, so a closing worker can still finish its
@@ -418,3 +422,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | What a forged `From` of an allowed sender learns (#33) |
 | 2026-11-05 | minor | `cargo xtask ci` runs the tests once, under coverage (#66) |
 | 2026-11-05 | minor | Onboarding's rough edges; the window applies worker events (#34) |
+| 2026-11-05 | minor | Passwords go at window close; the password field keeps no undo history (#34) |

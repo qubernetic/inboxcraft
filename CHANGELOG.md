@@ -283,10 +283,13 @@ All notable changes to InboxCraft are listed here. The format follows
   answer, an error, the log or the store. When the credential store refuses it, the account is removed again. The
   account check's steps then show as the worker reports them, each with the host and port it tried and the
   certificate's issuer; after a failure the owner checks again or changes the settings, which removes the account
-  and its password and opens the form again. A new account starts syncing once its first check signs in. New
-  commands: `account.add` and `account.remove` (owner); a complaint about `account.add`'s parameters repeats
-  nothing that was sent. The desktop app runs one `net` worker per account and applies their events each frame;
-  `ui_shot` draws the page in each state (`onboard`)
+  and its password and opens the form again. Accounts are not kept on disk yet, so when the window closes it removes
+  the passwords of the accounts added in it from the credential store again. The password field takes at most 256
+  characters into one buffer that is overwritten when cleared and keeps no undo history, so undo never brings a
+  cleared password back. The form says what Detect sends before it is pressed. A new account starts syncing once
+  its first check signs in. New commands: `account.add` and `account.remove` (owner); a complaint about
+  `account.add`'s parameters ends before the first quote and repeats nothing that was sent. The desktop app runs one
+  `net` worker per account and applies their events each frame; `ui_shot` draws the page in each state (`onboard`)
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
