@@ -253,6 +253,8 @@ All notable changes to InboxCraft are listed here. The format follows
   of `cargo xtask ci` fails when they differ.
 - The app icon, drawn in code (`crates/ui-egui/src/icons.rs`): a letter in an inbox tray with an unread dot,
   exported as `assets/app-icon/inboxcraft.svg` by `just icon` and used as the window icon (#31)
+- CI: the `flatpak` job builds the dev Flatpak into `inboxcraft.flatpak` on every full run and keeps it as the
+  `flatpak` artifact for 7 days; the `ci` gate needs it (#32)
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

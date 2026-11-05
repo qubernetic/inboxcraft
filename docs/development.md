@@ -278,7 +278,8 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | `draft` | on a draft PR only: one step, so the draft shows a check | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml` as the `reports` artifact | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
-| `ci` | the gate: succeeds only when `test` and `codecov` did | read |
+| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
+| `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
 
 - **Drafts get only the quick check.** The full run starts when the PR is marked ready (`gh pr ready`) and repeats
   on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before marking a PR
@@ -354,3 +355,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Fuzzing: the safe HTML display target (#29) |
 | 2026-11-05 | minor | The `shot` recipe; the desktop app opens the window (#30) |
 | 2026-11-05 | minor | The dev Flatpak: `just flatpak`, the CI bundle, `flatpak-sources-check`, `just icon` (#31) |
+| 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |
