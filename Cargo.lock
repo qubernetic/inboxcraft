@@ -825,6 +825,11 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui_kittest",
+ "inboxcraft-engine",
+ "inboxcraft-model",
+ "inboxcraft-store",
+ "inboxcraft-time",
+ "serde_json",
 ]
 
 [[package]]
