@@ -43,10 +43,10 @@ What is missing or rough is listed, ranked, in [docs/gaps.md](docs/gaps.md).
 
 | | |
 |---|---|
-| ![<alt text>](docs/images/<shot-1>.png) | ![<alt text>](docs/images/<shot-2>.png) |
+| ![The unified inbox of the sample mailbox in the light theme](docs/images/list-light.png) | ![The unified inbox of the sample mailbox in the dark theme](docs/images/list-dark.png) |
 
 The pictures show the sample mailbox (`--sample`): invented people and invented mail. They are made with
-`cargo run -p inboxcraft-ui-egui --example ui_shot`.
+`just shot` (`cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`).
 
 ## Platforms
 

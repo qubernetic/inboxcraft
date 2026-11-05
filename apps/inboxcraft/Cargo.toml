@@ -8,5 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+eframe = { workspace = true }
+inboxcraft-engine = { workspace = true }
+inboxcraft-store = { workspace = true }
+inboxcraft-time = { workspace = true }
+inboxcraft-ui-egui = { workspace = true }
+
 [lints]
 workspace = true

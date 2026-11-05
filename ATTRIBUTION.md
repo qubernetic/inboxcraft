@@ -8,7 +8,7 @@ Mailspring, Outlook, Gmail or any other vendor.** Every asset is original, CC0, 
 Commons licence that allows redistribution.
 
 Art drawn in code is original and has no file to list: the UI icon set (`crates/ui-egui/src/icons.rs`) and the
-sample mailbox (`crates/engine/src/sample.rs`).
+sample mailbox (`crates/ui-egui/src/sample.rs`).
 
 | Asset | Author | Source | Licence | Notes |
 |---|---|---|---|---|

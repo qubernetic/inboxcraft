@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-04 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -94,7 +94,8 @@ invented.
 - `just build`, then `just run-sample` runs the container-built app on the host with the sample mailbox;
   `just run -- --sample --control 7981` adds the control channel, driven with JSON-line control requests
   (`docs/control-protocol.md`).
-- Headless screenshots: `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`.
+- Headless screenshots: `just shot` runs `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`
+  (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`; the look is in `docs/design.md`).
 - For UI work, look at the result, in light and dark.
 - Parallel agents each use their own `CARGO_TARGET_DIR`.
 
@@ -118,3 +119,4 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-04 | minor | The coverage gate joins the `just ci` list (#7) |
 | 2026-11-04 | minor | CI runs on ready PRs only, drafts get the quick check (#9) |
 | 2026-11-04 | minor | Real accounts: agents never touch one; the owner alone runs the opt-in live tests (#10) |
+| 2026-11-05 | minor | `just shot` for the headless pictures; the look lives in `docs/design.md` (#30) |

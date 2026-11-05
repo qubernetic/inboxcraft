@@ -231,6 +231,18 @@ All notable changes to InboxCraft are listed here. The format follows
   characters other than the joiners are removed from all text. Input, nesting, tables, blocks, links and pictures are capped. The
   tokenizer and the character references are adapted from UCS-Care-Group/mailcraft `html` (MIT OR Apache-2.0).
   A hostile fixture set and the fuzz target `html_display` (#29)
+- The first window, `inboxcraft --sample` (#30): the invented sample mailbox (two accounts of one invented person on
+  `example.org`, 15 folders, 23 messages dated back from now; nothing connects anywhere) in a folder pane with the
+  unified views and each account's folders with their roles and unread badges, an account picker that narrows to one
+  account (its address in the header), the message list newest first (unread dot, sender, date, subject, preview,
+  flag, account stripe) and a search field over subject, sender and recipients (`mail.search`), Ctrl+F to focus it
+  and Escape to empty it. Every control has an accessible name. `inboxcraft` alone opens an empty window; `--help`
+  lists the arguments and anything unknown is refused with exit code 2. `inboxcraft-ui-egui`: InboxCraft's own theme
+  (`theme.rs`: colours, distances and type sizes for light and dark, WCAG AA contrast checked by tests, documented in
+  `docs/design.md`), the `tr!` macro every UI text goes through (English message ids, named placeholders), the list
+  state over the read commands, and `ui_shot` (`just shot`): headless pictures of the sample window filled on the
+  CPU and written as PNG under `docs/images/`. New dependencies: `egui` and `eframe` 0.37 (OpenGL through glow,
+  Wayland and X11, no wgpu, no `links`), `egui_kittest` for the UI tests, `png`.
 
 ### Changed
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
@@ -240,6 +252,11 @@ All notable changes to InboxCraft are listed here. The format follows
 - The second live test account is `live-imap2`, a throwaway account on the reference provider like `live-imap`,
   read from `INBOXCRAFT_LIVE_IMAP2_ADDRESS`, `_HOST`, `_USER` and `_SECRET`; the recipient allow-list and the
   leak scan of `just it-live` cover its values. No Google account takes part in the live tests (#57)
+- `deny.toml` allows the font licences of egui's bundled fonts (OFL-1.1 and the Ubuntu Font Licence 1.0) for the
+  `epaint_default_fonts` crate only, listed in `NOTICE`, and ignores three "unmaintained" notices (RUSTSEC-2026-0370,
+  0371 and 0372: zbus 5 parts merged into zbus 6) that come with the screen reader bridge `accesskit_unix`; the
+  `ui-egui` drawing code (`crates/ui-egui/src/draw/`)
+  counts for its crate's 80 % floor and no longer for the workspace total (#30)
 
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout

@@ -11,9 +11,9 @@ workspace = 95
 # Files counted nowhere: `xtask`'s `main` dispatch.
 exclude = ["xtask/src/main.rs"]
 
-# Files counted for their own crate but not for the workspace total: the apps' `main`. The `ui-egui` drawing code
-# joins this list when it lands.
-workspace-exclude = ["apps/*/src/main.rs"]
+# Files counted for their own crate but not for the workspace total: the apps' `main` and the `ui-egui` drawing code
+# (its floor is the crate's 80 %).
+workspace-exclude = ["apps/*/src/main.rs", "crates/ui-egui/src/draw/**"]
 
 [crates]
 # The core crates.

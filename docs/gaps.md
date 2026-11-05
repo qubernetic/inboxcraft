@@ -10,9 +10,7 @@
 B = blocks the next stage.
 
 ## Known rough edges (not ranked)
-- Every crate is an empty skeleton; the apps answer `--version` and refuse everything else (#5).
-- The `ui-egui` drawing code is not left out of the workspace coverage total yet: there is none. Its files join
-  `workspace-exclude` in `.config/coverage.toml` when it lands (#7).
+- `inboxcraft-cli` and `inboxcraft-web` answer `--version` and refuse everything else (#5).
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
 - `cargo xtask ci` runs the tests twice, once under nextest and once under `cargo llvm-cov nextest` for the
   coverage gate (#7).
@@ -304,6 +302,24 @@ B = blocks the next stage.
   shown text keeps the joiners, variation selectors and tag characters emoji and flags need (#29).
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
+- The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
+  one that is forgotten on exit, and adding an account comes with onboarding (E1.11). Selecting a row only
+  selects it; the reader comes with E1.12b (#30).
+- Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
+- The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
+  and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
+  with E5.1 (#30).
+- The list has no arrow-key navigation; Tab moves the focus through every folder and row, and Enter or Space
+  selects (#30).
+- The window uses egui's bundled fonts: Ubuntu Light (Ubuntu Font Licence 1.0, which is not an OSI licence; allowed
+  in `deny.toml` for that crate only, the project owner's to confirm) with no bold weight, so unread rows are marked
+  by a dot and the accent colour. Scripts the font lacks (CJK and others) show as boxes, and right-to-left text is
+  laid out left to right (egui has no bidi). InboxCraft's own choice of typeface is open (#30).
+- `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
+  GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
+  E1.13c (#30).
+- `eframe` without its default features links `libwayland-client` at build time instead of loading it at run time
+  (#30).
 
 ## Revision history
 | Date | Change | Summary |
@@ -343,3 +359,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The live tests use port 993 on both accounts (#57) |
 | 2026-11-05 | minor | Rough edges of the safe HTML display (#29) |
 | 2026-11-05 | minor | What the link comparison reads past (#29) |
+| 2026-11-05 | minor | Rough edges of the first window and the sample mailbox (#30) |

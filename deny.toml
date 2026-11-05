@@ -10,7 +10,9 @@ allow = [
   "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
   "ISC", "Zlib", "Unicode-3.0", "BSL-1.0", "0BSD", "CC0-1.0", "MIT-0", "Unlicense",
 ]
-# exceptions = [{ name = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] }]
+# egui's bundled fonts, compiled into the desktop app: Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT and the
+# Bitstream Vera licence), Noto Emoji (OFL-1.1) and the emoji icon font (MIT). Listed in NOTICE.
+exceptions = [{ name = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] }]
 
 [bans]
 multiple-versions = "warn"
@@ -29,4 +31,10 @@ allow-git = [
 [advisories]
 ignore = [
   # { id = "RUSTSEC-YYYY-NNNN", reason = "<why>, kept in step with osv-scanner.toml" },
+  # Unmaintained notices, not vulnerabilities: these zbus 5 parts merged into zbus 6. They come with
+  # accesskit_unix (through atspi), the bridge that shows the window to Linux screen readers over the session D-Bus;
+  # no release of it uses zbus 6 yet. Drop these when eframe's accesskit moves on.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled by accesskit_unix, no upgrade yet" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (merged into zbus 6); pulled by accesskit_unix, no upgrade yet" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (merged into zbus 6); pulled by accesskit_unix, no upgrade yet" },
 ]
