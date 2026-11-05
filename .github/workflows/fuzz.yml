@@ -1,0 +1,72 @@
+# Nightly fuzzing of every target in fuzz/ with cargo-fuzz (docs/development.md, "CI").
+#
+# GitHub runs a schedule only from the default branch (main), so the nightly run starts with the first release; until
+# then a PR that touches fuzz/ or this file runs it, and so does a manual dispatch once the file is on main
+# (gh workflow run fuzz.yml --ref develop). No targets yet: the job lists none and passes.
+#
+# Hardening as in ci.yml: read-only token, no secrets, no cache, every action pinned by commit SHA.
+
+name: fuzz
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop, main, 'epic/**']
+    paths:
+      - 'fuzz/**'
+      - '.github/workflows/fuzz.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # cargo-fuzz needs a nightly toolchain; pinned by date, bumped with rust-toolchain.toml.
+  FUZZ_TOOLCHAIN: nightly-2026-11-01
+  CARGO_FUZZ_VERSION: 0.13.2
+  # Seconds per target: the nightly run goes deeper than a PR run.
+  FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '30' || '300' }}
+
+jobs:
+  fuzz:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: List the fuzz targets
+        id: targets
+        run: |
+          shopt -s nullglob
+          targets=(fuzz/fuzz_targets/*.rs)
+          echo "count=${#targets[@]}" >> "$GITHUB_OUTPUT"
+          echo "${#targets[@]} fuzz targets in fuzz/fuzz_targets/"
+      - name: Install the nightly toolchain and cargo-fuzz
+        if: steps.targets.outputs.count != '0'
+        run: |
+          rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+          cargo +"$FUZZ_TOOLCHAIN" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+      - name: Fuzz every target
+        if: steps.targets.outputs.count != '0'
+        run: |
+          for target in $(cargo +"$FUZZ_TOOLCHAIN" fuzz list); do
+            echo "fuzz: $target for ${FUZZ_SECONDS}s"
+            cargo +"$FUZZ_TOOLCHAIN" fuzz run "$target" -- -max_total_time="$FUZZ_SECONDS"
+          done
+      # A crash leaves its input under fuzz/artifacts/; it becomes a regression test.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
