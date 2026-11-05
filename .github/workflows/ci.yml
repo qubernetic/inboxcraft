@@ -4,6 +4,8 @@
 # push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
 # (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
 #
+# The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
+#
 # Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, no cache a PR run could write
 # for a later one, every action pinned by commit SHA. Only the `codecov` job has `id-token: write`: it uploads the
 # coverage and test results with the job's GitHub OIDC token (the repository is private) and runs no repository
@@ -121,10 +123,42 @@ jobs:
           files: reports/target/nextest/ci/junit.xml
           disable_search: true
 
+  # Build proof for the dev Flatpak: the manifest `just flatpak` builds on the host, built offline from this checkout
+  # and cargo-sources.json into a single-file bundle (docs/development.md, "Install the bundle from CI").
+  flatpak:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Flathub's builder image with the 25.08 runtime and SDK, pinned by digest. Privileged because flatpak-builder runs
+    # every build step in a bubblewrap sandbox; the job token stays read-only and the job holds no secret.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08@sha256:c91a88269eee8fcdd73ecf43064232fbebe27411f926f63f38bdf70c51f2ceae
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No flatpak-builder cache: nothing a PR run writes feeds a later run.
+      - name: Build the bundle
+        run: |
+          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
+            --state-dir=target/flatpak/state --repo=target/flatpak/repo \
+            target/flatpak/build contrib/flatpak/io.github.qubernetic.inboxcraft.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            target/flatpak/repo inboxcraft.flatpak io.github.qubernetic.inboxcraft
+          ls -l inboxcraft.flatpak
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flatpak
+          path: inboxcraft.flatpak
+          if-no-files-found: error
+          retention-days: 7
+
   # The gate for the required-checks list: a skipped check reports as passing, so this job runs on every full run and
   # fails unless every job before it succeeded.
   ci:
-    needs: [test, codecov]
+    needs: [test, codecov, flatpak]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 1
@@ -133,6 +167,7 @@ jobs:
         env:
           TEST: ${{ needs.test.result }}
           CODECOV: ${{ needs.codecov.result }}
+          FLATPAK: ${{ needs.flatpak.result }}
         run: |
-          echo "test: $TEST, codecov: $CODECOV"
-          [ "$TEST" = success ] && [ "$CODECOV" = success ]
+          echo "test: $TEST, codecov: $CODECOV, flatpak: $FLATPAK"
+          [ "$TEST" = success ] && [ "$CODECOV" = success ] && [ "$FLATPAK" = success ]

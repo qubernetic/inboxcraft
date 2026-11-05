@@ -28,8 +28,10 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `shell`, `dev`, `down`,
-`rebuild`, `clean` (removes the cargo volumes and `target/`) and, for the owner only, `it-live` (see "Live tests").
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `icon` (exports the app icon),
+`flatpak-sources` and `flatpak-sources-check`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo
+volumes and `target/`), on the host `flatpak` (see "The dev Flatpak") and, for the owner only, `it-live` (see "Live
+tests").
 `just run -- <args>` passes arguments to the app; `INBOXCRAFT_PROFILE=release just run` runs the release build.
 
 ### Podman
@@ -75,12 +77,13 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cov --check`, `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, nextest (profile `ci`, `.config/nextest.toml`), doctests, `cov --check`, `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
+| `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
 | `cargo xtask help` | the commands and the exit codes |
@@ -139,6 +142,69 @@ The floors live in one file, `.config/coverage.toml`:
 - A crate with no lines has nothing to fall below. Cover is printed rounded down, so a crate below its floor never
   prints as on it.
 - A floor is never lowered in the PR that falls below it; lowering one needs the project owner.
+
+## The dev Flatpak
+`contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
+checkout and without a network during the build. After the first setup, `git pull && just flatpak` updates the
+installed app, and it starts from the desktop's menu like any other: the entry opens the app, its second action
+("Open the Sample Mailbox") starts it with `--sample`.
+
+| File | What it is |
+|---|---|
+| `io.github.qubernetic.inboxcraft.yml` | the manifest: the freedesktop 25.08 runtime with the `rust-stable` SDK extension, the build commands and the permissions |
+| `cargo-sources.json` | every crate of `Cargo.lock` as a download with its checksum, unpacked into a vendor folder for the offline build |
+| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, with the sample mailbox as its second action |
+| `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
+
+The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
+shapes are the window icon. After a change to the shapes, `just icon` exports the file again; a test fails while the
+file and the code differ.
+
+**Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
+network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
+GPU, the Secret Service for passwords and tokens, and desktop notifications. The Background portal needs no
+permission. There is no access to your files: everything the app keeps lives in
+`~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails when a permission has no comment above it.
+
+**Dependencies.** A change to `Cargo.lock` needs `just flatpak-sources` (in the container, or natively), and the
+regenerated `contrib/flatpak/cargo-sources.json` goes into the same commit; the `flatpak-sources-check` gate of
+`cargo xtask ci` fails until it is there. Only crates.io crates are allowed: a git or other registry dependency is
+refused.
+
+### Build and install it locally
+On the host you need `flatpak` and `flatpak-builder` (the `flatpak-builder` package of your distribution, or the
+`org.flatpak.Builder` app from Flathub), and the Flathub remote for your user once:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+```
+
+Then, in the checkout:
+
+```sh
+git pull
+just flatpak
+```
+
+`just flatpak` lints the manifest with `flatpak-builder-lint` when it is installed (or the linter of the
+`org.flatpak.Builder` app); the linter's findings are shown and the build goes on, as Flathub's rules are stricter
+than a dev build needs. It then runs `flatpak-builder --user --install`, which fetches the runtime, the SDK and the
+Rust extension from Flathub the first time, builds in `target/flatpak/` and installs the app for your user. The
+first build compiles every crate and takes a while; later ones reuse the downloads. Run it with
+`flatpak run io.github.qubernetic.inboxcraft` (add `--sample` for the sample mailbox), and remove it with
+`flatpak uninstall --user io.github.qubernetic.inboxcraft`.
+
+### Install the bundle from CI
+The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every ready PR run and
+keeps it as an artifact of the run. Download it from the run's page, or with `gh run download <run-id>`, then
+install it for your user:
+
+```sh
+flatpak install --user <bundle>.flatpak
+```
+
+The bundle needs the same runtime; `flatpak install` offers to fetch it from Flathub. Until that job lands, build
+locally.
 
 ## Live tests
 The owner alone runs opt-in live tests, by hand, on two throwaway test accounts. Agents write and maintain these
@@ -212,7 +278,8 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | `draft` | on a draft PR only: one step, so the draft shows a check | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml` as the `reports` artifact | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
-| `ci` | the gate: succeeds only when `test` and `codecov` did | read |
+| `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
+| `ci` | the gate: succeeds only when `test`, `codecov` and `flatpak` did | read |
 
 - **Drafts get only the quick check.** The full run starts when the PR is marked ready (`gh pr ready`) and repeats
   on every later push; a newer run of the same PR cancels the older one. Run `just ci` locally before marking a PR
@@ -287,3 +354,5 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | Live tests: both accounts sign in and list their folders (#57) |
 | 2026-11-05 | minor | Fuzzing: the safe HTML display target (#29) |
 | 2026-11-05 | minor | The `shot` recipe; the desktop app opens the window (#30) |
+| 2026-11-05 | minor | The dev Flatpak: `just flatpak`, the CI bundle, `flatpak-sources-check`, `just icon` (#31) |
+| 2026-11-05 | minor | CI: the `flatpak` bundle job (#32) |

@@ -7,10 +7,10 @@ source and licence. `cargo xtask assets` (part of `cargo xtask ci`) fails if an 
 Mailspring, Outlook, Gmail or any other vendor.** Every asset is original, CC0, OSI open source or under a Creative
 Commons licence that allows redistribution.
 
-Art drawn in code is original and has no file to list: the UI icon set (`crates/ui-egui/src/icons.rs`) and the
-sample mailbox (`crates/ui-egui/src/sample.rs`).
+Art drawn in code is original and has no file to list: the icons (`crates/ui-egui/src/icons.rs`) and the sample
+mailbox (`crates/ui-egui/src/sample.rs`). A file exported from that code has its row below.
 
 | Asset | Author | Source | Licence | Notes |
 |---|---|---|---|---|
-| `assets/app-icon/source/inboxcraft.svg` | InboxCraft contributors | drawn for InboxCraft | MIT OR Apache-2.0 | |
+| `assets/app-icon/inboxcraft.svg` | InboxCraft contributors | drawn in code for InboxCraft (`crates/ui-egui/src/icons.rs`), exported with `just icon` | MIT OR Apache-2.0 | the app icon; installed as `io.github.qubernetic.inboxcraft.svg` by the Flatpak |
 | `docs/images/<shot>.png` | InboxCraft contributors | screenshot of InboxCraft itself showing its sample mailbox, made with `ui_shot` | MIT OR Apache-2.0 | |
