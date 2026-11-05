@@ -96,9 +96,17 @@ wasm: _up
 shot script="crates/ui-egui/shots.jsonl": _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
 
-# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, cov, wasm, deny)
+# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, flatpak-sources-check, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci
+
+# Write contrib/flatpak/cargo-sources.json from Cargo.lock (after every dependency change; ci checks it)
+flatpak-sources: _up
+    {{ exec }} cargo xtask flatpak-sources
+
+# Check that contrib/flatpak/cargo-sources.json matches Cargo.lock
+flatpak-sources-check: _up
+    {{ exec }} cargo xtask flatpak-sources-check
 
 # ---- Host (display, tray, notifications, Secret Service) -------------------
 

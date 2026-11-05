@@ -7,15 +7,17 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, cov, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, nextest (ci profile), doctests, cov --check, wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, flatpak-sources-check, nextest (ci profile), doctests, cov --check, wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
   cov [--check] line coverage per crate under cargo llvm-cov nextest; --check fails below the floors in .config/coverage.toml
+  flatpak-sources        write contrib/flatpak/cargo-sources.json from Cargo.lock
+  flatpak-sources-check  contrib/flatpak/cargo-sources.json matches Cargo.lock
   layers        the layering rules between the crates (xtask/src/layers.rs)
   spdx [--fix]  every Rust file starts with the SPDX lines; --fix adds the missing ones
   stats         Rust files, code lines and test lines per crate
@@ -34,6 +36,7 @@ pub(crate) enum Command {
     Assets,
     Ci,
     Cov { check: bool },
+    FlatpakSources { check: bool },
     Help,
     Layers,
     Spdx { fix: bool },
@@ -62,6 +65,8 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
         Some("assets") => Command::Assets,
         Some("ci") => Command::Ci,
         Some("cov") => Command::Cov { check: false },
+        Some("flatpak-sources") => Command::FlatpakSources { check: false },
+        Some("flatpak-sources-check") => Command::FlatpakSources { check: true },
         Some("layers") => Command::Layers,
         Some("spdx") => Command::Spdx { fix: false },
         Some("stats") => Command::Stats,
@@ -118,6 +123,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
         Command::Assets => assets::gate(&ctx.root, out),
         Command::Ci => ci::gate(ctx, out),
         Command::Cov { check } => cov::gate(ctx, *check, out),
+        Command::FlatpakSources { check } => flatpak::gate(&ctx.root, *check, out),
         Command::Help => {
             out.write_all(HELP.as_bytes())?;
             Ok(true)
