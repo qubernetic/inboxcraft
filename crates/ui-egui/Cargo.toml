@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 egui = { workspace = true }
 inboxcraft-engine = { workspace = true }
+inboxcraft-html = { workspace = true }
 inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-store = { workspace = true }

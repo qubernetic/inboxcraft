@@ -26,6 +26,7 @@ pub mod i18n;
 pub mod mailbox;
 pub mod picture;
 pub mod quote;
+pub mod reader;
 pub mod sample;
 pub mod save;
 pub mod shot;
