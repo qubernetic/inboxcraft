@@ -159,6 +159,25 @@ fn with_the_ispdb_on_it_is_asked_for_the_domain_then_the_mx_domain() {
 }
 
 #[test]
+fn no_request_carries_the_local_part_or_the_address() {
+    let address = EmailAddress::new("zq-distinctive-local@example.org").unwrap();
+    let config_on = DetectConfig { ispdb: true, ..DetectConfig::default() };
+    let target = "https://autoconfig.provider.example.net/mail/config-v1.1.xml";
+    let web = FakeWeb::default().failing(AUTOCONFIG, ErrorKind::TimedOut).redirect(PLAIN, target);
+    let mut dns = FakeDns { mx: vec!["mx.mail.provider.example.net"], ..FakeDns::default() };
+    dns.srv.insert("_imaps._tcp.example.org".to_owned(), vec![("imap.provider.example.net", 993)]);
+    dns.srv.insert("_submission._tcp.example.org".to_owned(), vec![("smtp.provider.example.net", 587)]);
+    let proposal = detect(&address, &config_on, &dns, &web);
+    // Every source was asked: the failing autoconfig, the redirect and its target, the ISPDB and SRV.
+    assert!(proposal.asked.iter().any(|asked| asked.starts_with(ISPDB)), "{:?}", proposal.asked);
+    assert!(proposal.asked.contains(&target.to_owned()), "{:?}", proposal.asked);
+    assert!(proposal.imap.iter().any(|candidate| candidate.source == Source::Srv));
+    for asked in web.asked().iter().chain(&proposal.asked) {
+        assert!(!asked.contains("zq-distinctive-local") && !asked.contains('@'), "{asked}");
+    }
+}
+
+#[test]
 fn plain_http_counts_only_as_a_redirect_to_https_on_the_mx_domain() {
     let dns = FakeDns { mx: vec!["mx.mail.provider.example.net"], ..FakeDns::default() };
     let target = "https://autoconfig.provider.example.net/mail/config-v1.1.xml?emailaddress=x";
