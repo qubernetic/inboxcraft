@@ -131,3 +131,19 @@ fn a_check_of_an_unknown_account_or_with_bad_params_is_refused() {
     }
     assert!(session.take_jobs().is_empty());
 }
+
+#[test]
+fn a_new_start_forgets_a_check_whose_worker_ended() {
+    let mut session = session();
+    let job = start(&mut session);
+    session.apply(&step_event(job, CheckStep::Dns, StepStatus::Passed)).unwrap();
+    // The workers are started again: the old check's last step never comes.
+    session.start();
+    assert!(session.take_jobs().iter().all(|job| job.kind == JobKind::SyncFolderList));
+    let check = listed_check(&mut session);
+    assert_eq!(check["running"], json!(false));
+    assert_eq!(check["steps"][0]["status"], json!("passed"));
+    assert_eq!(session.apply(&step_event(job, CheckStep::Tcp, StepStatus::Passed)).unwrap(), Applied::Dropped);
+    let again = start(&mut session);
+    assert_ne!(again, job);
+}

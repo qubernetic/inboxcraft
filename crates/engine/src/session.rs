@@ -267,8 +267,14 @@ impl Session {
         Ok(value)
     }
 
-    /// Asks every account's worker for its folder list; the answers bring the folder syncs.
+    /// Asks every account's worker for its folder list; the answers bring the folder syncs. A check still running is
+    /// over: the worker that ran it is gone, so its last step never comes, and the account can be checked again.
     pub fn start(&mut self) {
+        for held in self.state.accounts.values_mut() {
+            if let Some(check) = held.check.as_mut() {
+                check.job = None;
+            }
+        }
         let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
         for account in accounts {
             self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None });
