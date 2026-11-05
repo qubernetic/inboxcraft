@@ -321,6 +321,9 @@ B = blocks the next stage.
 - Pictures: PNG and JPEG only (GIF, WebP and SVG show as a box with their alternative text), at most 8192 pixels a
   side and 8 Mi pixels; remote pictures over plain `http`, or on a host with only local addresses, are not fetched.
   Inline pictures show only from HTML bodies; a plain-text body's image parts are tiles (#33).
+- Decoded pictures are kept across messages until they pass 256 MiB, then all of them go at the next open, so a
+  picture shown again is fetched again. The cap applies between messages, not inside one: a thread of hostile
+  messages may still decode up to 64 pictures of 8 Mi pixels each (#33).
 - The reader shows no bold type (the bundled font has one weight); bold text is drawn in the full text colour.
   Tables are laid out as a grid without borders, four deep at most (#33).
 - `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
@@ -390,3 +393,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | The Flatpak is built by the CI bundle job (#32) |
 | 2026-11-05 | minor | Rough edges of the reader and remote pictures (#33) |
 | 2026-11-05 | minor | The Flatpak opens Downloads for Save (#33) |
+| 2026-11-05 | minor | The reader forgets decoded pictures past a budget (#33) |

@@ -31,6 +31,10 @@ pub const MAX_THREAD: usize = 100;
 /// The most remote pictures one message may ask for.
 pub const MAX_REMOTE: usize = 64;
 
+/// The most bytes of decoded pictures the reader keeps; past it, opening a message forgets them (a forgotten remote
+/// picture is asked for again when its message shows it).
+pub const MAX_KEPT: usize = 256 * 1024 * 1024;
+
 /// A person in a header: the name (perhaps empty) and the address, both made fit for one line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Person {
@@ -295,6 +299,10 @@ impl Reader {
         self.quotes.clear();
         self.once.clear();
         self.notice = None;
+        let kept = self.pictures.values().filter_map(|state| if let PictureState::Ready(picture) = state { Some(picture.rgba.len()) } else { None });
+        if kept.fold(0, usize::saturating_add) > MAX_KEPT {
+            self.pictures.retain(|_, state| matches!(state, PictureState::Waiting));
+        }
         let Some(id) = id else {
             self.full_width = false;
             return;

@@ -132,6 +132,21 @@ fn always_for_this_sender_remembers_the_sender() {
 }
 
 #[test]
+fn a_texture_goes_with_its_picture() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    harness.get_by_label("Always for prize-desk@example.org").click();
+    harness.run();
+    let url = "https://track.example.net/open.png?id=4417";
+    assert!(harness.state().textures.contains_key(url), "the fetched picture is drawn");
+    let gone = harness.ctx.load_texture("gone", egui::ColorImage::filled([1, 1], egui::Color32::WHITE), egui::TextureOptions::LINEAR);
+    harness.state_mut().textures.insert("https://pictures.example.org/gone.png".to_owned(), gone);
+    harness.run();
+    assert!(!harness.state().textures.contains_key("https://pictures.example.org/gone.png"), "no picture, no texture");
+    assert!(harness.state().textures.contains_key(url));
+}
+
+#[test]
 fn the_link_under_the_pointer_shows_where_it_goes_and_a_click_copies_it() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");

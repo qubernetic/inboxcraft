@@ -7,9 +7,10 @@ use inboxcraft_html::{Link, LinkTarget};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
-use super::{Content, PictureState, Reader, inline_key, link_status, size_text, unbase64};
+use super::{Content, MAX_KEPT, PictureState, Reader, inline_key, link_status, size_text, unbase64};
 use crate::fetch::{Fetch, Fetched};
 use crate::mailbox::Mailbox;
+use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::sample;
 use crate::save::Save;
@@ -151,6 +152,31 @@ fn always_for_this_sender_loads_now_and_next_time_without_asking() {
     fetch.done.lock().unwrap().push(("https://other.example.org/x.png".to_owned(), Ok(Vec::new())));
     assert!(reader.poll());
     assert!(reader.picture("https://other.example.org/x.png").is_none());
+}
+
+#[test]
+fn pictures_past_the_budget_are_forgotten_when_another_message_opens() {
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut mailbox = mailbox();
+    let junk = id_of(&mut mailbox, "You have won a lighthouse");
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(junk));
+    reader.allow_always(&mut mailbox, junk);
+    reader.poll();
+    let url = "https://track.example.net/open.png?id=4417";
+    assert!(matches!(reader.picture(url), Some(PictureState::Ready(_))));
+    // Within the budget a picture is kept, and opening the message again asks nothing.
+    reader.open(&mut mailbox, Some(junk));
+    assert_eq!(fetch.asked.lock().unwrap().len(), 1);
+    let big = Decoded { width: 1, height: 1, rgba: vec![0; MAX_KEPT] };
+    reader.pictures.insert("https://pictures.example.org/big.png".to_owned(), PictureState::Ready(Arc::new(big)));
+    reader.pictures.insert("https://pictures.example.org/slow.png".to_owned(), PictureState::Waiting);
+    reader.open(&mut mailbox, None);
+    assert!(reader.picture("https://pictures.example.org/big.png").is_none(), "past the budget the decoded pictures go");
+    assert!(reader.picture(url).is_none());
+    assert!(matches!(reader.picture("https://pictures.example.org/slow.png"), Some(PictureState::Waiting)), "a picture on its way stays");
+    reader.open(&mut mailbox, Some(junk));
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "a forgotten picture is asked for again");
 }
 
 #[test]

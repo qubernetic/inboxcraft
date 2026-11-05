@@ -17,7 +17,7 @@ use egui::{CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel,
 
 use crate::fetch::{Fetch, Offline};
 use crate::mailbox::Mailbox;
-use crate::reader::Reader;
+use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::theme::Theme;
 use crate::tr;
@@ -175,6 +175,8 @@ impl InboxApp {
             };
         }
         let mut drawn = reader::Drawn::default();
+        // A texture lives no longer than the picture the reader keeps for it.
+        self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if self.reader.open_id().is_some() {
             let hover = self.hover.take();
             drawn = CentralPanel::no_frame()
