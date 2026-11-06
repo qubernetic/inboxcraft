@@ -115,14 +115,17 @@ pub enum Under {
     Sharp,
 }
 
-/// Paints a float over `rect`: its shadow, the frosted surface, its edge and its light top edge.
+/// Paints a float over `rect`: its shadow, the frosted surface, its edge and its light top edge. Over sharp text the
+/// float casts no shadow, which would lay translucency over the text around it.
 pub fn float(painter: &Painter, theme: &Theme, rect: Rect, under: Under) {
-    let colour = match under {
-        Under::Fading => theme.palette.float,
-        Under::Sharp => theme.palette.float_over_text,
+    let [fill, edge] = match under {
+        Under::Fading => {
+            painter.add(shadow(painter, theme, rect));
+            pane(theme, rect, theme.palette.float)
+        }
+        Under::Sharp => pane(theme, rect, theme.palette.float_over_text),
     };
-    let [fill, edge] = pane(theme, rect, colour);
-    painter.extend([shadow(painter, theme, rect), fill, edge, highlight(painter, theme, rect)]);
+    painter.extend([fill, edge, highlight(painter, theme, rect)]);
 }
 
 /// Paints `galley` at `pos` in `colour`, fading out over the `over` points before `until` (a float's left edge) and

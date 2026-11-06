@@ -359,8 +359,10 @@ B = blocks the next stage.
   The gradient's full strength shows nowhere yet (the navigation rail comes with E1.17); the selection gradient is
   the only one in the list. A yellow field over a near-black background reads olive rather than amber (Citrus in
   dark), because the fields are mixed in sRGB. Layer shadows reach under the neighbouring layer's edge by a few
-  points. Each glass layer's shadow is a picture of its own size, so dragging a pane's edge rasterises it again
-  for every frame of the drag. The reader's subject still shrinks to "..." when the toolbar fills its width (E1.17b).
+  points. A resize still rasterises the colour fields again each time the window crosses a step of 128 pixels,
+  and the selection gradient whenever the selected row changes width; layer shadows are size-free nine-slices, but
+  their edges repeat a 32-pixel strip, dither noise included. A float over sharp text casts no shadow, so a menu
+  over the reader stands out by its colour and edge alone. The reader's subject still shrinks to "..." when the toolbar fills its width (E1.17b).
 - `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
   sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
   It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
@@ -444,3 +446,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Rough edges of the theme tokens and presets (#81) |
 | 2026-11-06 | minor | Limits of the side-by-side pictures (#81) |
 | 2026-11-06 | minor | Limits of glass and floats (#82) |
+| 2026-11-06 | minor | Glass and floats: resizes no longer rasterise the shadows; no float shadow over sharp text (#82) |

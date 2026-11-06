@@ -119,12 +119,14 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
 - **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the add-account page) are each a
   glass layer, `gap` apart and from the window's edge: the glass colour over the fields, a 1-point edge, a light top
   edge that fades in and out at its ends, and a soft shadow around it, clear under the layer itself so it does not
-  darken the glass. All layers go into one place reserved right after the colour fields, shadows first, so a layer
+  darken the glass. The shadow is a nine-slice: one small picture of its corners and a 32-pixel stretch of each
+  edge, tiled along the layer, so a resize never rasterises it again whatever the layer's size. All layers go into one place reserved right after the colour fields, shadows first, so a layer
   never covers another's content and translucency is never laid over text (a UI test checks every shape of the
   window in every preset and mode).
 - **Floats** (`glass::float`): what floats over content is frosted: `float` (about 80 %) where the content under
   it fades before it, so a little of the colour behind glows through, and `float over text` where it would sit over
-  sharp text that cannot fade, opaque enough that the text under it is barely there. Menus, tooltips and popups use
+  sharp text that cannot fade, opaque enough that the text under it is barely there; that one casts no shadow,
+  which would darken the text around it. Menus, tooltips and popups use
   `float over text`. Text that a float covers fades out over a few points before the float's edge and is cut there
   (`glass::faded`), so no letter shows through or touches it. A UI test draws a menu over the reader's text and
   hover actions over a fading row in every preset and mode, and checks the float's text reads at 4.5:1 while the
@@ -133,7 +135,9 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
   or a layer's shadow. Shapes get it as a picture rasterised once per gradient and size, every pixel dithered with
   a noise below one step of eight-bit colour added before rounding, so a wide gradient over few steps shows no
   bands (a test over 1024 pixels and eight steps of grey); lines and text are coloured at their vertices, dithered
-  the same way. The selected row and folder show the selection gradient from left to right. egui's own fade at the
+  the same way. At the end of every frame the window gives back the pictures that frame did not paint
+  (`gradient::sweep`), so a finished resize leaves no textures behind (a UI test resizes the window at scale 1 and
+  2 and checks the kept texture bytes). The selected row and folder show the selection gradient from left to right. egui's own fade at the
   ends of a scroll area is off: it was a gradient of its own laid over text.
 - **No repaint while nothing moves.** Nothing in the look asks for another frame; a UI test runs the window idle in
   every preset and mode and counts no repaint and no picture rasterised again.
@@ -226,3 +230,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | major | Colour tokens from the mode and an accent preset; Electric, Aurora and Citrus; teal and coral gone (#81) |
 | 2026-11-06 | minor | Pictures: each `ui_shot` picture beside its mood sketch, `just side-by-side` (#81) |
 | 2026-11-06 | minor | Glass and floats: colour fields, glass layers, the float surfaces, the one gradient helper (#82) |
+| 2026-11-06 | minor | Glass and floats: nine-slice shadows, the sweep of unused pictures, no shadow over sharp text (#82) |

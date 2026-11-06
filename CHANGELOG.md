@@ -348,7 +348,9 @@ All notable changes to InboxCraft are listed here. The format follows
   glass over the fields and on a float over the fields and the gradient. One gradient helper
   (`ui-egui::gradient`) paints every gradient on shapes, lines and text, dithered against banding; a test refuses a
   gradient painted anywhere else, and egui's own scroll-edge fade is off. The selected row and folder show the
-  selection gradient. Nothing asks for a repaint while nothing moves
+  selection gradient. Nothing asks for a repaint while nothing moves. Layer shadows are nine-slices whose picture
+  does not depend on the layer's size, and every frame gives back the pictures it did not paint, so resizing the
+  window neither rasterises the shadows again nor keeps their textures; a float over sharp text casts no shadow.
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)

@@ -177,3 +177,27 @@ fn a_layer_is_glass_with_a_light_top_edge_and_a_shadow_under_it() {
         assert!(light(shade) < light(bare), "{name}: a shadow under the layer: {shade:?} {bare:?}");
     }
 }
+
+#[test]
+fn a_float_over_sharp_text_casts_no_shadow_onto_it_and_one_over_fading_content_does() {
+    for theme in all() {
+        let name = format!("{} {:?}", theme.preset.id, theme.mode);
+        let draw = |under: Option<Under>| {
+            paint(vec2(WINDOW[0], WINDOW[1]), 1.0, theme.mode, move |ui| {
+                let painter = ui.painter().clone();
+                backdrop(&painter, &theme, Rect::from_min_size(pos2(0.0, 0.0), vec2(WINDOW[0], WINDOW[1])));
+                if let Some(under) = under {
+                    float(&painter, &theme, MENU, under);
+                }
+            })
+            .unwrap()
+        };
+        let bare = draw(None);
+        // Just outside the menu, where its shadow falls.
+        let beside = Rect::from_min_max(pos2(MENU.left() + 20.0, MENU.bottom() + 1.0), pos2(MENU.right() - 20.0, MENU.bottom() + 8.0));
+        let sharp = largest_change(&draw(Some(Under::Sharp)), &bare, beside);
+        assert!(sharp <= 1.0, "{name}: the menu darkens the text beside it at {sharp:.3}");
+        let fading = largest_change(&draw(Some(Under::Fading)), &bare, beside);
+        assert!(fading > 1.0, "{name}: a float over fading content has a shadow");
+    }
+}
