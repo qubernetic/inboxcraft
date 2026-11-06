@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-06 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -301,6 +301,10 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
   from `rust-toolchain.toml`, and nextest, cargo-llvm-cov and cargo-deny at the versions the `Dockerfile` pins: it
   reads them from there, so a bump stays one change.
+- **Dependencies at opt-level 0 in CI.** `Cargo.toml` builds the third-party dependencies at opt-level 2 for local
+  dev and test builds; the `test` job overrides that with `DEPS_OPT_LEVEL: 0`, which it writes to
+  `~/.cargo/config.toml` (cargo's own config wins over `Cargo.toml`). Measured on one runner (#70): a cold job
+  builds in 12 minutes instead of 31, a warm one 15 s faster, and the tests take 47 s instead of 26 s.
 - **One cache, written only by merged code.** The `test` job caches the compiled third-party dependencies
   (`deps`, `build` and `.fingerprint` of every profile under `target/`) and the cargo registry
   (`~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`; the unpacked sources are not cached,
@@ -309,8 +313,9 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
   run, so a `pull_request` or `workflow_dispatch` run never writes it. Before the save, every package and target
   name of this workspace is deleted from `target/`, with the binaries, reports and coverage data: no artifact of
   our own code is cached. The job sets `CARGO_INCREMENTAL=0`.
-- The key is `deps-v1-<os>-<ISO week>-<hash of rust-toolchain.toml>-<hash of the [profile.*] sections>-<hash of
-  Cargo.lock>`, so it rotates every week and a toolchain or profile change starts from nothing. A run whose
+- The key is `deps-v1-<os>-<ISO week>-<hash of rust-toolchain.toml>-<hash of the [profile.*] sections>-o<the
+  dependency opt-level>-<hash of Cargo.lock>`, so it rotates every week and a toolchain, profile or opt-level
+  change starts from nothing. A run whose
   `Cargo.lock` has no entry yet restores the newest entry of the same week, toolchain and profiles and rebuilds what
   changed; that entry can carry old dependency versions until the week ends. A PR restores the entries of its base
   branch and of `main`.
@@ -395,3 +400,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: no `draft` job, a draft starts no job (#68) |
 | 2026-11-05 | minor | CI: `flatpak` on a PR only when its inputs change; the list of inputs (#68) |
 | 2026-11-05 | minor | CI: fuzz builds every target, a PR fuzzes only new or changed targets, a push to `develop` all (#69) |
+| 2026-11-06 | minor | CI: the `test` job builds the dependencies at opt-level 0; the level is in the cache key (#70) |

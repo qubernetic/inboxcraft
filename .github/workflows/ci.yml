@@ -16,7 +16,7 @@
 # restores it; only a push to develop, main or an epic branch saves it, so only reviewed, merged code writes it. A
 # pull_request or workflow_dispatch run never saves. Our own crates are deleted from target/ before the save, so no
 # artifact of this repository's code is cached. The key rotates weekly and changes with rust-toolchain.toml,
-# Cargo.lock and the [profile.*] sections of Cargo.toml. The `codecov` and `flatpak` jobs and fuzz.yml use no cache.
+# Cargo.lock, the [profile.*] sections of Cargo.toml and the job's dependency opt-level. The `codecov` and `flatpak` jobs and fuzz.yml use no cache.
 # Purge every entry with `gh cache delete --all`.
 
 name: ci
@@ -83,12 +83,21 @@ jobs:
     env:
       # Incremental data only pays off on a warm machine, and it would hold our own code: never built, never cached.
       CARGO_INCREMENTAL: 0
+      # Third-party dependencies unoptimised in CI only (Cargo.toml keeps 2 for local builds): on one runner a cold
+      # job builds 19 minutes faster and a warm one 15 s faster, the tests run 21 s slower (#70).
+      DEPS_OPT_LEVEL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The cache key: ISO week, toolchain, [profile.*] sections, Cargo.lock. A run whose Cargo.lock has no entry yet
-      # restores the newest one of the same week, toolchain and profiles and rebuilds only what changed.
+      # [profile] settings in cargo's own config take precedence over Cargo.toml's.
+      - name: Set the dependency opt-level
+        run: |
+          mkdir -p ~/.cargo
+          printf '\n[profile.dev.package."*"]\nopt-level = %s\n' "$DEPS_OPT_LEVEL" >> ~/.cargo/config.toml
+      # The cache key: ISO week, toolchain, [profile.*] sections, the dependency opt-level, Cargo.lock. A run whose
+      # Cargo.lock has no entry yet restores the newest one of the same week, toolchain and profiles and rebuilds only
+      # what changed.
       - name: Compute the cache key
         id: cache-key
         env:
@@ -96,7 +105,7 @@ jobs:
           LOCK: ${{ hashFiles('Cargo.lock') }}
         run: |
           profiles=$(awk '/^\[/ { keep = /^\[profile\./ } keep' Cargo.toml | sha256sum | cut -d' ' -f1)
-          prefix="deps-v1-$RUNNER_OS-$(date -u +%G-W%V)-$TOOLCHAIN-$profiles-"
+          prefix="deps-v1-$RUNNER_OS-$(date -u +%G-W%V)-$TOOLCHAIN-$profiles-o$DEPS_OPT_LEVEL-"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
           echo "key=$prefix$LOCK" >> "$GITHUB_OUTPUT"
       # Every run restores; the save step at the end runs on pushes only. The paths match the save step's.
