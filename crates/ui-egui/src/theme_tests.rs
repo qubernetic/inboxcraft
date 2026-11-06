@@ -321,8 +321,8 @@ fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Whether `line` names a colour of its own: an RGB literal, a grey or a named egui colour other than "none" and
-/// the placeholder.
+/// Whether `line` names a colour of its own: an RGB or hex literal, a grey, an HSVA colour built from numbers, or a
+/// named egui colour other than "none" and the placeholder.
 fn names_a_colour(line: &str) -> bool {
     let literal = ["from_rgb(", "from_rgba_unmultiplied(", "from_rgba_premultiplied(", "from_gray(", "from_black_alpha(", "from_white_alpha("]
         .iter()
@@ -331,7 +331,7 @@ fn names_a_colour(line: &str) -> bool {
         let constant: String = rest.chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
         !constant.is_empty() && !["TRANSPARENT", "PLACEHOLDER"].contains(&constant.as_str())
     });
-    let hex = line.contains("rgb(0x") || line.contains("Rgba::from_");
+    let hex = line.contains("rgb(0x") || line.contains("Rgba::from_") || line.contains("from_hex(") || line.contains("Hsva::new(");
     literal || named || hex
 }
 
@@ -341,6 +341,8 @@ fn the_colour_check_finds_literals_and_named_colours() {
     assert!(names_a_colour("fill(Color32::WHITE)"));
     assert!(names_a_colour("Color32::from_gray(40)"));
     assert!(names_a_colour("const X: Color32 = rgb(0xffffff);"));
+    assert!(names_a_colour("Color32::from_hex(\"#2f6bff\")"));
+    assert!(names_a_colour("let h = Hsva::new(0.5, 1.0, 1.0, 1.0);"));
     assert!(!names_a_colour("Color32::from_rgba_premultiplied(*px.first()?, 1, 2, 3)"));
     assert!(!names_a_colour("painter.galley(pos, galley, Color32::PLACEHOLDER)"));
     assert!(!names_a_colour("let fill = p.surface;"));
