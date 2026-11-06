@@ -302,7 +302,8 @@ All notable changes to InboxCraft are listed here. The format follows
   `"components": true`, in every preset and mode.
 - Motion tokens (#85, `ui-egui::motion`), all at most 0.25 s: hover fade, tooltip, row slide-out, card open and
   close, toast rise. Every animation runs through the motion module and reads one reduced-motion flag
-  (`InboxApp::set_reduce_motion`); with it on, everything lands at once and egui's own animations stop too. Its
+  (`InboxApp::set_reduce_motion`); with it on, everything lands at once and egui's fades and its scrolling to a place stop too;
+  egui's smoothing of mouse wheel notches (about 0.1 s) is fixed inside egui and keeps running. Its
   default follows the system where the system can be read, otherwise motion is on.
 - A keymap (#85, `ui-egui::keymap`): which key runs which action, by id; tooltips, menu rows and a toast's Undo read
   their key from it when they are drawn, so a changed key shows at once. The search's Ctrl+F is its first key.

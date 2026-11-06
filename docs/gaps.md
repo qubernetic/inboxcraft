@@ -368,6 +368,8 @@ B = blocks the next stage.
   can be set only from code (`InboxApp::set_reduce_motion`); its `ui.motion.set` command and switch come with E1.16.
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
+  Reduced motion stops egui's fades and its scrolling to a place, but not its smoothing of a mouse wheel's notches
+  (about 0.1 s, fixed inside egui 0.37 with no setting), so a wheel still scrolls with a short glide.
   The row slide-out token waits for the Done of E1.17. A menu row shows its key as text, which a screen reader does
   not read with the row's name. Avatars show initials only; pictures of people (from a vCard or a sender's own
   picture) are not read.
@@ -478,3 +480,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Figtree and the text scale: what is left, the fallback scripts, Ubuntu Light still compiled in (#83) |
 | 2026-11-06 | minor | Icons: one set, the ids so far, whole fonts bundled, no gradient through a glyph (#84) |
 | 2026-11-06 | minor | Components and motion: what is used yet, one key, the reduced-motion default (#85) |
+| 2026-11-06 | minor | Reduced motion: the mouse wheel's smoothing keeps running (#85) |

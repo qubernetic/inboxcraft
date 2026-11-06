@@ -235,8 +235,10 @@ Short and snappy, nothing decorative. Every duration is a motion token (`motion:
 
 Everything that moves runs through `motion::toggle` (towards on or off) or `motion::appear` (from the frame
 something is first shown), and both read **one reduced-motion flag** (`motion::set_reduced`): with it on, every
-motion lands at its end in the frame it changes, and egui's own animations (fading areas, smooth scrolling) stop
-too. A test refuses egui's animation calls anywhere else in the crate, and a test switches every component on with
+motion lands at its end in the frame it changes, and egui's own animations stop too: fading areas
+(`animation_time`) and scrolling to a place (`scroll_animation`). egui still smooths a mouse wheel's notches over
+about 0.1 s with a factor fixed inside egui that no style changes, so wheel scrolling glides a little with reduced
+motion on (see `docs/gaps.md`). A test refuses egui's animation calls anywhere else in the crate, and a test switches every component on with
 motion and with reduced motion and finds the first still moving and the second at rest. The flag's default follows
 the system where the system can be read (the web build), otherwise motion is on; the window holds it
 (`InboxApp::set_reduce_motion`) and a switch for it comes with the appearance settings. While something moves the
@@ -344,4 +346,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Type: Figtree, font tokens, unread by weight, the text scale and layout from the font's metrics (#83) |
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
-| 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1 (#85) |
+| 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |

@@ -6,9 +6,10 @@
 //! on, everything lands at its end in the frame it changes. A test refuses egui's animation calls anywhere else.
 //!
 //! The flag's default follows the system where the system can be read ([`system_default`]); otherwise motion is on.
-//! With the flag on, egui's own animations (areas fading in, smooth scrolling) stop too.
+//! With the flag on, egui's own animations (areas fading in, scrolling to a place) stop too. egui's smoothing of a
+//! mouse wheel's notches is fixed inside egui and keeps running.
 
-use egui::{Context, Id, Style, emath::easing};
+use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
 
 /// The durations of the motion tokens, in seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,12 +52,17 @@ pub fn system_default(system: Option<bool>) -> bool {
     system.unwrap_or(false)
 }
 
-/// Turns reduced motion on or off in `ctx`, egui's own animations included, from this frame.
+/// Turns reduced motion on or off in `ctx`, egui's fades and scrolling to a place included, from this frame.
 pub fn set_reduced(ctx: &Context, reduced: bool) {
     ctx.data_mut(|data| data.insert_temp(flag(), reduced));
     let time = if reduced { 0.0 } else { MOTION.tooltip };
-    if ctx.global_style().animation_time != time {
-        ctx.all_styles_mut(|style| style.animation_time = time);
+    let scroll = if reduced { ScrollAnimation::none() } else { ScrollAnimation::default() };
+    let style = ctx.global_style();
+    if style.animation_time != time || style.scroll_animation != scroll {
+        ctx.all_styles_mut(|style| {
+            style.animation_time = time;
+            style.scroll_animation = scroll;
+        });
     }
 }
 

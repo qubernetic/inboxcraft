@@ -52,8 +52,10 @@ fn reduced_motion_stops_egui_s_own_animations_too() {
     let ctx = Context::default();
     set_reduced(&ctx, true);
     assert_eq!(ctx.global_style().animation_time, 0.0);
+    assert_eq!(ctx.global_style().scroll_animation, egui::style::ScrollAnimation::none());
     set_reduced(&ctx, false);
     assert_eq!(ctx.global_style().animation_time, MOTION.tooltip);
+    assert_eq!(ctx.global_style().scroll_animation, egui::style::ScrollAnimation::default());
     let mut style = egui::Style::default();
     super::tune(&mut style);
     assert_eq!(style.animation_time, MOTION.tooltip);
