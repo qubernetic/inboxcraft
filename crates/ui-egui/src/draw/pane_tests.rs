@@ -95,3 +95,15 @@ fn the_rail_opens_sent_and_says_which_views_are_not_built_yet() {
     assert_eq!(harness.state().mailbox().place(), Place::View(FolderRole::Inbox));
     harness.get_by_role_and_label(Role::Image, "InboxCraft");
 }
+
+#[test]
+fn the_folder_pane_keeps_no_add_account_link_where_accounts_can_be_added() {
+    // Most people have one account: a link in the pane would hold its room for nothing. Accounts are added in Settings.
+    let keychain = std::sync::Arc::new(crate::onboard::NoKeychain);
+    let app = app().with_accounts(keychain, Box::<crate::onboard::NoDetect>::default(), Box::new(crate::workers::NoWorkers));
+    let mut harness =
+        Harness::builder().with_size(vec2(1200.0, 800.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.get_by_label("MAILBOXES");
+    assert_eq!(harness.query_all_by_label("Add account").count(), 0);
+}

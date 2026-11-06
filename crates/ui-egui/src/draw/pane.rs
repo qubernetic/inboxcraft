@@ -7,9 +7,9 @@
 
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
-use super::paint::{NavRow, focus_ring, line_height, nav_row};
+use super::paint::{NavRow, line_height, nav_row};
+use crate::component::avatar;
 use crate::component::button::IconButton;
-use crate::component::{avatar, tooltip};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
@@ -136,7 +136,6 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
-    pub(super) add: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -205,31 +204,9 @@ fn folder_icon(role: Option<FolderRole>) -> IconId {
     }
 }
 
-/// "Add account": the accent text with a plus before it, as a link.
-fn add_account(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> bool {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let name = tr!("Add account");
-    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.accent);
-    let icon = theme.fonts.body.size * 1.1;
-    let height = line_height(ui, theme.fonts.body) + s.s * 1.5;
-    let (rect, response) = ui.allocate_exact_size(vec2(s.s + icon + s.s + galley.size().x + s.s, height), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
-    if ui.is_rect_visible(rect) {
-        if response.hovered() {
-            ui.painter().rect_filled(rect, s.corner, p.hover);
-        }
-        let at = Rect::from_center_size(pos2(rect.left() + s.s + icon / 2.0, rect.center().y), vec2(icon, icon));
-        theme.icons.paint(ui.painter(), at, IconId::Add, Style::Regular, p.accent);
-        ui.painter().galley(pos2(at.right() + s.s, rect.center().y - galley.size().y / 2.0), galley, p.accent);
-        focus_ring(ui, theme, &response);
-    }
-    tooltip::attach(response, theme, keymap, name, None).clicked()
-}
-
-/// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
-/// the Add account button.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool) -> Asked {
+/// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. Accounts are added
+/// in the settings, not here: most people have one, and a link here would hold its room for nothing.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
@@ -237,10 +214,6 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     if !mailbox.accounts().is_empty() {
         ui.add_space(theme.spacing.s);
         ui.scope(|ui| account_picker(ui, theme, mailbox, &mut asked));
-    }
-    if can_add {
-        ui.add_space(theme.spacing.xs);
-        asked.add = add_account(ui, theme, keymap);
     }
     if mailbox.accounts().is_empty() {
         return asked;

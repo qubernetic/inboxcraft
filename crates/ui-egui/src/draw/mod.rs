@@ -4,7 +4,7 @@
 //! The window's content: the folder pane on the left, the header with the search field and the message list, the
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
-//! in the folder pane and in the empty list; the add-account page then takes the place of the list and the reader.
+//! in the empty list; the add-account page then takes the place of the list and the reader.
 //! The navigation rail runs down the window's left edge in the preset's gradient: its settings button (or its key)
 //! opens the appearance settings page in the same place; Escape, its close button or the rail's Mail button leave it,
 //! and the add-account page closes it.
@@ -472,6 +472,7 @@ impl InboxApp {
             });
         }
         let mut asked = pane::Asked::default();
+        let mut add = false;
         let mut searched = None;
         let mut clicked = None;
         let mut acted = None;
@@ -500,7 +501,7 @@ impl InboxApp {
         rail.search = clicked_rail.search;
         if adding {
             let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers, false);
+            (asked, left) = self.folders(ui, &theme, &mut layers);
             let (keymap, mailbox, onboarding) = (&self.keymap, &self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
                 .frame(around(left, gap, gap))
@@ -508,7 +509,7 @@ impl InboxApp {
                 .inner;
         } else if !full {
             let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers, self.can_add);
+            (asked, left) = self.folders(ui, &theme, &mut layers);
             let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -529,7 +530,6 @@ impl InboxApp {
                     (searched, listed.clicked, listed.add, listed.acted, listed.out)
                 })
             };
-            let add;
             (searched, clicked, add, acted, out) = if self.reader.open_id().is_some() {
                 Panel::left("list")
                     .resizable(true)
@@ -541,7 +541,6 @@ impl InboxApp {
             } else {
                 CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
             };
-            asked.add |= add;
         }
         let mut drawn = reader::Drawn::default();
         // A texture lives no longer than the picture the reader keeps for it.
@@ -588,7 +587,7 @@ impl InboxApp {
             || asked.open.is_some()
             || searched.is_some()
             || clicked.is_some()
-            || asked.add
+            || add
             || page.is_some()
             || !drawn.asked.is_empty();
         if busy {
@@ -615,7 +614,7 @@ impl InboxApp {
         if clicked.is_some() {
             self.mailbox.select(clicked);
         }
-        if asked.add {
+        if add {
             self.settings.close();
             self.onboarding.open();
         }
@@ -668,7 +667,7 @@ impl InboxApp {
 
     /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
     /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
-    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers, can_add: bool) -> (pane::Asked, f32) {
+    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> (pane::Asked, f32) {
         let s = theme.spacing;
         if self.mailbox.accounts().is_empty() {
             return (pane::Asked::default(), s.gap);
@@ -678,7 +677,7 @@ impl InboxApp {
             .default_size(s.folder_pane)
             .show_separator_line(false)
             .frame(around(s.gap, s.gap / 2.0, s.gap))
-            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox, can_add)));
+            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.mailbox)));
         (shown.inner, s.gap / 2.0)
     }
 
