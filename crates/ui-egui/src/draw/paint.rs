@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The small pieces the panes are drawn from: one line of text cut to a width, a navigation row, a badge, a flag.
+//! The small pieces the panes are drawn from: one line of text cut to a width, the selection, a navigation row, a
+//! badge, a flag.
 
 use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{Color32, FontFamily, FontId, Galley, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
+use crate::gradient::{self, Gradient, Stop};
 use crate::theme::Theme;
 
 /// One line of `sections` (text and colour) at `size`, cut with an ellipsis at `width`.
@@ -21,6 +23,14 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Color32)], size: f32, width: f32)
         job.append(text, 0.0, TextFormat::simple(FontId::new(size, FontFamily::Proportional), *colour));
     }
     ui.painter().layout_job(job)
+}
+
+/// The selection over `rect`: the selection gradient from left to right.
+pub(super) fn selection(painter: &Painter, theme: &Theme, rect: Rect, corner: f32) {
+    let p = &theme.palette;
+    let gradient =
+        Gradient::Linear { from: pos2(0.0, 0.5), to: pos2(1.0, 0.5), stops: vec![Stop::new(0.0, p.selection), Stop::new(1.0, p.selection_end)] };
+    gradient::fill(painter, rect, corner, &gradient);
 }
 
 /// The focus ring around a control that has the keyboard focus.
@@ -74,9 +84,9 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, row.selected, &row.spoken));
     if ui.is_rect_visible(rect) {
         if row.selected {
-            ui.painter().rect_filled(rect, s.corner, p.selection);
+            selection(ui.painter(), theme, rect, s.corner);
         } else if response.hovered() {
-            ui.painter().rect_filled(rect, s.corner, p.background);
+            ui.painter().rect_filled(rect, s.corner, p.hover);
         }
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
         let left = rect.left() + s.s + f32::from(depth) * s.m;

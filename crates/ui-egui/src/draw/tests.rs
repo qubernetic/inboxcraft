@@ -16,7 +16,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use crate::mailbox::{Mailbox, Place};
 use crate::sample;
-use crate::theme::{Mode, ModePreference, Preset, Theme};
+use crate::theme::{Mode, ModePreference, PRESETS, Preset, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -237,4 +237,151 @@ fn the_app_shows_its_debug_form_without_message_text() {
     let shown = format!("{app:?}");
     assert!(shown.starts_with("InboxApp { mailbox: Mailbox {"), "{shown}");
     assert!(!shown.contains("Allotment"), "{shown}");
+}
+
+fn preset_app(preset: Preset) -> InboxApp {
+    let mut app = sample_app();
+    app.set_preset(preset);
+    app
+}
+
+#[test]
+fn nothing_repaints_while_nothing_moves() {
+    for preset in PRESETS {
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let mut harness = harness_with(preset_app(preset), theme);
+            // Settled: one more run is a single frame that asks for no other.
+            assert_eq!(harness.run(), 1, "{} {theme:?}: idle frames", preset.id);
+            let kept = crate::gradient::kept(&harness.ctx);
+            let mut asked = 0;
+            for _ in 0..10 {
+                harness.step();
+                asked += usize::from(harness.ctx.has_requested_repaint());
+            }
+            assert_eq!(asked, 0, "{} {theme:?}: repaints asked for while idle", preset.id);
+            assert_eq!(crate::gradient::kept(&harness.ctx), kept, "no picture rasterised again");
+            // The same with a message open in the reader.
+            harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+            harness.run();
+            assert_eq!(harness.run(), 1, "{} {theme:?}: idle with the reader", preset.id);
+        }
+    }
+}
+
+/// The bytes of every texture the window holds.
+fn texture_bytes(harness: &Harness<'static, InboxApp>) -> usize {
+    harness.ctx.tex_manager().read().allocated().map(|(_, meta)| meta.bytes_used()).sum()
+}
+
+#[test]
+fn resizing_the_window_rasterises_little_and_gives_the_memory_back() {
+    for scale in [1.0, 2.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(scale)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.run();
+        harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+        harness.run();
+        let idle = texture_bytes(&harness);
+        let mut most = 0;
+        for step in 0..20 {
+            let before = crate::gradient::rasterised(&harness.ctx);
+            harness.set_size(vec2(1100.0 + 3.0 * step as f32, 720.0 + 2.0 * step as f32));
+            harness.step();
+            most = most.max(crate::gradient::rasterised(&harness.ctx) - before);
+        }
+        assert!(most <= 2, "at scale {scale}: {most} pictures rasterised in one frame of the resize");
+        harness.set_size(vec2(1100.0, 720.0));
+        harness.run();
+        let after = texture_bytes(&harness);
+        assert!(after <= idle + idle / 4, "at scale {scale}: {after} bytes kept after the resize, {idle} before");
+    }
+}
+
+/// Whether `shape` lets what is under it show through.
+fn translucent(shape: &egui::Shape) -> bool {
+    let see_through = |colour: egui::Color32| colour.a() < 255 && colour != egui::Color32::TRANSPARENT;
+    match shape {
+        egui::Shape::Rect(rect) => rect.brush.is_some() || see_through(rect.fill) || (rect.stroke.width > 0.0 && see_through(rect.stroke.color)),
+        egui::Shape::Path(path) => {
+            see_through(path.fill)
+                || (path.stroke.width > 0.0
+                    && match &path.stroke.color {
+                        egui::epaint::ColorMode::Solid(colour) => see_through(*colour),
+                        egui::epaint::ColorMode::UV(_) => true,
+                    })
+        }
+        egui::Shape::Circle(circle) => see_through(circle.fill),
+        egui::Shape::LineSegment { stroke, .. } => see_through(stroke.color),
+        egui::Shape::Mesh(mesh) => mesh.vertices.iter().any(|vertex| see_through(vertex.color)),
+        _ => false,
+    }
+}
+
+/// Every shape of `shapes`, groups opened, with its clip, in paint order.
+fn flat(shapes: &[egui::epaint::ClippedShape]) -> Vec<(egui::Rect, egui::Shape)> {
+    fn open(clip: egui::Rect, shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Shape)>) {
+        if let egui::Shape::Vec(inner) = shape {
+            inner.iter().for_each(|shape| open(clip, shape, out));
+        } else {
+            out.push((clip, shape.clone()));
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|clipped| open(clipped.clip_rect, &clipped.shape, &mut out));
+    out
+}
+
+/// The translucent shapes laid over text drawn before them.
+fn translucency_over_text(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    let mut texts: Vec<egui::Rect> = Vec::new();
+    let mut found = Vec::new();
+    for (clip, shape) in flat(&harness.output().shapes) {
+        let rect = shape.visual_bounding_rect().intersect(clip);
+        if !rect.is_positive() {
+            continue;
+        }
+        if let egui::Shape::Text(_) = shape {
+            texts.push(rect);
+        } else if translucent(&shape) && texts.iter().any(|text| text.intersect(rect).is_positive()) {
+            found.push(format!("{rect:?}: {shape:?}").chars().take(200).collect());
+        }
+    }
+    found
+}
+
+#[test]
+fn translucency_is_never_laid_over_text() {
+    for preset in PRESETS {
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let mut harness = harness_with(preset_app(preset), theme);
+            let name = format!("{} {theme:?}", preset.id);
+            assert_eq!(translucency_over_text(&harness), Vec::<String>::new(), "{name}: the list");
+            harness.hover_at(harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread").rect().center());
+            harness.run();
+            assert_eq!(translucency_over_text(&harness), Vec::<String>::new(), "{name}: a hovered row");
+            harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+            harness.run();
+            assert_eq!(translucency_over_text(&harness), Vec::<String>::new(), "{name}: the reader");
+            harness.state_mut().mailbox_mut().select(None);
+            harness.state_mut().search("zeppelin");
+            harness.run();
+            assert_eq!(translucency_over_text(&harness), Vec::<String>::new(), "{name}: an empty search");
+        }
+    }
+}
+
+#[test]
+fn the_window_is_glass_over_colour_fields() {
+    let mut harness = harness_with(sample_app(), egui::Theme::Dark);
+    harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+    harness.run();
+    let shapes = flat(&harness.output().shapes);
+    let fields = shapes.iter().position(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.brush.is_some()));
+    let text = shapes.iter().position(|(_, shape)| matches!(shape, egui::Shape::Text(_)));
+    assert!(fields.is_some() && fields < text, "the colour fields come before any text: {fields:?} {text:?}");
+    let glass = Theme::new(Mode::Dark, &Preset::default()).palette.glass;
+    let layers = shapes.iter().filter(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == glass)).count();
+    assert_eq!(layers, 3, "the folder pane, the list and the reader are glass");
 }

@@ -128,8 +128,10 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
-        let fill = if response.hovered() { p.background } else { p.panel };
-        ui.painter().rect_filled(rect, theme.spacing.corner, fill);
+        if response.hovered() {
+            ui.painter().rect_filled(rect, theme.spacing.corner, p.hover);
+        }
+        ui.painter().rect_stroke(rect, theme.spacing.corner, Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
         let left = rect.left() + theme.spacing.m;
         let date_galley = super::paint::line(ui, &[(&date, p.muted)], theme.type_scale.small, f32::INFINITY);
         let date_left = rect.right() - theme.spacing.m - date_galley.size().x;
@@ -495,7 +497,8 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
 /// One unfolded message.
 fn message(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened: &Opened, textures: &mut Textures, drawn: &mut Drawn) {
     let p = &theme.palette;
-    Frame::new().fill(p.surface).inner_margin(margin(theme.spacing.l)).show(ui, |ui| {
+    let line = Stroke::new(1.0, p.line);
+    Frame::new().stroke(line).corner_radius(theme.spacing.corner).inner_margin(margin(theme.spacing.l)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         header(ui, theme, mailbox, reader, opened, drawn);
         ui.add_space(theme.spacing.m);
@@ -523,7 +526,7 @@ fn message(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opene
 pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, textures: &mut Textures, hover: Option<&str>) -> Drawn {
     let mut drawn = Drawn::default();
     let p = &theme.palette;
-    egui::Panel::bottom("reader-status").frame(Frame::new().fill(p.panel).inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
+    egui::Panel::bottom("reader-status").frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
         ui.horizontal(|ui| match (hover, reader.notice()) {
             (Some(status), _) => {
                 let colour = if status.starts_with(tr!("Careful")) { p.error } else { p.muted };
@@ -540,7 +543,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reade
             }
         });
     });
-    egui::Panel::top("reader-toolbar").frame(Frame::new().fill(p.surface).inner_margin(margin(theme.spacing.l))).show(ui, |ui| {
+    egui::Panel::top("reader-toolbar").frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(ui, |ui| {
         toolbar(ui, theme, mailbox, reader, &mut drawn);
     });
     ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {

@@ -23,6 +23,8 @@ use std::sync::Arc;
 use egui::{CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel, RichText, Ui};
 
 use crate::fetch::{Fetch, Offline};
+use crate::glass::{self, Layers};
+use crate::gradient;
 use crate::mailbox::Mailbox;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
@@ -69,6 +71,14 @@ impl std::fmt::Debug for InboxApp {
 fn margin(points: f32) -> Margin {
     // Distances are a few points; the clamp keeps the cast inside i8.
     Margin::same(points.clamp(0.0, 100.0) as i8)
+}
+
+/// A pane's frame: no fill, so the colour fields show `left` and `right` of its glass layer and `gap` above and
+/// below it.
+fn around(left: f32, right: f32, gap: f32) -> Frame {
+    // Distances are a few points; the clamp keeps the casts inside i8.
+    let side = |points: f32| points.clamp(0.0, 100.0) as i8;
+    Frame::new().inner_margin(Margin { left: side(left), right: side(right), top: side(gap), bottom: side(gap) })
 }
 
 impl InboxApp {
@@ -264,40 +274,53 @@ impl InboxApp {
         let mut page = None;
         let adding = self.onboarding.stage() != Stage::Closed;
         let full = self.reader.full_width() && !adding;
+        // The colour fields first, then the place for the glass layers, then everything else.
+        glass::backdrop(ui.painter(), &theme, ui.max_rect());
+        let mut layers = Layers::begin(ui.painter());
+        let (gap, half) = (s.gap, s.gap / 2.0);
         if adding {
             asked = Panel::left("folders")
                 .resizable(true)
                 .default_size(s.folder_pane)
-                .frame(Frame::new().fill(p.panel).inner_margin(margin(s.m)))
-                .show(ui, |ui| pane::show(ui, &theme, &self.mailbox, false))
+                .show_separator_line(false)
+                .frame(around(gap, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.mailbox, false)))
                 .inner;
             let (mailbox, onboarding) = (&self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
-                .frame(Frame::new().fill(p.surface).inner_margin(margin(s.xl)))
-                .show(ui, |ui| onboard::show(ui, &theme, mailbox, onboarding))
+                .frame(around(half, gap, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, mailbox, onboarding)))
                 .inner;
         } else if !full {
             asked = Panel::left("folders")
                 .resizable(true)
                 .default_size(s.folder_pane)
-                .frame(Frame::new().fill(p.panel).inner_margin(margin(s.m)))
-                .show(ui, |ui| pane::show(ui, &theme, &self.mailbox, self.can_add))
+                .show_separator_line(false)
+                .frame(around(gap, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.mailbox, self.can_add)))
                 .inner;
             let (mailbox, search, can_add) = (&self.mailbox, &mut self.search, self.can_add);
-            let list = |ui: &mut Ui| {
-                let searched = Panel::top("list-header")
-                    .frame(Frame::new().fill(p.surface).inner_margin(margin(s.l)))
-                    .show(ui, |ui| list::header(ui, &theme, mailbox, search))
-                    .inner;
-                let (clicked, add) =
-                    CentralPanel::no_frame().frame(Frame::new().fill(p.surface)).show(ui, |ui| list::rows(ui, &theme, mailbox, can_add)).inner;
-                (searched, clicked, add)
+            let mut list = |ui: &mut Ui, layers: &mut Layers| {
+                layers.card(ui, Margin::ZERO, |ui| {
+                    let searched = Panel::top("list-header")
+                        .frame(Frame::new().inner_margin(margin(s.l)))
+                        .show(ui, |ui| list::header(ui, &theme, mailbox, search))
+                        .inner;
+                    let (clicked, add) = CentralPanel::no_frame().show(ui, |ui| list::rows(ui, &theme, mailbox, can_add)).inner;
+                    (searched, clicked, add)
+                })
             };
             let add;
             (searched, clicked, add) = if self.reader.open_id().is_some() {
-                Panel::left("list").resizable(true).default_size(LIST_WIDTH).frame(Frame::new().fill(p.surface)).show(ui, list).inner
+                Panel::left("list")
+                    .resizable(true)
+                    .default_size(LIST_WIDTH)
+                    .show_separator_line(false)
+                    .frame(around(half, half, gap))
+                    .show(ui, |ui| list(ui, &mut layers))
+                    .inner
             } else {
-                CentralPanel::no_frame().show(ui, list).inner
+                CentralPanel::no_frame().frame(around(half, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
             };
             asked.add |= add;
         }
@@ -306,15 +329,21 @@ impl InboxApp {
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if self.reader.open_id().is_some() && !adding {
             let hover = self.hover.take();
+            let left = if full { gap } else { half };
             drawn = CentralPanel::no_frame()
-                .frame(Frame::new().fill(p.background))
-                .show(ui, |ui| reader::show(ui, &theme, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref()))
+                .frame(around(left, gap, gap))
+                .show(ui, |ui| {
+                    layers.card(ui, Margin::ZERO, |ui| reader::show(ui, &theme, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref()))
+                })
                 .inner;
             if drawn.hover != hover {
                 ui.ctx().request_repaint();
             }
             self.hover = drawn.hover.take();
         }
+        layers.finish(ui.painter(), &theme);
+        // Every gradient of the frame is painted by now: the pictures it left out go.
+        gradient::sweep(ui.ctx());
         let acted = dismiss
             || stepped
             || left_full

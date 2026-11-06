@@ -340,6 +340,17 @@ All notable changes to InboxCraft are listed here. The format follows
   palette is gone. The list, the reader and the add-account page use the tokens; `theme.rs` is the only file that
   names a colour (a test refuses any other). `InboxApp::set_mode` and `set_preset` change the look from the next
   frame (the commands and the settings page come later); `ui_shot` takes a `preset`
+- Glass without blur (#82): soft colour fields of the preset's stops are painted once behind the window, and the
+  folder pane, the list and the reader (or the add-account page) are translucent glass layers over them with a
+  light top edge and a soft shadow, a gap apart; translucency is never laid over text (a UI test checks every shape
+  of the window). Floats are about 80 % opaque over content that fades before them and more opaque over sharp text
+  (menus, tooltips and popups), so text under them shows at no more than 1.2:1; text tokens are now also readable on
+  glass over the fields and on a float over the fields and the gradient. One gradient helper
+  (`ui-egui::gradient`) paints every gradient on shapes, lines and text, dithered against banding; a test refuses a
+  gradient painted anywhere else, and egui's own scroll-edge fade is off. The selected row and folder show the
+  selection gradient. Nothing asks for a repaint while nothing moves. Layer shadows are nine-slices whose picture
+  does not depend on the layer's size, and every frame gives back the pictures it did not paint, so resizing the
+  window neither rasterises the shadows again nor keeps their textures; a float over sharp text casts no shadow.
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)

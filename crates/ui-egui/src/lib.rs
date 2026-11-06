@@ -6,6 +6,8 @@
 //! Layer 6: the only layer that may depend on UI crates (see `docs/architecture.md`).
 //!
 //! - [`theme`]: InboxCraft's own colours, spacing and type sizes for light and dark (`docs/design.md`).
+//! - [`gradient`]: the one place that paints a gradient, on shapes, lines and text, dithered against banding.
+//! - [`glass`]: glass without blur: the colour fields behind the window, the panes' glass layers and the floats.
 //! - [`i18n`] and [`tr!`]: every text the person reads goes through them.
 //! - [`sample`]: the invented sample mailbox behind `--sample`, on `example.org`.
 //! - [`mailbox`]: what the mail list shows, read from the engine's commands: the accounts, the unified views, the
@@ -26,6 +28,8 @@
 mod draw;
 mod error;
 pub mod fetch;
+pub mod glass;
+pub mod gradient;
 pub mod i18n;
 pub mod icons;
 pub mod mailbox;

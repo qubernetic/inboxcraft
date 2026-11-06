@@ -161,8 +161,12 @@ pub struct Palette {
     pub glass_highlight: Color32,
     /// The soft shadow under glass and floats.
     pub shadow: Color32,
-    /// What floats over content (tooltips, menus, hover actions, toasts): about 80 % opaque.
+    /// What floats over content that fades before it (hover actions over a row, toasts): about 80 % opaque, so a
+    /// little of the colour behind glows through.
     pub float: Color32,
+    /// What floats over sharp text that cannot fade (menus and tooltips over the reader): the same colour, opaque
+    /// enough that the text under it shows at no more than [`GHOST`].
+    pub float_over_text: Color32,
     /// Separators between rows.
     pub line: Color32,
     /// Laid over a hovered row.
@@ -192,6 +196,12 @@ pub struct Spacing {
     pub folder_pane: f32,
     /// The corner radius of fields, badges and selections.
     pub corner: f32,
+    /// The corner radius of glass layers and floats.
+    pub card: f32,
+    /// How far the soft shadow of a glass layer or a float reaches.
+    pub shadow: f32,
+    /// The colour fields that show between two glass layers.
+    pub gap: f32,
 }
 
 /// Type sizes in points.
@@ -308,10 +318,14 @@ const DARK: Neutrals = Neutrals {
     tint: 0.05,
     selection: [0.32, 0.20],
     badge: 0.30,
-    fields: 0.42,
+    fields: 0.34,
 };
 
-const SPACING: Spacing = Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, row_height: 52.0, folder_pane: 240.0, corner: 6.0 };
+const SPACING: Spacing =
+    Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, row_height: 52.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
+
+/// The most contrast text under a float over sharp text may keep: barely there.
+pub const GHOST: f32 = 1.2;
 
 const TYPE_SCALE: TypeScale = TypeScale { small: 12.0, body: 14.0, heading: 15.0, title: 20.0 };
 
@@ -329,7 +343,29 @@ impl Palette {
         let field = mix(n.field, middle, n.tint * 0.3);
         let selection = mix(surface, first, n.selection[0]);
         let selection_end = mix(surface, last, n.selection[1]);
-        let surfaces = [background, panel, surface, field, selection, selection_end];
+        let (sheer, shade) = match mode {
+            Mode::Light => (mix(WHITE, middle, 0.02), mix(n.text, middle, 0.3)),
+            Mode::Dark => (mix(WHITE, middle, 0.1), BLACK),
+        };
+        let glass = match mode {
+            Mode::Light => alpha(sheer, 0.72),
+            Mode::Dark => alpha(sheer, 0.055),
+        };
+        let hover = match mode {
+            Mode::Light => alpha(shade, 0.045),
+            Mode::Dark => alpha(sheer, 0.06),
+        };
+        let float_base = mix(n.float, middle, n.tint * 1.5);
+        let float = alpha(float_base, 0.8);
+        let colour_fields = preset.gradient.map(|stop| alpha(stop, n.fields));
+        // What text can sit on: the opaque surfaces, glass (hovered or not) over the colour fields, and a float over
+        // the fields, the full gradient or itself.
+        let mut backdrops = vec![background];
+        backdrops.extend(colour_fields.map(|colour| over(colour, background)));
+        let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
+        let mut surfaces = vec![background, panel, surface, field, selection, selection_end, float_base];
+        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind)]));
+        surfaces.extend(backdrops.iter().chain(preset.gradient.iter()).map(|behind| over(float, *behind)));
         let text = readable(mix(n.text, middle, 0.06), &surfaces, 4.5, mode);
         let muted = readable(mix(n.muted, middle, 0.08), &surfaces, 4.5, mode);
         let accent = match mode {
@@ -342,10 +378,9 @@ impl Palette {
         let error = readable(n.error, &surfaces, 4.5, mode);
         let accounts = [first, middle, last, preset.accent, mix(first, middle, 0.5), mix(middle, last, 0.5)]
             .map(|colour| readable(colour, &[background, panel, surface], 3.0, mode));
-        let (sheer, shade) = match mode {
-            Mode::Light => (mix(WHITE, middle, 0.02), mix(n.text, middle, 0.3)),
-            Mode::Dark => (mix(WHITE, middle, 0.1), BLACK),
-        };
+        let mut sharp = vec![background, panel, surface];
+        sharp.extend(glassy);
+        let float_over_text = quieting(float_base, 0.8, &[text, muted, accent], &sharp);
         Self {
             background,
             panel,
@@ -367,10 +402,7 @@ impl Palette {
             on_error: ink_on(error),
             gradient: preset.gradient,
             ink: DEEP_INK,
-            glass: match mode {
-                Mode::Light => alpha(sheer, 0.72),
-                Mode::Dark => alpha(sheer, 0.055),
-            },
+            glass,
             glass_edge: match mode {
                 Mode::Light => alpha(shade, 0.08),
                 Mode::Dark => alpha(sheer, 0.09),
@@ -383,16 +415,14 @@ impl Palette {
                 Mode::Light => alpha(shade, 0.10),
                 Mode::Dark => alpha(shade, 0.35),
             },
-            float: alpha(mix(n.float, middle, n.tint * 1.5), 0.8),
+            float,
+            float_over_text,
             line: match mode {
                 Mode::Light => alpha(shade, 0.07),
                 Mode::Dark => alpha(sheer, 0.06),
             },
-            hover: match mode {
-                Mode::Light => alpha(shade, 0.045),
-                Mode::Dark => alpha(sheer, 0.06),
-            },
-            colour_fields: preset.gradient.map(|stop| alpha(stop, n.fields)),
+            hover,
+            colour_fields,
             accounts,
         }
     }
@@ -450,7 +480,8 @@ impl Theme {
         visuals.override_text_color = Some(p.text);
         visuals.weak_text_color = Some(p.muted);
         visuals.panel_fill = p.panel;
-        visuals.window_fill = p.surface;
+        // Menus, tooltips and popups float over whatever is there, the reader's sharp text too.
+        visuals.window_fill = p.float_over_text;
         visuals.window_stroke = Stroke::new(1.0, p.field_border);
         visuals.window_corner_radius = corner;
         visuals.menu_corner_radius = corner;
@@ -493,6 +524,8 @@ impl Theme {
         style.spacing.item_spacing = vec2(s.s, s.xs);
         style.spacing.button_padding = vec2(s.s, s.xs);
         style.spacing.window_margin = egui::Margin::same(12);
+        // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
+        style.spacing.scroll.fade.strength = 0.0;
         style.text_styles = [
             (TextStyle::Small, FontId::new(t.small, FontFamily::Proportional)),
             (TextStyle::Body, FontId::new(t.body, FontFamily::Proportional)),
@@ -512,6 +545,25 @@ pub fn mix(a: Color32, b: Color32, amount: f32) -> Color32 {
     // Between two values of 0..=255, so the cast loses nothing.
     let channel = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgb(channel(a.r(), b.r()), channel(a.g(), b.g()), channel(a.b(), b.b()))
+}
+
+/// `top` laid over the opaque `under`.
+#[must_use]
+pub fn over(top: Color32, under: Color32) -> Color32 {
+    // Premultiplied: the top's channels plus what its alpha leaves of the colour under it; at most 255 each.
+    let keep = 255 - u16::from(top.a());
+    let channel = |t: u8, u: u8| u8::try_from((u16::from(t) + (u16::from(u) * keep + 127) / 255).min(255)).unwrap_or(u8::MAX);
+    Color32::from_rgb(channel(top.r(), under.r()), channel(top.g(), under.g()), channel(top.b(), under.b()))
+}
+
+/// `colour` at the least opacity from `from` up that keeps every ink in `inks`, sitting on any of `on`, at no more
+/// than [`GHOST`] under it; opaque when nothing less does.
+fn quieting(colour: Color32, from: f32, inks: &[Color32], on: &[Color32]) -> Color32 {
+    const STEPS: u8 = 40;
+    (0..=STEPS)
+        .map(|step| alpha(colour, from + (1.0 - from) * f32::from(step) / f32::from(STEPS)))
+        .find(|float| on.iter().all(|behind| inks.iter().all(|ink| contrast(over(*float, *ink), over(*float, *behind)) <= GHOST)))
+        .unwrap_or(colour)
 }
 
 /// `colour`, moved towards black in light mode or white in dark mode just far enough to reach `ratio` against

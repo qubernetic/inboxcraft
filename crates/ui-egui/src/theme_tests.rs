@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use egui::Color32;
 
-use super::{Mode, ModePreference, PRESETS, Preset, Theme, contrast, ink_on, mix, readable};
+use super::{GHOST, Mode, ModePreference, PRESETS, Palette, Preset, Theme, contrast, ink_on, mix, over, readable};
 
 /// Every preset in both modes.
 fn all() -> Vec<Theme> {
@@ -151,7 +151,12 @@ fn light_mode_accent_text_is_darkened_and_dark_mode_shows_the_accent_itself_wher
         let channels = |c: Color32| u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b());
         assert!(channels(light.accent) < channels(middle), "{}: darker than the middle stop", preset.id);
         let dark = Theme::new(Mode::Dark, preset).palette;
-        if [dark.background, dark.panel, dark.surface, dark.selection].iter().all(|on| contrast(preset.accent, *on) >= 4.5) {
+        // Where the raw accent reads on every opaque surface, on glass over the colour fields and on a float over them
+        // and the gradient, dark mode shows it unchanged.
+        let mut on = vec![dark.background, dark.panel, dark.surface, dark.field, dark.selection, dark.selection_end];
+        on.extend(backdrops(&dark).into_iter().flat_map(|behind| [over(dark.glass, behind), over(dark.hover, over(dark.glass, behind))]));
+        on.extend(backdrops(&dark).into_iter().chain(dark.gradient).map(|behind| over(dark.float, behind)));
+        if on.iter().all(|on| contrast(preset.accent, *on) >= 4.5) {
             assert_eq!(dark.accent, preset.accent, "{}: the accent itself in dark", preset.id);
         } else {
             assert!(channels(dark.accent) > channels(preset.accent), "{}: lightened in dark", preset.id);
@@ -378,4 +383,91 @@ fn no_colour_constant_outside_the_token_code() {
         }
     }
     assert!(found.is_empty(), "colours belong in theme.rs:\n{}", found.join("\n"));
+}
+
+#[test]
+fn over_lays_a_translucent_colour_on_an_opaque_one() {
+    let half = Color32::from_rgba_unmultiplied(200, 100, 0, 128);
+    let under = Color32::from_rgb(0, 0, 200);
+    let laid = over(half, under);
+    assert_eq!(laid.a(), 255);
+    assert!((i32::from(laid.r()) - 100).abs() <= 1 && (i32::from(laid.g()) - 50).abs() <= 1 && (i32::from(laid.b()) - 100).abs() <= 1, "{laid:?}");
+    assert_eq!(over(Color32::TRANSPARENT, under), under);
+    assert_eq!(over(Color32::from_rgb(1, 2, 3), under), Color32::from_rgb(1, 2, 3));
+}
+
+/// What the window shows behind a layer: the base, and each colour field at its centre.
+fn backdrops(p: &Palette) -> Vec<Color32> {
+    let mut found = vec![p.background];
+    found.extend(p.colour_fields.map(|field| over(field, p.background)));
+    found
+}
+
+#[test]
+fn text_reads_on_glass_over_the_colour_fields_for_every_preset_in_both_modes() {
+    for theme in all() {
+        let p = theme.palette;
+        for behind in backdrops(&p) {
+            for glass in [over(p.glass, behind), over(p.hover, over(p.glass, behind))] {
+                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
+                    let ratio = contrast(ink, glass);
+                    assert!(ratio >= 4.5, "{} {:?} {name} on glass over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn text_reads_on_a_float_over_anything_for_every_preset_in_both_modes() {
+    for theme in all() {
+        let p = theme.palette;
+        let mut behind = backdrops(&p);
+        behind.extend(p.gradient);
+        behind.extend([p.panel, p.surface]);
+        // The plain float sits only where the content under it fades; the other one over sharp text too.
+        let mut sharp = behind.clone();
+        sharp.extend([p.text, p.muted, p.accent]);
+        let floats = behind.into_iter().map(|under| (p.float, under)).chain(sharp.into_iter().map(|under| (p.float_over_text, under)));
+        for (float, under) in floats {
+            {
+                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
+                    let ratio = contrast(ink, over(float, under));
+                    assert!(ratio >= 4.5, "{} {:?} {name} on a float over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(under));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_float_over_sharp_text_goes_more_opaque_until_the_text_under_it_is_quiet() {
+    for theme in all() {
+        let p = theme.palette;
+        assert!(p.float_over_text.a() > p.float.a(), "{} {:?}: more opaque than {}", theme.preset.id, theme.mode, p.float.a());
+        let mut surfaces = vec![p.background, p.panel, p.surface];
+        surfaces.extend(backdrops(&p).into_iter().map(|behind| over(p.glass, behind)));
+        for surface in surfaces {
+            for ink in [p.text, p.muted, p.accent] {
+                let ghost = contrast(over(p.float_over_text, ink), over(p.float_over_text, surface));
+                assert!(ghost <= GHOST, "{} {:?}: text under the float shows at {ghost:.2}", theme.preset.id, theme.mode);
+                let plain = contrast(over(p.float, ink), over(p.float, surface));
+                assert!(plain >= ghost, "the plain float hides less");
+            }
+        }
+    }
+}
+
+#[test]
+fn menus_and_tooltips_float_over_sharp_text_and_nothing_casts_an_egui_shadow() {
+    for theme in all() {
+        let visuals = theme.visuals();
+        assert_eq!(visuals.window_fill, theme.palette.float_over_text);
+        assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(theme.style().spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
+        let s = theme.spacing;
+        assert!(s.card > s.corner, "glass layers are rounder than fields");
+        assert!(s.shadow > 0.0 && s.gap > 0.0);
+    }
 }
