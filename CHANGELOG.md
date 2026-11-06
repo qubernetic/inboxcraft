@@ -373,6 +373,10 @@ All notable changes to InboxCraft are listed here. The format follows
   account picker with a chevron, Add account as a link, a MAILBOXES heading, an icon per folder, and each account
   lists only its own folders; the app icon is the InboxCraft mark (two cards entering a notched tray, Electric
   gradient, white tile)
+- Accounts are added on the settings sheet (#104): its Accounts section lists every account with its colour,
+  avatar, name and address under "Your accounts", with Add account at the top; the form, Detect and the check run on
+  the same page, with a link back to the list. The window with no account is one card in the middle whose Add
+  account opens that page. The folder pane no longer shows Add account. `ui_shot` takes `accounts` and `first`
 - The screens follow the design file (#104): the settings are a sheet over the dimmed window, with the sections on
   the left (those not built yet faded) and each setting a row beside its control: segmented choices, accent and
   window-frame cards, a text-size slider, a switch and a two-row preview; the custom accent's fields show only

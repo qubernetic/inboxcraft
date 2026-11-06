@@ -27,7 +27,7 @@ icons show as empty boxes.
 | Screens · Triage | screener review, moving a sender to another group, the time picker (snooze), snoozed, pins and parked, follow-up reminder | [screens-triage.png](screens-triage.png) |
 | Screens · Writing | the composer in place of the reader (the default) and in a window of its own, an impossible address, send later, undo send and the outbox, a bounce, a template with a blank | [screens-writing.png](screens-writing.png) |
 | Screens · Calendar | week, month, agenda, day with the event editor, an invitation in a message | [screens-calendar.png](screens-calendar.png) |
-| Screens · Setup and settings | add account, the account check under way, failed and passed, settings for appearance, accounts, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
+| Screens · Setup and settings | first start, the settings sheet on Accounts (none yet, adding, the check under way, failed and passed, the list), appearance, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
 | Mood | the main window in Electric, Aurora and Citrus, light and dark | [mood.png](mood.png) |
 | Scenarios | five flows as numbered storyboards, in light and in dark side by side: first start, a morning of triage, write and send, an invitation, make it yours | [scenarios.png](scenarios.png) |
 
@@ -72,3 +72,4 @@ Nothing at the moment: the text gradient, the dark accent, the outline group ico
 | 2026-11-06 | minor | Dark mode's accent: the middle stop lightened instead of the separate accent (#96) |
 | 2026-11-06 | major | The file is the source of truth for the look; its changes not yet in the code are listed (#96) |
 | 2026-11-06 | minor | The window frame page and the new app icon on the cover; every listed change is in the code (#104) |
+| 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the folder pane has no Add account (#104) |

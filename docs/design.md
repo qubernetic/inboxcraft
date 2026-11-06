@@ -203,7 +203,7 @@ The app icon is not from a set: it stays drawn in code (see "The app icon").
   middle stop at the top right, the last stop from the bottom right; the left, where the panes start, stays calm.
   The fields are one picture, rasterised once per window size (rounded up to 128 pixels, so a resize does not
   rasterise them for every pixel of the drag) and kept as a texture.
-- **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the add-account page) are each a
+- **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the card of the window with no account) are each a
   glass layer, `gap` apart and from the window's edge: the glass colour over the fields, a 1-point edge, a light top
   edge that fades in and out at its ends, and a soft shadow around it, clear under the layer itself so it does not
   darken the glass. The shadow is a nine-slice: one small picture of its corners and a 32-pixel stretch of each
@@ -285,7 +285,7 @@ window asks for the next frame; once it has landed, nothing does.
   top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
   foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
   (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
-  (Ctrl+1) leaves the settings or the add-account page; the settings button (Ctrl+Comma) opens the settings page and
+  (Ctrl+1) leaves the settings sheet; the settings button (Ctrl+Comma) opens the settings page and
   closes it again. The rail is one button and 8 points either side wide, and shows on every page.
 - **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
@@ -377,8 +377,15 @@ the icon sits among others at the same size.
   bottom with Dismiss until it is dismissed.
 
 ## Adding an account
-- **Where**: "Add account" sits under the app's name in the folder pane, and in the middle of the empty window. The
-  page takes the place of the list and the reader; the folder pane stays.
+- **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
+  note), with Add account at its right end: secondary, or primary while there is no account; then a row per account
+  with its colour's dot, its avatar, its name in SemiBold and its address, muted. Without an account a framed box
+  says the accounts show up there. The folder pane has no Add account: most people have one account.
+- **First start**: the window with no account shows no folder pane, only one glass card in the middle, at most 640
+  points wide: the Inbox icon (Duotone), "No accounts yet", a line on what to do, Add account (primary) and "Opens
+  Settings · Accounts" under it. The button opens the sheet on Accounts.
+- **Adding**: Add account opens the form on the same page under a link back ("Accounts" after the Back arrow); the
+  check runs there too. Cancel, Done or the link lead back to the list; closing the sheet closes the form.
 - **Form**: one column of labelled fields at most 560 points wide: the address with Detect beside it, the box for
   Mozilla's list of providers (off), what Detect found in small type (a redirect over plain HTTP or a guessed name in
   the flag colour, so it gets a second look) with "What Detect asked (n)" folded, then the name for the account,
@@ -389,12 +396,13 @@ the icon sits among others at the same size.
   the accent colour while waiting, Done (Fill) in the accent colour when passed, Failed (Fill) in the error colour
   when failed, Skipped (Regular) muted when skipped, held back or not built yet. Under each step the host and port it
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
-  Check again, Change settings and Close after a failure; Close while it runs.
+  Check again and Change settings after a failure; the link above the page leads back while it runs.
 
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
-  and shows as active while the page is open; Ctrl+Comma opens the page too, and the rail's Mail button leaves it. The page takes the place of the list and the reader, as adding an
-  account does, and the two close each other. Close or Escape leaves it.
+  and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance and Accounts are built, the
+  rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
   the preview goes above the controls. The page scrolls.
@@ -477,3 +485,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The file's rules in the code: text gradient, dark accent, outline group icons, inset rows; secondary buttons, `ui.frame.set` (#104) |
 | 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
 | 2026-11-06 | minor | Lucide's Fill draws no disc (#104) |
+| 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the empty window is one card (#104) |

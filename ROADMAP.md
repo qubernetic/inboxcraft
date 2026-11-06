@@ -78,6 +78,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | The design file in FigCraft: foundations, components, every screen in light and dark, mood, five flows (#96) |
 | 2026-11-06 | UI polish toward the design file, waves 1 and 2: primary and secondary buttons on the text gradient, the search pill, the dark accent from the middle stop, inset rows and outline group icons; the rail with the app mark and its views, the folder pane on the design, the app's own window frame (`ui.frame.set`) and the brand mark as the app icon (#104) |
 | 2026-11-06 | UI polish wave 3: the settings as a sheet with sections and setting rows, the add-account form and the check on the design, the reader's large subject with its group chip, the list's Show all link, stripes and hover actions; the own window frame fixed on Wayland (resizing, moving, hover after a move) with round corners (#104) |
+| 2026-11-06 | Accounts move to the settings sheet: the Accounts page lists them and adds one (form, Detect, the check), the empty window is one card, the folder pane drops Add account (#104) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -124,3 +125,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: the design file (#96) |
 | 2026-11-06 | minor | Progress log: UI polish waves 1 and 2 (#104) |
 | 2026-11-06 | minor | Progress log: UI polish wave 3 (#104) |
+| 2026-11-06 | minor | Progress log: accounts on the settings sheet (#104) |

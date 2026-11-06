@@ -364,7 +364,7 @@ B = blocks the next stage.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; of the sheet's sections only Appearance is built, the others are faded and say so (#104). The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  runs them exist; of the sheet's sections only Appearance and Accounts are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
@@ -537,5 +537,6 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Reader: which toolbar actions act, what waits for which task, the inner buttons, no picture of More (#90) |
 | 2026-11-06 | minor | The app's own window frame, the rail's views not built yet, the folder pane's own folders (#104) |
 | 2026-11-06 | minor | The own frame: round corners, resizing on Wayland, moving in the top row (#104) |
+| 2026-11-06 | minor | The settings' Accounts page and what it lacks (#104) |
 | 2026-11-06 | minor | The settings sheet: only Appearance among its sections (#104) |
 | 2026-11-06 | minor | Lucide's Fill without a disc (#104) |
