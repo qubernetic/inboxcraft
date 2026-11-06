@@ -1,6 +1,6 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** major · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app: the design system, the screens and the main flows, made
 in [FigCraft](https://getartcraft.com/apps/figcraft). It is built from the same sources as the code:
@@ -45,9 +45,12 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
   its own mode. The PNGs are drawn on a dark base.
 - **Text on the gradient** sits on a text gradient: the preset's stops darkened in small steps until white reads at
   4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise the full
-  gradient with the deep ink (Citrus). Icons (the rail, group badges) keep the full gradient. This is a proposal:
+  gradient with the deep ink (Citrus). Icons on the rail keep the full gradient. This is a proposal:
   `docs/design.md` still says white or the deep ink, whichever has more contrast, which gives the deep ink on
   Electric.
+- **Group icons are outlines.** A group's header shows its Regular (outline) icon in the muted colour, without a
+  background; a solid icon on the gradient next to every group drew the eye away from the mail. This is a proposal
+  too: `docs/design.md` still describes the group badge as a solid icon on the gradient.
 - **Glass is faked, as in the app.** Colour fields behind the window, translucent layers with a light top edge and a
   soft shadow; no background blur, because the app has none.
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
@@ -65,3 +68,4 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 |---|---|---|
 | 2026-11-06 | major | First version: foundations, components, screens of the whole app, mood, scenarios (#96) |
 | 2026-11-06 | minor | Transparent pages; white text on a darkened text gradient where it reads at 4.5:1 (#96) |
+| 2026-11-06 | minor | Group headers show an outline icon without a background (#96) |
