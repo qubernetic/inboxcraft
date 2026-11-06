@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod assets;
+mod cache_prune;
 mod ci;
 mod cli;
 mod config;
@@ -29,6 +30,9 @@ mod test_support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ci_workflow_tests;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

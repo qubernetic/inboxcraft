@@ -15,11 +15,16 @@
 # OIDC token (the repository is private) and runs no repository code.
 #
 # The one cache, in the `test` job only: compiled third-party dependencies and the cargo registry. Every full run
-# restores it; only a push to develop, main or an epic branch saves it, so only reviewed, merged code writes it. A
-# pull_request or workflow_dispatch run never saves. Our own crates are deleted from target/ before the save, so no
-# artifact of this repository's code is cached. The key rotates weekly and changes with rust-toolchain.toml,
-# Cargo.lock, the [profile.*] sections of Cargo.toml and the job's dependency opt-level. The `codecov` and `flatpak` jobs and fuzz.yml use no cache.
-# Purge every entry with `gh cache delete --all`.
+# restores it. Only a green `push` run to develop, main or epic/* that did not create the branch prunes target/ and
+# saves it; a pull_request or workflow_dispatch run and the push that creates a branch never do. Who may push or
+# create those branches is the repository's rulesets, not this file. The prune (`cargo xtask cache-prune`) is an
+# allow list: only the deps, build and .fingerprint folders of each profile and cargo's marker files stay, minus
+# every entry named after a package or target of this workspace; it fails, and nothing is saved, when it cannot
+# read those names or when a path under target/ is still named after one. A test in xtask (ci_workflow_tests.rs)
+# checks these conditions in this file. The key rotates weekly and changes with the runner image, rust-toolchain.toml,
+# .cargo/config.toml, Cargo.lock, the [profile.*] sections of Cargo.toml and the job's dependency opt-level. The
+# `codecov` and `flatpak` jobs and fuzz.yml use no cache. Purging every entry with `gh cache delete --all` needs a
+# token with `actions: write`, the owner's; this workflow's token cannot.
 
 name: ci
 
@@ -103,17 +108,25 @@ jobs:
         run: |
           mkdir -p ~/.cargo
           printf '\n[profile.dev.package."*"]\nopt-level = %s\n' "$DEPS_OPT_LEVEL" >> ~/.cargo/config.toml
-      # The cache key: ISO week, toolchain, [profile.*] sections, the dependency opt-level, Cargo.lock. A run whose
-      # Cargo.lock has no entry yet restores the newest one of the same week, toolchain and profiles and rebuilds only
-      # what changed.
+      # The cache key: runner image, ISO week, toolchain, .cargo/config.toml, [profile.*] sections, the dependency
+      # opt-level, Cargo.lock. A run whose Cargo.lock has no entry yet restores the newest one of the same image, week,
+      # toolchain, cargo config and profiles and rebuilds only what changed.
       - name: Compute the cache key
         id: cache-key
+        shell: bash
         env:
           TOOLCHAIN: ${{ hashFiles('rust-toolchain.toml') }}
+          CARGO_CONFIG: ${{ hashFiles('.cargo/config.toml') }}
           LOCK: ${{ hashFiles('Cargo.lock') }}
         run: |
+          if [ -z "${ImageOS:-}" ] || [ -z "${ImageVersion:-}" ]; then
+            echo "ImageOS or ImageVersion is not set: not a GitHub-hosted runner image" >&2
+            exit 1
+          fi
           profiles=$(awk '/^\[/ { keep = /^\[profile\./ } keep' Cargo.toml | sha256sum | cut -d' ' -f1)
-          prefix="deps-v1-$RUNNER_OS-$(date -u +%G-W%V)-$TOOLCHAIN-$profiles-o$DEPS_OPT_LEVEL-"
+          week=$(date -u +%G-W%V)
+          prefix="deps-v1-$RUNNER_OS-$ImageOS-$ImageVersion-$week-$TOOLCHAIN-$CARGO_CONFIG-$profiles-o$DEPS_OPT_LEVEL-"
+          echo "Cache key prefix: $prefix"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
           echo "key=$prefix$LOCK" >> "$GITHUB_OUTPUT"
       # Every run restores; the save step at the end runs on pushes only. The paths match the save step's.
@@ -167,26 +180,24 @@ jobs:
             target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 7
-      # Pushes to develop, main and epic/** only (the push trigger names no other branch), and only after a green
-      # run. What stays in target/: deps, build and .fingerprint of each profile, minus every package and target
-      # name of this workspace; reports, binaries, examples and coverage data go.
+      # Only after a green run, only on a push to develop, main or epic/* that did not create the branch (the push that
+      # creates one carries no reviewed change). What stays in target/: cargo's marker files and the deps, build and
+      # .fingerprint folders of each profile, minus every entry named after a package or target of this workspace
+      # (xtask/src/cache_prune.rs). It fails, so nothing is saved, when it cannot read those names or when a path under
+      # target/ is still named after one. xtask/src/ci_workflow_tests.rs holds these conditions.
       - name: Drop our own crates from target/
-        if: github.event_name == 'push'
+        if: >-
+          github.event_name == 'push' && !github.event.created && (github.ref == 'refs/heads/develop' ||
+          github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/epic/'))
+        shell: bash
         run: |
-          # Exact names only: a target called `wasm` must not take `wasm-bindgen` with it.
-          names=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '[.packages[] | .name, .targets[].name | ., gsub("-"; "_")] | unique | join("|")')
-          ours=".*/(lib)?($names)-[0-9a-f]{16}(\..+)?"
-          rm -rf target/nextest target/tmp target/doc
-          find target -maxdepth 2 -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*-profraw-list' \) -delete
-          profiles=$(find target -type d -name .fingerprint -prune -printf '%h\n')
-          for profile in $profiles; do
-            find "$profile" -mindepth 1 -maxdepth 1 ! -name deps ! -name build ! -name .fingerprint -exec rm -rf {} +
-            find "$profile" -mindepth 2 -maxdepth 2 -regextype posix-extended -regex "$ours" -exec rm -rf {} +
-          done
+          cargo xtask cache-prune
           du -sh target ~/.cargo/registry/index ~/.cargo/registry/cache
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        if: >-
+          github.event_name == 'push' && !github.event.created && (github.ref == 'refs/heads/develop' ||
+          github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/epic/')) &&
+          steps.cache.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cargo/registry/index
