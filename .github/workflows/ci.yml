@@ -5,8 +5,10 @@
 # (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
 #
 # The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
-# It runs on every push and manual run, and on a PR only when the PR changes one of the Flatpak inputs (the `changes`
-# job; docs/development.md, "CI").
+# It runs on a push to develop or main and on every manual run, on a PR only when the PR changes one of the Flatpak
+# inputs (the `changes` job; docs/development.md, "CI"), and never on a push to an epic branch: the merged epic tree is
+# not built in the Flatpak SDK after each slice, only by the epic's PR into develop (when the epic changed an input)
+# and by the push to develop.
 #
 # Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, every action pinned by commit
 # SHA. Only the `codecov` job has `id-token: write`: it uploads the coverage and test results with the job's GitHub
@@ -40,10 +42,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Whether this run builds the Flatpak: always on a push or a manual run; on a PR only when the PR changes what the
-  # manifest builds from, apart from our own Rust sources (a Rust change that breaks only the Flatpak build shows on
-  # the next push to the base branch). For a PR, GitHub checks out a merge commit whose first parent is the base tip,
-  # so its diff against that parent is the PR's change. No third-party action.
+  # Whether this run builds the Flatpak: always on a push to develop or main and on a manual run; never on a push to
+  # an epic branch (the epic's PR into develop builds it when the epic changed an input, the push to develop always);
+  # on a PR only when the PR changes what the manifest builds from, apart from our own Rust sources (a Rust change
+  # that breaks only the Flatpak build shows on the next push to develop or main). For a PR, GitHub checks out a
+  # merge commit whose first parent is the base tip, so its diff against that parent is the PR's change. No
+  # third-party action.
   changes:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
@@ -59,12 +63,16 @@ jobs:
         id: flatpak
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
           # The manifest folder (manifest, cargo-sources.json, desktop file, metainfo), the workspace's Cargo files
           # and .cargo/, the app's Cargo.toml, the icon the manifest installs, and this workflow.
           inputs=(contrib/flatpak Cargo.toml Cargo.lock .cargo apps/inboxcraft/Cargo.toml assets/app-icon
             .github/workflows/ci.yml)
-          if [ "$EVENT" != pull_request ]; then
+          if [ "$EVENT" = push ] && [[ "$REF" == refs/heads/epic/* ]]; then
+            echo "A push to an epic branch: the epic's PR into develop builds the Flatpak" >&2
+            run=false
+          elif [ "$EVENT" != pull_request ]; then
             run=true
           elif ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
             echo "HEAD is not the PR's merge commit, so the Flatpak builds" >&2
@@ -255,7 +263,8 @@ jobs:
           retention-days: 7
 
   # The gate for the required-checks list: a skipped check reports as passing, so this job runs on every full run and
-  # fails unless every job before it succeeded. `flatpak` may be skipped only when `changes` said it was not needed.
+  # fails unless every job before it succeeded. `flatpak` may be skipped only when `changes` said it was not needed
+  # (a PR without a Flatpak input, or a push to an epic branch).
   ci:
     needs: [changes, test, codecov, flatpak]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}

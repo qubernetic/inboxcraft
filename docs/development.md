@@ -200,8 +200,8 @@ first build compiles every crate and takes a while; later ones reuse the downloa
 `flatpak uninstall --user io.github.qubernetic.inboxcraft`.
 
 ### Install the bundle from CI
-The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every push to `develop`,
-`main` or an epic branch, and on a ready PR that changes a Flatpak input (see "CI"), and keeps it as an artifact of
+The CI bundle job (#32) builds the same manifest into a single-file `.flatpak` bundle on every push to `develop`
+or `main`, on a manual run and on a ready PR that changes a Flatpak input (see "CI"), and keeps it as an artifact of
 the run. Download it from the run's page, or with `gh run download <run-id>`, then install it for your user:
 
 ```sh
@@ -280,11 +280,11 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 
 | Job | What it does | Token |
 |---|---|---|
-| `changes` | decides whether `flatpak` runs: always on a push or a manual run; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
+| `changes` | decides whether `flatpak` runs: always on a push to `develop` or `main` and on a manual run, never on a push to `epic/**`; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
 | `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
-| `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` found no Flatpak input in the PR | read |
+| `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` said so (no Flatpak input in the PR, or a push to `epic/**`) | read |
 
 - **A draft starts no job.** Every job is skipped on a draft PR, so a push to a draft bills nothing; the draft cannot
   merge anyway, as `ci` is the required check. The full run starts when the PR is marked ready (`gh pr ready`) and
@@ -294,8 +294,13 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
   apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
   metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
   `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
-  `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to the base
-  branch, not in its own PR.
+  `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to `develop` or
+  `main`, not in its own PR.
+- **No Flatpak on an epic push.** A push to `epic/**` skips `flatpak` (10 to 11 billed minutes per push, #78). What
+  that gives up: the merged epic tree is not built in the Flatpak SDK after each slice. A slice that breaks only the
+  Flatpak build is found by the epic's PR into `develop` (which builds the bundle when the epic changed a Flatpak
+  input) or by the push to `develop`. Run `gh workflow run ci.yml --ref epic/<N>-<slug>` to build an epic's bundle
+  on demand.
 - `ci` is the check to require. A skipped check reports as passing, so a required check has to be a job that runs on
   every full run.
 - `test` installs the Debian packages of the `Dockerfile` (without the ones the runner already has), the toolchain
@@ -401,3 +406,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: `flatpak` on a PR only when its inputs change; the list of inputs (#68) |
 | 2026-11-05 | minor | CI: fuzz builds every target, a PR fuzzes only new or changed targets, a push to `develop` all (#69) |
 | 2026-11-06 | minor | CI: the `test` job builds the dependencies at opt-level 0; the level is in the cache key (#70) |
+| 2026-11-06 | minor | CI: no `flatpak` on a push to an epic branch; what that gives up (#78) |
