@@ -45,6 +45,8 @@ const fn point(id: IconId) -> char {
         IconId::Failed => '\u{e084}',   // circle-x
         IconId::Waiting => '\u{e076}',  // circle
         IconId::Skipped => '\u{e07e}',  // circle-minus
+        IconId::Home => '\u{e0f5}',     // home
+        IconId::Mail => '\u{e10f}',     // mail
     }
 }
 

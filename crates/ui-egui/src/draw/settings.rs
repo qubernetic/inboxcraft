@@ -188,7 +188,13 @@ fn controls(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings
         let side = line_height(ui, theme.fonts.button) + theme.spacing.s;
         for (id, colours) in PRESETS.iter().map(|preset| (preset.id, *preset)).chain([("custom", draft)]) {
             let name = if id == "custom" { tr!("Custom") } else { preset_name(id) };
-            // The swatch and its pill wrap together.
+            // The swatch and its pill wrap together: a new row when the pair would not fit.
+            let text = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), theme.palette.text).size().x;
+            let pair = side + theme.spacing.xs + text + theme.spacing.m * 2.0 + ui.spacing().item_spacing.x;
+            let right = ui.max_rect().right().min(ui.clip_rect().right());
+            if right - ui.cursor().min.x < pair && ui.cursor().min.x > ui.max_rect().left() {
+                ui.end_row();
+            }
             let clicked = ui
                 .horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = theme.spacing.xs;

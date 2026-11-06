@@ -799,3 +799,11 @@ fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_
     assert_eq!(ink("aurora"), Some(WHITE));
     assert_ne!(ink("citrus"), Some(WHITE));
 }
+
+#[test]
+fn the_rail_avatar_s_initials_read_on_its_disc() {
+    for preset in &PRESETS {
+        let (disc, ink) = super::rail_avatar(preset.gradient);
+        assert!(contrast(ink, disc) >= 4.5, "{}", preset.id);
+    }
+}

@@ -34,6 +34,7 @@ use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb};
+use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::component::toast::{self, Toast};
@@ -43,7 +44,7 @@ use crate::gradient;
 use crate::iconset::IconSet;
 use crate::keep::{Keep, NoKeep};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Mailbox};
+use crate::mailbox::{Act, Mailbox, Place};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
@@ -405,7 +406,7 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
-        let mut rail = pane::Rail { mail: self.keymap.pressed(ui.ctx(), keymap::MAIL), settings: false };
+        let mut rail = pane::Rail { mail: self.keymap.pressed(ui.ctx(), keymap::MAIL), ..pane::Rail::default() };
         let open_settings = self.keymap.pressed(ui.ctx(), keymap::SETTINGS);
         if self.keymap.pressed(ui.ctx(), keymap::FIND) {
             self.reader.set_full_width(false);
@@ -455,16 +456,18 @@ impl InboxApp {
         glass::backdrop(ui.painter(), &theme, ui.max_rect());
         let mut layers = Layers::begin(ui.painter());
         let (gap, half) = (s.gap, s.gap / 2.0);
-        let width = pane::rail_width(ui, &theme);
+        let width = pane::rail_width(&theme);
         let clicked_rail = Panel::left("rail")
             .resizable(false)
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, setting, adding))
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding))
             .inner;
         rail.mail |= clicked_rail.mail;
         rail.settings = clicked_rail.settings;
+        rail.sent = clicked_rail.sent;
+        rail.search = clicked_rail.search;
         if adding {
             asked = Panel::left("folders")
                 .resizable(true)
@@ -567,6 +570,8 @@ impl InboxApp {
             || left_full
             || left_settings
             || rail.mail
+            || rail.sent
+            || rail.search
             || rail.settings
             || open_settings
             || changed.is_some()
@@ -610,10 +615,7 @@ impl InboxApp {
         } else if open_settings && !setting {
             self.open_settings();
         }
-        if rail.mail {
-            self.settings.close();
-            self.onboarding.close();
-        }
+        self.apply_rail(ui, &rail);
         if let Some(changed) = changed {
             self.apply_settings(changed);
         }
@@ -621,6 +623,24 @@ impl InboxApp {
             self.apply_page(page);
         }
         self.sync();
+    }
+
+    /// Applies what was asked on the rail besides the settings: Mail, Sent and Search show the mail (Mail its inbox
+    /// when Sent was open, Sent the unified Sent view), and Search puts the focus in the search field.
+    fn apply_rail(&mut self, ui: &Ui, rail: &pane::Rail) {
+        if rail.mail || rail.sent || rail.search {
+            self.settings.close();
+            self.onboarding.close();
+        }
+        if rail.mail && self.mailbox.place() == Place::View(Role::Sent) {
+            self.mailbox.open(Place::View(Role::Inbox));
+        }
+        if rail.sent {
+            self.mailbox.open(Place::View(Role::Sent));
+        }
+        if rail.search {
+            ui.memory_mut(|memory| memory.request_focus(list::search_id()));
+        }
     }
 
     /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its

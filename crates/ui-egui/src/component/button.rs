@@ -27,6 +27,7 @@ pub struct IconButton<'a> {
     enabled: bool,
     note: Option<&'a str>,
     ink: Option<Color32>,
+    side: Option<f32>,
 }
 
 /// How far a disabled button is faded.
@@ -42,7 +43,7 @@ impl<'a> IconButton<'a> {
     /// A button showing `icon`, called `name` (its accessible name and the text of its tooltip).
     #[must_use]
     pub fn new(icon: IconId, name: &'a str) -> Self {
-        Self { icon, name, action: None, active: false, enabled: true, note: None, ink: None }
+        Self { icon, name, action: None, active: false, enabled: true, note: None, ink: None, side: None }
     }
 
     /// The action it runs, whose key its tooltip shows.
@@ -82,11 +83,18 @@ impl<'a> IconButton<'a> {
         self
     }
 
+    /// A square of `side` points (the rail's larger tiles) instead of a control's side, the icon half as wide.
+    #[must_use]
+    pub fn side(mut self, side: f32) -> Self {
+        self.side = Some(side);
+        self
+    }
+
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
         let s = &theme.spacing;
-        let side = control_side(ui, theme);
+        let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(ui, theme)).min(512.0);
         let sense = if self.enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
         response.widget_info(|| WidgetInfo::selected(Role::Button, self.enabled, self.active, self.name));
@@ -94,15 +102,16 @@ impl<'a> IconButton<'a> {
         let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
+            let corner = if self.side.is_some() { side * 0.25 } else { s.corner };
             let (selection, lit, focus) = match self.ink {
                 Some(ink) => (ink.gamma_multiply(ON_INK_ACTIVE), ink.gamma_multiply(ON_INK_HOVER), ink),
                 None => (p.selection, p.hover, p.focus),
             };
             if self.active {
-                painter.rect_filled(rect, s.corner, selection);
+                painter.rect_filled(rect, corner, selection);
             }
             if hover > 0.0 {
-                painter.rect_filled(rect, s.corner, lit.gamma_multiply(hover));
+                painter.rect_filled(rect, corner, lit.gamma_multiply(hover));
             }
             let (style, colour) = match (self.ink, self.active) {
                 (Some(ink), active) => (if active { Style::Fill } else { Style::Regular }, ink),
@@ -116,10 +125,10 @@ impl<'a> IconButton<'a> {
             } else {
                 p.muted.gamma_multiply(DISABLED)
             };
-            let icon = theme.fonts.body.size * 1.3;
+            let icon = if self.side.is_some() { side * 0.5 } else { theme.fonts.body.size * 1.3 };
             theme.icons.paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, style, colour);
             if response.has_focus() {
-                painter.rect_stroke(rect.shrink(1.0), s.corner, Stroke::new(2.0, focus), StrokeKind::Inside);
+                painter.rect_stroke(rect.shrink(1.0), corner, Stroke::new(2.0, focus), StrokeKind::Inside);
             }
         }
         tooltip::attach_note(response, theme, keymap, self.name, self.action, self.note)

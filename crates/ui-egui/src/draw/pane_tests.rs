@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The navigation rail: the preset's gradient at full strength down the window's left edge, with Mail and the
+//! The navigation rail: the preset's gradient at full strength down the window's left edge, with the views and the
 //! appearance settings on it.
 
 use egui::accesskit::{Role, Toggled};
@@ -11,7 +11,9 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
-use crate::mailbox::Mailbox;
+use inboxcraft_model::Role as FolderRole;
+
+use crate::mailbox::{Mailbox, Place};
 use crate::sample;
 use crate::shot::render;
 use crate::theme::{Mode, PRESETS, Theme, contrast, install_fonts};
@@ -55,7 +57,7 @@ fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_gradient() {
     assert_eq!(toggled(&harness, "Appearance settings"), Some(Toggled::False));
     let mail = harness.get_by_role_and_label(Role::Button, "Mail").rect();
     let settings = harness.get_by_role_and_label(Role::Button, "Appearance settings").rect();
-    assert!(mail.left() < 30.0 && settings.top() > 600.0, "Mail on top, the settings at the foot: {mail:?} {settings:?}");
+    assert!(mail.left() < 30.0 && settings.top() > 525.0, "Mail on top, the settings at the foot: {mail:?} {settings:?}");
     harness.get_by_label("Appearance settings").click();
     harness.run();
     assert_eq!(toggled(&harness, "Mail"), Some(Toggled::False));
@@ -69,4 +71,27 @@ fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_gradient() {
             }
         }
     }
+}
+
+#[test]
+fn the_rail_opens_sent_and_says_which_views_are_not_built_yet() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1100.0, 700.0))
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app());
+    harness.run();
+    for name in ["Start", "Calendar", "Pins"] {
+        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name}");
+    }
+    harness.get_by_role_and_label(Role::Button, "Sent mail").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::View(FolderRole::Sent));
+    let toggled = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled();
+    assert_eq!(toggled(&harness, "Sent mail"), Some(Toggled::True));
+    harness.get_by_label("Signed in as mira@example.org");
+    assert_eq!(toggled(&harness, "Mail"), Some(Toggled::False));
+    harness.get_by_role_and_label(Role::Button, "Mail").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::View(FolderRole::Inbox));
+    harness.get_by_role_and_label(Role::Image, "InboxCraft");
 }

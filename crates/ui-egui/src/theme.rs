@@ -926,6 +926,13 @@ pub fn ink_on(behind: Color32) -> Color32 {
     if contrast(WHITE, behind) >= contrast(DEEP_INK, behind) { WHITE } else { DEEP_INK }
 }
 
+/// The owner's avatar on the rail: a white disc, and the preset's middle stop darkened until it reads on it at 4.5:1.
+#[must_use]
+pub fn rail_avatar(stops: [Color32; 3]) -> (Color32, Color32) {
+    let [_, middle, _] = stops;
+    (WHITE, readable(middle, &[WHITE], 4.5, Mode::Light))
+}
+
 /// The gradient text sits on (a primary button, a chip) and its ink: the stops darkened together in steps of 2 % until
 /// white reads at 4.5:1 on every one, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise
 /// the stops unchanged with the deep ink (Citrus). Icons on the rail keep the full gradient.
