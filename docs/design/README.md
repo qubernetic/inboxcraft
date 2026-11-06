@@ -48,6 +48,10 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
   gradient with the deep ink (Citrus). Icons on the rail keep the full gradient. This is a proposal:
   `docs/design.md` still says white or the deep ink, whichever has more contrast, which gives the deep ink on
   Electric.
+- **The dark accent is the middle stop, lightened.** Links, accent text and active icons in dark mode use the
+  preset's middle stop mixed 30 % with white, made readable at 4.5:1 (Electric a soft violet), instead of the
+  preset's separate accent (Electric's yellow), which stood apart from everything else. The separate accent stays one
+  of the account colours. This is a proposal: `docs/design.md` and `theme.rs` still use the separate accent.
 - **Group icons are outlines.** A group's header shows its Regular (outline) icon in the muted colour, without a
   background; a solid icon on the gradient next to every group drew the eye away from the mail. This is a proposal
   too: `docs/design.md` still describes the group badge as a solid icon on the gradient.
@@ -71,3 +75,4 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 | 2026-11-06 | minor | Group headers show an outline icon without a background (#96) |
 | 2026-11-06 | minor | The composer fills the reader's place or opens in a window of its own (#96) |
 | 2026-11-06 | minor | The scenarios also in Electric dark (#96) |
+| 2026-11-06 | minor | Dark mode's accent: the middle stop lightened instead of the separate accent (#96) |
