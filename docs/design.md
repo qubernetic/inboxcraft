@@ -191,9 +191,8 @@ id and style is in its font.
 
 The second set is **Lucide** (ISC; the icons it took from Feather are MIT), chosen with `ui.icons.set` and bundled
 from release 1.70.0 in `assets/icons/lucide/` (its one font, unchanged). Lucide has lines only, so Fill and Duotone
-keep the line glyph and draw a filled disc behind it, 90 % of the square across: at 38 % of the icon's colour for
-Fill and at 20 % for Duotone. Callers draw active states in the accent colour, so an active Lucide icon is the accent
-on an accent disc. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
+keep the line glyph. Fill draws nothing behind it: a disc there read as a smudge on the selection, and an active
+icon already shows in the accent colour. Duotone draws a disc 90 % of the square across at 20 % of the icon's colour. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
 the square and moved down by 4.5 % of it; the same ring test holds it to a pixel of the middle.
 
 The app icon is not from a set: it stays drawn in code (see "The app icon").
@@ -477,3 +476,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The FigCraft design file is the source of truth for the look (#96) |
 | 2026-11-06 | minor | The file's rules in the code: text gradient, dark accent, outline group icons, inset rows; secondary buttons, `ui.frame.set` (#104) |
 | 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
+| 2026-11-06 | minor | Lucide's Fill draws no disc (#104) |

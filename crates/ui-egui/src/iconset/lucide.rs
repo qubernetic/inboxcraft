@@ -11,9 +11,6 @@
 use super::{BACK_OPACITY, Glyph, IconId, Metrics, Style};
 use crate::theme::IconFont;
 
-/// The opacity of the disc behind an icon in [`Style::Fill`].
-pub(super) const FILL_DISC: f32 = 0.38;
-
 /// A glyph fills the font's em square to its edge and sits a little above the line's middle: drawn a little smaller
 /// and moved down, it has Phosphor's margin and sits in the middle (measured in `iconset/tests.rs`).
 pub(super) const METRICS: Metrics = Metrics { size: 0.92, drop: 0.045 };
@@ -63,9 +60,9 @@ const fn point(id: IconId) -> char {
 
 /// The glyphs of `id` in `style`.
 pub(super) fn glyph(id: IconId, style: Style) -> Glyph {
+    // Lucide has no solid glyphs: Fill is the line glyph, its state shown by its colour and what lies behind it.
     let disc = match style {
-        Style::Regular => 0.0,
-        Style::Fill => FILL_DISC,
+        Style::Regular | Style::Fill => 0.0,
         Style::Duotone => BACK_OPACITY,
     };
     Glyph { face: IconFont::Lucide, layers: vec![(point(id), 1.0)], disc }

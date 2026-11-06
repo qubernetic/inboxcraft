@@ -7,8 +7,8 @@
 //! Each set maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its own
 //! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The styles carry meaning:
 //! [`Style::Regular`] in toolbars and rows, [`Style::Fill`] for active and selected states, [`Style::Duotone`] for
-//! empty states. Phosphor has a font for each style; Lucide has lines only and draws Fill and Duotone over a filled
-//! disc ([`Glyph::disc`]). The app icon is not from a set; it is drawn in code in [`crate::icons`].
+//! empty states. Phosphor has a font for each style; Lucide has lines only: its Fill is the line glyph, and Duotone
+//! draws it over a faint filled disc ([`Glyph::disc`]). The app icon is not from a set; it is drawn in code in [`crate::icons`].
 
 mod lucide;
 mod phosphor;

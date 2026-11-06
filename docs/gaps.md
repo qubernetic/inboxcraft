@@ -353,8 +353,8 @@ B = blocks the next stage.
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
 - Icons (#84, #86): Phosphor and Lucide, chosen with `ui.icons.set`; the settings control comes with E1.16b. Lucide
-  has no solid icons, so its Fill and Duotone draw a filled disc behind the lines (a stronger one for Fill); on the
-  accent of an active button the lines on their disc read, but less boldly than Phosphor's solid shape. The set has
+  has no solid icons, so its Fill is the line glyph (an active or selected one reads by its colour and the selection
+  behind it, less boldly than Phosphor's solid shape) and its Duotone draws a faint disc behind the lines. The set has
   the ids the window and the triage actions need so far; a toolbar or a view that needs another meaning adds an id
   and its glyph (in both sets). Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
@@ -538,3 +538,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | The app's own window frame, the rail's views not built yet, the folder pane's own folders (#104) |
 | 2026-11-06 | minor | The own frame: round corners, resizing on Wayland, moving in the top row (#104) |
 | 2026-11-06 | minor | The settings sheet: only Appearance among its sections (#104) |
+| 2026-11-06 | minor | Lucide's Fill without a disc (#104) |
