@@ -147,7 +147,11 @@ fn custom(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) 
             if ui.color_edit_button_srgba(&mut picked).labelled_by(label.id).changed() {
                 *field = crate::settings::hex(picked);
             }
-            let edit = TextEdit::singleline(field).char_limit(MAX_CHARS).desired_width(theme.spacing.xl * 4.0).font(theme.fonts.mono.id());
+            let edit = TextEdit::singleline(field)
+                .char_limit(MAX_CHARS)
+                .margin(crate::component::field::margin(theme))
+                .desired_width(theme.spacing.xl * 4.0)
+                .font(theme.fonts.mono.id());
             let _ = ui.add(edit).labelled_by(label.id);
             ui.end_row();
         }

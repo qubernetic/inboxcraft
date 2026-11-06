@@ -6,6 +6,7 @@
 //!
 //! - [`card`]: a rounded card with a header that opens and closes it (grouped inbox groups, the screener, messages).
 //! - [`button`]: an icon button with its tooltip, active or disabled.
+//! - [`field`]: the search pill and the margin of a form field.
 //! - [`pill`]: a round, selectable chip (filters).
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`avatar`]: a person's initials on a colour picked from their address.
@@ -20,6 +21,7 @@ pub mod avatar;
 pub mod badge;
 pub mod button;
 pub mod card;
+pub mod field;
 pub mod gallery;
 pub mod hover;
 pub mod pill;

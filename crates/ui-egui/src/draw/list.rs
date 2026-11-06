@@ -17,13 +17,13 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use egui::{
-    Align, Color32, Frame, Galley, Id, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Galley, Id, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{focus_ring, line, line_height, selection};
 use crate::component::hover::{self, Action};
-use crate::component::{avatar, badge, button, margin, tooltip};
+use crate::component::{avatar, badge, button, field, margin, tooltip};
 use crate::glass;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
@@ -59,8 +59,8 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
                 search.clear();
                 changed = Some(String::new());
             }
-            let field = TextEdit::singleline(search).id(search_id()).hint_text(tr!("Search mail")).desired_width(theme.spacing.folder_pane);
-            let response = tooltip::attach(ui.add(field), theme, keymap, tr!("Search mail"), Some(keymap::FIND));
+            let field = field::search(ui, theme, search_id(), search, tr!("Search"), theme.spacing.folder_pane * 0.75);
+            let response = tooltip::attach(field, theme, keymap, tr!("Search mail"), Some(keymap::FIND));
             if response.changed() {
                 changed = Some(search.clone());
             }

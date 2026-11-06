@@ -7,6 +7,7 @@ use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
 use crate::component::button::TextButton;
+use crate::component::field as field_style;
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
@@ -28,9 +29,10 @@ pub(super) enum Asked {
 }
 
 /// A labelled one-line field in the form grid.
-fn field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) -> Response {
+fn field(ui: &mut Ui, theme: &Theme, label: &str, text: &mut String, hint: &str) -> Response {
     let label = ui.label(label);
-    let response = ui.add(TextEdit::singleline(text).hint_text(hint).desired_width(FORM_WIDTH - 200.0)).labelled_by(label.id);
+    let response =
+        ui.add(TextEdit::singleline(text).hint_text(hint).margin(field_style::margin(theme)).desired_width(FORM_WIDTH - 200.0)).labelled_by(label.id);
     ui.end_row();
     response
 }
@@ -38,12 +40,13 @@ fn field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) -> Response {
 /// The password field. egui's undo history keeps plain copies of what was typed, so it is emptied after every frame:
 /// undo never brings back a password that was cleared, nor an earlier account's. The field takes no more than its
 /// [`Secret`]'s buffer holds, so typing never moves the text.
-fn password(ui: &mut Ui, secret: &mut Secret) {
+fn password(ui: &mut Ui, theme: &Theme, secret: &mut Secret) {
     let label = ui.label(tr!("Password"));
     let edit = TextEdit::singleline(secret.expose_mut())
         .id_salt("account-password")
         .password(true)
         .char_limit(MAX_PASSWORD_CHARS)
+        .margin(field_style::margin(theme))
         .desired_width(FORM_WIDTH - 200.0);
     let id = ui.add(edit).labelled_by(label.id).id;
     if let Some(mut state) = TextEditState::load(ui.ctx(), id) {
@@ -76,7 +79,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     Grid::new("account-form").num_columns(2).spacing(vec2(theme.spacing.m, theme.spacing.s)).show(ui, |ui| {
         let label = ui.label(tr!("Address"));
         ui.horizontal(|ui| {
-            ui.add(TextEdit::singleline(&mut form.address).hint_text("you@example.org").desired_width(FORM_WIDTH - 300.0)).labelled_by(label.id);
+            ui.add(TextEdit::singleline(&mut form.address).hint_text("you@example.org").margin(field_style::margin(theme)).desired_width(FORM_WIDTH - 300.0)).labelled_by(label.id);
             let label = if detecting { tr!("Detecting…") } else { tr!("Detect") };
             let detect = ui.add_enabled_ui(!detecting, |ui| TextButton::new(label).secondary().show(ui, theme, keymap)).inner;
             if detect.clicked() {
@@ -125,13 +128,13 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
             });
             ui.end_row();
         }
-        field(ui, tr!("Name for the account"), &mut form.label, tr!("the address"));
-        field(ui, tr!("Your name on sent mail"), &mut form.display_name, tr!("optional"));
-        field(ui, tr!("User name"), &mut form.username, tr!("the address"));
-        password(ui, &mut form.password);
-        field(ui, tr!("IMAP server"), &mut form.host, "imap.example.org");
+        field(ui, theme, tr!("Name for the account"), &mut form.label, tr!("the address"));
+        field(ui, theme, tr!("Your name on sent mail"), &mut form.display_name, tr!("optional"));
+        field(ui, theme, tr!("User name"), &mut form.username, tr!("the address"));
+        password(ui, theme, &mut form.password);
+        field(ui, theme, tr!("IMAP server"), &mut form.host, "imap.example.org");
         let security = form.security.unwrap_or(Security::Tls);
-        field(ui, tr!("Port"), &mut form.port, &security.imap_port().to_string());
+        field(ui, theme, tr!("Port"), &mut form.port, &security.imap_port().to_string());
         ui.label(tr!("Encryption"));
         ui.horizontal(|ui| {
             for choice in [Security::Tls, Security::StartTls] {
