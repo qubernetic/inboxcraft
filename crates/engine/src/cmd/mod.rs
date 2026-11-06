@@ -10,6 +10,7 @@ mod account;
 mod folder;
 mod mail;
 mod remote;
+mod ui;
 
 pub use mail::MAX_LIST;
 
@@ -31,6 +32,12 @@ pub(crate) fn all() -> Vec<CommandSpec> {
         remote::ALLOW,
         remote::FORGET,
         remote::LIST,
+        ui::ACCENT,
+        ui::FONT,
+        ui::ICONS,
+        ui::MOTION,
+        ui::TEXT_SCALE,
+        ui::THEME,
     ]
 }
 
@@ -49,3 +56,6 @@ mod reader_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod ui_tests;

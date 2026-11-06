@@ -14,6 +14,7 @@ use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Timestamp};
 use serde_json::Value;
 
+use crate::appearance::Appearance;
 use crate::{Caller, EngineError, Registry, error};
 
 /// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
@@ -26,6 +27,8 @@ pub struct Outcome {
     senders: Vec<(String, bool)>,
     /// Accounts removed: the session forgets what it knows of them and drops their queued jobs.
     removed: Vec<AccountId>,
+    /// The appearance choices from now on.
+    appearance: Option<Appearance>,
 }
 
 /// A job before it has an id.
@@ -41,7 +44,7 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new() }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None }
     }
 
     /// The outcome with `change` to make in the store.
@@ -61,6 +64,12 @@ impl Outcome {
     /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
     pub(crate) fn with_sender(mut self, sender: String, allowed: bool) -> Self {
         self.senders.push((sender, allowed));
+        self
+    }
+
+    /// The outcome changing the appearance choices to `appearance`.
+    pub(crate) fn with_appearance(mut self, appearance: Appearance) -> Self {
+        self.appearance = Some(appearance);
         self
     }
 
@@ -130,6 +139,8 @@ pub(crate) struct State {
     /// The senders (addresses in lower case) whose remote pictures the owner lets load without asking. Kept for the
     /// session only until settings are kept on disk.
     pub(crate) remote_senders: BTreeSet<String>,
+    /// The owner's appearance choices; the front end keeps them on disk and hands them back at the start.
+    pub(crate) appearance: Appearance,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
     /// given again and a late event of its worker cannot land on a new account.
     pub(crate) next_account: u64,
@@ -275,6 +286,17 @@ impl Session {
         &*self.store
     }
 
+    /// The owner's appearance choices, as the `ui.*.set` commands left them.
+    #[must_use]
+    pub fn appearance(&self) -> &Appearance {
+        &self.state.appearance
+    }
+
+    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`].
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        self.state.appearance = appearance;
+    }
+
     /// Runs the command `id` with `params` for the owner.
     ///
     /// # Errors
@@ -299,7 +321,7 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for change in batch.changes() {
             if let Change::PutAccount(account) = change {
@@ -316,6 +338,9 @@ impl Session {
             } else {
                 self.state.remote_senders.remove(&sender);
             }
+        }
+        if let Some(appearance) = appearance {
+            self.state.appearance = appearance;
         }
         Ok(value)
     }
