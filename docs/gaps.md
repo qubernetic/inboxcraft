@@ -354,6 +354,9 @@ B = blocks the next stage.
 - `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
   GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
   E1.13c (#30).
+- `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
+  sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
+  It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
 - `eframe` without its default features links `libwayland-client` at build time instead of loading it at run time
   (#30).
 - The Flatpak is never built in the agent sandbox, which has no `flatpak`; the `flatpak` CI job builds the bundle on
@@ -432,3 +435,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Onboarding's rough edges; the window applies worker events (#34) |
 | 2026-11-05 | minor | Passwords go at window close; the password field keeps no undo history (#34) |
 | 2026-11-06 | minor | Rough edges of the theme tokens and presets (#81) |
+| 2026-11-06 | minor | Limits of the side-by-side pictures (#81) |

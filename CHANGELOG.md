@@ -290,6 +290,10 @@ All notable changes to InboxCraft are listed here. The format follows
   its first check signs in. New commands: `account.add` and `account.remove` (owner); a complaint about
   `account.add`'s parameters ends before the first quote and repeats nothing that was sent. The desktop app runs one
   `net` worker per account and applies their events each frame; `ui_shot` draws the page in each state (`onboard`)
+- `cargo xtask side-by-side` (`just side-by-side`): every `ui_shot` picture of the shot script next to the mood
+  sketch of its preset and mode, scaled to the same height, one PNG per picture in `plan/side-by-side/`. The
+  sketches are read from `plan/mood/` (gitignored, never committed); `--script`, `--mood` and `--out` name other
+  places (#81)
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

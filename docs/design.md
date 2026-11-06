@@ -167,6 +167,15 @@ width), and adding an account (the form, after Detect, the check under way, pass
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 A script line picks its preset with `"preset"`. Every UI change shows them in its PR.
 
+Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
+falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
+`plan/mood/` as `<preset>-<mode>.png` (for example `aurora-dark.png`); `plan/` is gitignored and they are never
+committed. `just side-by-side` (`cargo xtask side-by-side`) then reads the shot script, scales each sketch to the
+height of its picture and writes the pair, picture on the left, to `plan/side-by-side/<picture name>`. A line
+without a preset pairs with Electric; a screen the sketches do not show pairs with the sketch of its preset and
+mode all the same. A missing picture or sketch is reported and fails the command. `--script <file>`, `--mood <dir>`
+and `--out <dir>` name other places. The pairs go into the PR, not into the repository.
+
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
@@ -176,3 +185,4 @@ A script line picks its preset with `"preset"`. Every UI change shows them in it
 | 2026-11-05 | minor | The page mark joins the app icon in `icons.rs` (#33) |
 | 2026-11-05 | minor | Adding an account (#34) |
 | 2026-11-06 | major | Colour tokens from the mode and an accent preset; Electric, Aurora and Citrus; teal and coral gone (#81) |
+| 2026-11-06 | minor | Pictures: each `ui_shot` picture beside its mood sketch, `just side-by-side` (#81) |
