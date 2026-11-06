@@ -248,6 +248,30 @@ fn ctrl_f_focuses_the_search_and_escape_empties_it() {
 }
 
 #[test]
+fn a_rebound_find_key_focuses_the_search_and_the_old_one_does_nothing() {
+    let mut harness = harness();
+    harness.state_mut().keymap_mut().bind(crate::keymap::FIND, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::K));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
+    harness.run();
+    assert!(!harness.get_by_role(Role::TextInput).is_focused());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    harness.run();
+    assert!(harness.get_by_role(Role::TextInput).is_focused());
+}
+
+#[test]
+fn the_window_installs_its_reduced_motion_flag_every_frame() {
+    let mut harness = harness();
+    assert!(!harness.state().reduce_motion(), "motion is on where the system cannot be read");
+    assert!(!crate::motion::reduced(&harness.ctx));
+    harness.state_mut().set_reduce_motion(true);
+    harness.run();
+    assert!(harness.state().reduce_motion());
+    assert!(crate::motion::reduced(&harness.ctx));
+    assert_eq!(harness.ctx.global_style().animation_time, 0.0);
+}
+
+#[test]
 fn opening_a_folder_empties_the_search_field() {
     let mut harness = harness();
     harness.state_mut().search("logo");

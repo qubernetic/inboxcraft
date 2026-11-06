@@ -146,7 +146,7 @@ Flag, More, File, Failed, Waiting, Skipped), never a glyph, and a **style** that
 |---|---|
 | Regular | lines: toolbars, rows, the attachment tile, a step that waits or was skipped |
 | Fill | active and selected states: a flagged message's flag, a step that passed or failed |
-| Duotone | group badges and empty states: the lines over the same shape filled at 20 % |
+| Duotone | empty states: the lines over the same shape filled at 20 % |
 
 The theme names the icon set (`Theme::icons`). Each set maps every id onto a glyph of its font in an exhaustive
 `match`, so a new id without a glyph does not build, and keeps its own size and optical alignment (`Metrics`).
@@ -194,6 +194,56 @@ The app icon is not from a set: it stays drawn in code (see "The app icon").
 - **No repaint while nothing moves.** Nothing in the look asks for another frame; a UI test runs the window idle in
   every preset and mode and counts no repaint and no picture rasterised again.
 
+## Components
+Every view is built from these (`crates/ui-egui/src/component/`). Each draws only with the tokens above, moves only
+through the motion tokens below and shows a key only from the keymap; each has an accessible name.
+
+| Component | What it is |
+|---|---|
+| Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
+| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip. |
+| Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
+| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once. Every icon button has one. |
+| Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
+| Badge (`badge`) | An unread count in a pill of the badge colour, or a group's solid (Fill) icon on the preset's gradient at full strength: white wherever white reaches 3:1 (WCAG AA for a graphical object) on every stop, as on Electric, otherwise the deep ink. The WCAG 2 ratio rates dark ink on saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough. |
+| Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
+| Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
+| Popup (`popup`) | A float with menu rows (icon, name, key chip), opening over the card motion; over sharp text it is the float over text. |
+
+**Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
+royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
+the address alone, case and surrounding spaces aside, by a stable hash (FNV-1a), so one person has one colour on
+every screen, in every session and in every version. Tests check that the same address always gets the same
+colour, that the initials read at 4.5:1 on every avatar colour in both modes, that the palette is vivid and its
+colours far enough apart, and that everyone in the sample mail gets an avatar colour from it. The reader shows the
+sender's avatar in the message header.
+
+**Keys.** The keymap (`keymap::Keymap`) names which key runs which action, by id (the engine's command ids once
+they have a key; `ui.search.focus`, Ctrl+F, until then). One key runs one action: binding a key takes it from the
+action that had it. Everything that shows a key (tooltips, menu rows, a toast's Undo) reads it when it is drawn.
+
+## Motion
+Short and snappy, nothing decorative. Every duration is a motion token (`motion::MOTION`), none longer than 0.25 s:
+
+| Token | Seconds | Moves |
+|---|---|---|
+| `hover_fade` | 0.12 | hover actions over a row, a control's hover fill |
+| `tooltip` | 0.10 | a tooltip, and egui's own fade of tooltips and menus |
+| `row_slide` | 0.18 | a done row sliding out of the list |
+| `card` | 0.16 | a card or a popup opening and closing |
+| `toast` | 0.20 | a toast rising from the bottom edge |
+
+Everything that moves runs through `motion::toggle` (towards on or off) or `motion::appear` (from the frame
+something is first shown), and both read **one reduced-motion flag** (`motion::set_reduced`): with it on, every
+motion lands at its end in the frame it changes, and egui's own animations stop too: fading areas
+(`animation_time`) and scrolling to a place (`scroll_animation`). egui still smooths a mouse wheel's notches over
+about 0.1 s with a factor fixed inside egui that no style changes, so wheel scrolling glides a little with reduced
+motion on (see `docs/gaps.md`). A test refuses egui's animation calls anywhere else in the crate, and a test switches every component on with
+motion and with reduced motion and finds the first still moving and the second at rest. The flag's default follows
+the system where the system can be read (the web build), otherwise motion is on; the window holds it
+(`InboxApp::set_reduce_motion`) and a switch for it comes with the appearance settings. While something moves the
+window asks for the next frame; once it has landed, nothing does.
+
 ## The mail list window
 - **Folder pane** (left): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
@@ -226,8 +276,9 @@ the icon sits among others at the same size.
   wrapped rather than cut.
 - **Thread**: oldest first. The open message is unfolded; the others are one line (sender, the first words, the
   date) on the panel colour and unfold on a click; an unfolded older message has Fold.
-- **Header**: the sender's name large with the address muted, the date on the right, "to ..." under it; Details
-  shows From, Reply to, To, Copy and the date in full.
+- **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
+  it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
+  To, Copy and the date in full.
 - **Remote content**: while remote pictures are blocked, a banner on the panel colour says how many and that loading
   them tells the sender the message was opened, with "Load once" and "Always for <address>". A blocked picture is a
   muted box with its alternative text, so the layout shows where it was.
@@ -265,7 +316,11 @@ A script line picks its preset with `"preset"` and its text scale with `"text_sc
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points
 and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<mode>.png`, `icons-<mode>.png` for
-Electric). Every UI change shows them in its PR.
+Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
+buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
+tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
+for Electric). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
+them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
 falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
@@ -290,3 +345,5 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Glass and floats: nine-slice shadows, the sweep of unused pictures, no shadow over sharp text (#82) |
 | 2026-11-06 | minor | Type: Figtree, font tokens, unread by weight, the text scale and layout from the font's metrics (#83) |
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
+| 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
+| 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |

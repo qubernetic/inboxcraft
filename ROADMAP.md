@@ -69,6 +69,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | Glass without blur: colour fields behind the window, the panes as glass layers, floats that go more opaque over sharp text, one dithered gradient helper; no repaint while idle (#82) |
 | 2026-11-06 | Figtree in place of Ubuntu Light, every text style a font token, unread rows by weight, a text scale of 90 % to 130 % with rows and the reader's toolbar following the font, checked for overflow, clipping and overlap (#83) |
 | 2026-11-06 | An icon painter: views ask for an `IconId` in Regular, Fill or Duotone, the set maps every id in an exhaustive match; Phosphor 2.1.1 bundled; the flag, the file tile and the step marks moved onto it (#84) |
+| 2026-11-06 | The design system's components (card, icon button, pill, tooltip with key chip, avatar, badge, hover actions, toast, popup) with a `ui_shot` gallery; motion tokens and one reduced-motion flag every animation reads; a keymap the tooltips read their keys from; avatars in a vivid palette picked per address, in the reader's header (#85) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -106,3 +107,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: glass and floats (#82) |
 | 2026-11-06 | minor | Progress log: Figtree, font tokens and the text scale (#83) |
 | 2026-11-06 | minor | Progress log: the icon painter and Phosphor (#84) |
+| 2026-11-06 | minor | Progress log: the components and motion tokens (#85) |

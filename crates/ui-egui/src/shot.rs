@@ -18,7 +18,9 @@
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects. `icons` set to `true` draws every icon of
-//! the set in every style in the preset's colours instead of the window.
+//! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
+//! the components ([`crate::component::gallery`]). Every picture is taken with reduced motion, so it shows where each
+//! motion ends.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -30,12 +32,13 @@ use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
+use crate::component::gallery;
 use crate::mailbox::{Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Mode, Preset, TextScale, Theme};
 use crate::workers::Scripted;
-use crate::{InboxApp, UiError, iconset, sample};
+use crate::{InboxApp, UiError, iconset, motion, sample};
 
 /// The largest picture side in pixels.
 pub const MAX_SIDE: usize = 4096;
@@ -104,6 +107,9 @@ pub struct Shot {
     /// Every icon of the set in every style instead of the window.
     #[serde(default)]
     pub icons: Option<bool>,
+    /// The gallery of the components instead of the window.
+    #[serde(default)]
+    pub components: Option<bool>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -170,18 +176,39 @@ fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
     Ok(app)
 }
 
-/// The icon sheet of `shot` in `mode` and `preset`; it shows no window, so the window settings are refused.
-fn icon_sheet(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+/// Refuses the window settings for a page of `shot` that shows no window.
+fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
         || shot.open.is_some()
         || shot.search.is_some()
         || shot.select.is_some()
         || shot.onboard.is_some()
         || shot.text_scale.is_some()
-        || shot.size.is_some();
+        || shot.size.is_some()
+        || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
-        return Err(bad(format!("{}: an icon sheet has no window to narrow, open, search, select, scale or size", shot.out)));
+        return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
+    Ok(())
+}
+
+/// The gallery of the components of `shot` in `mode` and `preset`.
+fn component_gallery(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+    no_window(shot, "the component gallery")?;
+    let theme = Theme::new(mode, preset);
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(gallery::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+        }
+        gallery::page(ui, &theme, &keymap);
+    })
+}
+
+/// The icon sheet of `shot` in `mode` and `preset`; it shows no window, so the window settings are refused.
+fn icon_sheet(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+    no_window(shot, "an icon sheet")?;
     let theme = Theme::new(mode, preset);
     let mut fonts = true;
     paint(iconset::sheet_size(), shot.scale.unwrap_or(1.0), mode, |ui| {
@@ -472,7 +499,10 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mu
     let mut last = None;
     for _ in 0..4 {
         let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..RawInput::default() };
-        let mut output = ctx.run_ui(input, &mut draw);
+        let mut output = ctx.run_ui(input, |ui| {
+            motion::set_reduced(ui.ctx(), true);
+            draw(ui);
+        });
         apply_textures(&mut textures, &mut output.textures_delta);
         last = Some(output);
     }
@@ -496,6 +526,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         None => Preset::default(),
         Some(id) => *Preset::named(id).ok_or_else(|| bad(format!("{}: no preset {id:?}", shot.out)))?,
     };
+    if shot.components == Some(true) {
+        return component_gallery(shot, mode, &preset);
+    }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode, &preset);
     }
@@ -504,6 +537,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_preset(preset);
+    app.set_reduce_motion(true);
     if let Some(percent) = shot.text_scale {
         let scale =
             TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;

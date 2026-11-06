@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The keymap: which key runs which action. Actions are named by id, the engine's command ids once they have a key
+//! and the window's own (`ui.search.focus`) until then. Everything that shows a key (the key chip of a tooltip, a
+//! menu row, a toast's Undo) reads it from here when it is drawn, so a changed key shows at once; one key runs one
+//! action.
+
+use egui::{Context, Key, KeyboardShortcut, Modifiers};
+
+/// Focus the search field.
+pub const FIND: &str = "ui.search.focus";
+
+/// The keys of the actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keymap {
+    bindings: Vec<(String, KeyboardShortcut)>,
+}
+
+impl Default for Keymap {
+    /// The keys InboxCraft starts with.
+    fn default() -> Self {
+        let mut keymap = Self::empty();
+        keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
+        keymap
+    }
+}
+
+impl Keymap {
+    /// A keymap without a key.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self { bindings: Vec::new() }
+    }
+
+    /// The key of `action`, if it has one.
+    #[must_use]
+    pub fn shortcut(&self, action: &str) -> Option<KeyboardShortcut> {
+        self.bindings.iter().find(|(id, _)| id == action).map(|(_, shortcut)| *shortcut)
+    }
+
+    /// Gives `action` the key `shortcut`, in place of its old one; an action that had the key loses it.
+    pub fn bind(&mut self, action: &str, shortcut: KeyboardShortcut) {
+        self.bindings.retain(|(id, held)| id != action && *held != shortcut);
+        self.bindings.push((action.to_owned(), shortcut));
+    }
+
+    /// Takes the key from `action`.
+    pub fn unbind(&mut self, action: &str) {
+        self.bindings.retain(|(id, _)| id != action);
+    }
+
+    /// The key of `action` as the platform writes it (`Ctrl+F`, `⌘F`), for a key chip.
+    #[must_use]
+    pub fn chip(&self, ctx: &Context, action: &str) -> Option<String> {
+        self.shortcut(action).map(|shortcut| ctx.format_shortcut(&shortcut))
+    }
+
+    /// Whether the key of `action` was pressed in this frame; the press is taken, so nothing else sees it.
+    #[must_use]
+    pub fn pressed(&self, ctx: &Context, action: &str) -> bool {
+        self.shortcut(action).is_some_and(|shortcut| ctx.input_mut(|input| input.consume_shortcut(&shortcut)))
+    }
+}
+
+#[cfg(test)]
+#[path = "keymap_tests.rs"]
+mod tests;

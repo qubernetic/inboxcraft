@@ -17,6 +17,7 @@ use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
 
 use crate::iconset::IconSet;
+use crate::motion::{self, MOTION, Motion};
 
 /// Light or dark: the mode shown now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +182,9 @@ pub struct Palette {
     pub colour_fields: [Color32; 3],
     /// One colour per account, so the unified list shows where a message lives.
     pub accounts: [Color32; 6],
+    /// The avatar colours: vivid, one picked per address ([`crate::component::avatar`]); white or the deep ink
+    /// reads on each.
+    pub avatars: [Color32; 10],
 }
 
 /// Distances in points.
@@ -382,6 +386,8 @@ pub struct Theme {
     pub fonts: Fonts,
     /// The icon set its icons are drawn from.
     pub icons: IconSet,
+    /// How long its motion takes ([`crate::motion`]).
+    pub motion: Motion,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -401,6 +407,20 @@ const BLACK: Color32 = rgb(0x000000);
 
 /// The dark ink on the gradient: dark enough that white or it reads at 4.5:1 on any colour.
 const DEEP_INK: Color32 = rgb(0x05060A);
+
+/// The avatar colours, the same in both modes: vivid, no teal or coral, far enough apart to tell people apart.
+pub const AVATARS: [Color32; 10] = [
+    rgb(0x2F5BEA),
+    rgb(0x0A84FF),
+    rgb(0x7B3FF2),
+    rgb(0xC026D3),
+    rgb(0xE3218F),
+    rgb(0xD62839),
+    rgb(0xF06A00),
+    rgb(0xF5C400),
+    rgb(0x3DA62B),
+    rgb(0x7CB518),
+];
 
 /// The tint a picture is drawn with: none.
 pub const NO_TINT: Color32 = WHITE;
@@ -658,6 +678,7 @@ impl Palette {
             hover,
             colour_fields,
             accounts,
+            avatars: AVATARS,
         }
     }
 }
@@ -675,6 +696,7 @@ impl Theme {
             text_scale,
             fonts: FONTS.scaled(text_scale.factor()),
             icons: IconSet::default(),
+            motion: MOTION,
         }
     }
 
@@ -776,6 +798,7 @@ impl Theme {
         style.spacing.window_margin = egui::Margin::same(12);
         // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
         style.spacing.scroll.fade.strength = 0.0;
+        motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),
             (TextStyle::Body, f.body.id()),
@@ -835,6 +858,22 @@ pub fn readable(colour: Color32, on: &[Color32], ratio: f32, mode: Mode) -> Colo
 #[must_use]
 pub fn ink_on(behind: Color32) -> Color32 {
     if contrast(WHITE, behind) >= contrast(DEEP_INK, behind) { WHITE } else { DEEP_INK }
+}
+
+/// The ink for an icon or text that runs across every colour in `behind` (a gradient's stops): white or the deep
+/// ink, whichever reads better on the colour it reads worst on.
+#[must_use]
+pub fn ink_over(behind: &[Color32]) -> Color32 {
+    let worst = |ink: Color32| behind.iter().map(|colour| contrast(ink, *colour)).fold(f32::INFINITY, f32::min);
+    if worst(WHITE) >= worst(DEEP_INK) { WHITE } else { DEEP_INK }
+}
+
+/// The ink for a solid icon across every colour in `behind` (a gradient's stops): white wherever white reaches 3:1
+/// (WCAG AA for a graphical object) on every one, otherwise [`ink_over`]. The WCAG 2 ratio rates dark ink on
+/// saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough.
+#[must_use]
+pub fn icon_ink_over(behind: &[Color32]) -> Color32 {
+    if !behind.is_empty() && behind.iter().all(|colour| contrast(WHITE, *colour) >= 3.0) { WHITE } else { ink_over(behind) }
 }
 
 /// The WCAG contrast ratio of two colours, 1 to 21 (alpha is ignored).

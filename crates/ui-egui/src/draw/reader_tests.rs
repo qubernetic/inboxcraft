@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::{Key, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
@@ -41,6 +41,24 @@ fn opened(fetch: &Recorder, folder: Option<u64>, subject: &str) -> Harness<'stat
     let id = app.mailbox().messages().iter().find(|row| row.subject == subject).unwrap().id;
     app.mailbox_mut().select(Some(id));
     harness_with(app, egui::Theme::Light)
+}
+
+#[test]
+fn the_reader_shows_the_sender_s_avatar_in_the_avatar_palette() {
+    let fetch = Recorder::default();
+    let harness = opened(&fetch, None, "Photos from the coast walk");
+    assert!(harness.query_all_by_role(Role::Image).any(|node| node.accesskit_node().label().as_deref() == Some("Teodor Lisk")));
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::Preset::default());
+    let colour = crate::component::avatar::colour(&theme, "teodor@example.org");
+    assert!(crate::theme::AVATARS.contains(&colour));
+    let filled = |shape: &egui::Shape| matches!(shape, egui::Shape::Circle(circle) if circle.fill == colour);
+    fn any(shape: &egui::Shape, found: &dyn Fn(&egui::Shape) -> bool) -> bool {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| any(shape, found)),
+            other => found(other),
+        }
+    }
+    assert!(harness.output().shapes.iter().any(|clipped| any(&clipped.shape, &filled)), "the avatar is painted in its colour");
 }
 
 #[test]

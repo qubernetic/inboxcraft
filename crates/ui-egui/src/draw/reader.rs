@@ -150,12 +150,9 @@ fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened
     let p = &theme.palette;
     let f = &theme.fonts;
     let Header { from, reply_to, to, cc, date, .. } = &opened.header;
+    // The date and the buttons first, at the right; the avatar, the sender and the address then share what is left,
+    // cut with an ellipsis rather than running into the date.
     ui.horizontal(|ui| {
-        let sender = from.first().map_or_else(|| tr!("(no sender)").to_owned(), |person| person.shown().to_owned());
-        ui.label(RichText::new(sender).font(f.heading.id()).color(p.text));
-        if let Some(address) = from.first().filter(|person| !person.name.is_empty()).map(|person| person.address.clone()) {
-            ui.label(RichText::new(address).font(f.caption.id()).color(p.muted));
-        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let text = if reader.shows_details(opened.id) { tr!("Hide details") } else { tr!("Details") };
             if ui.button(text).clicked() {
@@ -167,6 +164,17 @@ fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened
             if let Some(date) = date {
                 ui.label(RichText::new(mailbox.short_date(*date)).font(f.caption.id()).color(p.muted));
             }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                if let Some(person) = from.first() {
+                    let side = super::paint::line_height(ui, f.heading) * 1.5;
+                    crate::component::avatar::avatar(ui, theme, &person.name, &person.address, side);
+                }
+                let sender = from.first().map_or_else(|| tr!("(no sender)").to_owned(), |person| person.shown().to_owned());
+                ui.add(egui::Label::new(RichText::new(sender).font(f.heading.id()).color(p.text)).truncate());
+                if let Some(address) = from.first().filter(|person| !person.name.is_empty()).map(|person| person.address.clone()) {
+                    ui.add(egui::Label::new(RichText::new(address).font(f.caption.id()).color(p.muted)).truncate());
+                }
+            });
         });
     });
     if !reader.shows_details(opened.id) {

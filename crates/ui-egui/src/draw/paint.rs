@@ -47,14 +47,7 @@ pub(super) fn focus_ring(ui: &Ui, theme: &Theme, response: &Response) {
 
 /// A pill with `count` in it, its right edge at `right`, centred on `centre_y`; returns its left edge.
 pub(super) fn badge(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f32 {
-    let p = &theme.palette;
-    let galley = line(ui, &[(&count.to_string(), theme.fonts.caption, p.on_badge)], f32::INFINITY);
-    let height = galley.size().y + 2.0;
-    let width = (galley.size().x + theme.spacing.s * 1.5).max(height);
-    let rect = Rect::from_min_size(pos2(right - width, centre_y - height / 2.0), vec2(width, height));
-    ui.painter().rect_filled(rect, height / 2.0, p.badge);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_badge);
-    rect.left()
+    crate::component::badge::count(ui, theme, count, right, centre_y)
 }
 
 /// What a navigation row shows.

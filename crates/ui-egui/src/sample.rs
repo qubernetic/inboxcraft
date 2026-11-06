@@ -51,6 +51,16 @@ const LUMEN: Person = person("Lumen Print accounts", "accounts@example.org");
 const KASIMIR: Person = person("Kasimir Vell", "kasimir@example.org");
 const NEWS: Person = person("Studio Collective news", "news@example.org");
 
+/// Everyone in the sample.
+const PEOPLE: [Person; 15] =
+    [MIRA, MIRA_STUDIO, ODILE, TEODOR, ANSEL, LIBRARY, CYCLES, LETTINGS, PAPER_PINE, PRIZE, FERRIES, PETRA, LUMEN, KASIMIR, NEWS];
+
+/// Everyone in the sample, `(name, address)`: their avatars take their colours from the theme's avatar palette.
+#[must_use]
+pub fn people() -> Vec<(&'static str, &'static str)> {
+    PEOPLE.iter().map(|person| (person.name, person.address)).collect()
+}
+
 /// The two accounts: `(id, label, owner)`.
 const ACCOUNTS: [(u64, &str, Person); 2] = [(1, "Personal", MIRA), (2, "Studio", MIRA_STUDIO)];
 
