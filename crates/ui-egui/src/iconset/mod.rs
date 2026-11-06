@@ -77,11 +77,13 @@ pub enum IconId {
     Add,
     /// Junk.
     Junk,
+    /// Mark as read: an open envelope.
+    MarkRead,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -110,6 +112,7 @@ impl IconId {
         Self::Mail,
         Self::Add,
         Self::Junk,
+        Self::MarkRead,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -144,6 +147,7 @@ impl IconId {
             Self::Mail => 25,
             Self::Add => 26,
             Self::Junk => 27,
+            Self::MarkRead => 28,
         }
     }
 }

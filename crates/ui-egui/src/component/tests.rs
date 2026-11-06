@@ -60,7 +60,7 @@ fn everything(ui: &mut egui::Ui, theme: &Theme, keymap: &Keymap, on: bool) {
     IconButton::new(IconId::Done, "Done").show(ui, theme, keymap);
     pill::pill(ui, theme, "Pill", on);
     let row = egui::Rect::from_min_size(pos2(0.0, 300.0), vec2(400.0, 40.0));
-    hover::actions(ui, theme, keymap, Id::unique("hover"), row, on, &[Action { icon: IconId::Done, name: "Done", action: None }]);
+    hover::actions(ui, theme, keymap, Id::unique("hover"), row, on, &[Action { icon: IconId::Done, name: "Done", action: None, unavailable: None }]);
     if on {
         toast::show(&ctx, theme, keymap, Id::unique("toast"), &Toast { text: "Toast", undo: None }, pos2(200.0, 400.0));
         popup::show(&ctx, theme, Id::unique("popup"), pos2(10.0, 10.0), Under::Sharp, 200.0, |ui| ui.label("Item"));

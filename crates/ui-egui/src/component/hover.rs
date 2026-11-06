@@ -25,6 +25,8 @@ pub struct Action<'a> {
     pub name: &'a str,
     /// The action it runs, whose key the tooltip shows.
     pub action: Option<&'a str>,
+    /// Why it cannot run yet: it shows faded and its tooltip says so; `None` for one that runs.
+    pub unavailable: Option<&'a str>,
 }
 
 /// What the group drew.
@@ -67,6 +69,9 @@ pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, row: Rect, s
         let mut button = IconButton::new(action.icon, action.name);
         if let Some(id) = action.action {
             button = button.action(id);
+        }
+        if let Some(note) = action.unavailable {
+            button = button.unavailable(note);
         }
         if button.show(&mut child, theme, keymap).clicked() {
             clicked = Some(index);

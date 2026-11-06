@@ -433,3 +433,18 @@ fn show_all_is_an_accent_link_under_the_rows_text() {
     assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
     assert!((text.left() - sender.left()).abs() <= 1.5, "Show all starts at {} where the rows' text starts, {}", text.left(), sender.left());
 }
+
+#[test]
+fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet() {
+    let mut harness = harness(true);
+    harness.get_by_label(ODILE).hover();
+    harness.run();
+    let row = harness.get_by_label(ODILE).rect();
+    let mut lefts = Vec::new();
+    for name in ["Done", "Mark as read", "Delete", "Snooze"] {
+        let button = harness.query_all_by_role_and_label(Role::Button, name).find(|node| row.contains(node.rect().center())).expect(name);
+        assert_eq!(button.accesskit_node().is_disabled(), name == "Snooze", "{name}");
+        lefts.push(button.rect().left());
+    }
+    assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {lefts:?}");
+}

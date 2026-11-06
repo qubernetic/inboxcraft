@@ -124,12 +124,14 @@ fn put(ui: &Ui, theme: &Theme, at: egui::Pos2, galley: Arc<Galley>, colour: Colo
 }
 
 /// The hover actions of `message`: Done, mark read or unread, Delete.
-fn actions(message: &MessageRow) -> [Action<'static>; 3] {
-    let read = if message.seen { tr!("Mark as unread") } else { tr!("Mark as read") };
+fn actions(message: &MessageRow) -> [Action<'static>; 4] {
+    // An open envelope opens an unread message; a closed one closes a read one again.
+    let (read_icon, read) = if message.seen { (IconId::Mail, tr!("Mark as unread")) } else { (IconId::MarkRead, tr!("Mark as read")) };
     [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE) },
-        Action { icon: IconId::Notify, name: read, action: Some(keymap::READ) },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE) },
+        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE), unavailable: None },
+        Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: None, unavailable: Some(tr!("Not available yet")) },
     ]
 }
 

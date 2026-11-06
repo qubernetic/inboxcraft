@@ -49,6 +49,7 @@ const fn point(id: IconId) -> char {
         IconId::Mail => '\u{e10f}',     // mail
         IconId::Add => '\u{e13d}',      // plus
         IconId::Junk => '\u{e077}',     // alert-circle
+        IconId::MarkRead => '\u{e363}', // mail-open
     }
 }
 

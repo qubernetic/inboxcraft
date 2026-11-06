@@ -87,9 +87,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.painter().rect_filled(rect, s.corner, p.surface);
     ui.painter().rect_filled(rect, s.corner, p.hover);
     let actions = [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done") },
-        Action { icon: IconId::Notify, name: tr!("Mark as read"), action: Some("mail.read") },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete") },
+        Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
+        Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
     let shown = hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
     let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.sender, p.text, f32::INFINITY);
