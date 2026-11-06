@@ -5,7 +5,9 @@
 InboxCraft's own look: the colours, distances and font tokens of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
 "Assets"). The values live in `crates/ui-egui/src/theme.rs`; this page explains them, and the tests in
-`crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below.
+`crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below. The design file
+[`docs/design/inboxcraft.figcraft`](design/README.md) shows the same tokens and components, and every screen of the
+app, in FigCraft; where it disagrees with this page or `theme.rs`, the file is wrong.
 
 ## Principles
 - **Two choices make every colour.** The mode (System, Light or Dark) and the accent preset (three gradient stops
@@ -347,3 +349,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
 | 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |
+| 2026-11-06 | minor | The design file in FigCraft, `docs/design/` (#96) |

@@ -310,6 +310,9 @@ All notable changes to InboxCraft are listed here. The format follows
 - Avatars (#85): a person's initials on one of ten vivid avatar colours (no teal or coral), picked from the address
   by a stable hash, with white or dark initials by contrast; the reader shows the sender's avatar in the message
   header, the sample mail's people included.
+- The design file `docs/design/inboxcraft.figcraft` (FigCraft): colour variables per preset and mode, type styles,
+  the components with their variants, every screen of the app in light and dark, the mood in each preset and five
+  flows as storyboards; a PNG per page and `docs/design/README.md` (#96)
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
