@@ -115,7 +115,10 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
-    harness.get_by_label("A step failed. Check again, or change the settings.");
+    // The reason stands under the title, as the design has it.
+    let reason = harness.get_by_label(&format!("Connection (TCP) failed: {}", ErrorKind::MailPortsBlocked)).rect();
+    let title = harness.get_by_label("Checking carol@example.org").rect();
+    assert!(reason.top() >= title.bottom() - 1.0 && reason.top() - title.bottom() < 40.0, "{reason:?} under {title:?}");
     harness.get_by_label("Connection (TCP): failed");
     harness.get_by_label(&ErrorKind::MailPortsBlocked.to_string());
     harness.get_by_label("Encryption (TLS): skipped");

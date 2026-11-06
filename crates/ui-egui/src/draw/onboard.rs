@@ -244,7 +244,24 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
             }
         });
     });
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s);
+}
+
+/// Why the check failed, in the error colour with a cross before it: the first failed step and its reason, or a plain
+/// word when the step gave none.
+fn failure(ui: &mut Ui, theme: &Theme, onboarding: &Onboarding) {
+    let p = theme.palette;
+    let failed = onboarding.steps().iter().find(|row| row.state == StepState::Failed);
+    let text = match failed.and_then(|row| row.message.as_deref().map(|message| (row.name(), message))) {
+        Some((step, message)) => tr!("{step} failed: {message}", step = step, message = message),
+        None => tr!("A step failed. Check again, or change the settings.").to_owned(),
+    };
+    ui.horizontal(|ui| {
+        let side = super::paint::line_height(ui, theme.fonts.body);
+        let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        theme.icons.paint(ui.painter(), at, IconId::Failed, Style::Fill, p.error);
+        ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.error)).wrap());
+    });
 }
 
 fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
@@ -252,16 +269,20 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
     let mut asked = None;
     let address = mailbox.account(account).map(|row| row.address.clone()).unwrap_or_default();
     ui.label(RichText::new(tr!("Checking {address}", address = address)).font(theme.fonts.title.id()).color(p.text));
-    let (summary, colour) = match onboarding.outcome() {
-        Outcome::Running => (tr!("Each step shows as it ends."), p.muted),
-        Outcome::Passed => (tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),
-        Outcome::Failed => (tr!("A step failed. Check again, or change the settings."), p.error),
-    };
-    note(ui, theme, summary, colour);
-    ui.add_space(theme.spacing.l);
-    for row in onboarding.steps() {
-        step(ui, theme, row);
+    match onboarding.outcome() {
+        Outcome::Running => note(ui, theme, tr!("Each step shows as it ends."), p.muted),
+        Outcome::Passed => note(ui, theme, tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),
+        Outcome::Failed => failure(ui, theme, onboarding),
     }
+    ui.add_space(theme.spacing.m);
+    // The steps on a card of their own.
+    let s = theme.spacing;
+    Frame::new().fill(p.surface).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l, s.m)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        for row in onboarding.steps() {
+            step(ui, theme, row);
+        }
+    });
     ui.add_space(theme.spacing.m);
     ui.horizontal(|ui| match onboarding.outcome() {
         Outcome::Passed => {
@@ -276,12 +297,12 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
             if TextButton::new(tr!("Change settings")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Change);
             }
-            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
+            if button::link(ui, theme, keymap, tr!("Close")).clicked() {
                 asked = Some(Asked::Close);
             }
         }
         Outcome::Running => {
-            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
+            if button::link(ui, theme, keymap, tr!("Close")).clicked() {
                 asked = Some(Asked::Close);
             }
         }
