@@ -31,7 +31,7 @@ pub struct IconButton<'a> {
 }
 
 /// How far a disabled button is faded.
-const DISABLED: f32 = 0.45;
+pub(crate) const DISABLED: f32 = 0.45;
 
 /// How strong the ink is in the fill of an active button on a gradient.
 const ON_INK_ACTIVE: f32 = 0.24;

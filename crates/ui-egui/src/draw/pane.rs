@@ -248,6 +248,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                 selected: !searching && mailbox.place() == Place::View(view.role),
                 depth: 0,
                 icon: Some(folder_icon(Some(view.role))),
+                enabled: true,
             };
             if nav_row(ui, theme, &row).clicked() {
                 asked.open = Some(Place::View(view.role));
@@ -281,6 +282,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                     selected: !searching && mailbox.place() == Place::Folder(folder.id),
                     depth: folder.depth,
                     icon: Some(folder_icon(folder.role)),
+                    enabled: true,
                 };
                 if nav_row(ui, theme, &row).clicked() {
                     asked.open = Some(Place::Folder(folder.id));

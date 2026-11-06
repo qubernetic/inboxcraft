@@ -218,6 +218,7 @@ fn glass_float_and_colour_fields_are_translucent_and_the_float_about_four_fifths
             ("glass", p.glass),
             ("glass edge", p.glass_edge),
             ("window edge", p.window_edge),
+            ("scrim", p.scrim),
             ("glass highlight", p.glass_highlight),
             ("shadow", p.shadow),
             ("line", p.line),

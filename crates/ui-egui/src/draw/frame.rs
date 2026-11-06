@@ -230,9 +230,11 @@ pub(super) fn top_row(ctx: &Context, theme: &Theme, keymap: &Keymap) {
             area.anchor(Align2::RIGHT_TOP, vec2(-gap * 2.0, gap * 2.0))
         }
     };
-    area.show(ctx, |ui| {
+    let shown = area.show(ctx, |ui| {
         Frame::float(theme).show(ui, |ui| controls(ui, theme, keymap));
     });
+    // Above a sheet over the window (the settings), too.
+    ctx.move_to_top(shown.response.layer_id);
 }
 
 /// The edges of the window resize it, its corners in both directions; the pointer shows which way. The window's rect

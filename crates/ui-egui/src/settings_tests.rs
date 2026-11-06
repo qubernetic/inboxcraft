@@ -56,3 +56,14 @@ fn a_nudged_accent_leaves_a_note_and_an_untouched_one_none() {
     settings.took(&json!({ "nudged": true, "requested": 7 }), &after);
     assert_eq!(settings.note(), None, "an answer of another shape says nothing");
 }
+
+#[test]
+fn following_a_preset_puts_its_colours_in_the_fields_and_drops_the_note() {
+    let mut settings = Settings::default();
+    let appearance = Appearance { accent: Accent::Preset("aurora"), ..Appearance::default() };
+    settings.colours_mut()[0] = "#123456".to_owned();
+    settings.follow(&appearance);
+    let (draft, aurora) = (settings.draft().unwrap(), Preset::of(&appearance.accent));
+    assert_eq!((draft.gradient, draft.accent), (aurora.gradient, aurora.accent));
+    assert!(settings.note().is_none());
+}

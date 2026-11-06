@@ -42,16 +42,42 @@ fn press(harness: &mut Harness<'static, InboxApp>, label: &str) -> &'static str 
     harness.state().mailbox().last_run().unwrap_or("nothing")
 }
 
+/// Moves the pointer to `at`, then presses and releases the primary button there.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run();
+    }
+}
+
 fn selected(harness: &Harness<'static, InboxApp>, label: &str) -> bool {
     harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled() == Some(Toggled::True)
 }
 
 #[test]
-fn the_pane_opens_the_page_in_place_of_the_list_and_close_or_escape_leave_it() {
+fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_leave_it() {
     let mut harness = opened();
+    harness.get_by_role_and_label(Role::Dialog, "Settings");
     harness.get_by_label("Appearance");
     harness.get_by_label("Preview");
-    assert_eq!(harness.query_all_by_label_contains("Draft logo for the bakery").count(), 0, "the list makes room for the page");
+    // The sections not built yet are there, faded.
+    assert!(harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());
+    assert!(!harness.get_by_label("Appearance, settings page").accesskit_node().is_disabled());
+    // The list lies under the sheet: a press there selects nothing, and the sheet stays.
+    let before = harness.state().mailbox().selected();
+    let row = harness.query_all_by_label_contains("Draft logo for the bakery").next().expect("the list is behind the sheet").rect();
+    press_at(&mut harness, row.center());
+    assert_eq!(harness.state().mailbox().selected(), before, "the sheet takes the press");
+    assert!(harness.state().settings().is_open());
+    // Beside the sheet the dim takes the press, and the sheet goes.
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    press_at(&mut harness, egui::pos2(sheet.left() / 2.0, sheet.center().y));
+    assert_eq!(harness.state().mailbox().selected(), before, "the dim takes the press");
+    assert!(!harness.state().settings().is_open(), "a press beside the sheet closes it");
+    harness.state_mut().open_settings();
+    harness.run();
     harness.get_by_role_and_label(Role::Button, "Close").click();
     harness.run();
     assert!(!harness.state().settings().is_open());
@@ -83,9 +109,15 @@ fn every_control_runs_its_command() {
     assert_eq!(press(&mut harness, "Lucide"), "ui.icons.set");
     assert_eq!(harness.state().appearance().icons, Icons::Lucide);
 
-    assert_eq!(press(&mut harness, "120 %"), "ui.text_scale.set");
+    // The slider: a press in its middle sets 110 %, the right arrow a step more.
+    harness.get_by_role_and_label(Role::Slider, "Text size").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("ui.text_scale.set"));
+    assert_eq!(harness.state().appearance().text_scale, 110);
+    harness.key_press(Key::ArrowRight);
+    harness.run();
     assert_eq!(harness.state().appearance().text_scale, 120);
-    assert!(selected(&harness, "120 %"));
+    assert_eq!(harness.get_by_role_and_label(Role::Slider, "Text size").accesskit_node().numeric_value(), Some(120.0));
 
     let switch = harness.get_by_role_and_label(Role::Switch, "Reduce motion");
     assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::False));
@@ -96,6 +128,9 @@ fn every_control_runs_its_command() {
     assert_eq!(harness.state().appearance().motion, Motion::Reduce);
     assert_eq!(harness.get_by_role_and_label(Role::Switch, "Reduce motion").accesskit_node().toggled(), Some(Toggled::True));
 
+    // Custom takes the colours in use as its own and opens their fields.
+    assert!(harness.query_by_label("Gradient start").is_none(), "no fields while a preset is in use");
+    assert_eq!(press(&mut harness, "Custom"), "ui.accent.set");
     for (label, colour) in [("Gradient start", "#102030"), ("Gradient middle", "#405060"), ("Gradient end", "#708090"), ("Accent", "#ffd60a")] {
         let field = harness.get_by_role_and_label(Role::TextInput, label);
         field.click();
@@ -125,7 +160,7 @@ fn an_accent_the_engine_made_lighter_says_so_and_shows_the_colour_it_uses() {
 }
 
 #[test]
-fn the_custom_pill_takes_the_typed_colours_and_the_preview_shows_them_first() {
+fn the_custom_card_takes_the_typed_colours_and_the_preview_shows_them_first() {
     let mut harness = opened();
     let typed = ["#00a86b", "#0077ff", "#7a00ff", "#ffe066"];
     for (field, colour) in harness.state_mut().settings_mut().colours_mut().iter_mut().zip(typed) {

@@ -442,6 +442,8 @@ impl InboxApp {
         let (escape, down, up) =
             ui.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
         let mut stepped = false;
+        // The settings sheet lies over the list: its keys do nothing to the mail.
+        let typing = typing || self.settings.is_open();
         if !typing && (down || up) {
             self.mailbox.step(down);
             stepped = true;
@@ -477,7 +479,7 @@ impl InboxApp {
         let mut out = true;
         let mut page = None;
         let mut changed = None;
-        let full = self.reader.full_width() && !adding && !setting;
+        let full = self.reader.full_width() && !adding;
         // The colour fields first, then the place for the glass layers, then everything else.
         let corner = self.window_corner(ui.ctx());
         glass::backdrop_rounded(ui.painter(), &theme, ui.max_rect(), corner);
@@ -508,20 +510,6 @@ impl InboxApp {
             page = CentralPanel::no_frame()
                 .frame(around(half, gap, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, keymap, mailbox, onboarding)))
-                .inner;
-        } else if setting {
-            asked = Panel::left("folders")
-                .resizable(true)
-                .default_size(s.folder_pane)
-                .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
-                .inner;
-            let reduce = self.reduce_motion();
-            let (keymap, settings, appearance) = (&self.keymap, &mut self.settings, self.mailbox.appearance());
-            changed = CentralPanel::no_frame()
-                .frame(around(half, gap, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| settings::show(ui, &theme, keymap, settings, appearance, reduce)))
                 .inner;
         } else if !full {
             asked = Panel::left("folders")
@@ -568,7 +556,7 @@ impl InboxApp {
         let mut drawn = reader::Drawn::default();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if self.reader.open_id().is_some() && !adding && !setting {
+        if self.reader.open_id().is_some() && !adding {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
             drawn = CentralPanel::no_frame()
@@ -585,6 +573,9 @@ impl InboxApp {
             self.hover = drawn.hover.take();
         }
         layers.finish(ui.painter(), &theme);
+        if setting {
+            changed = self.settings_sheet(ui.ctx(), &theme);
+        }
         // Every gradient of the frame is painted by now: the pictures it left out go.
         gradient::sweep(ui.ctx());
         let undone = self.toast(ui, &theme, typing);
@@ -685,6 +676,13 @@ impl InboxApp {
         frame::outline(ctx, theme, corner);
     }
 
+    /// The settings sheet over the window; what was asked on it.
+    fn settings_sheet(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<settings::Asked> {
+        let reduce = self.reduce_motion();
+        let (keymap, settings, appearance) = (&self.keymap, &mut self.settings, self.mailbox.appearance());
+        settings::sheet(ctx, theme, keymap, settings, appearance, reduce)
+    }
+
     /// Call with each frame's input before the frame (eframe's `raw_input_hook`): after the desktop moved or resized
     /// the window it adds the button release the desktop kept, so the hover shows again without a click.
     pub fn release_after_window_grab(ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -781,7 +779,10 @@ impl InboxApp {
     fn apply_settings(&mut self, asked: settings::Asked) {
         match asked {
             settings::Asked::Mode(mode) => self.set_mode(mode),
-            settings::Asked::Preset(id) => self.appear("ui.accent.set", &json!({ "preset": id })),
+            settings::Asked::Preset(id) => {
+                self.appear("ui.accent.set", &json!({ "preset": id }));
+                self.settings.follow(self.mailbox.appearance());
+            }
             settings::Asked::Custom(colours) => match self.set_appearance("ui.accent.set", &json!({ "custom": colours })) {
                 Ok(answer) => self.settings.took(&answer, self.mailbox.appearance()),
                 Err(error) => self.mailbox.fail(error),

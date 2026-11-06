@@ -58,6 +58,12 @@ impl Settings {
         self.note = None;
     }
 
+    /// The fields take the colours of `appearance`, after a preset was chosen: no draft is left to show.
+    pub fn follow(&mut self, appearance: &Appearance) {
+        self.fill(appearance);
+        self.note = None;
+    }
+
     /// Puts the colours of `appearance` in the fields.
     fn fill(&mut self, appearance: &Appearance) {
         let preset = Preset::of(&appearance.accent);

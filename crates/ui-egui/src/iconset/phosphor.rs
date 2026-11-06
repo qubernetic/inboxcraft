@@ -47,6 +47,13 @@ const fn point(id: IconId) -> char {
         IconId::Junk => '\u{e4e2}',     // warning-circle
         IconId::MarkRead => '\u{e21a}', // envelope-simple-open
         IconId::Lock => '\u{e308}',     // lock-simple
+        IconId::Palette => '\u{e6c8}',  // palette
+        IconId::At => '\u{e0ac}',       // at
+        IconId::Funnel => '\u{e266}',   // funnel
+        IconId::Keyboard => '\u{e2d8}', // keyboard
+        IconId::Shield => '\u{e40c}',   // shield-check
+        IconId::Info => '\u{e2ce}',     // info
+        IconId::Close => '\u{e4f6}',    // x
     }
 }
 

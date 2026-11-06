@@ -152,6 +152,8 @@ pub struct Palette {
     pub glass: Color32,
     /// The edge of a glass layer.
     pub glass_edge: Color32,
+    /// Over the window behind a sheet (the settings): a light shade, so the window shows through dimmed.
+    pub scrim: Color32,
     /// The outline of a window whose frame the app draws: about as strong as the desktops' own, so the window stands
     /// apart from what lies behind it.
     pub window_edge: Color32,
@@ -697,6 +699,7 @@ impl Palette {
                 Mode::Light => alpha(shade, 0.08),
                 Mode::Dark => alpha(sheer, 0.09),
             },
+            scrim: alpha(shade, 0.25),
             window_edge: match mode {
                 Mode::Light => alpha(shade, 0.24),
                 Mode::Dark => alpha(sheer, 0.16),
