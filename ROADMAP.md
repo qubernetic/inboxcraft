@@ -76,6 +76,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | The hover actions act on the sample mailbox: Done, read or unread and Delete, from the row or its keys (D, R, Delete), through the sample-only `sample.mail.set` in memory; the row slides out, a toast with Undo (Ctrl+Z) puts it back; reduced motion makes both land at once; hidden without `--sample` (#89) |
 | 2026-11-06 | The reader on the design system: a toolbar of mail actions over the subject, the thread as cards with Reply, Reply all and Forward on the open message, full width and the next-message rule in a More menu, the link status only while a link is hovered; actions without a command disabled with a tooltip, Done and Delete acting on the sample mailbox (#90) |
 | 2026-11-06 | The design file in FigCraft: foundations, components, every screen in light and dark, mood, five flows (#96) |
+| 2026-11-06 | UI polish toward the design file, waves 1 and 2: primary and secondary buttons on the text gradient, the search pill, the dark accent from the middle stop, inset rows and outline group icons; the rail with the app mark and its views, the folder pane on the design, the app's own window frame (`ui.frame.set`) and the brand mark as the app icon (#104) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -120,3 +121,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: the hover actions on the sample mailbox (#89) |
 | 2026-11-06 | minor | Progress log: the reader on the design system (#90) |
 | 2026-11-06 | minor | Progress log: the design file (#96) |
+| 2026-11-06 | minor | Progress log: UI polish waves 1 and 2 (#104) |

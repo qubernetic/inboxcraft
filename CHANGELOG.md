@@ -357,8 +357,22 @@ All notable changes to InboxCraft are listed here. The format follows
 - The design file `docs/design/inboxcraft.figcraft` (FigCraft): colour variables per preset and mode, type styles,
   the components with their variants, every screen of the app in light and dark, the mood in each preset and five
   flows as storyboards; a PNG per page and `docs/design/README.md` (#96)
+- `ui.frame.set` (`safe`): who draws the window frame, the desktop's title bar, the window controls in the top row
+  or a slim strip of the app's own with the title (the default). A native window opens without the desktop's
+  decorations unless the title bar is chosen, moves by its strip, maximises on a double click and resizes at its
+  edges; pictures and the web build draw no frame. The choice is a row on the Appearance page (#104)
+- The rail shows the app's mark, Start, Mail, Calendar, Pins, Sent mail, Search, the settings and the owner's
+  initials; the views not built yet are disabled and say so (#104)
+- Text buttons in three tones (quiet, secondary outlined, primary on the text gradient) with an optional icon; the
+  search field is a pill with a magnifier (#104)
 
 ### Changed
+- The look follows the design file (#104): dark mode's accent is the preset's middle stop lightened; primary
+  buttons sit on the text gradient, the stops darkened until white reads (at most 30 %); list rows sit 6 points
+  inside their card; a group's header shows an outline icon in the muted colour; the folder pane has an outlined
+  account picker with a chevron, Add account as a link, a MAILBOXES heading, an icon per folder, and each account
+  lists only its own folders; the app icon is the InboxCraft mark (two cards entering a notched tray, Electric
+  gradient, white tile)
 - The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
   left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
@@ -439,6 +453,8 @@ All notable changes to InboxCraft are listed here. The format follows
 - The `draft` CI job: a draft PR now starts no job at all (#68)
 
 ### Fixed
+- The line egui drew under the list header (and the error and reader notice bars) is gone, and the list keeps the
+  scroll bar's width free so the bar no longer lies over the cards (#104)
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
 

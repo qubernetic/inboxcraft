@@ -1,6 +1,6 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** major · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app: the design system, the screens and the main flows, made
 in [FigCraft](https://getartcraft.com/apps/figcraft). **It is the source of truth for the look.**
@@ -49,19 +49,8 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-The file changed these after `docs/design.md` and `theme.rs` were written; they are to be brought into both.
-- **Text on the gradient** sits on a text gradient: the preset's stops darkened in small steps until white reads at
-  4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise the full
-  gradient with the deep ink (Citrus). Icons on the rail keep the full gradient. `docs/design.md` says white or the
-  deep ink, whichever has more contrast, which gives the deep ink on Electric.
-- **The dark accent is the middle stop, lightened.** Links, accent text and active icons in dark mode use the
-  preset's middle stop mixed 30 % with white, made readable at 4.5:1 (Electric a soft violet), instead of the
-  preset's separate accent (Electric's yellow), which stood apart from everything else. The separate accent stays one
-  of the account colours.
-- **Group icons are outlines.** A group's header shows its Regular (outline) icon in the muted colour, without a
-  background, instead of a solid icon on the gradient.
-- **Rows sit inside their card.** A card keeps 6 points between its edges and its rows, so a selected or hovered
-  row is a rounded band inside the card; a card without a header keeps the same 6 points above its first row.
+Nothing at the moment: the text gradient, the dark accent, the outline group icons and the inset rows are in
+`docs/design.md` and `theme.rs` (#104).
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui
@@ -82,3 +71,4 @@ The file changed these after `docs/design.md` and `theme.rs` were written; they 
 | 2026-11-06 | minor | The scenarios also in Electric dark (#96) |
 | 2026-11-06 | minor | Dark mode's accent: the middle stop lightened instead of the separate accent (#96) |
 | 2026-11-06 | major | The file is the source of truth for the look; its changes not yet in the code are listed (#96) |
+| 2026-11-06 | minor | The window frame page and the new app icon on the cover; every listed change is in the code (#104) |
