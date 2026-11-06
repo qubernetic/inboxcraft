@@ -1,11 +1,12 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** major · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app: the design system, the screens and the main flows, made
-in [FigCraft](https://getartcraft.com/apps/figcraft). It is built from the same sources as the code:
-[`docs/design.md`](../design.md) and the tokens of `crates/ui-egui/src/theme.rs`. Where the file and those two
-disagree, `theme.rs` and `docs/design.md` win and the file is fixed.
+in [FigCraft](https://getartcraft.com/apps/figcraft). **It is the source of truth for the look.**
+[`docs/design.md`](../design.md) puts its rules and tokens into words and `crates/ui-egui/src/theme.rs` implements
+them; where the app or `docs/design.md` differs from the file, they are changed to match it. A change of look starts
+in the file.
 
 Everything in it is original. The typeface is Figtree and the icons are Phosphor, the same files as in `assets/`.
 Every person, address and message is invented (`example.org`).
@@ -43,27 +44,31 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
   their properties (a message row's sender, subject, preview, date, flag, attachment, account stripe and avatar).
 - **Pages are transparent** and default to Electric dark, so the labels read on a dark canvas; each screen sets
   its own mode. The PNGs are drawn on a dark base.
-- **Text on the gradient** sits on a text gradient: the preset's stops darkened in small steps until white reads at
-  4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise the full
-  gradient with the deep ink (Citrus). Icons on the rail keep the full gradient. This is a proposal:
-  `docs/design.md` still says white or the deep ink, whichever has more contrast, which gives the deep ink on
-  Electric.
-- **The dark accent is the middle stop, lightened.** Links, accent text and active icons in dark mode use the
-  preset's middle stop mixed 30 % with white, made readable at 4.5:1 (Electric a soft violet), instead of the
-  preset's separate accent (Electric's yellow), which stood apart from everything else. The separate accent stays one
-  of the account colours. This is a proposal: `docs/design.md` and `theme.rs` still use the separate accent.
-- **Group icons are outlines.** A group's header shows its Regular (outline) icon in the muted colour, without a
-  background; a solid icon on the gradient next to every group drew the eye away from the mail. This is a proposal
-  too: `docs/design.md` still describes the group badge as a solid icon on the gradient.
 - **Glass is faked, as in the app.** Colour fields behind the window, translucent layers with a light top edge and a
   soft shadow; no background blur, because the app has none.
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
+
+## Not in the code yet
+The file changed these after `docs/design.md` and `theme.rs` were written; they are to be brought into both.
+- **Text on the gradient** sits on a text gradient: the preset's stops darkened in small steps until white reads at
+  4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise the full
+  gradient with the deep ink (Citrus). Icons on the rail keep the full gradient. `docs/design.md` says white or the
+  deep ink, whichever has more contrast, which gives the deep ink on Electric.
+- **The dark accent is the middle stop, lightened.** Links, accent text and active icons in dark mode use the
+  preset's middle stop mixed 30 % with white, made readable at 4.5:1 (Electric a soft violet), instead of the
+  preset's separate accent (Electric's yellow), which stood apart from everything else. The separate accent stays one
+  of the account colours.
+- **Group icons are outlines.** A group's header shows its Regular (outline) icon in the muted colour, without a
+  background, instead of a solid icon on the gradient.
+- **Rows sit inside their card.** A card keeps 6 points between its edges and its rows, so a selected or hovered
+  row is a rounded band inside the card; a card without a header keeps the same 6 points above its first row.
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui
   premultiplies colours.
 - Screens for features not built yet (triage, writing, calendar, settings) show the intended behaviour from the plan
-  and `docs/design.md`; their exact layout is a proposal until the code lands.
+  and `docs/design.md`; they show the intended layout. The composer's place is still being designed: the file shows it in place of the
+  reader and in a window of its own.
 - Each flow is also a prototype flow on the full-size screens (a click goes to the next step). Steps on different
   pages may not play through in every viewer; the storyboards on the Scenarios page always show the whole flow.
 
@@ -76,3 +81,4 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 | 2026-11-06 | minor | The composer fills the reader's place or opens in a window of its own (#96) |
 | 2026-11-06 | minor | The scenarios also in Electric dark (#96) |
 | 2026-11-06 | minor | Dark mode's accent: the middle stop lightened instead of the separate accent (#96) |
+| 2026-11-06 | major | The file is the source of truth for the look; its changes not yet in the code are listed (#96) |

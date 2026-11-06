@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -100,7 +100,9 @@ invented.
   `just run -- --sample --control 7981` adds the control channel, driven with JSON-line control requests
   (`docs/control-protocol.md`).
 - Headless screenshots: `just shot` runs `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`
-  (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`; the look is in `docs/design.md`).
+  (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`).
+- The look's source of truth is the FigCraft design file `docs/design/inboxcraft.figcraft`; `docs/design.md` puts
+  it into words, and `docs/design/README.md` lists what the code does not follow yet.
 - For UI work, look at the result, in light and dark.
 - Parallel agents each use their own `CARGO_TARGET_DIR`.
 
@@ -128,3 +130,4 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-05 | minor | The Flatpak keeps building: `flatpak-sources-check` and reasons for permissions (#31) |
 | 2026-11-05 | minor | CI: a draft starts no job (#68) |
 | 2026-11-05 | minor | CI: `flatpak` runs on a PR only when its inputs change (#68) |
+| 2026-11-06 | minor | The FigCraft design file is the look's source of truth (#96) |
