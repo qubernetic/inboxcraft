@@ -1,4 +1,5 @@
-# The pictures of the mail list for docs/images and the PR (ui_shot, see crates/ui-egui/src/shot.rs).
+# The pictures of the mail list for docs/images and the PR (ui_shot, see crates/ui-egui/src/shot.rs), in the default
+# accent preset (Electric) unless a line names another.
 {"out": "docs/images/list-light.png", "mode": "light", "select": "Photos from the coast walk"}
 {"out": "docs/images/list-dark.png", "mode": "dark", "select": "Photos from the coast walk"}
 {"out": "docs/images/narrowed-light.png", "mode": "light", "narrow": 2}
@@ -27,3 +28,16 @@
 {"out": "docs/images/onboard-passed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "passed"}
 {"out": "docs/images/onboard-failed-light.png", "mode": "light", "size": [1200, 820], "onboard": "failed"}
 {"out": "docs/images/onboard-failed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "failed"}
+# The other accent presets (E1.15a): the list with the reader, a thread with its quote and a failed account check.
+{"out": "docs/images/list-aurora-light.png", "mode": "light", "preset": "aurora", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-aurora-dark.png", "mode": "dark", "preset": "aurora", "select": "Photos from the coast walk"}
+{"out": "docs/images/reader-thread-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/onboard-failed-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/list-citrus-light.png", "mode": "light", "preset": "citrus", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-citrus-dark.png", "mode": "dark", "preset": "citrus", "select": "Photos from the coast walk"}
+{"out": "docs/images/reader-thread-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/onboard-failed-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}

@@ -14,6 +14,7 @@ use egui::{Color32, IconData, Pos2, Rect, Shape, Vec2, pos2, vec2};
 use crate::UiError;
 use crate::shot::{self, Picture};
 use crate::theme::Mode;
+use crate::theme::app_icon::{DOT, INK, PAPER, TILE, TRAY};
 
 /// The side of the square the parts are drawn on, in units.
 pub const SIDE: f32 = 256.0;
@@ -55,12 +56,6 @@ pub enum Part {
         fill: Color32,
     },
 }
-
-const TILE: Color32 = Color32::from_rgb(0x1D, 0x6A, 0x64);
-const PAPER: Color32 = Color32::from_rgb(0xFF, 0xFF, 0xFF);
-const INK: Color32 = Color32::from_rgb(0xA9, 0xD4, 0xCF);
-const TRAY: Color32 = Color32::from_rgb(0x6C, 0xC4, 0xBA);
-const DOT: Color32 = Color32::from_rgb(0xF0, 0xA0, 0x6A);
 
 const fn round(radius: f32) -> CornerRadiusF32 {
     CornerRadiusF32 { nw: radius, ne: radius, sw: radius, se: radius }

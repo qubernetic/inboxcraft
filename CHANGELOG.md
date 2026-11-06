@@ -327,6 +327,15 @@ All notable changes to InboxCraft are listed here. The format follows
 - CI no longer builds the `flatpak` bundle on a push to an epic branch (10 to 11 billed minutes per push); it still
   builds on a push to `develop` or `main`, on a manual run and on a PR that changes a Flatpak input, so an epic's PR
   into `develop` builds it when the epic changed one (#78)
+- The look comes from colour tokens derived from the mode and an accent preset (#81): mode System (the default),
+  Light or Dark, and the presets Electric (the default), Aurora and Citrus, each one entry of
+  `theme::PRESETS` (three gradient stops and an accent). Surfaces, glass, float, selection, colour fields, badges,
+  focus, markers, account colours and text are derived from the two choices; text tokens are moved in lightness
+  until they meet WCAG AA (4.5:1) on every surface they sit on, markers and control edges 3:1; light-mode accent
+  text is the middle stop darkened; text on the gradient picks white or a deep ink by contrast. The teal and coral
+  palette is gone. The list, the reader and the add-account page use the tokens; `theme.rs` is the only file that
+  names a colour (a test refuses any other). `InboxApp::set_mode` and `set_preset` change the look from the next
+  frame (the commands and the settings page come later); `ui_shot` takes a `preset`
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)

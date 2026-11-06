@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** major
 
 InboxCraft's own look: the colours, distances and type sizes of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -8,10 +8,15 @@ Everything here is original. Nothing is copied, traced or recreated from another
 `crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below.
 
 ## Principles
-- **Calm and readable.** Warm paper and harbour teal in light, slate and sea glass in dark. One accent colour; the
-  rest is text on quiet surfaces.
-- **Contrast is checked, not hoped for.** Every text colour meets WCAG 2 AA (4.5:1) on each surface it sits on, and
-  every marker, focus ring and field edge meets 3:1. A test fails when a colour change breaks this.
+- **Two choices make every colour.** The mode (System, Light or Dark) and the accent preset (three gradient stops
+  and an accent) give every colour token; a view names tokens, never colours. `theme.rs` is the only file that names
+  a colour, and a test refuses a colour constant anywhere else in `crates/ui-egui`.
+- **Vivid colour in a few places, quiet surfaces elsewhere.** The gradient runs at full strength in one place (the
+  navigation rail, to come) and as accents elsewhere: the selected row, the unread marker, the badge, links. The
+  surfaces are near-neutral with a trace of the preset's middle stop.
+- **Contrast is checked, not hoped for.** Every text token is moved in lightness until it meets WCAG 2 AA (4.5:1) on
+  each surface it sits on, and every marker, focus ring and field edge until it meets 3:1. The tests run this for
+  every preset in both modes, and fail when a preset or a rule breaks it.
 - **Nothing depends on colour alone.** Unread rows have a dot and a coloured sender; flagged rows have a flag; the
   account colour stripe repeats what the folder pane says in words. A screen reader hears "unread" and "flagged".
 - **Every control has an accessible name.** Rows are named by sender, subject, date and state; folders by name,
@@ -19,31 +24,56 @@ Everything here is original. Nothing is copied, traced or recreated from another
 - **Message text is data.** Subjects, names and previews are shown on one line: line breaks, tabs and NUL become
   spaces, bidi controls that could reorder what is shown are removed, and each is cut to 300 characters.
 
-## Colours
+## Mode
+System (the default) follows the computer's light or dark choice; Light and Dark keep one. egui switches between the
+two installed styles, so a change shows from the next frame.
 
-| Role | Light | Dark | Used for |
+## Accent presets
+Each preset is one entry of `theme::PRESETS`; adding a preset is adding one entry, and the tests then check it in
+both modes.
+
+| Preset | Gradient (first, middle, last) | Accent |
+|---|---|---|
+| Electric (default) | `#2F6BFF` `#8A3FFC` `#FF2D95` | `#FFD60A` |
+| Aurora | `#9B5CFF` `#FF2BD6` `#FF8A00` | `#00E5FF` |
+| Citrus | `#FF2E63` `#FF8F00` `#FFD000` | `#3D5AFE` |
+
+## Colour tokens
+Each mode starts from neutral values of our own; the preset then tints them and gives the colours. "Readable" means
+moved towards black (light) or white (dark) in small steps until the ratio holds on every surface named.
+
+| Token | Light | Dark | Used for |
 |---|---|---|---|
-| background | `#F6F5F1` | `#15181B` | behind everything, hovered rows |
-| panel | `#ECEAE4` | `#1C2024` | the folder pane, buttons, row separators |
-| surface | `#FBFAF7` | `#191C1F` | the message list and its header |
-| field | `#FFFFFF` | `#101315` | inside text fields |
-| field border | `#80868D` | `#6E757D` | the edge of fields and windows |
-| text | `#1C2024` | `#E7E5DF` | text |
-| muted | `#565C63` | `#A5ABB2` | previews, dates, addresses, section headings |
-| selection | `#D5E6E3` | `#24413F` | the selected row or folder |
-| accent | `#1D6A64` | `#6CC4BA` | links, the sender of an unread message |
-| on accent | `#FFFFFF` | `#10201E` | text on the accent |
-| unread | `#1D6A64` | `#6CC4BA` | the unread dot |
-| flag | `#B5541A` | `#F0A06A` | the flag of a flagged message |
-| focus | `#0F5C8C` | `#7FB8F0` | the keyboard focus ring |
-| badge / on badge | `#1D6A64` / `#FFFFFF` | `#6CC4BA` / `#10201E` | unread counts |
-| error / on error | `#B3261E` / `#FFFFFF` | `#F2B8B5` / `#3B0A08` | the error banner |
+| background | `#F3F5F9` with 3 % of the middle stop | `#0D1016` with 5 % | behind everything, the reader, hovered rows |
+| panel | `#EBEEF3` with 3.6 % | `#141821` with 6 % | the folder pane, buttons, bars, row separators |
+| surface | `#FBFCFD` with 1.8 % | `#10131A` with 3 % | the message list and its header |
+| field | `#FFFFFF` with 0.9 % | `#090B10` with 1.5 % | inside text fields |
+| selection | surface with 20 % of the first stop | with 32 % | the selected row or folder; the start of the selection gradient |
+| selection end | surface with 12 % of the last stop | with 20 % | the end of the selection gradient |
+| text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text |
+| muted | `#5D6676` tinted, readable at 4.5:1 | `#9AA3B2` tinted, readable at 4.5:1 | previews, dates, addresses, section headings |
+| accent | the middle stop mixed 62/38 with black, readable at 4.5:1 | the preset's accent, readable at 4.5:1 | links, the sender of an unread message, accent text |
+| on accent | white or deep ink, by contrast | the same | text on the accent |
+| unread | the middle stop, readable at 3:1 | the same | the unread dot |
+| flag | the last stop, readable at 4.5:1 | the same | the flag; text that asks for a second look |
+| focus | the first stop, readable at 3:1 | the same | the keyboard focus ring, the hovered control's edge |
+| field border | muted towards the surface, readable at 3:1 | the same | the edge of fields and windows |
+| badge / on badge | panel with 16 % of the middle stop / accent, readable on it | 30 % / the same | unread counts |
+| error / on error | `#B3261E` readable / white or deep ink | `#F2B8B5` readable / white or deep ink | the error banner, error text |
+| gradient | the three stops at full strength | the same | the rail, the primary button, group badges (to come) |
+| ink | deep ink `#05060A` | the same | text on the gradient where white does not read |
+| glass / edge / highlight | near-white at 72 % / text-tone at 8 % / white at 90 % | near-white at 5.5 % / 9 % / 7 % | glass layers over the colour fields (E1.15b) |
+| shadow | text-tone at 10 % | black at 35 % | under glass and floats |
+| float | near-white at 80 % | `#1E2330` tinted at 80 % | tooltips, menus, hover actions, toasts |
+| line / hover | text-tone at 7 % / 4.5 % | near-white at 6 % / 6 % | row separators and hovered rows on glass |
+| colour fields | each stop at 30 % | each stop at 42 % | the soft fields painted once behind the window (E1.15b) |
 
-Account colours, in account order and repeating after the sixth: teal, plum, rust, blue, olive, raspberry
-(light `#1D6A64 #8A4B9C #B5541A #2F5FA8 #6B6B1F #A23B5B`, dark `#6CC4BA #C99BD8 #F0A06A #8DB4F0 #C9C66A #EE8FAA`).
+**Text on the gradient** picks white or the deep ink, whichever has more contrast with the colour under it; with
+that ink every point of every preset's gradient reads at 4.5:1 (white alone would not on Citrus's yellow end).
+
+**Account colours**, in account order and repeating after the sixth: the first, middle and last stop, the accent,
+the mix of the first and middle stop and the mix of the middle and last, each readable at 3:1 on the surfaces.
 They mark an account's heading in the folder pane and, in the unified list, a stripe at the left of each row.
-
-The window follows the system's light or dark choice.
 
 ## Distances
 
@@ -87,7 +117,7 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
 
 ## The app icon
 A white letter stands in a light teal inbox tray, with an orange unread dot at its corner, on a dark teal rounded
-square (the light theme's accent). It is drawn in code from rectangles, convex polygons and circles on a 256-unit
+square. The icon keeps these colours in every mode and preset (`theme::app_icon`), so the desktop shows one icon. It is drawn in code from rectangles, convex polygons and circles on a 256-unit
 square (`crates/ui-egui/src/icons.rs`); the same shapes give the SVG the desktop shows
 (`assets/app-icon/inboxcraft.svg`, written by `just icon`) and the window icon. The square keeps a 16-unit margin, so
 the icon sits among others at the same size.
@@ -134,7 +164,8 @@ the icon sits among others at the same size.
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
 width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
-dark. Every UI change shows them in its PR.
+dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
+A script line picks its preset with `"preset"`. Every UI change shows them in its PR.
 
 ## Revision history
 | Date | Change | Summary |
@@ -144,3 +175,4 @@ dark. Every UI change shows them in its PR.
 | 2026-11-05 | minor | The reader (#33) |
 | 2026-11-05 | minor | The page mark joins the app icon in `icons.rs` (#33) |
 | 2026-11-05 | minor | Adding an account (#34) |
+| 2026-11-06 | major | Colour tokens from the mode and an accent preset; Electric, Aurora and Citrus; teal and coral gone (#81) |
