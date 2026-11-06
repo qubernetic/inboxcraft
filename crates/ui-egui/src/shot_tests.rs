@@ -8,7 +8,7 @@ use egui::epaint::{ClippedPrimitive, Mesh, Primitive, TextureId, Vertex, WHITE_U
 use egui::{Color32, ColorImage, Rect, TextureOptions, pos2, vec2};
 
 use super::{Canvas, Open, Picture, Shot, Texture, apply_textures, fill, parse_script, render, shoot};
-use crate::theme::{Mode, Theme};
+use crate::theme::{Mode, PRESETS, Preset, Theme};
 
 fn shot(json: &str) -> Shot {
     parse_script(json).unwrap().remove(0)
@@ -35,23 +35,32 @@ fn a_bad_line_is_named() {
 }
 
 #[test]
-fn the_sample_window_is_drawn_in_the_theme_colours_of_each_mode() {
-    for mode in [Mode::Light, Mode::Dark] {
-        let name = if mode == Mode::Light { "light" } else { "dark" };
-        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "size": [1000, 700]}}"#))).unwrap();
-        assert_eq!((picture.width(), picture.height()), (1000, 700));
-        let palette = Theme::for_mode(mode).palette;
-        assert_eq!(picture.pixel(4, 690), Some(palette.panel), "{name}: the folder pane");
-        assert_eq!(picture.pixel(995, 695), Some(palette.surface), "{name}: below the list");
-        let mut colours = std::collections::BTreeSet::new();
-        for y in (0..700).step_by(7) {
-            for x in (0..1000).step_by(7) {
-                colours.insert(picture.pixel(x, y).unwrap().to_array());
+fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
+    for preset in &PRESETS {
+        for mode in [Mode::Light, Mode::Dark] {
+            let name = if mode == Mode::Light { "light" } else { "dark" };
+            let id = preset.id;
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "size": [1000, 700]}}"#))).unwrap();
+            assert_eq!((picture.width(), picture.height()), (1000, 700));
+            let palette = Theme::new(mode, preset).palette;
+            assert_eq!(picture.pixel(4, 690), Some(palette.panel), "{id} {name}: the folder pane");
+            assert_eq!(picture.pixel(995, 695), Some(palette.surface), "{id} {name}: below the list");
+            let mut colours = std::collections::BTreeSet::new();
+            for y in (0..700).step_by(7) {
+                for x in (0..1000).step_by(7) {
+                    colours.insert(picture.pixel(x, y).unwrap().to_array());
+                }
             }
+            assert!(colours.len() > 20, "{id} {name}: text and markers were drawn, not just the panels ({} colours)", colours.len());
+            assert!(colours.contains(&palette.text.to_array()), "{id} {name}: text in the text colour");
         }
-        assert!(colours.len() > 20, "{name}: text and markers were drawn, not just the panels ({} colours)", colours.len());
-        assert!(colours.contains(&palette.text.to_array()), "{name}: text in the text colour");
     }
+}
+
+#[test]
+fn a_shot_without_a_preset_is_electric() {
+    let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
+    assert_eq!(picture.pixel(4, 390), Some(Theme::new(Mode::Light, &Preset::default()).palette.panel));
 }
 
 #[test]
@@ -78,6 +87,7 @@ fn a_shot_can_narrow_open_search_and_select() {
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),
+        (r#"{"out": "x.png", "mode": "light", "preset": "teal"}"#, "no preset \"teal\""),
         (r#"{"out": "x.png", "mode": "light", "open": {"role": "attic"}}"#, "attic"),
         (r#"{"out": "x.png", "mode": "light", "select": "No such subject"}"#, "No such subject"),
         (r#"{"out": "x.png", "mode": "light", "select": "Your bike is due for a service", "pictures": "maybe"}"#, "maybe"),

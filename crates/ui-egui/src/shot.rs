@@ -12,7 +12,7 @@
 //! {"out": "docs/images/list-dark.png", "mode": "dark", "narrow": 2, "open": {"role": "inbox"}, "search": "logo"}
 //! ```
 //!
-//! `mode` is `light` or `dark`, `size` the window in points (1200 by 760 when left out), `scale` the pixels per
+//! `mode` is `light` or `dark`, `preset` the accent preset (`electric` when left out, `aurora`, `citrus`), `size` the window in points (1200 by 760 when left out), `scale` the pixels per
 //! point (1 to 4, 1 when left out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
@@ -31,7 +31,7 @@ use serde::Deserialize;
 use crate::mailbox::{Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
-use crate::theme::Mode;
+use crate::theme::{Mode, Preset};
 use crate::workers::Scripted;
 use crate::{InboxApp, UiError, sample};
 
@@ -59,6 +59,9 @@ pub struct Shot {
     pub out: String,
     /// `light` or `dark`.
     pub mode: String,
+    /// The accent preset's id; Electric when left out.
+    #[serde(default)]
+    pub preset: Option<String>,
     /// The window in points.
     #[serde(default)]
     pub size: Option<[f32; 2]>,
@@ -452,17 +455,22 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mu
 ///
 /// # Errors
 ///
-/// [`UiError::Shot`] for a mode, role, row or size the shot names wrongly; the errors of [`render`].
+/// [`UiError::Shot`] for a mode, preset, role, row or size the shot names wrongly; the errors of [`render`].
 pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let mode = match shot.mode.as_str() {
         "light" => Mode::Light,
         "dark" => Mode::Dark,
         other => return Err(bad(format!("{}: mode {other:?} is not light or dark", shot.out))),
     };
+    let preset = match shot.preset.as_deref() {
+        None => Preset::default(),
+        Some(id) => *Preset::named(id).ok_or_else(|| bad(format!("{}: no preset {id:?}", shot.out)))?,
+    };
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
     let session = sample::session(Box::new(FakeClock::new(time)))?;
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    app.set_preset(preset);
     if let Some(account) = shot.narrow {
         app.mailbox_mut().narrow(Some(account));
     }

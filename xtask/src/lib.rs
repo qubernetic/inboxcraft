@@ -16,6 +16,7 @@ mod cov;
 mod error;
 mod flatpak;
 mod layers;
+mod side_by_side;
 mod spdx;
 mod stats;
 mod test_files;

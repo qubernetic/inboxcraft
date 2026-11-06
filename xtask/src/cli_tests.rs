@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use super::{Command, HELP, Invocation, default_root, parse};
 use crate::ci::GATES;
+use crate::side_by_side::Options;
 use crate::test_support::run_xtask;
 use crate::{FAILED, OK, USAGE};
 
@@ -50,6 +51,17 @@ fn an_unknown_option_is_a_usage_error() {
 fn root_takes_a_directory() {
     assert_eq!(parse(args(&["help", "--root", "/tmp/x"])), Ok(Invocation { command: Command::Help, root: Some(PathBuf::from("/tmp/x")) }));
     assert_eq!(parse(args(&["help", "--root"])), Err("`--root` needs a directory".to_owned()));
+}
+
+#[test]
+fn side_by_side_takes_its_folders() {
+    let plain = parse(args(&["side-by-side"])).unwrap();
+    assert_eq!(plain.command, Command::SideBySide(Options::default()));
+    let named = parse(args(&["side-by-side", "--script", "s.jsonl", "--mood", "m", "--out", "o"])).unwrap();
+    let expected = Options { script: Some(PathBuf::from("s.jsonl")), mood: Some(PathBuf::from("m")), out: Some(PathBuf::from("o")) };
+    assert_eq!(named.command, Command::SideBySide(expected));
+    assert_eq!(parse(args(&["side-by-side", "--mood"])), Err("`--mood` needs a path".to_owned()));
+    assert_eq!(parse(args(&["layers", "--out", "o"])), Err("`--out` only goes with `side-by-side`".to_owned()));
 }
 
 #[test]

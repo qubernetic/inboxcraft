@@ -1,12 +1,19 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use std::path::{Path, PathBuf};
+
 use egui::Color32;
 
-use super::{Mode, Theme, contrast};
+use super::{Mode, ModePreference, PRESETS, Preset, Theme, contrast, ink_on, mix, readable};
 
-fn both() -> [Theme; 2] {
-    [Theme::light(), Theme::dark()]
+/// Every preset in both modes.
+fn all() -> Vec<Theme> {
+    PRESETS.iter().flat_map(|preset| [Theme::new(Mode::Light, preset), Theme::new(Mode::Dark, preset)]).collect()
+}
+
+fn hex(colour: Color32) -> String {
+    format!("#{:02x}{:02x}{:02x}", colour.r(), colour.g(), colour.b())
 }
 
 #[test]
@@ -18,54 +25,218 @@ fn contrast_of_black_on_white_is_21_and_of_a_colour_on_itself_is_1() {
 }
 
 #[test]
-fn every_text_colour_meets_wcag_aa_on_the_surface_it_sits_on() {
-    for theme in both() {
+fn the_three_presets_are_one_table_entry_each_with_the_owners_colours() {
+    let ids: Vec<&str> = PRESETS.iter().map(|preset| preset.id).collect();
+    assert_eq!(ids, ["electric", "aurora", "citrus"]);
+    let electric = Preset::named("electric").unwrap();
+    assert_eq!(electric.gradient.map(hex), ["#2f6bff", "#8a3ffc", "#ff2d95"]);
+    assert_eq!(hex(electric.accent), "#ffd60a");
+    let aurora = Preset::named("aurora").unwrap();
+    assert_eq!(aurora.gradient.map(hex), ["#9b5cff", "#ff2bd6", "#ff8a00"]);
+    assert_eq!(hex(aurora.accent), "#00e5ff");
+    let citrus = Preset::named("citrus").unwrap();
+    assert_eq!(citrus.gradient.map(hex), ["#ff2e63", "#ff8f00", "#ffd000"]);
+    assert_eq!(hex(citrus.accent), "#3d5afe");
+    assert_eq!(Preset::default(), *electric, "Electric is the default");
+    assert_eq!(Preset::named("teal"), None);
+    assert_eq!(Preset::named("Electric"), None, "ids are lower case");
+}
+
+#[test]
+fn the_mode_preference_is_system_by_default_and_maps_onto_egui() {
+    assert_eq!(ModePreference::default(), ModePreference::System);
+    assert_eq!(egui::ThemePreference::from(ModePreference::System), egui::ThemePreference::System);
+    assert_eq!(egui::ThemePreference::from(ModePreference::Light), egui::ThemePreference::Light);
+    assert_eq!(egui::ThemePreference::from(ModePreference::Dark), egui::ThemePreference::Dark);
+    for (id, preference) in [("system", ModePreference::System), ("light", ModePreference::Light), ("dark", ModePreference::Dark)] {
+        assert_eq!(ModePreference::named(id), Some(preference));
+        assert_eq!(preference.id(), id);
+    }
+    assert_eq!(ModePreference::named("sepia"), None);
+}
+
+#[test]
+fn every_text_colour_meets_wcag_aa_on_the_surface_it_sits_on_for_every_preset_in_both_modes() {
+    for theme in all() {
         let p = theme.palette;
         for (name, text, background) in [
             ("text on background", p.text, p.background),
             ("text on panel", p.text, p.panel),
             ("text on surface", p.text, p.surface),
+            ("text on field", p.text, p.field),
             ("text on selection", p.text, p.selection),
+            ("text on the selection's end", p.text, p.selection_end),
+            ("muted on background", p.muted, p.background),
             ("muted on surface", p.muted, p.surface),
             ("muted on panel", p.muted, p.panel),
             ("muted on selection", p.muted, p.selection),
-            ("accent text on accent", p.on_accent, p.accent),
+            ("accent text on background", p.accent, p.background),
+            ("accent text on surface", p.accent, p.surface),
+            ("accent text on panel", p.accent, p.panel),
+            ("accent text on selection", p.accent, p.selection),
+            ("text on accent", p.on_accent, p.accent),
             ("badge text on badge", p.on_badge, p.badge),
             ("error text on error", p.on_error, p.error),
+            ("error text on surface", p.error, p.surface),
+            ("error text on panel", p.error, p.panel),
+            ("flag text on surface", p.flag, p.surface),
         ] {
             let ratio = contrast(text, background);
-            assert!(ratio >= 4.5, "{:?} {name}: {ratio:.2}", theme.mode);
+            assert!(ratio >= 4.5, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
         }
     }
 }
 
 #[test]
-fn controls_and_markers_meet_three_to_one() {
-    for theme in both() {
+fn controls_and_markers_meet_three_to_one_for_every_preset_in_both_modes() {
+    for theme in all() {
         let p = theme.palette;
         for (name, colour, background) in [
-            ("accent on surface", p.accent, p.surface),
             ("unread marker on surface", p.unread, p.surface),
+            ("unread marker on selection", p.unread, p.selection),
             ("flag on surface", p.flag, p.surface),
             ("flag on selection", p.flag, p.selection),
-            ("unread sender on selection", p.accent, p.selection),
             ("focus ring on surface", p.focus, p.surface),
             ("focus ring on panel", p.focus, p.panel),
+            ("focus ring on background", p.focus, p.background),
             ("field border on surface", p.field_border, p.surface),
+            ("field border on field", p.field_border, p.field),
         ] {
             let ratio = contrast(colour, background);
-            assert!(ratio >= 3.0, "{:?} {name}: {ratio:.2}", theme.mode);
+            assert!(ratio >= 3.0, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
         }
     }
 }
 
 #[test]
-fn account_colours_are_distinct_and_visible_in_both_modes() {
-    for theme in both() {
+fn text_on_a_gradient_picks_white_or_dark_ink_by_contrast() {
+    assert_eq!(ink_on(Color32::from_rgb(0x20, 0x20, 0x60)), Color32::WHITE);
+    assert_ne!(ink_on(Color32::from_rgb(0xff, 0xd0, 0x00)), Color32::WHITE, "dark ink on yellow");
+    for theme in all() {
+        for step in 0..=32 {
+            let at = step as f32 / 32.0;
+            let behind = theme.gradient_at(at);
+            let ink = ink_on(behind);
+            let other = if ink == Color32::WHITE { theme.palette.ink } else { Color32::WHITE };
+            assert!(contrast(ink, behind) >= contrast(other, behind), "{} at {at}: the better ink", theme.preset.id);
+            assert!(contrast(ink, behind) >= 4.5, "{} {:?} ink on the gradient at {at}: {:.2}", theme.preset.id, theme.mode, contrast(ink, behind));
+        }
+    }
+    // Citrus's yellow end: white would not do.
+    let citrus = Theme::new(Mode::Light, Preset::named("citrus").unwrap());
+    assert!(contrast(Color32::WHITE, citrus.gradient_at(1.0)) < 4.5);
+    assert_ne!(ink_on(citrus.gradient_at(1.0)), Color32::WHITE);
+}
+
+#[test]
+fn the_gradient_runs_through_the_three_stops() {
+    for theme in all() {
+        let [first, middle, last] = theme.preset.gradient;
+        assert_eq!(theme.gradient_at(0.0), first);
+        assert_eq!(theme.gradient_at(0.5), middle);
+        assert_eq!(theme.gradient_at(1.0), last);
+        assert_eq!(theme.gradient_at(-3.0), first, "clamped");
+        assert_eq!(theme.gradient_at(f32::NAN), first, "nonsense starts at the start");
+        assert_eq!(theme.gradient_at(7.0), last, "clamped");
+        assert_eq!(theme.palette.gradient, theme.preset.gradient, "the gradient token is the preset at full strength");
+    }
+}
+
+#[test]
+fn light_mode_accent_text_is_darkened_and_dark_mode_shows_the_accent_itself_where_it_passes() {
+    for preset in &PRESETS {
+        let light = Theme::new(Mode::Light, preset).palette;
+        let middle = preset.gradient[1];
+        assert!(light.accent != middle && light.accent != preset.accent, "{}: darkened, not the raw colour", preset.id);
+        let channels = |c: Color32| u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b());
+        assert!(channels(light.accent) < channels(middle), "{}: darker than the middle stop", preset.id);
+        let dark = Theme::new(Mode::Dark, preset).palette;
+        if [dark.background, dark.panel, dark.surface, dark.selection].iter().all(|on| contrast(preset.accent, *on) >= 4.5) {
+            assert_eq!(dark.accent, preset.accent, "{}: the accent itself in dark", preset.id);
+        } else {
+            assert!(channels(dark.accent) > channels(preset.accent), "{}: lightened in dark", preset.id);
+        }
+    }
+}
+
+#[test]
+fn readable_moves_a_colour_only_as_far_as_it_must() {
+    let white = Color32::WHITE;
+    let already = Color32::from_rgb(0x20, 0x20, 0x20);
+    assert_eq!(readable(already, &[white], 4.5, Mode::Light), already);
+    let yellow = Color32::from_rgb(0xff, 0xd0, 0x00);
+    let darkened = readable(yellow, &[white], 4.5, Mode::Light);
+    assert!(contrast(darkened, white) >= 4.5);
+    assert!(contrast(darkened, white) < 6.0, "not darker than needed: {:.2}", contrast(darkened, white));
+    let lightened = readable(Color32::from_rgb(0x3d, 0x5a, 0xfe), &[Color32::BLACK], 7.0, Mode::Dark);
+    assert!(contrast(lightened, Color32::BLACK) >= 7.0);
+    assert_eq!(readable(yellow, &[], 4.5, Mode::Light), yellow, "nothing to sit on");
+}
+
+#[test]
+fn mix_runs_from_one_colour_to_the_other() {
+    let (a, b) = (Color32::from_rgb(0, 100, 200), Color32::from_rgb(200, 0, 100));
+    assert_eq!(mix(a, b, 0.0), a);
+    assert_eq!(mix(a, b, 1.0), b);
+    assert_eq!(mix(a, b, 0.5), Color32::from_rgb(100, 50, 150));
+    assert_eq!(mix(a, b, -1.0), a);
+    assert_eq!(mix(a, b, f32::NAN), a);
+}
+
+/// Teal: blue-green with more green than blue (the old `#1d6a64` and `#6cc4ba`); the presets' cyans have more blue.
+/// Coral: a soft orange-pink (the old `#f0a06a`).
+fn teal_or_coral(colour: Color32) -> bool {
+    let (r, g, b) = (i32::from(colour.r()), i32::from(colour.g()), i32::from(colour.b()));
+    let teal = g > r + 40 && b > r + 20 && g >= b;
+    let coral = r > 200 && r - g > 50 && (100..190).contains(&g) && (70..160).contains(&b);
+    teal || coral
+}
+
+#[test]
+fn no_teal_or_coral_is_left() {
+    for theme in all() {
+        let p = theme.palette;
+        let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection, p.selection_end];
+        tokens.extend(p.accounts);
+        for colour in tokens {
+            assert!(!teal_or_coral(colour), "{} {:?}: {} is teal or coral", theme.preset.id, theme.mode, hex(colour));
+        }
+    }
+}
+
+#[test]
+fn glass_float_and_colour_fields_are_translucent_and_the_float_about_four_fifths() {
+    for theme in all() {
+        let p = theme.palette;
+        for (name, colour) in [
+            ("glass", p.glass),
+            ("glass edge", p.glass_edge),
+            ("glass highlight", p.glass_highlight),
+            ("shadow", p.shadow),
+            ("line", p.line),
+            ("hover", p.hover),
+        ] {
+            assert!(colour.a() < 255 && colour.a() > 0, "{} {:?} {name}: alpha {}", theme.preset.id, theme.mode, colour.a());
+        }
+        assert!((195..=215).contains(&p.float.a()), "{} {:?} float alpha {}", theme.preset.id, theme.mode, p.float.a());
+        for (index, field) in p.colour_fields.iter().enumerate() {
+            assert!(field.a() > 0 && field.a() < 160, "{} {:?} colour field {index}", theme.preset.id, theme.mode);
+        }
+    }
+}
+
+#[test]
+fn account_colours_are_distinct_and_visible_for_every_preset_in_both_modes() {
+    for theme in all() {
         let colours = theme.palette.accounts;
         for (index, colour) in colours.iter().enumerate() {
-            assert!(contrast(*colour, theme.palette.surface) >= 3.0, "{:?} account colour {index}", theme.mode);
-            assert!(colours.iter().skip(index + 1).all(|other| other != colour), "{:?} account colour {index} repeats", theme.mode);
+            assert!(contrast(*colour, theme.palette.surface) >= 3.0, "{} {:?} account colour {index}", theme.preset.id, theme.mode);
+            assert!(
+                colours.iter().skip(index + 1).all(|other| other != colour),
+                "{} {:?} account colour {index} repeats",
+                theme.preset.id,
+                theme.mode
+            );
         }
         assert_eq!(theme.account_colour(0), colours[0]);
         assert_eq!(theme.account_colour(colours.len() as u64), colours[0], "wraps around");
@@ -74,8 +245,25 @@ fn account_colours_are_distinct_and_visible_in_both_modes() {
 }
 
 #[test]
+fn every_preset_gives_its_own_colours_and_the_modes_differ() {
+    for mode in [Mode::Light, Mode::Dark] {
+        let palettes: Vec<_> = PRESETS.iter().map(|preset| Theme::new(mode, preset).palette).collect();
+        for (index, palette) in palettes.iter().enumerate() {
+            for other in palettes.iter().skip(index + 1) {
+                assert_ne!(palette.accent, other.accent, "{mode:?}");
+                assert_ne!(palette.selection, other.selection, "{mode:?}");
+                assert_ne!(palette.background, other.background, "{mode:?}: the surfaces carry a trace of the preset");
+            }
+        }
+    }
+    for preset in &PRESETS {
+        assert_ne!(Theme::new(Mode::Light, preset).palette, Theme::new(Mode::Dark, preset).palette);
+    }
+}
+
+#[test]
 fn the_type_scale_grows_and_the_spacing_is_positive() {
-    for theme in both() {
+    for theme in all() {
         let t = theme.type_scale;
         assert!(0.0 < t.small && t.small < t.body && t.body < t.heading && t.heading < t.title, "{t:?}");
         let s = theme.spacing;
@@ -86,11 +274,8 @@ fn the_type_scale_grows_and_the_spacing_is_positive() {
 }
 
 #[test]
-fn for_mode_picks_the_matching_theme_and_the_visuals_follow() {
-    assert_eq!(Theme::for_mode(Mode::Light), Theme::light());
-    assert_eq!(Theme::for_mode(Mode::Dark), Theme::dark());
-    assert_ne!(Theme::light().palette, Theme::dark().palette);
-    for theme in both() {
+fn the_visuals_follow_the_tokens() {
+    for theme in all() {
         let visuals = theme.visuals();
         assert_eq!(visuals.dark_mode, theme.mode == Mode::Dark);
         assert_eq!(visuals.panel_fill, theme.palette.panel);
@@ -98,6 +283,7 @@ fn for_mode_picks_the_matching_theme_and_the_visuals_follow() {
         assert_eq!(visuals.selection.bg_fill, theme.palette.selection);
         assert_eq!(visuals.hyperlink_color, theme.palette.accent);
         assert_eq!(visuals.override_text_color, Some(theme.palette.text));
+        assert_eq!(visuals.widgets.hovered.bg_stroke.color, theme.palette.focus);
         let style = theme.style();
         assert_eq!(style.spacing.item_spacing.y, theme.spacing.xs);
         let body = style.text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
@@ -108,15 +294,88 @@ fn for_mode_picks_the_matching_theme_and_the_visuals_follow() {
 }
 
 #[test]
-fn mode_of_reads_the_context_and_apply_installs_both_styles() {
+fn mode_of_reads_the_context_and_apply_installs_both_modes_of_the_preset() {
     let ctx = egui::Context::default();
-    Theme::apply(&ctx);
-    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::light().palette.panel);
-    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::dark().palette.panel);
+    let aurora = Preset::named("aurora").unwrap();
+    Theme::apply(&ctx, aurora);
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, aurora).palette.panel);
+    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, aurora).palette.panel);
     ctx.set_theme(egui::Theme::Dark);
     assert_eq!(Mode::of(&ctx), Mode::Dark);
-    assert_eq!(Theme::current(&ctx), Theme::dark());
+    assert_eq!(Theme::current(&ctx, aurora), Theme::new(Mode::Dark, aurora));
     ctx.set_theme(egui::Theme::Light);
     assert_eq!(Mode::of(&ctx), Mode::Light);
-    assert_eq!(Theme::current(&ctx), Theme::light());
+    assert_eq!(Theme::current(&ctx, aurora), Theme::new(Mode::Light, aurora));
+}
+
+/// The `.rs` files under `dir`, test files left out.
+fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_owned();
+        if path.is_dir() {
+            sources(&path, found);
+        } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
+            found.push(path);
+        }
+    }
+}
+
+/// Whether `line` names a colour of its own: an RGB or hex literal, a grey, an HSVA colour built from numbers, or a
+/// named egui colour other than "none" and the placeholder.
+fn names_a_colour(line: &str) -> bool {
+    let literal = ["from_rgb(", "from_rgba_unmultiplied(", "from_rgba_premultiplied(", "from_gray(", "from_black_alpha(", "from_white_alpha("]
+        .iter()
+        .any(|call| line.split(call).skip(1).any(|rest| rest.trim_start().starts_with(|c: char| c.is_ascii_digit())));
+    let named = line.split("Color32::").skip(1).any(|rest| {
+        let constant: String = rest.chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
+        !constant.is_empty() && !["TRANSPARENT", "PLACEHOLDER"].contains(&constant.as_str())
+    });
+    let hex = line.contains("rgb(0x") || line.contains("Rgba::from_") || line.contains("from_hex(") || line.contains("Hsva::new(");
+    literal || named || hex
+}
+
+#[test]
+fn the_colour_check_finds_literals_and_named_colours() {
+    assert!(names_a_colour("let x = Color32::from_rgb(0x1D, 0x6A, 0x64);"));
+    assert!(names_a_colour("fill(Color32::WHITE)"));
+    assert!(names_a_colour("Color32::from_gray(40)"));
+    assert!(names_a_colour("const X: Color32 = rgb(0xffffff);"));
+    assert!(names_a_colour("Color32::from_hex(\"#2f6bff\")"));
+    assert!(names_a_colour("let h = Hsva::new(0.5, 1.0, 1.0, 1.0);"));
+    assert!(!names_a_colour("Color32::from_rgba_premultiplied(*px.first()?, 1, 2, 3)"));
+    assert!(!names_a_colour("painter.galley(pos, galley, Color32::PLACEHOLDER)"));
+    assert!(!names_a_colour("let fill = p.surface;"));
+}
+
+#[test]
+fn the_old_teal_and_coral_would_be_caught() {
+    for old in [0x1D6A64, 0x6CC4BA, 0xF0A06A] {
+        let colour = Color32::from_rgb((old >> 16) as u8, (old >> 8) as u8, old as u8);
+        assert!(teal_or_coral(colour), "{}", hex(colour));
+    }
+}
+
+#[test]
+fn no_colour_constant_outside_the_token_code() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    assert!(files.len() > 10, "the walk found the sources");
+    let token_code = root.join("src").join("theme.rs");
+    let mut found = Vec::new();
+    for file in files.iter().filter(|file| **file != token_code) {
+        let text = std::fs::read_to_string(file).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            if names_a_colour(code) {
+                found.push(format!("{}:{}: {}", file.strip_prefix(root).unwrap().display(), index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "colours belong in theme.rs:\n{}", found.join("\n"));
 }

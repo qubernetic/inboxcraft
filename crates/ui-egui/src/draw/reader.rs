@@ -24,7 +24,7 @@ use crate::mailbox::{After, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::reader::{Content, File, Header, Opened, Person, PictureState, Reader, ThreadRow, inline_key, link_status, size_text};
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
 use crate::tr;
 
 /// How deep tables inside tables are drawn; deeper cells show nothing.
@@ -309,7 +309,7 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
         let (rect, response) = ui.allocate_exact_size(vec2(w * scale, h * scale), Sense::click());
         let alt = if image.alt.is_empty() { tr!("Picture").to_owned() } else { image.alt.clone() };
         response.widget_info(|| WidgetInfo::labeled(egui::Role::Image, true, &alt));
-        ui.painter().image(handle.id(), rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), Color32::WHITE);
+        ui.painter().image(handle.id(), rect, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), theme::NO_TINT);
         if let Some(link) = image.link.and_then(|index| document.links.get(index))
             && response.hovered()
         {

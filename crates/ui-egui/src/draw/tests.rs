@@ -16,7 +16,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use crate::mailbox::{Mailbox, Place};
 use crate::sample;
-use crate::theme::{Mode, Theme};
+use crate::theme::{Mode, ModePreference, Preset, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -65,7 +65,27 @@ fn every_control_has_an_accessible_name_in_both_modes() {
 fn the_theme_follows_the_mode() {
     let harness = harness_with(sample_app(), egui::Theme::Dark);
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
-    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::dark().palette.panel);
+    assert_eq!(harness.state().mode(), ModePreference::System);
+    assert_eq!(*harness.state().preset(), Preset::default());
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &Preset::default()).palette.panel);
+}
+
+#[test]
+fn a_new_preset_and_mode_show_from_the_next_frame() {
+    let mut harness = harness_with(sample_app(), egui::Theme::Light);
+    let citrus = *Preset::named("citrus").unwrap();
+    harness.state_mut().set_preset(citrus);
+    harness.state_mut().set_mode(ModePreference::Dark);
+    harness.run();
+    assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
+    assert_eq!(harness.ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, &citrus).palette.panel);
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &citrus).palette.panel);
+    harness.state_mut().set_mode(ModePreference::Light);
+    harness.run();
+    assert_eq!(Mode::of(&harness.ctx), Mode::Light);
+    harness.state_mut().set_mode(ModePreference::System);
+    harness.run();
+    assert_eq!(harness.ctx.options(|options| options.theme_preference), egui::ThemePreference::System);
 }
 
 #[test]

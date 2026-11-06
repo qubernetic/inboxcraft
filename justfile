@@ -96,6 +96,10 @@ wasm: _up
 shot script="crates/ui-egui/shots.jsonl": _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
 
+# Each ui_shot picture next to the mood sketch of its preset and mode (sketches in plan/mood, pairs in plan/side-by-side)
+side-by-side *args: _up
+    {{ exec }} cargo xtask side-by-side {{ args }}
+
 # Export the app icon drawn in crates/ui-egui/src/icons.rs to assets/app-icon/inboxcraft.svg
 icon: _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example app_icon

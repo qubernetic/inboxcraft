@@ -28,7 +28,8 @@ just --list       # every recipe
 ```
 
 Other recipes: `test` (nextest; extra arguments go to it), `lint`, `fmt`, `fmt-check`, `deny`, `cov`, `layers`,
-`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `icon` (exports the app icon),
+`wasm`, `shot` (the `ui_shot` pictures of the sample window, see `docs/design.md`), `side-by-side` (each of
+those pictures beside its mood sketch, see `docs/design.md`, "Pictures"), `icon` (exports the app icon),
 `flatpak-sources` and `flatpak-sources-check`, `shell`, `dev`, `down`, `rebuild`, `clean` (removes the cargo
 volumes and `target/`), on the host `flatpak` (see "The dev Flatpak") and, for the owner only, `it-live` (see "Live
 tests").
@@ -86,6 +87,7 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
+| `cargo xtask side-by-side` | not a gate and not part of `ci`: writes each `ui_shot` picture beside the mood sketch of its preset and mode to `plan/side-by-side/` (sketches from `plan/mood/`, both gitignored; `--script`, `--mood`, `--out`); fails when a picture or sketch is missing (see `docs/design.md`, "Pictures") |
 | `cargo xtask help` | the commands and the exit codes |
 
 `ci` runs every gate even after one fails and names the failed ones at the end. Exit codes: 0 passed, 1 a gate
@@ -407,3 +409,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-05 | minor | CI: fuzz builds every target, a PR fuzzes only new or changed targets, a push to `develop` all (#69) |
 | 2026-11-06 | minor | CI: the `test` job builds the dependencies at opt-level 0; the level is in the cache key (#70) |
 | 2026-11-06 | minor | CI: no `flatpak` on a push to an epic branch; what that gives up (#78) |
+| 2026-11-06 | minor | `cargo xtask side-by-side` and its recipe (#81) |

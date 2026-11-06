@@ -2,7 +2,7 @@
 
 **Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -65,6 +65,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | The reader: thread oldest first, short and full header, folded quotes, safe HTML, attachment tiles with Save, remote pictures only after consent (once or always for the sender) through `net` leaking only the URL, link targets on hover, the next-message rule, the full-width reader that Escape leaves (#33) |
 | 2026-11-05 | CI runs the tests once: the `cov` gate's run under coverage is the test run, no separate nextest gate (#66) |
 | 2026-11-05 | Adding an account: the manual form with Detect's proposal, the password into the OS credential store only, `account.add` and `account.remove` (owner), the check's steps live with host, port and issuer; one `net` worker per account in the app (#34) |
+| 2026-11-06 | Theme tokens from the mode (System, Light, Dark) and an accent preset (Electric, Aurora, Citrus), WCAG AA checked for every preset in both modes; teal and coral gone; `cargo xtask side-by-side` puts each picture beside its mood sketch (#81) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -97,3 +98,5 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | minor | Progress log: the reader (#33) |
 | 2026-11-05 | minor | Progress log: the tests run once in CI (#66) |
 | 2026-11-05 | minor | Progress log: adding an account (#34) |
+| 2026-11-06 | minor | Progress log: theme tokens from mode and accent preset (#81) |
+| 2026-11-06 | minor | Progress log: the side-by-side pictures (#81) |

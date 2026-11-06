@@ -1,6 +1,6 @@
 # Where InboxCraft falls short
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
@@ -343,9 +343,20 @@ B = blocks the next stage.
   in `deny.toml` for that crate only, the project owner's to confirm) with no bold weight, so unread rows are marked
   by a dot and the accent colour. Scripts the font lacks (CJK and others) show as boxes, and right-to-left text is
   laid out left to right (egui has no bidi). InboxCraft's own choice of typeface is open (#30).
+- The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
+  `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
+  follows the system's mode in Electric. The glass, float and colour-field tokens exist and are checked, but nothing
+  draws them yet (E1.15b); the gradient shows nowhere yet. The error colours are fixed per mode, not derived from
+  the preset. The app icon keeps its own teal tile and orange dot, the same in every preset (#81).
+- Account colours are the preset's three stops, its accent and two mixes, moved in lightness to 3:1; with Aurora in
+  light mode the accent becomes a dark cyan, and in a preset two of them can look alike at a glance. The stripe
+  repeats what the folder pane says in words (#81).
 - `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
   GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
   E1.13c (#30).
+- `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
+  sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
+  It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
 - `eframe` without its default features links `libwayland-client` at build time instead of loading it at run time
   (#30).
 - The Flatpak is never built in the agent sandbox, which has no `flatpak`; the `flatpak` CI job builds the bundle on
@@ -423,3 +434,5 @@ B = blocks the next stage.
 | 2026-11-05 | minor | `cargo xtask ci` runs the tests once, under coverage (#66) |
 | 2026-11-05 | minor | Onboarding's rough edges; the window applies worker events (#34) |
 | 2026-11-05 | minor | Passwords go at window close; the password field keeps no undo history (#34) |
+| 2026-11-06 | minor | Rough edges of the theme tokens and presets (#81) |
+| 2026-11-06 | minor | Limits of the side-by-side pictures (#81) |

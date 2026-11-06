@@ -27,7 +27,7 @@ use crate::mailbox::Mailbox;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
-use crate::theme::Theme;
+use crate::theme::{ModePreference, Preset, Theme};
 use crate::tr;
 use crate::workers::{NoWorkers, Workers};
 
@@ -44,7 +44,12 @@ pub struct InboxApp {
     textures: reader::Textures,
     hover: Option<String>,
     search: String,
-    themed: bool,
+    /// The mode the owner chose.
+    mode: ModePreference,
+    /// The accent preset the colours come from.
+    preset: Preset,
+    /// The mode and preset installed in the context, once installed.
+    themed: Option<(ModePreference, Preset)>,
     onboarding: Onboarding,
     /// Whether the window offers to add an account.
     can_add: bool,
@@ -83,7 +88,9 @@ impl InboxApp {
             textures: reader::Textures::new(),
             hover: None,
             search: String::new(),
-            themed: false,
+            mode: ModePreference::default(),
+            preset: Preset::default(),
+            themed: None,
             onboarding: Onboarding::default(),
             can_add: false,
             workers: Box::new(NoWorkers),
@@ -179,13 +186,46 @@ impl InboxApp {
         &self.search
     }
 
+    /// The mode the owner chose.
+    #[must_use]
+    pub fn mode(&self) -> ModePreference {
+        self.mode
+    }
+
+    /// Follows the system's mode, or always shows light or dark, from the next frame.
+    pub fn set_mode(&mut self, mode: ModePreference) {
+        self.mode = mode;
+    }
+
+    /// The accent preset the colours come from.
+    #[must_use]
+    pub fn preset(&self) -> &Preset {
+        &self.preset
+    }
+
+    /// Takes the colours from `preset`, from the next frame.
+    pub fn set_preset(&mut self, preset: Preset) {
+        self.preset = preset;
+    }
+
+    /// Installs the chosen preset and mode in the context when they changed.
+    fn install_theme(&mut self, ctx: &egui::Context) {
+        let chosen = (self.mode, self.preset);
+        if self.themed == Some(chosen) {
+            return;
+        }
+        Theme::apply(ctx, &self.preset);
+        // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.
+        if self.themed.is_some() || self.mode != ModePreference::System {
+            ctx.set_theme(egui::ThemePreference::from(self.mode));
+        }
+        self.themed = Some(chosen);
+    }
+
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
-        if !self.themed {
-            Theme::apply(ui.ctx());
-            self.themed = true;
-        }
-        let theme = Theme::current(ui.ctx());
+        self.install_theme(ui.ctx());
+        let theme = Theme::current(ui.ctx(), &self.preset);
         ui.set_style(theme.style());
         let p = theme.palette;
         let s = theme.spacing;
