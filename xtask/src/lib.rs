@@ -31,6 +31,9 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod ci_workflow_tests;
+
 use std::ffi::OsString;
 use std::path::PathBuf;
 

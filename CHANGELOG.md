@@ -427,3 +427,13 @@ All notable changes to InboxCraft are listed here. The format follows
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
+
+### Security
+- The CI dependency cache is pruned and saved more strictly (#79): the prune is `cargo xtask cache-prune`, an allow
+  list that keeps only cargo's marker files and the `deps`, `build` and `.fingerprint` folders of each profile
+  minus every entry named after a package or target of this workspace, deletes everything else under `target/`
+  (`llvm-cov-target/tmp` and unknown folders included), deletes nothing when `cargo metadata` fails or its names
+  are empty or lack `xtask`, and fails when a path under `target/` is still named after one afterwards; the step
+  runs with `shell: bash`. The prune and the save run only on a `push` to `develop`, `main` or `epic/*` that did
+  not create the branch. The cache key carries the runner image (`$ImageOS-$ImageVersion`) and the hash of
+  `.cargo/config.toml`. A test in `xtask` reads `ci.yml` and keeps these conditions in place.
