@@ -180,6 +180,19 @@ fn a_shot_can_narrow_open_search_and_select() {
 }
 
 #[test]
+fn a_shot_shows_the_settings_page_in_the_window_only() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let page = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "settings": true}"#)).unwrap();
+    let closed = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "settings": false}"#)).unwrap();
+    assert_ne!(window, page);
+    assert_eq!(window, closed);
+    for page in [r#""icons": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "settings": true, {page}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),

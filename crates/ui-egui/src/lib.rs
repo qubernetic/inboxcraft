@@ -23,6 +23,7 @@
 //! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
 //! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor or Lucide) maps it to a
 //!   glyph.
+//! - [`settings`]: the appearance settings page's state: open or not, and the custom accent as the owner types it.
 //! - [`keep`]: where the appearance choices (the `ui.*.set` commands) are kept between runs.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
 //! - [`keymap`]: which key runs which action; tooltips and chips read their keys from it.
@@ -51,6 +52,7 @@ pub mod quote;
 pub mod reader;
 pub mod sample;
 pub mod save;
+pub mod settings;
 pub mod shot;
 pub mod theme;
 pub mod workers;

@@ -5,6 +5,8 @@
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
 //! in the folder pane and in the empty list; the add-account page then takes the place of the list and the reader.
+//! The settings button in the folder pane opens the appearance settings page in the same place; Escape or its close
+//! button leave it, and the add-account page closes it.
 //!
 //! Each frame the window hands the engine's jobs to the `net` workers and applies their events
 //! ([`Mailbox::pump`]), so the steps of an account check show as they come.
@@ -21,6 +23,7 @@ mod onboard;
 mod paint;
 mod pane;
 mod reader;
+mod settings;
 
 use std::sync::Arc;
 
@@ -39,6 +42,7 @@ use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
+use crate::settings::Settings;
 use crate::theme::{self, Look, ModePreference, Preset, TextScale, Theme, Typeface};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
@@ -62,6 +66,8 @@ pub struct InboxApp {
     /// Which key runs which action.
     keymap: Keymap,
     onboarding: Onboarding,
+    /// The appearance settings page.
+    settings: Settings,
     /// Whether the window offers to add an account.
     can_add: bool,
     workers: Box<dyn Workers>,
@@ -112,6 +118,7 @@ impl InboxApp {
             kept: Appearance::default(),
             keymap: Keymap::default(),
             onboarding: Onboarding::default(),
+            settings: Settings::default(),
             can_add: false,
             workers: Box::new(NoWorkers),
         }
@@ -157,6 +164,24 @@ impl InboxApp {
     /// control channel).
     pub fn onboarding_mut(&mut self) -> (&mut Onboarding, &mut Mailbox) {
         (&mut self.onboarding, &mut self.mailbox)
+    }
+
+    /// The appearance settings page.
+    #[must_use]
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// The appearance settings page, to type a custom accent from outside (the `ui_shot` scripts, later the control
+    /// channel).
+    pub fn settings_mut(&mut self) -> &mut Settings {
+        &mut self.settings
+    }
+
+    /// Opens the appearance settings page in place of the list and the reader, closing the add-account page.
+    pub fn open_settings(&mut self) {
+        self.onboarding.close();
+        self.settings.open(self.mailbox.appearance());
     }
 
     /// Hands the engine's jobs to the workers and applies their events; the check's steps are read again when
@@ -380,7 +405,16 @@ impl InboxApp {
             self.mailbox.step(down);
             stepped = true;
         }
-        let left_full = escape && self.reader.full_width();
+        let adding = self.onboarding.stage() != Stage::Closed;
+        if adding {
+            self.settings.close();
+        }
+        let left_settings = escape && self.settings.is_open();
+        if left_settings {
+            self.settings.close();
+        }
+        let setting = self.settings.is_open();
+        let left_full = escape && !left_settings && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
         }
@@ -397,8 +431,8 @@ impl InboxApp {
         let mut searched = None;
         let mut clicked = None;
         let mut page = None;
-        let adding = self.onboarding.stage() != Stage::Closed;
-        let full = self.reader.full_width() && !adding;
+        let mut changed = None;
+        let full = self.reader.full_width() && !adding && !setting;
         // The colour fields first, then the place for the glass layers, then everything else.
         glass::backdrop(ui.painter(), &theme, ui.max_rect());
         let mut layers = Layers::begin(ui.painter());
@@ -409,12 +443,26 @@ impl InboxApp {
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
                 .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.mailbox, false)))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false, false)))
                 .inner;
             let (mailbox, onboarding) = (&self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
                 .frame(around(half, gap, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, mailbox, onboarding)))
+                .inner;
+        } else if setting {
+            asked = Panel::left("folders")
+                .resizable(true)
+                .default_size(s.folder_pane)
+                .show_separator_line(false)
+                .frame(around(gap, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add, true)))
+                .inner;
+            let reduce = self.reduce_motion();
+            let (settings, appearance) = (&mut self.settings, self.mailbox.appearance());
+            changed = CentralPanel::no_frame()
+                .frame(around(half, gap, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| settings::show(ui, &theme, settings, appearance, reduce)))
                 .inner;
         } else if !full {
             asked = Panel::left("folders")
@@ -422,7 +470,7 @@ impl InboxApp {
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
                 .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.mailbox, self.can_add)))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add, false)))
                 .inner;
             let (mailbox, search, can_add) = (&self.mailbox, &mut self.search, self.can_add);
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
@@ -452,7 +500,7 @@ impl InboxApp {
         let mut drawn = reader::Drawn::default();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if self.reader.open_id().is_some() && !adding {
+        if self.reader.open_id().is_some() && !adding && !setting {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
             drawn = CentralPanel::no_frame()
@@ -472,6 +520,9 @@ impl InboxApp {
         let acted = dismiss
             || stepped
             || left_full
+            || left_settings
+            || asked.settings
+            || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
             || searched.is_some()
@@ -503,12 +554,36 @@ impl InboxApp {
             self.mailbox.select(clicked);
         }
         if asked.add {
+            self.settings.close();
             self.onboarding.open();
+        }
+        if asked.settings {
+            if setting { self.settings.close() } else { self.open_settings() }
+        }
+        if let Some(changed) = changed {
+            self.apply_settings(changed);
         }
         if let Some(page) = page {
             self.apply_page(page);
         }
         self.sync();
+    }
+
+    /// Applies what was asked for on the settings page: each control through its `ui.*.set` command.
+    fn apply_settings(&mut self, asked: settings::Asked) {
+        match asked {
+            settings::Asked::Mode(mode) => self.set_mode(mode),
+            settings::Asked::Preset(id) => self.appear("ui.accent.set", &json!({ "preset": id })),
+            settings::Asked::Custom(colours) => match self.set_appearance("ui.accent.set", &json!({ "custom": colours })) {
+                Ok(answer) => self.settings.took(&answer, self.mailbox.appearance()),
+                Err(error) => self.mailbox.fail(error),
+            },
+            settings::Asked::Font(typeface) => self.set_typeface(typeface),
+            settings::Asked::Icons(icons) => self.set_icons(icons),
+            settings::Asked::Scale(scale) => self.set_text_scale(scale),
+            settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
+            settings::Asked::Close => self.settings.close(),
+        }
     }
 
     /// Applies what was asked for on the add-account page.
@@ -559,5 +634,8 @@ mod onboard_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod settings_tests;
 #[cfg(test)]
 mod tests;

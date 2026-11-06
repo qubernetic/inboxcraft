@@ -172,6 +172,8 @@ pub struct Mailbox {
     after: After,
     error: Option<String>,
     runs: u64,
+    /// The id of the last command run through [`Mailbox::run`].
+    last: Option<&'static str>,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -311,6 +313,7 @@ impl Mailbox {
             after: After::Next,
             error: None,
             runs: 0,
+            last: None,
         };
         mailbox.refresh();
         mailbox
@@ -425,7 +428,14 @@ impl Mailbox {
 
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
+        self.last = Some(command);
         Ok(self.session.run(command, params)?)
+    }
+
+    /// The id of the last command run through [`Mailbox::run`], answered or refused.
+    #[must_use]
+    pub fn last_run(&self) -> Option<&'static str> {
+        self.last
     }
 
     /// How many commands ran through [`Mailbox::run`] so far.

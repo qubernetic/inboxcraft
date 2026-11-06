@@ -344,10 +344,11 @@ B = blocks the next stage.
   bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
   which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
   for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
-- Text size and typeface (#83, #86): the text scale (90 % to 130 %) and the typeface (Figtree or Inter) are set
-  through `ui.text_scale.set` and `ui.font.set` and kept on disk, but the window has no control for them until the
-  settings page (E1.16b); until then the commands run from code and the `ui_shot` scripts. The fit test draws the
-  list, the reader and the add-account page; the settings page joins it when it exists. Spacing and paddings stay
+- Text size and typeface (#83, #86, #87): the text scale (90 % to 130 %) and the typeface (Figtree or Inter) are
+  set on the appearance settings page or through `ui.text_scale.set` and `ui.font.set`, and kept on disk. The fit
+  test draws the list, the reader, the add-account page and the settings page in both typefaces at 90 %, 100 % and
+  130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
+  Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
@@ -362,8 +363,15 @@ B = blocks the next stage.
   helper on the icon's text) is not done. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
-- Appearance (#86): the six `ui.*.set` commands and the file that keeps their result exist, but the window has no
-  page to change them yet (E1.16b). The file sits in the config folder and is written in the sample window too: it
+- Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings page that
+  runs them exist. The page has no keyboard shortcut and no command of its own: it opens from the folder pane's
+  settings button (or `InboxApp::open_settings`). The custom accent is typed as `#rrggbb` or picked with egui's own
+  colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
+  label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
+  "follow the system" after a choice is possible only through `ui.motion.set` with `reduce: system`. Loading the
+  owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
+  the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of
+  missing glyphs. The file sits in the config folder and is written in the sample window too: it
   holds no mail and nothing about an account, so the sample mode writes this one file and nothing else. A custom
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
@@ -490,3 +498,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Components and motion: what is used yet, one key, the reduced-motion default (#85) |
 | 2026-11-06 | minor | Reduced motion: the mouse wheel's smoothing keeps running (#85) |
 | 2026-11-06 | minor | Appearance: the commands and keeping them exist, the controls wait for the settings page; Lucide's disc; the kept file (#86) |
+| 2026-11-06 | minor | Appearance settings page: what it lacks, the owner's own font or icon files an idea only; the fit test's reach (#87) |

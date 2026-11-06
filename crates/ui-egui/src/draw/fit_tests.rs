@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The window at the smallest and the largest text scale: every text fits the control it belongs to, is not cut by
+//! The window at the smallest and the largest text scale, in every typeface: every text fits the control it belongs to, is not cut by
 //! the pane it sits in, and lies over no other text.
 
 use egui::accesskit::Role;
 use egui::{Rect, Shape, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use inboxcraft_engine::appearance::Typeface;
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -35,15 +36,18 @@ enum Scene {
     Full,
     /// The add-account page.
     Onboard,
+    /// The appearance settings page.
+    Settings,
 }
 
-const SCENES: [Scene; 5] = [Scene::List, Scene::Thread, Scene::Details, Scene::Full, Scene::Onboard];
+const SCENES: [Scene; 6] = [Scene::List, Scene::Thread, Scene::Details, Scene::Full, Scene::Onboard, Scene::Settings];
 
-fn app(scene: Scene, scale: TextScale) -> InboxApp {
+fn app(scene: Scene, scale: TextScale, typeface: Typeface) -> InboxApp {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_text_scale(scale);
+    app.set_typeface(typeface);
     let (folder, subject) = match scene {
-        Scene::List | Scene::Onboard => (None, "Photos from the coast walk"),
+        Scene::List | Scene::Onboard | Scene::Settings => (None, "Photos from the coast walk"),
         Scene::Thread => (Some(3), "Re: Allotment rota for November"),
         Scene::Details => (None, "Your bike is due for a service"),
         Scene::Full => (None, "Draft logo for the bakery"),
@@ -58,11 +62,12 @@ fn app(scene: Scene, scale: TextScale) -> InboxApp {
         Scene::Thread => reader.toggle_quotes(id),
         Scene::Details => reader.toggle_details(id),
         Scene::Full => reader.set_full_width(true),
-        Scene::List | Scene::Onboard => {}
+        Scene::List | Scene::Onboard | Scene::Settings => {}
     }
-    if let Scene::Onboard = scene {
-        let (onboarding, _) = app.onboarding_mut();
-        onboarding.open();
+    match scene {
+        Scene::Onboard => app.onboarding_mut().0.open(),
+        Scene::Settings => app.open_settings(),
+        _ => {}
     }
     app
 }
@@ -125,19 +130,35 @@ fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
 }
 
 #[test]
-fn the_list_and_the_reader_fit_at_90_and_130_percent() {
-    for percent in [90, 100, 130] {
-        let scale = TextScale::from_percent(percent).unwrap();
-        for scene in SCENES {
-            let mut harness = Harness::builder()
-                .with_size(vec2(1200.0, 760.0))
-                .with_theme(egui::Theme::Light)
-                .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(scene, scale));
-            harness.run();
-            assert_eq!(harness.state().text_scale(), scale);
-            let found = misfits(&harness);
-            assert!(found.is_empty(), "{scene:?} at {percent} %:\n{}", found.join("\n"));
+fn the_list_the_reader_and_the_settings_fit_at_90_and_130_percent_in_every_typeface() {
+    for typeface in Typeface::ALL {
+        for percent in [90, 100, 130] {
+            let scale = TextScale::from_percent(percent).unwrap();
+            for scene in SCENES {
+                let mut harness = Harness::builder()
+                    .with_size(vec2(1200.0, 760.0))
+                    .with_theme(egui::Theme::Light)
+                    .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(scene, scale, typeface));
+                harness.run();
+                assert_eq!((harness.state().text_scale(), harness.state().typeface()), (scale, typeface));
+                let found = misfits(&harness);
+                assert!(found.is_empty(), "{scene:?} in {typeface:?} at {percent} %:\n{}", found.join("\n"));
+            }
         }
+    }
+}
+
+#[test]
+fn the_settings_fit_a_narrow_window_with_the_preview_above_the_controls() {
+    for percent in [90, 130] {
+        let scale = TextScale::from_percent(percent).unwrap();
+        let mut harness = Harness::builder()
+            .with_size(vec2(820.0, 760.0))
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(Scene::Settings, scale, Typeface::Inter));
+        harness.run();
+        let found = misfits(&harness);
+        assert!(found.is_empty(), "narrow at {percent} %:\n{}", found.join("\n"));
     }
 }
 

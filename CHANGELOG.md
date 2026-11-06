@@ -322,6 +322,13 @@ All notable changes to InboxCraft are listed here. The format follows
 - Inter v4.1 (OFL) as the second typeface and Lucide 1.70.0 (ISC, its Feather icons MIT) as the second icon set,
   bundled with their licence files (#86). Every `IconId` has a Lucide glyph; Lucide has lines only, so its active
   (Fill) and empty (Duotone) states draw a filled disc behind the lines. `ui_shot` takes `font` and `icon_set`.
+- The appearance settings page (#87): the settings button in the folder pane opens it in place of the list and the
+  reader. One control each for the mode, the accent preset, the custom accent (four colour fields with a picker,
+  `#rrggbb` only, and "Use these colours"), the typeface, the icon set and the text size, and a "Reduce motion"
+  switch; each runs its `ui.*.set` command at once. A preview card shows the look, the typed custom colours
+  included before they are used; when the engine makes a custom accent lighter, the page says which colour is used
+  instead. Close or Escape leave the page. The overflow test covers it in both typefaces at 90 % and 130 %;
+  `ui_shot` takes `settings`.
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
