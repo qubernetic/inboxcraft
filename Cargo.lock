@@ -1808,6 +1808,7 @@ dependencies = [
  "inboxcraft-time",
  "inboxcraft-ui-egui",
  "keyring",
+ "tempfile",
 ]
 
 [[package]]

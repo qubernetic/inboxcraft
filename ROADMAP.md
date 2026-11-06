@@ -70,6 +70,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | Figtree in place of Ubuntu Light, every text style a font token, unread rows by weight, a text scale of 90 % to 130 % with rows and the reader's toolbar following the font, checked for overflow, clipping and overlap (#83) |
 | 2026-11-06 | An icon painter: views ask for an `IconId` in Regular, Fill or Duotone, the set maps every id in an exhaustive match; Phosphor 2.1.1 bundled; the flag, the file tile and the step marks moved onto it (#84) |
 | 2026-11-06 | The design system's components (card, icon button, pill, tooltip with key chip, avatar, badge, hover actions, toast, popup) with a `ui_shot` gallery; motion tokens and one reduced-motion flag every animation reads; a keymap the tooltips read their keys from; avatars in a vivid palette picked per address, in the reader's header (#85) |
+| 2026-11-06 | The appearance commands `ui.theme.set`, `ui.accent.set` (preset or four custom colours, nudged to WCAG AA), `ui.font.set`, `ui.icons.set`, `ui.text_scale.set` and `ui.motion.set`, all `safe`, kept across a restart in the config folder; Inter and Lucide bundled as the second typeface and icon set (#86) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -108,3 +109,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: Figtree, font tokens and the text scale (#83) |
 | 2026-11-06 | minor | Progress log: the icon painter and Phosphor (#84) |
 | 2026-11-06 | minor | Progress log: the components and motion tokens (#85) |
+| 2026-11-06 | minor | Progress log: the appearance commands, Inter and Lucide (#86) |

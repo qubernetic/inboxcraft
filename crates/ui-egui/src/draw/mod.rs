@@ -11,6 +11,10 @@
 //!
 //! Drawing only reads the [`Mailbox`] and the [`Reader`]; what the person asks for is applied after the frame's
 //! drawing, through their methods, which run the engine's commands.
+//!
+//! The look comes from the session's appearance choices (the `ui.*.set` commands, from the window or from outside).
+//! A frame that finds them changed installs them and hands them to the window's [`Keep`], so they are there again
+//! after a restart; [`InboxApp::with_keep`] reads them back at the start.
 
 mod list;
 mod onboard;
@@ -21,19 +25,23 @@ mod reader;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
+use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb};
+use serde_json::{Value, json};
 
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
+use crate::iconset::IconSet;
+use crate::keep::{Keep, NoKeep};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::Mailbox;
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
-use crate::theme::{self, ModePreference, Preset, TextScale, Theme};
-use crate::tr;
+use crate::theme::{self, Look, ModePreference, Preset, TextScale, Theme, Typeface};
 use crate::workers::{NoWorkers, Workers};
+use crate::{UiError, tr};
 
 /// The width of the list beside the reader, in points.
 const LIST_WIDTH: f32 = 380.0;
@@ -45,18 +53,14 @@ pub struct InboxApp {
     textures: reader::Textures,
     hover: Option<String>,
     search: String,
-    /// The mode the owner chose.
-    mode: ModePreference,
-    /// The accent preset the colours come from.
-    preset: Preset,
-    /// The text scale every font token is at.
-    text_scale: TextScale,
-    /// The mode, preset and text scale installed in the context, once installed.
-    themed: Option<(ModePreference, Preset, TextScale)>,
+    /// The appearance installed in the context, once installed.
+    themed: Option<Appearance>,
+    /// Where the appearance is kept between runs.
+    keep: Box<dyn Keep>,
+    /// The appearance the keep holds.
+    kept: Appearance,
     /// Which key runs which action.
     keymap: Keymap,
-    /// Whether every animation lands at its end at once.
-    reduce_motion: bool,
     onboarding: Onboarding,
     /// Whether the window offers to add an account.
     can_add: bool,
@@ -103,12 +107,10 @@ impl InboxApp {
             textures: reader::Textures::new(),
             hover: None,
             search: String::new(),
-            mode: ModePreference::default(),
-            preset: Preset::default(),
-            text_scale: TextScale::default(),
             themed: None,
+            keep: Box::new(NoKeep),
+            kept: Appearance::default(),
             keymap: Keymap::default(),
-            reduce_motion: motion::system_default(None),
             onboarding: Onboarding::default(),
             can_add: false,
             workers: Box::new(NoWorkers),
@@ -122,6 +124,20 @@ impl InboxApp {
         self.onboarding = Onboarding::new(keychain, detect);
         self.can_add = true;
         self.workers = workers;
+        self
+    }
+
+    /// The same window, keeping the appearance choices in `keep`: the ones kept there from an earlier run are the
+    /// session's from now on, and every change is kept there from the frame it shows in.
+    #[must_use]
+    pub fn with_keep(mut self, keep: Box<dyn Keep>) -> Self {
+        if let Some(kept) = keep.load() {
+            self.mailbox.restore_appearance(kept);
+            self.kept = kept;
+        } else {
+            self.kept = *self.mailbox.appearance();
+        }
+        self.keep = keep;
         self
     }
 
@@ -204,37 +220,90 @@ impl InboxApp {
         &self.search
     }
 
+    /// The owner's appearance choices.
+    #[must_use]
+    pub fn appearance(&self) -> &Appearance {
+        self.mailbox.appearance()
+    }
+
+    /// Runs the appearance command `id` (`ui.theme.set` ...) with `params`, as the window's controls do; the look
+    /// changes from the next frame. Its answer, or why it was refused.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal.
+    pub fn set_appearance(&mut self, id: &'static str, params: &Value) -> Result<Value, UiError> {
+        self.mailbox.run(id, params)
+    }
+
+    /// Runs an appearance command whose parameters the window made itself; a refusal shows in the error banner.
+    fn appear(&mut self, id: &'static str, params: &Value) {
+        if let Err(error) = self.set_appearance(id, params) {
+            self.mailbox.fail(error);
+        }
+    }
+
     /// The mode the owner chose.
     #[must_use]
     pub fn mode(&self) -> ModePreference {
-        self.mode
+        self.appearance().theme
     }
 
-    /// Follows the system's mode, or always shows light or dark, from the next frame.
+    /// Follows the system's mode, or always shows light or dark, from the next frame (`ui.theme.set`).
     pub fn set_mode(&mut self, mode: ModePreference) {
-        self.mode = mode;
+        self.appear("ui.theme.set", &json!({ "mode": mode.id() }));
     }
 
     /// The accent preset the colours come from.
     #[must_use]
-    pub fn preset(&self) -> &Preset {
-        &self.preset
+    pub fn preset(&self) -> Preset {
+        Preset::of(&self.appearance().accent)
     }
 
-    /// Takes the colours from `preset`, from the next frame.
+    /// Takes the colours from `preset`, from the next frame (`ui.accent.set`): a shipped preset by id, otherwise its
+    /// four colours as the owner's own.
     pub fn set_preset(&mut self, preset: Preset) {
-        self.preset = preset;
+        if Accent::preset(preset.id).is_some() {
+            self.appear("ui.accent.set", &json!({ "preset": preset.id }));
+        } else {
+            let rgb = |colour: egui::Color32| Rgb(colour.r(), colour.g(), colour.b());
+            let custom = CustomAccent { gradient: preset.gradient.map(rgb), accent: rgb(preset.accent) };
+            self.appear("ui.accent.set", &json!({ "custom": custom.hex() }));
+        }
     }
 
     /// The text scale every font token is at.
     #[must_use]
     pub fn text_scale(&self) -> TextScale {
-        self.text_scale
+        Look::of(self.appearance()).text_scale
     }
 
-    /// Draws every text at `scale`, from the next frame; the rows, headers and toolbars follow the font.
+    /// Draws every text at `scale`, from the next frame; the rows, headers and toolbars follow the font
+    /// (`ui.text_scale.set`).
     pub fn set_text_scale(&mut self, scale: TextScale) {
-        self.text_scale = scale;
+        self.appear("ui.text_scale.set", &json!({ "percent": scale.percent() }));
+    }
+
+    /// The typeface every font token is in.
+    #[must_use]
+    pub fn typeface(&self) -> Typeface {
+        self.appearance().font
+    }
+
+    /// Draws every text in `typeface`, from the next frame (`ui.font.set`).
+    pub fn set_typeface(&mut self, typeface: Typeface) {
+        self.appear("ui.font.set", &json!({ "font": typeface.id() }));
+    }
+
+    /// The icon set the icons come from.
+    #[must_use]
+    pub fn icons(&self) -> IconSet {
+        IconSet::of(self.appearance().icons)
+    }
+
+    /// Draws the icons from `icons`, from the next frame (`ui.icons.set`).
+    pub fn set_icons(&mut self, icons: Icons) {
+        self.appear("ui.icons.set", &json!({ "icons": icons.id() }));
     }
 
     /// Which key runs which action.
@@ -248,39 +317,50 @@ impl InboxApp {
         &mut self.keymap
     }
 
-    /// Whether every animation lands at its end at once.
+    /// Whether every animation lands at its end at once: the owner's choice, or the system's wish where it can be
+    /// read (not on the desktop, where motion then runs).
     #[must_use]
     pub fn reduce_motion(&self) -> bool {
-        self.reduce_motion
+        match self.appearance().motion {
+            Motion::Reduce => true,
+            Motion::Full => false,
+            Motion::System => motion::system_default(None),
+        }
     }
 
-    /// Turns reduced motion on or off, from the next frame.
+    /// Turns reduced motion on or off, from the next frame (`ui.motion.set`).
     pub fn set_reduce_motion(&mut self, reduce: bool) {
-        self.reduce_motion = reduce;
+        self.appear("ui.motion.set", &json!({ "reduce": if reduce { "on" } else { "off" } }));
     }
 
-    /// Installs the fonts once, and the chosen preset, mode and text scale in the context when they changed.
+    /// Installs the fonts once, and the appearance in the context when it changed; keeps a changed appearance.
     fn install_theme(&mut self, ctx: &egui::Context) {
-        let chosen = (self.mode, self.preset, self.text_scale);
+        let chosen = *self.mailbox.appearance();
         if self.themed == Some(chosen) {
             return;
         }
         if self.themed.is_none() {
             theme::install_fonts(ctx);
         }
-        Theme::apply(ctx, &self.preset, self.text_scale);
+        Theme::apply(ctx, &Look::of(&chosen));
         // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.
-        if self.themed.is_some() || self.mode != ModePreference::System {
-            ctx.set_theme(egui::ThemePreference::from(self.mode));
+        if self.themed.is_some() || chosen.theme != ModePreference::System {
+            ctx.set_theme(theme::preference(chosen.theme));
         }
         self.themed = Some(chosen);
+        if chosen != self.kept {
+            match self.keep.store(&chosen) {
+                Ok(()) => self.kept = chosen,
+                Err(error) => self.mailbox.fail(UiError::Keep(error)),
+            }
+        }
     }
 
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
-        motion::set_reduced(ui.ctx(), self.reduce_motion);
-        let theme = Theme::current(ui.ctx(), &self.preset, self.text_scale);
+        motion::set_reduced(ui.ctx(), self.reduce_motion());
+        let theme = Theme::current(ui.ctx(), &Look::of(self.mailbox.appearance()));
         ui.set_style(theme.style());
         let p = theme.palette;
         let s = theme.spacing;
@@ -467,6 +547,9 @@ impl InboxApp {
     }
 }
 
+#[cfg(test)]
+#[path = "appearance_tests.rs"]
+mod appearance_tests;
 #[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;

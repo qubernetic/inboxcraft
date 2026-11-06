@@ -48,11 +48,11 @@ const fn point(id: IconId) -> char {
 pub(super) fn glyph(id: IconId, style: Style) -> Glyph {
     let point = point(id);
     match style {
-        Style::Regular => Glyph { face: IconFont::PhosphorRegular, layers: vec![(point, 1.0)] },
-        Style::Fill => Glyph { face: IconFont::PhosphorFill, layers: vec![(point, 1.0)] },
+        Style::Regular => Glyph { face: IconFont::PhosphorRegular, layers: vec![(point, 1.0)], disc: 0.0 },
+        Style::Fill => Glyph { face: IconFont::PhosphorFill, layers: vec![(point, 1.0)], disc: 0.0 },
         Style::Duotone => {
             let lines = char::from_u32(u32::from(point).saturating_add(1)).unwrap_or(point);
-            Glyph { face: IconFont::PhosphorDuotone, layers: vec![(point, BACK_OPACITY), (lines, 1.0)] }
+            Glyph { face: IconFont::PhosphorDuotone, layers: vec![(point, BACK_OPACITY), (lines, 1.0)], disc: 0.0 }
         }
     }
 }

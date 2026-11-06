@@ -344,28 +344,36 @@ B = blocks the next stage.
   bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
   which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
   for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
-- Text size and typeface (#83): the text scale (90 % to 130 %) can be changed only from code
-  (`InboxApp::set_text_scale`) and the `ui_shot` scripts; the `ui.text_scale.set` and `ui.font.set` commands, the
-  settings page, keeping the choice on disk and Inter as the second typeface come with E1.16. The fit test draws the
+- Text size and typeface (#83, #86): the text scale (90 % to 130 %) and the typeface (Figtree or Inter) are set
+  through `ui.text_scale.set` and `ui.font.set` and kept on disk, but the window has no control for them until the
+  settings page (E1.16b); until then the commands run from code and the `ui_shot` scripts. The fit test draws the
   list, the reader and the add-account page; the settings page joins it when it exists. Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
-- Icons (#84): Phosphor is the only set; Lucide, the `ui.icons.set` command and the settings control come with
-  E1.16. The set has the ids the window and the triage actions need so far; a toolbar or a view that needs another
-  meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
+- Icons (#84, #86): Phosphor and Lucide, chosen with `ui.icons.set`; the settings control comes with E1.16b. Lucide
+  has no solid icons, so its Fill and Duotone draw a filled disc behind the lines (a stronger one for Fill); on the
+  accent of an active button the lines on their disc read, but less boldly than Phosphor's solid shape. The set has
+  the ids the window and the triage actions need so far; a toolbar or a view that needs another meaning adds an id
+  and its glyph (in both sets). Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
   whole (about 1.5 MB, every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new
   font file. An icon is one colour token (Duotone's back at 20 % of it); a gradient through a glyph (the gradient
   helper on the icon's text) is not done. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
+- Appearance (#86): the six `ui.*.set` commands and the file that keeps their result exist, but the window has no
+  page to change them yet (E1.16b). The file sits in the config folder and is written in the sample window too: it
+  holds no mail and nothing about an account, so the sample mode writes this one file and nothing else. A custom
+  accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
+  made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
+  open at once each keep their own last change; the later write wins.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery, but only the avatar (in the reader's header) and the count
   badge are used in the window yet; the list and the reader move onto the rest with E1.17. The keymap knows one
   key of its own (Ctrl+F for the search); the arrow keys and Escape are still read directly, and changing a key is
-  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. The reduced-motion flag
-  can be set only from code (`InboxApp::set_reduce_motion`); its `ui.motion.set` command and switch come with E1.16.
+  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
+  `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
   Reduced motion stops egui's fades and its scrolling to a place, but not its smoothing of a mouse wheel's notches
@@ -481,3 +489,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Icons: one set, the ids so far, whole fonts bundled, no gradient through a glyph (#84) |
 | 2026-11-06 | minor | Components and motion: what is used yet, one key, the reduced-motion default (#85) |
 | 2026-11-06 | minor | Reduced motion: the mouse wheel's smoothing keeps running (#85) |
+| 2026-11-06 | minor | Appearance: the commands and keeping them exist, the controls wait for the settings page; Lucide's disc; the kept file (#86) |

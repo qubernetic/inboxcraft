@@ -310,6 +310,18 @@ All notable changes to InboxCraft are listed here. The format follows
 - Avatars (#85): a person's initials on one of ten vivid avatar colours (no teal or coral), picked from the address
   by a stable hash, with white or dark initials by contrast; the reader shows the sender's avatar in the message
   header, the sample mail's people included.
+- The appearance commands (#86), all `safe`: `ui.theme.set` (system, light, dark), `ui.accent.set` (a preset, or
+  four colours of your own: three gradient stops and the accent; an accent under WCAG AA as text on dark surfaces is
+  made lighter, hue kept, and the answer says so with the colour asked for and the contrast reached),
+  `ui.font.set` (Figtree, Inter), `ui.icons.set` (Phosphor, Lucide), `ui.text_scale.set` (90 to 130 per cent) and
+  `ui.motion.set` (reduce motion on, off, or follow the system). Each answers the whole appearance. The window's
+  own setters run them too.
+- The appearance is kept across a restart (#86) in `inboxcraft/appearance.json` in the config folder
+  (`XDG_CONFIG_HOME`, `.config`, `%APPDATA%` or `Library/Application Support`), read as outside data choice by
+  choice and written through a temporary file; a change that cannot be kept shows in the error banner.
+- Inter v4.1 (OFL) as the second typeface and Lucide 1.70.0 (ISC, its Feather icons MIT) as the second icon set,
+  bundled with their licence files (#86). Every `IconId` has a Lucide glyph; Lucide has lines only, so its active
+  (Fill) and empty (Duotone) states draw a filled disc behind the lines. `ui_shot` takes `font` and `icon_set`.
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

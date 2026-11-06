@@ -10,6 +10,9 @@
 //! The empty window adds accounts ([`accounts`]): each password goes into the OS credential store, Detect asks the
 //! system's name servers and the web, and every account runs on a `net` worker of its own. Besides those, the one
 //! request the window makes is for a remote picture the owner allowed, through `net`'s picture client.
+//!
+//! Both windows keep the owner's appearance choices through the [`Keep`] they are given; `main` gives them the file in
+//! the owner's config folder ([`KeepFile::of_owner`]). The file holds no mail and nothing about an account.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -24,6 +27,7 @@ use inboxcraft_net::{Connector, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::{Fetch, Get, Threaded, Wake};
+use inboxcraft_ui_egui::keep::{Keep, KeepFile, NoKeep};
 use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Run};
 use inboxcraft_ui_egui::save::{Downloads, NoSave, Save};
@@ -93,7 +97,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
 pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The window's content over `source`, dated by the clocks `clock` makes (one for the session, one for the list);
-/// `wake` draws the window again when a remote picture arrived.
+/// `wake` draws the window again when a remote picture arrived; the appearance choices are kept in `keep`.
 ///
 /// The sample draws its remote pictures in code and connects nowhere. Otherwise a remote picture the owner allowed
 /// is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public addresses
@@ -103,14 +107,14 @@ pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 /// # Errors
 ///
 /// A sample or a session that could not be built.
-pub fn app(source: Source, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>) -> Result<InboxApp, UiError> {
+pub fn app(source: Source, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, keep: Box<dyn Keep>) -> Result<InboxApp, UiError> {
     let save: Box<dyn Save> = match Downloads::of_owner() {
         Some(downloads) => Box::new(downloads),
         None => Box::new(NoSave),
     };
     if source == Source::Sample {
         let mailbox = Mailbox::new(sample::session(clock())?, clock());
-        return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save));
+        return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
     }
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
@@ -121,7 +125,18 @@ pub fn app(source: Source, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake
     let run: Run = Arc::new(move |address: &str, ispdb: bool| accounts::detect(&detecting, address, ispdb));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
     let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(accounts::OsKeychain), wake));
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(Arc::new(accounts::OsKeychain), detect, workers))
+    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
+        .with_accounts(Arc::new(accounts::OsKeychain), detect, workers)
+        .with_keep(keep))
+}
+
+/// Where the owner's appearance choices are kept: the file in their config folder, or nowhere without one.
+#[must_use]
+pub fn owner_keep() -> Box<dyn Keep> {
+    match KeepFile::of_owner() {
+        Some(file) => Box::new(file),
+        None => Box::new(NoKeep),
+    }
 }
 
 #[cfg(test)]

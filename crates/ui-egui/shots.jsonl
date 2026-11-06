@@ -60,3 +60,10 @@
 {"out": "docs/images/components-aurora-dark.png", "mode": "dark", "preset": "aurora", "components": true}
 {"out": "docs/images/components-citrus-light.png", "mode": "light", "preset": "citrus", "components": true}
 {"out": "docs/images/components-citrus-dark.png", "mode": "dark", "preset": "citrus", "components": true}
+# The second typeface and icon set (E1.16a): the list with the reader in Inter, every icon and the components in Lucide.
+{"out": "docs/images/list-inter-light.png", "mode": "light", "font": "inter", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-inter-dark.png", "mode": "dark", "font": "inter", "select": "Photos from the coast walk"}
+{"out": "docs/images/icons-lucide-light.png", "mode": "light", "icon_set": "lucide", "icons": true, "scale": 2}
+{"out": "docs/images/icons-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "icons": true, "scale": 2}
+{"out": "docs/images/components-lucide-light.png", "mode": "light", "icon_set": "lucide", "components": true}
+{"out": "docs/images/components-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "components": true}

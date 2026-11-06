@@ -36,7 +36,7 @@ fn window(source: Source) -> ExitCode {
             context.request_repaint();
         }
     });
-    let app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake)) {
+    let app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");

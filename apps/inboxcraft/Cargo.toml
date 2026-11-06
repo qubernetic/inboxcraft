@@ -18,5 +18,8 @@ inboxcraft-time = { workspace = true }
 inboxcraft-ui-egui = { workspace = true }
 keyring = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
