@@ -41,3 +41,8 @@
 {"out": "docs/images/reader-thread-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
 {"out": "docs/images/onboard-failed-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}
 {"out": "docs/images/onboard-failed-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}
+# The text scale (E1.15c): the list with the reader at the smallest and the largest scale.
+{"out": "docs/images/list-text-90-light.png", "mode": "light", "text_scale": 90, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-90-dark.png", "mode": "dark", "text_scale": 90, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-130-light.png", "mode": "light", "text_scale": 130, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-130-dark.png", "mode": "dark", "text_scale": 130, "select": "Photos from the coast walk"}

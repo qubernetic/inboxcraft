@@ -72,6 +72,15 @@ fn a_shot_without_a_preset_is_electric() {
 }
 
 #[test]
+fn a_text_scale_draws_the_window_with_larger_type() {
+    let plain = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
+    let hundred = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400], "text_scale": 100}"#)).unwrap();
+    let large = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400], "text_scale": 130}"#)).unwrap();
+    assert_eq!(plain, hundred, "100 % is the default");
+    assert_ne!(plain, large);
+}
+
+#[test]
 fn a_scale_of_two_doubles_the_picture() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [300, 200], "scale": 2}"#)).unwrap();
     assert_eq!((picture.width(), picture.height()), (600, 400));
@@ -101,6 +110,8 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "select": "Your bike is due for a service", "pictures": "maybe"}"#, "maybe"),
         (r#"{"out": "x.png", "mode": "light", "full_width": true}"#, "need a selected row"),
         (r#"{"out": "x.png", "mode": "light", "scale": 0.5}"#, "scale"),
+        (r#"{"out": "x.png", "mode": "light", "text_scale": 95}"#, "text scale 95"),
+        (r#"{"out": "x.png", "mode": "light", "text_scale": 200}"#, "text scale 200"),
         (r#"{"out": "x.png", "mode": "light", "scale": 9}"#, "scale"),
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),

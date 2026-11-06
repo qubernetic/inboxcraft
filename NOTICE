@@ -26,8 +26,12 @@ above.
 
 Third-party material
 --------------------
+- Figtree (https://github.com/erikdkennedy/figtree, release v2.0.3), Copyright 2022 The Figtree Project Authors,
+  SIL Open Font Licence 1.1: the Regular, Medium, SemiBold and Bold weights in `assets/fonts/figtree/`, compiled into
+  the desktop app as its typeface. The licence text is `assets/fonts/figtree/OFL.txt`.
 - egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
-  (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0), Hack
+  (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0; still
+  compiled in with that crate, but no text uses it since Figtree replaced it), Hack
   (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from), Noto
   Emoji (Copyright 2013 Google LLC, SIL Open Font Licence 1.1) and the emoji icon font with egui's subset of it
   (Copyright 2014 John Slegers, MIT). The licence texts ship in that crate's `fonts/` directory.

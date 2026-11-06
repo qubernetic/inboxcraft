@@ -5,7 +5,7 @@
 
 use egui::{ComboBox, RichText, ScrollArea, Ui, vec2};
 
-use super::paint::{NavRow, nav_row};
+use super::paint::{NavRow, line_height, nav_row};
 use crate::mailbox::{Mailbox, Place, role_text};
 use crate::theme::Theme;
 use crate::tr;
@@ -27,7 +27,7 @@ fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
 }
 
 fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Asked) {
-    let label = ui.label(RichText::new(tr!("Accounts")).size(theme.type_scale.small).color(theme.palette.muted));
+    let label = ui.label(RichText::new(tr!("Accounts")).font(theme.fonts.caption.id()).color(theme.palette.muted));
     let current = match mailbox.narrowed().and_then(|id| mailbox.account(id)) {
         Some(account) => account.label.clone(),
         None => tr!("All accounts").to_owned(),
@@ -53,7 +53,7 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
 
 fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.m);
-    ui.label(RichText::new(text).size(theme.type_scale.small).color(theme.palette.muted));
+    ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(theme.palette.muted));
 }
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
@@ -62,7 +62,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, can_add: bool)
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.label(RichText::new("InboxCraft").size(theme.type_scale.title).color(p.text));
+    ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
     if can_add {
         ui.add_space(theme.spacing.s);
         asked.add = ui.button(tr!("Add account")).clicked();
@@ -94,11 +94,11 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, can_add: bool)
             let colour = theme.account_colour(u64::try_from(account.index).unwrap_or(0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.xs;
-                let (dot, _) = ui.allocate_exact_size(vec2(10.0, theme.type_scale.body), egui::Sense::hover());
+                let (dot, _) = ui.allocate_exact_size(vec2(10.0, line_height(ui, theme.fonts.heading)), egui::Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, colour);
-                ui.label(RichText::new(&account.label).size(theme.type_scale.heading).color(p.text));
+                ui.label(RichText::new(&account.label).font(theme.fonts.heading.id()).color(p.text));
             });
-            ui.label(RichText::new(&account.address).size(theme.type_scale.small).color(p.muted));
+            ui.label(RichText::new(&account.address).font(theme.fonts.caption.id()).color(p.muted));
             ui.add_space(theme.spacing.xs);
             for folder in mailbox.folders_of(account.id) {
                 let text = match folder.role {

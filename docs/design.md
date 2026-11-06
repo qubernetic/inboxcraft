@@ -2,7 +2,7 @@
 
 > **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
-InboxCraft's own look: the colours, distances and type sizes of the front end, and the rules the screens follow.
+InboxCraft's own look: the colours, distances and font tokens of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
 "Assets"). The values live in `crates/ui-egui/src/theme.rs`; this page explains them, and the tests in
 `crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below.
@@ -24,7 +24,7 @@ Everything here is original. Nothing is copied, traced or recreated from another
 - **Contrast is checked, not hoped for.** Every text token is moved in lightness until it meets WCAG 2 AA (4.5:1) on
   each surface it sits on, and every marker, focus ring and field edge until it meets 3:1. The tests run this for
   every preset in both modes, and fail when a preset or a rule breaks it.
-- **Nothing depends on colour alone.** Unread rows have a dot and a coloured sender; flagged rows have a flag; the
+- **Nothing depends on colour alone.** Unread rows have a dot and heavier type; flagged rows have a flag; the
   account colour stripe repeats what the folder pane says in words. A screen reader hears "unread" and "flagged".
 - **Every control has an accessible name.** Rows are named by sender, subject, date and state; folders by name,
   account and unread count. The UI tests refuse a control without one.
@@ -59,7 +59,7 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 | selection end | surface with 12 % of the last stop | with 20 % | the end of the selection gradient |
 | text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text (readable also on glass over each field, hovered or not, and on a float over the fields and the gradient) |
 | muted | `#5D6676` tinted, readable at 4.5:1 | `#9AA3B2` tinted, readable at 4.5:1 | previews, dates, addresses, section headings |
-| accent | the middle stop mixed 62/38 with black, readable at 4.5:1 | the preset's accent, readable at 4.5:1 | links, the sender of an unread message, accent text |
+| accent | the middle stop mixed 62/38 with black, readable at 4.5:1 | the preset's accent, readable at 4.5:1 | links, accent text |
 | on accent | white or deep ink, by contrast | the same | text on the accent |
 | unread | the middle stop, readable at 3:1 | the same | the unread dot |
 | flag | the last stop, readable at 4.5:1 | the same | the flag; text that asks for a second look |
@@ -92,7 +92,7 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 | m | 12 | inside a row; the folder pane's margin |
 | l | 16 | around a pane; the list's left and right margin |
 | xl | 24 | between groups |
-| row height | 52 | a message row: two lines and air |
+| row height | from the font | a message row: `s` above and below, the sender's line, `xs`, the subject's line; each line as high as its tallest font's own line height at the current text scale |
 | folder pane | 240 | the folder pane's default width (it can be resized); the search field's width |
 | corner | 6 | the corner radius of fields, selections and buttons |
 | card | 14 | the corner radius of glass layers and floats |
@@ -101,14 +101,41 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 
 ## Type
 
-egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice of typeface is open (`docs/gaps.md`).
+The typeface is **Figtree** (SIL Open Font Licence 1.1), bundled from its upstream release v2.0.3 in
+`assets/fonts/figtree/` (Regular, Medium, SemiBold, Bold) and compiled in; nothing is fetched at run time. It takes
+the place of egui's Ubuntu Light everywhere; egui's Hack stays the monospaced face (with Figtree behind it for signs
+Hack lacks), and egui's emoji and icon fonts stay the last fallback. Each weight is a font family of its own, because
+egui has no notion of weight.
 
-| Name | Points | Used for |
-|---|---|---|
-| small | 12 | dates, badges, addresses, section headings |
-| body | 14 | rows, folders, fields, buttons |
-| heading | 15 | account names in the folder pane, empty-state titles |
-| title | 20 | the view's name above the list; the app name |
+Every text style is a **font token** of `theme::Fonts`: a weight and a size. A view names a token, never a family,
+a size or an egui text style; `theme.rs` is the only file that names a font, and a test refuses any other.
+
+| Token | Points | Weight | Used for |
+|---|---|---|---|
+| caption | 12 | Regular | dates, badges, addresses, section headings, the status line |
+| body | 14 | Regular | running text, folders, fields, empty-state details |
+| strong | 14 | SemiBold | bold text in a message |
+| button | 14 | Medium | buttons |
+| sender | 14 | Medium | the sender of a read message (list and folded thread rows) |
+| sender unread | 14 | Bold | the sender of an unread message |
+| subject | 14 | Regular | the subject of a read message, in the text colour |
+| subject unread | 14 | SemiBold | the subject of an unread message |
+| preview | 14 | Regular | the first words after the subject, in the muted colour |
+| heading | 15 | SemiBold | account names, empty-state titles, a message's sender, small headings in a message |
+| title | 20 | Bold | the view's name, the reader's subject, page titles, the app name |
+| mono | 13 | Hack | preformatted text and code |
+
+Sender and subject are strong and the preview muted; an unread row is set in heavier weights (Bold and SemiBold
+against Medium and Regular) as well as marked by its dot, so it reads as unread in grey too.
+
+**Text scale.** 90 %, 100 % (the default), 110 %, 120 % or 130 %, applied to every token
+(`InboxApp::set_text_scale`; the command and the settings page come with the settings). Layout follows the font,
+never fixed points for text: the message rows, folder rows, folded thread rows and step marks take their height
+from the font's own line height at the current scale, and every cut line is measured and ends in an ellipsis. The
+reader's controls wrap onto a second line when there is no room, and the subject has the line below them to itself
+and wraps rather than being cut. `draw/fit_tests.rs` draws the list, a thread, the full header, the full-width
+reader and the add-account page at 90 %, 100 % and 130 % and fails on text that sticks out of its row or button, is
+cut at the side of its pane, or lies over other text.
 
 ## Glass and floats
 - **Colour fields** (`glass::backdrop`): the background with three soft fields of the preset's stops, at 30 %
@@ -169,8 +196,9 @@ the icon sits among others at the same size.
 - **Where**: selecting a row opens the message to the right of the list, which narrows to a column. "Full width"
   hides the folder pane and the list; Escape, "Leave full width" or Ctrl+F (for the search) bring them back. Close
   ends the selection. The arrow keys step through the list while no field has the focus.
-- **Toolbar**: the subject, the next-message rule ("When a message leaves the list": show the next, show the
-  previous, go back to the list), Full width and Close.
+- **Toolbar**: the next-message rule ("When a message leaves the list": show the next, show the previous, go back
+  to the list), Full width and Close, wrapping when there is no room; the subject under them in the title token,
+  wrapped rather than cut.
 - **Thread**: oldest first. The open message is unfolded; the others are one line (sender, the first words, the
   date) on the panel colour and unfold on a click; an unfolded older message has Fold.
 - **Header**: the sender's name large with the address muted, the date on the right, "to ..." under it; Details
@@ -208,7 +236,9 @@ sample window without a display and writes the PNGs under `docs/images/`: the un
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
 width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
-A script line picks its preset with `"preset"`. Every UI change shows them in its PR.
+A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
+the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). Every UI change shows them in its
+PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
 falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
@@ -231,3 +261,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Pictures: each `ui_shot` picture beside its mood sketch, `just side-by-side` (#81) |
 | 2026-11-06 | minor | Glass and floats: colour fields, glass layers, the float surfaces, the one gradient helper (#82) |
 | 2026-11-06 | minor | Glass and floats: nine-slice shadows, the sweep of unused pictures, no shadow over sharp text (#82) |
+| 2026-11-06 | minor | Type: Figtree, font tokens, unread by weight, the text scale and layout from the font's metrics (#83) |

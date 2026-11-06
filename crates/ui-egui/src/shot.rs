@@ -13,7 +13,8 @@
 //! ```
 //!
 //! `mode` is `light` or `dark`, `preset` the accent preset (`electric` when left out, `aurora`, `citrus`), `size` the window in points (1200 by 760 when left out), `scale` the pixels per
-//! point (1 to 4, 1 when left out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
+//! point (1 to 4, 1 when left out), `text_scale` the text scale in per cent (90 to 130 in steps of 10, 100 when left
+//! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects.
@@ -31,7 +32,7 @@ use serde::Deserialize;
 use crate::mailbox::{Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
-use crate::theme::{Mode, Preset};
+use crate::theme::{Mode, Preset, TextScale};
 use crate::workers::Scripted;
 use crate::{InboxApp, UiError, sample};
 
@@ -68,6 +69,9 @@ pub struct Shot {
     /// Pixels per point.
     #[serde(default)]
     pub scale: Option<f32>,
+    /// The text scale in per cent (90 to 130 in steps of 10); 100 when left out.
+    #[serde(default)]
+    pub text_scale: Option<u16>,
     /// The account to narrow to.
     #[serde(default)]
     pub narrow: Option<u64>,
@@ -471,6 +475,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_preset(preset);
+    if let Some(percent) = shot.text_scale {
+        let scale =
+            TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;
+        app.set_text_scale(scale);
+    }
     if let Some(account) = shot.narrow {
         app.mailbox_mut().narrow(Some(account));
     }
