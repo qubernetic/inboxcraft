@@ -10,6 +10,7 @@ use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{Color32, Galley, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::gradient::{self, Gradient, Stop};
+use crate::iconset::{IconId, Style};
 use crate::theme::{Font, Theme};
 
 /// One line of `sections` (text, font token and colour), cut with an ellipsis at `width`.
@@ -58,6 +59,8 @@ pub(super) struct NavRow<'a> {
     pub(super) badge: u64,
     pub(super) selected: bool,
     pub(super) depth: usize,
+    /// The icon before the text, in the muted colour (the accent while selected).
+    pub(super) icon: Option<IconId>,
 }
 
 /// A row of the folder pane: a unified view or a folder, with its unread badge.
@@ -74,7 +77,14 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
             ui.painter().rect_filled(rect, s.corner, p.hover);
         }
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
-        let left = rect.left() + s.s + f32::from(depth) * s.m;
+        let mut left = rect.left() + s.s + f32::from(depth) * s.m;
+        if let Some(icon) = row.icon {
+            let side = theme.fonts.body.size * 1.15;
+            let at = Rect::from_center_size(pos2(left + side / 2.0, rect.center().y), vec2(side, side));
+            let (style, ink) = if row.selected { (Style::Fill, p.accent) } else { (Style::Regular, p.muted) };
+            theme.icons.paint(ui.painter(), at, icon, style, ink);
+            left += side + s.s;
+        }
         let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s, rect.center().y) - s.s } else { rect.right() - s.s };
         let galley = line(ui, &[(row.text, theme.fonts.body, p.text)], right - left);
         ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, p.text);

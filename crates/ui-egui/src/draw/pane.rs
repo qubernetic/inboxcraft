@@ -5,9 +5,9 @@
 //! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds the account picker,
 //! the unified views and each account's folders with their unread badges.
 
-use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
-use super::paint::{NavRow, line_height, nav_row};
+use super::paint::{NavRow, focus_ring, line_height, nav_row};
 use crate::component::button::IconButton;
 use crate::component::{avatar, tooltip};
 use crate::gradient::{self, Gradient, Stop};
@@ -136,16 +136,29 @@ fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
     if unread == 0 { named } else { tr!("{name}, {count} unread", name = named, count = unread) }
 }
 
+/// The account picker: the account shown (or All accounts) in an outlined field with a chevron.
 fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Asked) {
-    let label = ui.label(RichText::new(tr!("Accounts")).font(theme.fonts.caption.id()).color(theme.palette.muted));
     let current = match mailbox.narrowed().and_then(|id| mailbox.account(id)) {
         Some(account) => account.label.clone(),
         None => tr!("All accounts").to_owned(),
     };
     let width = ui.available_width();
+    let ink = theme.palette.muted;
+    // A field, not a button: the field colour at rest.
+    let visuals = &mut ui.visuals_mut().widgets;
+    visuals.inactive.weak_bg_fill = theme.palette.field;
+    visuals.inactive.bg_fill = theme.palette.field;
     let response = ComboBox::from_id_salt("account-picker")
-        .selected_text(current)
+        .selected_text(RichText::new(current).font(theme.fonts.body.id()).color(theme.palette.text))
         .width(width)
+        .icon(move |ui, rect, _, _| {
+            // A chevron pointing down, drawn in lines like the icons.
+            let c = rect.center();
+            let w = rect.width().min(rect.height()) * 0.3;
+            let stroke = Stroke::new(1.5, ink);
+            ui.painter().line_segment([pos2(c.x - w, c.y - w / 2.0), pos2(c.x, c.y + w / 2.0)], stroke);
+            ui.painter().line_segment([pos2(c.x, c.y + w / 2.0), pos2(c.x + w, c.y - w / 2.0)], stroke);
+        })
         .show_ui(ui, |ui| {
             if ui.selectable_label(mailbox.narrowed().is_none(), tr!("All accounts")).clicked() {
                 asked.narrow = Some(None);
@@ -158,12 +171,49 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
             }
         })
         .response;
-    let _ = response.labelled_by(label.id);
+    response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, tr!("Accounts")));
 }
 
+/// A section's heading: small capitals in the muted colour.
 fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.m);
-    ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(theme.palette.muted));
+    ui.label(RichText::new(text.to_uppercase()).font(theme.fonts.caption.id()).color(theme.palette.muted).extra_letter_spacing(0.6));
+    ui.add_space(theme.spacing.xs);
+}
+
+/// The icon of a folder of `role` (a plain folder without one).
+fn folder_icon(role: Option<FolderRole>) -> IconId {
+    match role {
+        Some(FolderRole::Inbox) => IconId::Inbox,
+        Some(FolderRole::Sent) => IconId::Send,
+        Some(FolderRole::Drafts) => IconId::File,
+        Some(FolderRole::Trash) => IconId::Delete,
+        Some(FolderRole::Junk) => IconId::Junk,
+        Some(FolderRole::Archive) => IconId::Archive,
+        _ => IconId::Move,
+    }
+}
+
+/// "Add account": the accent text with a plus before it, as a link.
+fn add_account(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> bool {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let name = tr!("Add account");
+    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.accent);
+    let icon = theme.fonts.body.size * 1.1;
+    let height = line_height(ui, theme.fonts.body) + s.s * 1.5;
+    let (rect, response) = ui.allocate_exact_size(vec2(s.s + icon + s.s + galley.size().x + s.s, height), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, s.corner, p.hover);
+        }
+        let at = Rect::from_center_size(pos2(rect.left() + s.s + icon / 2.0, rect.center().y), vec2(icon, icon));
+        theme.icons.paint(ui.painter(), at, IconId::Add, Style::Regular, p.accent);
+        ui.painter().galley(pos2(at.right() + s.s, rect.center().y - galley.size().y / 2.0), galley, p.accent);
+        focus_ring(ui, theme, &response);
+    }
+    tooltip::attach(response, theme, keymap, name, None).clicked()
 }
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
@@ -173,16 +223,17 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
     ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
-    if can_add {
+    if !mailbox.accounts().is_empty() {
         ui.add_space(theme.spacing.s);
-        let button = ui.button(tr!("Add account"));
-        asked.add = tooltip::attach(button, theme, keymap, tr!("Add account"), None).clicked();
+        ui.scope(|ui| account_picker(ui, theme, mailbox, &mut asked));
+    }
+    if can_add {
+        ui.add_space(theme.spacing.xs);
+        asked.add = add_account(ui, theme, keymap);
     }
     if mailbox.accounts().is_empty() {
         return asked;
     }
-    ui.add_space(theme.spacing.s);
-    account_picker(ui, theme, mailbox, &mut asked);
     let searching = !mailbox.query().is_empty();
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
@@ -195,6 +246,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                 badge: view.unread,
                 selected: !searching && mailbox.place() == Place::View(view.role),
                 depth: 0,
+                icon: Some(folder_icon(Some(view.role))),
             };
             if nav_row(ui, theme, &row).clicked() {
                 asked.open = Some(Place::View(view.role));
@@ -205,13 +257,18 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             let colour = theme.account_colour(u64::try_from(account.index).unwrap_or(0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.xs;
-                let (dot, _) = ui.allocate_exact_size(vec2(10.0, line_height(ui, theme.fonts.heading)), egui::Sense::hover());
+                let (dot, _) = ui.allocate_exact_size(vec2(10.0, line_height(ui, theme.fonts.strong)), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, colour);
-                ui.label(RichText::new(&account.label).font(theme.fonts.heading.id()).color(p.text));
+                ui.label(RichText::new(&account.label).font(theme.fonts.strong.id()).color(p.text));
             });
-            ui.label(RichText::new(&account.address).font(theme.fonts.caption.id()).color(p.muted));
+            ui.horizontal(|ui| {
+                ui.add_space(10.0 + theme.spacing.xs);
+                ui.label(RichText::new(&account.address).font(theme.fonts.caption.id()).color(p.muted));
+            });
             ui.add_space(theme.spacing.xs);
-            for folder in mailbox.folders_of(account.id) {
+            // The unified views above hold every account's inbox, sent mail and the like: an account lists only the
+            // folders of its own.
+            for folder in mailbox.folders_of(account.id).iter().filter(|folder| folder.role.is_none()) {
                 let text = match folder.role {
                     Some(role) => role_text(role),
                     None => folder.leaf.as_str(),
@@ -222,6 +279,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                     badge: folder.unread,
                     selected: !searching && mailbox.place() == Place::Folder(folder.id),
                     depth: folder.depth,
+                    icon: Some(folder_icon(folder.role)),
                 };
                 if nav_row(ui, theme, &row).clicked() {
                     asked.open = Some(Place::Folder(folder.id));

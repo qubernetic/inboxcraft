@@ -73,11 +73,15 @@ pub enum IconId {
     Home,
     /// Mail: the app's mark on the rail.
     Mail,
+    /// Add (an account).
+    Add,
+    /// Junk.
+    Junk,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -104,6 +108,8 @@ impl IconId {
         Self::Skipped,
         Self::Home,
         Self::Mail,
+        Self::Add,
+        Self::Junk,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -136,6 +142,8 @@ impl IconId {
             Self::Skipped => 23,
             Self::Home => 24,
             Self::Mail => 25,
+            Self::Add => 26,
+            Self::Junk => 27,
         }
     }
 }

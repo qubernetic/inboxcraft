@@ -43,6 +43,8 @@ const fn point(id: IconId) -> char {
         IconId::Skipped => '\u{e32c}',  // minus-circle
         IconId::Home => '\u{e2c2}',     // house
         IconId::Mail => '\u{e218}',     // envelope-simple
+        IconId::Add => '\u{e3d4}',      // plus
+        IconId::Junk => '\u{e4e2}',     // warning-circle
     }
 }
 
