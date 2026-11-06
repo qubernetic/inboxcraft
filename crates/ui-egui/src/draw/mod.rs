@@ -5,8 +5,9 @@
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
 //! in the folder pane and in the empty list; the add-account page then takes the place of the list and the reader.
-//! The settings button in the folder pane opens the appearance settings page in the same place; Escape or its close
-//! button leave it, and the add-account page closes it.
+//! The navigation rail runs down the window's left edge in the preset's gradient: its settings button (or its key)
+//! opens the appearance settings page in the same place; Escape, its close button or the rail's Mail button leave it,
+//! and the add-account page closes it.
 //!
 //! Each frame the window hands the engine's jobs to the `net` workers and applies their events
 //! ([`Mailbox::pump`]), so the steps of an account check show as they come.
@@ -393,6 +394,8 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
+        let mut rail = pane::Rail { mail: self.keymap.pressed(ui.ctx(), keymap::MAIL), settings: false };
+        let open_settings = self.keymap.pressed(ui.ctx(), keymap::SETTINGS);
         if self.keymap.pressed(ui.ctx(), keymap::FIND) {
             self.reader.set_full_width(false);
             ui.memory_mut(|memory| memory.request_focus(list::search_id()));
@@ -437,13 +440,23 @@ impl InboxApp {
         glass::backdrop(ui.painter(), &theme, ui.max_rect());
         let mut layers = Layers::begin(ui.painter());
         let (gap, half) = (s.gap, s.gap / 2.0);
+        let width = pane::rail_width(ui, &theme);
+        let clicked_rail = Panel::left("rail")
+            .resizable(false)
+            .exact_size(width)
+            .show_separator_line(false)
+            .frame(Frame::NONE)
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, setting, adding))
+            .inner;
+        rail.mail |= clicked_rail.mail;
+        rail.settings = clicked_rail.settings;
         if adding {
             asked = Panel::left("folders")
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false, false)))
+                .frame(around(half, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false)))
                 .inner;
             let (mailbox, onboarding) = (&self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
@@ -455,8 +468,8 @@ impl InboxApp {
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add, true)))
+                .frame(around(half, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
                 .inner;
             let reduce = self.reduce_motion();
             let (settings, appearance) = (&mut self.settings, self.mailbox.appearance());
@@ -469,18 +482,26 @@ impl InboxApp {
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add, false)))
+                .frame(around(half, half, gap))
+                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
                 .inner;
-            let (mailbox, search, can_add) = (&self.mailbox, &mut self.search, self.can_add);
+            let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
                 layers.card(ui, Margin::ZERO, |ui| {
                     let searched = Panel::top("list-header")
                         .frame(Frame::new().inner_margin(margin(s.l)))
-                        .show(ui, |ui| list::header(ui, &theme, mailbox, search))
+                        .show(ui, |ui| list::header(ui, &theme, keymap, mailbox, search))
                         .inner;
-                    let (clicked, add) = CentralPanel::no_frame().show(ui, |ui| list::rows(ui, &theme, mailbox, can_add)).inner;
-                    (searched, clicked, add)
+                    let listed = CentralPanel::no_frame()
+                        .frame(Frame::new().inner_margin(Margin {
+                            left: margin(s.m).left,
+                            right: margin(s.m).right,
+                            top: 0,
+                            bottom: margin(s.m).bottom,
+                        }))
+                        .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox, can_add))
+                        .inner;
+                    (searched, listed.clicked, listed.add)
                 })
             };
             let add;
@@ -521,7 +542,9 @@ impl InboxApp {
             || stepped
             || left_full
             || left_settings
-            || asked.settings
+            || rail.mail
+            || rail.settings
+            || open_settings
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
@@ -557,8 +580,14 @@ impl InboxApp {
             self.settings.close();
             self.onboarding.open();
         }
-        if asked.settings {
+        if rail.settings {
             if setting { self.settings.close() } else { self.open_settings() }
+        } else if open_settings && !setting {
+            self.open_settings();
+        }
+        if rail.mail {
+            self.settings.close();
+            self.onboarding.close();
         }
         if let Some(changed) = changed {
             self.apply_settings(changed);
@@ -629,8 +658,14 @@ mod appearance_tests;
 #[path = "fit_tests.rs"]
 mod fit_tests;
 #[cfg(test)]
+#[path = "list_tests.rs"]
+mod list_tests;
+#[cfg(test)]
 #[path = "onboard_tests.rs"]
 mod onboard_tests;
+#[cfg(test)]
+#[path = "pane_tests.rs"]
+mod pane_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;

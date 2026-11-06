@@ -3,7 +3,7 @@
 
 use egui::{Context, Event, Key, KeyboardShortcut, Modifiers, RawInput};
 
-use super::{FIND, Keymap};
+use super::{FIND, Keymap, MAIL, SETTINGS};
 
 const CTRL_K: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::K);
 
@@ -60,4 +60,11 @@ fn hostile_action_ids_are_only_strings() {
         keymap.unbind(id);
     }
     assert_eq!(keymap.shortcut(FIND), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::F)));
+}
+
+#[test]
+fn mail_is_command_1_and_the_settings_command_comma_by_default() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.shortcut(MAIL), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1)));
+    assert_eq!(keymap.shortcut(SETTINGS), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma)));
 }

@@ -1,17 +1,68 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The folder pane: the appearance settings button, the account picker, the unified views and each account's folders with their unread badges.
+//! The navigation rail and the folder pane. The rail runs the preset's gradient at full strength down the window's
+//! left edge, with Mail at its top and the appearance settings at its foot; the folder pane holds the account picker,
+//! the unified views and each account's folders with their unread badges.
 
-use egui::{Align, ComboBox, Layout, RichText, ScrollArea, Ui, vec2};
+use egui::{Align, Color32, ComboBox, Layout, RichText, ScrollArea, Ui, pos2, vec2};
 
 use super::paint::{NavRow, line_height, nav_row};
 use crate::component::button::IconButton;
+use crate::component::{control_side, tooltip};
+use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::IconId;
-use crate::keymap::Keymap;
+use crate::keymap::{self, Keymap};
 use crate::mailbox::{Mailbox, Place, role_text};
-use crate::theme::Theme;
+use crate::theme::{Theme, icon_ink_over};
 use crate::tr;
+
+/// The ink of the rail's icons: white where it reaches 3:1 on every stop of the gradient, otherwise the deep ink.
+pub(super) fn rail_ink(theme: &Theme) -> Color32 {
+    icon_ink_over(&theme.palette.gradient)
+}
+
+/// The rail's width: a button and room on either side.
+pub(super) fn rail_width(ui: &Ui, theme: &Theme) -> f32 {
+    control_side(ui, theme) + theme.spacing.s * 2.0
+}
+
+/// What the person asked for on the rail this frame.
+#[derive(Debug, Default)]
+pub(super) struct Rail {
+    pub(super) mail: bool,
+    pub(super) settings: bool,
+}
+
+/// Draws the rail over the whole of `ui`: Mail active unless `settings` or `adding` show another page.
+pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: bool, adding: bool) -> Rail {
+    let s = &theme.spacing;
+    let rect = ui.max_rect();
+    let [first, middle, last] = theme.palette.gradient;
+    let gradient = Gradient::Linear {
+        from: pos2(0.5, 0.0),
+        to: pos2(0.5, 1.0),
+        stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
+    };
+    gradient::fill(ui.painter(), rect, 0.0, &gradient);
+    let ink = rail_ink(theme);
+    let mut asked = Rail::default();
+    ui.vertical_centered(|ui| {
+        ui.add_space(s.m);
+        asked.mail =
+            IconButton::new(IconId::Inbox, tr!("Mail")).action(keymap::MAIL).active(!settings && !adding).ink(ink).show(ui, theme, keymap).clicked();
+    });
+    ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+        ui.add_space(s.m);
+        asked.settings = IconButton::new(IconId::Settings, tr!("Appearance settings"))
+            .action(keymap::SETTINGS)
+            .active(settings)
+            .ink(ink)
+            .show(ui, theme, keymap)
+            .clicked();
+    });
+    asked
+}
 
 /// What the person asked for in the pane this frame.
 #[derive(Debug, Default)]
@@ -19,7 +70,6 @@ pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
     pub(super) add: bool,
-    pub(super) settings: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -61,20 +111,16 @@ fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
 }
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
-/// the Add account button; `settings` shows the settings button as active, the page being open.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool, settings: bool) -> Asked {
+/// the Add account button.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            asked.settings = IconButton::new(IconId::Settings, tr!("Appearance settings")).active(settings).show(ui, theme, keymap).clicked();
-        });
-    });
+    ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
     if can_add {
         ui.add_space(theme.spacing.s);
-        asked.add = ui.button(tr!("Add account")).clicked();
+        let button = ui.button(tr!("Add account"));
+        asked.add = tooltip::attach(button, theme, keymap, tr!("Add account"), None).clicked();
     }
     if mailbox.accounts().is_empty() {
         return asked;

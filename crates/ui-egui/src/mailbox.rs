@@ -16,6 +16,7 @@ use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
 
+use crate::iconset::IconId;
 use crate::workers::Workers;
 use crate::{UiError, tr};
 
@@ -144,6 +145,8 @@ pub struct MessageRow {
     pub account: u64,
     /// The sender's name, or the address without one.
     pub sender: String,
+    /// The sender's address, which picks the avatar's colour.
+    pub address: String,
     /// The subject.
     pub subject: String,
     /// The first words of the text.
@@ -154,6 +157,47 @@ pub struct MessageRow {
     pub seen: bool,
     /// Flagged.
     pub flagged: bool,
+}
+
+/// A sender the screener holds back until the owner lets them in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    /// Their name.
+    pub name: String,
+    /// Their address, which picks the avatar's colour.
+    pub address: String,
+}
+
+/// A group of the grouped inbox: its badge's icon, its name and its messages, by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    /// The icon on its badge.
+    pub icon: IconId,
+    /// Its name.
+    pub name: String,
+    /// Its messages, by id; those not in the list are left out.
+    pub messages: Vec<u64>,
+}
+
+/// The parts of the list whose data or command does not exist yet (the screener and the groups come with E3.1 and
+/// E3.2, the hover actions' commands with E2.1 and E3.3), filled with invented data by `ui_shot` only. In the app it
+/// stays empty, so none of them is drawn.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Showcase {
+    /// The senders waiting in the screener; its card shows while there are any.
+    pub screener: Vec<Waiting>,
+    /// The groups of the unified inbox.
+    pub groups: Vec<Group>,
+    /// Whether a hovered or keyboard-selected row shows its actions.
+    pub hover: bool,
+}
+
+impl Showcase {
+    /// Whether it shows nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.screener.is_empty() && self.groups.is_empty() && !self.hover
+    }
 }
 
 /// The mail list's state over a session.
@@ -169,6 +213,9 @@ pub struct Mailbox {
     query: String,
     messages: Vec<MessageRow>,
     selected: Option<u64>,
+    /// Whether the selection came from the keyboard.
+    keyed: bool,
+    showcase: Showcase,
     after: After,
     error: Option<String>,
     runs: u64,
@@ -237,6 +284,7 @@ fn message_row(value: &Value) -> MessageRow {
         id: number(value, "id"),
         account: number(value, "account"),
         sender: sender(value.get("from").unwrap_or(&Value::Null)),
+        address: value.get("from").and_then(Value::as_array).and_then(|from| from.first()).map(|first| text(first, "address")).unwrap_or_default(),
         subject: text(value, "subject"),
         preview: text(value, "preview"),
         date: value.get("date").and_then(Value::as_str).and_then(parse_date),
@@ -310,6 +358,8 @@ impl Mailbox {
             query: String::new(),
             messages: Vec::new(),
             selected: None,
+            keyed: false,
+            showcase: Showcase::default(),
             after: After::Next,
             error: None,
             runs: 0,
@@ -358,7 +408,26 @@ impl Mailbox {
         };
         if let Some(row) = self.messages.get(next) {
             self.selected = Some(row.id);
+            self.keyed = true;
         }
+    }
+
+    /// Whether the selection came from the keyboard ([`Mailbox::step`]): the selected row then shows the hover
+    /// actions, as a hovered row does.
+    #[must_use]
+    pub fn keyed(&self) -> bool {
+        self.keyed
+    }
+
+    /// The invented parts `ui_shot` shows; empty in the app.
+    #[must_use]
+    pub fn showcase(&self) -> &Showcase {
+        &self.showcase
+    }
+
+    /// Shows `showcase` in the list, for `ui_shot`.
+    pub fn set_showcase(&mut self, showcase: Showcase) {
+        self.showcase = showcase;
     }
 
     /// Hands the engine's queued jobs to `workers`, stops the workers of accounts that are gone, and applies the
@@ -569,6 +638,7 @@ impl Mailbox {
 
     /// Selects a row of the list, or none. A message not in the list is not selected.
     pub fn select(&mut self, message: Option<u64>) {
+        self.keyed = false;
         match message {
             Some(id) if self.messages.iter().any(|row| row.id == id) => self.selected = Some(id),
             Some(_) => {}

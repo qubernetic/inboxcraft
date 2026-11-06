@@ -72,6 +72,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | The design system's components (card, icon button, pill, tooltip with key chip, avatar, badge, hover actions, toast, popup) with a `ui_shot` gallery; motion tokens and one reduced-motion flag every animation reads; a keymap the tooltips read their keys from; avatars in a vivid palette picked per address, in the reader's header (#85) |
 | 2026-11-06 | The appearance commands `ui.theme.set`, `ui.accent.set` (preset or four custom colours, nudged to WCAG AA), `ui.font.set`, `ui.icons.set`, `ui.text_scale.set` and `ui.motion.set`, all `safe`, kept across a restart in the config folder; Inter and Lucide bundled as the second typeface and icon set (#86) |
 | 2026-11-06 | The appearance settings page: mode, accent preset, custom accent, typeface, icon set, text size and a "Reduce motion" switch, each running its `ui.*.set` command, with a live preview; checked for overflow in both typefaces at 90 % and 130 % (#87) |
+| 2026-11-06 | The message list on the design system: a navigation rail in the preset's gradient, the rows on a card with avatars, the screener and grouped inbox cards and the hover actions built and shown in `ui_shot` with invented data, hidden in the app until their data and commands exist (#88) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -112,3 +113,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: the components and motion tokens (#85) |
 | 2026-11-06 | minor | Progress log: the appearance commands, Inter and Lucide (#86) |
 | 2026-11-06 | minor | Progress log: the appearance settings page (#87) |
+| 2026-11-06 | minor | Progress log: the message list on the design system (#88) |
