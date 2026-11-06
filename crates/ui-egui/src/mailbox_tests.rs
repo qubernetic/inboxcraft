@@ -7,7 +7,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Offset, Timestamp};
 use serde_json::{Value, json};
 
-use super::{After, MAX_QUERY, MAX_SHOWN, Mailbox, Place, shown, when};
+use super::{Act, After, MAX_QUERY, MAX_SHOWN, Mailbox, Place, Showcase, shown, when};
 use crate::sample;
 
 /// 2026-11-05T09:00:00Z, a Thursday.
@@ -364,4 +364,179 @@ fn the_expanded_header_gives_the_date_in_full() {
     let mailbox = mailbox();
     assert_eq!(mailbox.full_date(at(NOW - 25 * 60)), "Thursday 5 Nov 2026, 08:35");
     assert_eq!(mailbox.short_date(at(NOW - 25 * 60)), "08:35");
+}
+
+#[test]
+fn a_row_keeps_its_sender_s_address_for_the_avatar() {
+    let mailbox = mailbox();
+    let first = mailbox.messages().first().unwrap();
+    assert_eq!((first.sender.as_str(), first.address.as_str()), ("Odile Brannock", "odile@example.org"));
+}
+
+#[test]
+fn a_keyboard_step_marks_the_selection_as_keyed_and_a_click_does_not() {
+    let mut mailbox = mailbox();
+    assert!(!mailbox.keyed());
+    mailbox.step(true);
+    assert!(mailbox.keyed());
+    let second = mailbox.messages().get(1).unwrap().id;
+    mailbox.select(Some(second));
+    assert!(!mailbox.keyed());
+    mailbox.step(false);
+    assert!(mailbox.keyed());
+    mailbox.select(None);
+    assert!(!mailbox.keyed());
+}
+
+#[test]
+fn the_showcase_is_empty_until_ui_shot_fills_it() {
+    let mut mailbox = mailbox();
+    assert_eq!(mailbox.showcase(), &Showcase::default());
+    assert!(mailbox.showcase().is_empty());
+    let showcase = sample::showcase(&mailbox);
+    assert!(!showcase.screener.is_empty() && !showcase.groups.is_empty());
+    mailbox.set_showcase(showcase.clone());
+    assert_eq!(mailbox.showcase(), &showcase);
+    assert!(!mailbox.showcase().is_empty());
+}
+
+#[test]
+fn the_sample_showcase_groups_people_and_updates_and_leaves_one_row_out() {
+    let mailbox = mailbox();
+    let showcase = sample::showcase(&mailbox);
+    let names: Vec<&str> = showcase.groups.iter().map(|group| group.name.as_str()).collect();
+    assert_eq!(names, ["People", "Updates"]);
+    let grouped: Vec<u64> = showcase.groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    assert_eq!(grouped.len(), mailbox.messages().len() - 1);
+    let left: Vec<&str> = mailbox.messages().iter().filter(|row| !grouped.contains(&row.id)).map(|row| row.sender.as_str()).collect();
+    assert_eq!(left, ["Kasimir Vell"]);
+    assert!(showcase.screener.iter().all(|waiting| waiting.address.ends_with("@example.org")));
+}
+
+fn id_of(mailbox: &Mailbox, subject: &str) -> u64 {
+    mailbox.messages().iter().find(|row| row.subject == subject).map(|row| row.id).unwrap()
+}
+
+/// Whether the row of `id` is listed, and whether it is read.
+fn listed(mailbox: &Mailbox, id: u64) -> Option<bool> {
+    mailbox.messages().iter().find(|row| row.id == id).map(|row| row.seen)
+}
+
+fn inbox_unread(mailbox: &Mailbox) -> u64 {
+    mailbox.views().iter().find(|view| view.role == Role::Inbox).map_or(0, |view| view.unread)
+}
+
+const ROTA: &str = "Allotment rota for November";
+const PHOTOS: &str = "Photos from the coast walk";
+
+#[test]
+fn read_and_unread_change_the_row_and_undo_brings_its_state_back() {
+    let mut mailbox = mailbox();
+    assert!(mailbox.can_act());
+    let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    let unread = inbox_unread(&mailbox);
+    mailbox.act(rota, Act::Read);
+    assert_eq!(mailbox.last_run(), Some("mail.list"));
+    assert_eq!(listed(&mailbox, rota), Some(true));
+    assert_eq!(inbox_unread(&mailbox), unread - 1);
+    let undo = mailbox.undoable().unwrap();
+    assert_eq!((undo.act, undo.id, undo.serial), (Act::Read, rota, 1));
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(false));
+    assert_eq!(inbox_unread(&mailbox), unread);
+    assert_eq!(mailbox.undoable(), None);
+    mailbox.act(photos, Act::Unread);
+    assert_eq!(listed(&mailbox, photos), Some(false));
+    assert_eq!(mailbox.undoable().map(|undo| undo.serial), Some(2));
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, photos), Some(true));
+    assert_eq!(mailbox.error(), None);
+}
+
+#[test]
+fn done_reads_and_archives_and_undo_brings_the_row_back_selected() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let below = mailbox.messages()[1].id;
+    mailbox.select(Some(rota));
+    mailbox.act(rota, Act::Done);
+    assert_eq!(listed(&mailbox, rota), None);
+    assert_eq!(mailbox.messages().len(), 10);
+    assert_eq!(mailbox.selected(), Some(below), "the next-message rule picks the row below");
+    mailbox.open(Place::View(Role::Archive));
+    assert_eq!(listed(&mailbox, rota), Some(true), "in the Archive, read");
+    mailbox.open(Place::View(Role::Inbox));
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(false));
+    assert_eq!(mailbox.messages().len(), 11);
+    assert_eq!(mailbox.selected(), Some(rota));
+    assert_eq!(mailbox.error(), None);
+}
+
+#[test]
+fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
+    let mut mailbox = mailbox();
+    let logo = id_of(&mailbox, "Draft logo for the bakery");
+    mailbox.act(logo, Act::Delete);
+    assert_eq!(listed(&mailbox, logo), None);
+    mailbox.narrow(Some(2));
+    mailbox.open(Place::View(Role::Trash));
+    assert_eq!(listed(&mailbox, logo), Some(false), "in the Studio Trash, still unread");
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, logo), None, "out of the Trash");
+    mailbox.open(Place::View(Role::Inbox));
+    assert_eq!(listed(&mailbox, logo), Some(false));
+    assert_eq!(mailbox.selected(), None, "a row that was not selected is not selected after");
+}
+
+#[test]
+fn done_and_delete_slide_out_first_and_a_new_act_finishes_the_sliding_one() {
+    let mut mailbox = mailbox();
+    let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    mailbox.start(rota, Act::Done);
+    assert_eq!(mailbox.leaving(), Some((rota, Act::Done)));
+    assert_eq!(listed(&mailbox, rota), Some(false), "still in the list while it slides");
+    assert_eq!(mailbox.undoable(), None);
+    mailbox.start(photos, Act::Delete);
+    assert_eq!(listed(&mailbox, rota), None, "done before the next one starts");
+    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)));
+    mailbox.left();
+    assert_eq!(listed(&mailbox, photos), None);
+    assert_eq!(mailbox.leaving(), None);
+    mailbox.left();
+    let kasimir = id_of(&mailbox, "Studio open day: volunteers?");
+    mailbox.start(kasimir, Act::Read);
+    assert_eq!(mailbox.leaving(), None, "read is done at once");
+    assert_eq!(listed(&mailbox, kasimir), Some(true));
+    mailbox.forget_undo();
+    assert_eq!(mailbox.undoable(), None);
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, kasimir), Some(true), "a forgotten act is not undone");
+}
+
+#[test]
+fn a_mailbox_over_a_store_shows_no_action_and_does_nothing() {
+    let session = Session::new(Box::new(sample::mailbox(at(NOW)).unwrap()), clock()).unwrap();
+    let mut mailbox = Mailbox::new(session, clock());
+    assert!(!mailbox.can_act());
+    let rota = id_of(&mailbox, ROTA);
+    let runs = mailbox.runs();
+    mailbox.act(rota, Act::Done);
+    mailbox.start(rota, Act::Delete);
+    mailbox.left();
+    mailbox.undo();
+    assert_eq!(mailbox.runs(), runs, "no command ran");
+    assert_eq!(mailbox.leaving(), None);
+    assert_eq!(listed(&mailbox, rota), Some(false));
+}
+
+#[test]
+fn an_act_on_a_row_not_listed_shows_an_error_and_changes_nothing() {
+    let mut mailbox = mailbox();
+    mailbox.act(999, Act::Done);
+    assert!(mailbox.error().is_some_and(|error| error.contains("no Archive folder")), "{:?}", mailbox.error());
+    mailbox.act(999, Act::Read);
+    assert!(mailbox.error().is_some_and(|error| error.contains("there is no message 999")), "{:?}", mailbox.error());
+    assert_eq!(mailbox.undoable(), None);
+    assert_eq!(mailbox.messages().len(), 11);
 }

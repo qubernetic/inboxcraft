@@ -82,7 +82,11 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
         });
         ui.end_row();
         ui.label("");
-        ui.checkbox(&mut form.ispdb, tr!("Detect also asks Mozilla's list of providers, which tells Mozilla your domain"));
+        ui.vertical(|ui| {
+            // A grid cell does not wrap on its own.
+            ui.set_max_width(FORM_WIDTH - 200.0);
+            ui.checkbox(&mut form.ispdb, tr!("Detect also asks Mozilla's list of providers, which tells Mozilla your domain"));
+        });
         ui.end_row();
         ui.label("");
         ui.vertical(|ui| {

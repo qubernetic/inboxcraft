@@ -7,7 +7,7 @@ use egui::{Color32, Rect, pos2, vec2};
 
 use super::{BACK_OPACITY, IconId, IconSet, Style};
 use crate::shot::{self, Picture};
-use crate::theme::{self, Mode, Preset, Theme};
+use crate::theme::{self, IconFont, Mode, Preset, Theme};
 
 const STYLES: [Style; 3] = [Style::Regular, Style::Fill, Style::Duotone];
 
@@ -50,17 +50,40 @@ fn ids_have_their_own_glyphs() {
 }
 
 #[test]
-fn regular_and_fill_are_one_layer_and_duotone_a_faint_back_under_the_line() {
-    for set in IconSet::ALL {
-        for id in IconId::ALL {
-            assert_eq!(set.glyph(id, Style::Regular).layers.len(), 1);
-            assert_eq!(set.glyph(id, Style::Fill).layers.len(), 1);
-            let duotone = set.glyph(id, Style::Duotone);
-            let opacities: Vec<f32> = duotone.layers.iter().map(|(_, opacity)| *opacity).collect();
-            assert_eq!(opacities, vec![BACK_OPACITY, 1.0], "{set:?} {id:?}");
-            assert_ne!(set.glyph(id, Style::Regular).face, set.glyph(id, Style::Fill).face);
-        }
+fn phosphor_draws_regular_and_fill_as_one_glyph_of_its_own_font_and_duotone_as_a_faint_back_under_the_line() {
+    let set = IconSet::Phosphor;
+    for id in IconId::ALL {
+        assert_eq!(set.glyph(id, Style::Regular).layers.len(), 1);
+        assert_eq!(set.glyph(id, Style::Fill).layers.len(), 1);
+        let duotone = set.glyph(id, Style::Duotone);
+        let opacities: Vec<f32> = duotone.layers.iter().map(|(_, opacity)| *opacity).collect();
+        assert_eq!(opacities, vec![BACK_OPACITY, 1.0], "{id:?}");
+        assert_ne!(set.glyph(id, Style::Regular).face, set.glyph(id, Style::Fill).face);
+        assert!(STYLES.iter().all(|style| set.glyph(id, *style).disc == 0.0), "Phosphor has solid glyphs and needs no disc");
     }
+}
+
+#[test]
+fn lucide_draws_lines_and_shows_fill_and_duotone_with_a_filled_disc_behind_them() {
+    let set = IconSet::Lucide;
+    for id in IconId::ALL {
+        let [regular, fill, duotone] = STYLES.map(|style| set.glyph(id, style));
+        for glyph in [&regular, &fill, &duotone] {
+            assert_eq!(glyph.layers, regular.layers, "{id:?}: one line glyph in every style");
+            assert_eq!(glyph.face, IconFont::Lucide);
+        }
+        assert_eq!(regular.disc, 0.0);
+        assert_eq!(duotone.disc, BACK_OPACITY);
+        assert!(fill.disc > duotone.disc, "{id:?}: an active state stands out more than an empty state");
+    }
+}
+
+#[test]
+fn the_owner_s_icon_choice_names_its_set() {
+    use inboxcraft_engine::appearance::Icons;
+    assert_eq!(IconSet::of(Icons::Phosphor), IconSet::Phosphor);
+    assert_eq!(IconSet::of(Icons::Lucide), IconSet::Lucide);
+    assert_eq!(IconSet::ALL.len(), Icons::ALL.len());
 }
 
 #[test]

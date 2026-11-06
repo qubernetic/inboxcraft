@@ -145,6 +145,21 @@ fn a_text_scale_draws_the_window_with_larger_type() {
 }
 
 #[test]
+fn a_font_and_an_icon_set_draw_the_window_the_gallery_and_the_sheet_in_them() {
+    for page in [r#""size": [600, 400]"#, r#""components": true"#, r#""icons": true"#] {
+        let plain = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", {page}}}"#))).unwrap();
+        let named = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "figtree", "icon_set": "phosphor", {page}}}"#))).unwrap();
+        assert_eq!(plain, named, "{page}: Figtree and Phosphor are the default");
+        let inter = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "inter", {page}}}"#))).unwrap();
+        let lucide = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "icon_set": "lucide", {page}}}"#))).unwrap();
+        if !page.contains("icons") {
+            assert_ne!(plain, inter, "{page}");
+        }
+        assert_ne!(plain, lucide, "{page}");
+    }
+}
+
+#[test]
 fn a_scale_of_two_doubles_the_picture() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [300, 200], "scale": 2}"#)).unwrap();
     assert_eq!((picture.width(), picture.height()), (600, 400));
@@ -165,6 +180,60 @@ fn a_shot_can_narrow_open_search_and_select() {
 }
 
 #[test]
+fn a_shot_shows_the_settings_page_in_the_window_only() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let page = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "settings": true}"#)).unwrap();
+    let closed = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "settings": false}"#)).unwrap();
+    assert_ne!(window, page);
+    assert_eq!(window, closed);
+    for page in [r#""icons": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "settings": true, {page}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_the_showcase_and_steps_the_selection_by_keyboard() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let off = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": false}"#)).unwrap();
+    let shown = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": true}"#)).unwrap();
+    let stepped = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": true, "step": 2}"#)).unwrap();
+    assert_eq!(window, off);
+    assert_ne!(window, shown);
+    assert_ne!(shown, stepped);
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "step": 1, "select": "Draft logo for the bakery"}"#)).unwrap_err().to_string();
+    assert!(error.contains("by step or by subject"), "{error}");
+    for page in [r#""showcase": true"#, r#""step": 1"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "components": true, {page}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], "step": 1{more}}}"#));
+    let stepped = shoot(&line("")).unwrap();
+    let toast = shoot(&line(r#", "act": "done""#)).unwrap();
+    let sliding = shoot(&line(r#", "act": "done", "slide": true"#)).unwrap();
+    let read = shoot(&line(r#", "act": "read""#)).unwrap();
+    assert_ne!(stepped, toast);
+    assert_ne!(toast, sliding);
+    assert_ne!(toast, read, "another toast");
+    for (more, says) in [
+        (r#", "act": "archive""#, "not read, unread, done or delete"),
+        (r#", "act": "read", "slide": true"#, "only done and delete slide"),
+        (r#", "slide": true"#, "slide needs an act"),
+    ] {
+        let error = shoot(&line(more)).unwrap_err().to_string();
+        assert!(error.contains(says), "{error}");
+    }
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "act": "done"}"#)).unwrap_err().to_string();
+    assert!(error.contains("needs a selected row"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "act": "done"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),
@@ -180,6 +249,8 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
+        (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
+        (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");

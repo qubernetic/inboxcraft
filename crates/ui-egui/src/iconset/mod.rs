@@ -7,11 +7,14 @@
 //! Each set maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its own
 //! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The styles carry meaning:
 //! [`Style::Regular`] in toolbars and rows, [`Style::Fill`] for active and selected states, [`Style::Duotone`] for
-//! empty states. The app icon is not from a set; it is drawn in code in [`crate::icons`].
+//! empty states. Phosphor has a font for each style; Lucide has lines only and draws Fill and Duotone over a filled
+//! disc ([`Glyph::disc`]). The app icon is not from a set; it is drawn in code in [`crate::icons`].
 
+mod lucide;
 mod phosphor;
 
 use egui::{Color32, Painter, Rect, Vec2, pos2, vec2};
+use inboxcraft_engine::appearance::Icons;
 
 use crate::theme::{IconFont, Theme};
 
@@ -143,14 +146,20 @@ pub enum Style {
 /// The opacity of a duotone icon's back.
 pub const BACK_OPACITY: f32 = 0.2;
 
-/// What a set draws for an id in a style: glyphs of one font, painted one over the other, each at an opacity.
+/// What a set draws for an id in a style: glyphs of one font, painted one over the other, each at an opacity, over a
+/// filled disc where the set has no solid glyphs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Glyph {
     /// The font the glyphs are in.
     pub face: IconFont,
     /// The glyphs from back to front, each with its opacity (0 to 1).
     pub layers: Vec<(char, f32)>,
+    /// The opacity of a filled disc behind the glyphs (0 to 1); 0 draws none.
+    pub disc: f32,
 }
+
+/// The diameter of a [`Glyph::disc`] as a share of the square's side.
+pub const DISC: f32 = 0.9;
 
 /// How a set's glyphs sit in the square they are painted into.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -167,17 +176,29 @@ pub enum IconSet {
     /// Phosphor (MIT), the default.
     #[default]
     Phosphor,
+    /// Lucide (ISC).
+    Lucide,
 }
 
 impl IconSet {
     /// Every set.
-    pub const ALL: [Self; 1] = [Self::Phosphor];
+    pub const ALL: [Self; 2] = [Self::Phosphor, Self::Lucide];
+
+    /// The set the owner chose.
+    #[must_use]
+    pub const fn of(choice: Icons) -> Self {
+        match choice {
+            Icons::Phosphor => Self::Phosphor,
+            Icons::Lucide => Self::Lucide,
+        }
+    }
 
     /// The glyphs of `id` in `style`.
     #[must_use]
     pub fn glyph(self, id: IconId, style: Style) -> Glyph {
         match self {
             Self::Phosphor => phosphor::glyph(id, style),
+            Self::Lucide => lucide::glyph(id, style),
         }
     }
 
@@ -186,6 +207,7 @@ impl IconSet {
     pub const fn metrics(self) -> Metrics {
         match self {
             Self::Phosphor => phosphor::METRICS,
+            Self::Lucide => lucide::METRICS,
         }
     }
 
@@ -198,6 +220,9 @@ impl IconSet {
         }
         let metrics = self.metrics();
         let glyph = self.glyph(id, style);
+        if glyph.disc > 0.0 {
+            painter.circle_filled(rect.center(), side * DISC / 2.0, colour.gamma_multiply(glyph.disc));
+        }
         let font = glyph.face.id(side * metrics.size);
         for (layer, opacity) in glyph.layers {
             let colour = colour.gamma_multiply(opacity);

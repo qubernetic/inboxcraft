@@ -142,6 +142,23 @@ fn the_process_runner_reports_the_exit_status() {
 }
 
 #[test]
+fn the_process_runner_captures_standard_output() {
+    let cargo = OsStr::new(env!("CARGO"));
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let version = ProcessRunner.output(cargo, &["--version"], here).unwrap().unwrap();
+    assert!(String::from_utf8(version).unwrap().starts_with("cargo "));
+    assert_eq!(ProcessRunner.output(cargo, &["inboxcraft-no-such-subcommand"], here).unwrap(), None);
+    let missing = PathBuf::from(here).join("inboxcraft-no-such-program");
+    assert!(matches!(ProcessRunner.output(missing.as_os_str(), &[], here), Err(Error::Spawn { .. })));
+}
+
+#[test]
+fn a_runner_that_captures_nothing_answers_a_failed_call() {
+    let (mut ctx, _) = ci_context(vec![]);
+    assert_eq!(ctx.runner.output(OsStr::new("cargo"), &["--version"], Path::new(".")).unwrap(), None);
+}
+
+#[test]
 fn the_real_context_uses_the_cargo_that_runs_xtask() {
     let ctx = Context::from_env();
     assert_eq!(ctx.root, crate::default_root());

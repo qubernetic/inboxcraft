@@ -25,6 +25,7 @@ fn every_error_has_a_code_and_a_sentence() {
         (EngineError::NotFound { what: "message", id: 7 }, "not_found", "there is no message 7"),
         (EngineError::Store(StoreError::UnknownAccount(AccountId::new(3))), "store", "no account a3 in the store"),
         (EngineError::Panicked("mail.list"), "panicked", "the command mail.list failed inside; nothing was changed"),
+        (EngineError::SampleOnly("sample.mail.set"), "sample_only", "the command sample.mail.set runs only on the sample mailbox (--sample)"),
     ];
     for (error, code, sentence) in errors {
         assert_eq!(error.code(), code);

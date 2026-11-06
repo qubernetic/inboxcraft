@@ -6,15 +6,18 @@
 //!
 //! Everything goes through [`Session::run`] by command id (`account.list`, `folder.list`, `mail.list`,
 //! `mail.search`), as the menus, the CLI and MCP do. A command that fails leaves the list as it was and shows its
-//! error until the next command succeeds or the person dismisses it.
+//! error until the next command succeeds or the person dismisses it. On the sample mailbox the hover actions run
+//! `sample.mail.set` ([`Mailbox::act`]) and the last one can be undone.
 
 use std::collections::BTreeMap;
 
+use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::{Applied, EngineError, MAX_LIST, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
 
+use crate::iconset::IconId;
 use crate::workers::Workers;
 use crate::{UiError, tr};
 
@@ -143,6 +146,8 @@ pub struct MessageRow {
     pub account: u64,
     /// The sender's name, or the address without one.
     pub sender: String,
+    /// The sender's address, which picks the avatar's colour.
+    pub address: String,
     /// The subject.
     pub subject: String,
     /// The first words of the text.
@@ -153,6 +158,91 @@ pub struct MessageRow {
     pub seen: bool,
     /// Flagged.
     pub flagged: bool,
+}
+
+/// A sender the screener holds back until the owner lets them in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    /// Their name.
+    pub name: String,
+    /// Their address, which picks the avatar's colour.
+    pub address: String,
+}
+
+/// A group of the grouped inbox: its badge's icon, its name and its messages, by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    /// The icon on its badge.
+    pub icon: IconId,
+    /// Its name.
+    pub name: String,
+    /// Its messages, by id; those not in the list are left out.
+    pub messages: Vec<u64>,
+}
+
+/// The parts of the list whose data does not exist yet (the screener and the groups come with E3.1 and E3.2), filled
+/// with invented data by `ui_shot` only. In the app it stays empty, so none of them is drawn.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Showcase {
+    /// The senders waiting in the screener; its card shows while there are any.
+    pub screener: Vec<Waiting>,
+    /// The groups of the unified inbox.
+    pub groups: Vec<Group>,
+}
+
+impl Showcase {
+    /// Whether it shows nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.screener.is_empty() && self.groups.is_empty()
+    }
+}
+
+/// What a hover action or its key does to a message. Only the sample mailbox takes them (`sample.mail.set`), until
+/// the commands that act on a real mailbox exist (E2.1, E3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Act {
+    /// Mark it read.
+    Read,
+    /// Mark it unread.
+    Unread,
+    /// Mark it read and move it to its account's Archive folder: it leaves the inbox.
+    Done,
+    /// Move it to its account's Trash folder.
+    Delete,
+}
+
+impl Act {
+    /// Whether the row slides out of the list first: the message leaves the list.
+    #[must_use]
+    pub fn slides(self) -> bool {
+        matches!(self, Self::Done | Self::Delete)
+    }
+
+    /// What the toast says after it.
+    #[must_use]
+    pub fn told(self) -> &'static str {
+        match self {
+            Self::Read => tr!("Marked as read"),
+            Self::Unread => tr!("Marked as unread"),
+            Self::Done => tr!("Marked as done"),
+            Self::Delete => tr!("Moved to Trash"),
+        }
+    }
+}
+
+/// The last act, until it is undone or forgotten: where its message was and whether it was read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Undo {
+    /// What was done.
+    pub act: Act,
+    /// To which message.
+    pub id: u64,
+    /// The how-manyth act of the session, so a toast knows a new act from the one it shows.
+    pub serial: u64,
+    folder: u64,
+    seen: bool,
+    selected: bool,
 }
 
 /// The mail list's state over a session.
@@ -168,9 +258,20 @@ pub struct Mailbox {
     query: String,
     messages: Vec<MessageRow>,
     selected: Option<u64>,
+    /// Whether the selection came from the keyboard.
+    keyed: bool,
+    showcase: Showcase,
+    /// Whether the session is over the sample mailbox, where the hover actions act.
+    sample: bool,
+    /// The message sliding out of the list, and what is done to it once it is out.
+    leaving: Option<(u64, Act)>,
+    undo: Option<Undo>,
+    acts: u64,
     after: After,
     error: Option<String>,
     runs: u64,
+    /// The id of the last command run through [`Mailbox::run`].
+    last: Option<&'static str>,
 }
 
 impl std::fmt::Debug for Mailbox {
@@ -234,6 +335,7 @@ fn message_row(value: &Value) -> MessageRow {
         id: number(value, "id"),
         account: number(value, "account"),
         sender: sender(value.get("from").unwrap_or(&Value::Null)),
+        address: value.get("from").and_then(Value::as_array).and_then(|from| from.first()).map(|first| text(first, "address")).unwrap_or_default(),
         subject: text(value, "subject"),
         preview: text(value, "preview"),
         date: value.get("date").and_then(Value::as_str).and_then(parse_date),
@@ -295,6 +397,7 @@ impl Mailbox {
     /// The list over `session`, on the unified inbox of every account; `clock` dates the rows.
     #[must_use]
     pub fn new(session: Session, clock: Box<dyn Clock>) -> Self {
+        let sample = session.is_sample();
         let mut mailbox = Self {
             session,
             clock,
@@ -307,9 +410,16 @@ impl Mailbox {
             query: String::new(),
             messages: Vec::new(),
             selected: None,
+            keyed: false,
+            showcase: Showcase::default(),
+            sample,
+            leaving: None,
+            undo: None,
+            acts: 0,
             after: After::Next,
             error: None,
             runs: 0,
+            last: None,
         };
         mailbox.refresh();
         mailbox
@@ -354,7 +464,123 @@ impl Mailbox {
         };
         if let Some(row) = self.messages.get(next) {
             self.selected = Some(row.id);
+            self.keyed = true;
         }
+    }
+
+    /// Whether the selection came from the keyboard ([`Mailbox::step`]): the selected row then shows the hover
+    /// actions, as a hovered row does.
+    #[must_use]
+    pub fn keyed(&self) -> bool {
+        self.keyed
+    }
+
+    /// The invented parts `ui_shot` shows; empty in the app.
+    #[must_use]
+    pub fn showcase(&self) -> &Showcase {
+        &self.showcase
+    }
+
+    /// Shows `showcase` in the list, for `ui_shot`.
+    pub fn set_showcase(&mut self, showcase: Showcase) {
+        self.showcase = showcase;
+    }
+
+    /// Whether the rows show the hover actions and the action keys work: on the sample mailbox only, until the
+    /// commands that act on a real mailbox exist.
+    #[must_use]
+    pub fn can_act(&self) -> bool {
+        self.sample
+    }
+
+    /// Does `act` to the message `id` of the sample mailbox through `sample.mail.set`, at once; it can be undone
+    /// ([`Mailbox::undo`]) until the next act. Done and Delete move it to its account's Archive or Trash folder, so
+    /// it leaves the list and the next-message rule picks what is selected. Nothing outside the sample.
+    pub fn act(&mut self, id: u64, act: Act) {
+        if !self.sample {
+            return;
+        }
+        let result = self.acted(id, act);
+        if result.is_ok() {
+            self.refresh();
+        }
+        self.settle(result);
+    }
+
+    fn acted(&mut self, id: u64, act: Act) -> Result<(), UiError> {
+        let account = self.messages.iter().find(|row| row.id == id).map(|row| row.account);
+        let folder = |role: Role| {
+            let found = self.folders.iter().find(|folder| Some(folder.account) == account && folder.role == Some(role)).map(|folder| folder.id);
+            found.ok_or_else(|| shape("sample.mail.set", &format!("no {} folder", role.label())))
+        };
+        let params = match act {
+            Act::Read => json!({ "id": id, "seen": true }),
+            Act::Unread => json!({ "id": id, "seen": false }),
+            Act::Done => json!({ "id": id, "seen": true, "folder": folder(Role::Archive)? }),
+            Act::Delete => json!({ "id": id, "folder": folder(Role::Trash)? }),
+        };
+        let selected = self.selected == Some(id);
+        let answer = self.run("sample.mail.set", &params)?;
+        let was = answer.get("was");
+        let (Some(folder), Some(seen)) =
+            (was.and_then(|was| was.get("folder")).and_then(Value::as_u64), was.and_then(|was| was.get("seen")).and_then(Value::as_bool))
+        else {
+            return Err(shape("sample.mail.set", "no folder or read state it was in"));
+        };
+        self.acts = self.acts.saturating_add(1);
+        self.undo = Some(Undo { act, id, serial: self.acts, folder, seen, selected });
+        Ok(())
+    }
+
+    /// Starts `act` on the message `id`: an act that takes the row out of the list lets it slide out first
+    /// ([`Mailbox::leaving`], then [`Mailbox::left`]); the others are done at once. A row still sliding is done first.
+    pub fn start(&mut self, id: u64, act: Act) {
+        if !self.sample {
+            return;
+        }
+        self.left();
+        if act.slides() {
+            self.leaving = Some((id, act));
+        } else {
+            self.act(id, act);
+        }
+    }
+
+    /// The row sliding out of the list and what is done to it once it is out.
+    #[must_use]
+    pub fn leaving(&self) -> Option<(u64, Act)> {
+        self.leaving
+    }
+
+    /// The sliding row is out: its act is done.
+    pub fn left(&mut self) {
+        if let Some((id, act)) = self.leaving.take() {
+            self.act(id, act);
+        }
+    }
+
+    /// The last act while it can be undone.
+    #[must_use]
+    pub fn undoable(&self) -> Option<Undo> {
+        self.undo
+    }
+
+    /// Undoes the last act: its message goes back to its folder with its read state, selected again when it was.
+    pub fn undo(&mut self) {
+        let Some(undo) = self.undo.take() else { return };
+        let result = self.run("sample.mail.set", &json!({ "id": undo.id, "seen": undo.seen, "folder": undo.folder })).map(|_| ());
+        if result.is_ok() {
+            self.refresh();
+            if undo.selected && self.messages.iter().any(|row| row.id == undo.id) {
+                self.selected = Some(undo.id);
+            }
+        }
+        self.settle(result);
+    }
+
+    /// Forgets the last act: it can no longer be undone (its toast has gone).
+    pub fn forget_undo(&mut self) {
+        self.undo = None;
     }
 
     /// Hands the engine's queued jobs to `workers`, stops the workers of accounts that are gone, and applies the
@@ -406,9 +632,32 @@ impl Mailbox {
         self.error = result.err().map(|error| error.to_string());
     }
 
+    /// Shows `error` in the error banner until it is dismissed or the next command settles.
+    pub(crate) fn fail(&mut self, error: UiError) {
+        self.settle(Err(error));
+    }
+
+    /// The owner's appearance choices, as the `ui.*.set` commands left them.
+    #[must_use]
+    pub fn appearance(&self) -> &Appearance {
+        self.session.appearance()
+    }
+
+    /// Takes the appearance choices kept from an earlier run.
+    pub(crate) fn restore_appearance(&mut self, appearance: Appearance) {
+        self.session.set_appearance(appearance);
+    }
+
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
+        self.last = Some(command);
         Ok(self.session.run(command, params)?)
+    }
+
+    /// The id of the last command run through [`Mailbox::run`], answered or refused.
+    #[must_use]
+    pub fn last_run(&self) -> Option<&'static str> {
+        self.last
     }
 
     /// How many commands ran through [`Mailbox::run`] so far.
@@ -542,6 +791,7 @@ impl Mailbox {
 
     /// Selects a row of the list, or none. A message not in the list is not selected.
     pub fn select(&mut self, message: Option<u64>) {
+        self.keyed = false;
         match message {
             Some(id) if self.messages.iter().any(|row| row.id == id) => self.selected = Some(id),
             Some(_) => {}

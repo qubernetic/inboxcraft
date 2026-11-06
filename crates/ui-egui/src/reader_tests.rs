@@ -110,6 +110,22 @@ fn a_reply_opens_with_its_thread_oldest_first_and_its_quote_folded() {
 }
 
 #[test]
+fn the_thread_knows_its_writers_once_each_and_their_addresses() {
+    let (fetch, kept) = (Recorder::default(), Kept::default());
+    let mut mailbox = mailbox();
+    let reply = id_of(&mut mailbox, "Re: Allotment rota for November");
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(reply));
+    assert_eq!(reader.writers(), ["Odile Brannock", "Mira Holloway"]);
+    assert_eq!(reader.thread()[1].address, "mira@example.org");
+    let single = id_of(&mut mailbox, "Photos from the coast walk");
+    reader.open(&mut mailbox, Some(single));
+    assert_eq!(reader.writers(), ["Teodor Lisk"]);
+    reader.open(&mut mailbox, None);
+    assert!(reader.writers().is_empty());
+}
+
+#[test]
 fn no_remote_request_before_consent_and_once_loads_this_message_only() {
     let (fetch, kept) = (Recorder::default(), Kept::default());
     let mut mailbox = mailbox();

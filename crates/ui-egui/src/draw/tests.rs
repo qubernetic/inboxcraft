@@ -94,7 +94,7 @@ fn the_theme_follows_the_mode() {
     let harness = harness_with(sample_app(), egui::Theme::Dark);
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
     assert_eq!(harness.state().mode(), ModePreference::System);
-    assert_eq!(*harness.state().preset(), Preset::default());
+    assert_eq!(harness.state().preset(), Preset::default());
     assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &Preset::default()).palette.panel);
 }
 
@@ -117,7 +117,7 @@ fn a_new_preset_and_mode_show_from_the_next_frame() {
 }
 
 /// The font of the first text section of the frame that starts with `start`.
-fn font_of(harness: &Harness<'static, InboxApp>, start: &str) -> egui::FontId {
+pub(super) fn font_of(harness: &Harness<'static, InboxApp>, start: &str) -> egui::FontId {
     flat(&harness.output().shapes)
         .into_iter()
         .find_map(|(_, shape)| match shape {
@@ -430,6 +430,17 @@ fn translucent(shape: &egui::Shape) -> bool {
 }
 
 /// Every shape of `shapes`, groups opened, with its clip, in paint order.
+/// The galley of the first text that starts with `start`.
+pub(super) fn galley_of(harness: &Harness<'static, InboxApp>, start: &str) -> std::sync::Arc<egui::Galley> {
+    flat(&harness.output().shapes)
+        .into_iter()
+        .find_map(|(_, shape)| match shape {
+            egui::Shape::Text(text) if text.galley.job.text.starts_with(start) => Some(text.galley),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no text starts with {start:?}"))
+}
+
 fn flat(shapes: &[egui::epaint::ClippedShape]) -> Vec<(egui::Rect, egui::Shape)> {
     fn open(clip: egui::Rect, shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Shape)>) {
         if let egui::Shape::Vec(inner) = shape {

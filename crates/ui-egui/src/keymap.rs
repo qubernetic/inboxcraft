@@ -11,6 +11,24 @@ use egui::{Context, Key, KeyboardShortcut, Modifiers};
 /// Focus the search field.
 pub const FIND: &str = "ui.search.focus";
 
+/// Show the mail: leave the settings or the add-account page (the rail's Mail button).
+pub const MAIL: &str = "ui.mail.show";
+
+/// Open the appearance settings (the rail's settings button).
+pub const SETTINGS: &str = "ui.settings.open";
+
+/// Done: mark the selected message read and move it out of the inbox (the sample only, for now).
+pub const DONE: &str = "ui.message.done";
+
+/// Mark the selected message read, or unread when it is read (the sample only, for now).
+pub const READ: &str = "ui.message.read";
+
+/// Delete the selected message: move it to Trash (the sample only, for now).
+pub const DELETE: &str = "ui.message.delete";
+
+/// Undo the last act while its toast shows.
+pub const UNDO: &str = "ui.undo";
+
 /// The keys of the actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keymap {
@@ -22,6 +40,12 @@ impl Default for Keymap {
     fn default() -> Self {
         let mut keymap = Self::empty();
         keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
+        keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
+        keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
+        keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));
+        keymap.bind(READ, KeyboardShortcut::new(Modifiers::NONE, Key::R));
+        keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
+        keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));
         keymap
     }
 }

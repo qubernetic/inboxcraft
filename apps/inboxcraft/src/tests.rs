@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
+use inboxcraft_ui_egui::keep::NoKeep;
 
 use super::{Source, Step, app, run, usage};
 
@@ -93,16 +94,60 @@ fn clock() -> Box<dyn Clock> {
 
 #[test]
 fn the_sample_window_shows_the_sample_mailbox_and_the_empty_one_nothing() {
-    let sample = app(Source::Sample, clock, None).unwrap();
+    let sample = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
     assert_eq!(sample.mailbox().accounts().len(), 2);
     assert_eq!(sample.mailbox().messages().len(), 11);
-    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {}))).unwrap();
+    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {})), Box::new(NoKeep)).unwrap();
     assert!(empty.mailbox().accounts().is_empty());
     assert_eq!(empty.mailbox().error(), None);
 }
 
 #[test]
 fn only_the_empty_window_adds_accounts() {
-    assert!(!app(Source::Sample, clock, None).unwrap().can_add(), "the sample connects nowhere");
-    assert!(app(Source::Empty, clock, None).unwrap().can_add());
+    assert!(!app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap().can_add(), "the sample connects nowhere");
+    assert!(app(Source::Empty, clock, None, Box::new(NoKeep)).unwrap().can_add());
+}
+
+#[test]
+fn both_windows_start_with_the_kept_appearance() {
+    use inboxcraft_engine::appearance::{Appearance, Typeface};
+    use inboxcraft_ui_egui::keep::{FILE, Keep, KeepFile};
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(FILE);
+    let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
+    KeepFile::new(file.clone()).store(&chosen).unwrap();
+    for source in [Source::Sample, Source::Empty] {
+        let window = app(source, clock, None, Box::new(KeepFile::new(file.clone()))).unwrap();
+        assert_eq!(*window.appearance(), chosen, "{source:?}");
+    }
+}
+
+#[test]
+fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
+    use inboxcraft_ui_egui::keep::{FILE, KeepFile};
+    use inboxcraft_ui_egui::mailbox::Act;
+    use inboxcraft_ui_egui::workers::Scripted;
+    let dir = tempfile::tempdir().unwrap();
+    let mut window = app(Source::Sample, clock, None, Box::new(KeepFile::new(dir.path().join(FILE)))).unwrap();
+    assert!(window.mailbox().can_act());
+    let mut workers = Scripted::default();
+    let ids: Vec<u64> = window.mailbox().messages().iter().map(|row| row.id).collect();
+    for (id, act) in ids.into_iter().zip([Act::Read, Act::Unread, Act::Done, Act::Delete]) {
+        let mailbox = window.mailbox_mut();
+        mailbox.start(id, act);
+        mailbox.left();
+        assert!(mailbox.undoable().is_some(), "{act:?}");
+        mailbox.pump(&mut workers);
+        mailbox.undo();
+        mailbox.pump(&mut workers);
+        assert_eq!(mailbox.error(), None, "{act:?}");
+    }
+    let first = window.mailbox().messages()[0].id;
+    window.mailbox_mut().act(first, Act::Done);
+    window.mailbox_mut().pump(&mut workers);
+    assert_eq!(window.mailbox().messages().len(), 10);
+    assert!(workers.sent.is_empty(), "no job went to a worker: {:?}", workers.sent);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing was written");
+    let again = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
+    assert_eq!(again.mailbox().messages().len(), 11, "the next start shows the sample as it was");
 }

@@ -315,7 +315,7 @@ B = blocks the next stage.
 - The arrow keys step through the list only while no control has the keyboard focus; Tab moves the focus through
   every folder and row, and Enter or Space selects (#30, #33).
 - A link in a message is never opened: the window has no browser hand-off (egui's `links` feature is off, and
-  turning it on is the project owner's call), so a click copies the address and the line under the reader shows
+  turning it on is the project owner's call), so a click copies the address and the float over the reader shows
   where it goes. Plain-text bodies show web addresses as text, not as links (#33).
 - "Always for this sender" is kept for the session only (`remote.allow` keeps it in the engine's memory) until
   settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: a forger who
@@ -344,28 +344,65 @@ B = blocks the next stage.
   bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
   which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
   for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
-- Text size and typeface (#83): the text scale (90 % to 130 %) can be changed only from code
-  (`InboxApp::set_text_scale`) and the `ui_shot` scripts; the `ui.text_scale.set` and `ui.font.set` commands, the
-  settings page, keeping the choice on disk and Inter as the second typeface come with E1.16. The fit test draws the
-  list, the reader and the add-account page; the settings page joins it when it exists. Spacing and paddings stay
+- Text size and typeface (#83, #86, #87): the text scale (90 % to 130 %) and the typeface (Figtree or Inter) are
+  set on the appearance settings page or through `ui.text_scale.set` and `ui.font.set`, and kept on disk. The fit
+  test draws the list, the reader, the add-account page and the settings page in both typefaces at 90 %, 100 % and
+  130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
+  Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
-- Icons (#84): Phosphor is the only set; Lucide, the `ui.icons.set` command and the settings control come with
-  E1.16. The set has the ids the window and the triage actions need so far; a toolbar or a view that needs another
-  meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
+- Icons (#84, #86): Phosphor and Lucide, chosen with `ui.icons.set`; the settings control comes with E1.16b. Lucide
+  has no solid icons, so its Fill and Duotone draw a filled disc behind the lines (a stronger one for Fill); on the
+  accent of an active button the lines on their disc read, but less boldly than Phosphor's solid shape. The set has
+  the ids the window and the triage actions need so far; a toolbar or a view that needs another meaning adds an id
+  and its glyph (in both sets). Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
   whole (about 1.5 MB, every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new
   font file. An icon is one colour token (Duotone's back at 20 % of it); a gradient through a glyph (the gradient
   helper on the icon's text) is not done. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
+- Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings page that
+  runs them exist. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
+  colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
+  label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
+  "follow the system" after a choice is possible only through `ui.motion.set` with `reduce: system`. Loading the
+  owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
+  the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of
+  missing glyphs. The file sits in the config folder and is written in the sample window too: it
+  holds no mail and nothing about an account, so the sample mode writes this one file and nothing else. A custom
+  accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
+  made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
+  open at once each keep their own last change; the later write wins.
+- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: they
+  wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
+  there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
+  the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
+  holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
+  their features. A row shows the first sender's avatar from initials only.
+- Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
+  they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
+  that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
+  Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
+  be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
+  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
+  the keymap can be changed in the settings.
+- Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
+  `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
+  (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
+  for the composer (E2.3). They are drawn disabled with "Not available yet" in their
+  tooltips. More holds Full width, Close and the next-message rule; Escape leaves full width but does not close the
+  reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
+  still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
+  More menu or hover a link, so neither has a picture; the UI tests cover both. The thread's earlier messages fold
+  to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
-  popup exist and are shown in the `ui_shot` gallery, but only the avatar (in the reader's header) and the count
-  badge are used in the window yet; the list and the reader move onto the rest with E1.17. The keymap knows one
-  key of its own (Ctrl+F for the search); the arrow keys and Escape are still read directly, and changing a key is
-  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. The reduced-motion flag
-  can be set only from code (`InboxApp::set_reduce_motion`); its `ui.motion.set` command and switch come with E1.16.
+  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
+  settings); the arrow keys and Escape are still read directly, and changing a key is
+  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
+  `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
   Reduced motion stops egui's fades and its scrolling to a place, but not its smoothing of a mouse wheel's notches
@@ -481,3 +518,8 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Icons: one set, the ids so far, whole fonts bundled, no gradient through a glyph (#84) |
 | 2026-11-06 | minor | Components and motion: what is used yet, one key, the reduced-motion default (#85) |
 | 2026-11-06 | minor | Reduced motion: the mouse wheel's smoothing keeps running (#85) |
+| 2026-11-06 | minor | Appearance: the commands and keeping them exist, the controls wait for the settings page; Lucide's disc; the kept file (#86) |
+| 2026-11-06 | minor | Appearance settings page: what it lacks, the owner's own font or icon files an idea only; the fit test's reach (#87) |
+| 2026-11-06 | minor | Message list: the showcase-only parts, what waits for E2.1, E3.1 to E3.3 and E1.17c; the rail's reach (#88) |
+| 2026-11-06 | minor | Hover actions: on the sample only, Done's stand-in meaning, one undo, the keys fixed (#89) |
+| 2026-11-06 | minor | Reader: which toolbar actions act, what waits for which task, the inner buttons, no picture of More (#90) |

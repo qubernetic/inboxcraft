@@ -75,6 +75,24 @@ and every crate has its tests in files of its own (`src/tests.rs`, `src/<module>
 behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open the window; `inboxcraft-cli` and
 `inboxcraft-web` answer `--version` and refuse everything else.
 
+## The sample mailbox (`--sample`)
+`just run-sample` (or `inboxcraft --sample`, or the Flatpak's "Open the Sample Mailbox") opens two invented
+accounts with a few dozen invented messages on `example.org`. Nothing connects anywhere: the sample lives in memory,
+is built afresh at every start, starts no account worker and asks for no password. The only files its window writes
+are the ones the owner asks for: an attachment saved, and the appearance choices. In it the owner can try:
+
+- the folder pane, the unified views, narrowing to one account, opening a folder, and the search;
+- the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
+  draws them in code), attachments to save into the downloads folder;
+- the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and moves it to its
+  account's Archive, R marks it read or unread, Delete moves it to Trash. A row that leaves the list slides out; a
+  toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was;
+- the appearance settings (the gear on the rail, Ctrl+Comma): mode, preset, typeface, icons, text scale and reduced
+  motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
+
+Without `--sample` the hover actions are hidden and their keys do nothing, until the commands that act on a real
+mailbox exist. The sample's own command, `sample.mail.set`, is refused in any other session.
+
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
@@ -87,6 +105,7 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
+| `cargo xtask cache-prune` | not a gate and not part of `ci`: CI runs it before it saves the dependency cache (see "CI"); deletes from `target/` everything but cargo's marker files and the `deps`, `build` and `.fingerprint` folders of each profile, and in those every entry named after a package or target of this workspace (names from `cargo metadata`, hyphen and underscore forms); fails, deleting nothing, when `cargo metadata` fails or its names are empty or lack `xtask`, and fails when a path under `target/` is still named after one afterwards |
 | `cargo xtask side-by-side` | not a gate and not part of `ci`: writes each `ui_shot` picture beside the mood sketch of its preset and mode to `plan/side-by-side/` (sketches from `plan/mood/`, both gitignored; `--script`, `--mood`, `--out`); fails when a picture or sketch is missing (see `docs/design.md`, "Pictures") |
 | `cargo xtask help` | the commands and the exit codes |
 
@@ -283,7 +302,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 | Job | What it does | Token |
 |---|---|---|
 | `changes` | decides whether `flatpak` runs: always on a push to `develop` or `main` and on a manual run, never on a push to `epic/**`; on a PR only when `git diff` of GitHub's merge commit against its first parent, the base tip, touches a Flatpak input | read |
-| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache, and on a push saves it | read |
+| `test` | `cargo xtask ci` on `ubuntu-24.04`; uploads `lcov.info` and `target/nextest/ci/junit.xml`, both from the `cov` gate, as the `reports` artifact; restores the dependency cache; on a push to `develop`, `main` or `epic/**` that did not create the branch, prunes `target/` and saves it | read |
 | `codecov` | uploads the coverage and the test results to Codecov with the job's GitHub OIDC token; runs no repository code | read, `id-token: write` |
 | `flatpak` | builds `contrib/flatpak/` into `inboxcraft.flatpak` in Flathub's builder image (privileged, for bubblewrap; no cache) and keeps it as the `flatpak` artifact for 7 days | read |
 | `ci` | the gate: succeeds only when `changes`, `test` and `codecov` did, and `flatpak` did or was skipped because `changes` said so (no Flatpak input in the PR, or a push to `epic/**`) | read |
@@ -315,19 +334,32 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - **One cache, written only by merged code.** The `test` job caches the compiled third-party dependencies
   (`deps`, `build` and `.fingerprint` of every profile under `target/`) and the cargo registry
   (`~/.cargo/registry/index`, `~/.cargo/registry/cache`, `~/.cargo/git/db`; the unpacked sources are not cached,
-  cargo unpacks them again from the `.crate` files). Every full run restores it with `actions/cache/restore`; only a
-  `push` run, that is a push to `develop`, `main` or `epic/**`, saves it with `actions/cache/save`, after a green
-  run, so a `pull_request` or `workflow_dispatch` run never writes it. Before the save, every package and target
-  name of this workspace is deleted from `target/`, with the binaries, reports and coverage data: no artifact of
-  our own code is cached. The job sets `CARGO_INCREMENTAL=0`.
-- The key is `deps-v1-<os>-<ISO week>-<hash of rust-toolchain.toml>-<hash of the [profile.*] sections>-o<the
-  dependency opt-level>-<hash of Cargo.lock>`, so it rotates every week and a toolchain, profile or opt-level
-  change starts from nothing. A run whose
-  `Cargo.lock` has no entry yet restores the newest entry of the same week, toolchain and profiles and rebuilds what
-  changed; that entry can carry old dependency versions until the week ends. A PR restores the entries of its base
-  branch and of `main`.
-- Purge the cache with `gh cache delete --all` (one entry: `gh cache list`, then `gh cache delete <key>`). The
-  `codecov` and `flatpak` jobs and `fuzz.yml` use no cache.
+  cargo unpacks them again from the `.crate` files). Every full run restores it with `actions/cache/restore`. Only a
+  green `push` run whose ref is `refs/heads/develop`, `refs/heads/main` or `refs/heads/epic/*` and that did not
+  create the branch (`!github.event.created`) prunes `target/` and saves it with `actions/cache/save`; a
+  `pull_request` or `workflow_dispatch` run and the push that creates a branch never write it. Who may push to or
+  create those branches is set by the repository's rulesets, not by the workflow. The job sets `CARGO_INCREMENTAL=0`.
+- **The prune is an allow list.** `cargo xtask cache-prune` keeps only cargo's marker files and the `deps`, `build`
+  and `.fingerprint` folders of `target/<profile>/` and `target/<triple>/<profile>/`, and deletes in those folders
+  every entry named after a package or target of this workspace (`[lib]<name>-<16 hex digits>[.<ext>]`, hyphen and
+  underscore forms, so a target `wasm` leaves `wasm-bindgen` alone). Everything else under `target/` goes:
+  binaries, examples, incremental data, reports, coverage data, `llvm-cov-target/tmp` and any folder it does not
+  know. It deletes nothing and fails when `cargo metadata` fails or its name list is empty or lacks `xtask`, and it
+  fails when afterwards any path under `target/`, at any depth, is still named after one; a failed prune skips the
+  save. It prints the entries it kept per profile and what it removed. The step runs with `shell: bash`
+  (`-eo pipefail`). A test in `xtask/src/ci_workflow_tests.rs` reads `ci.yml` and fails when the save or the prune
+  step loses one of these conditions, when a step uses `actions/cache` or a second `actions/cache/save`, or when
+  the key loses the runner image.
+- The key is `deps-v1-<os>-<runner image>-<image version>-<ISO week>-<hash of rust-toolchain.toml>-<hash of
+  .cargo/config.toml>-<hash of the [profile.*] sections>-o<the dependency opt-level>-<hash of Cargo.lock>`, so it
+  rotates every week and a runner image, toolchain, cargo config, profile or opt-level change starts from nothing
+  (the image, `$ImageOS` and `$ImageVersion`, changes about weekly; the step fails when they are not set). A run
+  whose `Cargo.lock` has no entry yet restores the newest entry with the same prefix and rebuilds what changed; that
+  entry can carry old dependency versions until the week ends. A PR restores the entries of its base branch and of
+  `main`.
+- Purge the cache with `gh cache delete --all` (one entry: `gh cache list`, then `gh cache delete <key>`). Deleting
+  needs a token with `actions: write`, the owner's; the workflow token is read-only and cannot. The `codecov` and
+  `flatpak` jobs and `fuzz.yml` use no cache.
 - Every action is pinned by its full commit SHA with the tag in a comment; the workflow token is read-only and only
   `codecov` widens it.
 
@@ -410,3 +442,6 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-06 | minor | CI: the `test` job builds the dependencies at opt-level 0; the level is in the cache key (#70) |
 | 2026-11-06 | minor | CI: no `flatpak` on a push to an epic branch; what that gives up (#78) |
 | 2026-11-06 | minor | `cargo xtask side-by-side` and its recipe (#81) |
+| 2026-11-06 | minor | What the sample mailbox lets the owner try (#89) |
+| 2026-11-06 | minor | `cargo xtask cache-prune` (#79) |
+| 2026-11-06 | minor | CI: the cache prune is `cargo xtask cache-prune`, an allow list; prune and save only on a push that creates no branch; the key follows the runner image and `.cargo/config.toml` (#79) |

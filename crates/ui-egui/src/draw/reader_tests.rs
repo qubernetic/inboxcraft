@@ -27,7 +27,11 @@ fn app_with(fetch: &Recorder) -> InboxApp {
 }
 
 fn harness_with(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let mut harness = Harness::builder().with_size(vec2(1280.0, 800.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1280.0, 800.0))
+        .with_theme(theme)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -75,10 +79,12 @@ fn selecting_a_row_opens_the_reader_beside_the_list() {
     harness.get_by_label("Save lighthouse.png");
     harness.get_by_label("Accounts");
     harness.check_accessibility();
+    harness.get_by_label("More").click();
+    harness.run();
     harness.get_by_label("Close").click();
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), None);
-    assert!(harness.query_by_label("Close").is_none(), "the reader is gone");
+    assert!(harness.query_by_label("More").is_none(), "the reader is gone");
 }
 
 #[test]
@@ -99,24 +105,28 @@ fn every_reader_control_has_an_accessible_name_in_both_modes() {
     }
 }
 
+/// Picks `name` (Full width or Leave full width) from the reader's More menu.
+fn full_width(harness: &mut Harness<'static, InboxApp>, name: &str) {
+    harness.get_by_label("More").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItem, name).click();
+    harness.run();
+}
+
 #[test]
 fn escape_leaves_the_full_width_reader() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    harness.get_by_label("Full width").click();
-    harness.run();
+    full_width(&mut harness, "Full width");
     assert!(harness.state().reader().full_width());
     assert!(harness.query_by_label("Accounts").is_none(), "the folder pane makes way");
     assert!(harness.query_by_role(Role::TextInput).is_none(), "and the list with its search");
-    harness.get_by_label("Leave full width");
     harness.key_press(Key::Escape);
     harness.run();
     assert!(!harness.state().reader().full_width());
     harness.get_by_label("Accounts");
-    harness.get_by_label("Full width").click();
-    harness.run();
-    harness.get_by_label("Leave full width").click();
-    harness.run();
+    full_width(&mut harness, "Full width");
+    full_width(&mut harness, "Leave full width");
     assert!(!harness.state().reader().full_width());
 }
 
@@ -169,11 +179,16 @@ fn a_texture_goes_with_its_picture() {
 fn the_link_under_the_pointer_shows_where_it_goes_and_a_click_copies_it() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
-    harness.get_by_label("Point at a link to see where it goes.");
+    assert!(harness.query_by_label_contains("but the link goes to").is_none(), "no status line before a link is hovered");
     let link = harness.get_by_label("https://bank.example.org/login").rect();
     harness.hover_at(link.left_center() + vec2(8.0, 0.0));
     harness.run();
     harness.get_by_label_contains("but the link goes to prize-desk.example.net");
+    harness.hover_at(egui::pos2(5.0, 5.0));
+    harness.run();
+    assert!(harness.query_by_label_contains("but the link goes to").is_none(), "the status line goes with the pointer");
+    harness.hover_at(link.left_center() + vec2(8.0, 0.0));
+    harness.run();
     harness.get_by_label("https://bank.example.org/login").click();
     harness.run();
     harness.hover_at(egui::pos2(5.0, 5.0));
@@ -219,11 +234,15 @@ fn saving_an_attachment_says_where_it_went_or_why_not() {
 }
 
 #[test]
-fn the_next_message_rule_is_picked_in_the_toolbar_and_arrows_step_through_the_list() {
+fn the_next_message_rule_is_picked_in_the_more_menu_and_arrows_step_through_the_list() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Allotment rota for November");
-    harness.get_by_label("When a message leaves the list").click();
+    harness.get_by_label("More").click();
     harness.run();
+    harness.get_by_label("When a message leaves the list");
+    let chosen = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_label(name).accesskit_node().toggled();
+    assert_eq!(chosen(&harness, "Show the next message"), Some(egui::accesskit::Toggled::True));
+    assert_eq!(chosen(&harness, "Go back to the list"), Some(egui::accesskit::Toggled::False));
     harness.get_by_label("Go back to the list").click();
     harness.run();
     assert_eq!(harness.state().mailbox().after(), After::List);
@@ -242,10 +261,124 @@ fn the_next_message_rule_is_picked_in_the_toolbar_and_arrows_step_through_the_li
 fn the_find_shortcut_leaves_full_width_for_the_search() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Allotment rota for November");
-    harness.get_by_label("Full width").click();
-    harness.run();
+    full_width(&mut harness, "Full width");
     harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::F);
     harness.run();
     harness.run();
     assert!(!harness.state().reader().full_width());
+}
+
+#[test]
+fn the_toolbar_holds_the_mail_actions_and_those_without_a_command_are_disabled() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    full_width(&mut harness, "Full width");
+    let disabled = |name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled();
+    assert!(!disabled("Done"), "the sample mailbox can mark it done");
+    assert!(!disabled("Delete"), "and delete it");
+    for name in ["Archive", "Snooze", "Pin", "Move to a folder"] {
+        assert!(disabled(name), "{name} has no command yet");
+    }
+    assert!(!disabled("More"));
+    for icon in [IconId::Done, IconId::Archive, IconId::Delete, IconId::Snooze, IconId::Pin, IconId::Move, IconId::More] {
+        assert!(super::tests::drew_icon(harness.output(), icon, Style::Regular), "{icon:?}");
+    }
+}
+
+#[test]
+fn a_disabled_action_says_why_in_its_tooltip() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    assert!(harness.query_by_label("Not available yet").is_none());
+    harness.get_by_role_and_label(Role::Button, "Snooze").hover();
+    for _ in 0..4 {
+        harness.run();
+    }
+    harness.get_by_label("Not available yet");
+    let before = harness.state().mailbox().last_run();
+    harness.get_by_role_and_label(Role::Button, "Snooze").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), before, "a disabled action runs nothing");
+}
+
+#[test]
+fn outside_the_sample_done_and_delete_are_disabled_too() {
+    let fetch = Recorder::default();
+    let store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    let session = inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap();
+    let mut app = InboxApp::with_outside(Mailbox::new(session, clock()), Box::new(fetch.clone()), Box::new(NoSave));
+    assert!(!app.mailbox().can_act());
+    let id = app.mailbox().messages().first().unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let harness = harness_with(app, egui::Theme::Light);
+    for name in ["Done", "Delete"] {
+        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name}");
+    }
+}
+
+#[test]
+fn done_in_the_toolbar_marks_the_open_message_done_and_the_toast_offers_undo() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    harness.get_by_role_and_label(Role::Button, "Done").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id), "it left the inbox");
+    harness.get_by_label("Marked as done");
+    assert_ne!(harness.state().reader().open_id(), Some(id), "the next-message rule picks what shows");
+}
+
+#[test]
+fn delete_in_the_toolbar_moves_the_open_message_to_trash() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    harness.get_by_role_and_label(Role::Button, "Delete").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id));
+    harness.get_by_label("Moved to Trash");
+}
+
+#[test]
+fn the_open_message_offers_reply_reply_all_and_forward_disabled_for_now() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    for name in ["Reply", "Reply all", "Forward"] {
+        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name} has no composer yet");
+    }
+    harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+    harness.run();
+    assert_eq!(harness.query_all_by_label("Reply").count(), 1, "only the open message has them");
+}
+
+#[test]
+fn the_subject_heads_the_thread_with_who_wrote_and_how_many_messages() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    full_width(&mut harness, "Full width");
+    harness.get_by_label("Odile Brannock, Mira Holloway · 2 messages");
+    let size = |text: &str| super::tests::font_of(&harness, text).size;
+    let subject = size("Re: Allotment rota for November");
+    for other in ["Mira Holloway", "The second week works for me."] {
+        assert!(subject > size(other), "the subject is larger than {other}");
+    }
+}
+
+#[test]
+fn a_long_subject_wraps_and_is_never_cut_by_the_toolbar() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    full_width(&mut harness, "Full width");
+    harness.set_size(vec2(300.0, 800.0));
+    harness.run();
+    let subject = harness.get_by_label("Photos from the coast walk").rect();
+    let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+    assert!(subject.top() >= more.bottom(), "the subject sits under the toolbar, not beside it");
+    let galley = super::tests::galley_of(&harness, "Photos from the coast walk");
+    assert!(!galley.elided, "the subject is never cut");
+    assert!(galley.rows.len() > 1, "it wraps instead");
 }

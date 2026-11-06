@@ -33,6 +33,25 @@ app, in FigCraft; where it disagrees with this page or `theme.rs`, the file is w
 - **Message text is data.** Subjects, names and previews are shown on one line: line breaks, tabs and NUL become
   spaces, bidi controls that could reorder what is shown are removed, and each is cut to 300 characters.
 
+## Appearance choices
+The owner's choices are the engine's `Appearance`, changed only through the `ui.*.set` commands (all `safe`):
+
+| Command | Parameters | Choices |
+|---|---|---|
+| `ui.theme.set` | `mode` | `system` (default), `light`, `dark` |
+| `ui.accent.set` | `preset` or `custom` | `electric` (default), `aurora`, `citrus`; or four `#rrggbb` colours, the gradient's three stops and the accent |
+| `ui.font.set` | `font` | `figtree` (default), `inter` |
+| `ui.icons.set` | `icons` | `phosphor` (default), `lucide` |
+| `ui.text_scale.set` | `percent` | 90, 100 (default), 110, 120, 130 |
+| `ui.motion.set` | `reduce` | `on`, `off`, `system` (default) |
+
+Each answers the whole appearance. A custom accent is the colour of links and accent text in dark mode, so it must
+reach WCAG AA (4.5:1) on the lightest dark surface (the dark float, `#1E2330`); one that does not is made lighter in
+steps of 1 % lightness, hue and saturation kept, and the answer has `nudged: true`, the colour asked for
+(`requested`), the contrast reached and why. Every other token comes from the four colours as from a preset and is
+checked by the theme. The window installs a changed appearance in the next frame and keeps it in
+`inboxcraft/appearance.json` in the config folder, so it is there after a restart.
+
 ## Mode
 System (the default) follows the computer's light or dark choice; Light and Dark keep one. egui switches between the
 two installed styles, so a change shows from the next frame.
@@ -104,7 +123,10 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 ## Type
 
 The typeface is **Figtree** (SIL Open Font Licence 1.1), bundled from its upstream release v2.0.3 in
-`assets/fonts/figtree/` (Regular, Medium, SemiBold, Bold) and compiled in; nothing is fetched at run time. It takes
+`assets/fonts/figtree/` (Regular, Medium, SemiBold, Bold) and compiled in; nothing is fetched at run time. The
+owner can choose **Inter** instead (`ui.font.set`; the same licence, release v4.1 in `assets/fonts/inter/`, the same
+four weights): every token keeps its size and weight and only the typeface changes. Both are installed from the first
+frame, so a change of typeface is a change of tokens. It takes
 the place of egui's Ubuntu Light everywhere; egui's Hack stays the monospaced face (with Figtree behind it for signs
 Hack lacks), and egui's emoji and icon fonts stay the last fallback. Each weight is a font family of its own, because
 egui has no notion of weight.
@@ -131,11 +153,11 @@ Sender and subject are strong and the preview muted; an unread row is set in hea
 against Medium and Regular) as well as marked by its dot, so it reads as unread in grey too.
 
 **Text scale.** 90 %, 100 % (the default), 110 %, 120 % or 130 %, applied to every token
-(`InboxApp::set_text_scale`; the command and the settings page come with the settings). Layout follows the font,
+(`ui.text_scale.set`; the settings page comes with E1.16b). Layout follows the font,
 never fixed points for text: the message rows, folder rows, folded thread rows and step marks take their height
 from the font's own line height at the current scale, and every cut line is measured and ends in an ellipsis. The
-reader's controls wrap onto a second line when there is no room, and the subject has the line below them to itself
-and wraps rather than being cut. `draw/fit_tests.rs` draws the list, a thread, the full header, the full-width
+reader's mail actions wrap onto a second line when there is no room, and the subject has the line below them to
+itself and wraps rather than being cut; attachment tiles are measured first and wrap before they would stick out. `draw/fit_tests.rs` draws the list, a thread, the full header, the full-width
 reader and the add-account page at 90 %, 100 % and 130 % and fails on text that sticks out of its row or button, is
 cut at the side of its pane, or lies over other text.
 
@@ -154,13 +176,20 @@ The theme names the icon set (`Theme::icons`). Each set maps every id onto a gly
 `match`, so a new id without a glyph does not build, and keeps its own size and optical alignment (`Metrics`).
 `IconSet::paint` draws an icon into the middle of a square, as large as the square, in one colour token.
 
-The one set so far is **Phosphor** (MIT), bundled from its upstream release 2.1.1 in `assets/icons/phosphor/`
+The default set is **Phosphor** (MIT), bundled from its upstream release 2.1.1 in `assets/icons/phosphor/`
 (the Regular, Fill and Duotone fonts, unchanged) and compiled in; nothing is fetched at run time. A Phosphor glyph
 fills its em square with a margin of its own (a ring covers about 81 % of it) and sits in the middle of the line,
 so it is drawn at the square's side with no shift; a test paints the ring at 16, 20 and 32 points and fails when it
 is more than a pixel off the middle. Like the text fonts, the icon fonts are named only in `theme.rs`
 (`IconFont`); each is a font family of its own with nothing behind it, and a test checks that every glyph of every
 id and style is in its font.
+
+The second set is **Lucide** (ISC; the icons it took from Feather are MIT), chosen with `ui.icons.set` and bundled
+from release 1.70.0 in `assets/icons/lucide/` (its one font, unchanged). Lucide has lines only, so Fill and Duotone
+keep the line glyph and draw a filled disc behind it, 90 % of the square across: at 38 % of the icon's colour for
+Fill and at 20 % for Duotone. Callers draw active states in the accent colour, so an active Lucide icon is the accent
+on an accent disc. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
+the square and moved down by 4.5 % of it; the same ring test holds it to a pixel of the middle.
 
 The app icon is not from a set: it stays drawn in code (see "The app icon").
 
@@ -203,14 +232,15 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Component | What it is |
 |---|---|
 | Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
-| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip. |
+| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip; `unavailable` adds a note under the name that says why ("Not available yet"). On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
+| Text button (`button::text`) | A word in a fully rounded field one control high, with its tooltip: quiet (a hover fill only) or primary (the preset's gradient, the word in white or the deep ink). `button::unavailable` draws one that cannot be pressed yet: faded to 45 %, no click, its tooltip saying why. |
 | Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
-| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once. Every icon button has one. |
+| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once, and for a control that cannot be used yet a muted note under them. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
 | Badge (`badge`) | An unread count in a pill of the badge colour, or a group's solid (Fill) icon on the preset's gradient at full strength: white wherever white reaches 3:1 (WCAG AA for a graphical object) on every stop, as on Electric, otherwise the deep ink. The WCAG 2 ratio rates dark ink on saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough. |
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
-| Popup (`popup`) | A float with menu rows (icon, name, key chip), opening over the card motion; over sharp text it is the float over text. |
+| Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -243,20 +273,56 @@ about 0.1 s with a factor fixed inside egui that no style changes, so wheel scro
 motion on (see `docs/gaps.md`). A test refuses egui's animation calls anywhere else in the crate, and a test switches every component on with
 motion and with reduced motion and finds the first still moving and the second at rest. The flag's default follows
 the system where the system can be read (the web build), otherwise motion is on; the window holds it
-(`InboxApp::set_reduce_motion`) and a switch for it comes with the appearance settings. While something moves the
+through `ui.motion.set` (on, off or follow the system) and a switch for it comes with the settings page. While something moves the
 window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
-- **Folder pane** (left): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
+- **Navigation rail** (the window's left edge, full height): the preset's three gradient stops at full strength from
+  top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
+  foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
+  (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
+  (Ctrl+1) leaves the settings or the add-account page; the settings button (Ctrl+Comma) opens the settings page and
+  closes it again. The rail is one button and 8 points either side wide, and shows on every page.
+- **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
   view and folder with unread mail carries a badge with the count.
 - **Header** (top of the list): the view's or folder's name, whose mail it is (the narrowed account's address, or
   "All accounts") and how many messages; the search field on the right, with a Clear button while it holds text.
   Ctrl+F (Cmd+F on macOS) focuses it and Escape empties it.
-- **List**: newest first, one row per message: unread dot, sender, date (time today, "Yesterday", the weekday in
-  the last week, then the day and month, with the year for earlier years), subject and the preview in muted text, the
-  Flag icon (Fill, in the flag colour, one subject line high) for flagged mail, and the account stripe when more than one account is shown.
+- **List**: newest first, the rows on a card (the surface colour, corner `card`, a line edge) as tall as its rows
+  or the room, scrolling inside it. One row per message: the account stripe when more than one account is shown,
+  the unread dot, the sender's avatar two lines high, the sender and the date (time today, "Yesterday", the weekday
+  in the last week, then the day and month, with the year for earlier years), the subject and the preview in muted
+  text, and the Flag icon (Fill, in the flag colour, one subject line high) for flagged mail. Unread rows show the
+  dot and a heavier sender and subject; the selected row the selection gradient, a hovered one the hover fill, both
+  with the `corner` radius inside the card.
+- **Hover actions**: Done, "Mark as read" or "Mark as unread", and Delete on a float at the row's right end
+  (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
+  date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
+  their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
+  Their keys work on the selected row: D Done, R read or unread, Delete; while a text field has the focus they are
+  the field's. They act on the sample mailbox only (`sample.mail.set`); anywhere else no action is drawn and no key
+  acts, until the commands for a real mailbox exist. Done marks the message read and moves it to its account's
+  Archive, Delete to its Trash, read and unread change the dot and the weight.
+- **Slide-out**: a row that Done or Delete takes out of the list slides to the right and fades over the
+  `row_slide` token, clipped to its place; then it goes and the next-message rule picks the selection. With reduced
+  motion it goes at once.
+- **Toast**: after an act, a toast rises from the bottom edge over the `toast` token (in place at once with reduced
+  motion) and says what was done ("Marked as read", "Marked as unread", "Marked as done", "Moved to Trash"), with
+  Undo and its key chip (Ctrl+Z, Cmd+Z on macOS). It stays six seconds; Undo puts the row back where it was, read or
+  unread as it was, and selected again when it was. A new act replaces the toast; once it has gone the act stays.
+- **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
+  new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
+  card's edge is the preset's gradient, 1.5 points wide.
+- **Group cards** (the grouped unified inbox): a header with the group's badge, its name and unread count, and
+  "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds more. The rows no
+  group holds follow on a card of their own.
+- The screener and the groups have no data yet. The app draws neither; `ui_shot` shows them with invented data
+  (`"showcase": true`, and `"step": n` to select by keyboard, which also shows the hover actions).
+- **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
+  key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
+  deep ink, whichever reads at 4.5:1 on every stop).
 - **Search**: the text is looked for in subject, sender and recipients in every folder of the accounts shown, and
   the header says "Search". Opening a view or folder ends it.
 - **Empty states** say what is going on: no accounts yet (with the `--sample` hint), an empty folder, no match.
@@ -270,14 +336,25 @@ square (`crates/ui-egui/src/icons.rs`); the same shapes give the SVG the desktop
 the icon sits among others at the same size.
 
 ## The reader
-- **Where**: selecting a row opens the message to the right of the list, which narrows to a column. "Full width"
-  hides the folder pane and the list; Escape, "Leave full width" or Ctrl+F (for the search) bring them back. Close
-  ends the selection. The arrow keys step through the list while no field has the focus.
-- **Toolbar**: the next-message rule ("When a message leaves the list": show the next, show the previous, go back
-  to the list), Full width and Close, wrapping when there is no room; the subject under them in the title token,
-  wrapped rather than cut.
-- **Thread**: oldest first. The open message is unfolded; the others are one line (sender, the first words, the
-  date) on the panel colour and unfold on a click; an unfolded older message has Fold.
+- **Where**: selecting a row opens the message to the right of the list, which narrows to a column. More, Full
+  width hides the folder pane and the list; Escape, More, Leave full width or Ctrl+F (for the search) bring them
+  back. More, Close ends the selection. The arrow keys step through the list while no field has the focus.
+- **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
+  Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
+  room. Every action has a tooltip with its key. An action without a command is drawn disabled and its tooltip
+  says "Not available yet": on the sample mailbox Done (D) and Delete (Delete) act on the open message as the
+  list's hover actions do (the toast with Undo follows), everywhere else they are disabled too; Archive, Snooze, Pin
+  and Move wait for their commands.
+- **More**: a menu over the reader (the float over text) with Full width or Leave full width, Close, and the
+  next-message rule ("When a message leaves the list": show the next, show the previous, go back to the list), the
+  chosen one marked.
+- **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
+  under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
+- **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
+  colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
+  strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
+  message ends with Reply (primary, on the preset's gradient), Reply all and Forward, disabled with "Not available
+  yet" until the composer comes.
 - **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
   it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
   To, Copy and the date in full.
@@ -288,10 +365,12 @@ the icon sits among others at the same size.
   muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
   list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
   way.
-- **Attachments**: tiles with the File icon (Regular, in the accent colour, one and a half body lines high), the
-  name, the size and Save.
-- **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
-  "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
+- **Attachments**: tiles side by side, wrapping, each with the File icon (Regular, in the accent colour, one and a
+  half body lines high), the name (cut to fit), the size and Save.
+- **Link status**: only while the pointer is on a link, a float over the reader's bottom left corner says where it
+  goes; a link whose text names another place shows "Careful: ..." in the error colour. The float takes no
+  pointer, so the link under it stays hovered. A notice (a save, a copied link, an error) shows in a line at the
+  bottom with Dismiss until it is dismissed.
 
 ## Adding an account
 - **Where**: "Add account" sits under the app's name in the folder pane, and in the middle of the empty window. The
@@ -308,11 +387,39 @@ the icon sits among others at the same size.
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again, Change settings and Close after a failure; Close while it runs.
 
+## Appearance settings
+- **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
+  and shows as active while the page is open; Ctrl+Comma opens the page too, and the rail's Mail button leaves it. The page takes the place of the list and the reader, as adding an
+  account does, and the two close each other. Close or Escape leaves it.
+- **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
+  points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
+  the preview goes above the controls. The page scrolls.
+- **Controls**, each running its command (see "Appearance choices") the moment it is pressed: Mode (pills System,
+  Light, Dark); Accent (a pill per preset, each after a round swatch of its gradient with its accent in the middle,
+  and Custom, selected while the owner's own colours are in use, which takes the typed colours as the button below
+  does); Custom accent (Gradient start, Gradient middle,
+  Gradient end and Accent, each a colour picker and a `#rrggbb` field, then "Use these colours"); Typeface (a pill
+  per typeface, each name written in its own typeface); Icons (a pill per set, after three of its icons); Text size
+  (pills 90 % to 130 %); Motion (the "Reduce motion" switch, with a line saying motion follows the system until the
+  owner chooses).
+- **Custom accent**: the fields start with the colours in use. Only `#rrggbb` is a colour (the `#` may be left out);
+  while a field holds anything else a line says how to write a colour and "Use these colours" is disabled. The
+  preview shows the typed colours as soon as all four are colours; the rest of the window keeps the colours in use
+  until the button runs `ui.accent.set`. When the engine made the accent lighter, the field shows the colour used
+  and a line says which colour was asked for and which is used instead.
+- **Preview**: a card in the surface colour: the preset's gradient as a band with the app's name in the ink that
+  reads over it, three invented rows as the list draws them (one selected, two unread), Reply and Archive in Regular,
+  Pin and Flag in Fill in the accent, a selected and a plain pill, and a line in the link colour. It is drawn in the
+  mode, typeface, icon set and text size in use.
+- **Switch**: a track one body line high and 1.8 lines long, the selection gradient when on and the field colour
+  when off, with a knob that slides over the hover token (at once with reduced motion); a screen reader hears a
+  switch, on or off.
+
 ## Pictures
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
-width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
+width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-<mode>.png`), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
@@ -321,8 +428,15 @@ and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<m
 Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
 buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
 tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
-for Electric). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
-them in its PR.
+for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
+list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
+(`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
+page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
+(`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). `"act"` does a hover action to the
+selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done); with `"slide": true` the row of a Done
+or Delete is caught sliding out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
+the keyboard-selected row of `list-showcase-<preset>-<mode>.png`. Every picture but a slide is drawn with reduced
+motion, so it shows where each motion ends. Every UI change shows them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
 falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
@@ -349,4 +463,9 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
 | 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |
+| 2026-11-06 | minor | Appearance choices and their commands; Inter; Lucide with its disc for Fill and Duotone (#86) |
+| 2026-11-06 | minor | The appearance settings page with its preview, the switch, its pictures (#87) |
+| 2026-11-06 | minor | The mail list window: the navigation rail, the list card, avatars, hover actions, screener and group cards, text buttons (#88) |
+| 2026-11-06 | minor | The hover actions act on the sample: their keys, the slide-out, the toast with Undo, their pictures (#89) |
+| 2026-11-06 | minor | The reader on the design system: mail-action toolbar, More menu, thread cards, Reply row, link status float; unavailable buttons, tooltip notes, menu choices (#90) |
 | 2026-11-06 | minor | The design file in FigCraft, `docs/design/` (#96) |

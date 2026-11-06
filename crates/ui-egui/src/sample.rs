@@ -8,7 +8,8 @@
 //! The dates count back from the `now` given, so the sample always looks recent. Two replies quote what they answer
 //! and share a thread with it; a newsletter and a junk message carry remote pictures and links on `example.org` and
 //! `example.net`. Nothing in it connects anywhere: the accounts point at `imap.example.org`, the sample session never
-//! starts their workers, and [`Pictures`] draws the remote pictures instead of fetching them.
+//! starts their workers, and [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
+//! unread, Done, Delete) change it in memory only, and it is built afresh at every start.
 
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ use inboxcraft_time::{Clock, Timestamp};
 
 use crate::UiError;
 use crate::fetch::{Fetch, Fetched};
+use crate::iconset::IconId;
+use crate::mailbox::{Group, Showcase, Waiting};
 
 /// A person: a name and an address on `example.org`.
 #[derive(Debug, Clone, Copy)]
@@ -538,14 +541,39 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
     Ok(store)
 }
 
-/// A session over the sample mailbox, its dates counted back from `clock`'s time now.
+/// The senders the showcase's screener holds back: in the sample, but never in its inbox.
+const WAITING: [Person; 2] = [FERRIES, LETTINGS];
+
+/// The showcase's groups: `(icon, name, senders)`.
+const GROUPS: [(IconId, &str, &[Person]); 2] =
+    [(IconId::People, "People", &[ODILE, PETRA, TEODOR, ANSEL]), (IconId::Notify, "Updates", &[LIBRARY, LUMEN, CYCLES])];
+
+/// The invented screener and groups `ui_shot` shows over `mailbox`'s list ([`Showcase`]): two waiting
+/// senders, the messages of four people as "People" and of three services as "Updates"; any other row stays out of
+/// the groups.
+#[must_use]
+pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
+    let screener = WAITING.iter().map(|person| Waiting { name: person.name.to_owned(), address: person.address.to_owned() }).collect();
+    let groups = GROUPS
+        .iter()
+        .map(|(icon, name, senders)| Group {
+            icon: *icon,
+            name: (*name).to_owned(),
+            messages: mailbox.messages().iter().filter(|row| senders.iter().any(|person| person.address == row.address)).map(|row| row.id).collect(),
+        })
+        .collect();
+    Showcase { screener, groups }
+}
+
+/// A sample session ([`Session::sample`]) over the sample mailbox, its dates counted back from `clock`'s time now:
+/// the hover actions change the mailbox in memory through `sample.mail.set`, and nothing is kept.
 ///
 /// # Errors
 ///
 /// As [`mailbox`], and [`UiError::Engine`] when the session refuses the store.
 pub fn session(clock: Box<dyn Clock>) -> Result<Session, UiError> {
     let store = mailbox(clock.now())?;
-    Session::new(Box::new(store), clock).map_err(UiError::Engine)
+    Session::sample(Box::new(store), clock).map_err(UiError::Engine)
 }
 
 #[cfg(test)]

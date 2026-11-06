@@ -51,6 +51,8 @@ pub enum EngineError {
     Store(StoreError),
     /// The command panicked; the session is as it was before the command.
     Panicked(&'static str),
+    /// The command runs only in a session over the invented sample mailbox (`Session::sample`).
+    SampleOnly(&'static str),
 }
 
 impl EngineError {
@@ -73,6 +75,7 @@ impl EngineError {
             Self::NotFound { .. } => "not_found",
             Self::Store(_) => "store",
             Self::Panicked(_) => "panicked",
+            Self::SampleOnly(_) => "sample_only",
         }
     }
 
@@ -99,6 +102,7 @@ impl fmt::Display for EngineError {
             Self::NotFound { what, id } => write!(f, "there is no {what} {id}"),
             Self::Store(error) => write!(f, "{error}"),
             Self::Panicked(id) => write!(f, "the command {id} failed inside; nothing was changed"),
+            Self::SampleOnly(id) => write!(f, "the command {id} runs only on the sample mailbox (--sample)"),
         }
     }
 }

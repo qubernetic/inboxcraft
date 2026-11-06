@@ -310,11 +310,57 @@ All notable changes to InboxCraft are listed here. The format follows
 - Avatars (#85): a person's initials on one of ten vivid avatar colours (no teal or coral), picked from the address
   by a stable hash, with white or dark initials by contrast; the reader shows the sender's avatar in the message
   header, the sample mail's people included.
+- The appearance commands (#86), all `safe`: `ui.theme.set` (system, light, dark), `ui.accent.set` (a preset, or
+  four colours of your own: three gradient stops and the accent; an accent under WCAG AA as text on dark surfaces is
+  made lighter, hue kept, and the answer says so with the colour asked for and the contrast reached),
+  `ui.font.set` (Figtree, Inter), `ui.icons.set` (Phosphor, Lucide), `ui.text_scale.set` (90 to 130 per cent) and
+  `ui.motion.set` (reduce motion on, off, or follow the system). Each answers the whole appearance. The window's
+  own setters run them too.
+- The appearance is kept across a restart (#86) in `inboxcraft/appearance.json` in the config folder
+  (`XDG_CONFIG_HOME`, `.config`, `%APPDATA%` or `Library/Application Support`), read as outside data choice by
+  choice and written through a temporary file; a change that cannot be kept shows in the error banner.
+- Inter v4.1 (OFL) as the second typeface and Lucide 1.70.0 (ISC, its Feather icons MIT) as the second icon set,
+  bundled with their licence files (#86). Every `IconId` has a Lucide glyph; Lucide has lines only, so its active
+  (Fill) and empty (Duotone) states draw a filled disc behind the lines. `ui_shot` takes `font` and `icon_set`.
+- The appearance settings page (#87): the settings button in the folder pane opens it in place of the list and the
+  reader. One control each for the mode, the accent preset, the custom accent (four colour fields with a picker,
+  `#rrggbb` only, and "Use these colours"), the typeface, the icon set and the text size, and a "Reduce motion"
+  switch; each runs its `ui.*.set` command at once. A preview card shows the look, the typed custom colours
+  included before they are used; when the engine makes a custom accent lighter, the page says which colour is used
+  instead. Close or Escape leave the page. The overflow test covers it in both typefaces at 90 % and 130 %;
+  `ui_shot` takes `settings`.
+- The message list on the design system (#88): a navigation rail down the window's left edge in the preset's
+  gradient at full strength, with Mail (Ctrl+1) and the appearance settings (Ctrl+Comma; the button moved there
+  from the folder pane); the rows on a card, each with the sender's avatar, the selected row in the selection
+  gradient, unread by dot and weight. The screener card, the grouped inbox's cards (badge, name, unread count,
+  "Done all", "Show all (n)") and the hover actions (Done, mark read or unread, Delete), which a row selected by
+  keyboard shows as a hovered one does with its text fading out before them, are built but have no data or command
+  yet: the app draws none of them, and `ui_shot` shows them with invented data (`showcase`, `step`). A quiet and a
+  primary text button with a tooltip join the components; every button of the list and the rail has a tooltip.
+- The hover actions act on the sample mailbox (#89): Done (marks the message read and moves it to its account's
+  Archive), mark read or unread, and Delete (to Trash), from a hovered row or the row selected by keyboard, and
+  their keys D, R and Delete. Done and Delete let the row slide out first; a toast says what was done, with Undo
+  and its key chip (Ctrl+Z) for six seconds, and Undo puts the row back as it was, selected again when it was.
+  Reduced motion makes the slide and the toast land at once. They run through `sample.mail.set`, a `safe` command
+  that runs only in a `Session::sample` (others refuse it with `sample_only`), changes the in-memory sample only and
+  queues no job; without `--sample` the actions are hidden and the keys do nothing. `ui_shot` takes `act` and
+  `slide`; `docs/development.md` says what `--sample` lets the owner try.
+- The reader on the design system (#90): a toolbar of mail actions (Done, Archive, Delete, Snooze, Pin, Move to a
+  folder, More) as icon buttons with tooltips over the subject, the largest text of the window, which wraps rather
+  than being cut, and who wrote in the thread with how many messages. The thread shows as cards: earlier messages
+  folded to one line with the sender's avatar, the open message in full with Reply (primary), Reply all and
+  Forward. On the sample mailbox Done and Delete act on the open message as the hover actions do; every action
+  without a command (and Done and Delete outside the sample) is disabled and its tooltip says "Not available yet".
+  Full width, Close and the next-message rule moved into the More menu. Attachment tiles wrap side by side. The
+  components gain `button::unavailable`, `IconButton::unavailable`, a note line in the tooltip, and the popup's
+  `entry` and `choice` rows; `ui_shot` draws the full-width reader in every preset.
 - The design file `docs/design/inboxcraft.figcraft` (FigCraft): colour variables per preset and mode, type styles,
   the components with their variants, every screen of the app in light and dark, the mood in each preset and five
   flows as storyboards; a PNG per page and `docs/design/README.md` (#96)
 
 ### Changed
+- The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
+  left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
   `--sample` still connects nowhere and offers no "Add account" (#34)
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the
@@ -395,3 +441,13 @@ All notable changes to InboxCraft are listed here. The format follows
 ### Fixed
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
+
+### Security
+- The CI dependency cache is pruned and saved more strictly (#79): the prune is `cargo xtask cache-prune`, an allow
+  list that keeps only cargo's marker files and the `deps`, `build` and `.fingerprint` folders of each profile
+  minus every entry named after a package or target of this workspace, deletes everything else under `target/`
+  (`llvm-cov-target/tmp` and unknown folders included), deletes nothing when `cargo metadata` fails or its names
+  are empty or lack `xtask`, and fails when a path under `target/` is still named after one afterwards; the step
+  runs with `shell: bash`. The prune and the save run only on a `push` to `develop`, `main` or `epic/*` that did
+  not create the branch. The cache key carries the runner image (`$ImageOS-$ImageVersion`) and the hash of
+  `.cargo/config.toml`. A test in `xtask` reads `ci.yml` and keeps these conditions in place.

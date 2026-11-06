@@ -17,10 +17,18 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects. `icons` set to `true` draws every icon of
+//! (the certificate refused); the check is scripted and nothing connects. `settings` set to `true` shows the
+//! appearance settings page. `showcase` set to `true` fills the parts of the list that have no data yet with
+//! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
+//! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
+//! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
+//! `slide` set to `true` catches a `done` or `delete` row sliding out instead, four frames in with motion on.
+//! `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
-//! the components ([`crate::component::gallery`]). Every picture is taken with reduced motion, so it shows where each
-//! motion ends.
+//! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
+//! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
+//! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
+//! motion, so it shows where each motion ends.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -28,15 +36,16 @@ use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
+use inboxcraft_engine::appearance::{Icons, Typeface};
 use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
 use crate::component::gallery;
-use crate::mailbox::{Mailbox, Place};
+use crate::mailbox::{Act, Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
-use crate::theme::{self, Mode, Preset, TextScale, Theme};
+use crate::theme::{self, Look, Mode, Preset, TextScale, Theme};
 use crate::workers::Scripted;
 use crate::{InboxApp, UiError, iconset, motion, sample};
 
@@ -104,12 +113,33 @@ pub struct Shot {
     /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
     #[serde(default)]
     pub onboard: Option<String>,
+    /// Whether the appearance settings page is open.
+    #[serde(default)]
+    pub settings: Option<bool>,
+    /// The invented screener, groups and hover actions in the list, with keys for their actions.
+    #[serde(default)]
+    pub showcase: Option<bool>,
+    /// How many rows down the keyboard selects.
+    #[serde(default)]
+    pub step: Option<u8>,
+    /// A hover action on the selected row: `read`, `unread`, `done` or `delete`; the toast shows after it.
+    #[serde(default)]
+    pub act: Option<String>,
+    /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
+    #[serde(default)]
+    pub slide: Option<bool>,
     /// Every icon of the set in every style instead of the window.
     #[serde(default)]
     pub icons: Option<bool>,
     /// The gallery of the components instead of the window.
     #[serde(default)]
     pub components: Option<bool>,
+    /// The typeface: `figtree` when left out, `inter`.
+    #[serde(default)]
+    pub font: Option<String>,
+    /// The icon set: `phosphor` when left out, `lucide`.
+    #[serde(default)]
+    pub icon_set: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -176,6 +206,32 @@ fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
     Ok(app)
 }
 
+/// Does the hover action `shot` names to the selected row: at once, so the toast shows, or caught sliding out with
+/// motion on (four frames a sixtieth of a second apart, so the row is most of the way out).
+fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    let Some(name) = &shot.act else {
+        return if shot.slide.is_some() { Err(bad(format!("{}: slide needs an act", shot.out))) } else { Ok(()) };
+    };
+    let act = match name.as_str() {
+        "read" => Act::Read,
+        "unread" => Act::Unread,
+        "done" => Act::Done,
+        "delete" => Act::Delete,
+        other => return Err(bad(format!("{}: act {other:?} is not read, unread, done or delete", shot.out))),
+    };
+    let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: an act needs a selected row", shot.out))) };
+    if shot.slide == Some(true) {
+        if !act.slides() {
+            return Err(bad(format!("{}: only done and delete slide out", shot.out)));
+        }
+        app.set_reduce_motion(false);
+        app.mailbox_mut().start(id, act);
+    } else {
+        app.mailbox_mut().act(id, act);
+    }
+    Ok(())
+}
+
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
@@ -183,6 +239,11 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.search.is_some()
         || shot.select.is_some()
         || shot.onboard.is_some()
+        || shot.settings.is_some()
+        || shot.showcase.is_some()
+        || shot.step.is_some()
+        || shot.act.is_some()
+        || shot.slide.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
@@ -192,10 +253,10 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     Ok(())
 }
 
-/// The gallery of the components of `shot` in `mode` and `preset`.
-fn component_gallery(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+/// The gallery of the components of `shot` in `mode` and `look`.
+fn component_gallery(shot: &Shot, mode: Mode, look: &Look) -> Result<Picture, UiError> {
     no_window(shot, "the component gallery")?;
-    let theme = Theme::new(mode, preset);
+    let theme = Theme::of(mode, look);
     let keymap = gallery::keymap();
     let mut fonts = true;
     paint(gallery::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
@@ -206,10 +267,10 @@ fn component_gallery(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture
     })
 }
 
-/// The icon sheet of `shot` in `mode` and `preset`; it shows no window, so the window settings are refused.
-fn icon_sheet(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+/// The icon sheet of `shot` in `mode` and `look`; it shows no window, so the window settings are refused.
+fn icon_sheet(shot: &Shot, mode: Mode, look: &Look) -> Result<Picture, UiError> {
     no_window(shot, "an icon sheet")?;
-    let theme = Theme::new(mode, preset);
+    let theme = Theme::of(mode, look);
     let mut fonts = true;
     paint(iconset::sheet_size(), shot.scale.unwrap_or(1.0), mode, |ui| {
         if std::mem::take(&mut fonts) {
@@ -526,17 +587,28 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         None => Preset::default(),
         Some(id) => *Preset::named(id).ok_or_else(|| bad(format!("{}: no preset {id:?}", shot.out)))?,
     };
+    let typeface = match shot.font.as_deref() {
+        None => Typeface::default(),
+        Some(id) => Typeface::named(id).ok_or_else(|| bad(format!("{}: font {id:?} is not figtree or inter", shot.out)))?,
+    };
+    let icons = match shot.icon_set.as_deref() {
+        None => Icons::default(),
+        Some(id) => Icons::named(id).ok_or_else(|| bad(format!("{}: icon set {id:?} is not phosphor or lucide", shot.out)))?,
+    };
+    let look = Look { preset, typeface, icons: iconset::IconSet::of(icons), ..Look::default() };
     if shot.components == Some(true) {
-        return component_gallery(shot, mode, &preset);
+        return component_gallery(shot, mode, &look);
     }
     if shot.icons == Some(true) {
-        return icon_sheet(shot, mode, &preset);
+        return icon_sheet(shot, mode, &look);
     }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
     let session = sample::session(Box::new(FakeClock::new(time)))?;
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_preset(preset);
+    app.set_typeface(typeface);
+    app.set_icons(icons);
     app.set_reduce_motion(true);
     if let Some(percent) = shot.text_scale {
         let scale =
@@ -560,6 +632,19 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if let Some(text) = &shot.search {
         app.search(text);
     }
+    if shot.showcase == Some(true) {
+        let showcase = sample::showcase(app.mailbox());
+        app.mailbox_mut().set_showcase(showcase);
+        *app.keymap_mut() = gallery::keymap();
+    }
+    if let Some(steps) = shot.step {
+        if shot.select.is_some() {
+            return Err(bad(format!("{}: a shot selects by step or by subject, not both", shot.out)));
+        }
+        for _ in 0..steps {
+            app.mailbox_mut().step(true);
+        }
+    }
     if let Some(subject) = &shot.select {
         let id = app.mailbox().messages().iter().find(|row| row.subject == *subject).map(|row| row.id);
         let Some(id) = id else { return Err(bad(format!("{}: no row with the subject {subject:?}", shot.out))) };
@@ -581,8 +666,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     } else if shot.pictures.is_some() || shot.full_width.is_some() || shot.details.is_some() || shot.quotes.is_some() {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
     }
+    act(&mut app, shot)?;
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;
+    }
+    if shot.settings == Some(true) {
+        app.open_settings();
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)

@@ -9,12 +9,18 @@
 //! markers and control edges until they meet 3:1; the tests check this for every preset in both modes. This file is
 //! the only place that names a colour; a test refuses colour constants anywhere else in the crate.
 //!
-//! Every text style is a font token of [`Fonts`]: a weight of Figtree (bundled, replacing egui's Ubuntu Light) or the
-//! monospaced face, at a size the [`TextScale`] multiplies. The icon fonts are [`IconFont`]s. This file is also the only
-//! place that names a font.
+//! Every text style is a font token of [`Fonts`]: a weight of the [`Typeface`] the owner chose (Figtree, replacing
+//! egui's Ubuntu Light, or Inter; both bundled) or the monospaced face, at a size the [`TextScale`] multiplies. The icon
+//! fonts are [`IconFont`]s. This file is also the only place that names a font.
+//!
+//! The owner's choices arrive as the engine's [`Appearance`] (the `ui.*.set` commands); [`Look`] is what of it the
+//! tokens need, and [`Preset::of`] turns a preset id or four custom colours into a preset.
 
 use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
+
+use inboxcraft_engine::appearance::{Accent, Appearance, Rgb};
+pub use inboxcraft_engine::appearance::{ThemeMode as ModePreference, Typeface};
 
 use crate::iconset::IconSet;
 use crate::motion::{self, MOTION, Motion};
@@ -39,53 +45,20 @@ impl Mode {
     }
 }
 
-/// The mode the owner chose: follow the system, or always light or dark.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ModePreference {
-    /// Whatever the system shows.
-    #[default]
-    System,
-    /// Always light.
-    Light,
-    /// Always dark.
-    Dark,
-}
-
-impl ModePreference {
-    /// Every choice, in the order a picker shows them.
-    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    /// The stable id of the choice (`system`, `light`, `dark`), for commands and settings.
-    #[must_use]
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::Light => "light",
-            Self::Dark => "dark",
-        }
-    }
-
-    /// The choice with this id.
-    #[must_use]
-    pub fn named(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|choice| choice.id() == id)
-    }
-}
-
-impl From<ModePreference> for egui::ThemePreference {
-    fn from(choice: ModePreference) -> Self {
-        match choice {
-            ModePreference::System => Self::System,
-            ModePreference::Light => Self::Light,
-            ModePreference::Dark => Self::Dark,
-        }
+/// egui's preference for the mode the owner chose.
+#[must_use]
+pub fn preference(choice: ModePreference) -> egui::ThemePreference {
+    match choice {
+        ModePreference::System => egui::ThemePreference::System,
+        ModePreference::Light => egui::ThemePreference::Light,
+        ModePreference::Dark => egui::ThemePreference::Dark,
     }
 }
 
 /// An accent preset: three gradient stops and an accent, from which every colour token is derived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Preset {
-    /// The stable id (`electric` ...), for commands and settings.
+    /// The stable id (`electric` ...), for commands and settings; `custom` for the owner's own colours.
     pub id: &'static str,
     /// The gradient, first to last stop, at full strength.
     pub gradient: [Color32; 3],
@@ -107,6 +80,17 @@ impl Preset {
     #[must_use]
     pub fn named(id: &str) -> Option<&'static Self> {
         PRESETS.iter().find(|preset| preset.id == id)
+    }
+
+    /// The preset of `accent`: a shipped one by id (Electric for an id this front end does not ship), or `custom`
+    /// with the owner's four colours.
+    #[must_use]
+    pub fn of(accent: &Accent) -> Self {
+        let colour = |Rgb(r, g, b): Rgb| Color32::from_rgb(r, g, b);
+        match accent {
+            Accent::Preset(id) => Self::named(id).copied().unwrap_or_default(),
+            Accent::Custom(custom) => Self { id: "custom", gradient: custom.gradient.map(colour), accent: colour(custom.accent) },
+        }
     }
 }
 
@@ -234,31 +218,46 @@ pub enum Face {
     Mono,
 }
 
-/// A font token: a face and a size in points.
+/// A font token: a face of a typeface and a size in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Font {
     /// The size in points, the text scale applied.
     pub size: f32,
     /// The face.
     pub face: Face,
+    /// The typeface a [`Face::Sans`] weight is drawn in.
+    pub typeface: Typeface,
 }
 
-/// The family names of the weights; [`Weight::Regular`] is egui's proportional family.
-const FAMILIES: [(Weight, &str); 3] = [(Weight::Medium, "Figtree-Medium"), (Weight::SemiBold, "Figtree-SemiBold"), (Weight::Bold, "Figtree-Bold")];
+/// The weights the tokens use, lightest first.
+const WEIGHTS: [Weight; 4] = [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold];
+
+/// The family name of a weight of a typeface: one font file each. Figtree Regular is egui's proportional family too.
+const fn family_name(typeface: Typeface, weight: Weight) -> &'static str {
+    match (typeface, weight) {
+        (Typeface::Figtree, Weight::Regular) => "Figtree-Regular",
+        (Typeface::Figtree, Weight::Medium) => "Figtree-Medium",
+        (Typeface::Figtree, Weight::SemiBold) => "Figtree-SemiBold",
+        (Typeface::Figtree, Weight::Bold) => "Figtree-Bold",
+        (Typeface::Inter, Weight::Regular) => "Inter-Regular",
+        (Typeface::Inter, Weight::Medium) => "Inter-Medium",
+        (Typeface::Inter, Weight::SemiBold) => "Inter-SemiBold",
+        (Typeface::Inter, Weight::Bold) => "Inter-Bold",
+    }
+}
 
 impl Font {
     const fn sans(size: f32, weight: Weight) -> Self {
-        Self { size, face: Face::Sans(weight) }
+        Self { size, face: Face::Sans(weight), typeface: Typeface::Figtree }
     }
 
     /// egui's font for this token.
     #[must_use]
     pub fn id(self) -> FontId {
-        let family = match self.face {
-            Face::Mono => FontFamily::Monospace,
-            Face::Sans(weight) => {
-                FAMILIES.iter().find(|(named, _)| *named == weight).map_or(FontFamily::Proportional, |(_, name)| FontFamily::Name((*name).into()))
-            }
+        let family = match (self.face, self.typeface) {
+            (Face::Mono, _) => FontFamily::Monospace,
+            (Face::Sans(Weight::Regular), Typeface::Figtree) => FontFamily::Proportional,
+            (Face::Sans(weight), typeface) => FontFamily::Name(family_name(typeface, weight).into()),
         };
         FontId::new(self.size, family)
     }
@@ -317,21 +316,26 @@ impl Fonts {
         ]
     }
 
-    fn scaled(self, factor: f32) -> Self {
+    fn map(self, f: impl Fn(Font) -> Font) -> Self {
         Self {
-            caption: self.caption.scaled(factor),
-            body: self.body.scaled(factor),
-            strong: self.strong.scaled(factor),
-            button: self.button.scaled(factor),
-            sender: self.sender.scaled(factor),
-            sender_unread: self.sender_unread.scaled(factor),
-            subject: self.subject.scaled(factor),
-            subject_unread: self.subject_unread.scaled(factor),
-            preview: self.preview.scaled(factor),
-            heading: self.heading.scaled(factor),
-            title: self.title.scaled(factor),
-            mono: self.mono.scaled(factor),
+            caption: f(self.caption),
+            body: f(self.body),
+            strong: f(self.strong),
+            button: f(self.button),
+            sender: f(self.sender),
+            sender_unread: f(self.sender_unread),
+            subject: f(self.subject),
+            subject_unread: f(self.subject_unread),
+            preview: f(self.preview),
+            heading: f(self.heading),
+            title: f(self.title),
+            mono: f(self.mono),
         }
+    }
+
+    /// The tokens at 100 % in `typeface`, at `scale`.
+    fn of(typeface: Typeface, scale: TextScale) -> Self {
+        FONTS.map(|font| Font { typeface, ..font.scaled(scale.factor()) })
     }
 }
 
@@ -382,7 +386,9 @@ pub struct Theme {
     pub spacing: Spacing,
     /// The text scale its fonts are at.
     pub text_scale: TextScale,
-    /// Its font tokens, at the text scale.
+    /// The typeface its fonts are in.
+    pub typeface: Typeface,
+    /// Its font tokens, in the typeface at the text scale.
     pub fonts: Fonts,
     /// The icon set its icons are drawn from.
     pub icons: IconSet,
@@ -512,15 +518,20 @@ const FONTS: Fonts = Fonts {
     preview: Font::sans(14.0, Weight::Regular),
     heading: Font::sans(15.0, Weight::SemiBold),
     title: Font::sans(20.0, Weight::Bold),
-    mono: Font { size: 13.0, face: Face::Mono },
+    mono: Font { size: 13.0, face: Face::Mono, typeface: Typeface::Figtree },
 };
 
-/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`), the weights the tokens use.
-const FIGTREE: [(&str, &[u8]); 4] = [
+/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`) and Inter (the same licence,
+/// `assets/fonts/inter/OFL.txt`), the weights the tokens use, by [`family_name`].
+const TYPEFACES: [(&str, &[u8]); 8] = [
     ("Figtree-Regular", include_bytes!("../../../assets/fonts/figtree/Figtree-Regular.ttf")),
     ("Figtree-Medium", include_bytes!("../../../assets/fonts/figtree/Figtree-Medium.ttf")),
     ("Figtree-SemiBold", include_bytes!("../../../assets/fonts/figtree/Figtree-SemiBold.ttf")),
     ("Figtree-Bold", include_bytes!("../../../assets/fonts/figtree/Figtree-Bold.ttf")),
+    ("Inter-Regular", include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf")),
+    ("Inter-Medium", include_bytes!("../../../assets/fonts/inter/Inter-Medium.ttf")),
+    ("Inter-SemiBold", include_bytes!("../../../assets/fonts/inter/Inter-SemiBold.ttf")),
+    ("Inter-Bold", include_bytes!("../../../assets/fonts/inter/Inter-Bold.ttf")),
 ];
 
 /// The font an icon set draws a weight with.
@@ -532,27 +543,32 @@ pub enum IconFont {
     PhosphorFill,
     /// Phosphor Duotone: each icon a back glyph and a line glyph.
     PhosphorDuotone,
+    /// Lucide: lines, its only weight.
+    Lucide,
 }
 
-/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, each a family of its own.
-const PHOSPHOR: [(IconFont, &str, &[u8]); 3] = [
+/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, and Lucide (ISC,
+/// `assets/icons/lucide/LICENSE`), each a family of its own.
+const ICON_FONTS: [(IconFont, &str, &[u8]); 4] = [
     (IconFont::PhosphorRegular, "Phosphor", include_bytes!("../../../assets/icons/phosphor/Phosphor.ttf")),
     (IconFont::PhosphorFill, "Phosphor-Fill", include_bytes!("../../../assets/icons/phosphor/Phosphor-Fill.ttf")),
     (IconFont::PhosphorDuotone, "Phosphor-Duotone", include_bytes!("../../../assets/icons/phosphor/Phosphor-Duotone.ttf")),
+    (IconFont::Lucide, "Lucide", include_bytes!("../../../assets/icons/lucide/Lucide.ttf")),
 ];
 
 impl IconFont {
     /// egui's font for this icon font at `size` points.
     #[must_use]
     pub fn id(self, size: f32) -> FontId {
-        let name = PHOSPHOR.iter().find(|(font, _, _)| *font == self).map_or("Phosphor", |(_, name, _)| name);
+        let name = ICON_FONTS.iter().find(|(font, _, _)| *font == self).map_or("Phosphor", |(_, name, _)| name);
         FontId::new(size, FontFamily::Name(name.into()))
     }
 }
 
-/// egui's fonts with Figtree in place of Ubuntu Light: each weight is a family of its own, followed by egui's emoji
-/// and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family of its own too, with
-/// nothing behind it.
+/// egui's fonts with Figtree in place of Ubuntu Light: each weight of Figtree and Inter is a family of its own,
+/// followed by egui's emoji and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family
+/// of its own too, with nothing behind it. Every typeface and icon set is installed, so a change of either is a change
+/// of tokens only.
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
@@ -560,18 +576,21 @@ pub fn font_definitions() -> egui::FontDefinitions {
     for fonts in definitions.families.values_mut() {
         fonts.retain(|font| font != "Ubuntu-Light");
     }
-    for (name, data) in FIGTREE {
+    for (name, data) in TYPEFACES {
         definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
     }
     let fallbacks = definitions.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let family = |first: &str| std::iter::once(first.to_owned()).chain(fallbacks.iter().cloned()).collect::<Vec<_>>();
     definitions.families.insert(FontFamily::Proportional, family("Figtree-Regular"));
-    for (_, name) in FAMILIES {
-        definitions.families.insert(FontFamily::Name(name.into()), family(name));
+    for typeface in Typeface::ALL {
+        for weight in WEIGHTS {
+            let name = family_name(typeface, weight);
+            definitions.families.insert(FontFamily::Name(name.into()), family(name));
+        }
     }
     let monospace = definitions.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(monospace.len().min(1), "Figtree-Regular".to_owned());
-    for (_, name, data) in PHOSPHOR {
+    for (_, name, data) in ICON_FONTS {
         definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
         definitions.families.insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
     }
@@ -683,40 +702,85 @@ impl Palette {
     }
 }
 
+/// What the tokens take from the owner's choices besides the mode: the preset, the text scale, the typeface and the
+/// icon set.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Look {
+    /// The colours.
+    pub preset: Preset,
+    /// The text scale.
+    pub text_scale: TextScale,
+    /// The typeface.
+    pub typeface: Typeface,
+    /// The icon set.
+    pub icons: IconSet,
+}
+
+impl Look {
+    /// What the tokens take from `appearance`; a text scale this front end does not have is 100 %.
+    #[must_use]
+    pub fn of(appearance: &Appearance) -> Self {
+        Self {
+            preset: Preset::of(&appearance.accent),
+            text_scale: TextScale::from_percent(appearance.text_scale).unwrap_or_default(),
+            typeface: appearance.font,
+            icons: IconSet::of(appearance.icons),
+        }
+    }
+}
+
 impl Theme {
-    /// The look of `mode` with the colours of `preset`.
+    /// The look of `mode` with the colours of `preset`, in Figtree at 100 % with Phosphor icons.
     #[must_use]
     pub fn new(mode: Mode, preset: &Preset) -> Self {
-        let text_scale = TextScale::default();
+        let (text_scale, typeface) = (TextScale::default(), Typeface::default());
         Self {
             mode,
             preset: *preset,
             palette: Palette::derive(mode, preset),
             spacing: SPACING,
             text_scale,
-            fonts: FONTS.scaled(text_scale.factor()),
+            typeface,
+            fonts: Fonts::of(typeface, text_scale),
             icons: IconSet::default(),
             motion: MOTION,
         }
     }
 
+    /// The look of `mode` with everything else from `look`.
+    #[must_use]
+    pub fn of(mode: Mode, look: &Look) -> Self {
+        Self::new(mode, &look.preset).with_text_scale(look.text_scale).with_typeface(look.typeface).with_icons(look.icons)
+    }
+
     /// The same look with every font token at `scale`.
     #[must_use]
     pub fn with_text_scale(self, scale: TextScale) -> Self {
-        Self { text_scale: scale, fonts: FONTS.scaled(scale.factor()), ..self }
+        Self { text_scale: scale, fonts: Fonts::of(self.typeface, scale), ..self }
     }
 
-    /// The look `ctx` shows now with the colours of `preset` and the text at `scale`.
+    /// The same look with every font token in `typeface`.
     #[must_use]
-    pub fn current(ctx: &egui::Context, preset: &Preset, scale: TextScale) -> Self {
-        Self::new(Mode::of(ctx), preset).with_text_scale(scale)
+    pub fn with_typeface(self, typeface: Typeface) -> Self {
+        Self { typeface, fonts: Fonts::of(typeface, self.text_scale), ..self }
     }
 
-    /// Installs both modes of `preset` with the text at `scale` in `ctx`; egui shows the one the mode preference
-    /// asks for.
-    pub fn apply(ctx: &egui::Context, preset: &Preset, scale: TextScale) {
-        ctx.set_style_of(egui::Theme::Light, Self::new(Mode::Light, preset).with_text_scale(scale).style());
-        ctx.set_style_of(egui::Theme::Dark, Self::new(Mode::Dark, preset).with_text_scale(scale).style());
+    /// The same look with the icons from `icons`.
+    #[must_use]
+    pub fn with_icons(self, icons: IconSet) -> Self {
+        Self { icons, ..self }
+    }
+
+    /// The look `ctx` shows now with everything else from `look`.
+    #[must_use]
+    pub fn current(ctx: &egui::Context, look: &Look) -> Self {
+        Self::of(Mode::of(ctx), look)
+    }
+
+    /// Installs both modes of `look` in `ctx`; egui shows the one the mode preference asks for.
+    pub fn apply(ctx: &egui::Context, look: &Look) {
+        ctx.set_style_of(egui::Theme::Light, Self::of(Mode::Light, look).style());
+        ctx.set_style_of(egui::Theme::Dark, Self::of(Mode::Dark, look).style());
     }
 
     /// The colour of the account with this index, repeating after the last.
@@ -874,6 +938,14 @@ pub fn ink_over(behind: &[Color32]) -> Color32 {
 #[must_use]
 pub fn icon_ink_over(behind: &[Color32]) -> Color32 {
     if !behind.is_empty() && behind.iter().all(|colour| contrast(WHITE, *colour) >= 3.0) { WHITE } else { ink_over(behind) }
+}
+
+/// The colour the owner typed as `#rrggbb` or `rrggbb`, space around it dropped; `None` for anything else.
+#[must_use]
+pub fn typed(text: &str) -> Option<Color32> {
+    let text = text.trim();
+    let Rgb(r, g, b) = if text.starts_with('#') { Rgb::from_hex(text)? } else { Rgb::from_hex(&format!("#{text}"))? };
+    Some(Color32::from_rgb(r, g, b))
 }
 
 /// The WCAG contrast ratio of two colours, 1 to 21 (alpha is ignored).

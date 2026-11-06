@@ -5,16 +5,16 @@
 //!
 //! The commands come from `cmd::all`, so a new command is in here without anyone adding it. A panic would be caught
 //! by `Session::run` as `EngineError::Panicked`; that counts as a failure here, because the safety net is not a
-//! licence.
+//! licence. Each runs in a session over a store and in a sample session, where the `sample.*` commands run too.
 
 use proptest::prelude::*;
 use serde_json::{Map, Value, json};
 
-use crate::test_support::session;
+use crate::test_support::{sample_session, session};
 use crate::{Caller, EngineError, Session};
 
 /// Every parameter name any command reads, and a few it does not.
-const FIELDS: [&str; 26] = [
+const FIELDS: [&str; 34] = [
     "account",
     "folder",
     "role",
@@ -39,6 +39,14 @@ const FIELDS: [&str; 26] = [
     "host",
     "port",
     "security",
+    "mode",
+    "preset",
+    "custom",
+    "font",
+    "icons",
+    "percent",
+    "reduce",
+    "seen",
     "",
     "\u{0}",
 ];
@@ -85,12 +93,13 @@ fn run_everything(session: &mut Session, params: &Value) {
 
 #[test]
 fn hostile_params_never_panic() {
-    let mut session = session();
-    for value in junk() {
-        run_everything(&mut session, &value);
-        for field in FIELDS {
-            let params = Value::Object(Map::from_iter([(field.to_owned(), value.clone())]));
-            run_everything(&mut session, &params);
+    for mut session in [session(), sample_session()] {
+        for value in junk() {
+            run_everything(&mut session, &value);
+            for field in FIELDS {
+                let params = Value::Object(Map::from_iter([(field.to_owned(), value.clone())]));
+                run_everything(&mut session, &params);
+            }
         }
     }
 }
@@ -118,7 +127,8 @@ proptest! {
 
     #[test]
     fn random_params_never_panic(params in hostile_value()) {
-        let mut session = session();
-        run_everything(&mut session, &params);
+        for mut session in [session(), sample_session()] {
+            run_everything(&mut session, &params);
+        }
     }
 }
