@@ -98,3 +98,9 @@
 {"out": "docs/images/list-toast-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done"}
 {"out": "docs/images/list-toast-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}
 {"out": "docs/images/list-toast-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}
+# The reader on the design system (E1.17b) in each preset: the mail-action toolbar, the subject with who wrote, the
+# thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
+{"out": "docs/images/reader-full-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}

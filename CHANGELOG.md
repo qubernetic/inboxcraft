@@ -345,8 +345,19 @@ All notable changes to InboxCraft are listed here. The format follows
   that runs only in a `Session::sample` (others refuse it with `sample_only`), changes the in-memory sample only and
   queues no job; without `--sample` the actions are hidden and the keys do nothing. `ui_shot` takes `act` and
   `slide`; `docs/development.md` says what `--sample` lets the owner try.
+- The reader on the design system (#90): a toolbar of mail actions (Done, Archive, Delete, Snooze, Pin, Move to a
+  folder, More) as icon buttons with tooltips over the subject, the largest text of the window, which wraps rather
+  than being cut, and who wrote in the thread with how many messages. The thread shows as cards: earlier messages
+  folded to one line with the sender's avatar, the open message in full with Reply (primary), Reply all and
+  Forward. On the sample mailbox Done and Delete act on the open message as the hover actions do; every action
+  without a command (and Done and Delete outside the sample) is disabled and its tooltip says "Not available yet".
+  Full width, Close and the next-message rule moved into the More menu. Attachment tiles wrap side by side. The
+  components gain `button::unavailable`, `IconButton::unavailable`, a note line in the tooltip, and the popup's
+  `entry` and `choice` rows; `ui_shot` draws the full-width reader in every preset.
 
 ### Changed
+- The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
+  left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
   `--sample` still connects nowhere and offers no "Add account" (#34)
 - `cargo xtask layers`: `flate2` moves from the testkit-only crates to the new net-only crates, for the

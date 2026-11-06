@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The reader: a toolbar (the next-message rule, full width, close) over the subject, the thread oldest first (the open
-//! message and the ones the owner unfolded in full, the rest folded to one line), each message's header, the
-//! remote-content banner, the body, the attachment tiles, and a status line that shows where the link under the
-//! pointer goes.
+//! The reader: a toolbar of mail actions (Done, Archive, Delete, Snooze, Pin, Move and More) over the subject, the
+//! largest text of the window, which wraps rather than being cut, and who wrote in the thread. The thread follows as
+//! cards, oldest first: the open message and the ones the owner unfolded in full (each message's header, the
+//! remote-content banner, the body and the attachment tiles; Reply, Reply all and Forward on the open one), the rest
+//! folded to one line. More holds what is not a mail action: full width, closing the reader and the next-message
+//! rule. While the pointer is on a link, a float at the bottom says where it goes.
+//!
+//! Actions without a command are drawn disabled, and their tooltips say so. Done and Delete act on the sample mailbox
+//! as the hover actions of the list do.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -13,14 +18,18 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Color32, ColorImage, ComboBox, Frame, Galley, Grid, Layout, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, TextureHandle,
-    TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Layout, Margin, Order, Popup, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
+    Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
+use crate::component::button::{self, IconButton};
+use crate::component::popup;
+use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
-use crate::mailbox::{After, Mailbox};
+use crate::keymap::{self, Keymap};
+use crate::mailbox::{Act, After, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::reader::{Content, File, Header, Opened, Person, PictureState, Reader, ThreadRow, inline_key, link_status, size_text};
@@ -58,6 +67,8 @@ pub(super) enum Asked {
     Copy(String),
     /// Hide the notice.
     Dismiss,
+    /// Do `Act` to a message (the sample mailbox only, for now).
+    Act(u64, Act),
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -82,61 +93,133 @@ fn names(people: &[Person]) -> String {
     people.iter().map(Person::shown).collect::<Vec<_>>().join(", ")
 }
 
-/// The toolbar: the next-message rule, full width and close, and the subject under them.
-fn toolbar(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+/// What the tooltip of an action without a command says.
+fn not_yet() -> &'static str {
+    tr!("Not available yet")
+}
+
+/// The width of the More menu, in body text sizes.
+const MENU_WIDTH: f32 = 18.0;
+
+/// A thin upright line between groups of the toolbar.
+fn divider(ui: &mut Ui, theme: &Theme) {
+    let side = crate::component::control_side(ui, theme);
+    let (rect, _) = ui.allocate_exact_size(vec2(theme.spacing.s, side), Sense::hover());
+    ui.painter().vline(rect.center().x, rect.shrink2(vec2(0.0, side / 4.0)).y_range(), Stroke::new(1.0, theme.palette.line));
+}
+
+/// The More menu: full width, close, and the next-message rule.
+fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
+    if popup::entry(ui, theme, keymap, name, None).clicked() {
+        drawn.asked.push(Asked::FullWidth(full));
+    }
+    if popup::entry(ui, theme, keymap, tr!("Close"), None).clicked() {
+        drawn.asked.push(Asked::Close);
+    }
+    ui.add_space(theme.spacing.xs);
+    ui.separator();
+    ui.label(RichText::new(tr!("When a message leaves the list")).font(theme.fonts.caption.id()).color(p.muted));
+    for after in [After::Next, After::Previous, After::List] {
+        let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
+        if response.clicked() {
+            drawn.asked.push(Asked::After(after));
+        }
+    }
+}
+
+/// The toolbar of mail actions, then the subject under it with who wrote in the thread.
+fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let open = reader.open_id().filter(|_| mailbox.can_act());
+    // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
+    Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = s.xs;
+            let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
+                let button = IconButton::new(icon, name);
+                let button = match (act, open) {
+                    (Some((act, key)), Some(id)) => {
+                        if button.action(key).show(ui, theme, keymap).clicked() {
+                            drawn.asked.push(Asked::Act(id, act));
+                        }
+                        return;
+                    }
+                    (Some((_, key)), None) => button.action(key),
+                    (None, _) => button,
+                };
+                button.unavailable(not_yet()).show(ui, theme, keymap);
+            };
+            action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
+            action(ui, IconId::Archive, tr!("Archive"), None);
+            action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
+            divider(ui, theme);
+            action(ui, IconId::Snooze, tr!("Snooze"), None);
+            action(ui, IconId::Pin, tr!("Pin"), None);
+            action(ui, IconId::Move, tr!("Move to a folder"), None);
+            divider(ui, theme);
+            let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
+            let width = theme.fonts.body.size * MENU_WIDTH;
+            Popup::menu(&response)
+                .frame(Frame::NONE)
+                .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+        });
+    });
     let subject = reader
         .open_id()
         .and_then(|id| reader.opened(id))
         .map(|opened| opened.header.subject.clone())
         .filter(|subject| !subject.is_empty())
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    // The controls wrap onto a second line when the text scale leaves no room for them on one; the subject has the
-    // line below to itself and wraps rather than being cut.
-    ui.horizontal_wrapped(|ui| {
-        let label = ui.label(RichText::new(tr!("When a message leaves the list")).font(theme.fonts.caption.id()).color(theme.palette.muted));
-        let response = ComboBox::from_id_salt("after-rule")
-            .selected_text(after_text(mailbox.after()))
-            .show_ui(ui, |ui| {
-                for after in [After::Next, After::Previous, After::List] {
-                    if ui.selectable_label(mailbox.after() == after, after_text(after)).clicked() {
-                        drawn.asked.push(Asked::After(after));
-                    }
-                }
-            })
-            .response;
-        let _ = response.labelled_by(label.id);
-        let (text, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
-        if ui.button(text).clicked() {
-            drawn.asked.push(Asked::FullWidth(full));
-        }
-        if ui.button(tr!("Close")).clicked() {
-            drawn.asked.push(Asked::Close);
-        }
-    });
-    ui.add_space(theme.spacing.s);
-    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(theme.palette.text)).wrap());
+    ui.add_space(s.m);
+    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(p.text)).wrap());
+    let count = reader.thread().len();
+    if count > 1 {
+        let writers = reader.writers().join(", ");
+        let line = tr!("{writers} · {count} messages", writers = writers, count = count);
+        ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+    }
 }
 
-/// One folded message of the thread: sender, date and the first words; a click unfolds it.
+/// A card's frame: the surface with a line round it.
+fn card_frame(theme: &Theme, inner: f32) -> Frame {
+    Frame::new()
+        .fill(theme.palette.surface)
+        .stroke(Stroke::new(1.0, theme.palette.line))
+        .corner_radius(theme.spacing.card)
+        .inner_margin(margin(inner))
+}
+
+/// One folded message of the thread, a card of one line: the avatar, the sender, the first words and the date; a
+/// click unfolds it.
 fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn: &mut Drawn) {
     let p = &theme.palette;
+    let s = &theme.spacing;
     let date = row.date.map(|date| mailbox.short_date(date)).unwrap_or_default();
     let spoken = tr!("{sender}, {date}, folded: {preview}", sender = row.sender, date = date, preview = row.preview);
     let f = &theme.fonts;
-    let height = super::paint::line_height(ui, f.sender).max(super::paint::line_height(ui, f.caption)) + theme.spacing.m * 2.0;
+    let line = super::paint::line_height(ui, f.sender).max(super::paint::line_height(ui, f.caption));
+    let side = line * 1.5;
+    let height = side + s.m * 2.0;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, s.card, p.surface);
         if response.hovered() {
-            ui.painter().rect_filled(rect, theme.spacing.corner, p.hover);
+            painter.rect_filled(rect, s.card, p.hover);
         }
-        ui.painter().rect_stroke(rect, theme.spacing.corner, Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
-        let left = rect.left() + theme.spacing.m;
+        painter.rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
+        let face = Rect::from_min_size(pos2(rect.left() + s.m, rect.center().y - side / 2.0), vec2(side, side));
+        crate::component::avatar::paint(painter, theme, face, &row.sender, &row.address);
+        let left = face.right() + s.m;
         let date_galley = super::paint::line(ui, &[(&date, f.caption, p.muted)], f32::INFINITY);
-        let date_left = rect.right() - theme.spacing.m - date_galley.size().x;
+        let date_left = rect.right() - s.l - date_galley.size().x;
         ui.painter().galley(pos2(date_left, rect.center().y - date_galley.size().y / 2.0), date_galley, p.muted);
         let preview = format!("   {}", row.preview);
-        let text = super::paint::line(ui, &[(&row.sender, f.sender, p.text), (&preview, f.preview, p.muted)], date_left - theme.spacing.m - left);
+        let text = super::paint::line(ui, &[(&row.sender, f.sender_unread, p.text), (&preview, f.preview, p.muted)], date_left - s.m - left);
         ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
         super::paint::focus_ring(ui, theme, &response);
     }
@@ -480,41 +563,63 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
     }
 }
 
-/// The attachment tiles: a file mark, the name and the size, and a Save button.
+/// The attachment tiles, side by side as far as they fit: a file mark, the name (cut to fit) and the size, and a Save
+/// button. Each tile is measured first, so the row wraps before a tile rather than cutting it at the side.
 fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn) {
     if files.is_empty() {
         return;
     }
     let p = &theme.palette;
-    ui.add_space(theme.spacing.s);
+    let f = &theme.fonts;
+    let s = &theme.spacing;
+    ui.add_space(s.s);
+    let gap = ui.spacing().item_spacing.x;
+    let side = super::paint::line_height(ui, f.body) * 1.5;
+    let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.text)], f32::INFINITY).size().x;
+    let save = width(ui, tr!("Save"), f.button) + ui.spacing().button_padding.x * 2.0;
+    let row = ui.available_width();
     ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
         for file in files {
-            Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let side = super::paint::line_height(ui, theme.fonts.body) * 1.5;
-                    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                    theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.accent);
-                    ui.vertical(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&file.name).font(theme.fonts.body.id()).color(p.text)).truncate());
-                        ui.label(RichText::new(size_text(file.size)).font(theme.fonts.caption.id()).color(p.muted));
+            let size = size_text(file.size);
+            let text = width(ui, &file.name, f.body).max(width(ui, &size, f.caption));
+            let tile = (side + text + save + gap * 2.0 + s.s * 2.0 + 2.0).min(row);
+            ui.allocate_ui(vec2(tile, side), |ui| {
+                Frame::new().stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s)).corner_radius(s.corner).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                        theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.accent);
+                        ui.vertical(|ui| {
+                            ui.set_max_width((ui.available_width() - save - gap).max(1.0));
+                            ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.text)).truncate());
+                            ui.label(RichText::new(&size).font(f.caption.id()).color(p.muted));
+                        });
+                        let response = ui.button(tr!("Save"));
+                        let spoken = tr!("Save {name}", name = file.name);
+                        response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                        if response.clicked() {
+                            drawn.asked.push(Asked::Save(id, file.index));
+                        }
                     });
-                    let response = ui.button(tr!("Save"));
-                    let spoken = tr!("Save {name}", name = file.name);
-                    response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
-                    if response.clicked() {
-                        drawn.asked.push(Asked::Save(id, file.index));
-                    }
                 });
             });
         }
     });
 }
 
-/// One unfolded message.
-fn message(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened: &Opened, textures: &mut Textures, drawn: &mut Drawn) {
+/// One unfolded message, on a card; the open one ends with Reply, Reply all and Forward.
+#[expect(clippy::too_many_arguments, reason = "the drawing context of one message")]
+fn message(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    reader: &Reader,
+    opened: &Opened,
+    textures: &mut Textures,
+    drawn: &mut Drawn,
+) {
     let p = &theme.palette;
-    let line = Stroke::new(1.0, p.line);
-    Frame::new().stroke(line).corner_radius(theme.spacing.corner).inner_margin(margin(theme.spacing.l)).show(ui, |ui| {
+    card_frame(theme, theme.spacing.m).show(ui, |ui| {
         ui.set_width(ui.available_width());
         header(ui, theme, mailbox, reader, opened, drawn);
         ui.add_space(theme.spacing.m);
@@ -535,41 +640,87 @@ fn message(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opene
             say(ui, tr!("The text is cut here: the rest is longer than the reader shows."));
         }
         files(ui, theme, opened.id, &opened.files, drawn);
+        if Some(opened.id) == reader.open_id() {
+            ui.add_space(theme.spacing.m);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = theme.spacing.s;
+                button::unavailable(ui, theme, keymap, tr!("Reply"), true, not_yet());
+                button::unavailable(ui, theme, keymap, tr!("Reply all"), false, not_yet());
+                button::unavailable(ui, theme, keymap, tr!("Forward"), false, not_yet());
+            });
+        }
     });
 }
 
+/// Where the link under the pointer goes, on a float over the bottom left corner of `rect`. It takes no pointer, so
+/// the link under it stays hovered.
+fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let colour = if text.starts_with(tr!("Careful")) { p.error } else { p.text };
+    Area::new(ui.scope_id().with("link-status"))
+        .order(Order::Foreground)
+        .interactable(false)
+        .pivot(Align2::LEFT_BOTTOM)
+        .fixed_pos(rect.left_bottom() + vec2(s.m, -s.m))
+        .fade_in(false)
+        .show(ui.ctx(), |ui| {
+            let slot = ui.painter().add(Shape::Noop);
+            let inner = Frame::new().inner_margin(margin(s.s)).show(ui, |ui| {
+                ui.set_max_width((rect.width() - s.m * 2.0 - s.s * 2.0).max(1.0));
+                ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).truncate());
+            });
+            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, Under::Sharp);
+            ui.painter().set(slot, Shape::Vec(shapes));
+        });
+}
+
 /// Draws the reader over the whole of `ui` and returns what was asked for.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, textures: &mut Textures, hover: Option<&str>) -> Drawn {
+pub(super) fn show(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    reader: &Reader,
+    textures: &mut Textures,
+    hover: Option<&str>,
+) -> Drawn {
     let mut drawn = Drawn::default();
     let p = &theme.palette;
-    egui::Panel::bottom("reader-status").frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
-        ui.horizontal(|ui| match (hover, reader.notice()) {
-            (Some(status), _) => {
-                let colour = if status.starts_with(tr!("Careful")) { p.error } else { p.muted };
-                ui.add(egui::Label::new(RichText::new(status).font(theme.fonts.caption.id()).color(colour)).truncate());
-            }
-            (None, Some(notice)) => {
+    let whole = ui.max_rect();
+    if let Some(notice) = reader.notice() {
+        egui::Panel::bottom("reader-notice").frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
+            ui.horizontal(|ui| {
                 ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.text));
                 if ui.button(tr!("Dismiss")).clicked() {
                     drawn.asked.push(Asked::Dismiss);
                 }
-            }
-            (None, None) => {
-                ui.label(RichText::new(tr!("Point at a link to see where it goes.")).font(theme.fonts.caption.id()).color(p.muted));
-            }
+            });
         });
-    });
-    egui::Panel::top("reader-toolbar").frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(ui, |ui| {
-        toolbar(ui, theme, mailbox, reader, &mut drawn);
+    }
+    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(ui, |ui| {
+        toolbar(ui, theme, keymap, mailbox, reader, &mut drawn);
     });
     ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = theme.spacing.xs;
-        for row in reader.thread() {
-            match (&row.opened, reader.is_expanded(row.id)) {
-                (Some(opened), true) => message(ui, theme, mailbox, reader, opened, textures, &mut drawn),
-                _ => folded(ui, theme, mailbox, row, &mut drawn),
-            }
-        }
+        ui.spacing_mut().item_spacing.y = theme.spacing.s;
+        Frame::new()
+            .inner_margin(Margin {
+                left: margin(theme.spacing.l).left,
+                right: margin(theme.spacing.l).right,
+                top: 0,
+                bottom: margin(theme.spacing.l).bottom,
+            })
+            .show(ui, |ui| {
+                for row in reader.thread() {
+                    match (&row.opened, reader.is_expanded(row.id)) {
+                        (Some(opened), true) => message(ui, theme, keymap, mailbox, reader, opened, textures, &mut drawn),
+                        _ => folded(ui, theme, mailbox, row, &mut drawn),
+                    }
+                }
+            });
     });
+    if let Some(text) = hover {
+        status(ui, theme, whole, text);
+    }
     drawn
 }

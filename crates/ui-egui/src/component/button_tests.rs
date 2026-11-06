@@ -152,3 +152,35 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_t
     harness.run();
     harness.get_by_label("Ctrl+F");
 }
+
+#[test]
+fn an_unavailable_button_takes_no_press_and_says_why() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, presses: &mut u32| {
+            let keymap = Keymap::default();
+            if IconButton::new(IconId::Snooze, "Snooze").unavailable("Not available yet").show(ui, &theme, &keymap).clicked() {
+                *presses += 1;
+            }
+            if super::unavailable(ui, &theme, &keymap, "Reply", true, "Not yet either").clicked() {
+                *presses += 1;
+            }
+        },
+        0,
+    );
+    crate::component::tests::quick_tooltips(&harness.ctx);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Snooze").hover();
+    harness.run();
+    harness.get_by_label("Not available yet");
+    harness.get_by_role_and_label(Role::Button, "Reply").hover();
+    harness.run();
+    harness.get_by_label("Not yet either");
+    for name in ["Snooze", "Reply"] {
+        let button = harness.get_by_role_and_label(Role::Button, name);
+        assert!(button.accesskit_node().is_disabled(), "{name}");
+        button.click();
+        harness.run();
+    }
+    assert_eq!(*harness.state(), 0);
+}

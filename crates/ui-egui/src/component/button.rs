@@ -4,7 +4,8 @@
 //! The icon button: an icon in a square as tall as a line of button text with a little room, its hover fill fading
 //! in over the hover token, and always a tooltip with its name and key. Active (a pinned pin) it shows the Fill
 //! style in the accent on the selection; disabled (an action without a command yet) it is muted, takes no click and
-//! still explains itself in its tooltip. On a gradient (the navigation rail) it is drawn in one ink.
+//! still explains itself in its tooltip, with a note that says why when it is unavailable. On a gradient (the
+//! navigation rail) it is drawn in one ink. A text button that is unavailable fades the same way and says why too.
 
 use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
@@ -24,6 +25,7 @@ pub struct IconButton<'a> {
     action: Option<&'a str>,
     active: bool,
     enabled: bool,
+    note: Option<&'a str>,
     ink: Option<Color32>,
 }
 
@@ -40,7 +42,7 @@ impl<'a> IconButton<'a> {
     /// A button showing `icon`, called `name` (its accessible name and the text of its tooltip).
     #[must_use]
     pub fn new(icon: IconId, name: &'a str) -> Self {
-        Self { icon, name, action: None, active: false, enabled: true, ink: None }
+        Self { icon, name, action: None, active: false, enabled: true, note: None, ink: None }
     }
 
     /// The action it runs, whose key its tooltip shows.
@@ -61,6 +63,14 @@ impl<'a> IconButton<'a> {
     #[must_use]
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Disabled, its tooltip saying why under its name: `note`.
+    #[must_use]
+    pub fn unavailable(mut self, note: &'a str) -> Self {
+        self.enabled = false;
+        self.note = Some(note);
         self
     }
 
@@ -112,24 +122,37 @@ impl<'a> IconButton<'a> {
                 painter.rect_stroke(rect.shrink(1.0), s.corner, Stroke::new(2.0, focus), StrokeKind::Inside);
             }
         }
-        tooltip::attach(response, theme, keymap, self.name, self.action)
+        tooltip::attach_note(response, theme, keymap, self.name, self.action, self.note)
     }
 }
 
 /// A text button called `name` that runs `action`, whose key its tooltip shows: a quiet one with a hover fill, or the
 /// `primary` one on the preset's gradient with white or deep ink, whichever reads on every stop.
 pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, primary: bool) -> Response {
+    text_button(ui, theme, keymap, name, action, primary, None)
+}
+
+/// A text button like [`text`] that cannot be pressed yet: faded, and its tooltip says why (`note`).
+pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, primary: bool, note: &str) -> Response {
+    text_button(ui, theme, keymap, name, None, primary, Some(note))
+}
+
+fn text_button(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, primary: bool, note: Option<&str>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
+    let enabled = note.is_none();
     let ink = if primary { ink_over(&p.gradient) } else { p.text };
     let galley = super::galley(ui, name, theme.fonts.button, ink);
     let height = control_side(ui, theme);
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + s.m * 2.0, height), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
-    let lit = response.hovered() || response.has_focus();
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + s.m * 2.0, height), sense);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
+    let lit = enabled && (response.hovered() || response.has_focus());
     let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
+        let mut faded = ui.painter().clone();
+        faded.multiply_opacity(if enabled { 1.0 } else { DISABLED });
+        let painter = &faded;
         let round = rect.height() / 2.0;
         if primary {
             let [first, middle, last] = p.gradient;
@@ -148,7 +171,7 @@ pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Opt
             painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
         }
     }
-    tooltip::attach(response, theme, keymap, name, action)
+    tooltip::attach_note(response, theme, keymap, name, action, note)
 }
 
 #[cfg(test)]

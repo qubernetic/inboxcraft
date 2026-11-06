@@ -138,6 +138,8 @@ pub struct ThreadRow {
     pub id: u64,
     /// The sender as the folded row shows it.
     pub sender: String,
+    /// The sender's address, for the avatar's colour.
+    pub address: String,
     /// The first words of its text.
     pub preview: String,
     /// When it was sent or came in.
@@ -323,6 +325,11 @@ impl Reader {
                     .map(|message| ThreadRow {
                         id: message.get("id").and_then(Value::as_u64).unwrap_or(0),
                         sender: sender(message.get("from").unwrap_or(&Value::Null)),
+                        address: people(message.get("from").unwrap_or(&Value::Null))
+                            .into_iter()
+                            .next()
+                            .map(|person| person.address)
+                            .unwrap_or_default(),
                         preview: shown(message.get("preview").and_then(Value::as_str).unwrap_or_default()),
                         date: message.get("date").and_then(Value::as_str).and_then(parse_date),
                         opened: None,
@@ -332,7 +339,7 @@ impl Reader {
             Err(error) => self.notice = Some(error.to_string()),
         }
         if self.thread.iter().all(|row| row.id != id) {
-            self.thread.push(ThreadRow { id, sender: String::new(), preview: String::new(), date: None, opened: None });
+            self.thread.push(ThreadRow { id, sender: String::new(), address: String::new(), preview: String::new(), date: None, opened: None });
         }
         self.expand(mailbox, id);
     }
@@ -571,6 +578,19 @@ impl Reader {
     #[must_use]
     pub fn thread(&self) -> &[ThreadRow] {
         &self.thread
+    }
+
+    /// Who wrote in the thread, each once, in the order they first wrote.
+    #[must_use]
+    pub fn writers(&self) -> Vec<&str> {
+        let mut writers: Vec<&str> = Vec::new();
+        for row in &self.thread {
+            let shown = row.opened.as_ref().and_then(|opened| opened.header.from.first()).map_or(row.sender.as_str(), Person::shown);
+            if !shown.is_empty() && !writers.contains(&shown) {
+                writers.push(shown);
+            }
+        }
+        writers
     }
 
     /// Message `id` of the thread, once read.
