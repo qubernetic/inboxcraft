@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Badges: an unread count in a pill of the badge colour, and a group's badge, its Duotone icon on the preset's
-//! gradient at full strength in white or the deep ink, whichever reads on every stop.
+//! Badges: an unread count in a pill of the badge colour, and a group's badge, its solid (Fill) icon on the preset's
+//! gradient at full strength, white wherever white reaches 3:1 on every stop, otherwise the deep ink.
 
 use egui::{Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
-use crate::theme::{Theme, ink_over};
+use crate::theme::{Theme, icon_ink_over};
 
 use super::galley;
 
@@ -32,7 +32,7 @@ pub fn count(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f
 /// The ink of a group badge's icon in `theme`.
 #[must_use]
 pub fn group_ink(theme: &Theme) -> egui::Color32 {
-    ink_over(&theme.palette.gradient)
+    icon_ink_over(&theme.palette.gradient)
 }
 
 /// A group's badge of `side` points: `icon` on the preset's gradient; a screen reader reads `name`.
@@ -48,7 +48,7 @@ pub fn group(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, side: f32) ->
             stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
         };
         gradient::fill(ui.painter(), rect, side * 0.3, &gradient);
-        theme.icons.paint(ui.painter(), rect.shrink(side * 0.2), icon, Style::Duotone, group_ink(theme));
+        theme.icons.paint(ui.painter(), rect.shrink(side * 0.2), icon, Style::Fill, group_ink(theme));
     }
     response
 }

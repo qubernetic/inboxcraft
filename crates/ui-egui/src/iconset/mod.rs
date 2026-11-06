@@ -7,7 +7,7 @@
 //! Each set maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its own
 //! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The styles carry meaning:
 //! [`Style::Regular`] in toolbars and rows, [`Style::Fill`] for active and selected states, [`Style::Duotone`] for
-//! group badges and empty states. The app icon is not from a set; it is drawn in code in [`crate::icons`].
+//! empty states. The app icon is not from a set; it is drawn in code in [`crate::icons`].
 
 mod phosphor;
 
@@ -136,7 +136,7 @@ pub enum Style {
     Regular,
     /// Solid: active and selected states (a pinned pin, a flagged message).
     Fill,
-    /// A faint filled back under the lines: group badges and empty states.
+    /// A faint filled back under the lines: empty states.
     Duotone,
 }
 

@@ -868,6 +868,14 @@ pub fn ink_over(behind: &[Color32]) -> Color32 {
     if worst(WHITE) >= worst(DEEP_INK) { WHITE } else { DEEP_INK }
 }
 
+/// The ink for a solid icon across every colour in `behind` (a gradient's stops): white wherever white reaches 3:1
+/// (WCAG AA for a graphical object) on every one, otherwise [`ink_over`]. The WCAG 2 ratio rates dark ink on
+/// saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough.
+#[must_use]
+pub fn icon_ink_over(behind: &[Color32]) -> Color32 {
+    if !behind.is_empty() && behind.iter().all(|colour| contrast(WHITE, *colour) >= 3.0) { WHITE } else { ink_over(behind) }
+}
+
 /// The WCAG contrast ratio of two colours, 1 to 21 (alpha is ignored).
 #[must_use]
 pub fn contrast(a: Color32, b: Color32) -> f32 {

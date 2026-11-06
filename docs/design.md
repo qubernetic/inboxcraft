@@ -146,7 +146,7 @@ Flag, More, File, Failed, Waiting, Skipped), never a glyph, and a **style** that
 |---|---|
 | Regular | lines: toolbars, rows, the attachment tile, a step that waits or was skipped |
 | Fill | active and selected states: a flagged message's flag, a step that passed or failed |
-| Duotone | group badges and empty states: the lines over the same shape filled at 20 % |
+| Duotone | empty states: the lines over the same shape filled at 20 % |
 
 The theme names the icon set (`Theme::icons`). Each set maps every id onto a glyph of its font in an exhaustive
 `match`, so a new id without a glyph does not build, and keeps its own size and optical alignment (`Metrics`).
@@ -205,7 +205,7 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
 | Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
-| Badge (`badge`) | An unread count in a pill of the badge colour, or a group's Duotone icon on the preset's gradient at full strength, in the ink that reads on every stop. |
+| Badge (`badge`) | An unread count in a pill of the badge colour, or a group's solid (Fill) icon on the preset's gradient at full strength: white wherever white reaches 3:1 (WCAG AA for a graphical object) on every stop, as on Electric, otherwise the deep ink. The WCAG 2 ratio rates dark ink on saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough. |
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip), opening over the card motion; over sharp text it is the float over text. |
@@ -344,3 +344,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Type: Figtree, font tokens, unread by weight, the text scale and layout from the font's metrics (#83) |
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
+| 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1 (#85) |

@@ -296,7 +296,8 @@ All notable changes to InboxCraft are listed here. The format follows
   places (#81)
 - The design system's components (#85, `ui-egui::component`): a card that opens and closes, an icon button
   (active, disabled) with its tooltip, a pill, a tooltip bubble with the action's name and its key as a chip, an
-  avatar, a count badge and a group badge on the preset's gradient, a hover action group that fades in over a row,
+  avatar, a count badge and a group badge (a solid icon, white wherever white reaches 3:1 on every stop, otherwise
+  the deep ink) on the preset's gradient, a hover action group that fades in over a row,
   a toast that rises with Undo and its key, and a popup with menu rows. `ui_shot` draws them all on one page with
   `"components": true`, in every preset and mode.
 - Motion tokens (#85, `ui-egui::motion`), all at most 0.25 s: hover fade, tooltip, row slide-out, card open and
@@ -377,7 +378,7 @@ All notable changes to InboxCraft are listed here. The format follows
   rather than being cut. A test draws the list and the reader at 90 % and 130 % and fails on text that sticks out
   of its row or button, is cut at the side of its pane, or lies over other text.
 - An icon painter with the Phosphor set (#84): views ask for an `IconId` (`ui-egui::iconset`) in a style, Regular
-  for toolbars and rows, Fill for active and selected states and Duotone for group badges and empty states; each
+  for toolbars and rows, Fill for active and selected states and Duotone for empty states; each
   icon set maps every id onto a glyph of its font in an exhaustive `match`, so a missing mapping fails the build,
   and keeps its own size and optical alignment. The Regular, Fill and Duotone fonts of Phosphor 2.1.1 (MIT) are
   bundled in `assets/icons/phosphor/` with their licence and compiled in; nothing is fetched at run time. The

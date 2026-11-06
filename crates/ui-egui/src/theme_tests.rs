@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, ink_on,
-    ink_over, install_fonts, mix, over, readable,
+    AVATARS, Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, icon_ink_over,
+    ink_on, ink_over, install_fonts, mix, over, readable, rgb,
 };
 use crate::motion::MOTION;
 
@@ -683,6 +683,21 @@ fn ink_over_several_colours_reads_on_every_one_of_them() {
         assert_eq!(ink_over(&[stops[0]]), ink_on(stops[0]));
     }
     assert_eq!(ink_over(&[]), ink_on(Color32::TRANSPARENT));
+}
+
+#[test]
+fn icon_ink_over_prefers_white_wherever_it_reaches_3_to_1() {
+    let white = Color32::WHITE;
+    assert_eq!(icon_ink_over(&[rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)]), white);
+    assert_eq!(icon_ink_over(&[rgb(0xFF8F00), rgb(0xFFD000)]), ink_over(&[rgb(0xFF8F00), rgb(0xFFD000)]));
+    assert_ne!(icon_ink_over(&[rgb(0xFFD000)]), white);
+    assert_eq!(icon_ink_over(&[]), ink_over(&[]));
+    for theme in all() {
+        let stops = theme.palette.gradient;
+        let ink = icon_ink_over(&stops);
+        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
+        assert!(worst >= 3.0, "{} {:?}: a solid icon on the gradient at {worst}", theme.preset.id, theme.mode);
+    }
 }
 
 #[test]
