@@ -479,7 +479,8 @@ impl InboxApp {
         let mut changed = None;
         let full = self.reader.full_width() && !adding && !setting;
         // The colour fields first, then the place for the glass layers, then everything else.
-        glass::backdrop(ui.painter(), &theme, ui.max_rect());
+        let corner = self.window_corner(ui.ctx());
+        glass::backdrop_rounded(ui.painter(), &theme, ui.max_rect(), corner);
         let mut layers = Layers::begin(ui.painter());
         let (gap, half) = (s.gap, s.gap / 2.0);
         let width = pane::rail_width(&theme);
@@ -488,9 +489,9 @@ impl InboxApp {
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding))
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding, corner))
             .inner;
-        self.own_frame_parts(ui, &theme);
+        self.own_frame_parts(ui, &theme, corner);
         rail.mail |= clicked_rail.mail;
         rail.settings = clicked_rail.settings;
         rail.sent = clicked_rail.sent;
@@ -536,7 +537,7 @@ impl InboxApp {
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
                         .frame(Frame::new().inner_margin(margin(s.l)))
-                        .show(ui, |ui| list::header(ui, &theme, keymap, mailbox, search))
+                        .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, keymap, mailbox, search)))
                         .inner;
                     let listed = CentralPanel::no_frame()
                         .frame(Frame::new().inner_margin(Margin {
@@ -649,28 +650,45 @@ impl InboxApp {
         if let Some(page) = page {
             self.apply_page(page);
         }
+        self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
     }
 
-    /// The app's own frame, when it draws one: the strip right of the rail with the title and the window controls, or
-    /// the controls floating in the top row; and the resizing edges.
-    fn own_frame_parts(&self, ui: &mut Ui, theme: &Theme) {
+    /// The app's own frame before the panes, when it draws one: the strip right of the rail with the title and the
+    /// window controls, or the band of the top row that moves the window; and the resizing edges.
+    fn own_frame_parts(&self, ui: &mut Ui, theme: &Theme, corner: f32) {
+        let drawn = self.draws_frame();
+        frame::top_row_begins(ui, drawn && self.mailbox.appearance().frame == WindowFrame::TopRow);
+        if !drawn {
+            return;
+        }
+        if self.mailbox.appearance().frame == WindowFrame::Strip {
+            let title = tr!("{place} · InboxCraft", place = self.mailbox.title());
+            Panel::top("window-strip")
+                .exact_size(frame::STRIP)
+                .show_separator_line(false)
+                .frame(Frame::NONE)
+                .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title, corner));
+        }
+        frame::edges(ui.ctx());
+    }
+
+    /// The app's own frame over the panes, when it draws one: the controls of the top row at the end of the right
+    /// pane's first row, and the window's outline.
+    fn own_frame_over(&self, ctx: &egui::Context, theme: &Theme, corner: f32) {
         if !self.draws_frame() {
             return;
         }
-        match self.mailbox.appearance().frame {
-            WindowFrame::Strip => {
-                let title = tr!("{place} · InboxCraft", place = self.mailbox.title());
-                Panel::top("window-strip")
-                    .exact_size(frame::STRIP)
-                    .show_separator_line(false)
-                    .frame(Frame::NONE)
-                    .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title));
-            }
-            WindowFrame::TopRow => frame::top_row(ui.ctx(), theme, &self.keymap, theme.spacing.gap),
-            WindowFrame::System => {}
+        if self.mailbox.appearance().frame == WindowFrame::TopRow {
+            frame::top_row(ctx, theme, &self.keymap);
         }
-        frame::edges(ui.ctx());
+        frame::outline(ctx, theme, corner);
+    }
+
+    /// The window's corner radius in `ctx`.
+    #[must_use]
+    pub fn window_corner(&self, ctx: &egui::Context) -> f32 {
+        frame::corner(ctx, self.draws_frame())
     }
 
     /// Tells a native window to show the desktop's title bar or none, when the frame changed.

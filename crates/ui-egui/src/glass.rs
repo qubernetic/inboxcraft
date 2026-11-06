@@ -36,7 +36,12 @@ pub fn fields(theme: &Theme) -> Gradient {
 
 /// Paints the colour fields of `theme` over `rect`, the window behind everything.
 pub fn backdrop(painter: &Painter, theme: &Theme, rect: Rect) {
-    gradient::fill(painter, rect, 0.0, &fields(theme));
+    backdrop_rounded(painter, theme, rect, 0.0);
+}
+
+/// [`backdrop`] with its corners rounded by `corner`, for a window whose corners are round.
+pub fn backdrop_rounded(painter: &Painter, theme: &Theme, rect: Rect, corner: impl Into<egui::CornerRadius>) {
+    gradient::fill(painter, rect, corner, &fields(theme));
 }
 
 /// The soft shadow around a layer of `rect`.

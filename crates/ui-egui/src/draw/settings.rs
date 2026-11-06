@@ -353,12 +353,14 @@ fn preview(ui: &mut Ui, theme: &Theme) {
 /// was asked for, applied by the caller after the frame's drawing.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(tr!("Appearance")).font(theme.fonts.title.id()).color(theme.palette.text));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
-                asked = Some(Asked::Close);
-            }
+    super::frame::beside(ui, theme, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr!("Appearance")).font(theme.fonts.title.id()).color(theme.palette.text));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
+                    asked = Some(Asked::Close);
+                }
+            });
         });
     });
     note(ui, theme, tr!("Every change shows at once and is kept for the next start."));

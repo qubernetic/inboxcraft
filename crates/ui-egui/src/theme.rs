@@ -148,6 +148,9 @@ pub struct Palette {
     pub glass: Color32,
     /// The edge of a glass layer.
     pub glass_edge: Color32,
+    /// The outline of a window whose frame the app draws: about as strong as the desktops' own, so the window stands
+    /// apart from what lies behind it.
+    pub window_edge: Color32,
     /// The light top edge of a glass layer.
     pub glass_highlight: Color32,
     /// The soft shadow under glass and floats.
@@ -679,6 +682,10 @@ impl Palette {
             glass_edge: match mode {
                 Mode::Light => alpha(shade, 0.08),
                 Mode::Dark => alpha(sheer, 0.09),
+            },
+            window_edge: match mode {
+                Mode::Light => alpha(shade, 0.24),
+                Mode::Dark => alpha(sheer, 0.16),
             },
             glass_highlight: match mode {
                 Mode::Light => alpha(sheer, 0.9),

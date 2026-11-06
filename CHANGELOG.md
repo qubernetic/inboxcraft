@@ -455,6 +455,11 @@ All notable changes to InboxCraft are listed here. The format follows
 ### Fixed
 - The line egui drew under the list header (and the error and reader notice bars) is gone, and the list keeps the
   scroll bar's width free so the bar no longer lies over the cards (#104)
+- The app's own window frame (#104): its edges resize the window on Wayland too (egui knows no window rect there,
+  so the edges never acted); its corners are round with a one-pixel outline, square when maximised; the strip is a
+  band of glass with a line under it; in the top row the window controls sit at the end of the right pane's first
+  row instead of over its search field or Close button, and a drag in the band above and between the panes moves
+  the window
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
 

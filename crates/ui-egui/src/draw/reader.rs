@@ -135,36 +135,39 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     let s = &theme.spacing;
     let open = reader.open_id().filter(|_| mailbox.can_act());
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
-    Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.xs;
-            let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
-                let button = IconButton::new(icon, name);
-                let button = match (act, open) {
-                    (Some((act, key)), Some(id)) => {
-                        if button.action(key).show(ui, theme, keymap).clicked() {
-                            drawn.asked.push(Asked::Act(id, act));
+    // In the top row the window controls sit at the end of the actions' line.
+    super::frame::beside(ui, theme, |ui| {
+        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = s.xs;
+                let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
+                    let button = IconButton::new(icon, name);
+                    let button = match (act, open) {
+                        (Some((act, key)), Some(id)) => {
+                            if button.action(key).show(ui, theme, keymap).clicked() {
+                                drawn.asked.push(Asked::Act(id, act));
+                            }
+                            return;
                         }
-                        return;
-                    }
-                    (Some((_, key)), None) => button.action(key),
-                    (None, _) => button,
+                        (Some((_, key)), None) => button.action(key),
+                        (None, _) => button,
+                    };
+                    button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
-                button.unavailable(not_yet()).show(ui, theme, keymap);
-            };
-            action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
-            action(ui, IconId::Archive, tr!("Archive"), None);
-            action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
-            divider(ui, theme);
-            action(ui, IconId::Snooze, tr!("Snooze"), None);
-            action(ui, IconId::Pin, tr!("Pin"), None);
-            action(ui, IconId::Move, tr!("Move to a folder"), None);
-            divider(ui, theme);
-            let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-            let width = theme.fonts.body.size * MENU_WIDTH;
-            Popup::menu(&response)
-                .frame(Frame::NONE)
-                .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
+                action(ui, IconId::Archive, tr!("Archive"), None);
+                action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
+                divider(ui, theme);
+                action(ui, IconId::Snooze, tr!("Snooze"), None);
+                action(ui, IconId::Pin, tr!("Pin"), None);
+                action(ui, IconId::Move, tr!("Move to a folder"), None);
+                divider(ui, theme);
+                let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
+                let width = theme.fonts.body.size * MENU_WIDTH;
+                Popup::menu(&response)
+                    .frame(Frame::NONE)
+                    .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+            });
         });
     });
     let subject = reader

@@ -70,8 +70,9 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
 }
 
 /// Draws the rail over the whole of `ui`: the app's mark, the views (Mail active unless `settings` or `adding` show
-/// another page; the views not built yet disabled, saying so), and at the foot the settings and the owner.
-pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool) -> Rail {
+/// another page; the views not built yet disabled, saying so), and at the foot the settings and the owner. Its left
+/// corners follow the window's `corner`.
+pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool, corner: f32) -> Rail {
     let s = &theme.spacing;
     let rect = ui.max_rect();
     let [first, middle, last] = theme.palette.gradient;
@@ -80,7 +81,7 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         to: pos2(0.5, 1.0),
         stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
     };
-    gradient::fill(ui.painter(), rect, 0.0, &gradient);
+    gradient::fill(ui.painter(), rect, super::frame::left_corners(corner), &gradient);
     let ink = rail_ink(theme);
     let not_yet = tr!("Not available yet");
     let tile = RAIL_TILE;

@@ -461,10 +461,11 @@ B = blocks the next stage.
   - The window wakes on each worker event; the events channel has no bound (#25), and the window applies at most
     eight rounds of jobs and events a frame.
 
-- **The app's own window frame** (#104) has no rounded corners or shadow of its own: the window is a plain
-  rectangle without the desktop's decorations. It resizes from a 5-point band at each edge and corner, and in the
-  top-row frame it moves only by a double click on nothing; the strip moves it by any drag. The desktop's own
-  snapping and its window menu (right click on a title bar) are not offered. Pictures and the web build draw no
+- **The app's own window frame** (#104) has round corners (12 points) and a one-pixel outline but no shadow of its
+  own, and the corners need a compositor that shows a window's see-through pixels. It resizes from a 5-point band
+  at each edge and corner. In the top-row frame a drag moves the window only in the band of the panes' first rows
+  where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
+  (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
 - **The rail** (#104) offers Start, Calendar and Pins before those views exist: they are disabled and say "Not
   available yet". The owner's initials at its foot come from the first account's address, as no account holds a
@@ -535,3 +536,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Hover actions: on the sample only, Done's stand-in meaning, one undo, the keys fixed (#89) |
 | 2026-11-06 | minor | Reader: which toolbar actions act, what waits for which task, the inner buttons, no picture of More (#90) |
 | 2026-11-06 | minor | The app's own window frame, the rail's views not built yet, the folder pane's own folders (#104) |
+| 2026-11-06 | minor | The own frame: round corners, resizing on Wayland, moving in the top row (#104) |
