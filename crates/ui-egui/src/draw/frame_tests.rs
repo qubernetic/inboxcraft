@@ -164,7 +164,7 @@ fn the_window_s_corners_are_round_only_while_the_app_draws_the_frame() {
 }
 
 #[test]
-fn the_strip_s_window_controls_sit_in_its_middle() {
+fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is_from_the_window_s_edge() {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_own_frame(true);
     app.set_frame(WindowFrame::Strip);
@@ -182,6 +182,9 @@ fn the_strip_s_window_controls_sit_in_its_middle() {
         let (above, below) = (rect.top(), super::frame::STRIP - rect.bottom());
         assert!((above - below).abs() <= 1.0, "{name}: {above} above, {below} below in {rect:?}");
     }
+    let close = harness.get_by_label("Close the window").rect();
+    let right = harness.ctx.content_rect().right() - close.right();
+    assert!((close.top() - right).abs() <= 0.5, "Close: {} above, {right} to the window's edge", close.top());
 }
 
 #[test]

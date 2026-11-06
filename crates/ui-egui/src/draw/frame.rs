@@ -153,8 +153,8 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
     moves_the_window(ui.ctx(), &handle);
     let galley = ui.painter().layout_no_wrap(title.to_owned(), theme.fonts.caption.id(), p.muted);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.muted);
-    // As much room above the controls as below them.
-    let right = rect.right() - theme.spacing.s;
+    // As much room above the controls as below them, and as much again between Close and the window's edge.
+    let right = rect.right() - (rect.height() - CONTROL[1]) / 2.0;
     let at = Rect::from_min_max(pos2(right - CONTROLS, rect.center().y - CONTROL[1] / 2.0), pos2(right, rect.center().y + CONTROL[1] / 2.0));
     ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
         controls(ui, theme, keymap);

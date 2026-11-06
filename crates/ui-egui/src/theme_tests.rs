@@ -819,3 +819,17 @@ fn close_is_a_plain_red_with_white_on_it_in_every_preset_and_mode() {
         assert!(!teal_or_coral(p.close));
     }
 }
+
+#[test]
+fn the_scroll_bar_is_wide_enough_to_see_and_its_ends_are_round() {
+    for theme in all() {
+        let style = theme.style();
+        let scroll = &style.spacing.scroll;
+        assert!(scroll.floating_width >= 4.0, "{} {:?}: {} at rest", theme.preset.id, theme.mode, scroll.floating_width);
+        assert!(scroll.bar_width > scroll.floating_width, "{} {:?}: wider under the pointer", theme.preset.id, theme.mode);
+        let w = &style.visuals.widgets;
+        for corner in [w.noninteractive, w.inactive, w.hovered, w.active].map(|visuals| visuals.corner_radius) {
+            assert!(f32::from(corner.nw) >= scroll.bar_width / 2.0, "{} {:?}: {corner:?} leaves the ends square", theme.preset.id, theme.mode);
+        }
+    }
+}

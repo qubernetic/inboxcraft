@@ -878,6 +878,9 @@ impl Theme {
         style.spacing.window_margin = egui::Margin::same(12);
         // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
         style.spacing.scroll.fade.strength = 0.0;
+        // A bar wide enough to see at rest and wider under the pointer; the widgets' corner rounds both its ends.
+        style.spacing.scroll.floating_width = 5.0;
+        style.spacing.scroll.bar_width = 9.0;
         motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),
