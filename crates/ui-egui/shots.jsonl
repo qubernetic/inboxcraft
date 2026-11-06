@@ -86,3 +86,15 @@
 {"out": "docs/images/list-showcase-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "showcase": true, "step": 2}
 {"out": "docs/images/list-showcase-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}
 {"out": "docs/images/list-showcase-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-slide-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-toast-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}

@@ -121,3 +121,33 @@ fn both_windows_start_with_the_kept_appearance() {
         assert_eq!(*window.appearance(), chosen, "{source:?}");
     }
 }
+
+#[test]
+fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
+    use inboxcraft_ui_egui::keep::{FILE, KeepFile};
+    use inboxcraft_ui_egui::mailbox::Act;
+    use inboxcraft_ui_egui::workers::Scripted;
+    let dir = tempfile::tempdir().unwrap();
+    let mut window = app(Source::Sample, clock, None, Box::new(KeepFile::new(dir.path().join(FILE)))).unwrap();
+    assert!(window.mailbox().can_act());
+    let mut workers = Scripted::default();
+    let ids: Vec<u64> = window.mailbox().messages().iter().map(|row| row.id).collect();
+    for (id, act) in ids.into_iter().zip([Act::Read, Act::Unread, Act::Done, Act::Delete]) {
+        let mailbox = window.mailbox_mut();
+        mailbox.start(id, act);
+        mailbox.left();
+        assert!(mailbox.undoable().is_some(), "{act:?}");
+        mailbox.pump(&mut workers);
+        mailbox.undo();
+        mailbox.pump(&mut workers);
+        assert_eq!(mailbox.error(), None, "{act:?}");
+    }
+    let first = window.mailbox().messages()[0].id;
+    window.mailbox_mut().act(first, Act::Done);
+    window.mailbox_mut().pump(&mut workers);
+    assert_eq!(window.mailbox().messages().len(), 10);
+    assert!(workers.sent.is_empty(), "no job went to a worker: {:?}", workers.sent);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing was written");
+    let again = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
+    assert_eq!(again.mailbox().messages().len(), 11, "the next start shows the sample as it was");
+}

@@ -299,14 +299,25 @@ window asks for the next frame; once it has landed, nothing does.
   (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
   date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
   their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
+  Their keys work on the selected row: D Done, R read or unread, Delete; while a text field has the focus they are
+  the field's. They act on the sample mailbox only (`sample.mail.set`); anywhere else no action is drawn and no key
+  acts, until the commands for a real mailbox exist. Done marks the message read and moves it to its account's
+  Archive, Delete to its Trash, read and unread change the dot and the weight.
+- **Slide-out**: a row that Done or Delete takes out of the list slides to the right and fades over the
+  `row_slide` token, clipped to its place; then it goes and the next-message rule picks the selection. With reduced
+  motion it goes at once.
+- **Toast**: after an act, a toast rises from the bottom edge over the `toast` token (in place at once with reduced
+  motion) and says what was done ("Marked as read", "Marked as unread", "Marked as done", "Moved to Trash"), with
+  Undo and its key chip (Ctrl+Z, Cmd+Z on macOS). It stays six seconds; Undo puts the row back where it was, read or
+  unread as it was, and selected again when it was. A new act replaces the toast; once it has gone the act stays.
 - **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
   new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
   card's edge is the preset's gradient, 1.5 points wide.
 - **Group cards** (the grouped unified inbox): a header with the group's badge, its name and unread count, and
   "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds more. The rows no
   group holds follow on a card of their own.
-- The screener, the groups and the hover actions have no data or command yet. The app draws none of them; `ui_shot`
-  shows them with invented data (`"showcase": true`, and `"step": n` to select by keyboard).
+- The screener and the groups have no data yet. The app draws neither; `ui_shot` shows them with invented data
+  (`"showcase": true`, and `"step": n` to select by keyboard, which also shows the hover actions).
 - **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
   key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
   deep ink, whichever reads at 4.5:1 on every stop).
@@ -406,8 +417,11 @@ for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the s
 list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
 (`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
 page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
-(`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
-them in its PR.
+(`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). `"act"` does a hover action to the
+selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done); with `"slide": true` the row of a Done
+or Delete is caught sliding out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
+the keyboard-selected row of `list-showcase-<preset>-<mode>.png`. Every picture but a slide is drawn with reduced
+motion, so it shows where each motion ends. Every UI change shows them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
 falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
@@ -437,3 +451,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Appearance choices and their commands; Inter; Lucide with its disc for Fill and Duotone (#86) |
 | 2026-11-06 | minor | The appearance settings page with its preview, the switch, its pictures (#87) |
 | 2026-11-06 | minor | The mail list window: the navigation rail, the list card, avatars, hover actions, screener and group cards, text buttons (#88) |
+| 2026-11-06 | minor | The hover actions act on the sample: their keys, the slide-out, the toast with Undo, their pictures (#89) |

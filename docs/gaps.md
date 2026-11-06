@@ -376,14 +376,19 @@ B = blocks the next stage.
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
-- Message list (#88): the screener card, the grouped inbox's cards and the hover actions are built but have no
-  data or command: the screener and the groups wait for E3.1 and E3.2, Done for E3.3, read or unread and Delete
-  for E2.1. The app draws none of them; only `ui_shot` shows them, with invented data (`showcase`), and there
-  "Review", "Done all" and the hover actions do nothing when pressed. E1.17c makes the hover actions act on the
-  sample mailbox in memory. In the grouped inbox the arrow keys still step through the list in date order, not in
+- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: they
+  wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
+  there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
   holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
+- Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
+  they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
+  that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
+  Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
+  be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
+  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
+  the keymap can be changed in the settings.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader moves onto them
   with E1.17b. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
@@ -508,3 +513,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Appearance: the commands and keeping them exist, the controls wait for the settings page; Lucide's disc; the kept file (#86) |
 | 2026-11-06 | minor | Appearance settings page: what it lacks, the owner's own font or icon files an idea only; the fit test's reach (#87) |
 | 2026-11-06 | minor | Message list: the showcase-only parts, what waits for E2.1, E3.1 to E3.3 and E1.17c; the rail's reach (#88) |
+| 2026-11-06 | minor | Hover actions: on the sample only, Done's stand-in meaning, one undo, the keys fixed (#89) |
