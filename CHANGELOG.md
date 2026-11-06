@@ -357,8 +357,36 @@ All notable changes to InboxCraft are listed here. The format follows
 - The design file `docs/design/inboxcraft.figcraft` (FigCraft): colour variables per preset and mode, type styles,
   the components with their variants, every screen of the app in light and dark, the mood in each preset and five
   flows as storyboards; a PNG per page and `docs/design/README.md` (#96)
+- `ui.frame.set` (`safe`): who draws the window frame, the desktop's title bar, the window controls in the top row
+  or a slim strip of the app's own with the title (the default). A native window opens without the desktop's
+  decorations unless the title bar is chosen, moves by its strip, maximises on a double click and resizes at its
+  edges; pictures and the web build draw no frame. The choice is a row on the Appearance page (#104)
+- The rail shows the app's mark, Start, Mail, Calendar, Pins, Sent mail, Search, the settings and the owner's
+  initials; the views not built yet are disabled and say so (#104)
+- Text buttons in three tones (quiet, secondary outlined, primary on the text gradient) with an optional icon; the
+  search field is a pill with a magnifier (#104)
 
 ### Changed
+- The look follows the design file (#104): dark mode's accent is the preset's middle stop lightened; primary
+  buttons sit on the text gradient, the stops darkened until white reads (at most 30 %); list rows sit 6 points
+  inside their card; a group's header shows an outline icon in the muted colour; the folder pane has an outlined
+  account picker with a chevron, Add account as a link, a MAILBOXES heading, an icon per folder, and each account
+  lists only its own folders; the app icon is the InboxCraft mark (two cards entering a notched tray, Electric
+  gradient, white tile)
+- Accounts are added on the settings sheet (#104): its Accounts section lists every account with its colour,
+  avatar, name and address under "Your accounts", with Add account at the top; the form, Detect and the check run on
+  the same page, with a link back to the list. The window with no account is one card in the middle whose Add
+  account opens that page. The folder pane no longer shows Add account. `ui_shot` takes `accounts` and `first`
+- The screens follow the design file (#104): the settings are a sheet over the dimmed window, with the sections on
+  the left (those not built yet faded) and each setting a row beside its control: segmented choices, accent and
+  window-frame cards, a text-size slider, a switch and a two-row preview; the custom accent's fields show only
+  while it is in use or being typed. The add-account form has its labels above the fields, the address beside
+  Detect, Detect's result in a box, rows for the names and for server, port and security, and "Check and add"; a
+  failed check names the step and its reason under the title and lists the steps on a card. The reader's subject
+  is set large with the message's group as a chip. In the list, "Show all" is an accent link under the rows' text,
+  the grouped cards show no account stripe, and a row's hover actions are Done, an envelope for read or unread,
+  Delete and Snooze (not available yet). Without an account the folder pane is left out, in the empty window and
+  while the first account is added; Lucide's Fill draws no disc behind the line glyph
 - The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
   left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;
@@ -439,6 +467,19 @@ All notable changes to InboxCraft are listed here. The format follows
 - The `draft` CI job: a draft PR now starts no job at all (#68)
 
 ### Fixed
+- The line egui drew under the list header (and the error and reader notice bars) is gone, and the list keeps the
+  scroll bar's width free so the bar no longer lies over the cards (#104)
+- The app's own window frame (#104): its edges resize the window on Wayland too (egui knows no window rect there,
+  so the edges never acted); its corners are round with a one-pixel outline, square when maximised; the strip is a
+  band of glass with a line under it; in the top row the window controls sit at the end of the right pane's first
+  row instead of over its search field or Close button, and a drag in the band above and between the panes moves
+  the window. The strip's controls sit in its middle; a drag moves the window every time, also after a move whose
+  button release the desktop kept to itself; the first pane is as far from the rail as the panes are from each other
+  The hover of the window controls shows again right after a move or a resize, without a click; Close turns a
+  plain red under the pointer, and each control's hover fill keeps clear of the strip's edges. `ui_shot` takes a
+  `pointer` to picture a hover
+- The scroll bar is 5 points wide at rest and 9 under the pointer, with round ends; the strip's controls have as much
+  room above and below them as Close has to the window's edge: a cards' gap, so Close ends where the cards end (#104)
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
 

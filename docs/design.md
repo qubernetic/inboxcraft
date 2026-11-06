@@ -45,8 +45,10 @@ The owner's choices are the engine's `Appearance`, changed only through the `ui.
 | `ui.icons.set` | `icons` | `phosphor` (default), `lucide` |
 | `ui.text_scale.set` | `percent` | 90, 100 (default), 110, 120, 130 |
 | `ui.motion.set` | `reduce` | `on`, `off`, `system` (default) |
+| `ui.frame.set` | `frame` | `system`, `top_row`, `strip` (default) |
 
-Each answers the whole appearance. A custom accent is the colour of links and accent text in dark mode, so it must
+Each answers the whole appearance. Links and accent text in dark mode take the preset's middle stop mixed 30 % with
+white, made readable at 4.5:1; the separate accent is one of the account colours. A custom accent must still
 reach WCAG AA (4.5:1) on the lightest dark surface (the dark float, `#1E2330`); one that does not is made lighter in
 steps of 1 % lightness, hue and saturation kept, and the answer has `nudged: true`, the colour asked for
 (`requested`), the contrast reached and why. Every other token comes from the four colours as from a preset and is
@@ -98,8 +100,9 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 | line / hover | text-tone at 7 % / 4.5 % | near-white at 6 % / 6 % | row separators and hovered rows on glass |
 | colour fields | each stop at 30 % | each stop at 34 % | the soft fields painted once behind the window |
 
-**Text on the gradient** picks white or the deep ink, whichever has more contrast with the colour under it; with
-that ink every point of every preset's gradient reads at 4.5:1 (white alone would not on Citrus's yellow end).
+**Text on the gradient** (a primary button) sits on a text gradient: the preset's stops darkened together in steps of
+2 % until white reads at 4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %);
+otherwise the full gradient with the deep ink (Citrus). Icons on the rail keep the full gradient.
 
 **Account colours**, in account order and repeating after the sixth: the first, middle and last stop, the accent,
 the mix of the first and middle stop and the mix of the middle and last, each readable at 3:1 on the surfaces.
@@ -147,7 +150,8 @@ a size or an egui text style; `theme.rs` is the only file that names a font, and
 | subject unread | 14 | SemiBold | the subject of an unread message |
 | preview | 14 | Regular | the first words after the subject, in the muted colour |
 | heading | 15 | SemiBold | account names, empty-state titles, a message's sender, small headings in a message |
-| title | 20 | Bold | the view's name, the reader's subject, page titles, the app name |
+| title | 20 | Bold | the view's name, page titles, the app name |
+| display | 26 | Bold | the reader's subject |
 | mono | 13 | Hack | preformatted text and code |
 
 Sender and subject are strong and the preview muted; an unread row is set in heavier weights (Bold and SemiBold
@@ -187,9 +191,8 @@ id and style is in its font.
 
 The second set is **Lucide** (ISC; the icons it took from Feather are MIT), chosen with `ui.icons.set` and bundled
 from release 1.70.0 in `assets/icons/lucide/` (its one font, unchanged). Lucide has lines only, so Fill and Duotone
-keep the line glyph and draw a filled disc behind it, 90 % of the square across: at 38 % of the icon's colour for
-Fill and at 20 % for Duotone. Callers draw active states in the accent colour, so an active Lucide icon is the accent
-on an accent disc. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
+keep the line glyph. Fill draws nothing behind it: a disc there read as a smudge on the selection, and an active
+icon already shows in the accent colour. Duotone draws a disc 90 % of the square across at 20 % of the icon's colour. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
 the square and moved down by 4.5 % of it; the same ring test holds it to a pixel of the middle.
 
 The app icon is not from a set: it stays drawn in code (see "The app icon").
@@ -200,7 +203,7 @@ The app icon is not from a set: it stays drawn in code (see "The app icon").
   middle stop at the top right, the last stop from the bottom right; the left, where the panes start, stays calm.
   The fields are one picture, rasterised once per window size (rounded up to 128 pixels, so a resize does not
   rasterise them for every pixel of the drag) and kept as a texture.
-- **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the add-account page) are each a
+- **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the card of the window with no account) are each a
   glass layer, `gap` apart and from the window's edge: the glass colour over the fields, a 1-point edge, a light top
   edge that fades in and out at its ends, and a soft shadow around it, clear under the layer itself so it does not
   darken the glass. The shadow is a nine-slice: one small picture of its corners and a 32-pixel stretch of each
@@ -234,11 +237,11 @@ through the motion tokens below and shows a key only from the keymap; each has a
 |---|---|
 | Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
 | Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip; `unavailable` adds a note under the name that says why ("Not available yet"). On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
-| Text button (`button::text`) | A word in a fully rounded field one control high, with its tooltip: quiet (a hover fill only) or primary (the preset's gradient, the word in white or the deep ink). `button::unavailable` draws one that cannot be pressed yet: faded to 45 %, no click, its tooltip saying why. |
+| Text button (`button::TextButton`, `button::text`) | A word, an optional icon before it, in a fully rounded field one control high, with its tooltip: quiet (a hover fill only), secondary (outlined in the field border) or primary (on the text gradient). `button::unavailable` draws one that cannot be pressed yet: faded to 45 %, no click, its tooltip saying why. |
 | Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
 | Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once, and for a control that cannot be used yet a muted note under them. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
-| Badge (`badge`) | An unread count in a pill of the badge colour, or a group's solid (Fill) icon on the preset's gradient at full strength: white wherever white reaches 3:1 (WCAG AA for a graphical object) on every stop, as on Electric, otherwise the deep ink. The WCAG 2 ratio rates dark ink on saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough. |
+| Badge (`badge`) | An unread count in a pill of the badge colour, or a group's outline (Regular) icon in the muted colour, without a background. |
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
@@ -282,7 +285,7 @@ window asks for the next frame; once it has landed, nothing does.
   top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
   foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
   (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
-  (Ctrl+1) leaves the settings or the add-account page; the settings button (Ctrl+Comma) opens the settings page and
+  (Ctrl+1) leaves the settings sheet; the settings button (Ctrl+Comma) opens the settings page and
   closes it again. The rail is one button and 8 points either side wide, and shows on every page.
 - **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
@@ -374,8 +377,15 @@ the icon sits among others at the same size.
   bottom with Dismiss until it is dismissed.
 
 ## Adding an account
-- **Where**: "Add account" sits under the app's name in the folder pane, and in the middle of the empty window. The
-  page takes the place of the list and the reader; the folder pane stays.
+- **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
+  note), with Add account at its right end: secondary, or primary while there is no account; then a row per account
+  with its colour's dot, its avatar, its name in SemiBold and its address, muted. Without an account a framed box
+  says the accounts show up there. The folder pane has no Add account: most people have one account.
+- **First start**: the window with no account shows no folder pane, only one glass card in the middle, at most 640
+  points wide: the Inbox icon (Duotone), "No accounts yet", a line on what to do, Add account (primary) and "Opens
+  Settings · Accounts" under it. The button opens the sheet on Accounts.
+- **Adding**: Add account opens the form on the same page under a link back ("Accounts" after the Back arrow); the
+  check runs there too. Cancel, Done or the link lead back to the list; closing the sheet closes the form.
 - **Form**: one column of labelled fields at most 560 points wide: the address with Detect beside it, the box for
   Mozilla's list of providers (off), what Detect found in small type (a redirect over plain HTTP or a guessed name in
   the flag colour, so it gets a second look) with "What Detect asked (n)" folded, then the name for the account,
@@ -386,12 +396,13 @@ the icon sits among others at the same size.
   the accent colour while waiting, Done (Fill) in the accent colour when passed, Failed (Fill) in the error colour
   when failed, Skipped (Regular) muted when skipped, held back or not built yet. Under each step the host and port it
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
-  Check again, Change settings and Close after a failure; Close while it runs.
+  Check again and Change settings after a failure; the link above the page leads back while it runs.
 
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
-  and shows as active while the page is open; Ctrl+Comma opens the page too, and the rail's Mail button leaves it. The page takes the place of the list and the reader, as adding an
-  account does, and the two close each other. Close or Escape leaves it.
+  and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance and Accounts are built, the
+  rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
   the preview goes above the controls. The page scrolls.
@@ -471,3 +482,7 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The reader on the design system: mail-action toolbar, More menu, thread cards, Reply row, link status float; unavailable buttons, tooltip notes, menu choices (#90) |
 | 2026-11-06 | minor | The design file in FigCraft, `docs/design/` (#96) |
 | 2026-11-06 | minor | The FigCraft design file is the source of truth for the look (#96) |
+| 2026-11-06 | minor | The file's rules in the code: text gradient, dark accent, outline group icons, inset rows; secondary buttons, `ui.frame.set` (#104) |
+| 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
+| 2026-11-06 | minor | Lucide's Fill draws no disc (#104) |
+| 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the empty window is one card (#104) |

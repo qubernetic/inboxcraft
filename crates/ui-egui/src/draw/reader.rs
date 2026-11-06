@@ -24,8 +24,8 @@ use egui::{
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
-use crate::component::button::{self, IconButton};
-use crate::component::popup;
+use crate::component::button::{IconButton, TextButton};
+use crate::component::{badge, popup};
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
@@ -135,36 +135,39 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     let s = &theme.spacing;
     let open = reader.open_id().filter(|_| mailbox.can_act());
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
-    Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.xs;
-            let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
-                let button = IconButton::new(icon, name);
-                let button = match (act, open) {
-                    (Some((act, key)), Some(id)) => {
-                        if button.action(key).show(ui, theme, keymap).clicked() {
-                            drawn.asked.push(Asked::Act(id, act));
+    // In the top row the window controls sit at the end of the actions' line.
+    super::frame::beside(ui, theme, |ui| {
+        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = s.xs;
+                let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
+                    let button = IconButton::new(icon, name);
+                    let button = match (act, open) {
+                        (Some((act, key)), Some(id)) => {
+                            if button.action(key).show(ui, theme, keymap).clicked() {
+                                drawn.asked.push(Asked::Act(id, act));
+                            }
+                            return;
                         }
-                        return;
-                    }
-                    (Some((_, key)), None) => button.action(key),
-                    (None, _) => button,
+                        (Some((_, key)), None) => button.action(key),
+                        (None, _) => button,
+                    };
+                    button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
-                button.unavailable(not_yet()).show(ui, theme, keymap);
-            };
-            action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
-            action(ui, IconId::Archive, tr!("Archive"), None);
-            action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
-            divider(ui, theme);
-            action(ui, IconId::Snooze, tr!("Snooze"), None);
-            action(ui, IconId::Pin, tr!("Pin"), None);
-            action(ui, IconId::Move, tr!("Move to a folder"), None);
-            divider(ui, theme);
-            let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-            let width = theme.fonts.body.size * MENU_WIDTH;
-            Popup::menu(&response)
-                .frame(Frame::NONE)
-                .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
+                action(ui, IconId::Archive, tr!("Archive"), None);
+                action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
+                divider(ui, theme);
+                action(ui, IconId::Snooze, tr!("Snooze"), None);
+                action(ui, IconId::Pin, tr!("Pin"), None);
+                action(ui, IconId::Move, tr!("Move to a folder"), None);
+                divider(ui, theme);
+                let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
+                let width = theme.fonts.body.size * MENU_WIDTH;
+                Popup::menu(&response)
+                    .frame(Frame::NONE)
+                    .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+            });
         });
     });
     let subject = reader
@@ -173,13 +176,23 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .map(|opened| opened.header.subject.clone())
         .filter(|subject| !subject.is_empty())
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    ui.add_space(s.m);
-    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(p.text)).wrap());
+    ui.add_space(s.xl);
+    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.text)).wrap());
+    let group = reader.open_id().and_then(|id| mailbox.showcase().groups.iter().find(|group| group.messages.contains(&id)));
     let count = reader.thread().len();
-    if count > 1 {
-        let writers = reader.writers().join(", ");
-        let line = tr!("{writers} · {count} messages", writers = writers, count = count);
-        ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+    if group.is_some() || count > 1 {
+        // The message's group as a chip, then who wrote in the thread.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s;
+            if let Some(group) = group {
+                badge::chip(ui, theme, &group.name, &tr!("In {group}", group = group.name));
+            }
+            if count > 1 {
+                let writers = reader.writers().join(", ");
+                let line = tr!("{writers} · {count} messages", writers = writers, count = count);
+                ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+            }
+        });
     }
 }
 
@@ -644,9 +657,9 @@ fn message(
             ui.add_space(theme.spacing.m);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s;
-                button::unavailable(ui, theme, keymap, tr!("Reply"), true, not_yet());
-                button::unavailable(ui, theme, keymap, tr!("Reply all"), false, not_yet());
-                button::unavailable(ui, theme, keymap, tr!("Forward"), false, not_yet());
+                TextButton::new(tr!("Reply")).primary().icon(IconId::Reply).unavailable(not_yet()).show(ui, theme, keymap);
+                TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll).unavailable(not_yet()).show(ui, theme, keymap);
+                TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward).unavailable(not_yet()).show(ui, theme, keymap);
             });
         }
     });
@@ -689,7 +702,7 @@ pub(super) fn show(
     let p = &theme.palette;
     let whole = ui.max_rect();
     if let Some(notice) = reader.notice() {
-        egui::Panel::bottom("reader-notice").frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
+        egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.text));
                 if ui.button(tr!("Dismiss")).clicked() {

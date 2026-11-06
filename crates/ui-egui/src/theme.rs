@@ -62,7 +62,7 @@ pub struct Preset {
     pub id: &'static str,
     /// The gradient, first to last stop, at full strength.
     pub gradient: [Color32; 3],
-    /// The accent: links and accent text in dark mode, and one account colour.
+    /// The accent: one account colour.
     pub accent: Color32,
 }
 
@@ -122,7 +122,7 @@ pub struct Palette {
     pub selection: Color32,
     /// The end of the selection gradient.
     pub selection_end: Color32,
-    /// Links and accent text: the accent in dark mode, the middle stop darkened in light mode.
+    /// Links and accent text: the middle stop lightened in dark mode, darkened in light mode.
     pub accent: Color32,
     /// Text on the accent colour.
     pub on_accent: Color32,
@@ -140,6 +140,10 @@ pub struct Palette {
     pub error: Color32,
     /// Text on the error banner.
     pub on_error: Color32,
+    /// Behind the window's Close control under the pointer: the plain red most desktops use there, in both modes.
+    pub close: Color32,
+    /// The cross on [`Palette::close`].
+    pub on_close: Color32,
     /// The preset's gradient at full strength (the navigation rail, the primary button, group badges).
     pub gradient: [Color32; 3],
     /// The dark ink for text on the gradient where white does not read ([`ink_on`] picks).
@@ -148,6 +152,11 @@ pub struct Palette {
     pub glass: Color32,
     /// The edge of a glass layer.
     pub glass_edge: Color32,
+    /// Over the window behind a sheet (the settings): a light shade, so the window shows through dimmed.
+    pub scrim: Color32,
+    /// The outline of a window whose frame the app draws: about as strong as the desktops' own, so the window stands
+    /// apart from what lies behind it.
+    pub window_edge: Color32,
     /// The light top edge of a glass layer.
     pub glass_highlight: Color32,
     /// The soft shadow under glass and floats.
@@ -290,8 +299,10 @@ pub struct Fonts {
     pub preview: Font,
     /// Account names, empty-state titles, message headings.
     pub heading: Font,
-    /// The view's name, the reader's subject, page titles.
+    /// The view's name, page titles.
     pub title: Font,
+    /// The reader's subject.
+    pub display: Font,
     /// Preformatted text and code.
     pub mono: Font,
 }
@@ -312,6 +323,7 @@ impl Fonts {
             self.preview,
             self.heading,
             self.title,
+            self.display,
             self.mono,
         ]
     }
@@ -329,6 +341,7 @@ impl Fonts {
             preview: f(self.preview),
             heading: f(self.heading),
             title: f(self.title),
+            display: f(self.display),
             mono: f(self.mono),
         }
     }
@@ -396,6 +409,9 @@ pub struct Theme {
     pub motion: Motion,
 }
 
+/// The red behind Close, the same in every preset and mode.
+const CLOSE: Color32 = rgb(0xD92D20);
+
 const fn rgb(hex: u32) -> Color32 {
     // The masks keep each value in 0..=255, so the casts lose nothing.
     Color32::from_rgb(((hex >> 16) & 0xff) as u8, ((hex >> 8) & 0xff) as u8, (hex & 0xff) as u8)
@@ -437,16 +453,14 @@ pub(crate) mod app_icon {
 
     use super::rgb;
 
-    /// The rounded tile.
-    pub(crate) const TILE: Color32 = rgb(0x1D6A64);
-    /// The letter.
-    pub(crate) const PAPER: Color32 = rgb(0xFFFFFF);
-    /// The lines of text on the letter.
-    pub(crate) const INK: Color32 = rgb(0xA9D4CF);
-    /// The tray.
-    pub(crate) const TRAY: Color32 = rgb(0x6CC4BA);
-    /// The unread dot.
-    pub(crate) const DOT: Color32 = rgb(0xF0A06A);
+    /// The white tile.
+    pub(crate) const TILE: Color32 = rgb(0xFFFFFF);
+    /// The tile's edge: the deep ink at 16 %, so the white tile holds its shape on a light background.
+    pub(crate) const EDGE: Color32 = Color32::from_rgba_premultiplied(1, 1, 2, 41);
+    /// The Electric gradient of the mark, first to last stop.
+    pub(crate) const GRADIENT: [Color32; 3] = [rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)];
+    /// Where the gradient starts and ends on the icon's square, in units.
+    pub(crate) const GRADIENT_LINE: [[f32; 2]; 2] = [[48.0, 60.0], [208.0, 200.0]];
 }
 
 /// The neutral starting points of one mode, before the preset tints them.
@@ -499,7 +513,7 @@ const DARK: Neutrals = Neutrals {
     fields: 0.34,
 };
 
-const SPACING: Spacing =
+pub(crate) const SPACING: Spacing =
     Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
 
 /// The most contrast text under a float over sharp text may keep: barely there.
@@ -518,6 +532,7 @@ const FONTS: Fonts = Fonts {
     preview: Font::sans(14.0, Weight::Regular),
     heading: Font::sans(15.0, Weight::SemiBold),
     title: Font::sans(20.0, Weight::Bold),
+    display: Font::sans(26.0, Weight::Bold),
     mono: Font { size: 13.0, face: Face::Mono, typeface: Typeface::Figtree },
 };
 
@@ -644,7 +659,9 @@ impl Palette {
         let accent = match mode {
             // The middle stop mixed with black: even a yellow-orange reads on white.
             Mode::Light => readable(mix(middle, BLACK, 0.38), &surfaces, 4.5, mode),
-            Mode::Dark => readable(preset.accent, &surfaces, 4.5, mode),
+            // The middle stop mixed 30 % with white: it stays in the gradient's family (the preset's separate
+            // accent stays an account colour).
+            Mode::Dark => readable(mix(middle, WHITE, 0.3), &surfaces, 4.5, mode),
         };
         let marked = [background, panel, surface, selection];
         let badge = mix(panel, middle, n.badge);
@@ -673,12 +690,19 @@ impl Palette {
             on_badge: readable(accent, &[badge], 4.5, mode),
             error,
             on_error: ink_on(error),
+            close: CLOSE,
+            on_close: ink_on(CLOSE),
             gradient: preset.gradient,
             ink: DEEP_INK,
             glass,
             glass_edge: match mode {
                 Mode::Light => alpha(shade, 0.08),
                 Mode::Dark => alpha(sheer, 0.09),
+            },
+            scrim: alpha(shade, 0.25),
+            window_edge: match mode {
+                Mode::Light => alpha(shade, 0.24),
+                Mode::Dark => alpha(sheer, 0.16),
             },
             glass_highlight: match mode {
                 Mode::Light => alpha(sheer, 0.9),
@@ -862,6 +886,9 @@ impl Theme {
         style.spacing.window_margin = egui::Margin::same(12);
         // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
         style.spacing.scroll.fade.strength = 0.0;
+        // A bar wide enough to see at rest and wider under the pointer; the widgets' corner rounds both its ends.
+        style.spacing.scroll.floating_width = 5.0;
+        style.spacing.scroll.bar_width = 9.0;
         motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),
@@ -922,6 +949,27 @@ pub fn readable(colour: Color32, on: &[Color32], ratio: f32, mode: Mode) -> Colo
 #[must_use]
 pub fn ink_on(behind: Color32) -> Color32 {
     if contrast(WHITE, behind) >= contrast(DEEP_INK, behind) { WHITE } else { DEEP_INK }
+}
+
+/// The owner's avatar on the rail: a white disc, and the preset's middle stop darkened until it reads on it at 4.5:1.
+#[must_use]
+pub fn rail_avatar(stops: [Color32; 3]) -> (Color32, Color32) {
+    let [_, middle, _] = stops;
+    (WHITE, readable(middle, &[WHITE], 4.5, Mode::Light))
+}
+
+/// The gradient text sits on (a primary button, a chip) and its ink: the stops darkened together in steps of 2 % until
+/// white reads at 4.5:1 on every one, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise
+/// the stops unchanged with the deep ink (Citrus). Icons on the rail keep the full gradient.
+#[must_use]
+pub fn text_gradient(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
+    // 15 steps of 2 %: at most 30 %.
+    const STEP: f32 = 0.02;
+    const STEPS: u8 = 15;
+    (0..=STEPS)
+        .map(|step| stops.map(|stop| mix(stop, BLACK, f32::from(step) * STEP)))
+        .find(|darkened| darkened.iter().all(|stop| contrast(WHITE, *stop) >= 4.5))
+        .map_or((stops, DEEP_INK), |darkened| (darkened, WHITE))
 }
 
 /// The ink for an icon or text that runs across every colour in `behind` (a gradient's stops): white or the deep

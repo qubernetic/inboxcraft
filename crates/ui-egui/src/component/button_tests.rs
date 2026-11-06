@@ -5,7 +5,7 @@ use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::IconButton;
+use super::{IconButton, TextButton};
 use crate::component::control_side;
 use crate::component::tests::{builder, drew_icon, theme};
 use crate::iconset::{IconId, Style};
@@ -124,7 +124,7 @@ fn a_button_on_a_gradient_draws_its_icon_in_the_ink_it_is_given() {
 }
 
 #[test]
-fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_the_gradient() {
+fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_the_text_gradient() {
     let theme = theme();
     let mut harness = builder().build_ui_state(
         move |ui, presses: &mut [u32; 2]| {
@@ -141,7 +141,7 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_t
     let colours = text_colours(harness.output());
     let colour = |name: &str| colours.iter().find(|(text, _)| text == name).map(|(_, colour)| *colour);
     assert_eq!(colour("Done all"), Some(theme.palette.text));
-    assert_eq!(colour("Review"), Some(crate::theme::ink_over(&theme.palette.gradient)));
+    assert_eq!(colour("Review"), Some(crate::theme::text_gradient(theme.palette.gradient).1));
     harness.get_by_role_and_label(Role::Button, "Review").click();
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Done all").click();
@@ -183,4 +183,51 @@ fn an_unavailable_button_takes_no_press_and_says_why() {
         harness.run();
     }
     assert_eq!(*harness.state(), 0);
+}
+
+/// Primary with an icon, secondary, and a primary that is unavailable; how often each was pressed.
+fn text_harness() -> Harness<'static, Presses> {
+    let theme = theme();
+    let keymap = Keymap::default();
+    let mut harness = builder().build_ui_state(
+        move |ui, presses: &mut Presses| {
+            let buttons = [
+                TextButton::new("Reply").primary().icon(IconId::Reply),
+                TextButton::new("Forward").secondary().icon(IconId::Forward),
+                TextButton::new("Check again").primary().unavailable("Not yet"),
+            ];
+            for (button, count) in buttons.into_iter().zip(presses.iter_mut()) {
+                if button.show(ui, &theme, &keymap).clicked() {
+                    *count += 1;
+                }
+            }
+        },
+        [0; 3],
+    );
+    harness.run();
+    harness
+}
+
+#[test]
+fn text_buttons_of_every_tone_are_named_buttons_with_their_icons() {
+    let mut harness = text_harness();
+    for name in ["Reply", "Forward"] {
+        let button = harness.get_by_label(name);
+        assert_eq!(button.accesskit_node().role(), Role::Button);
+        button.click();
+    }
+    harness.run();
+    assert_eq!(harness.state(), &[1, 1, 0]);
+    assert!(drew_icon(harness.output(), IconId::Reply, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Forward, Style::Regular));
+}
+
+#[test]
+fn an_unavailable_text_button_takes_no_press() {
+    let mut harness = text_harness();
+    let again = harness.get_by_label("Check again");
+    assert!(again.accesskit_node().is_disabled());
+    again.click();
+    harness.run();
+    assert_eq!(harness.state(), &[0, 0, 0]);
 }

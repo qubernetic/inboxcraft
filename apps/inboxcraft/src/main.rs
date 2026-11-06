@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
 use inboxcraft::{Source, Step};
+use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::fetch::Wake;
@@ -20,6 +21,16 @@ struct Desktop(InboxApp);
 impl eframe::App for Desktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        inboxcraft_ui_egui::InboxApp::release_after_window_grab(ctx, raw_input);
+    }
+
+    /// Nothing behind the app: the window's own frame has round corners, and the desktop shows through them. The app
+    /// paints every pixel inside them itself.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0; 4]
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -36,7 +47,7 @@ fn window(source: Source) -> ExitCode {
             context.request_repaint();
         }
     });
-    let app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
+    let mut app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");
@@ -47,7 +58,12 @@ fn window(source: Source) -> ExitCode {
         .with_title("InboxCraft")
         .with_app_id("io.github.qubernetic.inboxcraft")
         .with_inner_size([1200.0, 760.0])
-        .with_min_inner_size([720.0, 480.0]);
+        .with_min_inner_size([720.0, 480.0])
+        // See-through where the app paints nothing: the corners of its own frame.
+        .with_transparent(true)
+        // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
+        .with_decorations(app.mailbox().appearance().frame == WindowFrame::System);
+    app.set_own_frame(true);
     // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
     if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
         viewport = viewport.with_icon(icon);

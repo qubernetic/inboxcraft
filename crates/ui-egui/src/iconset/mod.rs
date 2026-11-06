@@ -7,8 +7,8 @@
 //! Each set maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its own
 //! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The styles carry meaning:
 //! [`Style::Regular`] in toolbars and rows, [`Style::Fill`] for active and selected states, [`Style::Duotone`] for
-//! empty states. Phosphor has a font for each style; Lucide has lines only and draws Fill and Duotone over a filled
-//! disc ([`Glyph::disc`]). The app icon is not from a set; it is drawn in code in [`crate::icons`].
+//! empty states. Phosphor has a font for each style; Lucide has lines only: its Fill is the line glyph, and Duotone
+//! draws it over a faint filled disc ([`Glyph::disc`]). The app icon is not from a set; it is drawn in code in [`crate::icons`].
 
 mod lucide;
 mod phosphor;
@@ -69,11 +69,39 @@ pub enum IconId {
     Waiting,
     /// Something skipped or not done.
     Skipped,
+    /// The start view (home).
+    Home,
+    /// Mail: the app's mark on the rail.
+    Mail,
+    /// Add (an account).
+    Add,
+    /// Junk.
+    Junk,
+    /// Mark as read: an open envelope.
+    MarkRead,
+    /// Kept safe: a lock.
+    Lock,
+    /// The look: a palette.
+    Palette,
+    /// Accounts: an at sign.
+    At,
+    /// Triage: a funnel.
+    Funnel,
+    /// Shortcuts: a keyboard.
+    Keyboard,
+    /// Privacy: a shield with a tick.
+    Shield,
+    /// About: an i in a circle.
+    Info,
+    /// Close: a cross.
+    Close,
+    /// Back: an arrow to the left, before the name of the page it leads back to.
+    Back,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 38] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -98,6 +126,20 @@ impl IconId {
         Self::Failed,
         Self::Waiting,
         Self::Skipped,
+        Self::Home,
+        Self::Mail,
+        Self::Add,
+        Self::Junk,
+        Self::MarkRead,
+        Self::Lock,
+        Self::Palette,
+        Self::At,
+        Self::Funnel,
+        Self::Keyboard,
+        Self::Shield,
+        Self::Info,
+        Self::Close,
+        Self::Back,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -128,6 +170,20 @@ impl IconId {
             Self::Failed => 21,
             Self::Waiting => 22,
             Self::Skipped => 23,
+            Self::Home => 24,
+            Self::Mail => 25,
+            Self::Add => 26,
+            Self::Junk => 27,
+            Self::MarkRead => 28,
+            Self::Lock => 29,
+            Self::Palette => 30,
+            Self::At => 31,
+            Self::Funnel => 32,
+            Self::Keyboard => 33,
+            Self::Shield => 34,
+            Self::Info => 35,
+            Self::Close => 36,
+            Self::Back => 37,
         }
     }
 }

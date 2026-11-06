@@ -388,3 +388,63 @@ fn acting_on_the_sample_keeps_nothing() {
     assert_eq!(stores.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert_eq!(rows(&harness), 11);
 }
+
+/// The account stripes of the last frame: the thin upright bars at the left of the rows.
+fn stripes(harness: &Harness<'_, InboxApp>) -> usize {
+    fn count(shape: &egui::Shape) -> usize {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().map(count).sum(),
+            egui::Shape::Rect(rect) if (rect.rect.width() - 3.0).abs() < 0.01 && rect.rect.height() > 10.0 => 1,
+            _ => 0,
+        }
+    }
+    harness.output().shapes.iter().map(|clipped| count(&clipped.shape)).sum()
+}
+
+#[test]
+fn the_account_stripe_marks_the_rows_of_the_simple_list_only() {
+    assert!(stripes(&harness(false)) > 0, "the simple list of two accounts shows whose each row is");
+    assert_eq!(stripes(&harness(true)), 0, "the grouped inbox's cards show no stripes");
+}
+
+/// The text `wanted` of the last frame: where it is drawn and its colour.
+fn painted(harness: &Harness<'_, InboxApp>, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text() == wanted => {
+                let colour = text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color);
+                Some((shape.visual_bounding_rect(), colour))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn show_all_is_an_accent_link_under_the_rows_text() {
+    let harness = harness(true);
+    let (text, colour) = painted(&harness, "Show all (7)").expect("Show all is drawn");
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert_eq!(colour, theme.palette.accent, "Show all is in the accent colour");
+    let row = harness.get_by_label(ODILE).rect();
+    let sender = painted(&harness, "Odile Brannock").expect("the sender is drawn").0;
+    assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
+    assert!((text.left() - sender.left()).abs() <= 1.5, "Show all starts at {} where the rows' text starts, {}", text.left(), sender.left());
+}
+
+#[test]
+fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet() {
+    let mut harness = harness(true);
+    harness.get_by_label(ODILE).hover();
+    harness.run();
+    let row = harness.get_by_label(ODILE).rect();
+    let mut lefts = Vec::new();
+    for name in ["Done", "Mark as read", "Delete", "Snooze"] {
+        let button = harness.query_all_by_role_and_label(Role::Button, name).find(|node| row.contains(node.rect().center())).expect(name);
+        assert_eq!(button.accesskit_node().is_disabled(), name == "Snooze", "{name}");
+        lefts.push(button.rect().left());
+    }
+    assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {lefts:?}");
+}

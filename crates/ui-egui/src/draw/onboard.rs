@@ -4,16 +4,19 @@
 //! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw.
 
 use egui::text_edit::TextEditState;
-use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
+use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
+use crate::component::button::{self, TextButton};
+use crate::component::{field as field_style, margin, pill};
 use crate::iconset::{IconId, Style};
+use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
+use crate::onboard::{Found, MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
 use crate::tr;
 
 /// The widest the form grows, in points.
-const FORM_WIDTH: f32 = 560.0;
+const FORM_WIDTH: f32 = 480.0;
 
 /// What the owner asked for on the page this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,129 +28,165 @@ pub(super) enum Asked {
     Close,
 }
 
-/// A labelled one-line field in the form grid.
-fn field(ui: &mut Ui, label: &str, text: &mut String, hint: &str) -> Response {
-    let label = ui.label(label);
-    let response = ui.add(TextEdit::singleline(text).hint_text(hint).desired_width(FORM_WIDTH - 200.0)).labelled_by(label.id);
-    ui.end_row();
-    response
+/// The room between the fields of a row, in points.
+fn between(theme: &Theme) -> f32 {
+    theme.spacing.s
+}
+
+/// A field `width` points wide under its `label` (the caption in the muted colour); `add` draws the field.
+fn labelled(ui: &mut Ui, theme: &Theme, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> Response) -> Response {
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        ui.spacing_mut().item_spacing.y = theme.spacing.xs;
+        let label = ui.label(RichText::new(label).font(theme.fonts.caption.id()).color(theme.palette.muted));
+        add(ui).labelled_by(label.id)
+    })
+    .inner
+}
+
+/// A one-line field `width` points wide with `hint` in it while it is empty.
+fn line_edit<'t>(theme: &Theme, text: &'t mut String, hint: &str, width: f32) -> TextEdit<'t> {
+    TextEdit::singleline(text).hint_text(hint).margin(field_style::margin(theme)).desired_width(width)
 }
 
 /// The password field. egui's undo history keeps plain copies of what was typed, so it is emptied after every frame:
 /// undo never brings back a password that was cleared, nor an earlier account's. The field takes no more than its
 /// [`Secret`]'s buffer holds, so typing never moves the text.
-fn password(ui: &mut Ui, secret: &mut Secret) {
-    let label = ui.label(tr!("Password"));
-    let edit = TextEdit::singleline(secret.expose_mut())
-        .id_salt("account-password")
-        .password(true)
-        .char_limit(MAX_PASSWORD_CHARS)
-        .desired_width(FORM_WIDTH - 200.0);
-    let id = ui.add(edit).labelled_by(label.id).id;
-    if let Some(mut state) = TextEditState::load(ui.ctx(), id) {
-        state.clear_undoer();
-        state.store(ui.ctx(), id);
-    }
-    ui.end_row();
+fn password(ui: &mut Ui, theme: &Theme, secret: &mut Secret, width: f32) {
+    labelled(ui, theme, tr!("Password"), width, |ui| {
+        let edit = TextEdit::singleline(secret.expose_mut())
+            .id_salt("account-password")
+            .password(true)
+            .char_limit(MAX_PASSWORD_CHARS)
+            .margin(field_style::margin(theme))
+            .desired_width(width);
+        let response = ui.add(edit);
+        if let Some(mut state) = TextEditState::load(ui.ctx(), response.id) {
+            state.clear_undoer();
+            state.store(ui.ctx(), response.id);
+        }
+        response
+    });
 }
 
 fn note(ui: &mut Ui, theme: &Theme, text: &str, colour: Color32) {
-    ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(colour));
+    ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).wrap());
 }
 
-fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked> {
+/// What Detect found, on a tinted box: where the settings came from (in the flag colour when it is a guess), and what
+/// it asked, folded.
+fn found_box(ui: &mut Ui, theme: &Theme, found: &Found) {
     let p = theme.palette;
-    let mut asked = None;
-    ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
+    let s = theme.spacing;
+    Frame::new().fill(p.hover).corner_radius(s.corner).inner_margin(margin(s.s, s.s)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        match found.source {
+            Some(source) => note(ui, theme, source.text(), if source.doubtful() { p.flag } else { p.muted }),
+            None => note(ui, theme, tr!("Detect found no server: type the settings in."), p.flag),
+        }
+        CollapsingHeader::new(
+            RichText::new(tr!("What Detect asked ({count})", count = found.asked.len())).font(theme.fonts.caption.id()).color(p.accent),
+        )
+        .id_salt("detect-asked")
+        .show(ui, |ui| {
+            for line in found.asked.iter().take(32) {
+                note(ui, theme, line, p.muted);
+            }
+            for line in found.failed.iter().take(32) {
+                note(ui, theme, line, p.flag);
+            }
+        });
+    });
+}
+
+/// The address with Detect beside it, the box to ask Mozilla's list too, what Detect sends, and what it found.
+fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding, width: f32) -> bool {
+    let p = theme.palette;
+    let detecting = onboarding.detecting();
+    let found = onboarding.found().cloned();
+    let form = onboarding.form_mut();
+    let mut detect = false;
+    let label = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
+    ui.horizontal(|ui| {
+        let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
+        let room = width - ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.text).size().x) - 64.0;
+        ui.add(line_edit(theme, &mut form.address, "you@example.org", room.max(120.0))).labelled_by(label.id);
+        let button = TextButton::new(name).secondary().icon(IconId::Search);
+        if ui.add_enabled_ui(!detecting, |ui| button.show(ui, theme, keymap)).inner.clicked() {
+            detect = true;
+        }
+    });
+    ui.checkbox(&mut form.ispdb, tr!("Also ask Mozilla's list of providers (tells Mozilla the domain)"));
     note(
         ui,
         theme,
         tr!(
-            "Type the settings your provider gives you, or let Detect propose them. Nothing is sent to the mail server before you choose Add and check."
+            "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password."
         ),
         p.muted,
     );
-    ui.add_space(theme.spacing.l);
-    let detecting = onboarding.detecting();
-    let found = onboarding.found().cloned();
+    if let Some(found) = &found {
+        found_box(ui, theme, found);
+    }
+    detect
+}
+
+fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding) -> Option<Asked> {
+    let p = theme.palette;
+    let s = theme.spacing;
+    let mut asked = None;
+    let width = ui.available_width().min(FORM_WIDTH);
+    let gap = between(theme);
+    ui.spacing_mut().item_spacing.y = s.s;
+    ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
+    ui.add_space(s.s);
+    if detect_part(ui, theme, keymap, onboarding, width) {
+        asked = Some(Asked::Detect);
+    }
+    ui.add_space(s.s);
     let form = onboarding.form_mut();
-    Grid::new("account-form").num_columns(2).spacing(vec2(theme.spacing.m, theme.spacing.s)).show(ui, |ui| {
-        let label = ui.label(tr!("Address"));
-        ui.horizontal(|ui| {
-            ui.add(TextEdit::singleline(&mut form.address).hint_text("you@example.org").desired_width(FORM_WIDTH - 300.0)).labelled_by(label.id);
-            let detect = ui.add_enabled(!detecting, egui::Button::new(if detecting { tr!("Detecting…") } else { tr!("Detect") }));
-            if detect.clicked() {
-                asked = Some(Asked::Detect);
-            }
-        });
-        ui.end_row();
-        ui.label("");
-        ui.vertical(|ui| {
-            // A grid cell does not wrap on its own.
-            ui.set_max_width(FORM_WIDTH - 200.0);
-            ui.checkbox(&mut form.ispdb, tr!("Detect also asks Mozilla's list of providers, which tells Mozilla your domain"));
-        });
-        ui.end_row();
-        ui.label("");
-        ui.vertical(|ui| {
-            // A grid cell does not wrap on its own.
-            ui.set_max_width(FORM_WIDTH - 200.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(tr!(
-                        "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password."
-                    ))
-                    .font(theme.fonts.caption.id())
-                    .color(p.muted),
-                )
-                .wrap(),
-            );
-        });
-        ui.end_row();
-        if let Some(found) = &found {
-            ui.label("");
-            ui.vertical(|ui| {
-                match found.source {
-                    Some(source) => note(ui, theme, source.text(), if source.doubtful() { p.flag } else { p.muted }),
-                    None => note(ui, theme, tr!("Detect found no server: type the settings in."), p.flag),
-                }
-                CollapsingHeader::new(tr!("What Detect asked ({count})", count = found.asked.len())).id_salt("detect-asked").show(ui, |ui| {
-                    for line in found.asked.iter().take(32) {
-                        note(ui, theme, line, p.muted);
-                    }
-                    for line in found.failed.iter().take(32) {
-                        note(ui, theme, line, p.flag);
-                    }
-                });
-            });
-            ui.end_row();
-        }
-        field(ui, tr!("Name for the account"), &mut form.label, tr!("the address"));
-        field(ui, tr!("Your name on sent mail"), &mut form.display_name, tr!("optional"));
-        field(ui, tr!("User name"), &mut form.username, tr!("the address"));
-        password(ui, &mut form.password);
-        field(ui, tr!("IMAP server"), &mut form.host, "imap.example.org");
-        let security = form.security.unwrap_or(Security::Tls);
-        field(ui, tr!("Port"), &mut form.port, &security.imap_port().to_string());
-        ui.label(tr!("Encryption"));
-        ui.horizontal(|ui| {
-            for choice in [Security::Tls, Security::StartTls] {
-                if ui.selectable_label(security == choice, choice.text()).clicked() {
-                    form.security = Some(choice);
-                }
-            }
-        });
-        ui.end_row();
-    });
-    ui.add_space(theme.spacing.m);
-    note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."), p.muted);
-    note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
-    ui.add_space(theme.spacing.m);
+    let half = (width - gap) / 2.0;
     ui.horizontal(|ui| {
-        if ui.button(tr!("Add and check")).clicked() {
+        ui.spacing_mut().item_spacing.x = gap;
+        labelled(ui, theme, tr!("Name for the account"), half, |ui| ui.add(line_edit(theme, &mut form.label, tr!("the address"), half)));
+        labelled(ui, theme, tr!("Name on sent mail"), half, |ui| ui.add(line_edit(theme, &mut form.display_name, tr!("optional"), half)));
+    });
+    labelled(ui, theme, tr!("User name"), width, |ui| ui.add(line_edit(theme, &mut form.username, tr!("the address"), width)));
+    password(ui, theme, &mut form.password, width);
+    let security = form.security.unwrap_or(Security::Tls);
+    let port = s.xl * 3.0;
+    let choices = s.xl * 6.0;
+    let server = (width - port - choices - 2.0 * gap).max(120.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        labelled(ui, theme, tr!("IMAP server"), server, |ui| ui.add(line_edit(theme, &mut form.host, "imap.example.org", server)));
+        labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, &mut form.port, &security.imap_port().to_string(), port)));
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = s.xs;
+            ui.label(RichText::new(tr!("Security")).font(theme.fonts.caption.id()).color(p.muted));
+            ui.horizontal(|ui| {
+                for choice in [Security::Tls, Security::StartTls] {
+                    if pill::pill(ui, theme, choice.text(), security == choice).clicked() {
+                        form.security = Some(choice);
+                    }
+                }
+            });
+        });
+    });
+    ui.add_space(s.xs);
+    ui.horizontal(|ui| {
+        let side = theme.fonts.caption.size * 1.2;
+        let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        theme.icons.paint(ui.painter(), at, IconId::Lock, Style::Regular, p.muted);
+        note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."), p.muted);
+    });
+    note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
+    ui.add_space(s.s);
+    ui.horizontal(|ui| {
+        if TextButton::new(tr!("Check and add")).primary().show(ui, theme, keymap).clicked() {
             asked = Some(Asked::Add);
         }
-        if ui.button(tr!("Cancel")).clicked() {
+        if button::link(ui, theme, keymap, tr!("Cancel")).clicked() {
             asked = Some(Asked::Close);
         }
     });
@@ -205,53 +244,68 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
             }
         });
     });
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s);
 }
 
-fn checking(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
+/// Why the check failed, in the error colour with a cross before it: the first failed step and its reason, or a plain
+/// word when the step gave none.
+fn failure(ui: &mut Ui, theme: &Theme, onboarding: &Onboarding) {
+    let p = theme.palette;
+    let failed = onboarding.steps().iter().find(|row| row.state == StepState::Failed);
+    let text = match failed.and_then(|row| row.message.as_deref().map(|message| (row.name(), message))) {
+        Some((step, message)) => tr!("{step} failed: {message}", step = step, message = message),
+        None => tr!("A step failed. Check again, or change the settings.").to_owned(),
+    };
+    ui.horizontal(|ui| {
+        let side = super::paint::line_height(ui, theme.fonts.body);
+        let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        theme.icons.paint(ui.painter(), at, IconId::Failed, Style::Fill, p.error);
+        ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.error)).wrap());
+    });
+}
+
+fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
     let address = mailbox.account(account).map(|row| row.address.clone()).unwrap_or_default();
     ui.label(RichText::new(tr!("Checking {address}", address = address)).font(theme.fonts.title.id()).color(p.text));
-    let (summary, colour) = match onboarding.outcome() {
-        Outcome::Running => (tr!("Each step shows as it ends."), p.muted),
-        Outcome::Passed => (tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),
-        Outcome::Failed => (tr!("A step failed. Check again, or change the settings."), p.error),
-    };
-    note(ui, theme, summary, colour);
-    ui.add_space(theme.spacing.l);
-    for row in onboarding.steps() {
-        step(ui, theme, row);
+    match onboarding.outcome() {
+        Outcome::Running => note(ui, theme, tr!("Each step shows as it ends."), p.muted),
+        Outcome::Passed => note(ui, theme, tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),
+        Outcome::Failed => failure(ui, theme, onboarding),
     }
+    ui.add_space(theme.spacing.m);
+    // The steps on a card of their own.
+    let s = theme.spacing;
+    Frame::new().fill(p.surface).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l, s.m)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        for row in onboarding.steps() {
+            step(ui, theme, row);
+        }
+    });
     ui.add_space(theme.spacing.m);
     ui.horizontal(|ui| match onboarding.outcome() {
         Outcome::Passed => {
-            if ui.button(tr!("Done")).clicked() {
+            if TextButton::new(tr!("Done")).primary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Close);
             }
         }
         Outcome::Failed => {
-            if ui.button(tr!("Check again")).clicked() {
+            if TextButton::new(tr!("Check again")).primary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::CheckAgain);
             }
-            if ui.button(tr!("Change settings")).clicked() {
+            if TextButton::new(tr!("Change settings")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Change);
             }
-            if ui.button(tr!("Close")).clicked() {
-                asked = Some(Asked::Close);
-            }
         }
-        Outcome::Running => {
-            if ui.button(tr!("Close")).clicked() {
-                asked = Some(Asked::Close);
-            }
-        }
+        // The way back to the list is the link above the page.
+        Outcome::Running => {}
     });
     asked
 }
 
 /// Draws the page and returns what was asked for; the caller applies it after the frame's drawing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -261,8 +315,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &m
             ui.add_space(theme.spacing.s);
         }
         asked = match onboarding.stage() {
-            Stage::Form => form(ui, theme, onboarding),
-            Stage::Checking(account) => checking(ui, theme, mailbox, onboarding, account),
+            Stage::Form => form(ui, theme, keymap, onboarding),
+            Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };
     });

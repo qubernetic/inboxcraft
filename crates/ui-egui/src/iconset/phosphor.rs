@@ -41,6 +41,20 @@ const fn point(id: IconId) -> char {
         IconId::Failed => '\u{e4f8}',   // x-circle
         IconId::Waiting => '\u{e18a}',  // circle
         IconId::Skipped => '\u{e32c}',  // minus-circle
+        IconId::Home => '\u{e2c2}',     // house
+        IconId::Mail => '\u{e218}',     // envelope-simple
+        IconId::Add => '\u{e3d4}',      // plus
+        IconId::Junk => '\u{e4e2}',     // warning-circle
+        IconId::MarkRead => '\u{e21a}', // envelope-simple-open
+        IconId::Lock => '\u{e308}',     // lock-simple
+        IconId::Palette => '\u{e6c8}',  // palette
+        IconId::At => '\u{e0ac}',       // at
+        IconId::Funnel => '\u{e266}',   // funnel
+        IconId::Keyboard => '\u{e2d8}', // keyboard
+        IconId::Shield => '\u{e40c}',   // shield-check
+        IconId::Info => '\u{e2ce}',     // info
+        IconId::Close => '\u{e4f6}',    // x
+        IconId::Back => '\u{e058}',     // arrow-left
     }
 }
 

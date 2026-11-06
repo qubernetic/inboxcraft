@@ -20,6 +20,7 @@ use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, mailbox, proposal};
 use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
 use crate::sample;
+use crate::settings::Section;
 
 fn clock() -> Box<FakeClock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
@@ -44,19 +45,85 @@ fn type_in(harness: &mut Harness<'static, InboxApp>) {
     harness.run();
 }
 
+/// Presses Add account on the empty window, then on the sheet's Accounts page: the form opens there.
+fn open_form(harness: &mut Harness<'static, InboxApp>) {
+    harness.get_by_role_and_label(Role::Button, "Add account").click();
+    harness.run();
+    on_sheet(harness, "Add account").click();
+    harness.run();
+}
+
+/// The button called `label` on the settings sheet: the window under it may hold one of the same name, and the sheet
+/// comes after it in the tree.
+fn on_sheet<'h>(harness: &'h Harness<'static, InboxApp>, label: &'h str) -> egui_kittest::Node<'h> {
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    harness.get_all_by_role_and_label(Role::Button, label).rfind(|node| sheet.contains_rect(node.rect())).unwrap()
+}
+
 #[test]
-fn the_empty_window_offers_to_add_an_account_and_opens_the_form() {
+fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_the_form_opens() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.get_by_label("No accounts yet");
-    assert_eq!(harness.get_all_by_label("Add account").count(), 2, "in the pane and in the empty list");
-    harness.get_all_by_label("Add account").next().unwrap().click();
+    // Without an account the folder pane would hold only the app's name: it is left out.
+    assert_eq!(harness.get_all_by_label("Add account").count(), 1, "on the empty window only");
+    assert!(harness.query_by_label("MAILBOXES").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
+    harness.get_by_role_and_label(Role::Button, "Add account").click();
+    harness.run();
+    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the list first");
+    harness.get_by_label("No account yet. Add one to read and send mail here.");
+    harness.get_by_label("Your accounts show up here");
+    harness.check_accessibility();
+    on_sheet(&harness, "Add account").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
-    harness.get_by_label("Add an account");
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    assert!(sheet.contains_rect(harness.get_by_label("Add an account").rect()), "the form is on the sheet");
     harness.get_by_label("Password");
+    harness.check_accessibility();
     harness.get_by_label("Cancel").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
+    assert_eq!(harness.state().settings().section(), Section::Accounts, "Cancel leads back to the list");
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    harness.get_by_label("Back to the accounts").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
+    harness.get_by_label("Your accounts show up here");
+}
+
+#[test]
+fn the_empty_window_is_one_card_in_the_middle() {
+    let harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    let title = harness.get_by_label("No accounts yet").rect();
+    let add = harness.get_by_role_and_label(Role::Button, "Add account").rect();
+    harness.get_by_label("Opens Settings · Accounts");
+    assert!((add.center().x - title.center().x).abs() < 2.0, "{add:?} under {title:?}");
+    // The window is 1100 by 760; right of the rail its middle is near x 580, and the card stands in the middle.
+    assert!((500.0..660.0).contains(&title.center().x), "{title:?}");
+    assert!(title.top() > 150.0 && add.bottom() < 610.0, "{title:?} {add:?}");
+}
+
+#[test]
+fn closing_the_sheet_closes_the_form_on_it() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    open_form(&mut harness);
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings().is_open());
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form would open the sheet again");
+}
+
+#[test]
+fn opening_the_form_from_outside_opens_it_on_the_sheet() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
+    harness.get_by_label("Add an account");
 }
 
 #[test]
@@ -77,8 +144,7 @@ fn harness_empty() -> Harness<'static, InboxApp> {
 fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     let kept = Kept::default();
     let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Dark);
-    harness.get_all_by_label("Add account").next().unwrap().click();
-    harness.run();
+    open_form(&mut harness);
     type_in(&mut harness);
     harness.get_by_label("Detect").click();
     harness.run();
@@ -86,7 +152,7 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Found in your provider's settings file.");
     harness.get_by_label("What Detect asked (2)");
     assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
@@ -100,7 +166,7 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Done").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
-    assert!(harness.query_all_by_label("carol@example.org").count() >= 1, "the account is in the pane");
+    harness.get_by_label("carol@example.org, carol@example.org");
 }
 
 #[test]
@@ -108,14 +174,16 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     let failed = FakeWorkers::answering(&[(CheckStep::Dns, StepStatus::Passed), (CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]);
     let kept = Kept::default();
     let mut harness = harness(app(&kept, failed), egui::Theme::Light);
-    harness.get_all_by_label("Add account").next().unwrap().click();
-    harness.run();
+    open_form(&mut harness);
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
-    harness.get_by_label("A step failed. Check again, or change the settings.");
+    // The reason stands under the title, as the design has it.
+    let reason = harness.get_by_label(&format!("Connection (TCP) failed: {}", ErrorKind::MailPortsBlocked)).rect();
+    let title = harness.get_by_label("Checking carol@example.org").rect();
+    assert!(reason.top() >= title.bottom() - 1.0 && reason.top() - title.bottom() < 40.0, "{reason:?} under {title:?}");
     harness.get_by_label("Connection (TCP): failed");
     harness.get_by_label(&ErrorKind::MailPortsBlocked.to_string());
     harness.get_by_label("Encryption (TLS): skipped");
@@ -146,7 +214,7 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         harness.run();
         assert_eq!(harness.state().onboarding().form().security, Some(crate::onboard::Security::StartTls));
         // An error shows above the form.
-        harness.get_by_label("Add and check").click();
+        harness.get_by_label("Check and add").click();
         harness.run();
         harness.get_by_label("Enter the address.");
     }
@@ -181,7 +249,7 @@ fn undo_brings_no_password_back_after_change_settings() {
     harness.run();
     type_password(&mut harness, PASSWORD);
     assert_eq!(harness.state().onboarding().form().password.expose(), PASSWORD);
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     harness.get_by_label("Change settings").click();
@@ -201,7 +269,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
     type_password(&mut harness, PASSWORD);
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     harness.get_by_label("Done").click();
@@ -213,7 +281,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.run();
     undo_in_password(&mut harness);
     assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the first account's password");
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.get_by_label("Enter the password.");
     assert_eq!(kept.passwords.lock().unwrap().get(&2), None, "no password for the second account");
@@ -242,10 +310,10 @@ fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
             harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
             harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
             harness.run();
-            harness.get_by_label("Add and check").click();
+            harness.get_by_label("Check and add").click();
             harness.run();
             harness.run();
-            let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Close" };
+            let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Back to the accounts" };
             harness.get_by_label(close).click();
             harness.run();
         }
@@ -264,7 +332,7 @@ fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit()
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     kept.refuse_forget.store(true, Ordering::SeqCst);

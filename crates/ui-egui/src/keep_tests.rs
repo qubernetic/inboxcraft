@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface};
+use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 
 use super::{FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
@@ -13,6 +13,7 @@ fn chosen() -> Appearance {
         icons: Icons::Lucide,
         text_scale: 120,
         motion: Motion::Reduce,
+        frame: WindowFrame::TopRow,
     }
 }
 

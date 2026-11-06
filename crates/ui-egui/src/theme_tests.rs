@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, Weight, contrast,
-    font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb,
+    AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
+    contrast, font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb, text_gradient,
 };
 use crate::iconset::IconSet;
 use crate::motion::MOTION;
@@ -148,7 +148,7 @@ fn the_gradient_runs_through_the_three_stops() {
 }
 
 #[test]
-fn light_mode_accent_text_is_darkened_and_dark_mode_shows_the_accent_itself_where_it_passes() {
+fn light_mode_accent_text_is_the_middle_stop_darkened_and_dark_mode_the_middle_stop_lightened() {
     for preset in &PRESETS {
         let light = Theme::new(Mode::Light, preset).palette;
         let middle = preset.gradient[1];
@@ -156,16 +156,11 @@ fn light_mode_accent_text_is_darkened_and_dark_mode_shows_the_accent_itself_wher
         let channels = |c: Color32| u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b());
         assert!(channels(light.accent) < channels(middle), "{}: darker than the middle stop", preset.id);
         let dark = Theme::new(Mode::Dark, preset).palette;
-        // Where the raw accent reads on every opaque surface, on glass over the colour fields and on a float over them
-        // and the gradient, dark mode shows it unchanged.
-        let mut on = vec![dark.background, dark.panel, dark.surface, dark.field, dark.selection, dark.selection_end];
-        on.extend(backdrops(&dark).into_iter().flat_map(|behind| [over(dark.glass, behind), over(dark.hover, over(dark.glass, behind))]));
-        on.extend(backdrops(&dark).into_iter().chain(dark.gradient).map(|behind| over(dark.float, behind)));
-        if on.iter().all(|on| contrast(preset.accent, *on) >= 4.5) {
-            assert_eq!(dark.accent, preset.accent, "{}: the accent itself in dark", preset.id);
-        } else {
-            assert!(channels(dark.accent) > channels(preset.accent), "{}: lightened in dark", preset.id);
-        }
+        // Dark mode takes the middle stop mixed 30 % with white (lightened further where it would not read), never
+        // the preset's separate accent, which stays an account colour.
+        assert_ne!(dark.accent, preset.accent, "{}: not the separate accent", preset.id);
+        assert!(channels(dark.accent) >= channels(mix(middle, WHITE, 0.3)), "{}: at least the lightened stop", preset.id);
+        assert!(channels(dark.accent) > channels(middle), "{}: lighter than the middle stop", preset.id);
     }
 }
 
@@ -222,6 +217,8 @@ fn glass_float_and_colour_fields_are_translucent_and_the_float_about_four_fifths
         for (name, colour) in [
             ("glass", p.glass),
             ("glass edge", p.glass_edge),
+            ("window edge", p.window_edge),
+            ("scrim", p.scrim),
             ("glass highlight", p.glass_highlight),
             ("shadow", p.shadow),
             ("line", p.line),
@@ -782,5 +779,58 @@ fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
     for theme in all() {
         assert_eq!(theme.motion, MOTION);
         assert_eq!(theme.style().animation_time, MOTION.tooltip);
+    }
+}
+
+#[test]
+fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_deep_ink() {
+    for preset in &PRESETS {
+        let (stops, ink) = text_gradient(preset.gradient);
+        if ink == WHITE {
+            assert!(stops.iter().all(|stop| contrast(WHITE, *stop) >= 4.5), "{}: white reads on every stop", preset.id);
+            // No more than 30 % darker: each channel keeps at least 70 % of the stop's.
+            for (stop, raw) in stops.iter().zip(preset.gradient) {
+                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 7, "{}: at most 30 %", preset.id);
+            }
+        } else {
+            assert_eq!(stops, preset.gradient, "{}: the full gradient with the deep ink", preset.id);
+        }
+    }
+    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| text_gradient(preset.gradient).1);
+    assert_eq!(ink("electric"), Some(WHITE));
+    assert_eq!(ink("aurora"), Some(WHITE));
+    assert_ne!(ink("citrus"), Some(WHITE));
+}
+
+#[test]
+fn the_rail_avatar_s_initials_read_on_its_disc() {
+    for preset in &PRESETS {
+        let (disc, ink) = super::rail_avatar(preset.gradient);
+        assert!(contrast(ink, disc) >= 4.5, "{}", preset.id);
+    }
+}
+
+#[test]
+fn close_is_a_plain_red_with_white_on_it_in_every_preset_and_mode() {
+    for theme in all() {
+        let p = theme.palette;
+        assert!(p.close.r() > 180 && p.close.g() < 80 && p.close.b() < 80, "{} {:?}: {}", theme.preset.id, theme.mode, hex(p.close));
+        assert_eq!(p.on_close, Color32::WHITE, "{} {:?}", theme.preset.id, theme.mode);
+        assert!(contrast(p.on_close, p.close) >= 4.5, "{} {:?}", theme.preset.id, theme.mode);
+        assert!(!teal_or_coral(p.close));
+    }
+}
+
+#[test]
+fn the_scroll_bar_is_wide_enough_to_see_and_its_ends_are_round() {
+    for theme in all() {
+        let style = theme.style();
+        let scroll = &style.spacing.scroll;
+        assert!(scroll.floating_width >= 4.0, "{} {:?}: {} at rest", theme.preset.id, theme.mode, scroll.floating_width);
+        assert!(scroll.bar_width > scroll.floating_width, "{} {:?}: wider under the pointer", theme.preset.id, theme.mode);
+        let w = &style.visuals.widgets;
+        for corner in [w.noninteractive, w.inactive, w.hovered, w.active].map(|visuals| visuals.corner_radius) {
+            assert!(f32::from(corner.nw) >= scroll.bar_width / 2.0, "{} {:?}: {corner:?} leaves the ends square", theme.preset.id, theme.mode);
+        }
     }
 }

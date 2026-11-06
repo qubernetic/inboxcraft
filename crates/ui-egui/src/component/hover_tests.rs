@@ -13,9 +13,9 @@ use crate::keymap::Keymap;
 const ROW: Rect = Rect { min: pos2(0.0, 40.0), max: pos2(500.0, 80.0) };
 
 const ACTIONS: [Action<'static>; 3] = [
-    Action { icon: IconId::Done, name: "Done", action: Some("mail.done") },
-    Action { icon: IconId::Notify, name: "Mark as read", action: None },
-    Action { icon: IconId::Delete, name: "Delete", action: None },
+    Action { icon: IconId::Done, name: "Done", action: Some("mail.done"), unavailable: None },
+    Action { icon: IconId::MarkRead, name: "Mark as read", action: None, unavailable: None },
+    Action { icon: IconId::Delete, name: "Delete", action: None, unavailable: None },
 ];
 
 /// The group over a row, shown when the state's flag says so; the state keeps what the group drew.

@@ -17,13 +17,13 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use egui::{
-    Align, Color32, Frame, Galley, Id, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Galley, Id, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{focus_ring, line, line_height, selection};
 use crate::component::hover::{self, Action};
-use crate::component::{avatar, badge, button, margin, tooltip};
+use crate::component::{avatar, badge, button, field, margin, tooltip};
 use crate::glass;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
@@ -32,6 +32,16 @@ use crate::mailbox::{Act, Group, Mailbox, MessageRow, Place, Showcase};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
+
+/// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
+pub(super) const ROW_INSET: f32 = 6.0;
+
+/// The room the vertical scroll bar takes at the right of a scroll area, kept free so it never lies over a card or a
+/// row's date.
+fn scroll_room(ui: &Ui) -> f32 {
+    let scroll = &ui.spacing().scroll;
+    scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin
+}
 
 /// The rows a group shows before "Show all".
 pub(super) const GROUP_ROWS: usize = 3;
@@ -59,8 +69,8 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
                 search.clear();
                 changed = Some(String::new());
             }
-            let field = TextEdit::singleline(search).id(search_id()).hint_text(tr!("Search mail")).desired_width(theme.spacing.folder_pane);
-            let response = tooltip::attach(ui.add(field), theme, keymap, tr!("Search mail"), Some(keymap::FIND));
+            let field = field::search(ui, theme, search_id(), search, tr!("Search"), theme.spacing.folder_pane * 0.75);
+            let response = tooltip::attach(field, theme, keymap, tr!("Search mail"), Some(keymap::FIND));
             if response.changed() {
                 changed = Some(search.clone());
             }
@@ -90,6 +100,13 @@ fn row_lines(ui: &Ui, theme: &Theme) -> (f32, f32) {
     (first, second)
 }
 
+/// How far right of a row's left edge its text starts: past the room for the unread dot and the avatar.
+fn text_indent(ui: &Ui, theme: &Theme) -> f32 {
+    let s = &theme.spacing;
+    let (first, second) = row_lines(ui, theme);
+    s.m + s.xs + first + s.xs + second + s.m
+}
+
 /// The height of a message row: its two lines and air, from the font's metrics at the current text scale.
 pub(super) fn row_height(ui: &Ui, theme: &Theme) -> f32 {
     let (first, second) = row_lines(ui, theme);
@@ -107,12 +124,14 @@ fn put(ui: &Ui, theme: &Theme, at: egui::Pos2, galley: Arc<Galley>, colour: Colo
 }
 
 /// The hover actions of `message`: Done, mark read or unread, Delete.
-fn actions(message: &MessageRow) -> [Action<'static>; 3] {
-    let read = if message.seen { tr!("Mark as unread") } else { tr!("Mark as read") };
+fn actions(message: &MessageRow) -> [Action<'static>; 4] {
+    // An open envelope opens an unread message; a closed one closes a read one again.
+    let (read_icon, read) = if message.seen { (IconId::Mail, tr!("Mark as unread")) } else { (IconId::MarkRead, tr!("Mark as read")) };
     [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE) },
-        Action { icon: IconId::Notify, name: read, action: Some(keymap::READ) },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE) },
+        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE), unavailable: None },
+        Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: None, unavailable: Some(tr!("Not available yet")) },
     ]
 }
 
@@ -202,7 +221,7 @@ fn paint_row(
     let side = first_height + s.xs + second_height;
     let face = Rect::from_min_size(pos2(rect.left() + s.m + s.xs, first), vec2(side, side));
     avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
-    let left = face.right() + s.m;
+    let left = rect.left() + text_indent(ui, theme);
     let right = rect.right() - s.m;
     let (sender_font, subject_font) = if message.seen { (f.sender, f.subject) } else { (f.sender_unread, f.subject_unread) };
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
@@ -243,7 +262,7 @@ fn sheet<R>(ui: &mut Ui, theme: &Theme, edge: bool, add: impl FnOnce(&mut Ui) ->
     let p = &theme.palette;
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
-    let inner = Frame::new().inner_margin(margin(s.xs, s.xs)).show(ui, |ui| {
+    let inner = Frame::new().inner_margin(margin(ROW_INSET, ROW_INSET)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
     });
@@ -272,8 +291,6 @@ const EDGE: f32 = 1.5;
 pub(super) struct Asked {
     /// The row clicked.
     pub(super) clicked: Option<u64>,
-    /// Add account, in the empty window.
-    pub(super) add: bool,
     /// A hover action pressed, and on which message.
     pub(super) acted: Option<(u64, Act)>,
     /// The row sliding out is all the way out, or was not drawn: its act can be done.
@@ -381,9 +398,11 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
         let shown = if all { messages.len() } else { messages.len().min(GROUP_ROWS) };
         clicked = rows.show(ui, messages.iter().take(shown).copied());
         if messages.len() > GROUP_ROWS {
-            ui.vertical_centered(|ui| {
+            // A link under the rows' text, as far in as the text.
+            ui.horizontal(|ui| {
+                ui.add_space(text_indent(ui, theme) - button::LINK_PAD);
                 let label = if all { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = messages.len()) };
-                if button::text(ui, theme, rows.keymap, &label, None, false).clicked() {
+                if button::link(ui, theme, rows.keymap, &label).clicked() {
                     ui.data_mut(|data| data.insert_temp(id, !all));
                 }
             });
@@ -398,6 +417,7 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, showcase: &Showcase) -> Option<u64> {
     let mailbox = rows.mailbox;
     let mut clicked = None;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
         ui.spacing_mut().item_spacing = vec2(0.0, s.s);
         if !showcase.screener.is_empty() {
             screener(ui, rows.theme, rows.keymap, showcase);
@@ -425,37 +445,51 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     let count = rows.mailbox.messages().len();
     let height = row_height(ui, theme);
     let room = ui.available_rect_before_wrap();
-    let content = height * count as f32 + s.xs * 2.0;
+    let content = height * count as f32 + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
     ui.painter().rect_filled(card, s.card, p.surface);
     ui.painter().rect_stroke(card, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
-    let inside = card.shrink(s.xs);
+    let inside = card.shrink(ROW_INSET);
     let mut clicked = None;
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
         ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, height, count, |ui, range| {
+            ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
             clicked = rows.show(ui, rows.mailbox.messages().get(range).unwrap_or_default());
         });
     });
     clicked
 }
 
-/// The rows, or what to say when there are none. Returns the message clicked this frame, and whether Add account
-/// was (the empty window offers it when `can_add`).
-pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool) -> Asked {
-    if mailbox.accounts().is_empty() {
-        if !can_add {
-            empty(ui, theme, tr!("No accounts yet"), tr!("Start InboxCraft with --sample to look around an invented mailbox."));
-            return Asked { out: true, ..Asked::default() };
-        }
-        empty(ui, theme, tr!("No accounts yet"), tr!("Add an account to read its mail here. Nothing leaves this computer before you do."));
-        let mut add = false;
-        ui.vertical_centered(|ui| {
-            ui.add_space(theme.spacing.l);
-            add = button::text(ui, theme, keymap, tr!("Add account"), None, true).clicked();
-        });
-        return Asked { add, out: true, ..Asked::default() };
+/// The empty window's card: the inbox icon, "No accounts yet" and what to do. Where the window can add accounts
+/// (`can_add`), Add account, which opens the settings on Accounts; whether it was pressed.
+pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let side = line_height(ui, theme.fonts.body) * 3.6;
+    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+    theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.accent);
+    ui.add_space(s.m);
+    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.text));
+    ui.add_space(s.xs);
+    let about = if can_add {
+        tr!("Add an account to read its mail here. Nothing leaves this computer before you do.")
+    } else {
+        tr!("Start InboxCraft with --sample to look around an invented mailbox.")
+    };
+    ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
+    if !can_add {
+        return false;
     }
+    ui.add_space(s.l);
+    let add = button::TextButton::new(tr!("Add account")).icon(IconId::Add).primary().show(ui, theme, keymap).clicked();
+    ui.add_space(s.xs);
+    ui.label(RichText::new(tr!("Opens Settings · Accounts")).font(theme.fonts.caption.id()).color(p.muted));
+    add
+}
+
+/// The rows, or what to say when there are none. Returns the message clicked this frame.
+pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.messages().is_empty() {
         if mailbox.query().is_empty() {
             empty(ui, theme, tr!("Nothing here"), tr!("This folder holds no messages."));
@@ -464,18 +498,19 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         return Asked { out: true, ..Asked::default() };
     }
+    let showcase = mailbox.showcase();
+    let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
+    let grouping = inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty());
     let rows = Rows {
         theme,
         keymap,
         mailbox,
-        account_marker: mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
+        // Whose each row is shows in the simple list of more than one account; the grouped cards leave it out.
+        account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
     };
-    let showcase = mailbox.showcase();
-    let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
-    let clicked =
-        if inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty()) { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
+    let clicked = if grouping { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, add: false, acted: rows.acted.get(), out: !drawn || out }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out }
 }

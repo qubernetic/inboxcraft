@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::{Rect, Shape, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::NodeT as _;
 use inboxcraft_engine::appearance::Typeface;
 use inboxcraft_time::{FakeClock, Timestamp};
 
@@ -72,13 +72,20 @@ fn app(scene: Scene, scale: TextScale, typeface: Typeface) -> InboxApp {
     app
 }
 
-/// Every text of the last frame with the clip it was drawn in, groups opened.
+/// Every text of the last frame with the clip it was drawn in, groups opened. The scrim of a sheet covers every text
+/// drawn before it: those are left out.
 fn texts<S>(harness: &Harness<'_, S>) -> Vec<(Rect, Rect, String)> {
     fn open(clip: Rect, shape: &Shape, out: &mut Vec<(Rect, Rect, String)>) {
         match shape {
             Shape::Vec(inner) => inner.iter().for_each(|shape| open(clip, shape, out)),
             Shape::Text(text) if !text.galley.is_empty() => {
                 out.push((clip, shape.visual_bounding_rect(), text.galley.text().to_owned()));
+            }
+            // A plain translucent fill over the whole window, from its corner: a sheet's scrim.
+            Shape::Rect(rect)
+                if rect.brush.is_none() && rect.rect.min == egui::Pos2::ZERO && rect.rect.width() > 500.0 && (1..255).contains(&rect.fill.a()) =>
+            {
+                out.clear();
             }
             _ => {}
         }
@@ -93,9 +100,14 @@ fn inside(inner: Rect, outer: Rect) -> bool {
 }
 
 /// What does not fit: a text that sticks out of the row or button it belongs to, is cut at the side of its pane (a
-/// text cut at the top or bottom of a scrolling pane is only scrolled), or lies over another text.
+/// text cut at the top or bottom of a scrolling pane is only scrolled), or lies over another text. While a dialog (the
+/// settings sheet) is open, only what lies in it counts: the window under it is covered on purpose.
 fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
     let mut found = Vec::new();
+    // A dialog covers the controls made before it.
+    let nodes: Vec<_> = harness.root().children_recursive().collect();
+    let first = nodes.iter().position(|node| node.accesskit_node().role() == Role::Dialog).map_or(0, |index| index + 1);
+    let counted = nodes.get(first..).unwrap_or_default();
     let texts = texts(harness);
     let visible: Vec<(Rect, &str)> = texts
         .iter()
@@ -109,7 +121,7 @@ fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
         .filter(|(rect, _)| rect.is_positive())
         .collect();
     for role in [Role::ListBoxOption, Role::Button] {
-        for node in harness.query_all_by_role(role) {
+        for node in counted.iter().filter(|node| node.accesskit_node().role() == role) {
             let control = node.rect();
             for (rect, text) in visible.iter().filter(|(rect, _)| control.contains(rect.center())) {
                 if !inside(*rect, control) {
@@ -149,7 +161,7 @@ fn the_list_the_reader_and_the_settings_fit_at_90_and_130_percent_in_every_typef
 }
 
 #[test]
-fn the_settings_fit_a_narrow_window_with_the_preview_above_the_controls() {
+fn the_settings_fit_a_narrow_window() {
     for percent in [90, 130] {
         let scale = TextScale::from_percent(percent).unwrap();
         let mut harness = Harness::builder()

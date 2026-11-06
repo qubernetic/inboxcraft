@@ -132,6 +132,20 @@ choice! {
     } default System
 }
 
+choice! {
+    /// Who draws the window's frame: the desktop's title bar, or the app's own (its window controls in the top row,
+    /// or on a slim strip of its own above the panes). Only a native window has a frame; elsewhere this is kept and
+    /// does nothing.
+    WindowFrame {
+        /// The desktop's title bar.
+        System = "system",
+        /// The window controls in the top row, no title bar.
+        TopRow = "top_row",
+        /// A slim strip of the app's own with the title and the window controls.
+        Strip = "strip",
+    } default Strip
+}
+
 /// Four colours of the owner's own: the gradient's three stops and the accent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CustomAccent {
@@ -218,6 +232,8 @@ pub struct Appearance {
     pub text_scale: u16,
     /// Reduced motion.
     pub motion: Motion,
+    /// Who draws the window's frame.
+    pub frame: WindowFrame,
 }
 
 impl Default for Appearance {
@@ -229,6 +245,7 @@ impl Default for Appearance {
             icons: Icons::default(),
             text_scale: 100,
             motion: Motion::default(),
+            frame: WindowFrame::default(),
         }
     }
 }
@@ -244,6 +261,7 @@ impl Appearance {
             "icons": self.icons.id(),
             "text_scale": self.text_scale,
             "motion": self.motion.id(),
+            "frame": self.frame.id(),
         })
     }
 
@@ -267,6 +285,7 @@ impl Appearance {
                 .filter(|percent| TEXT_SCALES.contains(percent))
                 .unwrap_or(default.text_scale),
             motion: text("motion").and_then(Motion::named).unwrap_or(default.motion),
+            frame: text("frame").and_then(WindowFrame::named).unwrap_or(default.frame),
         }
     }
 }

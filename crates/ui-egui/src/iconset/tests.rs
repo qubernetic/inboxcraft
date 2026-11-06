@@ -64,7 +64,7 @@ fn phosphor_draws_regular_and_fill_as_one_glyph_of_its_own_font_and_duotone_as_a
 }
 
 #[test]
-fn lucide_draws_lines_and_shows_fill_and_duotone_with_a_filled_disc_behind_them() {
+fn lucide_draws_lines_with_a_faint_disc_behind_duotone_only() {
     let set = IconSet::Lucide;
     for id in IconId::ALL {
         let [regular, fill, duotone] = STYLES.map(|style| set.glyph(id, style));
@@ -74,7 +74,8 @@ fn lucide_draws_lines_and_shows_fill_and_duotone_with_a_filled_disc_behind_them(
         }
         assert_eq!(regular.disc, 0.0);
         assert_eq!(duotone.disc, BACK_OPACITY);
-        assert!(fill.disc > duotone.disc, "{id:?}: an active state stands out more than an empty state");
+        // A disc behind an active state looked like a smudge; its colour and the selection behind it show the state.
+        assert_eq!(fill.disc, 0.0, "{id:?}: no disc behind Fill");
     }
 }
 
@@ -143,12 +144,16 @@ fn a_ring_sits_in_the_middle_of_its_square_and_fills_most_of_it_at_every_size() 
 }
 
 #[test]
-fn fill_and_duotone_put_more_ink_down_than_regular() {
+fn duotone_puts_more_ink_down_than_regular_and_fill_more_still_where_the_set_has_solid_glyphs() {
     for set in IconSet::ALL {
         let sum = |style| ink(&painted(set, IconId::Inbox, style, 24.0)).unwrap().1;
         let regular = sum(Style::Regular);
         assert!(sum(Style::Duotone) > regular * 1.1, "{set:?}");
-        assert!(sum(Style::Fill) > sum(Style::Duotone), "{set:?}");
+        // Lucide's Fill is its line glyph; Phosphor's is solid.
+        match set {
+            IconSet::Phosphor => assert!(sum(Style::Fill) > sum(Style::Duotone), "{set:?}"),
+            IconSet::Lucide => assert!((sum(Style::Fill) - regular).abs() < regular * 0.01, "{set:?}"),
+        }
     }
 }
 

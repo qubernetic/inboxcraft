@@ -12,7 +12,7 @@ mailbox (`crates/ui-egui/src/sample.rs`). A file exported from that code has its
 
 | Asset | Author | Source | Licence | Notes |
 |---|---|---|---|---|
-| `assets/app-icon/inboxcraft.svg` | InboxCraft contributors | drawn in code for InboxCraft (`crates/ui-egui/src/icons.rs`), exported with `just icon` | MIT OR Apache-2.0 | the app icon; installed as `io.github.qubernetic.inboxcraft.svg` by the Flatpak |
+| `assets/app-icon/inboxcraft.svg` | InboxCraft contributors | the InboxCraft mark (two cards entering a notched tray, Electric gradient, white tile), drawn in code for InboxCraft (`crates/ui-egui/src/icons.rs`), exported with `just icon` | MIT OR Apache-2.0 | the app icon; installed as `io.github.qubernetic.inboxcraft.svg` by the Flatpak |
 | `assets/fonts/figtree/Figtree-<weight>.ttf` | The Figtree Project Authors (Erik Kennedy) | https://github.com/erikdkennedy/figtree, release v2.0.3, `fonts/ttf/` (Regular, Medium, SemiBold, Bold), unchanged | OFL-1.1 | the typeface of every text style (`crates/ui-egui/src/theme.rs`); licence text in `assets/fonts/figtree/OFL.txt` |
 | `assets/fonts/figtree/OFL.txt` | The Figtree Project Authors | https://github.com/erikdkennedy/figtree, release v2.0.3, `OFL.txt`, unchanged | OFL-1.1 | the licence of the Figtree files beside it |
 | `assets/fonts/inter/Inter-<weight>.ttf` | The Inter Project Authors (Rasmus Andersson) | https://github.com/rsms/inter, release v4.1, `Inter-4.1.zip`, `extras/ttf/` (Regular, Medium, SemiBold, Bold), unchanged | OFL-1.1 | the second typeface the owner can choose (`ui.font.set`, `crates/ui-egui/src/theme.rs`); licence text in `assets/fonts/inter/OFL.txt` |

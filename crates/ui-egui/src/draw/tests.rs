@@ -179,8 +179,9 @@ fn the_folder_pane_names_views_and_folders_with_their_unread_counts() {
     let harness = harness();
     harness.get_by_label("Inbox, 4 unread");
     harness.get_by_label("Junk, 1 unread");
-    harness.get_by_label("Inbox in Personal, 2 unread");
-    harness.get_by_label("Inbox in Studio, 2 unread");
+    // An account lists only its own folders; its inbox is in the unified view above.
+    assert!(harness.query_by_label("Inbox in Personal, 2 unread").is_none());
+    harness.get_by_label("Receipts in Personal");
     harness.get_by_label("Harbour Bakery in Studio");
     harness.get_by_label("mira@example.org");
     harness.get_by_label("holloway.studio@example.org");

@@ -353,8 +353,8 @@ B = blocks the next stage.
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
 - Icons (#84, #86): Phosphor and Lucide, chosen with `ui.icons.set`; the settings control comes with E1.16b. Lucide
-  has no solid icons, so its Fill and Duotone draw a filled disc behind the lines (a stronger one for Fill); on the
-  accent of an active button the lines on their disc read, but less boldly than Phosphor's solid shape. The set has
+  has no solid icons, so its Fill is the line glyph (an active or selected one reads by its colour and the selection
+  behind it, less boldly than Phosphor's solid shape) and its Duotone draws a faint disc behind the lines. The set has
   the ids the window and the triage actions need so far; a toolbar or a view that needs another meaning adds an id
   and its glyph (in both sets). Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
@@ -363,8 +363,8 @@ B = blocks the next stage.
   helper on the icon's text) is not done. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
-- Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings page that
-  runs them exist. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+- Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
+  runs them exist; of the sheet's sections only Appearance and Accounts are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
@@ -461,6 +461,18 @@ B = blocks the next stage.
   - The window wakes on each worker event; the events channel has no bound (#25), and the window applies at most
     eight rounds of jobs and events a frame.
 
+- **The app's own window frame** (#104) has round corners (12 points) and a one-pixel outline but no shadow of its
+  own, and the corners need a compositor that shows a window's see-through pixels. It resizes from a 5-point band
+  at each edge and corner. In the top-row frame a drag moves the window only in the band of the panes' first rows
+  where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
+  (right click on a title bar) are not offered. Pictures and the web build draw no
+  frame, so the screens in `docs/images` show the window's content only.
+- **The rail** (#104) offers Start, Calendar and Pins before those views exist: they are disabled and say "Not
+  available yet". The owner's initials at its foot come from the first account's address, as no account holds a
+  name of the person yet.
+- **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
+  reached through the unified views, narrowed to the account with the picker.
+
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
@@ -523,3 +535,8 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Message list: the showcase-only parts, what waits for E2.1, E3.1 to E3.3 and E1.17c; the rail's reach (#88) |
 | 2026-11-06 | minor | Hover actions: on the sample only, Done's stand-in meaning, one undo, the keys fixed (#89) |
 | 2026-11-06 | minor | Reader: which toolbar actions act, what waits for which task, the inner buttons, no picture of More (#90) |
+| 2026-11-06 | minor | The app's own window frame, the rail's views not built yet, the folder pane's own folders (#104) |
+| 2026-11-06 | minor | The own frame: round corners, resizing on Wayland, moving in the top row (#104) |
+| 2026-11-06 | minor | The settings' Accounts page and what it lacks (#104) |
+| 2026-11-06 | minor | The settings sheet: only Appearance among its sections (#104) |
+| 2026-11-06 | minor | Lucide's Fill without a disc (#104) |

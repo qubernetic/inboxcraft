@@ -17,8 +17,9 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects. `settings` set to `true` shows the
-//! appearance settings page. `showcase` set to `true` fills the parts of the list that have no data yet with
+//! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
+//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page.
+//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
 //! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
@@ -27,6 +28,8 @@
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
+//! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
+//! at `[x, y]` points, so what lies under it shows its hover;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -36,7 +39,7 @@ use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
-use inboxcraft_engine::appearance::{Icons, Typeface};
+use inboxcraft_engine::appearance::{Icons, Typeface, WindowFrame};
 use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
@@ -116,6 +119,12 @@ pub struct Shot {
     /// Whether the appearance settings page is open.
     #[serde(default)]
     pub settings: Option<bool>,
+    /// Whether the settings sheet is open on Accounts.
+    #[serde(default)]
+    pub accounts: Option<bool>,
+    /// Whether the window has no account yet (and can add one) instead of the sample's.
+    #[serde(default)]
+    pub first: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
@@ -140,6 +149,12 @@ pub struct Shot {
     /// The icon set: `phosphor` when left out, `lucide`.
     #[serde(default)]
     pub icon_set: Option<String>,
+    /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
+    #[serde(default)]
+    pub frame: Option<String>,
+    /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
+    #[serde(default)]
+    pub pointer: Option<[f32; 2]>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -240,12 +255,15 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.select.is_some()
         || shot.onboard.is_some()
         || shot.settings.is_some()
+        || shot.accounts.is_some()
+        || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
         || shot.act.is_some()
         || shot.slide.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
+        || shot.frame.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -533,13 +551,27 @@ pub fn render(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode) -> Result<
     paint(size, scale, mode, |ui| app.ui(ui))
 }
 
+/// [`render`] with the pointer resting at `pointer`, so what lies under it shows its hover.
+///
+/// # Errors
+///
+/// The errors of [`render`].
+pub fn render_pointed(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>) -> Result<Picture, UiError> {
+    paint_pointed(size, scale, mode, pointer, |ui| app.ui(ui))
+}
+
 /// Runs `draw` for a few frames on a transparent window of `size` points at `scale` pixels per point in `mode`, and
 /// fills the last frame into a picture.
 ///
 /// # Errors
 ///
 /// [`UiError::Shot`] for a size of nothing, a scale outside 1 to 4, or a picture side over [`MAX_SIDE`].
-pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
+pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
+    paint_pointed(size, scale, mode, None, draw)
+}
+
+/// [`paint`] with the pointer resting at `pointer`.
+fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
     if !(1.0..=4.0).contains(&scale) {
         return Err(bad(format!("scale {scale} is not between 1 and 4")));
     }
@@ -559,7 +591,8 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mu
     let mut textures = HashMap::new();
     let mut last = None;
     for _ in 0..4 {
-        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..RawInput::default() };
+        let events = pointer.map(egui::Event::PointerMoved).into_iter().collect();
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..RawInput::default() };
         let mut output = ctx.run_ui(input, |ui| {
             motion::set_reduced(ui.ctx(), true);
             draw(ui);
@@ -603,13 +636,28 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return icon_sheet(shot, mode, &look);
     }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
-    let session = sample::session(Box::new(FakeClock::new(time)))?;
+    let session = if shot.first == Some(true) {
+        let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
+        inboxcraft_engine::Session::new(Box::new(store), Box::new(FakeClock::new(time))).map_err(UiError::Engine)?
+    } else {
+        sample::session(Box::new(FakeClock::new(time)))?
+    };
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    if shot.first == Some(true) {
+        app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
+    }
     app.set_preset(preset);
     app.set_typeface(typeface);
     app.set_icons(icons);
     app.set_reduce_motion(true);
+    if let Some(name) = &shot.frame {
+        let frame = WindowFrame::named(name)
+            .filter(|frame| *frame != WindowFrame::System)
+            .ok_or_else(|| bad(format!("{}: frame {name} is not strip or top_row", shot.out)))?;
+        app.set_frame(frame);
+        app.set_own_frame(true);
+    }
     if let Some(percent) = shot.text_scale {
         let scale =
             TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;
@@ -673,8 +721,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.settings == Some(true) {
         app.open_settings();
     }
+    if shot.accounts == Some(true) {
+        app.open_accounts();
+    }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
-    render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)
+    let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
+    render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer)
 }
 
 #[cfg(test)]
