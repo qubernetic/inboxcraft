@@ -227,3 +227,29 @@ fn without_a_grab_by_the_desktop_no_release_is_added() {
     InboxApp::release_after_window_grab(&ctx, harness.input_mut());
     assert!(harness.input_mut().events.is_empty());
 }
+
+/// The app in the whole window, as eframe gives it to it.
+fn whole_window(frame: WindowFrame) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_own_frame(true);
+    app.set_frame(frame);
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(
+        |ui, app: &mut InboxApp| {
+            let whole = ui.ctx().content_rect();
+            ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
+        },
+        app,
+    );
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_rail_s_mark_starts_where_the_cards_start_in_every_frame() {
+    let gap = crate::theme::SPACING.gap;
+    for (frame, cards) in [(WindowFrame::Strip, super::frame::STRIP + gap), (WindowFrame::TopRow, gap), (WindowFrame::System, gap)] {
+        let harness = whole_window(frame);
+        let mark = harness.get_by_role_and_label(Role::Image, "InboxCraft").rect();
+        assert!((mark.top() - cards).abs() <= 0.5, "{frame:?}: the mark starts at {}, the cards at {cards}", mark.top());
+    }
+}

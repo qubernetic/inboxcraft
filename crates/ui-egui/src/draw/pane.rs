@@ -69,10 +69,19 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
 }
 
+/// Where the rail sits in the window: the window's corner radius, which its left corners follow, and how far down the
+/// cards start, where its mark starts too.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RailPlace {
+    pub(super) corner: f32,
+    pub(super) top: f32,
+}
+
 /// Draws the rail over the whole of `ui`: the app's mark, the views (Mail active unless `settings` or `adding` show
 /// another page; the views not built yet disabled, saying so), and at the foot the settings and the owner. Its left
 /// corners follow the window's `corner`.
-pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool, corner: f32) -> Rail {
+pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool, place: RailPlace) -> Rail {
+    let corner = place.corner;
     let s = &theme.spacing;
     let rect = ui.max_rect();
     let [first, middle, last] = theme.palette.gradient;
@@ -90,7 +99,8 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let mut asked = Rail::default();
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = s.s;
-        ui.add_space(s.m);
+        // The mark's top lines up with the cards'.
+        ui.add_space((place.top - (ui.cursor().top() - rect.top())).max(0.0));
         mark(ui, theme, ink);
         ui.add_space(s.m);
         IconButton::new(IconId::Home, tr!("Start")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);

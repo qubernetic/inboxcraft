@@ -491,7 +491,7 @@ impl InboxApp {
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding, corner))
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding, self.rail_place(corner, gap)))
             .inner;
         self.own_frame_parts(ui, &theme, corner);
         rail.mail |= clicked_rail.mail;
@@ -680,6 +680,13 @@ impl InboxApp {
             .frame(around(s.gap, s.gap / 2.0, s.gap))
             .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox, can_add)));
         (shown.inner, s.gap / 2.0)
+    }
+
+    /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,
+    /// where the cards start.
+    fn rail_place(&self, corner: f32, gap: f32) -> pane::RailPlace {
+        let strip = self.draws_frame() && self.mailbox.appearance().frame == WindowFrame::Strip;
+        pane::RailPlace { corner, top: gap + if strip { frame::STRIP } else { 0.0 } }
     }
 
     /// The settings sheet over the window; what was asked on it.
