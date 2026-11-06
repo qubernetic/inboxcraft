@@ -62,7 +62,7 @@ pub struct Preset {
     pub id: &'static str,
     /// The gradient, first to last stop, at full strength.
     pub gradient: [Color32; 3],
-    /// The accent: links and accent text in dark mode, and one account colour.
+    /// The accent: one account colour.
     pub accent: Color32,
 }
 
@@ -122,7 +122,7 @@ pub struct Palette {
     pub selection: Color32,
     /// The end of the selection gradient.
     pub selection_end: Color32,
-    /// Links and accent text: the accent in dark mode, the middle stop darkened in light mode.
+    /// Links and accent text: the middle stop lightened in dark mode, darkened in light mode.
     pub accent: Color32,
     /// Text on the accent colour.
     pub on_accent: Color32,
@@ -644,7 +644,9 @@ impl Palette {
         let accent = match mode {
             // The middle stop mixed with black: even a yellow-orange reads on white.
             Mode::Light => readable(mix(middle, BLACK, 0.38), &surfaces, 4.5, mode),
-            Mode::Dark => readable(preset.accent, &surfaces, 4.5, mode),
+            // The middle stop mixed 30 % with white: it stays in the gradient's family (the preset's separate
+            // accent stays an account colour).
+            Mode::Dark => readable(mix(middle, WHITE, 0.3), &surfaces, 4.5, mode),
         };
         let marked = [background, panel, surface, selection];
         let badge = mix(panel, middle, n.badge);
