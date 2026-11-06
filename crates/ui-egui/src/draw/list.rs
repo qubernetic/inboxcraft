@@ -100,6 +100,13 @@ fn row_lines(ui: &Ui, theme: &Theme) -> (f32, f32) {
     (first, second)
 }
 
+/// How far right of a row's left edge its text starts: past the room for the unread dot and the avatar.
+fn text_indent(ui: &Ui, theme: &Theme) -> f32 {
+    let s = &theme.spacing;
+    let (first, second) = row_lines(ui, theme);
+    s.m + s.xs + first + s.xs + second + s.m
+}
+
 /// The height of a message row: its two lines and air, from the font's metrics at the current text scale.
 pub(super) fn row_height(ui: &Ui, theme: &Theme) -> f32 {
     let (first, second) = row_lines(ui, theme);
@@ -212,7 +219,7 @@ fn paint_row(
     let side = first_height + s.xs + second_height;
     let face = Rect::from_min_size(pos2(rect.left() + s.m + s.xs, first), vec2(side, side));
     avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
-    let left = face.right() + s.m;
+    let left = rect.left() + text_indent(ui, theme);
     let right = rect.right() - s.m;
     let (sender_font, subject_font) = if message.seen { (f.sender, f.subject) } else { (f.sender_unread, f.subject_unread) };
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
@@ -391,9 +398,11 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
         let shown = if all { messages.len() } else { messages.len().min(GROUP_ROWS) };
         clicked = rows.show(ui, messages.iter().take(shown).copied());
         if messages.len() > GROUP_ROWS {
-            ui.vertical_centered(|ui| {
+            // A link under the rows' text, as far in as the text.
+            ui.horizontal(|ui| {
+                ui.add_space(text_indent(ui, theme) - button::LINK_PAD);
                 let label = if all { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = messages.len()) };
-                if button::text(ui, theme, rows.keymap, &label, None, false).clicked() {
+                if button::link(ui, theme, rows.keymap, &label).clicked() {
                     ui.data_mut(|data| data.insert_temp(id, !all));
                 }
             });

@@ -406,3 +406,30 @@ fn the_account_stripe_marks_the_rows_of_the_simple_list_only() {
     assert!(stripes(&harness(false)) > 0, "the simple list of two accounts shows whose each row is");
     assert_eq!(stripes(&harness(true)), 0, "the grouped inbox's cards show no stripes");
 }
+
+/// The text `wanted` of the last frame: where it is drawn and its colour.
+fn painted(harness: &Harness<'_, InboxApp>, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<(egui::Rect, egui::Color32)> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text() == wanted => {
+                let colour = text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color);
+                Some((shape.visual_bounding_rect(), colour))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn show_all_is_an_accent_link_under_the_rows_text() {
+    let harness = harness(true);
+    let (text, colour) = painted(&harness, "Show all (7)").expect("Show all is drawn");
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert_eq!(colour, theme.palette.accent, "Show all is in the accent colour");
+    let row = harness.get_by_label(ODILE).rect();
+    let sender = painted(&harness, "Odile Brannock").expect("the sender is drawn").0;
+    assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
+    assert!((text.left() - sender.left()).abs() <= 1.5, "Show all starts at {} where the rows' text starts, {}", text.left(), sender.left());
+}

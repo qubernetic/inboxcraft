@@ -275,3 +275,26 @@ pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, prim
 #[cfg(test)]
 #[path = "button_tests.rs"]
 mod tests;
+
+/// The room a [`link`] leaves left and right of its text, in points.
+pub const LINK_PAD: f32 = 4.0;
+
+/// A link called `name`: the text in the accent colour on nothing, a hover fill under the pointer and a ring with the
+/// keyboard focus, with [`LINK_PAD`] points of room beside the text.
+pub fn link(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str) -> Response {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.accent);
+    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(2.0 * LINK_PAD, 2.0 * s.xs), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, s.corner, p.hover);
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(rect, s.corner, Stroke::new(2.0, p.focus), StrokeKind::Outside);
+        }
+        ui.painter().galley(rect.min + vec2(LINK_PAD, s.xs), galley, p.accent);
+    }
+    tooltip::attach(response, theme, keymap, name, None)
+}
