@@ -6,7 +6,7 @@
 
 use egui::{Align, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui, WidgetInfo, pos2, vec2};
 
-use super::paint::{flag, focus_ring, line};
+use super::paint::{flag, focus_ring, line, selection};
 use crate::mailbox::{Mailbox, MessageRow};
 use crate::theme::Theme;
 use crate::tr;
@@ -67,15 +67,12 @@ fn row(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, message: &MessageRow, acco
         return response;
     }
     let painter = ui.painter();
-    let fill = if selected {
-        p.selection
+    if selected {
+        selection(painter, theme, rect, 0.0);
     } else if response.hovered() {
-        p.background
-    } else {
-        p.surface
-    };
-    painter.rect_filled(rect, 0.0, fill);
-    painter.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, p.panel));
+        painter.rect_filled(rect, 0.0, p.hover);
+    }
+    painter.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, p.line));
     if account_marker {
         let index = mailbox.account(message.account).map_or(0, |account| account.index);
         let marker = Rect::from_min_size(pos2(rect.left(), rect.top() + s.s), vec2(3.0, s.row_height - 2.0 * s.s));

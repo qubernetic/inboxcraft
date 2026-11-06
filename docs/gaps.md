@@ -345,8 +345,7 @@ B = blocks the next stage.
   laid out left to right (egui has no bidi). InboxCraft's own choice of typeface is open (#30).
 - The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
   `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
-  follows the system's mode in Electric. The glass, float and colour-field tokens exist and are checked, but nothing
-  draws them yet (E1.15b); the gradient shows nowhere yet. The error colours are fixed per mode, not derived from
+  follows the system's mode in Electric. The error colours are fixed per mode, not derived from
   the preset. The app icon keeps its own teal tile and orange dot, the same in every preset (#81).
 - Account colours are the preset's three stops, its accent and two mixes, moved in lightness to 3:1; with Aurora in
   light mode the accent becomes a dark cyan, and in a preset two of them can look alike at a glance. The stripe
@@ -354,6 +353,14 @@ B = blocks the next stage.
 - `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
   GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
   E1.13c (#30).
+- Glass and floats (#82): nothing in the window floats yet except egui's menus and tooltips (`float over text`);
+  the 80 % float and the text that fades before it are built and tested but first used by the hover actions
+  (E1.17). Menus and tooltips cast no shadow (egui's own shadow is a gradient outside the helper, so it is off).
+  The gradient's full strength shows nowhere yet (the navigation rail comes with E1.17); the selection gradient is
+  the only one in the list. A yellow field over a near-black background reads olive rather than amber (Citrus in
+  dark), because the fields are mixed in sRGB. Layer shadows reach under the neighbouring layer's edge by a few
+  points. Each glass layer's shadow is a picture of its own size, so dragging a pane's edge rasterises it again
+  for every frame of the drag. The reader's subject still shrinks to "..." when the toolbar fills its width (E1.17b).
 - `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
   sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
   It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
@@ -436,3 +443,4 @@ B = blocks the next stage.
 | 2026-11-05 | minor | Passwords go at window close; the password field keeps no undo history (#34) |
 | 2026-11-06 | minor | Rough edges of the theme tokens and presets (#81) |
 | 2026-11-06 | minor | Limits of the side-by-side pictures (#81) |
+| 2026-11-06 | minor | Limits of glass and floats (#82) |

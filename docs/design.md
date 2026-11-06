@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
 InboxCraft's own look: the colours, distances and type sizes of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -14,6 +14,13 @@ Everything here is original. Nothing is copied, traced or recreated from another
 - **Vivid colour in a few places, quiet surfaces elsewhere.** The gradient runs at full strength in one place (the
   navigation rail, to come) and as accents elsewhere: the selected row, the unread marker, the badge, links. The
   surfaces are near-neutral with a trace of the preset's middle stop.
+- **Glass without blur, and readability beats glass.** egui cannot blur what lies behind a shape, so glass is faked:
+  soft colour fields painted once behind the window, and translucent layers over them with a light top edge and a
+  soft shadow. Translucency is only ever laid over the colour fields, never over text; what floats over content
+  is about 80 % opaque where the content fades before it, and more opaque over sharp text. See "Glass and floats".
+- **One gradient helper.** Every colour transition (shapes, lines, text, shadows) is painted by
+  `crates/ui-egui/src/gradient.rs`, dithered, so its quality is decided in one place; a test refuses a gradient
+  painted anywhere else.
 - **Contrast is checked, not hoped for.** Every text token is moved in lightness until it meets WCAG 2 AA (4.5:1) on
   each surface it sits on, and every marker, focus ring and field edge until it meets 3:1. The tests run this for
   every preset in both modes, and fail when a preset or a rule breaks it.
@@ -44,13 +51,13 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 
 | Token | Light | Dark | Used for |
 |---|---|---|---|
-| background | `#F3F5F9` with 3 % of the middle stop | `#0D1016` with 5 % | behind everything, the reader, hovered rows |
-| panel | `#EBEEF3` with 3.6 % | `#141821` with 6 % | the folder pane, buttons, bars, row separators |
-| surface | `#FBFCFD` with 1.8 % | `#10131A` with 3 % | the message list and its header |
+| background | `#F3F5F9` with 3 % of the middle stop | `#0D1016` with 5 % | the base of the colour fields behind the window |
+| panel | `#EBEEF3` with 3.6 % | `#141821` with 6 % | buttons and the remote-content banner |
+| surface | `#FBFCFD` with 1.8 % | `#10131A` with 3 % | the base of the selection; a surface text is checked on |
 | field | `#FFFFFF` with 0.9 % | `#090B10` with 1.5 % | inside text fields |
 | selection | surface with 20 % of the first stop | with 32 % | the selected row or folder; the start of the selection gradient |
 | selection end | surface with 12 % of the last stop | with 20 % | the end of the selection gradient |
-| text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text |
+| text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text (readable also on glass over each field, hovered or not, and on a float over the fields and the gradient) |
 | muted | `#5D6676` tinted, readable at 4.5:1 | `#9AA3B2` tinted, readable at 4.5:1 | previews, dates, addresses, section headings |
 | accent | the middle stop mixed 62/38 with black, readable at 4.5:1 | the preset's accent, readable at 4.5:1 | links, the sender of an unread message, accent text |
 | on accent | white or deep ink, by contrast | the same | text on the accent |
@@ -62,11 +69,12 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 | error / on error | `#B3261E` readable / white or deep ink | `#F2B8B5` readable / white or deep ink | the error banner, error text |
 | gradient | the three stops at full strength | the same | the rail, the primary button, group badges (to come) |
 | ink | deep ink `#05060A` | the same | text on the gradient where white does not read |
-| glass / edge / highlight | near-white at 72 % / text-tone at 8 % / white at 90 % | near-white at 5.5 % / 9 % / 7 % | glass layers over the colour fields (E1.15b) |
+| glass / edge / highlight | near-white at 72 % / text-tone at 8 % / white at 90 % | near-white at 5.5 % / 9 % / 7 % | the glass layers of the panes, their edge and light top edge |
 | shadow | text-tone at 10 % | black at 35 % | under glass and floats |
-| float | near-white at 80 % | `#1E2330` tinted at 80 % | tooltips, menus, hover actions, toasts |
+| float | near-white at 80 % | `#1E2330` tinted at 80 % | floats over content that fades before them (hover actions, toasts) |
+| float over text | the float, as opaque as it takes | the same | menus, tooltips and popups, which may sit over sharp text: opaque enough that text, muted and accent text under it show at no more than 1.2:1 (`theme::GHOST`) |
 | line / hover | text-tone at 7 % / 4.5 % | near-white at 6 % / 6 % | row separators and hovered rows on glass |
-| colour fields | each stop at 30 % | each stop at 42 % | the soft fields painted once behind the window (E1.15b) |
+| colour fields | each stop at 30 % | each stop at 34 % | the soft fields painted once behind the window |
 
 **Text on the gradient** picks white or the deep ink, whichever has more contrast with the colour under it; with
 that ink every point of every preset's gradient reads at 4.5:1 (white alone would not on Citrus's yellow end).
@@ -87,6 +95,9 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 | row height | 52 | a message row: two lines and air |
 | folder pane | 240 | the folder pane's default width (it can be resized); the search field's width |
 | corner | 6 | the corner radius of fields, selections and buttons |
+| card | 14 | the corner radius of glass layers and floats |
+| shadow | 18 | how far the soft shadow of a glass layer or a float reaches; it falls a third of that downwards |
+| gap | 10 | the colour fields between two glass layers and around the window's edge |
 
 ## Type
 
@@ -98,6 +109,34 @@ egui's bundled proportional font (Ubuntu Light) for now; InboxCraft's own choice
 | body | 14 | rows, folders, fields, buttons |
 | heading | 15 | account names in the folder pane, empty-state titles |
 | title | 20 | the view's name above the list; the app name |
+
+## Glass and floats
+- **Colour fields** (`glass::backdrop`): the background with three soft fields of the preset's stops, at 30 %
+  (light) or 34 % (dark) at their centres and fading out smoothly: the first stop at the top towards the middle, the
+  middle stop at the top right, the last stop from the bottom right; the left, where the panes start, stays calm.
+  The fields are one picture, rasterised once per window size (rounded up to 128 pixels, so a resize does not
+  rasterise them for every pixel of the drag) and kept as a texture.
+- **Glass layers** (`glass::Layers`): the folder pane, the list and the reader (or the add-account page) are each a
+  glass layer, `gap` apart and from the window's edge: the glass colour over the fields, a 1-point edge, a light top
+  edge that fades in and out at its ends, and a soft shadow around it, clear under the layer itself so it does not
+  darken the glass. All layers go into one place reserved right after the colour fields, shadows first, so a layer
+  never covers another's content and translucency is never laid over text (a UI test checks every shape of the
+  window in every preset and mode).
+- **Floats** (`glass::float`): what floats over content is frosted: `float` (about 80 %) where the content under
+  it fades before it, so a little of the colour behind glows through, and `float over text` where it would sit over
+  sharp text that cannot fade, opaque enough that the text under it is barely there. Menus, tooltips and popups use
+  `float over text`. Text that a float covers fades out over a few points before the float's edge and is cut there
+  (`glass::faded`), so no letter shows through or touches it. A UI test draws a menu over the reader's text and
+  hover actions over a fading row in every preset and mode, and checks the float's text reads at 4.5:1 while the
+  content under it changes the picture by no more than 1.2:1.
+- **Gradients** (`gradient`): a gradient is linear through stops, soft colour fields over a base (a gradient mesh),
+  or a layer's shadow. Shapes get it as a picture rasterised once per gradient and size, every pixel dithered with
+  a noise below one step of eight-bit colour added before rounding, so a wide gradient over few steps shows no
+  bands (a test over 1024 pixels and eight steps of grey); lines and text are coloured at their vertices, dithered
+  the same way. The selected row and folder show the selection gradient from left to right. egui's own fade at the
+  ends of a scroll area is off: it was a gradient of its own laid over text.
+- **No repaint while nothing moves.** Nothing in the look asks for another frame; a UI test runs the window idle in
+  every preset and mode and counts no repaint and no picture rasterised again.
 
 ## The mail list window
 - **Folder pane** (left): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
@@ -186,3 +225,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-05 | minor | Adding an account (#34) |
 | 2026-11-06 | major | Colour tokens from the mode and an accent preset; Electric, Aurora and Citrus; teal and coral gone (#81) |
 | 2026-11-06 | minor | Pictures: each `ui_shot` picture beside its mood sketch, `just side-by-side` (#81) |
+| 2026-11-06 | minor | Glass and floats: colour fields, glass layers, the float surfaces, the one gradient helper (#82) |

@@ -8,7 +8,7 @@ use egui::epaint::{ClippedPrimitive, Mesh, Primitive, TextureId, Vertex, WHITE_U
 use egui::{Color32, ColorImage, Rect, TextureOptions, pos2, vec2};
 
 use super::{Canvas, Open, Picture, Shot, Texture, apply_textures, fill, parse_script, render, shoot};
-use crate::theme::{Mode, PRESETS, Preset, Theme};
+use crate::theme::{Mode, PRESETS, Preset, Theme, contrast, over};
 
 fn shot(json: &str) -> Shot {
     parse_script(json).unwrap().remove(0)
@@ -43,8 +43,12 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
             let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "size": [1000, 700]}}"#))).unwrap();
             assert_eq!((picture.width(), picture.height()), (1000, 700));
             let palette = Theme::new(mode, preset).palette;
-            assert_eq!(picture.pixel(4, 690), Some(palette.panel), "{id} {name}: the folder pane");
-            assert_eq!(picture.pixel(995, 695), Some(palette.surface), "{id} {name}: below the list");
+            // Below the list's rows: its glass over the colour fields (rasterised for 1024 by 768).
+            let theme = Theme::new(mode, preset);
+            let [r, g, b, _] = crate::glass::fields(&theme).colour_at(pos2(980.5, 686.5), vec2(1024.0, 768.0)).map(|c| (c * 255.0).round() as u8);
+            let expected = over(palette.glass, Color32::from_rgb(r, g, b));
+            let glass = picture.pixel(980, 686).unwrap();
+            assert!(contrast(glass, expected) < 1.03, "{id} {name}: glass over the fields below the list: {glass:?} {expected:?}");
             let mut colours = std::collections::BTreeSet::new();
             for y in (0..700).step_by(7) {
                 for x in (0..1000).step_by(7) {
@@ -60,7 +64,11 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
 #[test]
 fn a_shot_without_a_preset_is_electric() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
-    assert_eq!(picture.pixel(4, 390), Some(Theme::new(Mode::Light, &Preset::default()).palette.panel));
+    let electric = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "electric", "size": [600, 400]}"#)).unwrap();
+    let citrus = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "citrus", "size": [600, 400]}"#)).unwrap();
+    assert_eq!(picture, electric);
+    assert_ne!(picture.pixel(4, 390), citrus.pixel(4, 390));
+    assert_eq!(Preset::default().id, "electric");
 }
 
 #[test]
