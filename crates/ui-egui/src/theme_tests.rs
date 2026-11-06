@@ -7,7 +7,7 @@ use egui::Color32;
 
 use super::{
     AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
-    contrast, font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb,
+    contrast, font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb, text_gradient,
 };
 use crate::iconset::IconSet;
 use crate::motion::MOTION;
@@ -778,4 +778,24 @@ fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
         assert_eq!(theme.motion, MOTION);
         assert_eq!(theme.style().animation_time, MOTION.tooltip);
     }
+}
+
+#[test]
+fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_deep_ink() {
+    for preset in &PRESETS {
+        let (stops, ink) = text_gradient(preset.gradient);
+        if ink == WHITE {
+            assert!(stops.iter().all(|stop| contrast(WHITE, *stop) >= 4.5), "{}: white reads on every stop", preset.id);
+            // No more than 30 % darker: each channel keeps at least 70 % of the stop's.
+            for (stop, raw) in stops.iter().zip(preset.gradient) {
+                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 7, "{}: at most 30 %", preset.id);
+            }
+        } else {
+            assert_eq!(stops, preset.gradient, "{}: the full gradient with the deep ink", preset.id);
+        }
+    }
+    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| text_gradient(preset.gradient).1);
+    assert_eq!(ink("electric"), Some(WHITE));
+    assert_eq!(ink("aurora"), Some(WHITE));
+    assert_ne!(ink("citrus"), Some(WHITE));
 }

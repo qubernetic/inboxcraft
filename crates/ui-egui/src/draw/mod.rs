@@ -473,10 +473,10 @@ impl InboxApp {
                 .frame(around(half, half, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false)))
                 .inner;
-            let (mailbox, onboarding) = (&self.mailbox, &mut self.onboarding);
+            let (keymap, mailbox, onboarding) = (&self.keymap, &self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
                 .frame(around(half, gap, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, mailbox, onboarding)))
+                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, keymap, mailbox, onboarding)))
                 .inner;
         } else if setting {
             asked = Panel::left("folders")
@@ -487,10 +487,10 @@ impl InboxApp {
                 .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
                 .inner;
             let reduce = self.reduce_motion();
-            let (settings, appearance) = (&mut self.settings, self.mailbox.appearance());
+            let (keymap, settings, appearance) = (&self.keymap, &mut self.settings, self.mailbox.appearance());
             changed = CentralPanel::no_frame()
                 .frame(around(half, gap, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| settings::show(ui, &theme, settings, appearance, reduce)))
+                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| settings::show(ui, &theme, keymap, settings, appearance, reduce)))
                 .inner;
         } else if !full {
             asked = Panel::left("folders")

@@ -5,16 +5,16 @@
 //! mode, the accent preset, the custom accent, the typeface, the icon set and the text size, and the "Reduce motion"
 //! switch. Wide, the preview stands beside the controls; narrow, above them.
 
-use egui::{
-    Align, Button, Frame, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2,
-};
+use egui::{Align, Frame, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2};
 use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface};
 
 use super::paint::{line, line_height, selection};
 use crate::component::avatar;
+use crate::component::button::TextButton;
 use crate::component::pill::pill;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, IconSet, Style};
+use crate::keymap::Keymap;
 use crate::motion;
 use crate::settings::{MAX_CHARS, Settings};
 use crate::theme::{self, Look, PRESETS, Preset, TextScale, Theme};
@@ -138,7 +138,7 @@ fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
 }
 
 /// The four colour fields of the custom accent, each with a picker; whether "Use these colours" was pressed.
-fn custom(ui: &mut Ui, theme: &Theme, settings: &mut Settings) -> Option<Asked> {
+fn custom(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
     let names = [tr!("Gradient start"), tr!("Gradient middle"), tr!("Gradient end"), tr!("Accent")];
     egui::Grid::new("custom-accent").num_columns(3).spacing(vec2(theme.spacing.m, theme.spacing.s)).show(ui, |ui| {
         for (field, name) in settings.colours_mut().iter_mut().zip(names) {
@@ -160,12 +160,13 @@ fn custom(ui: &mut Ui, theme: &Theme, settings: &mut Settings) -> Option<Asked> 
         note(ui, theme, text);
     }
     ui.add_space(theme.spacing.xs);
-    let pressed = ui.add_enabled(custom.is_some(), Button::new(tr!("Use these colours"))).clicked();
+    let pressed =
+        ui.add_enabled_ui(custom.is_some(), |ui| TextButton::new(tr!("Use these colours")).primary().show(ui, theme, keymap)).inner.clicked();
     custom.filter(|_| pressed).map(Asked::Custom)
 }
 
 /// The controls; what was asked for.
-fn controls(ui: &mut Ui, theme: &Theme, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+fn controls(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
     heading(ui, theme, tr!("Mode"));
     let modes = ThemeMode::ALL.map(|mode| (mode, mode_name(mode)));
@@ -203,7 +204,7 @@ fn controls(ui: &mut Ui, theme: &Theme, settings: &mut Settings, current: &Appea
     heading(ui, theme, tr!("Custom accent"));
     note(ui, theme, tr!("Three colours for the gradient and one for links and accent text; the preview shows them as you type."));
     ui.add_space(theme.spacing.xs);
-    asked = asked.or(custom(ui, theme, settings));
+    asked = asked.or(custom(ui, theme, keymap, settings));
 
     heading(ui, theme, tr!("Typeface"));
     ui.horizontal_wrapped(|ui| {
@@ -325,12 +326,12 @@ fn preview(ui: &mut Ui, theme: &Theme) {
 
 /// Draws the page in `theme`, the preview in the draft's colours while they differ from those in use; returns what
 /// was asked for, applied by the caller after the frame's drawing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr!("Appearance")).font(theme.fonts.title.id()).color(theme.palette.text));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(tr!("Close")).clicked() {
+            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Close);
             }
         });
@@ -348,7 +349,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, settings: &mut Settings, current:
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(COLUMN);
-                    asked = asked.clone().or(controls(ui, theme, settings, current, reduce));
+                    asked = asked.clone().or(controls(ui, theme, keymap, settings, current, reduce));
                 });
                 ui.add_space(theme.spacing.xl);
                 ui.vertical(|ui| {
@@ -359,7 +360,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, settings: &mut Settings, current:
         } else {
             ui.add_space(theme.spacing.l);
             preview(ui, &shown);
-            asked = asked.clone().or(controls(ui, theme, settings, current, reduce));
+            asked = asked.clone().or(controls(ui, theme, keymap, settings, current, reduce));
         }
     });
     asked

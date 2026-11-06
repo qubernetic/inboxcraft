@@ -926,6 +926,20 @@ pub fn ink_on(behind: Color32) -> Color32 {
     if contrast(WHITE, behind) >= contrast(DEEP_INK, behind) { WHITE } else { DEEP_INK }
 }
 
+/// The gradient text sits on (a primary button, a chip) and its ink: the stops darkened together in steps of 2 % until
+/// white reads at 4.5:1 on every one, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise
+/// the stops unchanged with the deep ink (Citrus). Icons on the rail keep the full gradient.
+#[must_use]
+pub fn text_gradient(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
+    // 15 steps of 2 %: at most 30 %.
+    const STEP: f32 = 0.02;
+    const STEPS: u8 = 15;
+    (0..=STEPS)
+        .map(|step| stops.map(|stop| mix(stop, BLACK, f32::from(step) * STEP)))
+        .find(|darkened| darkened.iter().all(|stop| contrast(WHITE, *stop) >= 4.5))
+        .map_or((stops, DEEP_INK), |darkened| (darkened, WHITE))
+}
+
 /// The ink for an icon or text that runs across every colour in `behind` (a gradient's stops): white or the deep
 /// ink, whichever reads better on the colour it reads worst on.
 #[must_use]

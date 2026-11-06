@@ -24,7 +24,7 @@ use egui::{
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
-use crate::component::button::{self, IconButton};
+use crate::component::button::{IconButton, TextButton};
 use crate::component::popup;
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
@@ -644,9 +644,9 @@ fn message(
             ui.add_space(theme.spacing.m);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s;
-                button::unavailable(ui, theme, keymap, tr!("Reply"), true, not_yet());
-                button::unavailable(ui, theme, keymap, tr!("Reply all"), false, not_yet());
-                button::unavailable(ui, theme, keymap, tr!("Forward"), false, not_yet());
+                TextButton::new(tr!("Reply")).primary().icon(IconId::Reply).unavailable(not_yet()).show(ui, theme, keymap);
+                TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll).unavailable(not_yet()).show(ui, theme, keymap);
+                TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward).unavailable(not_yet()).show(ui, theme, keymap);
             });
         }
     });

@@ -6,7 +6,9 @@
 use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
+use crate::component::button::TextButton;
 use crate::iconset::{IconId, Style};
+use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
 use crate::onboard::{MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
@@ -55,7 +57,7 @@ fn note(ui: &mut Ui, theme: &Theme, text: &str, colour: Color32) {
     ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(colour));
 }
 
-fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked> {
+fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
     ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
@@ -75,7 +77,8 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
         let label = ui.label(tr!("Address"));
         ui.horizontal(|ui| {
             ui.add(TextEdit::singleline(&mut form.address).hint_text("you@example.org").desired_width(FORM_WIDTH - 300.0)).labelled_by(label.id);
-            let detect = ui.add_enabled(!detecting, egui::Button::new(if detecting { tr!("Detecting…") } else { tr!("Detect") }));
+            let label = if detecting { tr!("Detecting…") } else { tr!("Detect") };
+            let detect = ui.add_enabled_ui(!detecting, |ui| TextButton::new(label).secondary().show(ui, theme, keymap)).inner;
             if detect.clicked() {
                 asked = Some(Asked::Detect);
             }
@@ -144,10 +147,10 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
     note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
     ui.add_space(theme.spacing.m);
     ui.horizontal(|ui| {
-        if ui.button(tr!("Add and check")).clicked() {
+        if TextButton::new(tr!("Add and check")).primary().show(ui, theme, keymap).clicked() {
             asked = Some(Asked::Add);
         }
-        if ui.button(tr!("Cancel")).clicked() {
+        if TextButton::new(tr!("Cancel")).secondary().show(ui, theme, keymap).clicked() {
             asked = Some(Asked::Close);
         }
     });
@@ -208,7 +211,7 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
     ui.add_space(theme.spacing.xs);
 }
 
-fn checking(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
+fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &Onboarding, account: u64) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
     let address = mailbox.account(account).map(|row| row.address.clone()).unwrap_or_default();
@@ -226,23 +229,23 @@ fn checking(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &Onboardi
     ui.add_space(theme.spacing.m);
     ui.horizontal(|ui| match onboarding.outcome() {
         Outcome::Passed => {
-            if ui.button(tr!("Done")).clicked() {
+            if TextButton::new(tr!("Done")).primary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Close);
             }
         }
         Outcome::Failed => {
-            if ui.button(tr!("Check again")).clicked() {
+            if TextButton::new(tr!("Check again")).primary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::CheckAgain);
             }
-            if ui.button(tr!("Change settings")).clicked() {
+            if TextButton::new(tr!("Change settings")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Change);
             }
-            if ui.button(tr!("Close")).clicked() {
+            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Close);
             }
         }
         Outcome::Running => {
-            if ui.button(tr!("Close")).clicked() {
+            if TextButton::new(tr!("Close")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Close);
             }
         }
@@ -251,7 +254,7 @@ fn checking(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &Onboardi
 }
 
 /// Draws the page and returns what was asked for; the caller applies it after the frame's drawing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -261,8 +264,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &m
             ui.add_space(theme.spacing.s);
         }
         asked = match onboarding.stage() {
-            Stage::Form => form(ui, theme, onboarding),
-            Stage::Checking(account) => checking(ui, theme, mailbox, onboarding, account),
+            Stage::Form => form(ui, theme, keymap, onboarding),
+            Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };
     });

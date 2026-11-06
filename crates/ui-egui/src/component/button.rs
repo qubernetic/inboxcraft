@@ -13,7 +13,7 @@ use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion;
-use crate::theme::{Theme, ink_over};
+use crate::theme::{Theme, text_gradient};
 
 use super::{control_side, tooltip};
 
@@ -126,52 +126,141 @@ impl<'a> IconButton<'a> {
     }
 }
 
+/// How a text button stands out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// Text only, with a hover fill (Done all, Clear).
+    Quiet,
+    /// Outlined in the field border (Reply all, Cancel).
+    Secondary,
+    /// On the preset's text gradient, in white or the deep ink ([`text_gradient`]): the one thing to do.
+    Primary,
+}
+
+/// A text button: its name, an optional icon before it, and its tone.
+#[derive(Debug, Clone, Copy)]
+pub struct TextButton<'a> {
+    name: &'a str,
+    icon: Option<IconId>,
+    tone: Tone,
+    action: Option<&'a str>,
+    note: Option<&'a str>,
+}
+
+impl<'a> TextButton<'a> {
+    /// A quiet button called `name`.
+    #[must_use]
+    pub fn new(name: &'a str) -> Self {
+        Self { name, icon: None, tone: Tone::Quiet, action: None, note: None }
+    }
+
+    /// The primary button: on the text gradient.
+    #[must_use]
+    pub fn primary(mut self) -> Self {
+        self.tone = Tone::Primary;
+        self
+    }
+
+    /// A secondary button: outlined.
+    #[must_use]
+    pub fn secondary(mut self) -> Self {
+        self.tone = Tone::Secondary;
+        self
+    }
+
+    /// `icon` before the name, in the Regular style.
+    #[must_use]
+    pub fn icon(mut self, icon: IconId) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// The action it runs, whose key its tooltip shows.
+    #[must_use]
+    pub fn action(mut self, action: &'a str) -> Self {
+        self.action = Some(action);
+        self
+    }
+
+    /// Cannot be pressed yet: faded, its tooltip saying why (`note`).
+    #[must_use]
+    pub fn unavailable(mut self, note: &'a str) -> Self {
+        self.note = Some(note);
+        self
+    }
+
+    /// Draws it into `ui`; its response is clicked when it was pressed.
+    pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
+        let p = &theme.palette;
+        let s = &theme.spacing;
+        let enabled = self.note.is_none();
+        let (stops, on_gradient) = text_gradient(p.gradient);
+        let ink = match self.tone {
+            Tone::Primary => on_gradient,
+            Tone::Quiet | Tone::Secondary => p.text,
+        };
+        let galley = super::galley(ui, self.name, theme.fonts.button, ink);
+        let height = control_side(ui, theme);
+        let icon_side = theme.fonts.button.size * 1.2;
+        let lead = self.icon.map_or(0.0, |_| icon_side + s.s);
+        let sense = if enabled { Sense::click() } else { Sense::hover() };
+        let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + lead + s.m * 2.0, height), sense);
+        response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
+        let lit = enabled && (response.hovered() || response.has_focus());
+        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
+        if ui.is_rect_visible(rect) {
+            let mut faded = ui.painter().clone();
+            faded.multiply_opacity(if enabled { 1.0 } else { DISABLED });
+            let painter = &faded;
+            let round = rect.height() / 2.0;
+            match self.tone {
+                Tone::Primary => {
+                    let [first, middle, last] = stops;
+                    let fill = Gradient::Linear {
+                        from: egui::pos2(0.0, 0.5),
+                        to: egui::pos2(1.0, 0.5),
+                        stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
+                    };
+                    gradient::fill(painter, rect, round, &fill);
+                }
+                Tone::Secondary => {
+                    painter.rect_stroke(rect.shrink(0.5), round, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
+                }
+                Tone::Quiet => {}
+            }
+            if hover > 0.0 {
+                painter.rect_filled(rect, round, p.hover.gamma_multiply(hover));
+            }
+            let left = rect.center().x - (galley.size().x + lead) / 2.0;
+            if let Some(icon) = self.icon {
+                let at = egui::Rect::from_center_size(egui::pos2(left + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
+                theme.icons.paint(painter, at, icon, Style::Regular, ink);
+            }
+            painter.galley(egui::pos2(left + lead, rect.center().y - galley.size().y / 2.0), galley, ink);
+            if response.has_focus() {
+                painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
+            }
+        }
+        tooltip::attach_note(response, theme, keymap, self.name, self.action, self.note)
+    }
+}
+
 /// A text button called `name` that runs `action`, whose key its tooltip shows: a quiet one with a hover fill, or the
-/// `primary` one on the preset's gradient with white or deep ink, whichever reads on every stop.
+/// `primary` one on the preset's text gradient.
 pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, primary: bool) -> Response {
-    text_button(ui, theme, keymap, name, action, primary, None)
+    let button = TextButton::new(name);
+    let button = if primary { button.primary() } else { button };
+    match action {
+        Some(action) => button.action(action),
+        None => button,
+    }
+    .show(ui, theme, keymap)
 }
 
 /// A text button like [`text`] that cannot be pressed yet: faded, and its tooltip says why (`note`).
 pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, primary: bool, note: &str) -> Response {
-    text_button(ui, theme, keymap, name, None, primary, Some(note))
-}
-
-fn text_button(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, primary: bool, note: Option<&str>) -> Response {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let enabled = note.is_none();
-    let ink = if primary { ink_over(&p.gradient) } else { p.text };
-    let galley = super::galley(ui, name, theme.fonts.button, ink);
-    let height = control_side(ui, theme);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + s.m * 2.0, height), sense);
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
-    let lit = enabled && (response.hovered() || response.has_focus());
-    let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
-    if ui.is_rect_visible(rect) {
-        let mut faded = ui.painter().clone();
-        faded.multiply_opacity(if enabled { 1.0 } else { DISABLED });
-        let painter = &faded;
-        let round = rect.height() / 2.0;
-        if primary {
-            let [first, middle, last] = p.gradient;
-            let fill = Gradient::Linear {
-                from: egui::pos2(0.0, 0.5),
-                to: egui::pos2(1.0, 0.5),
-                stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-            };
-            gradient::fill(painter, rect, round, &fill);
-        }
-        if hover > 0.0 {
-            painter.rect_filled(rect, round, p.hover.gamma_multiply(hover));
-        }
-        painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
-        if response.has_focus() {
-            painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
-        }
-    }
-    tooltip::attach_note(response, theme, keymap, name, action, note)
+    let button = TextButton::new(name).unavailable(note);
+    if primary { button.primary() } else { button }.show(ui, theme, keymap)
 }
 
 #[cfg(test)]
