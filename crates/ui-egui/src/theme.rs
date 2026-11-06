@@ -507,7 +507,7 @@ const DARK: Neutrals = Neutrals {
     fields: 0.34,
 };
 
-const SPACING: Spacing =
+pub(crate) const SPACING: Spacing =
     Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
 
 /// The most contrast text under a float over sharp text may keep: barely there.

@@ -14,17 +14,18 @@ use inboxcraft_engine::appearance::WindowFrame;
 
 use crate::component::tooltip;
 use crate::keymap::Keymap;
-use crate::theme::Theme;
+use crate::theme::{SPACING, Theme};
 use crate::tr;
 
-/// The strip's height, in points.
-pub(super) const STRIP: f32 = 34.0;
+/// The strip's height, in points: a control's hover fill with a cards' gap above and below it, so the fill of Close,
+/// one gap from the window's right edge too, ends where the cards end.
+pub(super) const STRIP: f32 = CONTROL[1] - 2.0 * HOVER_INSET + 2.0 * SPACING.gap;
 
 /// A window control's width and height, in points.
 const CONTROL: [f32; 2] = [34.0, 28.0];
 
 /// How far inside a window control its hover fill stays, in points.
-const HOVER_INSET: f32 = 2.0;
+pub(super) const HOVER_INSET: f32 = 2.0;
 
 /// How far from the window's edge a press resizes it, in points.
 const EDGE: f32 = 5.0;
@@ -162,7 +163,7 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
 }
 
 /// How high the band at the top of the window is that moves it in the top row: the panes' first rows.
-const BAND: f32 = STRIP * 2.0;
+const BAND: f32 = 68.0;
 
 /// How near the window's right edge a pane's first row ends when the controls of the top row sit at its end.
 const REACH: f32 = 64.0;

@@ -185,6 +185,9 @@ fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is
     let close = harness.get_by_label("Close the window").rect();
     let right = harness.ctx.content_rect().right() - close.right();
     assert!((close.top() - right).abs() <= 0.5, "Close: {} above, {right} to the window's edge", close.top());
+    // Close's hover fill, a little inside the control, ends where the cards end: one gap from the window's edge.
+    let fill_to_edge = right + super::frame::HOVER_INSET;
+    assert!((fill_to_edge - crate::theme::SPACING.gap).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge");
 }
 
 #[test]

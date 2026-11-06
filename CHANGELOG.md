@@ -465,7 +465,7 @@ All notable changes to InboxCraft are listed here. The format follows
   plain red under the pointer, and each control's hover fill keeps clear of the strip's edges. `ui_shot` takes a
   `pointer` to picture a hover
 - The scroll bar is 5 points wide at rest and 9 under the pointer, with round ends; the strip's controls have as much
-  room above and below them as Close has to the window's edge (#104)
+  room above and below them as Close has to the window's edge: a cards' gap, so Close ends where the cards end (#104)
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
 
