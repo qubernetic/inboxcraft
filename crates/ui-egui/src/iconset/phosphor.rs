@@ -46,6 +46,7 @@ const fn point(id: IconId) -> char {
         IconId::Add => '\u{e3d4}',      // plus
         IconId::Junk => '\u{e4e2}',     // warning-circle
         IconId::MarkRead => '\u{e21a}', // envelope-simple-open
+        IconId::Lock => '\u{e308}',     // lock-simple
     }
 }
 

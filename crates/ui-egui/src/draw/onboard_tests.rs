@@ -86,7 +86,7 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Found in your provider's settings file.");
     harness.get_by_label("What Detect asked (2)");
     assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
@@ -112,7 +112,7 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     harness.run();
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     harness.get_by_label("A step failed. Check again, or change the settings.");
@@ -146,7 +146,7 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         harness.run();
         assert_eq!(harness.state().onboarding().form().security, Some(crate::onboard::Security::StartTls));
         // An error shows above the form.
-        harness.get_by_label("Add and check").click();
+        harness.get_by_label("Check and add").click();
         harness.run();
         harness.get_by_label("Enter the address.");
     }
@@ -181,7 +181,7 @@ fn undo_brings_no_password_back_after_change_settings() {
     harness.run();
     type_password(&mut harness, PASSWORD);
     assert_eq!(harness.state().onboarding().form().password.expose(), PASSWORD);
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     harness.get_by_label("Change settings").click();
@@ -201,7 +201,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
     type_password(&mut harness, PASSWORD);
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     harness.get_by_label("Done").click();
@@ -213,7 +213,7 @@ fn undo_brings_no_password_of_an_earlier_account_into_the_next() {
     harness.run();
     undo_in_password(&mut harness);
     assert!(harness.state().onboarding().form().password.is_empty(), "undo restored the first account's password");
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.get_by_label("Enter the password.");
     assert_eq!(kept.passwords.lock().unwrap().get(&2), None, "no password for the second account");
@@ -242,7 +242,7 @@ fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
             harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
             harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
             harness.run();
-            harness.get_by_label("Add and check").click();
+            harness.get_by_label("Check and add").click();
             harness.run();
             harness.run();
             let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Close" };
@@ -264,7 +264,7 @@ fn a_password_the_store_did_not_forget_in_change_settings_is_forgotten_at_exit()
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.run();
-    harness.get_by_label("Add and check").click();
+    harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
     kept.refuse_forget.store(true, Ordering::SeqCst);

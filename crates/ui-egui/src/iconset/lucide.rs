@@ -50,6 +50,7 @@ const fn point(id: IconId) -> char {
         IconId::Add => '\u{e13d}',      // plus
         IconId::Junk => '\u{e077}',     // alert-circle
         IconId::MarkRead => '\u{e363}', // mail-open
+        IconId::Lock => '\u{e10b}',     // lock
     }
 }
 
