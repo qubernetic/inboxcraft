@@ -33,6 +33,9 @@ use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
+/// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
+pub(super) const ROW_INSET: f32 = 6.0;
+
 /// The rows a group shows before "Show all".
 pub(super) const GROUP_ROWS: usize = 3;
 
@@ -243,7 +246,7 @@ fn sheet<R>(ui: &mut Ui, theme: &Theme, edge: bool, add: impl FnOnce(&mut Ui) ->
     let p = &theme.palette;
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
-    let inner = Frame::new().inner_margin(margin(s.xs, s.xs)).show(ui, |ui| {
+    let inner = Frame::new().inner_margin(margin(ROW_INSET, ROW_INSET)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
     });
@@ -425,11 +428,11 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     let count = rows.mailbox.messages().len();
     let height = row_height(ui, theme);
     let room = ui.available_rect_before_wrap();
-    let content = height * count as f32 + s.xs * 2.0;
+    let content = height * count as f32 + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
     ui.painter().rect_filled(card, s.card, p.surface);
     ui.painter().rect_stroke(card, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
-    let inside = card.shrink(s.xs);
+    let inside = card.shrink(ROW_INSET);
     let mut clicked = None;
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
