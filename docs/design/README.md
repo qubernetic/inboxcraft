@@ -24,7 +24,7 @@ icons show as empty boxes.
 | Components | avatar, key chip, badge, button, icon button, pill, tooltip, menu row, toast, rail item, folder row, message row, group header, text field, switch, checkbox, radio, recipient chip, banner, check step, event; each with its variants and properties, and a gallery of all of them in light and dark | [components.png](components.png) |
 | Screens · Mail | grouped inbox with the reader, simple list with two accounts, full-width reader with blocked pictures, search with operators, first start, empty and error states, start screen, command palette, notification and tray | [screens-mail.png](screens-mail.png) |
 | Screens · Triage | screener review, moving a sender to another group, the time picker (snooze), snoozed, pins and parked, follow-up reminder | [screens-triage.png](screens-triage.png) |
-| Screens · Writing | composer, an impossible address, send later, undo send and the outbox, a bounce, a template with a blank | [screens-writing.png](screens-writing.png) |
+| Screens · Writing | the composer in place of the reader (the default) and in a window of its own, an impossible address, send later, undo send and the outbox, a bounce, a template with a blank | [screens-writing.png](screens-writing.png) |
 | Screens · Calendar | week, month, agenda, day with the event editor, an invitation in a message | [screens-calendar.png](screens-calendar.png) |
 | Screens · Setup and settings | add account, the account check under way, failed and passed, settings for appearance, accounts, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
 | Mood | the main window in Electric, Aurora and Citrus, light and dark | [mood.png](mood.png) |
@@ -69,3 +69,4 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 | 2026-11-06 | major | First version: foundations, components, screens of the whole app, mood, scenarios (#96) |
 | 2026-11-06 | minor | Transparent pages; white text on a darkened text gradient where it reads at 4.5:1 (#96) |
 | 2026-11-06 | minor | Group headers show an outline icon without a background (#96) |
+| 2026-11-06 | minor | The composer fills the reader's place or opens in a window of its own (#96) |
