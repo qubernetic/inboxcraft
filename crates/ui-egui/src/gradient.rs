@@ -14,7 +14,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use egui::epaint::{PathShape, PathStroke, RectShape, TextShape};
+use egui::epaint::{Mesh, PathShape, PathStroke, RectShape, TextShape};
 use egui::{Color32, ColorImage, CornerRadius, Galley, Painter, Pos2, Rect, Shape, TextureHandle, TextureId, TextureOptions, Vec2, pos2, vec2};
 
 use crate::theme::NO_TINT;
@@ -28,6 +28,15 @@ const SOFT_STEP: usize = 128;
 
 /// How many pictures are kept for reuse.
 const KEEP: usize = 32;
+
+/// The side of the stretch of edge in a sliced shadow's picture, in pixels: tiled along the layer's edges.
+const TILE: usize = 32;
+
+/// The most tiles along one edge of a sliced shadow; longer edges get longer tiles.
+const MAX_TILES: usize = 256;
+
+/// The widest border of a sliced shadow, in pixels.
+const MAX_BORDER: usize = 512;
 
 /// The longest piece of a gradient line between two vertices, in points: a line is coloured at its vertices.
 const LINE_STEP: f32 = 4.0;
@@ -304,10 +313,11 @@ pub fn image(gradient: &Gradient, size: Vec2, pixels: [usize; 2]) -> ColorImage 
     raster(gradient, size, pixels, true)
 }
 
-/// The pictures kept for reuse: key, texture, the pass it was last used in.
+/// The pictures kept for reuse: key, texture, the pass it was last used in; and how many were rasterised in all.
 #[derive(Clone, Default)]
 struct Cache {
     entries: Vec<(u64, TextureHandle, u64)>,
+    made: u64,
 }
 
 fn cache_id() -> egui::Id {
@@ -333,6 +343,7 @@ fn texture(ctx: &egui::Context, gradient: &Gradient, size: Vec2, pixels: [usize;
     ctx.data_mut(|data| {
         let cache = data.get_temp_mut_or_default::<Cache>(cache_id());
         cache.entries.push((key, handle, pass));
+        cache.made = cache.made.saturating_add(1);
         // The oldest go first, never one this frame paints.
         while cache.entries.len() > KEEP {
             let oldest = cache.entries.iter().enumerate().filter(|(_, entry)| entry.2 < pass).min_by_key(|(_, entry)| entry.2).map(|(at, _)| at);
@@ -347,6 +358,19 @@ fn texture(ctx: &egui::Context, gradient: &Gradient, size: Vec2, pixels: [usize;
 #[must_use]
 pub fn kept(ctx: &egui::Context) -> usize {
     ctx.data_mut(|data| data.get_temp::<Cache>(cache_id()).map_or(0, |cache| cache.entries.len()))
+}
+
+/// How many pictures have been rasterised so far.
+#[must_use]
+pub fn rasterised(ctx: &egui::Context) -> u64 {
+    ctx.data_mut(|data| data.get_temp::<Cache>(cache_id()).map_or(0, |cache| cache.made))
+}
+
+/// Gives back every picture this pass did not paint. Called once at the end of the window's frame, so a resize or
+/// a closed float leaves no pictures behind.
+pub fn sweep(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<Cache>(cache_id()).entries.retain(|entry| entry.2 >= pass));
 }
 
 /// The pixels of `points` at `scale`, at least 1 and at most [`MAX_SIDE`].
@@ -364,7 +388,13 @@ pub fn fill(painter: &Painter, rect: Rect, corner: impl Into<CornerRadius>, grad
 /// The shape of `gradient` over `rect`, with corners rounded by `corner`, for a painter to add later (its picture
 /// is rasterised now when it is not kept yet).
 pub fn filled(painter: &Painter, rect: Rect, corner: impl Into<CornerRadius>, gradient: &Gradient) -> Shape {
+    let corner = corner.into();
     let scale = painter.pixels_per_point();
+    if corner == CornerRadius::ZERO
+        && let Some(shape) = sliced(painter, rect, gradient, scale)
+    {
+        return shape;
+    }
     let wanted = [pixels_of(rect.width(), scale), pixels_of(rect.height(), scale)];
     let (pixels, uv) = if gradient.soft() {
         let up = |side: usize| side.div_ceil(SOFT_STEP).saturating_mul(SOFT_STEP).clamp(1, MAX_SIDE);
@@ -376,6 +406,67 @@ pub fn filled(painter: &Painter, rect: Rect, corner: impl Into<CornerRadius>, gr
     let size = if gradient.soft() { vec2(pixels[0] as f32 / scale, pixels[1] as f32 / scale) } else { rect.size() };
     let id = texture(painter.ctx(), gradient, size, pixels);
     Shape::Rect(RectShape::filled(rect, corner, NO_TINT).with_texture(id, uv))
+}
+
+/// The pieces of one side of a sliced picture from `start` to `end` on screen: the border of `border` pixels, the
+/// middle in tiles of [`TILE`] pixels, the border at the other end. Each piece is where it goes on screen (in
+/// points), where it comes from in the picture (as a part of the picture's side) and whether it is in the middle.
+fn pieces(start: f32, end: f32, border: usize, scale: f32) -> Vec<([f32; 2], [f32; 2], bool)> {
+    let total = border.saturating_mul(2).saturating_add(TILE) as f32;
+    let (edge, inner) = (border as f32, (border + TILE) as f32);
+    let (width, tile) = (edge / scale, TILE as f32 / scale);
+    let (from, to) = (start + width, end - width);
+    let mut out = vec![([start, from], [0.0, edge / total], false)];
+    // Long middles get longer tiles; the cap keeps the count of pieces small.
+    let tile = tile.max((to - from) / MAX_TILES as f32);
+    let count = sane((to - from) / tile).ceil().clamp(0.0, MAX_TILES as f32);
+    // Clamped before the cast.
+    for index in 0..count as usize {
+        let at = from + tile * index as f32;
+        let next = (at + tile).min(to);
+        out.push(([at, next], [edge / total, (edge + TILE as f32 * (next - at) / tile) / total], true));
+    }
+    out.push(([to, end], [inner / total, 1.0], false));
+    out
+}
+
+/// A [`Gradient::Shadow`] over `rect` as a nine-slice: one small picture of the corners and a stretch of each edge,
+/// laid out around the layer with the edges tiled and the clear inside left out, so its picture is the same for
+/// every size of layer. `None` for other gradients and for layers too small to slice.
+fn sliced(painter: &Painter, rect: Rect, gradient: &Gradient, scale: f32) -> Option<Shape> {
+    let Gradient::Shadow { blur, drop, corner, .. } = gradient else { return None };
+    let border = |points: f32| {
+        let pixels = sane(points * scale).max(0.0).ceil();
+        // Clamped before the cast.
+        (pixels <= MAX_BORDER as f32).then_some(pixels as usize)
+    };
+    let (blur, drop, corner) = (sane(*blur).max(0.0), sane(*drop).max(0.0), sane(*corner).max(0.0));
+    let across = border(blur + corner)?;
+    let down = border(blur + corner + drop)?;
+    if !scale.is_finite()
+        || scale <= 0.0
+        || !rect.is_finite()
+        || rect.width() < 2.0 * across as f32 / scale
+        || rect.height() < 2.0 * down as f32 / scale
+    {
+        return None;
+    }
+    let pixels = [across * 2 + TILE, down * 2 + TILE];
+    let size = vec2(pixels[0] as f32 / scale, pixels[1] as f32 / scale);
+    let id = texture(painter.ctx(), gradient, size, pixels);
+    let mut mesh = Mesh::with_texture(id);
+    let columns = pieces(rect.left(), rect.right(), across, scale);
+    let rows = pieces(rect.top(), rect.bottom(), down, scale);
+    for (y, v, middle_row) in &rows {
+        for (x, u, middle_column) in &columns {
+            // The middle of both is under the layer, clear.
+            if !(*middle_row && *middle_column) {
+                let place = Rect::from_min_max(pos2(x[0], y[0]), pos2(x[1], y[1]));
+                mesh.add_rect_with_uv(place, Rect::from_min_max(pos2(u[0], v[0]), pos2(u[1], v[1])), NO_TINT);
+            }
+        }
+    }
+    Some(Shape::mesh(mesh))
 }
 
 /// Paints a line through `points`, `width` points wide, coloured by `gradient` over the line's bounding box.

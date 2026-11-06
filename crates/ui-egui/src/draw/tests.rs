@@ -268,6 +268,37 @@ fn nothing_repaints_while_nothing_moves() {
     }
 }
 
+/// The bytes of every texture the window holds.
+fn texture_bytes(harness: &Harness<'static, InboxApp>) -> usize {
+    harness.ctx.tex_manager().read().allocated().map(|(_, meta)| meta.bytes_used()).sum()
+}
+
+#[test]
+fn resizing_the_window_rasterises_little_and_gives_the_memory_back() {
+    for scale in [1.0, 2.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(scale)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.run();
+        harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+        harness.run();
+        let idle = texture_bytes(&harness);
+        let mut most = 0;
+        for step in 0..20 {
+            let before = crate::gradient::rasterised(&harness.ctx);
+            harness.set_size(vec2(1100.0 + 3.0 * step as f32, 720.0 + 2.0 * step as f32));
+            harness.step();
+            most = most.max(crate::gradient::rasterised(&harness.ctx) - before);
+        }
+        assert!(most <= 2, "at scale {scale}: {most} pictures rasterised in one frame of the resize");
+        harness.set_size(vec2(1100.0, 720.0));
+        harness.run();
+        let after = texture_bytes(&harness);
+        assert!(after <= idle + idle / 4, "at scale {scale}: {after} bytes kept after the resize, {idle} before");
+    }
+}
+
 /// Whether `shape` lets what is under it show through.
 fn translucent(shape: &egui::Shape) -> bool {
     let see_through = |colour: egui::Color32| colour.a() < 255 && colour != egui::Color32::TRANSPARENT;

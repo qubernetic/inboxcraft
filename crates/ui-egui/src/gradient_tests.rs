@@ -343,3 +343,76 @@ fn a_line_gets_a_vertex_every_few_points_and_no_more_than_the_cap() {
     assert_eq!(super::subdivided(&[pos2(0.0, 0.0), pos2(f32::INFINITY, 0.0)]).len(), 2);
     assert!(super::subdivided(&[]).is_empty());
 }
+
+fn shadow() -> Gradient {
+    Gradient::Shadow { colour: Color32::from_rgba_unmultiplied(0, 0, 0, 120), blur: 18.0, drop: 6.0, corner: 12.0 }
+}
+
+/// One frame of `ctx` at `scale` that fills each of `rects` with `gradient`, then sweeps the pictures.
+fn fill_frame(ctx: &egui::Context, scale: f32, rects: &[egui::Rect], gradient: &Gradient) {
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(2000.0, 1400.0))), ..Default::default() };
+    ctx.set_pixels_per_point(scale);
+    ctx.run_ui(input, |ui| {
+        for rect in rects {
+            super::fill(ui.painter(), *rect, 0.0, gradient);
+        }
+        super::sweep(ui.ctx());
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn a_shadow_picture_does_not_depend_on_the_size_of_its_layer() {
+    let ctx = egui::Context::default();
+    for scale in [1.0, 2.0] {
+        let before = super::rasterised(&ctx);
+        for width in (300..1900).step_by(37) {
+            let around = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(width as f32, width as f32 * 0.6));
+            fill_frame(&ctx, scale, &[around], &shadow());
+        }
+        assert_eq!(super::rasterised(&ctx) - before, 1, "at scale {scale} one picture for every size");
+        assert_eq!(super::kept(&ctx), 1);
+        let bytes: usize = ctx.tex_manager().read().allocated().filter(|(_, meta)| meta.name == "gradient").map(|(_, meta)| meta.bytes_used()).sum();
+        assert!(bytes < 256 * 1024, "the picture holds only the border: {bytes} bytes");
+    }
+}
+
+#[test]
+fn a_sliced_shadow_paints_what_the_whole_picture_would() {
+    let around = egui::Rect::from_min_size(pos2(4.0, 4.0), vec2(300.0, 180.0));
+    let picture = painted(vec2(310.0, 190.0), |ui| super::fill(ui.painter(), around, 0.0, &shadow()));
+    let mut worst = 0.0_f32;
+    for y in 4..184 {
+        for x in 4..304 {
+            let at = pos2(x as f32 + 0.5 - 4.0, y as f32 + 0.5 - 4.0);
+            let ideal = shadow().colour_at(at, around.size())[3] * 255.0;
+            let shown = f32::from(picture.pixel(x, y).unwrap().a());
+            worst = worst.max((shown - ideal).abs());
+        }
+    }
+    assert!(worst <= 2.0, "the slices meet without a seam: off by {worst}");
+    assert_eq!(picture.pixel(150, 90).map(|pixel| pixel.a()), Some(0), "the inside stays clear");
+}
+
+#[test]
+fn a_shadow_too_small_to_slice_is_painted_whole() {
+    let around = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(40.0, 40.0));
+    let picture = painted(vec2(50.0, 50.0), |ui| super::fill(ui.painter(), around, 0.0, &shadow()));
+    let ideal = shadow().colour_at(pos2(20.5, 2.5), around.size())[3] * 255.0;
+    let shown = f32::from(picture.pixel(20, 2).unwrap().a());
+    assert!((shown - ideal).abs() <= 2.0, "{shown} {ideal}");
+}
+
+#[test]
+fn a_sweep_gives_back_the_pictures_this_frame_did_not_paint() {
+    let ctx = egui::Context::default();
+    let rect = |width: f32| egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 20.0));
+    for width in 100..120 {
+        fill_frame(&ctx, 1.0, &[rect(width as f32), rect(50.0)], &ramp(0, 255));
+    }
+    assert_eq!(super::kept(&ctx), 2, "only what the last frame painted");
+    fill_frame(&ctx, 1.0, &[], &ramp(0, 255));
+    assert_eq!(super::kept(&ctx), 0);
+    assert_eq!(ctx.tex_manager().read().allocated().len(), 1, "only egui's own font texture is left");
+}

@@ -24,6 +24,7 @@ use egui::{CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel,
 
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
+use crate::gradient;
 use crate::mailbox::Mailbox;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
@@ -341,6 +342,8 @@ impl InboxApp {
             self.hover = drawn.hover.take();
         }
         layers.finish(ui.painter(), &theme);
+        // Every gradient of the frame is painted by now: the pictures it left out go.
+        gradient::sweep(ui.ctx());
         let acted = dismiss
             || stepped
             || left_full
