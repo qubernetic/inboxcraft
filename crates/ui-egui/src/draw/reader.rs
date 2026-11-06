@@ -689,7 +689,7 @@ pub(super) fn show(
     let p = &theme.palette;
     let whole = ui.max_rect();
     if let Some(notice) = reader.notice() {
-        egui::Panel::bottom("reader-notice").frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
+        egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.text));
                 if ui.button(tr!("Dismiss")).clicked() {

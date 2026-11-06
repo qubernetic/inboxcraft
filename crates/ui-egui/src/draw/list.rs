@@ -36,6 +36,13 @@ use crate::tr;
 /// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
 pub(super) const ROW_INSET: f32 = 6.0;
 
+/// The room the vertical scroll bar takes at the right of a scroll area, kept free so it never lies over a card or a
+/// row's date.
+fn scroll_room(ui: &Ui) -> f32 {
+    let scroll = &ui.spacing().scroll;
+    scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin
+}
+
 /// The rows a group shows before "Show all".
 pub(super) const GROUP_ROWS: usize = 3;
 
@@ -401,6 +408,7 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, showcase: &Showcase) -> Option<u64> {
     let mailbox = rows.mailbox;
     let mut clicked = None;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
         ui.spacing_mut().item_spacing = vec2(0.0, s.s);
         if !showcase.screener.is_empty() {
             screener(ui, rows.theme, rows.keymap, showcase);
@@ -437,6 +445,7 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
         ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, height, count, |ui, range| {
+            ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
             clicked = rows.show(ui, rows.mailbox.messages().get(range).unwrap_or_default());
         });
     });

@@ -435,7 +435,7 @@ impl InboxApp {
         }
         let mut dismiss = false;
         if let Some(error) = self.mailbox.error() {
-            Panel::top("error").frame(Frame::new().fill(p.error).inner_margin(margin(s.s))).show(ui, |ui| {
+            Panel::top("error").show_separator_line(false).frame(Frame::new().fill(p.error).inner_margin(margin(s.s))).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(error).color(p.on_error));
                     dismiss = ui.button(tr!("Dismiss")).clicked();
@@ -504,6 +504,7 @@ impl InboxApp {
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
                 layers.card(ui, Margin::ZERO, |ui| {
                     let searched = Panel::top("list-header")
+                        .show_separator_line(false)
                         .frame(Frame::new().inner_margin(margin(s.l)))
                         .show(ui, |ui| list::header(ui, &theme, keymap, mailbox, search))
                         .inner;
