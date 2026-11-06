@@ -62,6 +62,34 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
 }
 
 #[test]
+fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_preset() {
+    for preset in &PRESETS {
+        for mode in [Mode::Light, Mode::Dark] {
+            let name = if mode == Mode::Light { "light" } else { "dark" };
+            let id = preset.id;
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "icons": true}}"#))).unwrap();
+            let palette = Theme::new(mode, preset).palette;
+            assert_eq!(picture.pixel(0, 0), Some(palette.panel), "{id} {name}: the sheet is on the panel");
+            let mut colours = std::collections::BTreeSet::new();
+            for y in 0..picture.height() {
+                for x in 0..picture.width() {
+                    colours.insert(picture.pixel(x, y).unwrap().to_array());
+                }
+            }
+            for (token, colour) in [("text", palette.text), ("accent", palette.accent)] {
+                assert!(colours.contains(&colour.to_array()), "{id} {name}: icons in the {token} colour");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_icon_sheet_is_not_a_window() {
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "search": "logo"}"#)).unwrap_err();
+    assert!(error.to_string().contains("x.png: an icon sheet"), "{error}");
+}
+
+#[test]
 fn a_shot_without_a_preset_is_electric() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
     let electric = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "electric", "size": [600, 400]}"#)).unwrap();

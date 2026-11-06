@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Art drawn in code: the app icon and the attachment tile's page mark.
+//! Art drawn in code: the app icon. The icons inside the window come from an icon set, see [`crate::iconset`].
 //!
 //! The icon is a list of [`Part`]s on a square of [`SIDE`] units: a harbour teal tile, a letter standing in an inbox
 //! tray and an unread dot. The same parts give the SVG the desktop shows ([`svg`], exported to [`EXPORTED`] by the
@@ -175,19 +175,6 @@ pub fn shapes(parts: &[Part], rect: Rect) -> Vec<Shape> {
             Part::Circle { centre, radius, fill } => Shape::circle_filled(at(*centre), radius.max(0.0) * size, *fill),
         })
         .collect()
-}
-
-/// The attachment tile's mark: a page with a folded corner, outlined in `colour` inside `rect`.
-#[must_use]
-pub fn page_mark(rect: Rect, colour: Color32) -> Vec<Shape> {
-    let fold = rect.width() * 0.35;
-    let stroke = egui::Stroke::new(1.5, colour);
-    let corner = pos2(rect.right() - fold, rect.top());
-    let side = pos2(rect.right(), rect.top() + fold);
-    vec![
-        Shape::line(vec![rect.left_top(), corner, side, rect.right_bottom(), rect.left_bottom(), rect.left_top()], stroke),
-        Shape::line(vec![corner, pos2(corner.x, side.y), side], stroke),
-    ]
 }
 
 /// `parts` filled into a picture of `side` by `side` pixels on a transparent background.

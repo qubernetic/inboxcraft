@@ -19,7 +19,7 @@ use egui::{
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
-use crate::icons;
+use crate::iconset::{IconId, Style};
 use crate::mailbox::{After, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
@@ -483,8 +483,9 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
         for file in files {
             Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 22.0), Sense::hover());
-                    ui.painter().extend(icons::page_mark(rect.shrink(1.0), p.accent));
+                    let side = super::paint::line_height(ui, theme.fonts.body) * 1.5;
+                    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                    theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.accent);
                     ui.vertical(|ui| {
                         ui.add(egui::Label::new(RichText::new(&file.name).font(theme.fonts.body.id()).color(p.text)).truncate());
                         ui.label(RichText::new(size_text(file.size)).font(theme.fonts.caption.id()).color(p.muted));

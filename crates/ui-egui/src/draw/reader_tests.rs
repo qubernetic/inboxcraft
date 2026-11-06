@@ -12,6 +12,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
 use super::InboxApp;
+use crate::iconset::{IconId, Style};
 use crate::mailbox::{After, Mailbox};
 use crate::reader::tests::Recorder;
 use crate::sample;
@@ -193,6 +194,7 @@ fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
 fn saving_an_attachment_says_where_it_went_or_why_not() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    assert!(super::tests::drew_icon(harness.output(), IconId::File, Style::Regular), "the tile shows the file icon");
     harness.get_by_label("Save sketch-2.png").click();
     harness.run();
     harness.get_by_label("Saving attachments is not available in this window.");

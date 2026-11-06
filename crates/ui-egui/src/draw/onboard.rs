@@ -4,8 +4,9 @@
 //! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw.
 
 use egui::text_edit::TextEditState;
-use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, pos2, vec2};
+use egui::{CollapsingHeader, Color32, Grid, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
+use crate::iconset::{IconId, Style};
 use crate::mailbox::Mailbox;
 use crate::onboard::{MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
@@ -149,35 +150,19 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
     asked
 }
 
-/// The mark in front of a step, drawn in code: a filled disc with a tick or a cross, or a ring.
+/// The icon in front of a step: a filled tick or cross once it is decided, a ring while it waits, a dash when it
+/// will not run.
 fn mark(ui: &mut Ui, theme: &Theme, state: StepState) {
     let p = theme.palette;
     let size = super::paint::line_height(ui, theme.fonts.body);
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    let painter = ui.painter();
-    let (c, r) = (rect.center(), size / 2.0 - 1.0);
-    match state {
-        StepState::Passed => {
-            painter.circle_filled(c, r, p.accent);
-            let stroke = Stroke::new(1.8, p.on_accent);
-            painter.line_segment([pos2(c.x - r * 0.45, c.y), pos2(c.x - r * 0.1, c.y + r * 0.4)], stroke);
-            painter.line_segment([pos2(c.x - r * 0.1, c.y + r * 0.4), pos2(c.x + r * 0.5, c.y - r * 0.4)], stroke);
-        }
-        StepState::Failed => {
-            painter.circle_filled(c, r, p.error);
-            let stroke = Stroke::new(1.8, p.on_error);
-            let d = r * 0.4;
-            painter.line_segment([pos2(c.x - d, c.y - d), pos2(c.x + d, c.y + d)], stroke);
-            painter.line_segment([pos2(c.x - d, c.y + d), pos2(c.x + d, c.y - d)], stroke);
-        }
-        StepState::Pending => {
-            painter.circle_stroke(c, r - 0.5, Stroke::new(1.5, p.accent));
-        }
-        StepState::Skipped | StepState::Held | StepState::NotBuilt => {
-            painter.circle_stroke(c, r - 0.5, Stroke::new(1.5, p.muted));
-            painter.line_segment([pos2(c.x - r * 0.4, c.y), pos2(c.x + r * 0.4, c.y)], Stroke::new(1.5, p.muted));
-        }
-    }
+    let (id, style, colour) = match state {
+        StepState::Passed => (IconId::Done, Style::Fill, p.accent),
+        StepState::Failed => (IconId::Failed, Style::Fill, p.error),
+        StepState::Pending => (IconId::Waiting, Style::Regular, p.accent),
+        StepState::Skipped | StepState::Held | StepState::NotBuilt => (IconId::Skipped, Style::Regular, p.muted),
+    };
+    theme.icons.paint(ui.painter(), rect, id, style, colour);
 }
 
 fn state_text(state: StepState) -> &'static str {

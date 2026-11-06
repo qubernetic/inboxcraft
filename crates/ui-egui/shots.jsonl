@@ -46,3 +46,10 @@
 {"out": "docs/images/list-text-90-dark.png", "mode": "dark", "text_scale": 90, "select": "Photos from the coast walk"}
 {"out": "docs/images/list-text-130-light.png", "mode": "light", "text_scale": 130, "select": "Photos from the coast walk"}
 {"out": "docs/images/list-text-130-dark.png", "mode": "dark", "text_scale": 130, "select": "Photos from the coast walk"}
+# The icon set (E1.15d): every icon in Regular (text colour), Fill and Duotone (accent) and Regular at body size.
+{"out": "docs/images/icons-light.png", "mode": "light", "icons": true, "scale": 2}
+{"out": "docs/images/icons-dark.png", "mode": "dark", "icons": true, "scale": 2}
+{"out": "docs/images/icons-aurora-light.png", "mode": "light", "preset": "aurora", "icons": true, "scale": 2}
+{"out": "docs/images/icons-aurora-dark.png", "mode": "dark", "preset": "aurora", "icons": true, "scale": 2}
+{"out": "docs/images/icons-citrus-light.png", "mode": "light", "preset": "citrus", "icons": true, "scale": 2}
+{"out": "docs/images/icons-citrus-dark.png", "mode": "dark", "preset": "citrus", "icons": true, "scale": 2}

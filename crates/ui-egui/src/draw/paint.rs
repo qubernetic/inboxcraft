@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The small pieces the panes are drawn from: one line of text cut to a width, the selection, a navigation row, a
-//! badge, a flag.
+//! badge.
 
 use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{Color32, Galley, Painter, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Galley, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::gradient::{self, Gradient, Stop};
 use crate::theme::{Font, Theme};
@@ -55,19 +55,6 @@ pub(super) fn badge(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f3
     ui.painter().rect_filled(rect, height / 2.0, p.badge);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_badge);
     rect.left()
-}
-
-/// A small pennant: the flag marker of a flagged message, drawn in code.
-pub(super) fn flag(ui: &Ui, colour: Color32, at: Pos2, size: f32) {
-    let painter = ui.painter();
-    let top = at;
-    let bottom = pos2(at.x, at.y + size);
-    painter.line_segment([top, bottom], Stroke::new(1.5, colour));
-    painter.add(egui::Shape::convex_polygon(
-        vec![top, pos2(at.x + size * 0.8, at.y + size * 0.25), pos2(at.x, at.y + size * 0.5)],
-        colour,
-        Stroke::NONE,
-    ));
 }
 
 /// What a navigation row shows.

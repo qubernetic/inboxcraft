@@ -17,7 +17,8 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects.
+//! (the certificate refused); the check is scripted and nothing connects. `icons` set to `true` draws every icon of
+//! the set in every style in the preset's colours instead of the window.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -32,9 +33,9 @@ use serde::Deserialize;
 use crate::mailbox::{Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
-use crate::theme::{Mode, Preset, TextScale};
+use crate::theme::{self, Mode, Preset, TextScale, Theme};
 use crate::workers::Scripted;
-use crate::{InboxApp, UiError, sample};
+use crate::{InboxApp, UiError, iconset, sample};
 
 /// The largest picture side in pixels.
 pub const MAX_SIDE: usize = 4096;
@@ -100,6 +101,9 @@ pub struct Shot {
     /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
     #[serde(default)]
     pub onboard: Option<String>,
+    /// Every icon of the set in every style instead of the window.
+    #[serde(default)]
+    pub icons: Option<bool>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -164,6 +168,28 @@ fn onboard(app: InboxApp, out: &str, state: &str) -> Result<InboxApp, UiError> {
         app.pump();
     }
     Ok(app)
+}
+
+/// The icon sheet of `shot` in `mode` and `preset`; it shows no window, so the window settings are refused.
+fn icon_sheet(shot: &Shot, mode: Mode, preset: &Preset) -> Result<Picture, UiError> {
+    let window = shot.narrow.is_some()
+        || shot.open.is_some()
+        || shot.search.is_some()
+        || shot.select.is_some()
+        || shot.onboard.is_some()
+        || shot.text_scale.is_some()
+        || shot.size.is_some();
+    if window {
+        return Err(bad(format!("{}: an icon sheet has no window to narrow, open, search, select, scale or size", shot.out)));
+    }
+    let theme = Theme::new(mode, preset);
+    let mut fonts = true;
+    paint(iconset::sheet_size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+        }
+        iconset::sheet(ui.painter(), &theme);
+    })
 }
 
 fn bad(detail: impl Into<String>) -> UiError {
@@ -470,6 +496,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         None => Preset::default(),
         Some(id) => *Preset::named(id).ok_or_else(|| bad(format!("{}: no preset {id:?}", shot.out)))?,
     };
+    if shot.icons == Some(true) {
+        return icon_sheet(shot, mode, &preset);
+    }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
     let session = sample::session(Box::new(FakeClock::new(time)))?;
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
