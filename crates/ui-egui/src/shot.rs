@@ -18,7 +18,10 @@
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects. `settings` set to `true` shows the
-//! appearance settings page. `icons` set to `true` draws every icon of
+//! appearance settings page. `showcase` set to `true` fills the parts of the list that have no data or command yet
+//! with invented data ([`sample::showcase`]: the screener and grouped inbox cards, the hover actions) and gives their
+//! actions keys; `step` selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the
+//! hover actions. `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
@@ -111,6 +114,12 @@ pub struct Shot {
     /// Whether the appearance settings page is open.
     #[serde(default)]
     pub settings: Option<bool>,
+    /// The invented screener, groups and hover actions in the list, with keys for their actions.
+    #[serde(default)]
+    pub showcase: Option<bool>,
+    /// How many rows down the keyboard selects.
+    #[serde(default)]
+    pub step: Option<u8>,
     /// Every icon of the set in every style instead of the window.
     #[serde(default)]
     pub icons: Option<bool>,
@@ -197,6 +206,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.select.is_some()
         || shot.onboard.is_some()
         || shot.settings.is_some()
+        || shot.showcase.is_some()
+        || shot.step.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
@@ -584,6 +595,19 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if let Some(text) = &shot.search {
         app.search(text);
+    }
+    if shot.showcase == Some(true) {
+        let showcase = sample::showcase(app.mailbox());
+        app.mailbox_mut().set_showcase(showcase);
+        *app.keymap_mut() = gallery::keymap();
+    }
+    if let Some(steps) = shot.step {
+        if shot.select.is_some() {
+            return Err(bad(format!("{}: a shot selects by step or by subject, not both", shot.out)));
+        }
+        for _ in 0..steps {
+            app.mailbox_mut().step(true);
+        }
     }
     if let Some(subject) = &shot.select {
         let id = app.mailbox().messages().iter().find(|row| row.subject == *subject).map(|row| row.id);

@@ -20,6 +20,12 @@ fn count_rect(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> 
     (Rect::from_min_size(pos2(right - width, centre_y - height / 2.0), vec2(width, height)), text)
 }
 
+/// The width of a count badge for `count`.
+#[must_use]
+pub fn count_width(ui: &Ui, theme: &Theme, count: u64) -> f32 {
+    count_rect(ui, theme, count, 0.0, 0.0).0.width()
+}
+
 /// Paints a count badge with `count` in it, its right edge at `right`, centred on `centre_y`; returns its left edge.
 pub fn count(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f32 {
     let p = &theme.palette;

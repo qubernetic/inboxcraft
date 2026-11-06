@@ -364,8 +364,8 @@ B = blocks the next stage.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings page that
-  runs them exist. The page has no keyboard shortcut and no command of its own: it opens from the folder pane's
-  settings button (or `InboxApp::open_settings`). The custom accent is typed as `#rrggbb` or picked with egui's own
+  runs them exist. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
   "follow the system" after a choice is possible only through `ui.motion.set` with `reduce: system`. Loading the
@@ -376,10 +376,18 @@ B = blocks the next stage.
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
+- Message list (#88): the screener card, the grouped inbox's cards and the hover actions are built but have no
+  data or command: the screener and the groups wait for E3.1 and E3.2, Done for E3.3, read or unread and Delete
+  for E2.1. The app draws none of them; only `ui_shot` shows them, with invented data (`showcase`), and there
+  "Review", "Done all" and the hover actions do nothing when pressed. E1.17c makes the hover actions act on the
+  sample mailbox in memory. In the grouped inbox the arrow keys still step through the list in date order, not in
+  the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
+  holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
+  their features. A row shows the first sender's avatar from initials only.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
-  popup exist and are shown in the `ui_shot` gallery, but only the avatar (in the reader's header) and the count
-  badge are used in the window yet; the list and the reader move onto the rest with E1.17. The keymap knows one
-  key of its own (Ctrl+F for the search); the arrow keys and Escape are still read directly, and changing a key is
+  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader moves onto them
+  with E1.17b. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
+  settings); the arrow keys and Escape are still read directly, and changing a key is
   possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
   `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
@@ -499,3 +507,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Reduced motion: the mouse wheel's smoothing keeps running (#85) |
 | 2026-11-06 | minor | Appearance: the commands and keeping them exist, the controls wait for the settings page; Lucide's disc; the kept file (#86) |
 | 2026-11-06 | minor | Appearance settings page: what it lacks, the owner's own font or icon files an idea only; the fit test's reach (#87) |
+| 2026-11-06 | minor | Message list: the showcase-only parts, what waits for E2.1, E3.1 to E3.3 and E1.17c; the rail's reach (#88) |

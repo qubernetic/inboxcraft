@@ -193,6 +193,23 @@ fn a_shot_shows_the_settings_page_in_the_window_only() {
 }
 
 #[test]
+fn a_shot_shows_the_showcase_and_steps_the_selection_by_keyboard() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let off = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": false}"#)).unwrap();
+    let shown = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": true}"#)).unwrap();
+    let stepped = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600], "showcase": true, "step": 2}"#)).unwrap();
+    assert_eq!(window, off);
+    assert_ne!(window, shown);
+    assert_ne!(shown, stepped);
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "step": 1, "select": "Draft logo for the bakery"}"#)).unwrap_err().to_string();
+    assert!(error.contains("by step or by subject"), "{error}");
+    for page in [r#""showcase": true"#, r#""step": 1"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "components": true, {page}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),

@@ -11,6 +11,12 @@ use egui::{Context, Key, KeyboardShortcut, Modifiers};
 /// Focus the search field.
 pub const FIND: &str = "ui.search.focus";
 
+/// Show the mail: leave the settings or the add-account page (the rail's Mail button).
+pub const MAIL: &str = "ui.mail.show";
+
+/// Open the appearance settings (the rail's settings button).
+pub const SETTINGS: &str = "ui.settings.open";
+
 /// The keys of the actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keymap {
@@ -22,6 +28,8 @@ impl Default for Keymap {
     fn default() -> Self {
         let mut keymap = Self::empty();
         keymap.bind(FIND, KeyboardShortcut::new(Modifiers::COMMAND, Key::F));
+        keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
+        keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
         keymap
     }
 }

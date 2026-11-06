@@ -7,7 +7,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Offset, Timestamp};
 use serde_json::{Value, json};
 
-use super::{After, MAX_QUERY, MAX_SHOWN, Mailbox, Place, shown, when};
+use super::{After, MAX_QUERY, MAX_SHOWN, Mailbox, Place, Showcase, shown, when};
 use crate::sample;
 
 /// 2026-11-05T09:00:00Z, a Thursday.
@@ -364,4 +364,51 @@ fn the_expanded_header_gives_the_date_in_full() {
     let mailbox = mailbox();
     assert_eq!(mailbox.full_date(at(NOW - 25 * 60)), "Thursday 5 Nov 2026, 08:35");
     assert_eq!(mailbox.short_date(at(NOW - 25 * 60)), "08:35");
+}
+
+#[test]
+fn a_row_keeps_its_sender_s_address_for_the_avatar() {
+    let mailbox = mailbox();
+    let first = mailbox.messages().first().unwrap();
+    assert_eq!((first.sender.as_str(), first.address.as_str()), ("Odile Brannock", "odile@example.org"));
+}
+
+#[test]
+fn a_keyboard_step_marks_the_selection_as_keyed_and_a_click_does_not() {
+    let mut mailbox = mailbox();
+    assert!(!mailbox.keyed());
+    mailbox.step(true);
+    assert!(mailbox.keyed());
+    let second = mailbox.messages().get(1).unwrap().id;
+    mailbox.select(Some(second));
+    assert!(!mailbox.keyed());
+    mailbox.step(false);
+    assert!(mailbox.keyed());
+    mailbox.select(None);
+    assert!(!mailbox.keyed());
+}
+
+#[test]
+fn the_showcase_is_empty_until_ui_shot_fills_it() {
+    let mut mailbox = mailbox();
+    assert_eq!(mailbox.showcase(), &Showcase::default());
+    assert!(mailbox.showcase().is_empty());
+    let showcase = sample::showcase(&mailbox);
+    assert!(showcase.hover && !showcase.screener.is_empty() && !showcase.groups.is_empty());
+    mailbox.set_showcase(showcase.clone());
+    assert_eq!(mailbox.showcase(), &showcase);
+    assert!(!mailbox.showcase().is_empty());
+}
+
+#[test]
+fn the_sample_showcase_groups_people_and_updates_and_leaves_one_row_out() {
+    let mailbox = mailbox();
+    let showcase = sample::showcase(&mailbox);
+    let names: Vec<&str> = showcase.groups.iter().map(|group| group.name.as_str()).collect();
+    assert_eq!(names, ["People", "Updates"]);
+    let grouped: Vec<u64> = showcase.groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    assert_eq!(grouped.len(), mailbox.messages().len() - 1);
+    let left: Vec<&str> = mailbox.messages().iter().filter(|row| !grouped.contains(&row.id)).map(|row| row.sender.as_str()).collect();
+    assert_eq!(left, ["Kasimir Vell"]);
+    assert!(showcase.screener.iter().all(|waiting| waiting.address.ends_with("@example.org")));
 }

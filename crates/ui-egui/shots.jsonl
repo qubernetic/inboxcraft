@@ -78,3 +78,11 @@
 {"out": "docs/images/settings-inter-dark.png", "mode": "dark", "font": "inter", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-lucide-light.png", "mode": "light", "icon_set": "lucide", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "size": [1200, 820], "settings": true}
+# The message list (E1.17a) in each preset: the screener and group cards and the hover actions on the row selected by
+# keyboard, with invented data the app does not show yet.
+{"out": "docs/images/list-showcase-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}

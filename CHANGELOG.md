@@ -329,6 +329,14 @@ All notable changes to InboxCraft are listed here. The format follows
   included before they are used; when the engine makes a custom accent lighter, the page says which colour is used
   instead. Close or Escape leave the page. The overflow test covers it in both typefaces at 90 % and 130 %;
   `ui_shot` takes `settings`.
+- The message list on the design system (#88): a navigation rail down the window's left edge in the preset's
+  gradient at full strength, with Mail (Ctrl+1) and the appearance settings (Ctrl+Comma; the button moved there
+  from the folder pane); the rows on a card, each with the sender's avatar, the selected row in the selection
+  gradient, unread by dot and weight. The screener card, the grouped inbox's cards (badge, name, unread count,
+  "Done all", "Show all (n)") and the hover actions (Done, mark read or unread, Delete), which a row selected by
+  keyboard shows as a hovered one does with its text fading out before them, are built but have no data or command
+  yet: the app draws none of them, and `ui_shot` shows them with invented data (`showcase`, `step`). A quiet and a
+  primary text button with a tooltip join the components; every button of the list and the rail has a tooltip.
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

@@ -230,7 +230,8 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Component | What it is |
 |---|---|
 | Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
-| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip. |
+| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip. On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
+| Text button (`button::text`) | A word in a fully rounded field one control high, with its tooltip: quiet (a hover fill only) or primary (the preset's gradient, the word in white or the deep ink). |
 | Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
 | Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
@@ -274,16 +275,41 @@ through `ui.motion.set` (on, off or follow the system) and a switch for it comes
 window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
-- **Folder pane** (left): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
+- **Navigation rail** (the window's left edge, full height): the preset's three gradient stops at full strength from
+  top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
+  foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
+  (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
+  (Ctrl+1) leaves the settings or the add-account page; the settings button (Ctrl+Comma) opens the settings page and
+  closes it again. The rail is one button and 8 points either side wide, and shows on every page.
+- **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
   view and folder with unread mail carries a badge with the count.
 - **Header** (top of the list): the view's or folder's name, whose mail it is (the narrowed account's address, or
   "All accounts") and how many messages; the search field on the right, with a Clear button while it holds text.
   Ctrl+F (Cmd+F on macOS) focuses it and Escape empties it.
-- **List**: newest first, one row per message: unread dot, sender, date (time today, "Yesterday", the weekday in
-  the last week, then the day and month, with the year for earlier years), subject and the preview in muted text, the
-  Flag icon (Fill, in the flag colour, one subject line high) for flagged mail, and the account stripe when more than one account is shown.
+- **List**: newest first, the rows on a card (the surface colour, corner `card`, a line edge) as tall as its rows
+  or the room, scrolling inside it. One row per message: the account stripe when more than one account is shown,
+  the unread dot, the sender's avatar two lines high, the sender and the date (time today, "Yesterday", the weekday
+  in the last week, then the day and month, with the year for earlier years), the subject and the preview in muted
+  text, and the Flag icon (Fill, in the flag colour, one subject line high) for flagged mail. Unread rows show the
+  dot and a heavier sender and subject; the selected row the selection gradient, a hovered one the hover fill, both
+  with the `corner` radius inside the card.
+- **Hover actions**: Done, "Mark as read" or "Mark as unread", and Delete on a float at the row's right end
+  (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
+  date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
+  their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
+- **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
+  new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
+  card's edge is the preset's gradient, 1.5 points wide.
+- **Group cards** (the grouped unified inbox): a header with the group's badge, its name and unread count, and
+  "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds more. The rows no
+  group holds follow on a card of their own.
+- The screener, the groups and the hover actions have no data or command yet. The app draws none of them; `ui_shot`
+  shows them with invented data (`"showcase": true`, and `"step": n` to select by keyboard).
+- **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
+  key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
+  deep ink, whichever reads at 4.5:1 on every stop).
 - **Search**: the text is looked for in subject, sender and recipients in every folder of the accounts shown, and
   the header says "Search". Opening a view or folder ends it.
 - **Empty states** say what is going on: no accounts yet (with the `--sample` hint), an empty folder, no match.
@@ -336,8 +362,8 @@ the icon sits among others at the same size.
   Check again, Change settings and Close after a failure; Close while it runs.
 
 ## Appearance settings
-- **Where**: the settings button (the Settings icon, "Appearance settings") sits beside the app's name in the folder
-  pane and shows as active while the page is open. The page takes the place of the list and the reader, as adding an
+- **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
+  and shows as active while the page is open; Ctrl+Comma opens the page too, and the rail's Mail button leaves it. The page takes the place of the list and the reader, as adding an
   account does, and the two close each other. Close or Escape leaves it.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
@@ -410,3 +436,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |
 | 2026-11-06 | minor | Appearance choices and their commands; Inter; Lucide with its disc for Fill and Duotone (#86) |
 | 2026-11-06 | minor | The appearance settings page with its preview, the switch, its pictures (#87) |
+| 2026-11-06 | minor | The mail list window: the navigation rail, the list card, avatars, hover actions, screener and group cards, text buttons (#88) |
