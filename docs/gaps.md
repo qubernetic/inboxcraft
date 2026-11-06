@@ -315,7 +315,7 @@ B = blocks the next stage.
 - The arrow keys step through the list only while no control has the keyboard focus; Tab moves the focus through
   every folder and row, and Enter or Space selects (#30, #33).
 - A link in a message is never opened: the window has no browser hand-off (egui's `links` feature is off, and
-  turning it on is the project owner's call), so a click copies the address and the line under the reader shows
+  turning it on is the project owner's call), so a click copies the address and the float over the reader shows
   where it goes. Plain-text bodies show web addresses as text, not as links (#33).
 - "Always for this sender" is kept for the session only (`remote.allow` keeps it in the engine's memory) until
   settings are kept on disk. It goes by the sender's address, which a forged `From` can borrow: a forger who
@@ -389,9 +389,17 @@ B = blocks the next stage.
   be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
   but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
   the keymap can be changed in the settings.
+- Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
+  `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
+  (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
+  for the composer (E2.3). They are drawn disabled with "Not available yet" in their
+  tooltips. More holds Full width, Close and the next-message rule; Escape leaves full width but does not close the
+  reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
+  still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
+  More menu or hover a link, so neither has a picture; the UI tests cover both. The thread's earlier messages fold
+  to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
-  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader moves onto them
-  with E1.17b. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
+  popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
   settings); the arrow keys and Escape are still read directly, and changing a key is
   possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
   `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
@@ -514,3 +522,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Appearance settings page: what it lacks, the owner's own font or icon files an idea only; the fit test's reach (#87) |
 | 2026-11-06 | minor | Message list: the showcase-only parts, what waits for E2.1, E3.1 to E3.3 and E1.17c; the rail's reach (#88) |
 | 2026-11-06 | minor | Hover actions: on the sample only, Done's stand-in meaning, one undo, the keys fixed (#89) |
+| 2026-11-06 | minor | Reader: which toolbar actions act, what waits for which task, the inner buttons, no picture of More (#90) |

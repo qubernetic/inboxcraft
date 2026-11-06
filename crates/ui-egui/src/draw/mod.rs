@@ -542,7 +542,9 @@ impl InboxApp {
             drawn = CentralPanel::no_frame()
                 .frame(around(left, gap, gap))
                 .show(ui, |ui| {
-                    layers.card(ui, Margin::ZERO, |ui| reader::show(ui, &theme, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref()))
+                    layers.card(ui, Margin::ZERO, |ui| {
+                        reader::show(ui, &theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
+                    })
                 })
                 .inner;
             if drawn.hover != hover {
@@ -722,6 +724,7 @@ impl InboxApp {
                 ui.ctx().copy_text(url);
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
+            reader::Asked::Act(id, act) => mailbox.start(id, act),
         }
     }
 }

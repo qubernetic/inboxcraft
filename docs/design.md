@@ -154,8 +154,8 @@ against Medium and Regular) as well as marked by its dot, so it reads as unread 
 (`ui.text_scale.set`; the settings page comes with E1.16b). Layout follows the font,
 never fixed points for text: the message rows, folder rows, folded thread rows and step marks take their height
 from the font's own line height at the current scale, and every cut line is measured and ends in an ellipsis. The
-reader's controls wrap onto a second line when there is no room, and the subject has the line below them to itself
-and wraps rather than being cut. `draw/fit_tests.rs` draws the list, a thread, the full header, the full-width
+reader's mail actions wrap onto a second line when there is no room, and the subject has the line below them to
+itself and wraps rather than being cut; attachment tiles are measured first and wrap before they would stick out. `draw/fit_tests.rs` draws the list, a thread, the full header, the full-width
 reader and the add-account page at 90 %, 100 % and 130 % and fails on text that sticks out of its row or button, is
 cut at the side of its pane, or lies over other text.
 
@@ -230,15 +230,15 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Component | What it is |
 |---|---|
 | Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
-| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip. On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
-| Text button (`button::text`) | A word in a fully rounded field one control high, with its tooltip: quiet (a hover fill only) or primary (the preset's gradient, the word in white or the deep ink). |
+| Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip; `unavailable` adds a note under the name that says why ("Not available yet"). On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
+| Text button (`button::text`) | A word in a fully rounded field one control high, with its tooltip: quiet (a hover fill only) or primary (the preset's gradient, the word in white or the deep ink). `button::unavailable` draws one that cannot be pressed yet: faded to 45 %, no click, its tooltip saying why. |
 | Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
-| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once. Every icon button has one. |
+| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once, and for a control that cannot be used yet a muted note under them. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
 | Badge (`badge`) | An unread count in a pill of the badge colour, or a group's solid (Fill) icon on the preset's gradient at full strength: white wherever white reaches 3:1 (WCAG AA for a graphical object) on every stop, as on Electric, otherwise the deep ink. The WCAG 2 ratio rates dark ink on saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough. |
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
-| Popup (`popup`) | A float with menu rows (icon, name, key chip), opening over the card motion; over sharp text it is the float over text. |
+| Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -334,14 +334,25 @@ square (`crates/ui-egui/src/icons.rs`); the same shapes give the SVG the desktop
 the icon sits among others at the same size.
 
 ## The reader
-- **Where**: selecting a row opens the message to the right of the list, which narrows to a column. "Full width"
-  hides the folder pane and the list; Escape, "Leave full width" or Ctrl+F (for the search) bring them back. Close
-  ends the selection. The arrow keys step through the list while no field has the focus.
-- **Toolbar**: the next-message rule ("When a message leaves the list": show the next, show the previous, go back
-  to the list), Full width and Close, wrapping when there is no room; the subject under them in the title token,
-  wrapped rather than cut.
-- **Thread**: oldest first. The open message is unfolded; the others are one line (sender, the first words, the
-  date) on the panel colour and unfold on a click; an unfolded older message has Fold.
+- **Where**: selecting a row opens the message to the right of the list, which narrows to a column. More, Full
+  width hides the folder pane and the list; Escape, More, Leave full width or Ctrl+F (for the search) bring them
+  back. More, Close ends the selection. The arrow keys step through the list while no field has the focus.
+- **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
+  Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
+  room. Every action has a tooltip with its key. An action without a command is drawn disabled and its tooltip
+  says "Not available yet": on the sample mailbox Done (D) and Delete (Delete) act on the open message as the
+  list's hover actions do (the toast with Undo follows), everywhere else they are disabled too; Archive, Snooze, Pin
+  and Move wait for their commands.
+- **More**: a menu over the reader (the float over text) with Full width or Leave full width, Close, and the
+  next-message rule ("When a message leaves the list": show the next, show the previous, go back to the list), the
+  chosen one marked.
+- **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
+  under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
+- **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
+  colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
+  strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
+  message ends with Reply (primary, on the preset's gradient), Reply all and Forward, disabled with "Not available
+  yet" until the composer comes.
 - **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
   it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
   To, Copy and the date in full.
@@ -352,10 +363,12 @@ the icon sits among others at the same size.
   muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
   list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
   way.
-- **Attachments**: tiles with the File icon (Regular, in the accent colour, one and a half body lines high), the
-  name, the size and Save.
-- **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
-  "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
+- **Attachments**: tiles side by side, wrapping, each with the File icon (Regular, in the accent colour, one and a
+  half body lines high), the name (cut to fit), the size and Save.
+- **Link status**: only while the pointer is on a link, a float over the reader's bottom left corner says where it
+  goes; a link whose text names another place shows "Careful: ..." in the error colour. The float takes no
+  pointer, so the link under it stays hovered. A notice (a save, a copied link, an error) shows in a line at the
+  bottom with Dismiss until it is dismissed.
 
 ## Adding an account
 - **Where**: "Add account" sits under the app's name in the folder pane, and in the middle of the empty window. The
@@ -404,7 +417,7 @@ the icon sits among others at the same size.
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
-width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
+width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-<mode>.png`), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
@@ -452,3 +465,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The appearance settings page with its preview, the switch, its pictures (#87) |
 | 2026-11-06 | minor | The mail list window: the navigation rail, the list card, avatars, hover actions, screener and group cards, text buttons (#88) |
 | 2026-11-06 | minor | The hover actions act on the sample: their keys, the slide-out, the toast with Undo, their pictures (#89) |
+| 2026-11-06 | minor | The reader on the design system: mail-action toolbar, More menu, thread cards, Reply row, link status float; unavailable buttons, tooltip notes, menu choices (#90) |

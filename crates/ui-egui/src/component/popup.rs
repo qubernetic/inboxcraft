@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The popup: a float with menu rows (an icon, a name and the key chip), opening over the card motion token. Over
-//! sharp text (a menu over the reader) it goes more opaque; over content that fades it is the frosted float.
+//! The popup: a float with menu rows (an icon, a name and the key chip) and choice rows (one of a few, the chosen one
+//! marked), opening over the card motion token. Over sharp text (a menu over the reader) it goes more opaque; over
+//! content that fades it is the frosted float.
 
 use egui::{Align2, Area, Context, Id, Order, Pos2, Rect, Response, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
@@ -49,11 +50,28 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, under: Under,
 
 /// A menu row: `icon`, `name` and the key of `action` from `keymap` at its right end; clicked when chosen.
 pub fn item(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: IconId, name: &str, action: Option<&str>) -> Response {
+    row(ui, theme, keymap, Some(icon), name, action, None)
+}
+
+/// A menu row without an icon, its name in line with the names of the rows that have one.
+pub fn entry(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>) -> Response {
+    row(ui, theme, keymap, None, name, action, None)
+}
+
+/// A choice row: `name`, marked with the Done icon when it is the one `chosen`; clicked when picked.
+pub fn choice(ui: &mut Ui, theme: &Theme, name: &str, chosen: bool) -> Response {
+    row(ui, theme, &Keymap::empty(), chosen.then_some(IconId::Done), name, None, Some(chosen))
+}
+
+fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: &str, action: Option<&str>, chosen: Option<bool>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = control_side(ui, theme);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, name));
+    response.widget_info(|| match chosen {
+        Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, true, chosen, name),
+        None => WidgetInfo::labeled(Role::MenuItem, true, name),
+    });
     let lit = response.hovered() || response.has_focus();
     let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
     if ui.is_rect_visible(rect) {
@@ -63,7 +81,10 @@ pub fn item(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: IconId, name: &st
         }
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s + side / 2.0, rect.center().y), vec2(side, side));
-        theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.text);
+        if let Some(icon) = icon {
+            let colour = if chosen.is_some() { p.accent } else { p.text };
+            theme.icons.paint(painter, icon_rect, icon, Style::Regular, colour);
+        }
         let mut right = rect.right() - s.s;
         if let Some(chip) = action.and_then(|action| keymap.chip(ui.ctx(), action)) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);

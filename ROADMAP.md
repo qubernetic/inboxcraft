@@ -74,6 +74,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | The appearance settings page: mode, accent preset, custom accent, typeface, icon set, text size and a "Reduce motion" switch, each running its `ui.*.set` command, with a live preview; checked for overflow in both typefaces at 90 % and 130 % (#87) |
 | 2026-11-06 | The message list on the design system: a navigation rail in the preset's gradient, the rows on a card with avatars, the screener and grouped inbox cards and the hover actions built and shown in `ui_shot` with invented data, hidden in the app until their data and commands exist (#88) |
 | 2026-11-06 | The hover actions act on the sample mailbox: Done, read or unread and Delete, from the row or its keys (D, R, Delete), through the sample-only `sample.mail.set` in memory; the row slides out, a toast with Undo (Ctrl+Z) puts it back; reduced motion makes both land at once; hidden without `--sample` (#89) |
+| 2026-11-06 | The reader on the design system: a toolbar of mail actions over the subject, the thread as cards with Reply, Reply all and Forward on the open message, full width and the next-message rule in a More menu, the link status only while a link is hovered; actions without a command disabled with a tooltip, Done and Delete acting on the sample mailbox (#90) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -116,3 +117,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: the appearance settings page (#87) |
 | 2026-11-06 | minor | Progress log: the message list on the design system (#88) |
 | 2026-11-06 | minor | Progress log: the hover actions on the sample mailbox (#89) |
+| 2026-11-06 | minor | Progress log: the reader on the design system (#90) |

@@ -7,7 +7,7 @@
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_engine::Session;
 use inboxcraft_time::{FakeClock, Timestamp};
 
@@ -115,8 +115,9 @@ fn without_the_sample_no_hover_action_is_drawn_and_no_key_acts() {
     harness.key_press(Key::ArrowDown);
     harness.run();
     assert!(harness.state().mailbox().keyed());
+    // The reader's toolbar shows Done and Delete too, disabled without the sample.
     for name in ACTIONS.into_iter().chain(["Undo"]) {
-        assert!(harness.query_by_label(name).is_none(), "{name} shows without the sample");
+        assert!(harness.query_all_by_label(name).all(|node| node.accesskit_node().is_disabled()), "{name} shows without the sample");
     }
     for key in [Key::D, Key::R, Key::Delete] {
         harness.key_press(key);
@@ -297,8 +298,8 @@ fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
     let row = harness.state().mailbox().messages().iter().find(|row| row.id == selected).unwrap().clone();
     let spoken = harness.state().mailbox().spoken(&row);
     let rect = harness.get_by_label(&spoken).rect();
-    let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
-    assert!(rect.contains(done.center()), "{done:?} in {rect:?}");
+    let done: Vec<_> = harness.query_all_by_role_and_label(Role::Button, "Done").map(|node| node.rect()).collect();
+    assert!(done.iter().any(|done| rect.contains(done.center())), "{done:?} in {rect:?}");
     // A read row offers to mark it unread.
     harness.get_by_role_and_label(Role::Button, if row.seen { "Mark as unread" } else { "Mark as read" });
 }

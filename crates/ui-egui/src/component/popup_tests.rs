@@ -98,3 +98,22 @@ fn the_rows_stand_one_under_the_other_even_inside_a_row() {
     assert!(flag.top() >= snooze.bottom() - 0.5 && (flag.left() - snooze.left()).abs() < 0.5, "{snooze:?} {flag:?}");
     assert!((snooze.width() - 192.0).abs() < 1.0, "{snooze:?}");
 }
+
+#[test]
+fn choice_rows_mark_the_chosen_one_and_entries_line_up_with_items() {
+    let theme = theme();
+    let harness = builder().build_ui(move |ui| {
+        super::panel(ui, &theme, Under::Sharp, 220.0, |ui| {
+            item(ui, &theme, &Keymap::default(), IconId::Snooze, "Snooze", None);
+            super::entry(ui, &theme, &Keymap::default(), "Full width", None);
+            super::choice(ui, &theme, "Show the next message", true);
+            super::choice(ui, &theme, "Go back to the list", false);
+        });
+    });
+    let chosen = harness.get_by_label("Show the next message");
+    assert_eq!(chosen.accesskit_node().role(), Role::MenuItemRadio);
+    assert_eq!(chosen.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
+    assert_eq!(harness.get_by_label("Go back to the list").accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
+    assert_eq!(harness.get_by_label("Full width").accesskit_node().role(), Role::MenuItem);
+    assert!(drew_icon(harness.output(), IconId::Done, Style::Regular), "the chosen one is marked");
+}
