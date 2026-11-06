@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The folder pane: the account picker, the unified views and each account's folders with their unread badges.
+//! The folder pane: the appearance settings button, the account picker, the unified views and each account's folders with their unread badges.
 
-use egui::{ComboBox, RichText, ScrollArea, Ui, vec2};
+use egui::{Align, ComboBox, Layout, RichText, ScrollArea, Ui, vec2};
 
 use super::paint::{NavRow, line_height, nav_row};
+use crate::component::button::IconButton;
+use crate::iconset::IconId;
+use crate::keymap::Keymap;
 use crate::mailbox::{Mailbox, Place, role_text};
 use crate::theme::Theme;
 use crate::tr;
@@ -16,6 +19,7 @@ pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
     pub(super) add: bool,
+    pub(super) settings: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -57,12 +61,17 @@ fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
 }
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. `can_add` shows
-/// the Add account button.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, can_add: bool) -> Asked {
+/// the Add account button; `settings` shows the settings button as active, the page being open.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool, settings: bool) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            asked.settings = IconButton::new(IconId::Settings, tr!("Appearance settings")).active(settings).show(ui, theme, keymap).clicked();
+        });
+    });
     if can_add {
         ui.add_space(theme.spacing.s);
         asked.add = ui.button(tr!("Add account")).clicked();

@@ -17,7 +17,8 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects. `icons` set to `true` draws every icon of
+//! (the certificate refused); the check is scripted and nothing connects. `settings` set to `true` shows the
+//! appearance settings page. `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
@@ -107,6 +108,9 @@ pub struct Shot {
     /// The add-account page: `form`, `detected`, `checking`, `passed` or `failed`.
     #[serde(default)]
     pub onboard: Option<String>,
+    /// Whether the appearance settings page is open.
+    #[serde(default)]
+    pub settings: Option<bool>,
     /// Every icon of the set in every style instead of the window.
     #[serde(default)]
     pub icons: Option<bool>,
@@ -192,6 +196,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.search.is_some()
         || shot.select.is_some()
         || shot.onboard.is_some()
+        || shot.settings.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
@@ -603,6 +608,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;
+    }
+    if shot.settings == Some(true) {
+        app.open_settings();
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)

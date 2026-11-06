@@ -940,6 +940,14 @@ pub fn icon_ink_over(behind: &[Color32]) -> Color32 {
     if !behind.is_empty() && behind.iter().all(|colour| contrast(WHITE, *colour) >= 3.0) { WHITE } else { ink_over(behind) }
 }
 
+/// The colour the owner typed as `#rrggbb` or `rrggbb`, space around it dropped; `None` for anything else.
+#[must_use]
+pub fn typed(text: &str) -> Option<Color32> {
+    let text = text.trim();
+    let Rgb(r, g, b) = if text.starts_with('#') { Rgb::from_hex(text)? } else { Rgb::from_hex(&format!("#{text}"))? };
+    Some(Color32::from_rgb(r, g, b))
+}
+
 /// The WCAG contrast ratio of two colours, 1 to 21 (alpha is ignored).
 #[must_use]
 pub fn contrast(a: Color32, b: Color32) -> f32 {

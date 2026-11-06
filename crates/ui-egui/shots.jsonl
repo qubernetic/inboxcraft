@@ -67,3 +67,14 @@
 {"out": "docs/images/icons-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "icons": true, "scale": 2}
 {"out": "docs/images/components-lucide-light.png", "mode": "light", "icon_set": "lucide", "components": true}
 {"out": "docs/images/components-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "components": true}
+# The appearance settings page (E1.16b) in each preset, in Inter and with Lucide.
+{"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-inter-light.png", "mode": "light", "font": "inter", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-inter-dark.png", "mode": "dark", "font": "inter", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-lucide-light.png", "mode": "light", "icon_set": "lucide", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "size": [1200, 820], "settings": true}

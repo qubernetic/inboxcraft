@@ -335,6 +335,34 @@ the icon sits among others at the same size.
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again, Change settings and Close after a failure; Close while it runs.
 
+## Appearance settings
+- **Where**: the settings button (the Settings icon, "Appearance settings") sits beside the app's name in the folder
+  pane and shows as active while the page is open. The page takes the place of the list and the reader, as adding an
+  account does, and the two close each other. Close or Escape leaves it.
+- **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
+  points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
+  the preview goes above the controls. The page scrolls.
+- **Controls**, each running its command (see "Appearance choices") the moment it is pressed: Mode (pills System,
+  Light, Dark); Accent (a pill per preset, each after a round swatch of its gradient with its accent in the middle,
+  and Custom, selected while the owner's own colours are in use, which takes the typed colours as the button below
+  does); Custom accent (Gradient start, Gradient middle,
+  Gradient end and Accent, each a colour picker and a `#rrggbb` field, then "Use these colours"); Typeface (a pill
+  per typeface, each name written in its own typeface); Icons (a pill per set, after three of its icons); Text size
+  (pills 90 % to 130 %); Motion (the "Reduce motion" switch, with a line saying motion follows the system until the
+  owner chooses).
+- **Custom accent**: the fields start with the colours in use. Only `#rrggbb` is a colour (the `#` may be left out);
+  while a field holds anything else a line says how to write a colour and "Use these colours" is disabled. The
+  preview shows the typed colours as soon as all four are colours; the rest of the window keeps the colours in use
+  until the button runs `ui.accent.set`. When the engine made the accent lighter, the field shows the colour used
+  and a line says which colour was asked for and which is used instead.
+- **Preview**: a card in the surface colour: the preset's gradient as a band with the app's name in the ink that
+  reads over it, three invented rows as the list draws them (one selected, two unread), Reply and Archive in Regular,
+  Pin and Flag in Fill in the accent, a selected and a plain pill, and a line in the link colour. It is drawn in the
+  mode, typeface, icon set and text size in use.
+- **Switch**: a track one body line high and 1.8 lines long, the selection gradient when on and the field colour
+  when off, with a knob that slides over the hover token (at once with reduced motion); a screen reader hears a
+  switch, on or off.
+
 ## Pictures
 `just shot` (or `cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`) draws the
 sample window without a display and writes the PNGs under `docs/images/`: the unified list, one account and a
@@ -350,7 +378,9 @@ buttons (active and disabled), pills, badges, the sample's people as avatars, a 
 tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
 for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
 list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
-(`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
+(`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
+page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
+(`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
 them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
@@ -379,3 +409,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
 | 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |
 | 2026-11-06 | minor | Appearance choices and their commands; Inter; Lucide with its disc for Fill and Duotone (#86) |
+| 2026-11-06 | minor | The appearance settings page with its preview, the switch, its pictures (#87) |
