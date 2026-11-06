@@ -354,6 +354,9 @@ All notable changes to InboxCraft are listed here. The format follows
   Full width, Close and the next-message rule moved into the More menu. Attachment tiles wrap side by side. The
   components gain `button::unavailable`, `IconButton::unavailable`, a note line in the tooltip, and the popup's
   `entry` and `choice` rows; `ui_shot` draws the full-width reader in every preset.
+- The design file `docs/design/inboxcraft.figcraft` (FigCraft): colour variables per preset and mode, type styles,
+  the components with their variants, every screen of the app in light and dark, the mood in each preset and five
+  flows as storyboards; a PNG per page and `docs/design/README.md` (#96)
 
 ### Changed
 - The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom

@@ -5,7 +5,10 @@
 InboxCraft's own look: the colours, distances and font tokens of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
 "Assets"). The values live in `crates/ui-egui/src/theme.rs`; this page explains them, and the tests in
-`crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below.
+`crates/ui-egui/src/theme_tests.rs` hold them to the contrast rules below. The design file
+[`docs/design/inboxcraft.figcraft`](design/README.md) is the source of truth for the look: its tokens, components and
+every screen of the app, in FigCraft. Where this page or `theme.rs` disagrees with it, they are changed to match;
+[its README](design/README.md#not-in-the-code-yet) lists what is not in the code yet.
 
 ## Principles
 - **Two choices make every colour.** The mode (System, Light or Dark) and the accent preset (three gradient stops
@@ -466,3 +469,5 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The mail list window: the navigation rail, the list card, avatars, hover actions, screener and group cards, text buttons (#88) |
 | 2026-11-06 | minor | The hover actions act on the sample: their keys, the slide-out, the toast with Undo, their pictures (#89) |
 | 2026-11-06 | minor | The reader on the design system: mail-action toolbar, More menu, thread cards, Reply row, link status float; unavailable buttons, tooltip notes, menu choices (#90) |
+| 2026-11-06 | minor | The design file in FigCraft, `docs/design/` (#96) |
+| 2026-11-06 | minor | The FigCraft design file is the source of truth for the look (#96) |
