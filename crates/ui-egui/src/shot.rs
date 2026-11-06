@@ -27,7 +27,8 @@
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
-//! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`);
+//! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
+//! at `[x, y]` points, so what lies under it shows its hover;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -144,6 +145,9 @@ pub struct Shot {
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
+    /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
+    #[serde(default)]
+    pub pointer: Option<[f32; 2]>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -538,13 +542,27 @@ pub fn render(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode) -> Result<
     paint(size, scale, mode, |ui| app.ui(ui))
 }
 
+/// [`render`] with the pointer resting at `pointer`, so what lies under it shows its hover.
+///
+/// # Errors
+///
+/// The errors of [`render`].
+pub fn render_pointed(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>) -> Result<Picture, UiError> {
+    paint_pointed(size, scale, mode, pointer, |ui| app.ui(ui))
+}
+
 /// Runs `draw` for a few frames on a transparent window of `size` points at `scale` pixels per point in `mode`, and
 /// fills the last frame into a picture.
 ///
 /// # Errors
 ///
 /// [`UiError::Shot`] for a size of nothing, a scale outside 1 to 4, or a picture side over [`MAX_SIDE`].
-pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
+pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
+    paint_pointed(size, scale, mode, None, draw)
+}
+
+/// [`paint`] with the pointer resting at `pointer`.
+fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
     if !(1.0..=4.0).contains(&scale) {
         return Err(bad(format!("scale {scale} is not between 1 and 4")));
     }
@@ -564,7 +582,8 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, mut draw: impl FnMut(&mu
     let mut textures = HashMap::new();
     let mut last = None;
     for _ in 0..4 {
-        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..RawInput::default() };
+        let events = pointer.map(egui::Event::PointerMoved).into_iter().collect();
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..RawInput::default() };
         let mut output = ctx.run_ui(input, |ui| {
             motion::set_reduced(ui.ctx(), true);
             draw(ui);
@@ -686,7 +705,8 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         app.open_settings();
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
-    render(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode)
+    let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
+    render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer)
 }
 
 #[cfg(test)]

@@ -23,6 +23,10 @@ impl eframe::App for Desktop {
         self.0.ui(ui);
     }
 
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        inboxcraft_ui_egui::InboxApp::release_after_window_grab(ctx, raw_input);
+    }
+
     /// Nothing behind the app: the window's own frame has round corners, and the desktop shows through them. The app
     /// paints every pixel inside them itself.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

@@ -808,3 +808,14 @@ fn the_rail_avatar_s_initials_read_on_its_disc() {
         assert!(contrast(ink, disc) >= 4.5, "{}", preset.id);
     }
 }
+
+#[test]
+fn close_is_a_plain_red_with_white_on_it_in_every_preset_and_mode() {
+    for theme in all() {
+        let p = theme.palette;
+        assert!(p.close.r() > 180 && p.close.g() < 80 && p.close.b() < 80, "{} {:?}: {}", theme.preset.id, theme.mode, hex(p.close));
+        assert_eq!(p.on_close, Color32::WHITE, "{} {:?}", theme.preset.id, theme.mode);
+        assert!(contrast(p.on_close, p.close) >= 4.5, "{} {:?}", theme.preset.id, theme.mode);
+        assert!(!teal_or_coral(p.close));
+    }
+}

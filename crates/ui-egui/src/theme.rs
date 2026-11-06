@@ -140,6 +140,10 @@ pub struct Palette {
     pub error: Color32,
     /// Text on the error banner.
     pub on_error: Color32,
+    /// Behind the window's Close control under the pointer: the plain red most desktops use there, in both modes.
+    pub close: Color32,
+    /// The cross on [`Palette::close`].
+    pub on_close: Color32,
     /// The preset's gradient at full strength (the navigation rail, the primary button, group badges).
     pub gradient: [Color32; 3],
     /// The dark ink for text on the gradient where white does not read ([`ink_on`] picks).
@@ -398,6 +402,9 @@ pub struct Theme {
     /// How long its motion takes ([`crate::motion`]).
     pub motion: Motion,
 }
+
+/// The red behind Close, the same in every preset and mode.
+const CLOSE: Color32 = rgb(0xD92D20);
 
 const fn rgb(hex: u32) -> Color32 {
     // The masks keep each value in 0..=255, so the casts lose nothing.
@@ -676,6 +683,8 @@ impl Palette {
             on_badge: readable(accent, &[badge], 4.5, mode),
             error,
             on_error: ink_on(error),
+            close: CLOSE,
+            on_close: ink_on(CLOSE),
             gradient: preset.gradient,
             ink: DEEP_INK,
             glass,

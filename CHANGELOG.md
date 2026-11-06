@@ -461,6 +461,9 @@ All notable changes to InboxCraft are listed here. The format follows
   row instead of over its search field or Close button, and a drag in the band above and between the panes moves
   the window. The strip's controls sit in its middle; a drag moves the window every time, also after a move whose
   button release the desktop kept to itself; the first pane is as far from the rail as the panes are from each other
+  The hover of the window controls shows again right after a move or a resize, without a click; Close turns a
+  plain red under the pointer, and each control's hover fill keeps clear of the strip's edges. `ui_shot` takes a
+  `pointer` to picture a hover
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
 

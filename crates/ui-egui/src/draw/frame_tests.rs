@@ -194,3 +194,30 @@ fn the_window_moves_again_after_a_move_whose_release_the_desktop_kept() {
         assert!(seen.contains(&ViewportCommand::StartDrag), "{frame:?}: the second move {seen:?}");
     }
 }
+
+#[test]
+fn after_the_desktop_moved_or_resized_the_window_the_button_counts_as_up_again() {
+    // The desktop keeps the release; until the app hears the button come up, egui shows no hover anywhere.
+    for (frame, at, grab) in [
+        (WindowFrame::Strip, pos2(500.0, 17.0), ViewportCommand::StartDrag),
+        (WindowFrame::TopRow, pos2(600.0, 8.0), ViewportCommand::StartDrag),
+        (WindowFrame::Strip, pos2(1098.0, 400.0), ViewportCommand::BeginResize(ResizeDirection::East)),
+    ] {
+        let mut harness = harness(true, frame);
+        assert!(drag_from(&mut harness, at).contains(&grab), "{frame:?} {grab:?}");
+        assert!(harness.ctx.input(|input| input.pointer.any_down()), "{frame:?}: the release never came");
+        let ctx = harness.ctx.clone();
+        InboxApp::release_after_window_grab(&ctx, harness.input_mut());
+        harness.step();
+        assert!(!harness.ctx.input(|input| input.pointer.any_down()), "{frame:?} {grab:?}: the button still counts as down");
+        assert!(harness.ctx.dragged_id().is_none(), "{frame:?} {grab:?}: a drag still goes on");
+    }
+}
+
+#[test]
+fn without_a_grab_by_the_desktop_no_release_is_added() {
+    let mut harness = harness(true, WindowFrame::Strip);
+    let ctx = harness.ctx.clone();
+    InboxApp::release_after_window_grab(&ctx, harness.input_mut());
+    assert!(harness.input_mut().events.is_empty());
+}

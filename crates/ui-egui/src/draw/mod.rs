@@ -685,6 +685,12 @@ impl InboxApp {
         frame::outline(ctx, theme, corner);
     }
 
+    /// Call with each frame's input before the frame (eframe's `raw_input_hook`): after the desktop moved or resized
+    /// the window it adds the button release the desktop kept, so the hover shows again without a click.
+    pub fn release_after_window_grab(ctx: &egui::Context, raw: &mut egui::RawInput) {
+        frame::release_after_grab(ctx, raw);
+    }
+
     /// The window's corner radius in `ctx`.
     #[must_use]
     pub fn window_corner(&self, ctx: &egui::Context) -> f32 {

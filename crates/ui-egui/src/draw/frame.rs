@@ -23,6 +23,9 @@ pub(super) const STRIP: f32 = 34.0;
 /// A window control's width and height, in points.
 const CONTROL: [f32; 2] = [34.0, 28.0];
 
+/// How far inside a window control its hover fill stays, in points.
+const HOVER_INSET: f32 = 2.0;
+
 /// How far from the window's edge a press resizes it, in points.
 const EDGE: f32 = 5.0;
 
@@ -59,10 +62,11 @@ fn control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Control) -> Respo
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
     if ui.is_rect_visible(rect) {
         let lit = response.hovered() || response.has_focus();
-        let ink = if lit && which == Control::Close { p.on_error } else { p.text };
+        let ink = if lit && which == Control::Close { p.on_close } else { p.text };
         if lit {
-            let fill = if which == Control::Close { p.error } else { p.hover };
-            ui.painter().rect_filled(rect, theme.spacing.corner, fill);
+            let fill = if which == Control::Close { p.close } else { p.hover };
+            // A little smaller than the control, so the fill keeps clear of the strip's edges and the window's corner.
+            ui.painter().rect_filled(rect.shrink2(vec2(HOVER_INSET, HOVER_INSET)), theme.spacing.corner, fill);
         }
         let c = rect.center();
         let r = 5.0;
@@ -126,7 +130,7 @@ fn moves_the_window(ctx: &Context, response: &Response) {
         && from.distance(to) > MOVE_AFTER
     {
         ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        hand_over(ctx, ViewportCommand::StartDrag);
     }
     if response.double_clicked() {
         ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximised(ctx)));
@@ -260,8 +264,37 @@ pub(super) fn edges(ctx: &Context) {
     };
     ctx.set_cursor_icon(cursor);
     if ctx.input(|input| input.pointer.primary_pressed()) {
-        ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
+        hand_over(ctx, ViewportCommand::BeginResize(direction));
     }
+}
+
+/// Marks that the desktop has the pointer: a move or a resize of the window it does itself.
+fn grabbed_id() -> Id {
+    Id::unique("window-grabbed")
+}
+
+/// Sends `command`, which hands the pointer to the desktop until the button comes up, and marks it so the next
+/// frame's input gets the release the desktop keeps ([`release_after_grab`]).
+fn hand_over(ctx: &Context, command: ViewportCommand) {
+    ctx.data_mut(|data| data.insert_temp(grabbed_id(), true));
+    ctx.send_viewport_cmd(command);
+}
+
+/// Adds to `raw` the release of the primary button when the desktop took the pointer since the last frame: while it
+/// moves or resizes the window it keeps the release to itself, and egui would think the button still down, showing
+/// no hover anywhere until the next click.
+pub(super) fn release_after_grab(ctx: &Context, raw: &mut egui::RawInput) {
+    let grabbed = ctx.data_mut(|data| data.remove_temp::<bool>(grabbed_id())).unwrap_or(false);
+    if !grabbed {
+        return;
+    }
+    let pos = ctx.input(|input| input.pointer.latest_pos()).unwrap_or(Pos2::ZERO);
+    raw.events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: ctx.input(|input| input.modifiers),
+    });
 }
 
 /// Whether the window fills the screen now.
