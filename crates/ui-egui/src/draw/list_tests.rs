@@ -388,3 +388,21 @@ fn acting_on_the_sample_keeps_nothing() {
     assert_eq!(stores.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert_eq!(rows(&harness), 11);
 }
+
+/// The account stripes of the last frame: the thin upright bars at the left of the rows.
+fn stripes(harness: &Harness<'_, InboxApp>) -> usize {
+    fn count(shape: &egui::Shape) -> usize {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().map(count).sum(),
+            egui::Shape::Rect(rect) if (rect.rect.width() - 3.0).abs() < 0.01 && rect.rect.height() > 10.0 => 1,
+            _ => 0,
+        }
+    }
+    harness.output().shapes.iter().map(|clipped| count(&clipped.shape)).sum()
+}
+
+#[test]
+fn the_account_stripe_marks_the_rows_of_the_simple_list_only() {
+    assert!(stripes(&harness(false)) > 0, "the simple list of two accounts shows whose each row is");
+    assert_eq!(stripes(&harness(true)), 0, "the grouped inbox's cards show no stripes");
+}

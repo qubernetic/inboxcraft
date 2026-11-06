@@ -476,18 +476,19 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         return Asked { out: true, ..Asked::default() };
     }
+    let showcase = mailbox.showcase();
+    let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
+    let grouping = inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty());
     let rows = Rows {
         theme,
         keymap,
         mailbox,
-        account_marker: mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
+        // Whose each row is shows in the simple list of more than one account; the grouped cards leave it out.
+        account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
     };
-    let showcase = mailbox.showcase();
-    let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
-    let clicked =
-        if inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty()) { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
+    let clicked = if grouping { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
     let (drawn, out) = rows.leaving.get();
     Asked { clicked, add: false, acted: rows.acted.get(), out: !drawn || out }
 }
