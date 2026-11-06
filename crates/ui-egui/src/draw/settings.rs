@@ -6,7 +6,7 @@
 //! switch. Wide, the preview stands beside the controls; narrow, above them.
 
 use egui::{Align, Frame, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2};
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface};
+use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 
 use super::paint::{line, line_height, selection};
 use crate::component::avatar;
@@ -36,6 +36,7 @@ pub(super) enum Asked {
     Icons(Icons),
     Scale(TextScale),
     ReduceMotion(bool),
+    Frame(WindowFrame),
     Close,
 }
 
@@ -256,7 +257,21 @@ fn controls(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings
     if current.motion == Motion::System {
         note(ui, theme, tr!("Until you choose, motion follows the system where InboxCraft can read it, and runs elsewhere."));
     }
+
+    heading(ui, theme, tr!("Window frame"));
+    let frames = WindowFrame::ALL.map(|frame| (frame, frame_name(frame)));
+    asked = asked.or(pills(ui, theme, &frames, current.frame).map(Asked::Frame));
+    note(ui, theme, tr!("The system's title bar, the window controls in the top row, or a slim strip of InboxCraft's own."));
     asked
+}
+
+/// The name of a window frame.
+fn frame_name(frame: WindowFrame) -> &'static str {
+    match frame {
+        WindowFrame::System => tr!("Title bar"),
+        WindowFrame::TopRow => tr!("Top row"),
+        WindowFrame::Strip => tr!("Strip"),
+    }
 }
 
 /// A message row of the preview, drawn like the list's.

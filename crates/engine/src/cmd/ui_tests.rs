@@ -3,11 +3,11 @@
 
 use serde_json::{Value, json};
 
-use crate::appearance::{Accent, Appearance, Icons, Motion, Rgb, ThemeMode, Typeface, contrast};
+use crate::appearance::{Accent, Appearance, Icons, Motion, Rgb, ThemeMode, Typeface, WindowFrame, contrast};
 use crate::test_support::session;
 use crate::{AgentClass, Caller, EngineError};
 
-const COMMANDS: [&str; 6] = ["ui.theme.set", "ui.accent.set", "ui.font.set", "ui.icons.set", "ui.text_scale.set", "ui.motion.set"];
+const COMMANDS: [&str; 7] = ["ui.theme.set", "ui.accent.set", "ui.font.set", "ui.icons.set", "ui.text_scale.set", "ui.motion.set", "ui.frame.set"];
 
 fn bad(result: Result<Value, EngineError>) -> bool {
     matches!(result, Err(EngineError::BadParams { .. }))
@@ -32,6 +32,23 @@ fn a_new_session_has_the_default_appearance() {
     assert_eq!(Appearance::default().icons, Icons::Phosphor);
     assert_eq!(Appearance::default().text_scale, 100);
     assert_eq!(Appearance::default().motion, Motion::System);
+    assert_eq!(Appearance::default().frame, WindowFrame::Strip);
+}
+
+#[test]
+fn frame_set_takes_system_top_row_or_strip_and_refuses_anything_else() {
+    let mut session = session();
+    for (name, expected) in [("system", WindowFrame::System), ("top_row", WindowFrame::TopRow), ("strip", WindowFrame::Strip)] {
+        let answer = session.run_as(Caller::Agent, "ui.frame.set", &json!({ "frame": name })).unwrap();
+        assert_eq!(answer["appearance"]["frame"], name);
+        assert_eq!(session.appearance().frame, expected);
+    }
+    for junk in [json!({}), json!({ "frame": "title" }), json!({ "frame": 1 }), json!({ "frame": "strip", "more": true })] {
+        assert!(bad(session.run("ui.frame.set", &junk)), "{junk}");
+    }
+    let kept = Appearance::from_value(&json!({ "frame": "top_row" }));
+    assert_eq!(kept.frame, WindowFrame::TopRow);
+    assert_eq!(Appearance::from_value(&json!({ "frame": "window" })).frame, WindowFrame::Strip);
 }
 
 #[test]

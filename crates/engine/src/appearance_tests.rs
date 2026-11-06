@@ -35,6 +35,7 @@ fn an_appearance_comes_back_whole_from_its_json() {
         icons: Icons::Lucide,
         text_scale: 130,
         motion: Motion::Reduce,
+        frame: WindowFrame::TopRow,
     };
     let value = appearance.to_value();
     assert_eq!(
@@ -46,6 +47,7 @@ fn an_appearance_comes_back_whole_from_its_json() {
             "icons": "lucide",
             "text_scale": 130,
             "motion": "reduce",
+            "frame": "top_row",
         })
     );
     assert_eq!(Appearance::from_value(&value), appearance);

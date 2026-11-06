@@ -8,7 +8,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::appearance::{AA, Accent, Appearance, CustomAccent, DARK_SURFACE, Icons, Motion, TEXT_SCALES, ThemeMode, Typeface, contrast};
+use crate::appearance::{AA, Accent, Appearance, CustomAccent, DARK_SURFACE, Icons, Motion, TEXT_SCALES, ThemeMode, Typeface, WindowFrame, contrast};
 use crate::params::decode;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
@@ -39,6 +39,14 @@ pub(crate) const TEXT_SCALE: CommandSpec =
 /// `ui.motion.set`: reduced motion.
 pub(crate) const MOTION: CommandSpec =
     CommandSpec { id: "ui.motion.set", class: Some(AgentClass::Safe), summary: "Reduce motion, let it run, or follow the system", run: motion };
+
+/// `ui.frame.set`: who draws the window's frame.
+pub(crate) const FRAME: CommandSpec = CommandSpec {
+    id: "ui.frame.set",
+    class: Some(AgentClass::Safe),
+    summary: "Draw the window frame: the system's, controls in the top row, or a slim strip",
+    run: frame,
+};
 
 /// The outcome of a change to the appearance: the whole appearance as the answer, `more` added to it.
 fn changed(appearance: Appearance, more: Value) -> Outcome {
@@ -158,4 +166,17 @@ fn motion(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         _ => return Err(EngineError::bad_params(MOTION.id, "reduce is on, off or system")),
     };
     Ok(changed(Appearance { motion, ..context.state().appearance }, json!({})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameParams {
+    /// `system`, `top_row` or `strip`.
+    frame: String,
+}
+
+fn frame(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: FrameParams = decode(FRAME.id, params)?;
+    let frame = WindowFrame::named(&params.frame).ok_or_else(|| EngineError::bad_params(FRAME.id, "frame is system, top_row or strip"))?;
+    Ok(changed(Appearance { frame, ..context.state().appearance }, json!({})))
 }

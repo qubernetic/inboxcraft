@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
 use inboxcraft::{Source, Step};
+use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::fetch::Wake;
@@ -36,7 +37,7 @@ fn window(source: Source) -> ExitCode {
             context.request_repaint();
         }
     });
-    let app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
+    let mut app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");
@@ -47,7 +48,10 @@ fn window(source: Source) -> ExitCode {
         .with_title("InboxCraft")
         .with_app_id("io.github.qubernetic.inboxcraft")
         .with_inner_size([1200.0, 760.0])
-        .with_min_inner_size([720.0, 480.0]);
+        .with_min_inner_size([720.0, 480.0])
+        // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
+        .with_decorations(app.mailbox().appearance().frame == WindowFrame::System);
+    app.set_own_frame(true);
     // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
     if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
         viewport = viewport.with_icon(icon);

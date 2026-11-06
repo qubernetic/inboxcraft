@@ -7,7 +7,7 @@ use egui::accesskit::{Role, Toggled};
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::{Accent, Icons, Motion, ThemeMode, Typeface};
+use inboxcraft_engine::appearance::{Accent, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -166,4 +166,20 @@ fn opening_the_page_closes_the_add_account_page_and_the_other_way_round() {
     harness.run();
     assert!(harness.state().settings().is_open());
     assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Closed);
+}
+
+#[test]
+fn the_window_frame_row_runs_ui_frame_set() {
+    // Tall enough that the last row of the page is in view.
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut harness =
+        Harness::builder().with_size(vec2(1200.0, 1400.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.get_by_label("Appearance settings").click();
+    harness.run();
+    assert!(selected(&harness, "Strip"), "the app's own strip by default");
+    assert_eq!(press(&mut harness, "Top row"), "ui.frame.set");
+    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow);
+    assert_eq!(press(&mut harness, "Title bar"), "ui.frame.set");
+    assert_eq!(harness.state().appearance().frame, WindowFrame::System);
 }

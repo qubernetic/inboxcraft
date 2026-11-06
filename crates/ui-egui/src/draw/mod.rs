@@ -23,6 +23,7 @@
 //! A frame that finds them changed installs them and hands them to the window's [`Keep`], so they are there again
 //! after a restart; [`InboxApp::with_keep`] reads them back at the start.
 
+mod frame;
 mod list;
 mod onboard;
 mod paint;
@@ -33,7 +34,7 @@ mod settings;
 use std::sync::Arc;
 
 use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
-use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb};
+use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb, WindowFrame};
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
@@ -83,6 +84,10 @@ pub struct InboxApp {
     workers: Box<dyn Workers>,
     /// The act the toast shows (by its serial) and when the toast came.
     toast: Option<(u64, f64)>,
+    /// Whether the window is a native one whose frame the app may draw (`set_own_frame`).
+    own_frame: bool,
+    /// The frame the window was last told to show.
+    frame_applied: Option<WindowFrame>,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -134,6 +139,8 @@ impl InboxApp {
             can_add: false,
             workers: Box::new(NoWorkers),
             toast: None,
+            own_frame: false,
+            frame_applied: None,
         }
     }
 
@@ -344,6 +351,24 @@ impl InboxApp {
         self.appear("ui.icons.set", &json!({ "icons": icons.id() }));
     }
 
+    /// Who draws the window's frame, from the next frame (`ui.frame.set`).
+    pub fn set_frame(&mut self, frame: WindowFrame) {
+        self.appear("ui.frame.set", &json!({ "frame": frame.id() }));
+    }
+
+    /// Lets the app draw the window's frame: the native window calls it, so the strip, the window controls and the
+    /// resizing edges show when the appearance asks for the app's own frame. Pictures and the web build leave it off.
+    pub fn set_own_frame(&mut self, own: bool) {
+        self.own_frame = own;
+        self.frame_applied = None;
+    }
+
+    /// Whether the app draws the window's frame now.
+    #[must_use]
+    pub fn draws_frame(&self) -> bool {
+        frame::drawn(self.own_frame, self.mailbox.appearance().frame)
+    }
+
     /// Which key runs which action.
     #[must_use]
     pub fn keymap(&self) -> &Keymap {
@@ -398,6 +423,7 @@ impl InboxApp {
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
         motion::set_reduced(ui.ctx(), self.reduce_motion());
+        self.apply_frame(ui.ctx());
         let theme = Theme::current(ui.ctx(), &Look::of(self.mailbox.appearance()));
         ui.set_style(theme.style());
         let p = theme.palette;
@@ -464,6 +490,7 @@ impl InboxApp {
             .frame(Frame::NONE)
             .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding))
             .inner;
+        self.own_frame_parts(ui, &theme);
         rail.mail |= clicked_rail.mail;
         rail.settings = clicked_rail.settings;
         rail.sent = clicked_rail.sent;
@@ -625,6 +652,36 @@ impl InboxApp {
         self.sync();
     }
 
+    /// The app's own frame, when it draws one: the strip right of the rail with the title and the window controls, or
+    /// the controls floating in the top row; and the resizing edges.
+    fn own_frame_parts(&self, ui: &mut Ui, theme: &Theme) {
+        if !self.draws_frame() {
+            return;
+        }
+        match self.mailbox.appearance().frame {
+            WindowFrame::Strip => {
+                let title = tr!("{place} · InboxCraft", place = self.mailbox.title());
+                Panel::top("window-strip")
+                    .exact_size(frame::STRIP)
+                    .show_separator_line(false)
+                    .frame(Frame::NONE)
+                    .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title));
+            }
+            WindowFrame::TopRow => frame::top_row(ui.ctx(), theme, &self.keymap, theme.spacing.gap),
+            WindowFrame::System => {}
+        }
+        frame::edges(ui.ctx());
+    }
+
+    /// Tells a native window to show the desktop's title bar or none, when the frame changed.
+    fn apply_frame(&mut self, ctx: &egui::Context) {
+        let frame = self.mailbox.appearance().frame;
+        if self.own_frame && self.frame_applied != Some(frame) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(frame == WindowFrame::System));
+            self.frame_applied = Some(frame);
+        }
+    }
+
     /// Applies what was asked on the rail besides the settings: Mail, Sent and Search show the mail (Mail its inbox
     /// when Sent was open, Sent the unified Sent view), and Search puts the focus in the search field.
     fn apply_rail(&mut self, ui: &Ui, rail: &pane::Rail) {
@@ -709,6 +766,7 @@ impl InboxApp {
             settings::Asked::Icons(icons) => self.set_icons(icons),
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
+            settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Close => self.settings.close(),
         }
     }
@@ -756,6 +814,9 @@ mod appearance_tests;
 #[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;
+#[cfg(test)]
+#[path = "frame_tests.rs"]
+mod frame_tests;
 #[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;

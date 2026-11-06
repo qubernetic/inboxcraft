@@ -27,6 +27,7 @@
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
+//! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`);
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -36,7 +37,7 @@ use std::sync::Arc;
 
 use egui::epaint::{ClippedPrimitive, ImageData, Mesh, Primitive, TextureId};
 use egui::{Color32, Pos2, RawInput, Rect, Vec2, pos2, vec2};
-use inboxcraft_engine::appearance::{Icons, Typeface};
+use inboxcraft_engine::appearance::{Icons, Typeface, WindowFrame};
 use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
@@ -140,6 +141,9 @@ pub struct Shot {
     /// The icon set: `phosphor` when left out, `lucide`.
     #[serde(default)]
     pub icon_set: Option<String>,
+    /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -246,6 +250,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.slide.is_some()
         || shot.text_scale.is_some()
         || shot.size.is_some()
+        || shot.frame.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -610,6 +615,13 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     app.set_typeface(typeface);
     app.set_icons(icons);
     app.set_reduce_motion(true);
+    if let Some(name) = &shot.frame {
+        let frame = WindowFrame::named(name)
+            .filter(|frame| *frame != WindowFrame::System)
+            .ok_or_else(|| bad(format!("{}: frame {name} is not strip or top_row", shot.out)))?;
+        app.set_frame(frame);
+        app.set_own_frame(true);
+    }
     if let Some(percent) = shot.text_scale {
         let scale =
             TextScale::from_percent(percent).ok_or_else(|| bad(format!("{}: text scale {percent} is not 90, 100, 110, 120 or 130", shot.out)))?;

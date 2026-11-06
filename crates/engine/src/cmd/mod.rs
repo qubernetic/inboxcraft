@@ -36,6 +36,7 @@ pub(crate) fn all() -> Vec<CommandSpec> {
         sample::SET,
         ui::ACCENT,
         ui::FONT,
+        ui::FRAME,
         ui::ICONS,
         ui::MOTION,
         ui::TEXT_SCALE,
