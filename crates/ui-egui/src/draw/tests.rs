@@ -16,7 +16,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use crate::mailbox::{Mailbox, Place};
 use crate::sample;
-use crate::theme::{Mode, ModePreference, PRESETS, Preset, Theme};
+use crate::theme::{Mode, ModePreference, PRESETS, Preset, TextScale, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -86,6 +86,64 @@ fn a_new_preset_and_mode_show_from_the_next_frame() {
     harness.state_mut().set_mode(ModePreference::System);
     harness.run();
     assert_eq!(harness.ctx.options(|options| options.theme_preference), egui::ThemePreference::System);
+}
+
+/// The font of the first text section of the frame that starts with `start`.
+fn font_of(harness: &Harness<'static, InboxApp>, start: &str) -> egui::FontId {
+    flat(&harness.output().shapes)
+        .into_iter()
+        .find_map(|(_, shape)| match shape {
+            egui::Shape::Text(text) => text
+                .galley
+                .job
+                .sections
+                .iter()
+                .find(|section| {
+                    text.galley.job.text.get(section.byte_range.start.0..section.byte_range.end.0).is_some_and(|text| text.starts_with(start))
+                })
+                .map(|section| section.format.font_id.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no text starts with {start:?}"))
+}
+
+#[test]
+fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
+    let harness = harness();
+    let fonts = Theme::new(Mode::Light, &Preset::default()).fonts;
+    // Odile's row is unread, Teodor's is read.
+    assert_eq!(font_of(&harness, "Odile Brannock"), fonts.sender_unread.id());
+    assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.subject_unread.id());
+    assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.sender.id());
+    assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.subject.id());
+    assert_ne!(fonts.sender.id(), fonts.sender_unread.id());
+    let preview = flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
+        egui::Shape::Text(text) if text.galley.job.text.starts_with("Teodor Lisk") => None,
+        egui::Shape::Text(text) if text.galley.job.text.starts_with("Photos from the coast walk") => {
+            text.galley.job.sections.get(1).map(|section| section.format.clone())
+        }
+        _ => None,
+    });
+    let preview = preview.unwrap();
+    assert_eq!(preview.font_id, fonts.preview.id());
+    assert_eq!(preview.color, Theme::new(Mode::Light, &Preset::default()).palette.muted);
+}
+
+#[test]
+fn a_new_text_scale_shows_from_the_next_frame_and_the_rows_grow_with_it() {
+    let mut harness = harness();
+    assert_eq!(harness.state().text_scale(), TextScale::default());
+    let row = "Odile Brannock, Allotment rota for November, 08:35, unread";
+    let before = harness.get_by_label(row).rect().height();
+    let large = TextScale::from_percent(130).unwrap();
+    harness.state_mut().set_text_scale(large);
+    harness.run();
+    let body = harness.ctx.style_of(egui::Theme::Light).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
+    assert_eq!(body, Some(Theme::new(Mode::Light, &Preset::default()).with_text_scale(large).fonts.body.size));
+    assert_eq!(font_of(&harness, "Odile Brannock").size, Theme::new(Mode::Light, &Preset::default()).with_text_scale(large).fonts.sender_unread.size);
+    let after = harness.get_by_label(row).rect().height();
+    // The two lines grow by 30 %, the air around them stays.
+    assert!(after > before * 1.15, "the row follows the font: {before} then {after}");
 }
 
 #[test]

@@ -29,7 +29,7 @@ use crate::mailbox::Mailbox;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
-use crate::theme::{ModePreference, Preset, Theme};
+use crate::theme::{self, ModePreference, Preset, TextScale, Theme};
 use crate::tr;
 use crate::workers::{NoWorkers, Workers};
 
@@ -50,8 +50,10 @@ pub struct InboxApp {
     mode: ModePreference,
     /// The accent preset the colours come from.
     preset: Preset,
-    /// The mode and preset installed in the context, once installed.
-    themed: Option<(ModePreference, Preset)>,
+    /// The text scale every font token is at.
+    text_scale: TextScale,
+    /// The mode, preset and text scale installed in the context, once installed.
+    themed: Option<(ModePreference, Preset, TextScale)>,
     onboarding: Onboarding,
     /// Whether the window offers to add an account.
     can_add: bool,
@@ -100,6 +102,7 @@ impl InboxApp {
             search: String::new(),
             mode: ModePreference::default(),
             preset: Preset::default(),
+            text_scale: TextScale::default(),
             themed: None,
             onboarding: Onboarding::default(),
             can_add: false,
@@ -218,13 +221,27 @@ impl InboxApp {
         self.preset = preset;
     }
 
-    /// Installs the chosen preset and mode in the context when they changed.
+    /// The text scale every font token is at.
+    #[must_use]
+    pub fn text_scale(&self) -> TextScale {
+        self.text_scale
+    }
+
+    /// Draws every text at `scale`, from the next frame; the rows, headers and toolbars follow the font.
+    pub fn set_text_scale(&mut self, scale: TextScale) {
+        self.text_scale = scale;
+    }
+
+    /// Installs the fonts once, and the chosen preset, mode and text scale in the context when they changed.
     fn install_theme(&mut self, ctx: &egui::Context) {
-        let chosen = (self.mode, self.preset);
+        let chosen = (self.mode, self.preset, self.text_scale);
         if self.themed == Some(chosen) {
             return;
         }
-        Theme::apply(ctx, &self.preset);
+        if self.themed.is_none() {
+            theme::install_fonts(ctx);
+        }
+        Theme::apply(ctx, &self.preset, self.text_scale);
         // egui follows the system by itself; a first frame that follows it leaves the context's mode alone.
         if self.themed.is_some() || self.mode != ModePreference::System {
             ctx.set_theme(egui::ThemePreference::from(self.mode));
@@ -235,7 +252,7 @@ impl InboxApp {
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
-        let theme = Theme::current(ui.ctx(), &self.preset);
+        let theme = Theme::current(ui.ctx(), &self.preset, self.text_scale);
         ui.set_style(theme.style());
         let p = theme.palette;
         let s = theme.spacing;
@@ -422,6 +439,9 @@ impl InboxApp {
     }
 }
 
+#[cfg(test)]
+#[path = "fit_tests.rs"]
+mod fit_tests;
 #[cfg(test)]
 #[path = "onboard_tests.rs"]
 mod onboard_tests;

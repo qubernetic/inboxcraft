@@ -51,13 +51,13 @@ fn password(ui: &mut Ui, secret: &mut Secret) {
 }
 
 fn note(ui: &mut Ui, theme: &Theme, text: &str, colour: Color32) {
-    ui.label(RichText::new(text).size(theme.type_scale.small).color(colour));
+    ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(colour));
 }
 
 fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
-    ui.label(RichText::new(tr!("Add an account")).size(theme.type_scale.title).color(p.text));
+    ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
     note(
         ui,
         theme,
@@ -92,7 +92,7 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
                     RichText::new(tr!(
                         "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password."
                     ))
-                    .size(theme.type_scale.small)
+                    .font(theme.fonts.caption.id())
                     .color(p.muted),
                 )
                 .wrap(),
@@ -152,7 +152,7 @@ fn form(ui: &mut Ui, theme: &Theme, onboarding: &mut Onboarding) -> Option<Asked
 /// The mark in front of a step, drawn in code: a filled disc with a tick or a cross, or a ring.
 fn mark(ui: &mut Ui, theme: &Theme, state: StepState) {
     let p = theme.palette;
-    let size = theme.type_scale.body + 2.0;
+    let size = super::paint::line_height(ui, theme.fonts.body);
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
     let painter = ui.painter();
     let (c, r) = (rect.center(), size / 2.0 - 1.0);
@@ -198,7 +198,7 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
         ui.vertical(|ui| {
             let colour = if matches!(row.state, StepState::Skipped | StepState::NotBuilt) { p.muted } else { p.text };
             ui.label(
-                RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).size(theme.type_scale.body).color(colour),
+                RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).font(theme.fonts.body.id()).color(colour),
             );
             let mut details = Vec::new();
             // A step that did not run tried no server.
@@ -223,7 +223,7 @@ fn checking(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, onboarding: &Onboardi
     let p = theme.palette;
     let mut asked = None;
     let address = mailbox.account(account).map(|row| row.address.clone()).unwrap_or_default();
-    ui.label(RichText::new(tr!("Checking {address}", address = address)).size(theme.type_scale.title).color(p.text));
+    ui.label(RichText::new(tr!("Checking {address}", address = address)).font(theme.fonts.title.id()).color(p.text));
     let (summary, colour) = match onboarding.outcome() {
         Outcome::Running => (tr!("Each step shows as it ends."), p.muted),
         Outcome::Passed => (tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),

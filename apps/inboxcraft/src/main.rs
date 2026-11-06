@@ -55,6 +55,8 @@ fn window(source: Source) -> ExitCode {
     let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
     let made = move |creation: &eframe::CreationContext<'_>| {
         let _ = context.set(creation.egui_ctx.clone());
+        // Figtree from the first frame on, so no text is drawn in another font first.
+        inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
         Ok(Box::new(Desktop(app)) as Box<dyn eframe::App>)
     };
     match eframe::run_native("InboxCraft", options, Box::new(made)) {

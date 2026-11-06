@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The reader: a toolbar (subject, the next-message rule, full width, close), the thread oldest first (the open
+//! The reader: a toolbar (the next-message rule, full width, close) over the subject, the thread oldest first (the open
 //! message and the ones the owner unfolded in full, the rest folded to one line), each message's header, the
 //! remote-content banner, the body, the attachment tiles, and a status line that shows where the link under the
 //! pointer goes.
@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Color32, ColorImage, ComboBox, FontFamily, FontId, Frame, Galley, Grid, Layout, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke,
-    TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Color32, ColorImage, ComboBox, Frame, Galley, Grid, Layout, Margin, Pos2, Rect, RichText, ScrollArea, Sense, Stroke, TextureHandle,
+    TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
@@ -24,7 +24,7 @@ use crate::mailbox::{After, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::reader::{Content, File, Header, Opened, Person, PictureState, Reader, ThreadRow, inline_key, link_status, size_text};
-use crate::theme::{self, Theme};
+use crate::theme::{self, Font, Theme};
 use crate::tr;
 
 /// How deep tables inside tables are drawn; deeper cells show nothing.
@@ -82,7 +82,7 @@ fn names(people: &[Person]) -> String {
     people.iter().map(Person::shown).collect::<Vec<_>>().join(", ")
 }
 
-/// The toolbar: the subject, the next-message rule, full width and close.
+/// The toolbar: the next-message rule, full width and close, and the subject under them.
 fn toolbar(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let subject = reader
         .open_id()
@@ -90,33 +90,31 @@ fn toolbar(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, drawn
         .map(|opened| opened.header.subject.clone())
         .filter(|subject| !subject.is_empty())
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.button(tr!("Close")).clicked() {
-                drawn.asked.push(Asked::Close);
-            }
-            let (text, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
-            if ui.button(text).clicked() {
-                drawn.asked.push(Asked::FullWidth(full));
-            }
-            let response = ComboBox::from_id_salt("after-rule")
-                .selected_text(after_text(mailbox.after()))
-                .show_ui(ui, |ui| {
-                    for after in [After::Next, After::Previous, After::List] {
-                        if ui.selectable_label(mailbox.after() == after, after_text(after)).clicked() {
-                            drawn.asked.push(Asked::After(after));
-                        }
+    // The controls wrap onto a second line when the text scale leaves no room for them on one; the subject has the
+    // line below to itself and wraps rather than being cut.
+    ui.horizontal_wrapped(|ui| {
+        let label = ui.label(RichText::new(tr!("When a message leaves the list")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+        let response = ComboBox::from_id_salt("after-rule")
+            .selected_text(after_text(mailbox.after()))
+            .show_ui(ui, |ui| {
+                for after in [After::Next, After::Previous, After::List] {
+                    if ui.selectable_label(mailbox.after() == after, after_text(after)).clicked() {
+                        drawn.asked.push(Asked::After(after));
                     }
-                })
-                .response;
-            // Right to left: the label comes after the picker in code and before it on screen.
-            let label = ui.label(RichText::new(tr!("When a message leaves the list")).size(theme.type_scale.small).color(theme.palette.muted));
-            let _ = response.labelled_by(label.id);
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(subject).size(theme.type_scale.title).color(theme.palette.text)).truncate());
-            });
-        });
+                }
+            })
+            .response;
+        let _ = response.labelled_by(label.id);
+        let (text, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
+        if ui.button(text).clicked() {
+            drawn.asked.push(Asked::FullWidth(full));
+        }
+        if ui.button(tr!("Close")).clicked() {
+            drawn.asked.push(Asked::Close);
+        }
     });
+    ui.add_space(theme.spacing.s);
+    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(theme.palette.text)).wrap());
 }
 
 /// One folded message of the thread: sender, date and the first words; a click unfolds it.
@@ -124,7 +122,8 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     let p = &theme.palette;
     let date = row.date.map(|date| mailbox.short_date(date)).unwrap_or_default();
     let spoken = tr!("{sender}, {date}, folded: {preview}", sender = row.sender, date = date, preview = row.preview);
-    let height = theme.type_scale.body + theme.spacing.m * 2.0;
+    let f = &theme.fonts;
+    let height = super::paint::line_height(ui, f.sender).max(super::paint::line_height(ui, f.caption)) + theme.spacing.m * 2.0;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
@@ -133,11 +132,11 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
         }
         ui.painter().rect_stroke(rect, theme.spacing.corner, Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
         let left = rect.left() + theme.spacing.m;
-        let date_galley = super::paint::line(ui, &[(&date, p.muted)], theme.type_scale.small, f32::INFINITY);
+        let date_galley = super::paint::line(ui, &[(&date, f.caption, p.muted)], f32::INFINITY);
         let date_left = rect.right() - theme.spacing.m - date_galley.size().x;
         ui.painter().galley(pos2(date_left, rect.center().y - date_galley.size().y / 2.0), date_galley, p.muted);
         let preview = format!("   {}", row.preview);
-        let text = super::paint::line(ui, &[(&row.sender, p.text), (&preview, p.muted)], theme.type_scale.body, date_left - theme.spacing.m - left);
+        let text = super::paint::line(ui, &[(&row.sender, f.sender, p.text), (&preview, f.preview, p.muted)], date_left - theme.spacing.m - left);
         ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
         super::paint::focus_ring(ui, theme, &response);
     }
@@ -149,13 +148,13 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
 /// The header: the sender and the date, whom it went to, and the full header when asked.
 fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
     let p = &theme.palette;
-    let t = &theme.type_scale;
+    let f = &theme.fonts;
     let Header { from, reply_to, to, cc, date, .. } = &opened.header;
     ui.horizontal(|ui| {
         let sender = from.first().map_or_else(|| tr!("(no sender)").to_owned(), |person| person.shown().to_owned());
-        ui.label(RichText::new(sender).size(t.heading).color(p.text));
+        ui.label(RichText::new(sender).font(f.heading.id()).color(p.text));
         if let Some(address) = from.first().filter(|person| !person.name.is_empty()).map(|person| person.address.clone()) {
-            ui.label(RichText::new(address).size(t.small).color(p.muted));
+            ui.label(RichText::new(address).font(f.caption.id()).color(p.muted));
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let text = if reader.shows_details(opened.id) { tr!("Hide details") } else { tr!("Details") };
@@ -166,7 +165,7 @@ fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened
                 drawn.asked.push(Asked::Expand(opened.id));
             }
             if let Some(date) = date {
-                ui.label(RichText::new(mailbox.short_date(*date)).size(t.small).color(p.muted));
+                ui.label(RichText::new(mailbox.short_date(*date)).font(f.caption.id()).color(p.muted));
             }
         });
     });
@@ -175,13 +174,13 @@ fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened
         if !cc.is_empty() {
             whom = tr!("{to}, copy to {cc}", to = whom, cc = names(cc));
         }
-        ui.label(RichText::new(tr!("to {whom}", whom = whom)).size(t.small).color(p.muted));
+        ui.label(RichText::new(tr!("to {whom}", whom = whom)).font(f.caption.id()).color(p.muted));
         return;
     }
     Grid::new(("details", opened.id)).num_columns(2).spacing(vec2(theme.spacing.m, theme.spacing.xs)).show(ui, |ui| {
         let row = |ui: &mut Ui, name: &str, value: String| {
-            ui.label(RichText::new(name).size(t.small).color(p.muted));
-            ui.label(RichText::new(value).size(t.small).color(p.text));
+            ui.label(RichText::new(name).font(f.caption.id()).color(p.muted));
+            ui.label(RichText::new(value).font(f.caption.id()).color(p.text));
             ui.end_row();
         };
         let full = |people: &[Person]| people.iter().map(Person::full).collect::<Vec<_>>().join(", ");
@@ -214,7 +213,7 @@ fn banner(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, drawn: &
         } else {
             tr!("{count} remote pictures are not shown. Loading them tells the sender that you opened this message.", count = count)
         };
-        ui.label(RichText::new(text).size(theme.type_scale.small).color(p.text));
+        ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(p.text));
         ui.horizontal(|ui| {
             if ui.button(tr!("Load once")).clicked() {
                 drawn.asked.push(Asked::Once(opened.id));
@@ -329,7 +328,7 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
     };
     Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
         let text = if image.alt.is_empty() { why } else { format!("{why}: {}", image.alt) };
-        ui.label(RichText::new(text).size(theme.type_scale.small).color(p.muted));
+        ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(p.muted));
     });
 }
 
@@ -347,7 +346,7 @@ fn blocks(
     drawn: &mut Drawn,
 ) {
     let p = &theme.palette;
-    let t = &theme.type_scale;
+    let f = &theme.fonts;
     let quotes = reader.shows_quotes(id);
     let mut toggled = false;
     for (index, block) in list.iter().enumerate() {
@@ -371,27 +370,35 @@ fn blocks(
             ui.add_space(indent);
             ui.vertical(|ui| match block {
                 Block::Text { kind, spans, .. } => {
-                    let (size, family, prefix) = match kind {
-                        TextKind::Heading(level) => (if *level <= 2 { t.title } else { t.heading }, FontFamily::Proportional, String::new()),
+                    let (font, prefix) = match kind {
+                        TextKind::Heading(level) => (if *level <= 2 { f.title } else { f.heading }, String::new()),
                         TextKind::ListItem { depth, marker } => {
                             let pad = "    ".repeat(usize::from((*depth).clamp(1, 6)).saturating_sub(1));
                             let mark = match marker {
                                 Marker::Bullet => "•".to_owned(),
                                 Marker::Number(n) => format!("{n}."),
                             };
-                            (t.body, FontFamily::Proportional, format!("{pad}{mark} "))
+                            (f.body, format!("{pad}{mark} "))
                         }
-                        TextKind::Preformatted => (t.body, FontFamily::Monospace, String::new()),
-                        TextKind::Paragraph => (t.body, FontFamily::Proportional, String::new()),
+                        TextKind::Preformatted => (f.mono, String::new()),
+                        TextKind::Paragraph => (f.body, String::new()),
                     };
                     let colour = if quote > 0 { p.muted } else { p.text };
                     let mut run = Run::new(ui.available_width());
                     if !prefix.is_empty() {
-                        run.push(&prefix, TextFormat::simple(FontId::new(size, FontFamily::Proportional), colour), None);
+                        run.push(&prefix, TextFormat::simple(font.id(), colour), None);
                     }
                     for span in spans {
-                        let family = if span.code { FontFamily::Monospace } else { family.clone() };
-                        let mut format = TextFormat::simple(FontId::new(size, family), if span.link.is_some() { p.accent } else { colour });
+                        // Code is monospaced, bold text a heavier weight, both at the size of the block.
+                        let face = if span.code {
+                            f.mono.face
+                        } else if span.bold && matches!(kind, TextKind::Paragraph | TextKind::ListItem { .. }) {
+                            f.strong.face
+                        } else {
+                            font.face
+                        };
+                        let span_font = Font { face, ..font };
+                        let mut format = TextFormat::simple(span_font.id(), if span.link.is_some() { p.accent } else { colour });
                         format.italics = span.italic;
                         if span.underline || span.link.is_some() {
                             format.underline = Stroke::new(1.0, if span.link.is_some() { p.accent } else { colour });
@@ -430,11 +437,11 @@ fn blocks(
 /// A plain-text body, its quotes folded until the owner opens them.
 fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segment], drawn: &mut Drawn) {
     let p = &theme.palette;
-    let t = &theme.type_scale;
+    let f = &theme.fonts;
     for segment in segments {
         match segment {
             Segment::Text(text) => {
-                ui.label(RichText::new(text).size(t.body).color(p.text));
+                ui.label(RichText::new(text).font(f.body.id()).color(p.text));
             }
             Segment::Quote { attribution, text, lines } => {
                 let shown = reader.shows_quotes(id);
@@ -452,9 +459,9 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
                     let (bar, inner) = (p.muted, margin(theme.spacing.s));
                     let response = Frame::new().inner_margin(Margin { left: inner.left.saturating_add(4), ..inner }).show(ui, |ui| {
                         if let Some(attribution) = attribution {
-                            ui.label(RichText::new(attribution).size(t.small).color(p.muted));
+                            ui.label(RichText::new(attribution).font(f.caption.id()).color(p.muted));
                         }
-                        ui.label(RichText::new(text).size(t.body).color(p.muted));
+                        ui.label(RichText::new(text).font(f.body.id()).color(p.muted));
                     });
                     let rect = response.response.rect;
                     ui.painter().vline(rect.left() + 1.5, rect.y_range(), Stroke::new(3.0, bar));
@@ -479,8 +486,8 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
                     let (rect, _) = ui.allocate_exact_size(vec2(18.0, 22.0), Sense::hover());
                     ui.painter().extend(icons::page_mark(rect.shrink(1.0), p.accent));
                     ui.vertical(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&file.name).size(theme.type_scale.body).color(p.text)).truncate());
-                        ui.label(RichText::new(size_text(file.size)).size(theme.type_scale.small).color(p.muted));
+                        ui.add(egui::Label::new(RichText::new(&file.name).font(theme.fonts.body.id()).color(p.text)).truncate());
+                        ui.label(RichText::new(size_text(file.size)).font(theme.fonts.caption.id()).color(p.muted));
                     });
                     let response = ui.button(tr!("Save"));
                     let spoken = tr!("Save {name}", name = file.name);
@@ -505,7 +512,7 @@ fn message(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opene
         banner(ui, theme, reader, opened, drawn);
         ui.add_space(theme.spacing.s);
         let say = |ui: &mut Ui, text: &str| {
-            ui.label(RichText::new(text).size(theme.type_scale.body).color(p.muted));
+            ui.label(RichText::new(text).font(theme.fonts.body.id()).color(p.muted));
         };
         match &opened.content {
             Content::Loading => say(ui, tr!("Loading the message…")),
@@ -530,16 +537,16 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reade
         ui.horizontal(|ui| match (hover, reader.notice()) {
             (Some(status), _) => {
                 let colour = if status.starts_with(tr!("Careful")) { p.error } else { p.muted };
-                ui.add(egui::Label::new(RichText::new(status).size(theme.type_scale.small).color(colour)).truncate());
+                ui.add(egui::Label::new(RichText::new(status).font(theme.fonts.caption.id()).color(colour)).truncate());
             }
             (None, Some(notice)) => {
-                ui.label(RichText::new(notice).size(theme.type_scale.small).color(p.text));
+                ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.text));
                 if ui.button(tr!("Dismiss")).clicked() {
                     drawn.asked.push(Asked::Dismiss);
                 }
             }
             (None, None) => {
-                ui.label(RichText::new(tr!("Point at a link to see where it goes.")).size(theme.type_scale.small).color(p.muted));
+                ui.label(RichText::new(tr!("Point at a link to see where it goes.")).font(theme.fonts.caption.id()).color(p.muted));
             }
         });
     });

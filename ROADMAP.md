@@ -67,6 +67,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-05 | Adding an account: the manual form with Detect's proposal, the password into the OS credential store only, `account.add` and `account.remove` (owner), the check's steps live with host, port and issuer; one `net` worker per account in the app (#34) |
 | 2026-11-06 | Theme tokens from the mode (System, Light, Dark) and an accent preset (Electric, Aurora, Citrus), WCAG AA checked for every preset in both modes; teal and coral gone; `cargo xtask side-by-side` puts each picture beside its mood sketch (#81) |
 | 2026-11-06 | Glass without blur: colour fields behind the window, the panes as glass layers, floats that go more opaque over sharp text, one dithered gradient helper; no repaint while idle (#82) |
+| 2026-11-06 | Figtree in place of Ubuntu Light, every text style a font token, unread rows by weight, a text scale of 90 % to 130 % with rows and the reader's toolbar following the font, checked for overflow, clipping and overlap (#83) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -102,3 +103,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: theme tokens from mode and accent preset (#81) |
 | 2026-11-06 | minor | Progress log: the side-by-side pictures (#81) |
 | 2026-11-06 | minor | Progress log: glass and floats (#82) |
+| 2026-11-06 | minor | Progress log: Figtree, font tokens and the text scale (#83) |

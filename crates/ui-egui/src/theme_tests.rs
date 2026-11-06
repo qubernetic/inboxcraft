@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use egui::Color32;
 
-use super::{GHOST, Mode, ModePreference, PRESETS, Palette, Preset, Theme, contrast, ink_on, mix, over, readable};
+use super::{
+    Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, ink_on, install_fonts,
+    mix, over, readable,
+};
 
 /// Every preset in both modes.
 fn all() -> Vec<Theme> {
@@ -267,15 +270,113 @@ fn every_preset_gives_its_own_colours_and_the_modes_differ() {
 }
 
 #[test]
-fn the_type_scale_grows_and_the_spacing_is_positive() {
+fn the_type_grows_and_the_spacing_is_positive() {
     for theme in all() {
-        let t = theme.type_scale;
-        assert!(0.0 < t.small && t.small < t.body && t.body < t.heading && t.heading < t.title, "{t:?}");
+        let f = theme.fonts;
+        assert!(0.0 < f.caption.size && f.caption.size < f.body.size && f.body.size < f.heading.size && f.heading.size < f.title.size, "{f:?}");
         let s = theme.spacing;
         assert!(0.0 < s.xs && s.xs < s.s && s.s < s.m && s.m < s.l && s.l < s.xl, "{s:?}");
-        assert!(s.row_height > t.body * 2.0, "a row holds two lines of text");
         assert!(s.folder_pane > 0.0 && s.corner > 0.0);
     }
+}
+
+#[test]
+fn sender_and_subject_are_strong_the_preview_plain_and_unread_heavier() {
+    let f = Theme::new(Mode::Light, &Preset::default()).fonts;
+    assert_eq!(f.preview.face, Face::Sans(Weight::Regular));
+    assert_eq!(f.body.face, Face::Sans(Weight::Regular));
+    for (read, unread) in [(f.sender, f.sender_unread), (f.subject, f.subject_unread)] {
+        let (Face::Sans(read), Face::Sans(unread)) = (read.face, unread.face) else { panic!("sans") };
+        assert!(read < unread, "unread is heavier: {read:?} {unread:?}");
+    }
+    let Face::Sans(sender) = f.sender.face else { panic!("sans") };
+    assert!(sender > Weight::Regular, "the sender is stronger than the preview");
+    assert!(f.title.face == Face::Sans(Weight::Bold));
+    assert_eq!(f.mono.face, Face::Mono);
+}
+
+#[test]
+fn the_text_scale_runs_from_90_to_130_percent_in_steps_of_10() {
+    let percents: Vec<u16> = TextScale::ALL.iter().map(|scale| scale.percent()).collect();
+    assert_eq!(percents, [90, 100, 110, 120, 130]);
+    assert_eq!(TextScale::default().percent(), 100);
+    assert_eq!(TextScale::from_percent(120).map(TextScale::percent), Some(120));
+    for wrong in [0, 80, 95, 105, 140, u16::MAX] {
+        assert_eq!(TextScale::from_percent(wrong), None, "{wrong}");
+    }
+    assert_eq!(TextScale::from_percent(130).map(TextScale::factor), Some(1.3));
+}
+
+#[test]
+fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
+    let base = Theme::new(Mode::Dark, &Preset::default());
+    assert_eq!(base.text_scale, TextScale::default());
+    for scale in TextScale::ALL {
+        let theme = base.with_text_scale(scale);
+        assert_eq!(theme.text_scale, scale);
+        assert_eq!(theme.palette, base.palette);
+        assert_eq!(theme.spacing, base.spacing);
+        let (scaled, plain) = (theme.fonts.all(), base.fonts.all());
+        assert_eq!(scaled.len(), plain.len());
+        assert!(scaled.len() >= 12, "every token is listed");
+        for (scaled, plain) in scaled.iter().zip(&plain) {
+            assert_eq!(scaled.face, plain.face);
+            assert!((scaled.size - plain.size * scale.factor()).abs() < 1e-4, "{scale:?}: {scaled:?} from {plain:?}");
+        }
+        let body = theme.style().text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
+        assert_eq!(body, Some(theme.fonts.body.size));
+    }
+    // Scaling twice starts from the 100 % sizes again.
+    let twice = base.with_text_scale(TextScale::ALL[4]).with_text_scale(TextScale::ALL[0]);
+    assert_eq!(twice, base.with_text_scale(TextScale::ALL[0]));
+}
+
+#[test]
+fn every_font_token_names_a_family_figtree_defines() {
+    let definitions = font_definitions();
+    for font in Theme::new(Mode::Light, &Preset::default()).fonts.all() {
+        let id = font.id();
+        assert_eq!(id.size, font.size);
+        let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
+        let first = family.first().unwrap();
+        assert!(definitions.font_data.contains_key(first), "{first}");
+        match font.face {
+            Face::Mono => assert_eq!(first, "Hack"),
+            Face::Sans(_) => assert!(first.starts_with("Figtree-"), "{first}"),
+        }
+    }
+}
+
+#[test]
+fn figtree_replaces_ubuntu_light_everywhere() {
+    let definitions = font_definitions();
+    assert!(!definitions.font_data.contains_key("Ubuntu-Light"));
+    for (family, fonts) in &definitions.families {
+        assert!(!fonts.iter().any(|font| font.contains("Ubuntu")), "{family:?}: {fonts:?}");
+        assert!(fonts.iter().all(|font| definitions.font_data.contains_key(font)), "{family:?}: {fonts:?}");
+    }
+    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
+    assert_eq!(proportional.first().map(String::as_str), Some("Figtree-Regular"));
+    let monospace = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
+    assert!(monospace.contains(&"Figtree-Regular".to_owned()), "Figtree stands in for Hack's missing signs: {monospace:?}");
+    for weight in [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold] {
+        let family = Font { size: 14.0, face: Face::Sans(weight) }.id().family;
+        let fonts = definitions.families.get(&family).unwrap();
+        assert!(fonts.len() > 1, "{weight:?} falls back to the emoji and icon fonts");
+    }
+}
+
+#[test]
+fn install_fonts_puts_figtree_into_the_context() {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("Figtree-Regular"));
+    let bold = Font { size: 14.0, face: Face::Sans(Weight::Bold) };
+    let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular) };
+    let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
+    assert!(width(bold) > width(regular), "the bold weight is its own face");
 }
 
 #[test]
@@ -291,10 +392,15 @@ fn the_visuals_follow_the_tokens() {
         assert_eq!(visuals.widgets.hovered.bg_stroke.color, theme.palette.focus);
         let style = theme.style();
         assert_eq!(style.spacing.item_spacing.y, theme.spacing.xs);
-        let body = style.text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
-        assert_eq!(body, Some(theme.type_scale.body));
-        let heading = style.text_styles.get(&egui::TextStyle::Heading).map(|font| font.size);
-        assert_eq!(heading, Some(theme.type_scale.heading));
+        for (style_of, token) in [
+            (egui::TextStyle::Small, theme.fonts.caption),
+            (egui::TextStyle::Body, theme.fonts.body),
+            (egui::TextStyle::Button, theme.fonts.button),
+            (egui::TextStyle::Heading, theme.fonts.heading),
+            (egui::TextStyle::Monospace, theme.fonts.mono),
+        ] {
+            assert_eq!(style.text_styles.get(&style_of), Some(&token.id()), "{style_of:?}");
+        }
     }
 }
 
@@ -302,15 +408,60 @@ fn the_visuals_follow_the_tokens() {
 fn mode_of_reads_the_context_and_apply_installs_both_modes_of_the_preset() {
     let ctx = egui::Context::default();
     let aurora = Preset::named("aurora").unwrap();
-    Theme::apply(&ctx, aurora);
+    let large = TextScale::from_percent(130).unwrap();
+    Theme::apply(&ctx, aurora, large);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, aurora).palette.panel);
     assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, aurora).palette.panel);
+    let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
+    assert_eq!(body, Some(Theme::new(Mode::Dark, aurora).with_text_scale(large).fonts.body.size));
     ctx.set_theme(egui::Theme::Dark);
     assert_eq!(Mode::of(&ctx), Mode::Dark);
-    assert_eq!(Theme::current(&ctx, aurora), Theme::new(Mode::Dark, aurora));
+    assert_eq!(Theme::current(&ctx, aurora, large), Theme::new(Mode::Dark, aurora).with_text_scale(large));
     ctx.set_theme(egui::Theme::Light);
     assert_eq!(Mode::of(&ctx), Mode::Light);
-    assert_eq!(Theme::current(&ctx, aurora), Theme::new(Mode::Light, aurora));
+    assert_eq!(Theme::current(&ctx, aurora, TextScale::default()), Theme::new(Mode::Light, aurora));
+}
+
+/// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a
+/// size set by hand.
+fn names_a_font(line: &str) -> bool {
+    let size_by_hand = line.split(".size(").skip(1).any(|rest| !rest.starts_with(')'));
+    let styled = [".heading()", ".small()", ".strong()", ".monospace()", ".text_style(", "TextStyle::"].iter().any(|call| line.contains(call));
+    line.contains("FontFamily") || line.contains("FontId") || size_by_hand || styled
+}
+
+#[test]
+fn the_font_check_finds_families_sizes_and_styles() {
+    assert!(names_a_font("TextFormat::simple(FontId::new(size, FontFamily::Proportional), c)"));
+    assert!(names_a_font("RichText::new(text).size(theme.type_scale.small)"));
+    assert!(names_a_font("RichText::new(text).strong()"));
+    assert!(names_a_font("ui.label(RichText::new(x).heading())"));
+    assert!(names_a_font("style.text_styles.insert(TextStyle::Body, x)"));
+    assert!(!names_a_font("let width = galley.size().x;"));
+    assert!(!names_a_font("RichText::new(text).font(theme.fonts.caption.id())"));
+}
+
+#[test]
+fn no_view_names_a_font() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    let token_code = root.join("src").join("theme.rs");
+    let mut found = Vec::new();
+    for file in files.iter().filter(|file| **file != token_code) {
+        let text = std::fs::read_to_string(file).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            if names_a_font(code) {
+                found.push(format!("{}:{}: {}", file.strip_prefix(root).unwrap().display(), index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "fonts are tokens of theme.rs:\n{}", found.join("\n"));
 }
 
 /// The `.rs` files under `dir`, test files left out.

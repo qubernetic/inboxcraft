@@ -351,6 +351,17 @@ All notable changes to InboxCraft are listed here. The format follows
   selection gradient. Nothing asks for a repaint while nothing moves. Layer shadows are nine-slices whose picture
   does not depend on the layer's size, and every frame gives back the pictures it did not paint, so resizing the
   window neither rasterises the shadows again nor keeps their textures; a float over sharp text casts no shadow.
+- Figtree replaces egui's Ubuntu Light (#83): the Regular, Medium, SemiBold and Bold weights of Figtree v2.0.3
+  (SIL Open Font Licence 1.1) are bundled in `assets/fonts/figtree/` with their licence and compiled in; nothing is
+  fetched at run time. Every text style is a font token of `theme::Fonts` (caption, body, strong, button, sender,
+  subject, preview, heading, title, mono, read and unread); `theme.rs` is the only file that names a font (a test
+  refuses any other). Sender and subject are strong, the preview muted, and an unread row is set in heavier
+  weights as well as marked by its dot; the sender is no longer coloured by the accent. Bold text in a message is
+  set in SemiBold. A text scale of 90 % to 130 % in steps of 10 % (`InboxApp::set_text_scale`, `ui_shot`
+  `text_scale`) applies to every token; the message rows, the folder rows, the folded thread rows and the step
+  marks take their height from the font's metrics, and the reader's controls wrap above the subject, which wraps
+  rather than being cut. A test draws the list and the reader at 90 % and 130 % and fails on text that sticks out
+  of its row or button, is cut at the side of its pane, or lies over other text.
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)

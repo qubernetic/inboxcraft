@@ -331,18 +331,26 @@ B = blocks the next stage.
   messages together keep at most 256 MiB: a new picture first forgets the pictures of folded messages, and a
   forgotten remote picture is fetched again when its message shows it. Each inline picture is one `mail.attachment`,
   which reads the whole message again, so a large message with 32 inline pictures opens slowly (#33).
-- The reader shows no bold type (the bundled font has one weight); bold text is drawn in the full text colour.
-  Tables are laid out as a grid without borders, four deep at most (#33).
+- Bold text in a message is set in Figtree SemiBold; italic text is slanted by egui, as Figtree's italics are not
+  bundled (#83). Tables are laid out as a grid without borders, four deep at most (#33).
 - `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
   mailboxes, an index comes with the store on disk (#33).
 - The next-message rule applies when the open message leaves the list after a refresh; archive and delete, which
   will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened (#33).
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
-- The window uses egui's bundled fonts: Ubuntu Light (Ubuntu Font Licence 1.0, which is not an OSI licence; allowed
-  in `deny.toml` for that crate only, the project owner's to confirm) with no bold weight, so unread rows are marked
-  by a dot and the accent colour. Scripts the font lacks (CJK and others) show as boxes, and right-to-left text is
-  laid out left to right (egui has no bidi). InboxCraft's own choice of typeface is open (#30).
+- The window's typeface is Figtree (four weights, #83). Scripts it and egui's fallback fonts lack (CJK, Arabic,
+  Hebrew, Devanagari and others) show as boxes, and right-to-left text is laid out left to right (egui has no
+  bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
+  which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
+  for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
+- Text size and typeface (#83): the text scale (90 % to 130 %) can be changed only from code
+  (`InboxApp::set_text_scale`) and the `ui_shot` scripts; the `ui.text_scale.set` and `ui.font.set` commands, the
+  settings page, keeping the choice on disk and Inter as the second typeface come with E1.16. The fit test draws the
+  list, the reader and the add-account page; the settings page joins it when it exists. Spacing and paddings stay
+  on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
+  idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
+  and handling of missing glyphs.
 - The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
   `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
   follows the system's mode in Electric. The error colours are fixed per mode, not derived from
@@ -362,7 +370,7 @@ B = blocks the next stage.
   points. A resize still rasterises the colour fields again each time the window crosses a step of 128 pixels,
   and the selection gradient whenever the selected row changes width; layer shadows are size-free nine-slices, but
   their edges repeat a 32-pixel strip, dither noise included. A float over sharp text casts no shadow, so a menu
-  over the reader stands out by its colour and edge alone. The reader's subject still shrinks to "..." when the toolbar fills its width (E1.17b).
+  over the reader stands out by its colour and edge alone.
 - `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
   sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
   It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
@@ -447,3 +455,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Limits of the side-by-side pictures (#81) |
 | 2026-11-06 | minor | Limits of glass and floats (#82) |
 | 2026-11-06 | minor | Glass and floats: resizes no longer rasterise the shadows; no float shadow over sharp text (#82) |
+| 2026-11-06 | minor | Figtree and the text scale: what is left, the fallback scripts, Ubuntu Light still compiled in (#83) |

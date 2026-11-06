@@ -1,13 +1,16 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! InboxCraft's own look: the colour tokens, spacing and type sizes (`docs/design.md`).
+//! InboxCraft's own look: the colour tokens, spacing and font tokens (`docs/design.md`).
 //!
 //! Every colour on screen is a token of a [`Palette`], and every token is derived from two choices: the mode (light
 //! or dark) and the accent [`Preset`] (three gradient stops and an accent). Adding a preset is adding one entry to
 //! [`PRESETS`]. Text tokens are moved in lightness until they meet WCAG AA (4.5:1) on every surface they sit on, and
 //! markers and control edges until they meet 3:1; the tests check this for every preset in both modes. This file is
 //! the only place that names a colour; a test refuses colour constants anywhere else in the crate.
+//!
+//! Every text style is a font token of [`Fonts`]: a weight of Figtree (bundled, replacing egui's Ubuntu Light) or the
+//! monospaced face, at a size the [`TextScale`] multiplies. This file is also the only place that names a font.
 
 use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
@@ -190,8 +193,6 @@ pub struct Spacing {
     pub l: f32,
     /// Between groups.
     pub xl: f32,
-    /// The height of a message row: two lines of text and air.
-    pub row_height: f32,
     /// The default width of the folder pane.
     pub folder_pane: f32,
     /// The corner radius of fields, badges and selections.
@@ -204,17 +205,161 @@ pub struct Spacing {
     pub gap: f32,
 }
 
-/// Type sizes in points.
+/// A weight of the typeface, lightest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Weight {
+    /// Running text and previews.
+    Regular,
+    /// Read senders and subjects, buttons.
+    Medium,
+    /// Unread subjects, headings, bold text in a message.
+    SemiBold,
+    /// Unread senders and titles.
+    Bold,
+}
+
+/// A face of a font token: the typeface at a weight, or the monospaced face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Face {
+    /// The typeface (Figtree).
+    Sans(Weight),
+    /// The monospaced face, for preformatted text and code.
+    Mono,
+}
+
+/// A font token: a face and a size in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TypeScale {
-    /// Badges, dates, captions.
-    pub small: f32,
-    /// List rows, folders, fields.
-    pub body: f32,
-    /// Section headings in the folder pane.
-    pub heading: f32,
-    /// The name of the view above the list.
-    pub title: f32,
+pub struct Font {
+    /// The size in points, the text scale applied.
+    pub size: f32,
+    /// The face.
+    pub face: Face,
+}
+
+/// The family names of the weights; [`Weight::Regular`] is egui's proportional family.
+const FAMILIES: [(Weight, &str); 3] = [(Weight::Medium, "Figtree-Medium"), (Weight::SemiBold, "Figtree-SemiBold"), (Weight::Bold, "Figtree-Bold")];
+
+impl Font {
+    const fn sans(size: f32, weight: Weight) -> Self {
+        Self { size, face: Face::Sans(weight) }
+    }
+
+    /// egui's font for this token.
+    #[must_use]
+    pub fn id(self) -> FontId {
+        let family = match self.face {
+            Face::Mono => FontFamily::Monospace,
+            Face::Sans(weight) => {
+                FAMILIES.iter().find(|(named, _)| *named == weight).map_or(FontFamily::Proportional, |(_, name)| FontFamily::Name((*name).into()))
+            }
+        };
+        FontId::new(self.size, family)
+    }
+
+    fn scaled(self, factor: f32) -> Self {
+        Self { size: self.size * factor, ..self }
+    }
+}
+
+/// The font tokens: every text style on screen is one of these.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fonts {
+    /// Dates, addresses, badges, captions and section headings.
+    pub caption: Font,
+    /// Running text, folders, fields, empty-state details.
+    pub body: Font,
+    /// Bold text in a message.
+    pub strong: Font,
+    /// Buttons.
+    pub button: Font,
+    /// The sender of a read message.
+    pub sender: Font,
+    /// The sender of an unread message.
+    pub sender_unread: Font,
+    /// The subject of a read message.
+    pub subject: Font,
+    /// The subject of an unread message.
+    pub subject_unread: Font,
+    /// The first words of a message, after its subject (in the muted colour).
+    pub preview: Font,
+    /// Account names, empty-state titles, message headings.
+    pub heading: Font,
+    /// The view's name, the reader's subject, page titles.
+    pub title: Font,
+    /// Preformatted text and code.
+    pub mono: Font,
+}
+
+impl Fonts {
+    /// Every token.
+    #[must_use]
+    pub fn all(&self) -> Vec<Font> {
+        vec![
+            self.caption,
+            self.body,
+            self.strong,
+            self.button,
+            self.sender,
+            self.sender_unread,
+            self.subject,
+            self.subject_unread,
+            self.preview,
+            self.heading,
+            self.title,
+            self.mono,
+        ]
+    }
+
+    fn scaled(self, factor: f32) -> Self {
+        Self {
+            caption: self.caption.scaled(factor),
+            body: self.body.scaled(factor),
+            strong: self.strong.scaled(factor),
+            button: self.button.scaled(factor),
+            sender: self.sender.scaled(factor),
+            sender_unread: self.sender_unread.scaled(factor),
+            subject: self.subject.scaled(factor),
+            subject_unread: self.subject_unread.scaled(factor),
+            preview: self.preview.scaled(factor),
+            heading: self.heading.scaled(factor),
+            title: self.title.scaled(factor),
+            mono: self.mono.scaled(factor),
+        }
+    }
+}
+
+/// The text scale the owner chose: 90 % to 130 % in steps of 10 %, applied to every font token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextScale(u8);
+
+impl TextScale {
+    /// Every scale, smallest first.
+    pub const ALL: [Self; 5] = [Self(90), Self(100), Self(110), Self(120), Self(130)];
+
+    /// The scale in per cent.
+    #[must_use]
+    pub fn percent(self) -> u16 {
+        u16::from(self.0)
+    }
+
+    /// The scale of `percent`, if it is one of [`Self::ALL`].
+    #[must_use]
+    pub fn from_percent(percent: u16) -> Option<Self> {
+        Self::ALL.into_iter().find(|scale| scale.percent() == percent)
+    }
+
+    /// What the 100 % sizes are multiplied by.
+    #[must_use]
+    pub fn factor(self) -> f32 {
+        f32::from(self.0) / 100.0
+    }
+}
+
+impl Default for TextScale {
+    /// 100 %.
+    fn default() -> Self {
+        Self(100)
+    }
 }
 
 /// The whole look of one mode and preset.
@@ -228,8 +373,10 @@ pub struct Theme {
     pub palette: Palette,
     /// Its distances.
     pub spacing: Spacing,
-    /// Its type sizes.
-    pub type_scale: TypeScale,
+    /// The text scale its fonts are at.
+    pub text_scale: TextScale,
+    /// Its font tokens, at the text scale.
+    pub fonts: Fonts,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -322,12 +469,62 @@ const DARK: Neutrals = Neutrals {
 };
 
 const SPACING: Spacing =
-    Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, row_height: 52.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
+    Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
 
 /// The most contrast text under a float over sharp text may keep: barely there.
 pub const GHOST: f32 = 1.2;
 
-const TYPE_SCALE: TypeScale = TypeScale { small: 12.0, body: 14.0, heading: 15.0, title: 20.0 };
+/// The font tokens at 100 %.
+const FONTS: Fonts = Fonts {
+    caption: Font::sans(12.0, Weight::Regular),
+    body: Font::sans(14.0, Weight::Regular),
+    strong: Font::sans(14.0, Weight::SemiBold),
+    button: Font::sans(14.0, Weight::Medium),
+    sender: Font::sans(14.0, Weight::Medium),
+    sender_unread: Font::sans(14.0, Weight::Bold),
+    subject: Font::sans(14.0, Weight::Regular),
+    subject_unread: Font::sans(14.0, Weight::SemiBold),
+    preview: Font::sans(14.0, Weight::Regular),
+    heading: Font::sans(15.0, Weight::SemiBold),
+    title: Font::sans(20.0, Weight::Bold),
+    mono: Font { size: 13.0, face: Face::Mono },
+};
+
+/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`), the weights the tokens use.
+const FIGTREE: [(&str, &[u8]); 4] = [
+    ("Figtree-Regular", include_bytes!("../../../assets/fonts/figtree/Figtree-Regular.ttf")),
+    ("Figtree-Medium", include_bytes!("../../../assets/fonts/figtree/Figtree-Medium.ttf")),
+    ("Figtree-SemiBold", include_bytes!("../../../assets/fonts/figtree/Figtree-SemiBold.ttf")),
+    ("Figtree-Bold", include_bytes!("../../../assets/fonts/figtree/Figtree-Bold.ttf")),
+];
+
+/// egui's fonts with Figtree in place of Ubuntu Light: each weight is a family of its own, followed by egui's emoji
+/// and icon fonts; the monospaced face (Hack) falls back to Figtree.
+#[must_use]
+pub fn font_definitions() -> egui::FontDefinitions {
+    let mut definitions = egui::FontDefinitions::default();
+    definitions.font_data.remove("Ubuntu-Light");
+    for fonts in definitions.families.values_mut() {
+        fonts.retain(|font| font != "Ubuntu-Light");
+    }
+    for (name, data) in FIGTREE {
+        definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
+    }
+    let fallbacks = definitions.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let family = |first: &str| std::iter::once(first.to_owned()).chain(fallbacks.iter().cloned()).collect::<Vec<_>>();
+    definitions.families.insert(FontFamily::Proportional, family("Figtree-Regular"));
+    for (_, name) in FAMILIES {
+        definitions.families.insert(FontFamily::Name(name.into()), family(name));
+    }
+    let monospace = definitions.families.entry(FontFamily::Monospace).or_default();
+    monospace.insert(monospace.len().min(1), "Figtree-Regular".to_owned());
+    definitions
+}
+
+/// Installs [`font_definitions`] in `ctx`, from its next frame.
+pub fn install_fonts(ctx: &egui::Context) {
+    ctx.set_fonts(font_definitions());
+}
 
 impl Palette {
     /// Every token of `mode` from `preset`.
@@ -432,19 +629,27 @@ impl Theme {
     /// The look of `mode` with the colours of `preset`.
     #[must_use]
     pub fn new(mode: Mode, preset: &Preset) -> Self {
-        Self { mode, preset: *preset, palette: Palette::derive(mode, preset), spacing: SPACING, type_scale: TYPE_SCALE }
+        let text_scale = TextScale::default();
+        Self { mode, preset: *preset, palette: Palette::derive(mode, preset), spacing: SPACING, text_scale, fonts: FONTS.scaled(text_scale.factor()) }
     }
 
-    /// The look `ctx` shows now with the colours of `preset`.
+    /// The same look with every font token at `scale`.
     #[must_use]
-    pub fn current(ctx: &egui::Context, preset: &Preset) -> Self {
-        Self::new(Mode::of(ctx), preset)
+    pub fn with_text_scale(self, scale: TextScale) -> Self {
+        Self { text_scale: scale, fonts: FONTS.scaled(scale.factor()), ..self }
     }
 
-    /// Installs both modes of `preset` in `ctx`; egui shows the one the mode preference asks for.
-    pub fn apply(ctx: &egui::Context, preset: &Preset) {
-        ctx.set_style_of(egui::Theme::Light, Self::new(Mode::Light, preset).style());
-        ctx.set_style_of(egui::Theme::Dark, Self::new(Mode::Dark, preset).style());
+    /// The look `ctx` shows now with the colours of `preset` and the text at `scale`.
+    #[must_use]
+    pub fn current(ctx: &egui::Context, preset: &Preset, scale: TextScale) -> Self {
+        Self::new(Mode::of(ctx), preset).with_text_scale(scale)
+    }
+
+    /// Installs both modes of `preset` with the text at `scale` in `ctx`; egui shows the one the mode preference
+    /// asks for.
+    pub fn apply(ctx: &egui::Context, preset: &Preset, scale: TextScale) {
+        ctx.set_style_of(egui::Theme::Light, Self::new(Mode::Light, preset).with_text_scale(scale).style());
+        ctx.set_style_of(egui::Theme::Dark, Self::new(Mode::Dark, preset).with_text_scale(scale).style());
     }
 
     /// The colour of the account with this index, repeating after the last.
@@ -515,11 +720,11 @@ impl Theme {
         visuals
     }
 
-    /// egui's style for this theme: the colours, the distances and the type sizes.
+    /// egui's style for this theme: the colours, the distances and the font tokens.
     #[must_use]
     pub fn style(&self) -> Style {
         let s = &self.spacing;
-        let t = &self.type_scale;
+        let f = &self.fonts;
         let mut style = Style { visuals: self.visuals(), ..Style::default() };
         style.spacing.item_spacing = vec2(s.s, s.xs);
         style.spacing.button_padding = vec2(s.s, s.xs);
@@ -527,11 +732,11 @@ impl Theme {
         // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
         style.spacing.scroll.fade.strength = 0.0;
         style.text_styles = [
-            (TextStyle::Small, FontId::new(t.small, FontFamily::Proportional)),
-            (TextStyle::Body, FontId::new(t.body, FontFamily::Proportional)),
-            (TextStyle::Button, FontId::new(t.body, FontFamily::Proportional)),
-            (TextStyle::Heading, FontId::new(t.heading, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(t.body, FontFamily::Monospace)),
+            (TextStyle::Small, f.caption.id()),
+            (TextStyle::Body, f.body.id()),
+            (TextStyle::Button, f.button.id()),
+            (TextStyle::Heading, f.heading.id()),
+            (TextStyle::Monospace, f.mono.id()),
         ]
         .into();
         style

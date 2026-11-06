@@ -7,22 +7,27 @@
 use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Galley, Painter, Pos2, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::gradient::{self, Gradient, Stop};
-use crate::theme::Theme;
+use crate::theme::{Font, Theme};
 
-/// One line of `sections` (text and colour) at `size`, cut with an ellipsis at `width`.
-pub(super) fn line(ui: &Ui, sections: &[(&str, Color32)], size: f32, width: f32) -> Arc<Galley> {
+/// One line of `sections` (text, font token and colour), cut with an ellipsis at `width`.
+pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> Arc<Galley> {
     let mut job = LayoutJob {
         wrap: TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') },
         break_on_newline: false,
         ..LayoutJob::default()
     };
-    for (text, colour) in sections {
-        job.append(text, 0.0, TextFormat::simple(FontId::new(size, FontFamily::Proportional), *colour));
+    for (text, font, colour) in sections {
+        job.append(text, 0.0, TextFormat::simple(font.id(), *colour));
     }
     ui.painter().layout_job(job)
+}
+
+/// The height of one line of `font`, from the font's own metrics.
+pub(super) fn line_height(ui: &Ui, font: Font) -> f32 {
+    ui.fonts_mut(|fonts| fonts.row_height(&font.id()))
 }
 
 /// The selection over `rect`: the selection gradient from left to right.
@@ -43,7 +48,7 @@ pub(super) fn focus_ring(ui: &Ui, theme: &Theme, response: &Response) {
 /// A pill with `count` in it, its right edge at `right`, centred on `centre_y`; returns its left edge.
 pub(super) fn badge(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f32 {
     let p = &theme.palette;
-    let galley = line(ui, &[(&count.to_string(), p.on_badge)], theme.type_scale.small, f32::INFINITY);
+    let galley = line(ui, &[(&count.to_string(), theme.fonts.caption, p.on_badge)], f32::INFINITY);
     let height = galley.size().y + 2.0;
     let width = (galley.size().x + theme.spacing.s * 1.5).max(height);
     let rect = Rect::from_min_size(pos2(right - width, centre_y - height / 2.0), vec2(width, height));
@@ -79,7 +84,7 @@ pub(super) struct NavRow<'a> {
 pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response {
     let s = &theme.spacing;
     let p = &theme.palette;
-    let height = theme.type_scale.body + s.s * 1.5;
+    let height = line_height(ui, theme.fonts.body) + s.s * 1.5;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, row.selected, &row.spoken));
     if ui.is_rect_visible(rect) {
@@ -91,7 +96,7 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
         let left = rect.left() + s.s + f32::from(depth) * s.m;
         let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s, rect.center().y) - s.s } else { rect.right() - s.s };
-        let galley = line(ui, &[(row.text, p.text)], theme.type_scale.body, right - left);
+        let galley = line(ui, &[(row.text, theme.fonts.body, p.text)], right - left);
         ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, p.text);
         focus_ring(ui, theme, &response);
     }
