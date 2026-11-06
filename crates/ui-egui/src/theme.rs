@@ -437,16 +437,14 @@ pub(crate) mod app_icon {
 
     use super::rgb;
 
-    /// The rounded tile.
-    pub(crate) const TILE: Color32 = rgb(0x1D6A64);
-    /// The letter.
-    pub(crate) const PAPER: Color32 = rgb(0xFFFFFF);
-    /// The lines of text on the letter.
-    pub(crate) const INK: Color32 = rgb(0xA9D4CF);
-    /// The tray.
-    pub(crate) const TRAY: Color32 = rgb(0x6CC4BA);
-    /// The unread dot.
-    pub(crate) const DOT: Color32 = rgb(0xF0A06A);
+    /// The white tile.
+    pub(crate) const TILE: Color32 = rgb(0xFFFFFF);
+    /// The tile's edge: the deep ink at 16 %, so the white tile holds its shape on a light background.
+    pub(crate) const EDGE: Color32 = Color32::from_rgba_premultiplied(1, 1, 2, 41);
+    /// The Electric gradient of the mark, first to last stop.
+    pub(crate) const GRADIENT: [Color32; 3] = [rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)];
+    /// Where the gradient starts and ends on the icon's square, in units.
+    pub(crate) const GRADIENT_LINE: [[f32; 2]; 2] = [[48.0, 60.0], [208.0, 200.0]];
 }
 
 /// The neutral starting points of one mode, before the preset tints them.

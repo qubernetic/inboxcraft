@@ -4,7 +4,9 @@
 use egui::epaint::CornerRadiusF32;
 use egui::{Color32, Rect, Shape, pos2, vec2};
 
-use super::{DOT, EXPORTED, PAPER, Part, SIDE, TILE, TRAY, WINDOW_ICON_SIDE, app_icon, number, picture, shapes, svg, svg_rect, window_icon};
+use super::{
+    EDGE, EXPORTED, Fill, GRADIENT, Part, SIDE, TILE, WINDOW_ICON_SIDE, app_icon, gradient_at, number, picture, shapes, svg, svg_rect, window_icon,
+};
 use crate::shot::MAX_SIDE;
 
 fn workspace_file(rel: &str) -> std::path::PathBuf {
@@ -18,15 +20,22 @@ fn the_exported_svg_is_the_icon_the_code_draws() {
 }
 
 #[test]
-fn the_svg_has_one_element_a_part_on_the_side_square() {
+fn the_svg_defines_the_gradient_then_has_one_element_a_part() {
     let parts = app_icon();
     let text = svg(&parts);
     assert!(text.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"256\" height=\"256\" viewBox=\"0 0 256 256\">\n"), "{text}");
     assert!(text.ends_with("</svg>\n"), "{text}");
-    assert_eq!(text.lines().count(), parts.len() + 2);
-    assert!(text.contains("<rect x=\"16\" y=\"16\" width=\"224\" height=\"224\" rx=\"52\" fill=\"#1d6a64\"/>"), "{text}");
-    assert!(text.contains("<polygon points=\"44,124 100,124 114,152 44,152\" fill=\"#6cc4ba\"/>"), "{text}");
-    assert!(text.contains("<circle cx=\"180\" cy=\"52\" r=\"20\" fill=\"#f0a06a\"/>"), "{text}");
+    assert_eq!(text.lines().count(), parts.len() + 3, "the svg line, the gradient, the parts and the end");
+    assert!(text.contains("<linearGradient id=\"electric\" gradientUnits=\"userSpaceOnUse\" x1=\"48\" y1=\"60\" x2=\"208\" y2=\"200\">"), "{text}");
+    assert!(
+        text.contains("<stop stop-color=\"#2f6bff\"/><stop offset=\"0.5\" stop-color=\"#8a3ffc\"/><stop offset=\"1\" stop-color=\"#ff2d95\"/>"),
+        "{text}"
+    );
+    assert!(text.contains("<rect x=\"9\" y=\"9\" width=\"238\" height=\"238\" rx=\"59\" fill=\"#ffffff\"/>"), "{text}");
+    // The deep ink at 16 %; kept premultiplied, its colour comes back a step off.
+    assert!(text.contains("<rect x=\"7\" y=\"7\" width=\"242\" height=\"242\" rx=\"61\" fill=\"#0"), "{text}");
+    assert!(text.contains("fill-opacity=\"0.161\""), "{text}");
+    assert!(text.contains("<polygon points=\"41,135 95,135 111.7,159 41,159\" fill=\"url(#electric)\"/>"), "{text}");
 }
 
 #[test]
@@ -44,28 +53,25 @@ fn numbers_are_short_and_finite() {
 #[test]
 fn rectangles_become_rects_or_paths_with_clamped_corners() {
     let square = CornerRadiusF32 { nw: 0.0, ne: 0.0, sw: 0.0, se: 0.0 };
-    assert_eq!(svg_rect([1.0, 2.0], [11.0, 22.0], square, Color32::BLACK), "<rect x=\"1\" y=\"2\" width=\"10\" height=\"20\" fill=\"#000000\"/>");
+    let black = Fill::Solid(Color32::BLACK);
+    assert_eq!(svg_rect([1.0, 2.0], [11.0, 22.0], square, black), "<rect x=\"1\" y=\"2\" width=\"10\" height=\"20\" fill=\"#000000\"/>");
     let big = CornerRadiusF32 { nw: 99.0, ne: 99.0, sw: 99.0, se: 99.0 };
     assert_eq!(
-        svg_rect([0.0, 0.0], [10.0, 20.0], big, Color32::WHITE),
+        svg_rect([0.0, 0.0], [10.0, 20.0], big, Fill::Solid(Color32::WHITE)),
         "<rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" rx=\"5\" fill=\"#ffffff\"/>"
     );
     let base = CornerRadiusF32 { nw: 0.0, ne: 0.0, sw: 4.0, se: 4.0 };
-    assert_eq!(
-        svg_rect([0.0, 0.0], [20.0, 10.0], base, Color32::BLACK),
-        "<path d=\"M0 0 H20 V6 A4 4 0 0 1 16 10 H4 A4 4 0 0 1 0 6 V0 Z\" fill=\"#000000\"/>"
-    );
+    assert_eq!(svg_rect([0.0, 0.0], [20.0, 10.0], base, black), "<path d=\"M0 0 H20 V6 A4 4 0 0 1 16 10 H4 A4 4 0 0 1 0 6 V0 Z\" fill=\"#000000\"/>");
     let odd = CornerRadiusF32 { nw: 2.0, ne: f32::NAN, sw: -1.0, se: 0.0 };
-    assert_eq!(svg_rect([0.0, 0.0], [10.0, 10.0], odd, Color32::BLACK), "<path d=\"M2 0 H10 V10 H0 V2 A2 2 0 0 1 2 0 Z\" fill=\"#000000\"/>");
+    assert_eq!(svg_rect([0.0, 0.0], [10.0, 10.0], odd, black), "<path d=\"M2 0 H10 V10 H0 V2 A2 2 0 0 1 2 0 Z\" fill=\"#000000\"/>");
 }
 
 #[test]
-fn every_part_stays_on_the_tile_and_every_polygon_is_convex_and_clockwise() {
-    let inside = |[x, y]: [f32; 2]| (16.0..=240.0).contains(&x) && (16.0..=240.0).contains(&y);
+fn every_part_stays_on_the_square_and_every_polygon_is_convex_and_clockwise() {
+    let inside = |[x, y]: [f32; 2]| (0.0..=SIDE).contains(&x) && (0.0..=SIDE).contains(&y);
     for part in app_icon() {
         match part {
             Part::Rect { min, max, .. } => assert!(inside(min) && inside(max) && min[0] < max[0] && min[1] < max[1], "{min:?} {max:?}"),
-            Part::Circle { centre: [x, y], radius, .. } => assert!(inside([x - radius, y - radius]) && inside([x + radius, y + radius])),
             Part::Polygon { points, .. } => {
                 assert!(points.len() >= 3);
                 for (i, a) in points.iter().enumerate() {
@@ -81,32 +87,44 @@ fn every_part_stays_on_the_tile_and_every_polygon_is_convex_and_clockwise() {
 }
 
 #[test]
-fn shapes_scale_the_side_square_into_the_rect() {
+fn shapes_scale_the_side_square_into_the_rect_and_grade_the_mark() {
     let parts = app_icon();
     let shown = shapes(&parts, Rect::from_min_size(pos2(10.0, 20.0), vec2(128.0, 128.0)));
     assert_eq!(shown.len(), parts.len());
-    let Shape::Rect(tile) = &shown[0] else { panic!("the tile is a rect: {:?}", shown[0]) };
-    assert_eq!(tile.rect, Rect::from_min_max(pos2(18.0, 28.0), pos2(130.0, 140.0)));
-    assert_eq!(tile.corner_radius.nw, 26);
-    let Shape::Circle(dot) = &shown[parts.len() - 1] else { panic!("the dot is a circle") };
-    assert_eq!((dot.center, dot.radius, dot.fill), (pos2(100.0, 46.0), 10.0, DOT));
-    assert!(matches!(shown[4], Shape::Path(_)));
+    let Shape::Rect(tile) = &shown[1] else { panic!("the tile is a rect: {:?}", shown[1]) };
+    assert_eq!(tile.rect, Rect::from_min_max(pos2(14.5, 24.5), pos2(133.5, 143.5)));
+    assert_eq!(tile.fill, TILE);
+    assert!(shown[2..].iter().all(|shape| matches!(shape, Shape::Mesh(_))), "the mark is graded");
 }
 
 #[test]
-fn the_picture_shows_the_tile_the_letter_the_tray_and_the_dot() {
+fn the_gradient_runs_from_blue_through_violet_to_pink() {
+    let [first, middle, last] = GRADIENT;
+    assert_eq!(gradient_at([48.0, 60.0]), first);
+    assert_eq!(gradient_at([128.0, 130.0]), middle);
+    assert_eq!(gradient_at([208.0, 200.0]), last);
+    assert_eq!(gradient_at([0.0, 0.0]), first, "clamped before the line");
+    assert_eq!(gradient_at([f32::NAN, 0.0]), first);
+}
+
+#[test]
+fn the_picture_shows_the_white_tile_and_the_graded_mark() {
     let side = SIDE as usize;
     let icon = picture(&app_icon(), side).unwrap();
     assert_eq!((icon.width(), icon.height()), (side, side));
     let at = |x: usize, y: usize| icon.pixel(x, y).unwrap();
     assert_eq!(at(2, 2), Color32::TRANSPARENT, "outside the tile");
-    assert_eq!(at(20, 20), Color32::TRANSPARENT, "the rounded corner");
+    assert_eq!(at(14, 14), Color32::TRANSPARENT, "the rounded corner");
     assert_eq!(at(30, 128), TILE);
-    assert_eq!(at(128, 60), PAPER);
-    assert_eq!(at(128, 140), PAPER, "the letter shows through the slot");
-    assert_eq!(at(60, 180), TRAY);
-    assert_eq!(at(180, 52), DOT);
-    assert_eq!(at(180, 78), TILE, "the ring around the dot");
+    assert_eq!(at(128, 85), TILE, "between the cards");
+    assert_eq!(at(128, 150), TILE, "the notch");
+    let near = |got: Color32, want: Color32| got.to_array().iter().zip(want.to_array()).all(|(a, b)| a.abs_diff(b) <= 12);
+    for (x, y) in [(128, 65), (128, 106), (60, 180), (200, 180)] {
+        let want = gradient_at([x as f32 + 0.5, y as f32 + 0.5]);
+        assert!(near(at(x, y), want), "({x}, {y}): {:?} is not {want:?}", at(x, y));
+    }
+    assert!(at(128, 8).a() > 0 && at(128, 8) != TILE, "the faint edge");
+    let _ = EDGE;
 }
 
 #[test]
@@ -121,9 +139,11 @@ fn the_window_icon_has_straight_alpha() {
     assert_eq!((icon.width as usize, icon.height as usize), (WINDOW_ICON_SIDE, WINDOW_ICON_SIDE));
     assert_eq!(icon.rgba.len(), WINDOW_ICON_SIDE * WINDOW_ICON_SIDE * 4);
     assert_eq!(&icon.rgba[..4], &[0, 0, 0, 0]);
+    // The middle of the tile is opaque white; the faint edge outside it is mostly see-through, never darkened by
+    // premultiplied alpha into grey.
+    let middle = (WINDOW_ICON_SIDE / 2 * WINDOW_ICON_SIDE + 30) * 4;
+    assert_eq!(&icon.rgba[middle..middle + 4], &[255, 255, 255, 255]);
     let (pixels, _) = icon.rgba.as_chunks::<4>();
-    let edge = pixels.iter().find(|px| px[3] >= 100 && px[3] < 250).unwrap();
-    for (got, want) in edge.iter().zip([TILE.r(), TILE.g(), TILE.b()]) {
-        assert!(got.abs_diff(want) <= 4, "{edge:?}: the edge keeps the tile colour, not a darker premultiplied one");
-    }
+    let edge = pixels.iter().find(|px| px[3] > 0 && px[3] < 60).unwrap();
+    assert!(edge[0] < 40 && edge[1] < 40 && edge[2] < 40, "{edge:?}: the edge keeps the ink's colour");
 }
