@@ -381,7 +381,8 @@ All notable changes to InboxCraft are listed here. The format follows
   failed check names the step and its reason under the title and lists the steps on a card. The reader's subject
   is set large with the message's group as a chip. In the list, "Show all" is an accent link under the rows' text,
   the grouped cards show no account stripe, and a row's hover actions are Done, an envelope for read or unread,
-  Delete and Snooze (not available yet)
+  Delete and Snooze (not available yet). Without an account the folder pane is left out, in the empty window and
+  while the first account is added; Lucide's Fill draws no disc behind the line glyph
 - The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
   left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

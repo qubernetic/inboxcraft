@@ -499,26 +499,16 @@ impl InboxApp {
         rail.sent = clicked_rail.sent;
         rail.search = clicked_rail.search;
         if adding {
-            asked = Panel::left("folders")
-                .resizable(true)
-                .default_size(s.folder_pane)
-                .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false)))
-                .inner;
+            let left;
+            (asked, left) = self.folders(ui, &theme, &mut layers, false);
             let (keymap, mailbox, onboarding) = (&self.keymap, &self.mailbox, &mut self.onboarding);
             page = CentralPanel::no_frame()
-                .frame(around(half, gap, gap))
+                .frame(around(left, gap, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, keymap, mailbox, onboarding)))
                 .inner;
         } else if !full {
-            asked = Panel::left("folders")
-                .resizable(true)
-                .default_size(s.folder_pane)
-                .show_separator_line(false)
-                .frame(around(gap, half, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
-                .inner;
+            let left;
+            (asked, left) = self.folders(ui, &theme, &mut layers, self.can_add);
             let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -545,11 +535,11 @@ impl InboxApp {
                     .resizable(true)
                     .default_size(LIST_WIDTH)
                     .show_separator_line(false)
-                    .frame(around(half, half, gap))
+                    .frame(around(left, half, gap))
                     .show(ui, |ui| list(ui, &mut layers))
                     .inner
             } else {
-                CentralPanel::no_frame().frame(around(half, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
+                CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
             };
             asked.add |= add;
         }
@@ -674,6 +664,22 @@ impl InboxApp {
             frame::top_row(ctx, theme, &self.keymap);
         }
         frame::outline(ctx, theme, corner);
+    }
+
+    /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
+    /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
+    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers, can_add: bool) -> (pane::Asked, f32) {
+        let s = theme.spacing;
+        if self.mailbox.accounts().is_empty() {
+            return (pane::Asked::default(), s.gap);
+        }
+        let shown = Panel::left("folders")
+            .resizable(true)
+            .default_size(s.folder_pane)
+            .show_separator_line(false)
+            .frame(around(s.gap, s.gap / 2.0, s.gap))
+            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox, can_add)));
+        (shown.inner, s.gap / 2.0)
     }
 
     /// The settings sheet over the window; what was asked on it.

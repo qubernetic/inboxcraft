@@ -48,10 +48,14 @@ fn type_in(harness: &mut Harness<'static, InboxApp>) {
 fn the_empty_window_offers_to_add_an_account_and_opens_the_form() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.get_by_label("No accounts yet");
-    assert_eq!(harness.get_all_by_label("Add account").count(), 2, "in the pane and in the empty list");
+    // Without an account the folder pane would hold only the app's name: it is left out, here and while adding.
+    assert_eq!(harness.get_all_by_label("Add account").count(), 1, "in the empty list only");
+    assert!(harness.query_by_label("MAILBOXES").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
     harness.get_all_by_label("Add account").next().unwrap().click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    let form = harness.get_by_label("Add an account").rect();
+    assert!(form.left() < 200.0, "the form takes the folder pane's room: {form:?}");
     harness.get_by_label("Add an account");
     harness.get_by_label("Password");
     harness.get_by_label("Cancel").click();
