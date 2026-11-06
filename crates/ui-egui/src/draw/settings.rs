@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance; the others not built yet), the
-//! Appearance page on the right. Each setting is a row: its name and a note on the left, its control on the right (or
+//! The settings sheet over the dimmed window: the sections on the left (Appearance and Accounts; the others not built
+//! yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
 //! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
 //! for "Reduce motion"; a preview in the look the controls choose closes the page.
@@ -21,8 +21,10 @@ use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
+use crate::mailbox::Mailbox;
 use crate::motion;
-use crate::settings::{MAX_CHARS, Settings};
+use crate::onboard::Onboarding;
+use crate::settings::{MAX_CHARS, Section, Settings};
 use crate::theme::{Face, Font, Look, PRESETS, Preset, TextScale, Theme, Weight};
 use crate::tr;
 
@@ -55,7 +57,27 @@ pub(super) enum Asked {
     Scale(TextScale),
     ReduceMotion(bool),
     Frame(WindowFrame),
+    /// Another page of the sheet.
+    Section(Section),
+    /// Add account on the Accounts page: the form opens on it.
+    Add,
+    /// Back from the form or the check to the list of accounts.
+    Back,
+    /// Something on the form or the check.
+    Page(super::onboard::Asked),
     Close,
+}
+
+/// What the sheet shows and changes.
+pub(super) struct Sheet<'a> {
+    pub(super) keymap: &'a Keymap,
+    pub(super) settings: &'a mut Settings,
+    pub(super) current: &'a Appearance,
+    pub(super) reduce: bool,
+    pub(super) mailbox: &'a Mailbox,
+    pub(super) onboarding: &'a mut Onboarding,
+    /// Whether the window can add accounts.
+    pub(super) can_add: bool,
 }
 
 /// The name of a mode.
@@ -102,19 +124,27 @@ fn frame_name(frame: WindowFrame) -> &'static str {
     }
 }
 
-/// The sections of the settings, with their icons; only Appearance is built.
-fn sections() -> [(IconId, &'static str, bool); 9] {
+/// The sections of the settings, with their icons and the page of those that are built.
+fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
     [
-        (IconId::Palette, tr!("Appearance"), true),
-        (IconId::At, tr!("Accounts"), false),
-        (IconId::Notify, tr!("Notifications"), false),
-        (IconId::Funnel, tr!("Triage"), false),
-        (IconId::Send, tr!("Sending"), false),
-        (IconId::Calendar, tr!("Calendar"), false),
-        (IconId::Keyboard, tr!("Shortcuts"), false),
-        (IconId::Shield, tr!("Privacy"), false),
-        (IconId::Info, tr!("About"), false),
+        (IconId::Palette, tr!("Appearance"), Some(Section::Appearance)),
+        (IconId::At, tr!("Accounts"), Some(Section::Accounts)),
+        (IconId::Notify, tr!("Notifications"), None),
+        (IconId::Funnel, tr!("Triage"), None),
+        (IconId::Send, tr!("Sending"), None),
+        (IconId::Calendar, tr!("Calendar"), None),
+        (IconId::Keyboard, tr!("Shortcuts"), None),
+        (IconId::Shield, tr!("Privacy"), None),
+        (IconId::Info, tr!("About"), None),
     ]
+}
+
+/// The name of a section.
+fn section_name(section: Section) -> &'static str {
+    match section {
+        Section::Appearance => tr!("Appearance"),
+        Section::Accounts => tr!("Accounts"),
+    }
 }
 
 /// `stops` from the top left to the bottom right.
@@ -149,6 +179,30 @@ fn texts(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str]) {
 /// A setting: its `title` and `notes` on the left and `control` at the right end, or under them when the row has no
 /// room for both, and a line under it. The control is measured in a pass that draws nothing and takes no press.
 fn row(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str], control: &mut dyn FnMut(&mut Ui)) {
+    row_with(ui, theme, None, title, notes, control);
+}
+
+/// The name and notes of a row, `width` wide, after its `icon` in the accent colour when it has one.
+fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes: &[&str], width: f32) {
+    let Some(icon) = icon else {
+        ui.vertical(|ui| texts(ui, theme, title, notes));
+        return;
+    };
+    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+        let side = line_height(ui, theme.fonts.body) * 1.2;
+        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        theme.icons.paint(ui.painter(), rect, icon, Style::Regular, theme.palette.accent);
+        ui.add_space(theme.spacing.xs);
+        let used = side + theme.spacing.xs + ui.spacing().item_spacing.x * 2.0;
+        ui.vertical(|ui| {
+            ui.set_width((width - used).max(1.0));
+            texts(ui, theme, title, notes);
+        });
+    });
+}
+
+/// A row as [`row`] draws it, with an `icon` before its name.
+pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes: &[&str], control: &mut dyn FnMut(&mut Ui)) {
     let s = &theme.spacing;
     ui.add_space(s.l);
     let width = ui.available_width();
@@ -158,14 +212,14 @@ fn row(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str], control: &mut dy
     let need = sizing.min_rect().width();
     let room = width - need - s.l;
     if room < TEXT_MIN {
-        ui.vertical(|ui| texts(ui, theme, title, notes));
+        heading(ui, theme, icon, title, notes, width);
         ui.add_space(s.xs);
         ui.horizontal_wrapped(|ui| control(ui));
     } else {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(room);
-                texts(ui, theme, title, notes);
+                heading(ui, theme, icon, title, notes, room);
             });
             ui.add_space((width - room - need - 2.0 * ui.spacing().item_spacing.x).max(0.0));
             control(ui);
@@ -525,34 +579,43 @@ fn preview(ui: &mut Ui, theme: &Theme) {
     });
 }
 
-/// The sections on the left: the title, then a row each; those not built yet are faded and say so.
-fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+/// The sections on the left: the title, then a row each, the one shown selected; those not built yet are faded and
+/// say so. The section pressed.
+fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<Section> {
     ui.spacing_mut().item_spacing.y = 2.0;
     ui.label(RichText::new(tr!("Settings")).font(theme.fonts.title.id()).color(theme.palette.text));
     ui.add_space(theme.spacing.s);
-    for (icon, name, built) in sections() {
+    let mut pressed = None;
+    for (icon, name, section) in sections() {
         let row = NavRow {
             text: name,
             spoken: tr!("{section}, settings page", section = name),
             badge: 0,
-            selected: built,
+            selected: section == Some(shown),
             depth: 0,
             icon: Some(icon),
-            enabled: built,
+            enabled: section.is_some(),
         };
         let response = nav_row(ui, theme, &row);
-        if !built {
-            tooltip::attach_note(response, theme, keymap, name, None, Some(tr!("Not available yet")));
+        match section {
+            Some(section) if response.clicked() && section != shown => pressed = Some(section),
+            Some(_) => {}
+            None => {
+                tooltip::attach_note(response, theme, keymap, name, None, Some(tr!("Not available yet")));
+            }
         }
     }
+    pressed
 }
 
-/// The Appearance page: its title with Close, then the rows and the preview, scrolling.
-fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+/// The page shown: its title with Close, then Appearance's rows and preview, scrolling, or the Accounts page.
+fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let mut asked = None;
+    let keymap = view.keymap;
+    let section = view.settings.section();
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr!("Appearance")).font(theme.fonts.title.id()).color(theme.palette.text));
+            ui.label(RichText::new(section_name(section)).font(theme.fonts.title.id()).color(theme.palette.text));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked() {
                     asked = Some(Asked::Close);
@@ -561,6 +624,16 @@ fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, cu
         });
     });
     ui.add_space(theme.spacing.s);
+    let on_page = match section {
+        Section::Appearance => appearance(ui, theme, keymap, view.settings, view.current, view.reduce),
+        Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
+    };
+    asked.or(on_page)
+}
+
+/// The Appearance page under its title: the rows and the preview, scrolling.
+fn appearance(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+    let mut asked = None;
     let shown = match settings.draft() {
         Some(draft) if matches!(current.accent, Accent::Custom(_)) || !same_colours(&draft, &Preset::of(&current.accent)) => {
             Theme::of(theme.mode, &Look { preset: draft, text_scale: theme.text_scale, typeface: theme.typeface, icons: theme.icons })
@@ -569,7 +642,7 @@ fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, cu
     };
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.m);
-        asked = asked.clone().or(rows(ui, theme, keymap, settings, current, reduce));
+        asked = rows(ui, theme, keymap, settings, current, reduce);
         preview(ui, &shown);
     });
     asked
@@ -584,14 +657,7 @@ fn place(theme: &Theme, screen: Rect) -> Rect {
 
 /// Draws the settings sheet over the window, which it dims and keeps from taking presses; returns what was asked
 /// for, applied by the caller after the frame's drawing.
-pub(super) fn sheet(
-    ctx: &egui::Context,
-    theme: &Theme,
-    keymap: &Keymap,
-    settings: &mut Settings,
-    current: &Appearance,
-    reduce: bool,
-) -> Option<Asked> {
+pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
     let p = &theme.palette;
     let s = &theme.spacing;
     let screen = ctx.content_rect();
@@ -619,10 +685,15 @@ pub(super) fn sheet(
         let round = s.card.clamp(0.0, 255.0) as u8;
         ui.painter().rect_filled(left, egui::CornerRadius { nw: round, sw: round, ne: 0, se: 0 }, p.panel);
         let inner = left.shrink2(vec2(s.m, s.l));
-        ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, keymap));
+        let shown = view.settings.section();
+        let pressed =
+            ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, view.keymap, shown)).inner;
+        if let Some(section) = pressed {
+            asked = Some(Asked::Section(section));
+        }
         let body = Rect::from_min_max(pos2(whole.left() + nav_width, whole.top()), whole.max).shrink2(vec2(s.xl + s.xs, s.l + s.xs));
         ui.scope_builder(UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)), |ui| {
-            if let Some(on_page) = page(ui, theme, keymap, settings, current, reduce) {
+            if let Some(on_page) = page(ui, theme, &mut view) {
                 asked = Some(on_page);
             }
         });

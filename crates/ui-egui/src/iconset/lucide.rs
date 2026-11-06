@@ -55,6 +55,7 @@ const fn point(id: IconId) -> char {
         IconId::Shield => '\u{e1ff}',   // shield-check
         IconId::Info => '\u{e0f9}',     // info
         IconId::Close => '\u{e1b2}',    // x
+        IconId::Back => '\u{e048}',     // arrow-left
     }
 }
 

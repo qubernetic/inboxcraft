@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The appearance settings page: whether it is open, the four colours of the custom accent as the owner types them,
+//! The settings sheet: whether it is open and on which page, the four colours of the custom accent as the owner types them,
 //! and what the engine said about the last ones it took.
 //!
 //! Every other control of the page runs its `ui.*.set` command at once; the custom accent is a draft the page's
@@ -19,10 +19,21 @@ use crate::tr;
 /// The most characters a colour field takes.
 pub const MAX_CHARS: usize = 16;
 
-/// The settings page.
+/// A page of the settings sheet that is built.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Section {
+    /// Mode, accent, typeface, icons, window frame, text size and motion.
+    #[default]
+    Appearance,
+    /// The accounts, and adding one.
+    Accounts,
+}
+
+/// The settings sheet.
 #[derive(Debug, Default)]
 pub struct Settings {
     open: bool,
+    section: Section,
     colours: [String; 4],
     note: Option<String>,
 }
@@ -45,11 +56,28 @@ impl Settings {
         self.open
     }
 
-    /// Opens the page with the colours of `appearance` in the custom accent's fields.
+    /// The page shown.
+    #[must_use]
+    pub fn section(&self) -> Section {
+        self.section
+    }
+
+    /// Opens the sheet on Appearance with the colours of `appearance` in the custom accent's fields.
     pub fn open(&mut self, appearance: &Appearance) {
+        self.open_at(Section::Appearance, appearance);
+    }
+
+    /// Opens the sheet on `section`, with the colours of `appearance` in the custom accent's fields.
+    pub fn open_at(&mut self, section: Section, appearance: &Appearance) {
         self.open = true;
+        self.section = section;
         self.note = None;
         self.fill(appearance);
+    }
+
+    /// Shows `section` on the open sheet.
+    pub fn show(&mut self, section: Section) {
+        self.section = section;
     }
 
     /// Closes the page.

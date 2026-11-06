@@ -13,6 +13,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use crate::mailbox::Mailbox;
 use crate::sample;
+use crate::settings::Section;
 use crate::theme::Mode;
 
 fn clock() -> Box<FakeClock> {
@@ -63,7 +64,8 @@ fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_l
     harness.get_by_label("Appearance");
     harness.get_by_label("Preview");
     // The sections not built yet are there, faded.
-    assert!(harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());
+    assert!(harness.get_by_label("Notifications, settings page").accesskit_node().is_disabled());
+    assert!(!harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Appearance, settings page").accesskit_node().is_disabled());
     // The list lies under the sheet: a press there selects nothing, and the sheet stays.
     let before = harness.state().mailbox().selected();
@@ -192,15 +194,63 @@ fn colours_that_are_not_rrggbb_run_nothing_and_say_how_to_write_them() {
 }
 
 #[test]
-fn opening_the_page_closes_the_add_account_page_and_the_other_way_round() {
+fn the_add_account_form_opens_on_the_accounts_page_and_appearance_closes_it() {
     let mut harness = opened();
     harness.state_mut().onboarding_mut().0.open();
     harness.run();
-    assert!(!harness.state().settings().is_open(), "the add-account page takes the place");
+    assert!(harness.state().settings().is_open(), "the form opens on the sheet");
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
     harness.state_mut().open_settings();
     harness.run();
-    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().section(), Section::Appearance);
     assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Closed);
+}
+
+#[test]
+fn the_accounts_page_lists_every_account_with_its_address_and_the_nav_goes_back() {
+    let mut harness = opened();
+    assert!(selected(&harness, "Appearance, settings page"));
+    harness.get_by_label("Accounts, settings page").click();
+    harness.run();
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
+    assert!(selected(&harness, "Accounts, settings page"));
+    harness.get_by_label("Your accounts");
+    harness.get_by_label("The mail accounts this computer reads and sends from.");
+    let accounts = harness.state().mailbox().accounts().to_vec();
+    assert!(!accounts.is_empty());
+    for account in &accounts {
+        harness.get_by_label(&format!("{}, {}", account.label, account.address));
+    }
+    assert!(harness.query_by_label("Mode").is_none(), "Appearance's rows are gone");
+    // The sample window adds no account: it offers none.
+    assert_eq!(harness.query_all_by_label("Add account").count(), 0);
+    harness.check_accessibility();
+    harness.get_by_label("Appearance, settings page").click();
+    harness.run();
+    assert_eq!(harness.state().settings().section(), Section::Appearance);
+    harness.get_by_label("Mode");
+}
+
+#[test]
+fn a_window_that_adds_accounts_offers_add_account_above_the_list() {
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())).with_accounts(
+        std::sync::Arc::new(crate::onboard::NoKeychain),
+        Box::<crate::onboard::NoDetect>::default(),
+        Box::new(crate::workers::NoWorkers),
+    );
+    let mut harness =
+        Harness::builder().with_size(vec2(1200.0, 820.0)).with_theme(egui::Theme::Dark).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.state_mut().open_accounts();
+    harness.run();
+    let add = harness.get_by_role_and_label(Role::Button, "Add account").rect();
+    let first = harness.state().mailbox().accounts().first().map(|a| format!("{}, {}", a.label, a.address)).unwrap();
+    assert!(add.bottom() <= harness.get_by_label(&first).rect().top(), "Add account heads the list");
+    harness.check_accessibility();
+    harness.get_by_role_and_label(Role::Button, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), crate::onboard::Stage::Form);
+    harness.get_by_label("Add an account");
 }
 
 #[test]

@@ -297,15 +297,9 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
             if TextButton::new(tr!("Change settings")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Change);
             }
-            if button::link(ui, theme, keymap, tr!("Close")).clicked() {
-                asked = Some(Asked::Close);
-            }
         }
-        Outcome::Running => {
-            if button::link(ui, theme, keymap, tr!("Close")).clicked() {
-                asked = Some(Asked::Close);
-            }
-        }
+        // The way back to the list is the link above the page.
+        Outcome::Running => {}
     });
     asked
 }

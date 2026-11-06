@@ -17,8 +17,8 @@
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
-//! (the certificate refused); the check is scripted and nothing connects. `settings` set to `true` shows the
-//! appearance settings page. `showcase` set to `true` fills the parts of the list that have no data yet with
+//! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
+//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
 //! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
@@ -118,6 +118,9 @@ pub struct Shot {
     /// Whether the appearance settings page is open.
     #[serde(default)]
     pub settings: Option<bool>,
+    /// Whether the settings sheet is open on Accounts.
+    #[serde(default)]
+    pub accounts: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
@@ -248,6 +251,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.select.is_some()
         || shot.onboard.is_some()
         || shot.settings.is_some()
+        || shot.accounts.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
         || shot.act.is_some()
@@ -703,6 +707,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.settings == Some(true) {
         app.open_settings();
+    }
+    if shot.accounts == Some(true) {
+        app.open_accounts();
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));

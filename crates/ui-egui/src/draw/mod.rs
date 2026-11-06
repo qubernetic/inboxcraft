@@ -4,10 +4,10 @@
 //! The window's content: the folder pane on the left, the header with the search field and the message list, the
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
-//! in the empty list; the add-account page then takes the place of the list and the reader.
+//! in the empty window, which opens the settings sheet on Accounts; accounts are added and listed there.
 //! The navigation rail runs down the window's left edge in the preset's gradient: its settings button (or its key)
-//! opens the appearance settings page in the same place; Escape, its close button or the rail's Mail button leave it,
-//! and the add-account page closes it.
+//! opens the settings sheet over the window; Escape, its close button or the rail's Mail button leave it, and an
+//! account being added with it.
 //!
 //! On the sample mailbox the hover actions and their keys (D Done, R read or unread, Delete) act on the hovered or
 //! selected row; a row that leaves the list slides out first. A toast then says what was done, with Undo and its key
@@ -23,6 +23,7 @@
 //! A frame that finds them changed installs them and hands them to the window's [`Keep`], so they are there again
 //! after a restart; [`InboxApp::with_keep`] reads them back at the start.
 
+mod accounts;
 mod frame;
 mod list;
 mod onboard;
@@ -50,7 +51,7 @@ use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
-use crate::settings::Settings;
+use crate::settings::{Section, Settings};
 use crate::theme::{self, Look, ModePreference, Preset, TextScale, Theme, Typeface};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
@@ -198,10 +199,29 @@ impl InboxApp {
         &mut self.settings
     }
 
-    /// Opens the appearance settings page in place of the list and the reader, closing the add-account page.
+    /// Opens the settings sheet on Appearance, closing the add-account form.
     pub fn open_settings(&mut self) {
         self.onboarding.close();
         self.settings.open(self.mailbox.appearance());
+    }
+
+    /// Opens the settings sheet on Accounts, where accounts are added.
+    pub fn open_accounts(&mut self) {
+        self.settings.open_at(Section::Accounts, self.mailbox.appearance());
+    }
+
+    /// Closes the settings sheet and the add-account form on it.
+    pub fn close_settings(&mut self) {
+        self.onboarding.close();
+        self.settings.close();
+    }
+
+    /// The add-account form and the check run on the sheet's Accounts page: opening the form opens it there.
+    fn follow_adding(&mut self) {
+        let adding = self.onboarding.stage() != Stage::Closed;
+        if adding && !(self.settings.is_open() && self.settings.section() == Section::Accounts) {
+            self.open_accounts();
+        }
     }
 
     /// Hands the engine's jobs to the workers and applies their events; the check's steps are read again when
@@ -449,13 +469,11 @@ impl InboxApp {
             stepped = true;
         }
         let keyed = if typing || !self.mailbox.can_act() { None } else { self.keyed_act(ui.ctx()) };
+        self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
-        if adding {
-            self.settings.close();
-        }
         let left_settings = escape && self.settings.is_open();
         if left_settings {
-            self.settings.close();
+            self.close_settings();
         }
         let setting = self.settings.is_open();
         let left_full = escape && !left_settings && self.reader.full_width();
@@ -478,9 +496,8 @@ impl InboxApp {
         let mut acted = None;
         // The row sliding out is out when the list is not drawn.
         let mut out = true;
-        let mut page = None;
         let mut changed = None;
-        let full = self.reader.full_width() && !adding;
+        let full = self.reader.full_width();
         // The colour fields first, then the place for the glass layers, then everything else.
         let corner = self.window_corner(ui.ctx());
         glass::backdrop_rounded(ui.painter(), &theme, ui.max_rect(), corner);
@@ -499,15 +516,7 @@ impl InboxApp {
         rail.settings = clicked_rail.settings;
         rail.sent = clicked_rail.sent;
         rail.search = clicked_rail.search;
-        if adding {
-            let left;
-            (asked, left) = self.folders(ui, &theme, &mut layers);
-            let (keymap, mailbox, onboarding) = (&self.keymap, &self.mailbox, &mut self.onboarding);
-            page = CentralPanel::no_frame()
-                .frame(around(left, gap, gap))
-                .show(ui, |ui| layers.card(ui, margin(s.xl), |ui| onboard::show(ui, &theme, keymap, mailbox, onboarding)))
-                .inner;
-        } else if !full {
+        if !full {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers);
             let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
@@ -545,7 +554,7 @@ impl InboxApp {
         let mut drawn = reader::Drawn::default();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if self.reader.open_id().is_some() && !adding {
+        if self.reader.open_id().is_some() {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
             drawn = CentralPanel::no_frame()
@@ -588,7 +597,6 @@ impl InboxApp {
             || searched.is_some()
             || clicked.is_some()
             || add
-            || page.is_some()
             || !drawn.asked.is_empty();
         if busy {
             // What changed shows in the next frame.
@@ -615,20 +623,16 @@ impl InboxApp {
             self.mailbox.select(clicked);
         }
         if add {
-            self.settings.close();
-            self.onboarding.open();
+            self.open_accounts();
         }
         if rail.settings {
-            if setting { self.settings.close() } else { self.open_settings() }
+            if setting { self.close_settings() } else { self.open_settings() }
         } else if open_settings && !setting {
             self.open_settings();
         }
         self.apply_rail(ui, &rail);
         if let Some(changed) = changed {
             self.apply_settings(changed);
-        }
-        if let Some(page) = page {
-            self.apply_page(page);
         }
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
@@ -691,8 +695,16 @@ impl InboxApp {
     /// The settings sheet over the window; what was asked on it.
     fn settings_sheet(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<settings::Asked> {
         let reduce = self.reduce_motion();
-        let (keymap, settings, appearance) = (&self.keymap, &mut self.settings, self.mailbox.appearance());
-        settings::sheet(ctx, theme, keymap, settings, appearance, reduce)
+        let view = settings::Sheet {
+            keymap: &self.keymap,
+            settings: &mut self.settings,
+            current: self.mailbox.appearance(),
+            reduce,
+            mailbox: &self.mailbox,
+            onboarding: &mut self.onboarding,
+            can_add: self.can_add,
+        };
+        settings::sheet(ctx, theme, view)
     }
 
     /// Call with each frame's input before the frame (eframe's `raw_input_hook`): after the desktop moved or resized
@@ -720,8 +732,7 @@ impl InboxApp {
     /// when Sent was open, Sent the unified Sent view), and Search puts the focus in the search field.
     fn apply_rail(&mut self, ui: &Ui, rail: &pane::Rail) {
         if rail.mail || rail.sent || rail.search {
-            self.settings.close();
-            self.onboarding.close();
+            self.close_settings();
         }
         if rail.mail && self.mailbox.place() == Place::View(Role::Sent) {
             self.mailbox.open(Place::View(Role::Inbox));
@@ -804,11 +815,18 @@ impl InboxApp {
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),
-            settings::Asked::Close => self.settings.close(),
+            settings::Asked::Section(section) => {
+                self.onboarding.close();
+                self.settings.show(section);
+            }
+            settings::Asked::Add => self.onboarding.open(),
+            settings::Asked::Back => self.onboarding.close(),
+            settings::Asked::Page(asked) => self.apply_page(asked),
+            settings::Asked::Close => self.close_settings(),
         }
     }
 
-    /// Applies what was asked for on the add-account page.
+    /// Applies what was asked for on the add-account form or the check.
     fn apply_page(&mut self, asked: onboard::Asked) {
         let (onboarding, mailbox) = (&mut self.onboarding, &mut self.mailbox);
         match asked {

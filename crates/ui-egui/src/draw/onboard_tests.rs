@@ -20,6 +20,7 @@ use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, mailbox, proposal};
 use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
 use crate::sample;
+use crate::settings::Section;
 
 fn clock() -> Box<FakeClock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
@@ -44,23 +45,73 @@ fn type_in(harness: &mut Harness<'static, InboxApp>) {
     harness.run();
 }
 
+/// Presses Add account on the empty window, then on the sheet's Accounts page: the form opens there.
+fn open_form(harness: &mut Harness<'static, InboxApp>) {
+    harness.get_by_role_and_label(Role::Button, "Add account").click();
+    harness.run();
+    on_sheet(harness, "Add account").click();
+    harness.run();
+}
+
+/// The button called `label` on the settings sheet: the window under it may hold one of the same name, and the sheet
+/// comes after it in the tree.
+fn on_sheet<'h>(harness: &'h Harness<'static, InboxApp>, label: &'h str) -> egui_kittest::Node<'h> {
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    harness.get_all_by_role_and_label(Role::Button, label).rfind(|node| sheet.contains_rect(node.rect())).unwrap()
+}
+
 #[test]
-fn the_empty_window_offers_to_add_an_account_and_opens_the_form() {
+fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_the_form_opens() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     harness.get_by_label("No accounts yet");
-    // Without an account the folder pane would hold only the app's name: it is left out, here and while adding.
-    assert_eq!(harness.get_all_by_label("Add account").count(), 1, "in the empty list only");
+    // Without an account the folder pane would hold only the app's name: it is left out.
+    assert_eq!(harness.get_all_by_label("Add account").count(), 1, "on the empty window only");
     assert!(harness.query_by_label("MAILBOXES").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
-    harness.get_all_by_label("Add account").next().unwrap().click();
+    harness.get_by_role_and_label(Role::Button, "Add account").click();
+    harness.run();
+    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the list first");
+    harness.get_by_label("No account yet. Add one to read and send mail here.");
+    harness.get_by_label("Your accounts show up here");
+    harness.check_accessibility();
+    on_sheet(&harness, "Add account").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Form);
-    let form = harness.get_by_label("Add an account").rect();
-    assert!(form.left() < 200.0, "the form takes the folder pane's room: {form:?}");
-    harness.get_by_label("Add an account");
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    assert!(sheet.contains_rect(harness.get_by_label("Add an account").rect()), "the form is on the sheet");
     harness.get_by_label("Password");
+    harness.check_accessibility();
     harness.get_by_label("Cancel").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
+    assert_eq!(harness.state().settings().section(), Section::Accounts, "Cancel leads back to the list");
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    harness.get_by_label("Back to the accounts").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
+    harness.get_by_label("Your accounts show up here");
+}
+
+#[test]
+fn closing_the_sheet_closes_the_form_on_it() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    open_form(&mut harness);
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings().is_open());
+    assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the form would open the sheet again");
+}
+
+#[test]
+fn opening_the_form_from_outside_opens_it_on_the_sheet() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    assert!(harness.state().settings().is_open());
+    assert_eq!(harness.state().settings().section(), Section::Accounts);
+    harness.get_by_label("Add an account");
 }
 
 #[test]
@@ -81,8 +132,7 @@ fn harness_empty() -> Harness<'static, InboxApp> {
 fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     let kept = Kept::default();
     let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Dark);
-    harness.get_all_by_label("Add account").next().unwrap().click();
-    harness.run();
+    open_form(&mut harness);
     type_in(&mut harness);
     harness.get_by_label("Detect").click();
     harness.run();
@@ -104,7 +154,7 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Done").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
-    assert!(harness.query_all_by_label("carol@example.org").count() >= 1, "the account is in the pane");
+    harness.get_by_label("carol@example.org, carol@example.org");
 }
 
 #[test]
@@ -112,8 +162,7 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     let failed = FakeWorkers::answering(&[(CheckStep::Dns, StepStatus::Passed), (CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))]);
     let kept = Kept::default();
     let mut harness = harness(app(&kept, failed), egui::Theme::Light);
-    harness.get_all_by_label("Add account").next().unwrap().click();
-    harness.run();
+    open_form(&mut harness);
     type_in(&mut harness);
     harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
     harness.get_by_label("Check and add").click();
@@ -252,7 +301,7 @@ fn closing_the_window_forgets_the_password_of_every_account_added_in_it() {
             harness.get_by_label("Check and add").click();
             harness.run();
             harness.run();
-            let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Close" };
+            let close = if harness.query_by_label("Done").is_some() { "Done" } else { "Back to the accounts" };
             harness.get_by_label(close).click();
             harness.run();
         }

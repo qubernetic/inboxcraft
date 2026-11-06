@@ -95,11 +95,13 @@ pub enum IconId {
     Info,
     /// Close: a cross.
     Close,
+    /// Back: an arrow to the left, before the name of the page it leads back to.
+    Back,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -137,6 +139,7 @@ impl IconId {
         Self::Shield,
         Self::Info,
         Self::Close,
+        Self::Back,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -180,6 +183,7 @@ impl IconId {
             Self::Shield => 34,
             Self::Info => 35,
             Self::Close => 36,
+            Self::Back => 37,
         }
     }
 }
