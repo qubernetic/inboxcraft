@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, ink_on, install_fonts,
-    mix, over, readable,
+    AVATARS, Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, ink_on,
+    ink_over, install_fonts, mix, over, readable,
 };
+use crate::motion::MOTION;
 
 /// Every preset in both modes.
 fn all() -> Vec<Theme> {
@@ -206,6 +207,7 @@ fn no_teal_or_coral_is_left() {
         let p = theme.palette;
         let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection, p.selection_end];
         tokens.extend(p.accounts);
+        tokens.extend(p.avatars);
         for colour in tokens {
             assert!(!teal_or_coral(colour), "{} {:?}: {} is teal or coral", theme.preset.id, theme.mode, hex(colour));
         }
@@ -620,5 +622,73 @@ fn menus_and_tooltips_float_over_sharp_text_and_nothing_casts_an_egui_shadow() {
         let s = theme.spacing;
         assert!(s.card > s.corner, "glass layers are rounder than fields");
         assert!(s.shadow > 0.0 && s.gap > 0.0);
+    }
+}
+
+/// Hue in degrees, saturation and value (HSV) of `colour`, each 0 to 1 but the hue.
+fn hsv(colour: Color32) -> (f32, f32, f32) {
+    let [r, g, b] = [colour.r(), colour.g(), colour.b()].map(|c| f32::from(c) / 255.0);
+    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+    let span = high - low;
+    let hue = if span == 0.0 {
+        0.0
+    } else if high == r {
+        60.0 * ((g - b) / span).rem_euclid(6.0)
+    } else if high == g {
+        60.0 * ((b - r) / span + 2.0)
+    } else {
+        60.0 * ((r - g) / span + 4.0)
+    };
+    (hue, if high == 0.0 { 0.0 } else { span / high }, high)
+}
+
+#[test]
+fn the_avatar_palette_is_vivid_distinct_and_free_of_teal_and_coral() {
+    assert!(AVATARS.len() >= 8);
+    for colour in AVATARS {
+        let (hue, saturation, value) = hsv(colour);
+        assert!(saturation >= 0.7 && value >= 0.6, "{} is not vivid: {saturation} {value}", hex(colour));
+        assert!(!(150.0..=200.0).contains(&hue), "{} is teal: {hue}", hex(colour));
+        assert!(!teal_or_coral(colour), "{}", hex(colour));
+    }
+    for (index, one) in AVATARS.iter().enumerate() {
+        for other in AVATARS.iter().skip(index + 1) {
+            let distance: i32 =
+                [(one.r(), other.r()), (one.g(), other.g()), (one.b(), other.b())].iter().map(|(a, b)| (i32::from(*a) - i32::from(*b)).abs()).sum();
+            assert!(distance >= 90, "{} and {} are too alike", hex(*one), hex(*other));
+        }
+    }
+    for theme in all() {
+        assert_eq!(theme.palette.avatars, AVATARS, "{} {:?}", theme.preset.id, theme.mode);
+    }
+}
+
+#[test]
+fn every_avatar_colour_passes_wcag_aa_with_its_initials_in_both_modes() {
+    for theme in all() {
+        for colour in theme.palette.avatars {
+            let ratio = contrast(ink_on(colour), colour);
+            assert!(ratio >= 4.5, "{} {:?}: initials on {} at {ratio}", theme.preset.id, theme.mode, hex(colour));
+        }
+    }
+}
+
+#[test]
+fn ink_over_several_colours_reads_on_every_one_of_them() {
+    for theme in all() {
+        let stops = theme.palette.gradient;
+        let ink = ink_over(&stops);
+        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
+        assert!(worst >= 3.0, "{}: an icon on the gradient at {worst}", theme.preset.id);
+        assert_eq!(ink_over(&[stops[0]]), ink_on(stops[0]));
+    }
+    assert_eq!(ink_over(&[]), ink_on(Color32::TRANSPARENT));
+}
+
+#[test]
+fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
+    for theme in all() {
+        assert_eq!(theme.motion, MOTION);
+        assert_eq!(theme.style().animation_time, MOTION.tooltip);
     }
 }

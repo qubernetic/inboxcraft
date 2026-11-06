@@ -294,6 +294,20 @@ All notable changes to InboxCraft are listed here. The format follows
   sketch of its preset and mode, scaled to the same height, one PNG per picture in `plan/side-by-side/`. The
   sketches are read from `plan/mood/` (gitignored, never committed); `--script`, `--mood` and `--out` name other
   places (#81)
+- The design system's components (#85, `ui-egui::component`): a card that opens and closes, an icon button
+  (active, disabled) with its tooltip, a pill, a tooltip bubble with the action's name and its key as a chip, an
+  avatar, a count badge and a group badge on the preset's gradient, a hover action group that fades in over a row,
+  a toast that rises with Undo and its key, and a popup with menu rows. `ui_shot` draws them all on one page with
+  `"components": true`, in every preset and mode.
+- Motion tokens (#85, `ui-egui::motion`), all at most 0.25 s: hover fade, tooltip, row slide-out, card open and
+  close, toast rise. Every animation runs through the motion module and reads one reduced-motion flag
+  (`InboxApp::set_reduce_motion`); with it on, everything lands at once and egui's own animations stop too. Its
+  default follows the system where the system can be read, otherwise motion is on.
+- A keymap (#85, `ui-egui::keymap`): which key runs which action, by id; tooltips, menu rows and a toast's Undo read
+  their key from it when they are drawn, so a changed key shows at once. The search's Ctrl+F is its first key.
+- Avatars (#85): a person's initials on one of ten vivid avatar colours (no teal or coral), picked from the address
+  by a stable hash, with white or dark initials by contrast; the reader shows the sender's avatar in the message
+  header, the sample mail's people included.
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

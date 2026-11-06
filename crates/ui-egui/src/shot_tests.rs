@@ -90,6 +90,42 @@ fn an_icon_sheet_is_not_a_window() {
 }
 
 #[test]
+fn the_component_gallery_is_drawn_in_the_tokens_of_its_preset_and_mode() {
+    let mut pictures = Vec::new();
+    for preset in &PRESETS {
+        for mode in [Mode::Light, Mode::Dark] {
+            let name = if mode == Mode::Light { "light" } else { "dark" };
+            let id = preset.id;
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "components": true}}"#))).unwrap();
+            let size = crate::component::gallery::size();
+            assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+            let theme = Theme::new(mode, preset);
+            let mut colours = std::collections::BTreeSet::new();
+            for y in 0..picture.height() {
+                for x in 0..picture.width() {
+                    colours.insert(picture.pixel(x, y).unwrap().to_array());
+                }
+            }
+            let avatar = crate::component::avatar::colour(&theme, "odile@example.org");
+            assert!(colours.contains(&avatar.to_array()), "{id} {name}: the avatars in their palette");
+            assert!(colours.contains(&theme.palette.surface.to_array()), "{id} {name}: the cards on the surface");
+            pictures.push(picture);
+        }
+    }
+    for (index, one) in pictures.iter().enumerate() {
+        assert!(pictures.iter().skip(index + 1).all(|other| other != one), "every preset and mode looks its own");
+    }
+}
+
+#[test]
+fn the_component_gallery_is_not_a_window_nor_an_icon_sheet() {
+    for extra in [r#""select": "logo""#, r#""icons": true"#, r#""size": [10, 10]"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "components": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png: the component gallery"), "{error}");
+    }
+}
+
+#[test]
 fn a_shot_without_a_preset_is_electric() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
     let electric = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "electric", "size": [600, 400]}"#)).unwrap();

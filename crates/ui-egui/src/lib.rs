@@ -22,10 +22,15 @@
 //! - [`quote`]: a plain-text body split into what the sender wrote and the quotes the reader folds.
 //! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
 //! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor) maps it to a glyph.
+//! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
+//! - [`keymap`]: which key runs which action; tooltips and chips read their keys from it.
+//! - [`component`]: the design system's components: card, icon button, pill, tooltip, avatar, badge, hover actions,
+//!   toast and popup, and a gallery of them for `ui_shot`.
 //! - [`icons`]: art drawn in code: the app icon, exported as SVG for the desktop and filled as the window icon.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod component;
 mod draw;
 mod error;
 pub mod fetch;
@@ -34,7 +39,9 @@ pub mod gradient;
 pub mod i18n;
 pub mod icons;
 pub mod iconset;
+pub mod keymap;
 pub mod mailbox;
+pub mod motion;
 pub mod onboard;
 pub mod picture;
 pub mod quote;

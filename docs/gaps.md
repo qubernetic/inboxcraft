@@ -360,6 +360,17 @@ B = blocks the next stage.
   helper on the icon's text) is not done. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
+- Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
+  popup exist and are shown in the `ui_shot` gallery, but only the avatar (in the reader's header) and the count
+  badge are used in the window yet; the list and the reader move onto the rest with E1.17. The keymap knows one
+  key of its own (Ctrl+F for the search); the arrow keys and Escape are still read directly, and changing a key is
+  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. The reduced-motion flag
+  can be set only from code (`InboxApp::set_reduce_motion`); its `ui.motion.set` command and switch come with E1.16.
+  The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
+  none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
+  The row slide-out token waits for the Done of E1.17. A menu row shows its key as text, which a screen reader does
+  not read with the row's name. Avatars show initials only; pictures of people (from a vCard or a sender's own
+  picture) are not read.
 - The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
   `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
   follows the system's mode in Electric. The error colours are fixed per mode, not derived from
@@ -466,3 +477,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Glass and floats: resizes no longer rasterise the shadows; no float shadow over sharp text (#82) |
 | 2026-11-06 | minor | Figtree and the text scale: what is left, the fallback scripts, Ubuntu Light still compiled in (#83) |
 | 2026-11-06 | minor | Icons: one set, the ids so far, whole fonts bundled, no gradient through a glyph (#84) |
+| 2026-11-06 | minor | Components and motion: what is used yet, one key, the reduced-motion default (#85) |

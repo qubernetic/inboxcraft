@@ -5,7 +5,9 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, MESSAGES, mailbox, session};
+use super::{FOLDERS, MESSAGES, mailbox, people, session};
+use crate::component::avatar;
+use crate::theme::{AVATARS, Mode, PRESETS, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn now() -> Timestamp {
@@ -169,4 +171,22 @@ fn the_sample_draws_its_remote_pictures_and_asks_nobody() {
         assert_eq!((picture.width, picture.height), (480, 200), "{url}");
     }
     assert!(done.iter().skip(2).all(|(_, answer)| answer.is_err()));
+}
+
+#[test]
+fn everyone_who_writes_or_is_written_to_has_an_avatar_from_the_avatar_palette() {
+    let people = people();
+    for sample in MESSAGES {
+        for person in [sample.from, sample.to] {
+            assert!(people.contains(&(person.name, person.address)), "{} is in people()", person.address);
+        }
+    }
+    for preset in &PRESETS {
+        for mode in [Mode::Light, Mode::Dark] {
+            let theme = Theme::new(mode, preset);
+            for (name, address) in &people {
+                assert!(AVATARS.contains(&avatar::colour(&theme, address)), "{name}");
+            }
+        }
+    }
 }

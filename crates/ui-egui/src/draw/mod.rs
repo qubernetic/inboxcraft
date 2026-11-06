@@ -20,21 +20,20 @@ mod reader;
 
 use std::sync::Arc;
 
-use egui::{CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel, RichText, Ui};
+use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
 
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
+use crate::keymap::{self, Keymap};
 use crate::mailbox::Mailbox;
+use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::theme::{self, ModePreference, Preset, TextScale, Theme};
 use crate::tr;
 use crate::workers::{NoWorkers, Workers};
-
-/// Focuses the search field.
-const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
 
 /// The width of the list beside the reader, in points.
 const LIST_WIDTH: f32 = 380.0;
@@ -54,6 +53,10 @@ pub struct InboxApp {
     text_scale: TextScale,
     /// The mode, preset and text scale installed in the context, once installed.
     themed: Option<(ModePreference, Preset, TextScale)>,
+    /// Which key runs which action.
+    keymap: Keymap,
+    /// Whether every animation lands at its end at once.
+    reduce_motion: bool,
     onboarding: Onboarding,
     /// Whether the window offers to add an account.
     can_add: bool,
@@ -104,6 +107,8 @@ impl InboxApp {
             preset: Preset::default(),
             text_scale: TextScale::default(),
             themed: None,
+            keymap: Keymap::default(),
+            reduce_motion: motion::system_default(None),
             onboarding: Onboarding::default(),
             can_add: false,
             workers: Box::new(NoWorkers),
@@ -232,6 +237,28 @@ impl InboxApp {
         self.text_scale = scale;
     }
 
+    /// Which key runs which action.
+    #[must_use]
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+
+    /// The keymap, to change a key; what shows the key shows the new one in the next frame.
+    pub fn keymap_mut(&mut self) -> &mut Keymap {
+        &mut self.keymap
+    }
+
+    /// Whether every animation lands at its end at once.
+    #[must_use]
+    pub fn reduce_motion(&self) -> bool {
+        self.reduce_motion
+    }
+
+    /// Turns reduced motion on or off, from the next frame.
+    pub fn set_reduce_motion(&mut self, reduce: bool) {
+        self.reduce_motion = reduce;
+    }
+
     /// Installs the fonts once, and the chosen preset, mode and text scale in the context when they changed.
     fn install_theme(&mut self, ctx: &egui::Context) {
         let chosen = (self.mode, self.preset, self.text_scale);
@@ -252,6 +279,7 @@ impl InboxApp {
     /// Draws one frame into `ui` and applies what the person asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.install_theme(ui.ctx());
+        motion::set_reduced(ui.ctx(), self.reduce_motion);
         let theme = Theme::current(ui.ctx(), &self.preset, self.text_scale);
         ui.set_style(theme.style());
         let p = theme.palette;
@@ -260,7 +288,7 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
-        if ui.input_mut(|input| input.consume_shortcut(&FIND)) {
+        if self.keymap.pressed(ui.ctx(), keymap::FIND) {
             self.reader.set_full_width(false);
             ui.memory_mut(|memory| memory.request_focus(list::search_id()));
         }
