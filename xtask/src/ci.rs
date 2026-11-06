@@ -9,9 +9,9 @@
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-use crate::{Context, Error, assets, cov, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, assets, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -21,6 +21,17 @@ pub trait Runner {
     ///
     /// [`Error::Spawn`] when the program cannot be started.
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error>;
+
+    /// Runs `program` with `args` in `dir`, its standard error going to the terminal, and returns its standard
+    /// output, or `None` when it did not exit with 0. A runner that captures no output answers `None`, a failed call.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when the program cannot be started.
+    fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        let _ = (program, args, dir);
+        Ok(None)
+    }
 }
 
 /// The [`Runner`] that starts real processes.
@@ -36,6 +47,16 @@ impl Runner for ProcessRunner {
             .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;
         Ok(status.success())
     }
+
+    fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        let output = Command::new(program)
+            .args(args)
+            .current_dir(dir)
+            .stderr(Stdio::inherit())
+            .output()
+            .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;
+        Ok(output.status.success().then_some(output.stdout))
+    }
 }
 
 pub(crate) enum Gate {
@@ -44,6 +65,8 @@ pub(crate) enum Gate {
     Cargo(&'static [&'static str]),
     /// `cov --check`.
     Cov,
+    /// `flatpak-sources-check`.
+    FlatpakSources,
     Layers,
     Spdx,
     Stats,
@@ -51,7 +74,8 @@ pub(crate) enum Gate {
     Wasm,
 }
 
-/// The gates of `cargo xtask ci`, cheap ones first; `stats` only reports.
+/// The gates of `cargo xtask ci`, cheap ones first; `stats` only reports. `cov` is the one test run: the tests run
+/// only under coverage.
 pub(crate) const GATES: &[(&str, Gate)] = &[
     ("fmt", Gate::Cargo(&["fmt", "--all", "--", "--check"])),
     ("clippy", Gate::Cargo(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"])),
@@ -59,7 +83,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("test-files", Gate::TestFiles),
     ("assets", Gate::Assets),
     ("layers", Gate::Layers),
-    ("nextest", Gate::Cargo(&["nextest", "run", "--workspace", "--profile", "ci"])),
+    ("flatpak-sources-check", Gate::FlatpakSources),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
     ("cov", Gate::Cov),
     ("wasm", Gate::Wasm),
@@ -77,6 +101,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
             Gate::Cargo(args) => ctx.runner.run(&ctx.cargo, args, &ctx.root),
             Gate::Assets => assets::gate(&ctx.root, out),
             Gate::Cov => cov::gate(ctx, true, out),
+            Gate::FlatpakSources => flatpak::gate(&ctx.root, true, out),
             Gate::Layers => layers::gate(&ctx.root, out),
             Gate::Spdx => spdx::gate(&ctx.root, false, out),
             Gate::Stats => stats::gate(&ctx.root, out),

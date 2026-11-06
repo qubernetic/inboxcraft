@@ -1,0 +1,41 @@
+# The greeting: capabilities in its response code, an alert for the person, and what is no greeting.
+@ tls
+? Greeting
+> capability
+! WrongState { command: "CAPABILITY", state: Greeting }
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN SASL-IR] Example IMAP server ready
+= greeted
+? NotAuthenticated
+S: * OK [ALERT] Maintenance tonight at 22:00
+= alert Maintenance tonight at 22:00
+> logout
+C: A0001 LOGOUT
+S: * BYE Logging out
+S: A0001 OK LOGOUT completed
+= A0001 logged out
+? Closed
+
+# A server that turns the connection away.
+@ tls
+S: * BYE Too many connections from your address
+! Bye("Too many connections from your address")
+? Closed
+> capability
+! Closed
+
+# What is no greeting ends the session.
+@ tls
+S: * NO not now
+! Malformed("greeting")
+@ tls
+S: A0001 OK hello
+! Unexpected("response before the greeting")
+@ tls
+S: * 3 EXISTS
+! Unexpected("response before the greeting")
+@ tls
+S: + hello
+! Unexpected("response before the greeting")
+@ tls
+S: hello there
+! Malformed("tagged response")

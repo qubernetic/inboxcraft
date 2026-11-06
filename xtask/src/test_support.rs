@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{Context, Error, Runner};
 
+/// What the cov gate says when the test run fails.
+pub const TESTS_FAILED: &str = "cov: the tests failed (a failing test or a build error, see the nextest output above); no coverage floor was checked";
+
 /// A writer that always fails, like a closed pipe.
 pub struct Broken;
 

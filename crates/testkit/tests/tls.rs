@@ -20,7 +20,9 @@ fn a_valid_chain_carries_the_script() -> Result<(), Box<dyn std::error::Error>> 
     client.send_line("a1 LOGOUT")?;
     assert_eq!(client.read_line()?, "a1 OK bye");
     assert_eq!(client.read_line().map_err(|err| err.kind()), Err(ErrorKind::Dropped));
-    assert_eq!(server.finish()?.received(), ["a1 LOGOUT"]);
+    let transcript = server.finish()?;
+    assert_eq!(transcript.received(), ["a1 LOGOUT"]);
+    assert!(transcript.in_clear().is_empty());
     Ok(())
 }
 

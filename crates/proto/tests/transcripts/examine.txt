@@ -1,0 +1,22 @@
+# EXAMINE opens read-only, also when the answer does not say so; a server that says READ-WRITE is believed.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> examine INBOX
+C: A0001 EXAMINE "INBOX"
+S: * 17 EXISTS
+S: * 0 RECENT
+S: * OK [UIDVALIDITY 1] UIDs valid
+S: * OK [UIDNEXT 18] Predicted next UID
+S: A0001 OK EXAMINE completed
+= A0001 selected exists=17 recent=0 flags=- permanent=- uidvalidity=1 uidnext=18 unseen=none modseq=none read-only=true
+? Selected
+> examine Sent Items
+C: A0002 EXAMINE "Sent Items"
+S: A0002 OK [READ-WRITE] done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> examine INBOX
+C: A0003 EXAMINE "INBOX"
+S: A0003 BAD [CLIENTBUG] mailbox busy
+= A0003 Bad [CLIENTBUG] mailbox busy
+? Authenticated

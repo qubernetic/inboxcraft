@@ -10,8 +10,11 @@
 //! - a dependency on a higher layer, or on a crate in the same layer that [`INTRA_LAYER_ORDER`] does not list;
 //! - a standalone crate with any workspace dependency;
 //! - `testkit` as a normal or build dependency (it is for dev-dependencies only);
+//! - `testkit` with any dependency on a [`TESTKIT_NEVER`] crate, whose parser its fakes test;
 //! - a [`UI_CRATES`] dependency anywhere but layer 6 and the apps;
 //! - a [`NETWORK_CRATES`] dependency anywhere but `net`, `testkit` and the apps;
+//! - a [`TESTKIT_ONLY_CRATES`] dependency anywhere but `testkit`, unless it is a dev-dependency;
+//! - a [`NET_ONLY_CRATES`] dependency anywhere but `net` and `testkit`, unless it is a dev-dependency;
 //! - a dependency on an app or tool crate from anything but another app or tool crate.
 
 use std::io::Write;
@@ -69,7 +72,20 @@ pub(crate) const CRATES: &[(&str, Class)] = &[
 ];
 
 /// The dependencies allowed inside one layer, as `(from, to)`.
-pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] = &[("inboxcraft-net", "inboxcraft-proto"), ("inboxcraft-net", "inboxcraft-dav")];
+pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] =
+    &[("inboxcraft-store", "inboxcraft-model"), ("inboxcraft-net", "inboxcraft-proto"), ("inboxcraft-net", "inboxcraft-dav")];
+
+/// The crates whose parsers the fake servers test: `testkit` never depends on them, not even for its own tests, so a
+/// parser bug cannot hide behind the same bug in the fake.
+pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto"];
+
+/// Crates the fakes need and nothing that ships does: `testkit` only, or a dev-dependency. A crate that comes to need
+/// one lifts it here as a reviewed choice.
+pub(crate) const TESTKIT_ONLY_CRATES: &[&str] = &["rcgen"];
+
+/// Crates for `net`'s streams that the fakes speak too: `net` and `testkit` only, or a dev-dependency. `flate2` is the
+/// COMPRESS=DEFLATE stream (RFC 4978).
+pub(crate) const NET_ONLY_CRATES: &[&str] = &["flate2"];
 
 /// The crate that does the network I/O.
 const NET: &str = "inboxcraft-net";
@@ -79,6 +95,7 @@ pub(crate) const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "egui_kittest
 
 /// Crates that open sockets, speak TLS or make requests: `net` only (and `testkit` and the apps).
 pub(crate) const NETWORK_CRATES: &[&str] = &[
+    "hickory-proto",
     "hickory-resolver",
     "hyper",
     "hyper-util",
@@ -115,10 +132,22 @@ fn violations(member: &Member, own: Class, members: &[Member]) -> Vec<String> {
             if NETWORK_CRATES.contains(&target.as_str()) && name != NET && !matches!(own, Class::Testkit | Class::Exempt) {
                 found.push(format!("`{name}` depends on the network crate `{target}`; only `{NET}` does network I/O"));
             }
+            let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
+            if TESTKIT_ONLY_CRATES.contains(&target.as_str()) && own != Class::Testkit && dep.kind != Kind::Dev {
+                found.push(format!("`{name}` has `{target}` as a {kind} dependency; it is for `inboxcraft-testkit` and dev-dependencies only"));
+            }
+            if NET_ONLY_CRATES.contains(&target.as_str()) && name != NET && own != Class::Testkit && dep.kind != Kind::Dev {
+                found.push(format!(
+                    "`{name}` has `{target}` as a {kind} dependency; it is for `{NET}`, `inboxcraft-testkit` and dev-dependencies only"
+                ));
+            }
             continue;
         }
         // An unregistered member is reported on its own.
         let Some(theirs) = class(target) else { continue };
+        if own == Class::Testkit && TESTKIT_NEVER.contains(&target.as_str()) {
+            found.push(format!("`{name}` depends on `{target}`; a fake server never uses the parser it tests"));
+        }
         if theirs == Class::Testkit && dep.kind != Kind::Dev {
             let kind = if dep.kind == Kind::Build { "build" } else { "normal" };
             found.push(format!("`{name}` has `{target}` as a {kind} dependency; testkit is for dev-dependencies only"));

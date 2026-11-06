@@ -1,0 +1,33 @@
+# UID SEARCH: keys side by side, UIDs as a set, a text that is not ASCII as a UTF-8 literal.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> search unseen
+! WrongState { command: "UID SEARCH", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK SELECT completed
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> search unseen since 2026-01-31 not deleted
+C: A0002 UID SEARCH UNSEEN SINCE 31-Jan-2026 NOT DELETED
+S: * SEARCH 4 7 8 9 12 x 0
+S: A0002 OK SEARCH completed
+= A0002 searched 4,7:9,12
+> search subject Árvíztűrő
+C: A0003 UID SEARCH CHARSET UTF-8 SUBJECT {13}
+S: + go ahead
+C: Árvíztűrő
+S: * SEARCH
+S: A0003 OK SEARCH completed
+= A0003 searched -
+> search or from anna@example.org header List-Id dev uid 1:100
+C: A0004 UID SEARCH OR FROM "anna@example.org" HEADER List-Id "dev" UID 1:100
+S: * SEARCH 3
+S: A0004 NO [CANNOT] Search too complex
+= A0004 No [CANNOT] Search too complex
+> search subject two_words
+C: A0005 UID SEARCH SUBJECT "two words"
+S: * SEARCH 2
+S: * SEARCH 1
+S: A0005 OK done
+= A0005 searched 1:2
