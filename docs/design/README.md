@@ -28,7 +28,7 @@ icons show as empty boxes.
 | Screens · Calendar | week, month, agenda, day with the event editor, an invitation in a message | [screens-calendar.png](screens-calendar.png) |
 | Screens · Setup and settings | add account, the account check under way, failed and passed, settings for appearance, accounts, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
 | Mood | the main window in Electric, Aurora and Citrus, light and dark | [mood.png](mood.png) |
-| Scenarios | five flows as numbered storyboards: first start, a morning of triage, write and send, an invitation, make it yours | [scenarios.png](scenarios.png) |
+| Scenarios | five flows as numbered storyboards, in light and in dark side by side: first start, a morning of triage, write and send, an invitation, make it yours | [scenarios.png](scenarios.png) |
 
 Each screens page has a "Dark" column on the right with its main screens in Electric dark.
 
@@ -70,3 +70,4 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 | 2026-11-06 | minor | Transparent pages; white text on a darkened text gradient where it reads at 4.5:1 (#96) |
 | 2026-11-06 | minor | Group headers show an outline icon without a background (#96) |
 | 2026-11-06 | minor | The composer fills the reader's place or opens in a window of its own (#96) |
+| 2026-11-06 | minor | The scenarios also in Electric dark (#96) |
