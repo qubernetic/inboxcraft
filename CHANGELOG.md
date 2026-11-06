@@ -337,6 +337,14 @@ All notable changes to InboxCraft are listed here. The format follows
   keyboard shows as a hovered one does with its text fading out before them, are built but have no data or command
   yet: the app draws none of them, and `ui_shot` shows them with invented data (`showcase`, `step`). A quiet and a
   primary text button with a tooltip join the components; every button of the list and the rail has a tooltip.
+- The hover actions act on the sample mailbox (#89): Done (marks the message read and moves it to its account's
+  Archive), mark read or unread, and Delete (to Trash), from a hovered row or the row selected by keyboard, and
+  their keys D, R and Delete. Done and Delete let the row slide out first; a toast says what was done, with Undo
+  and its key chip (Ctrl+Z) for six seconds, and Undo puts the row back as it was, selected again when it was.
+  Reduced motion makes the slide and the toast land at once. They run through `sample.mail.set`, a `safe` command
+  that runs only in a `Session::sample` (others refuse it with `sample_only`), changes the in-memory sample only and
+  queues no job; without `--sample` the actions are hidden and the keys do nothing. `ui_shot` takes `act` and
+  `slide`; `docs/development.md` says what `--sample` lets the owner try.
 
 ### Changed
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

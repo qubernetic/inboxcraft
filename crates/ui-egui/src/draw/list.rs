@@ -5,12 +5,15 @@
 //! empty states.
 //!
 //! A row shows the sender's avatar, the sender and the date, the subject and the preview; an unread row its dot and
-//! a heavier sender and subject; the selected row the selection gradient. The parts whose data or command does not
-//! exist yet come from the mailbox's [`Showcase`], which only `ui_shot` fills, so the app draws none of them: the
-//! screener card on top of the unified inbox, the grouped inbox's cards (badge, name, unread count, "Done all",
-//! "Show all (n)") and the hover actions, which a hovered row and a row selected by keyboard show alike, the row's
-//! text fading out before them.
+//! a heavier sender and subject; the selected row the selection gradient. The parts whose data does not exist yet come
+//! from the mailbox's [`Showcase`], which only `ui_shot` fills, so the app draws none of them: the screener card on
+//! top of the unified inbox and the grouped inbox's cards (badge, name, unread count, "Done all", "Show all (n)").
+//!
+//! On the sample mailbox ([`Mailbox::can_act`]) a hovered row and a row selected by keyboard show the hover actions
+//! alike, the row's text fading out before them: Done, mark read or unread, Delete. Done and Delete let the row slide
+//! out first; the window does the act once it is out and shows the toast with Undo. Anywhere else no action is drawn.
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use egui::{
@@ -25,7 +28,8 @@ use crate::glass;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Group, Mailbox, MessageRow, Place, Showcase};
+use crate::mailbox::{Act, Group, Mailbox, MessageRow, Place, Showcase};
+use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
@@ -106,31 +110,83 @@ fn put(ui: &Ui, theme: &Theme, at: egui::Pos2, galley: Arc<Galley>, colour: Colo
 fn actions(message: &MessageRow) -> [Action<'static>; 3] {
     let read = if message.seen { tr!("Mark as unread") } else { tr!("Mark as read") };
     [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done") },
-        Action { icon: IconId::Notify, name: read, action: Some("mail.read") },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete") },
+        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE) },
+        Action { icon: IconId::Notify, name: read, action: Some(keymap::READ) },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE) },
     ]
 }
 
-/// One message row across `ui`'s width. Returns its response; a click selects it.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool) -> Response {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let f = &theme.fonts;
+/// What the hover action at `index` of [`actions`] does to `message`.
+fn act(message: &MessageRow, index: usize) -> Option<Act> {
+    match index {
+        0 => Some(Act::Done),
+        1 if message.seen => Some(Act::Unread),
+        1 => Some(Act::Read),
+        2 => Some(Act::Delete),
+        _ => None,
+    }
+}
+
+/// What a message row did this frame.
+#[derive(Debug, Default)]
+struct Drawn {
+    /// It was clicked.
+    clicked: bool,
+    /// A hover action was pressed.
+    acted: Option<Act>,
+    /// It is the row sliding out, and it is all the way out.
+    out: bool,
+}
+
+/// One message row across `ui`'s width; a click selects it. The row leaving the list slides to the right and fades
+/// over the row slide token, a frame's worth at a time; with reduced motion it is out at once.
+fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool) -> Drawn {
     let height = row_height(ui, theme);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     let selected = mailbox.selected() == Some(message.id);
     response.widget_info(|| WidgetInfo::selected(Role::ListBoxOption, true, selected, mailbox.spoken(message)));
+    let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
     if !ui.is_rect_visible(rect) {
-        return response;
+        return Drawn { clicked: response.clicked(), acted: None, out: leaving };
     }
+    let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
+    let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
+    if leaving {
+        face.shrink_clip_rect(rect);
+        face.multiply_opacity(1.0 - gone);
+    }
+    let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
+    let acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
+    focus_ring(ui, theme, &response);
+    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
+}
+
+/// Paints a message row into `rect`; the hover action pressed. A leaving row shows no actions.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row")]
+fn paint_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    account_marker: bool,
+    rect: Rect,
+    response: &Response,
+    leaving: bool,
+) -> Option<Act> {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let height = rect.height();
+    let selected = mailbox.selected() == Some(message.id);
     if selected {
         selection(ui.painter(), theme, rect, s.corner);
     } else if response.hovered() {
         ui.painter().rect_filled(rect, s.corner, p.hover);
     }
-    let reach = mailbox.showcase().hover && (ui.rect_contains_pointer(rect) || (selected && mailbox.keyed()));
+    let reach = mailbox.can_act() && !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
     let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
+    let acted = shown.clicked.and_then(|index| act(message, index));
     let until = (shown.openness > 0.0).then_some(shown.left - s.xs);
     let (first_height, second_height) = row_lines(ui, theme);
     let first = rect.top() + s.s;
@@ -179,8 +235,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
             }
         }
     }
-    focus_ring(ui, theme, &response);
-    response
+    acted
 }
 
 /// A rounded card across `ui`'s width with `add` drawn inside; `edge` rings it with the preset's gradient.
@@ -219,6 +274,10 @@ pub(super) struct Asked {
     pub(super) clicked: Option<u64>,
     /// Add account, in the empty window.
     pub(super) add: bool,
+    /// A hover action pressed, and on which message.
+    pub(super) acted: Option<(u64, Act)>,
+    /// The row sliding out is all the way out, or was not drawn: its act can be done.
+    pub(super) out: bool,
 }
 
 /// What the rows of a card share.
@@ -227,6 +286,10 @@ struct Rows<'a> {
     keymap: &'a Keymap,
     mailbox: &'a Mailbox,
     account_marker: bool,
+    /// A hover action pressed this frame.
+    acted: Cell<Option<(u64, Act)>>,
+    /// Whether the row sliding out was drawn, and whether it is out.
+    leaving: Cell<(bool, bool)>,
 }
 
 impl Rows<'_> {
@@ -235,8 +298,15 @@ impl Rows<'_> {
         let mut clicked = None;
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         for message in messages {
-            if row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker).clicked() {
+            let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker);
+            if drawn.clicked {
                 clicked = Some(message.id);
+            }
+            if let Some(act) = drawn.acted {
+                self.acted.set(Some((message.id, act)));
+            }
+            if self.mailbox.leaving().is_some_and(|(id, _)| id == message.id) {
+                self.leaving.set((true, drawn.out));
             }
         }
         clicked
@@ -376,7 +446,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     if mailbox.accounts().is_empty() {
         if !can_add {
             empty(ui, theme, tr!("No accounts yet"), tr!("Start InboxCraft with --sample to look around an invented mailbox."));
-            return Asked::default();
+            return Asked { out: true, ..Asked::default() };
         }
         empty(ui, theme, tr!("No accounts yet"), tr!("Add an account to read its mail here. Nothing leaves this computer before you do."));
         let mut add = false;
@@ -384,7 +454,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             ui.add_space(theme.spacing.l);
             add = button::text(ui, theme, keymap, tr!("Add account"), None, true).clicked();
         });
-        return Asked { clicked: None, add };
+        return Asked { add, out: true, ..Asked::default() };
     }
     if mailbox.messages().is_empty() {
         if mailbox.query().is_empty() {
@@ -392,12 +462,20 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         } else {
             empty(ui, theme, tr!("No messages match"), &tr!("No subject, sender or recipient holds “{query}”.", query = mailbox.query()));
         }
-        return Asked::default();
+        return Asked { out: true, ..Asked::default() };
     }
-    let rows = Rows { theme, keymap, mailbox, account_marker: mailbox.narrowed().is_none() && mailbox.accounts().len() > 1 };
+    let rows = Rows {
+        theme,
+        keymap,
+        mailbox,
+        account_marker: mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
+        acted: Cell::new(None),
+        leaving: Cell::new((false, false)),
+    };
     let showcase = mailbox.showcase();
     let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
     let clicked =
         if inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty()) { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
-    Asked { clicked, add: false }
+    let (drawn, out) = rows.leaving.get();
+    Asked { clicked, add: false, acted: rows.acted.get(), out: !drawn || out }
 }

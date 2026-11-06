@@ -9,6 +9,10 @@
 //! opens the appearance settings page in the same place; Escape, its close button or the rail's Mail button leave it,
 //! and the add-account page closes it.
 //!
+//! On the sample mailbox the hover actions and their keys (D Done, R read or unread, Delete) act on the hovered or
+//! selected row; a row that leaves the list slides out first. A toast then says what was done, with Undo and its key
+//! (Ctrl+Z) for [`TOAST_SECONDS`]. While a text field has the focus the keys are the field's.
+//!
 //! Each frame the window hands the engine's jobs to the `net` workers and applies their events
 //! ([`Mailbox::pump`]), so the steps of an account check show as they come.
 //!
@@ -32,13 +36,14 @@ use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb};
 use serde_json::{Value, json};
 
+use crate::component::toast::{self, Toast};
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
 use crate::iconset::IconSet;
 use crate::keep::{Keep, NoKeep};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::Mailbox;
+use crate::mailbox::{Act, Mailbox};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::reader::{PictureState, Reader};
@@ -50,6 +55,9 @@ use crate::{UiError, tr};
 
 /// The width of the list beside the reader, in points.
 const LIST_WIDTH: f32 = 380.0;
+
+/// How long the toast after an act shows, in seconds; its Undo works until then.
+pub const TOAST_SECONDS: f64 = 6.0;
 
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
@@ -72,6 +80,8 @@ pub struct InboxApp {
     /// Whether the window offers to add an account.
     can_add: bool,
     workers: Box<dyn Workers>,
+    /// The act the toast shows (by its serial) and when the toast came.
+    toast: Option<(u64, f64)>,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -122,6 +132,7 @@ impl InboxApp {
             settings: Settings::default(),
             can_add: false,
             workers: Box::new(NoWorkers),
+            toast: None,
         }
     }
 
@@ -408,6 +419,7 @@ impl InboxApp {
             self.mailbox.step(down);
             stepped = true;
         }
+        let keyed = if typing || !self.mailbox.can_act() { None } else { self.keyed_act(ui.ctx()) };
         let adding = self.onboarding.stage() != Stage::Closed;
         if adding {
             self.settings.close();
@@ -433,6 +445,9 @@ impl InboxApp {
         let mut asked = pane::Asked::default();
         let mut searched = None;
         let mut clicked = None;
+        let mut acted = None;
+        // The row sliding out is out when the list is not drawn.
+        let mut out = true;
         let mut page = None;
         let mut changed = None;
         let full = self.reader.full_width() && !adding && !setting;
@@ -501,11 +516,11 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox, can_add))
                         .inner;
-                    (searched, listed.clicked, listed.add)
+                    (searched, listed.clicked, listed.add, listed.acted, listed.out)
                 })
             };
             let add;
-            (searched, clicked, add) = if self.reader.open_id().is_some() {
+            (searched, clicked, add, acted, out) = if self.reader.open_id().is_some() {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -538,8 +553,14 @@ impl InboxApp {
         layers.finish(ui.painter(), &theme);
         // Every gradient of the frame is painted by now: the pictures it left out go.
         gradient::sweep(ui.ctx());
-        let acted = dismiss
+        let undone = self.toast(ui, &theme, typing);
+        let acted = acted.or(keyed);
+        let leaving = self.mailbox.leaving().is_some();
+        let busy = dismiss
             || stepped
+            || acted.is_some()
+            || undone
+            || (out && leaving)
             || left_full
             || left_settings
             || rail.mail
@@ -553,10 +574,11 @@ impl InboxApp {
             || asked.add
             || page.is_some()
             || !drawn.asked.is_empty();
-        if acted {
+        if busy {
             // What changed shows in the next frame.
             ui.ctx().request_repaint();
         }
+        self.act(out, acted, undone);
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
@@ -596,6 +618,59 @@ impl InboxApp {
             self.apply_page(page);
         }
         self.sync();
+    }
+
+    /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its
+    /// key), and Undo when `undone`.
+    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool) {
+        if out {
+            self.mailbox.left();
+        }
+        if let Some((id, act)) = acted {
+            self.mailbox.start(id, act);
+        }
+        if undone {
+            self.mailbox.undo();
+        }
+    }
+
+    /// The act whose key was pressed in this frame, on the selected row.
+    fn keyed_act(&self, ctx: &egui::Context) -> Option<(u64, Act)> {
+        let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let read = if row.seen { Act::Unread } else { Act::Read };
+        [(keymap::DONE, Act::Done), (keymap::READ, read), (keymap::DELETE, Act::Delete)]
+            .into_iter()
+            .find(|(action, _)| self.keymap.pressed(ctx, action))
+            .map(|(_, act)| (row.id, act))
+    }
+
+    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; the act can no longer be
+    /// undone after. Whether Undo was pressed (its key works while no text field has the focus).
+    fn toast(&mut self, ui: &Ui, theme: &Theme, typing: bool) -> bool {
+        let Some(undo) = self.mailbox.undoable() else {
+            self.toast = None;
+            return false;
+        };
+        let now = ui.input(|input| input.time);
+        let since = match self.toast {
+            Some((serial, since)) if serial == undo.serial => since,
+            _ => now,
+        };
+        let left = TOAST_SECONDS - (now - since);
+        if left <= 0.0 {
+            self.mailbox.forget_undo();
+            self.toast = None;
+            return false;
+        }
+        self.toast = Some((undo.serial, since));
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+        let mut keys = self.keymap.clone();
+        if typing {
+            keys.unbind(keymap::UNDO);
+        }
+        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let id = egui::Id::unique("act-toast").with(undo.serial);
+        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: undo.act.told(), undo: Some(keymap::UNDO) }, bottom)
     }
 
     /// Applies what was asked for on the settings page: each control through its `ui.*.set` command.

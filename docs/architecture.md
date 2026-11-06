@@ -77,6 +77,11 @@ answer the whole of it. The engine checks the values and makes a custom accent r
 The front end installs a changed appearance in the frame it finds it and keeps it in a file of the config folder
 (`ui-egui::keep`), handing it back to the session with `Session::set_appearance` at the next start.
 
+`sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
+and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with
+`Session::sample` over the invented sample mailbox; any other session refuses it (`sample_only`). It queues no job,
+so nothing reaches a server; the sample's hover actions use it until the commands for a real mailbox exist.
+
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
 no account had in this session and queues the owner's first check. The front end puts the password into the OS
@@ -149,3 +154,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | Adding an account: `account.add`, `account.remove`, the credential store and the window's workers (#34) |
 | 2026-11-05 | minor | The window removes the session's passwords when it closes (#34) |
 | 2026-11-06 | minor | The appearance commands and where their result is kept (#86) |
+| 2026-11-06 | minor | `sample.mail.set` and the sample session (#89) |

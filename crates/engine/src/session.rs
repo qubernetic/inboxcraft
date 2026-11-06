@@ -147,6 +147,8 @@ pub(crate) struct State {
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
+    /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
+    pub(crate) sample: bool,
 }
 
 /// What the session knows of one account.
@@ -272,6 +274,24 @@ impl Session {
     pub fn with_registry(store: Box<dyn Storage>, clock: Box<dyn Clock>, registry: Registry) -> Result<Self, EngineError> {
         let state = State::load(&*store)?;
         Ok(Self { store, clock, registry, state, jobs: Vec::new() })
+    }
+
+    /// A session over the invented sample mailbox in `store`, with InboxCraft's own commands: the `sample.*` commands
+    /// run in it and nowhere else. Nothing in it reaches a server; the front end starts no worker for it.
+    ///
+    /// # Errors
+    ///
+    /// A store that cannot be read.
+    pub fn sample(store: Box<dyn Storage>, clock: Box<dyn Clock>) -> Result<Self, EngineError> {
+        let mut session = Self::new(store, clock)?;
+        session.state.sample = true;
+        Ok(session)
+    }
+
+    /// Whether this is a session over the sample mailbox ([`Session::sample`]).
+    #[must_use]
+    pub fn is_sample(&self) -> bool {
+        self.state.sample
     }
 
     /// The commands.

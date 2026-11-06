@@ -6,7 +6,8 @@
 //!
 //! Everything goes through [`Session::run`] by command id (`account.list`, `folder.list`, `mail.list`,
 //! `mail.search`), as the menus, the CLI and MCP do. A command that fails leaves the list as it was and shows its
-//! error until the next command succeeds or the person dismisses it.
+//! error until the next command succeeds or the person dismisses it. On the sample mailbox the hover actions run
+//! `sample.mail.set` ([`Mailbox::act`]) and the last one can be undone.
 
 use std::collections::BTreeMap;
 
@@ -179,25 +180,69 @@ pub struct Group {
     pub messages: Vec<u64>,
 }
 
-/// The parts of the list whose data or command does not exist yet (the screener and the groups come with E3.1 and
-/// E3.2, the hover actions' commands with E2.1 and E3.3), filled with invented data by `ui_shot` only. In the app it
-/// stays empty, so none of them is drawn.
+/// The parts of the list whose data does not exist yet (the screener and the groups come with E3.1 and E3.2), filled
+/// with invented data by `ui_shot` only. In the app it stays empty, so none of them is drawn.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Showcase {
     /// The senders waiting in the screener; its card shows while there are any.
     pub screener: Vec<Waiting>,
     /// The groups of the unified inbox.
     pub groups: Vec<Group>,
-    /// Whether a hovered or keyboard-selected row shows its actions.
-    pub hover: bool,
 }
 
 impl Showcase {
     /// Whether it shows nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.screener.is_empty() && self.groups.is_empty() && !self.hover
+        self.screener.is_empty() && self.groups.is_empty()
     }
+}
+
+/// What a hover action or its key does to a message. Only the sample mailbox takes them (`sample.mail.set`), until
+/// the commands that act on a real mailbox exist (E2.1, E3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Act {
+    /// Mark it read.
+    Read,
+    /// Mark it unread.
+    Unread,
+    /// Mark it read and move it to its account's Archive folder: it leaves the inbox.
+    Done,
+    /// Move it to its account's Trash folder.
+    Delete,
+}
+
+impl Act {
+    /// Whether the row slides out of the list first: the message leaves the list.
+    #[must_use]
+    pub fn slides(self) -> bool {
+        matches!(self, Self::Done | Self::Delete)
+    }
+
+    /// What the toast says after it.
+    #[must_use]
+    pub fn told(self) -> &'static str {
+        match self {
+            Self::Read => tr!("Marked as read"),
+            Self::Unread => tr!("Marked as unread"),
+            Self::Done => tr!("Marked as done"),
+            Self::Delete => tr!("Moved to Trash"),
+        }
+    }
+}
+
+/// The last act, until it is undone or forgotten: where its message was and whether it was read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Undo {
+    /// What was done.
+    pub act: Act,
+    /// To which message.
+    pub id: u64,
+    /// The how-manyth act of the session, so a toast knows a new act from the one it shows.
+    pub serial: u64,
+    folder: u64,
+    seen: bool,
+    selected: bool,
 }
 
 /// The mail list's state over a session.
@@ -216,6 +261,12 @@ pub struct Mailbox {
     /// Whether the selection came from the keyboard.
     keyed: bool,
     showcase: Showcase,
+    /// Whether the session is over the sample mailbox, where the hover actions act.
+    sample: bool,
+    /// The message sliding out of the list, and what is done to it once it is out.
+    leaving: Option<(u64, Act)>,
+    undo: Option<Undo>,
+    acts: u64,
     after: After,
     error: Option<String>,
     runs: u64,
@@ -346,6 +397,7 @@ impl Mailbox {
     /// The list over `session`, on the unified inbox of every account; `clock` dates the rows.
     #[must_use]
     pub fn new(session: Session, clock: Box<dyn Clock>) -> Self {
+        let sample = session.is_sample();
         let mut mailbox = Self {
             session,
             clock,
@@ -360,6 +412,10 @@ impl Mailbox {
             selected: None,
             keyed: false,
             showcase: Showcase::default(),
+            sample,
+            leaving: None,
+            undo: None,
+            acts: 0,
             after: After::Next,
             error: None,
             runs: 0,
@@ -428,6 +484,103 @@ impl Mailbox {
     /// Shows `showcase` in the list, for `ui_shot`.
     pub fn set_showcase(&mut self, showcase: Showcase) {
         self.showcase = showcase;
+    }
+
+    /// Whether the rows show the hover actions and the action keys work: on the sample mailbox only, until the
+    /// commands that act on a real mailbox exist.
+    #[must_use]
+    pub fn can_act(&self) -> bool {
+        self.sample
+    }
+
+    /// Does `act` to the message `id` of the sample mailbox through `sample.mail.set`, at once; it can be undone
+    /// ([`Mailbox::undo`]) until the next act. Done and Delete move it to its account's Archive or Trash folder, so
+    /// it leaves the list and the next-message rule picks what is selected. Nothing outside the sample.
+    pub fn act(&mut self, id: u64, act: Act) {
+        if !self.sample {
+            return;
+        }
+        let result = self.acted(id, act);
+        if result.is_ok() {
+            self.refresh();
+        }
+        self.settle(result);
+    }
+
+    fn acted(&mut self, id: u64, act: Act) -> Result<(), UiError> {
+        let account = self.messages.iter().find(|row| row.id == id).map(|row| row.account);
+        let folder = |role: Role| {
+            let found = self.folders.iter().find(|folder| Some(folder.account) == account && folder.role == Some(role)).map(|folder| folder.id);
+            found.ok_or_else(|| shape("sample.mail.set", &format!("no {} folder", role.label())))
+        };
+        let params = match act {
+            Act::Read => json!({ "id": id, "seen": true }),
+            Act::Unread => json!({ "id": id, "seen": false }),
+            Act::Done => json!({ "id": id, "seen": true, "folder": folder(Role::Archive)? }),
+            Act::Delete => json!({ "id": id, "folder": folder(Role::Trash)? }),
+        };
+        let selected = self.selected == Some(id);
+        let answer = self.run("sample.mail.set", &params)?;
+        let was = answer.get("was");
+        let (Some(folder), Some(seen)) =
+            (was.and_then(|was| was.get("folder")).and_then(Value::as_u64), was.and_then(|was| was.get("seen")).and_then(Value::as_bool))
+        else {
+            return Err(shape("sample.mail.set", "no folder or read state it was in"));
+        };
+        self.acts = self.acts.saturating_add(1);
+        self.undo = Some(Undo { act, id, serial: self.acts, folder, seen, selected });
+        Ok(())
+    }
+
+    /// Starts `act` on the message `id`: an act that takes the row out of the list lets it slide out first
+    /// ([`Mailbox::leaving`], then [`Mailbox::left`]); the others are done at once. A row still sliding is done first.
+    pub fn start(&mut self, id: u64, act: Act) {
+        if !self.sample {
+            return;
+        }
+        self.left();
+        if act.slides() {
+            self.leaving = Some((id, act));
+        } else {
+            self.act(id, act);
+        }
+    }
+
+    /// The row sliding out of the list and what is done to it once it is out.
+    #[must_use]
+    pub fn leaving(&self) -> Option<(u64, Act)> {
+        self.leaving
+    }
+
+    /// The sliding row is out: its act is done.
+    pub fn left(&mut self) {
+        if let Some((id, act)) = self.leaving.take() {
+            self.act(id, act);
+        }
+    }
+
+    /// The last act while it can be undone.
+    #[must_use]
+    pub fn undoable(&self) -> Option<Undo> {
+        self.undo
+    }
+
+    /// Undoes the last act: its message goes back to its folder with its read state, selected again when it was.
+    pub fn undo(&mut self) {
+        let Some(undo) = self.undo.take() else { return };
+        let result = self.run("sample.mail.set", &json!({ "id": undo.id, "seen": undo.seen, "folder": undo.folder })).map(|_| ());
+        if result.is_ok() {
+            self.refresh();
+            if undo.selected && self.messages.iter().any(|row| row.id == undo.id) {
+                self.selected = Some(undo.id);
+            }
+        }
+        self.settle(result);
+    }
+
+    /// Forgets the last act: it can no longer be undone (its toast has gone).
+    pub fn forget_undo(&mut self) {
+        self.undo = None;
     }
 
     /// Hands the engine's queued jobs to `workers`, stops the workers of accounts that are gone, and applies the

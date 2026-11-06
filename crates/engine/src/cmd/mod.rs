@@ -10,6 +10,7 @@ mod account;
 mod folder;
 mod mail;
 mod remote;
+mod sample;
 mod ui;
 
 pub use mail::MAX_LIST;
@@ -32,6 +33,7 @@ pub(crate) fn all() -> Vec<CommandSpec> {
         remote::ALLOW,
         remote::FORGET,
         remote::LIST,
+        sample::SET,
         ui::ACCENT,
         ui::FONT,
         ui::ICONS,
@@ -53,6 +55,9 @@ mod hostile_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;
+#[cfg(test)]
+#[path = "sample_tests.rs"]
+mod sample_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

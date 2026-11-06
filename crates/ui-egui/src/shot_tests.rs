@@ -210,6 +210,30 @@ fn a_shot_shows_the_showcase_and_steps_the_selection_by_keyboard() {
 }
 
 #[test]
+fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], "step": 1{more}}}"#));
+    let stepped = shoot(&line("")).unwrap();
+    let toast = shoot(&line(r#", "act": "done""#)).unwrap();
+    let sliding = shoot(&line(r#", "act": "done", "slide": true"#)).unwrap();
+    let read = shoot(&line(r#", "act": "read""#)).unwrap();
+    assert_ne!(stepped, toast);
+    assert_ne!(toast, sliding);
+    assert_ne!(toast, read, "another toast");
+    for (more, says) in [
+        (r#", "act": "archive""#, "not read, unread, done or delete"),
+        (r#", "act": "read", "slide": true"#, "only done and delete slide"),
+        (r#", "slide": true"#, "slide needs an act"),
+    ] {
+        let error = shoot(&line(more)).unwrap_err().to_string();
+        assert!(error.contains(says), "{error}");
+    }
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "act": "done"}"#)).unwrap_err().to_string();
+    assert!(error.contains("needs a selected row"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "act": "done"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),

@@ -73,3 +73,8 @@ pub fn session_with(store: Memory, registry: Registry) -> Session {
 pub fn session() -> Session {
     session_with(mailbox(), Registry::builtin().unwrap())
 }
+
+/// A sample session over [`mailbox`], where the `sample.*` commands run.
+pub fn sample_session() -> Session {
+    Session::sample(Box::new(mailbox()), Box::new(clock())).unwrap()
+}
