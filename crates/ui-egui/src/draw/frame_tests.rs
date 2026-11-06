@@ -162,3 +162,35 @@ fn the_window_s_corners_are_round_only_while_the_app_draws_the_frame() {
     assert_eq!(harness(true, WindowFrame::System).state().window_corner(&egui::Context::default()), 0.0);
     assert_eq!(harness(false, WindowFrame::Strip).state().window_corner(&egui::Context::default()), 0.0);
 }
+
+#[test]
+fn the_strip_s_window_controls_sit_in_its_middle() {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_own_frame(true);
+    app.set_frame(WindowFrame::Strip);
+    // The whole window, as eframe gives it; the harness's own `ui` has a margin.
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 700.0)).with_context_setup(install_fonts).build_ui_state(
+        |ui, app: &mut InboxApp| {
+            let whole = ui.ctx().content_rect();
+            ui.scope_builder(egui::UiBuilder::new().max_rect(whole), |ui| app.ui(ui));
+        },
+        app,
+    );
+    harness.run();
+    for name in ["Minimise", "Maximise", "Close the window"] {
+        let rect = harness.get_by_label(name).rect();
+        let (above, below) = (rect.top(), super::frame::STRIP - rect.bottom());
+        assert!((above - below).abs() <= 1.0, "{name}: {above} above, {below} below in {rect:?}");
+    }
+}
+
+#[test]
+fn the_window_moves_again_after_a_move_whose_release_the_desktop_kept() {
+    // While the desktop moves the window it holds the pointer: the app never hears the button come up.
+    for (frame, at) in [(WindowFrame::Strip, pos2(500.0, 17.0)), (WindowFrame::TopRow, pos2(600.0, 8.0))] {
+        let mut harness = harness(true, frame);
+        assert!(drag_from(&mut harness, at).contains(&ViewportCommand::StartDrag), "{frame:?}: the first move");
+        let seen = drag_from(&mut harness, at + vec2(40.0, 0.0));
+        assert!(seen.contains(&ViewportCommand::StartDrag), "{frame:?}: the second move {seen:?}");
+    }
+}

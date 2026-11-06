@@ -7,7 +7,7 @@
 //! a viewport command; nothing here runs a command of the engine.
 
 use egui::{
-    Align2, Area, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Rect, ResizeDirection, Response, Role, Sense, Stroke, StrokeKind, Ui,
+    Align2, Area, Context, CornerRadius, CursorIcon, Id, LayerId, Order, Pos2, Rect, ResizeDirection, Response, Role, Sense, Stroke, StrokeKind, Ui,
     ViewportCommand, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_engine::appearance::WindowFrame;
@@ -108,9 +108,24 @@ fn controls(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
-/// Moves the window while `response` is dragged, and maximises or restores it on a double click.
+/// How far the pointer goes with the button down on a handle before the window moves, in points; less is a click.
+const MOVE_AFTER: f32 = 3.0;
+
+/// Moves the window when the pointer goes a few points with the button pressed on `response`, and maximises or
+/// restores it on a double click. The press is kept here rather than taken from egui's drag: while the desktop moves
+/// the window it holds the pointer, the app never hears the button come up, and egui would take the next press for
+/// the same drag still going on.
 fn moves_the_window(ctx: &Context, response: &Response) {
-    if response.drag_started_by(egui::PointerButton::Primary) {
+    let id = response.id.with("pressed-at");
+    let (pressed, released, at) = ctx.input(|input| (input.pointer.primary_pressed(), input.pointer.primary_released(), input.pointer.latest_pos()));
+    if pressed && response.contains_pointer() {
+        ctx.data_mut(|data| data.insert_temp(id, at));
+    } else if released {
+        ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
+    } else if let (Some(from), Some(to)) = (ctx.data(|data| data.get_temp::<Option<Pos2>>(id)).flatten(), at)
+        && from.distance(to) > MOVE_AFTER
+    {
+        ctx.data_mut(|data| data.insert_temp(id, None::<Pos2>));
         ctx.send_viewport_cmd(ViewportCommand::StartDrag);
     }
     if response.double_clicked() {
@@ -134,8 +149,10 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
     moves_the_window(ui.ctx(), &handle);
     let galley = ui.painter().layout_no_wrap(title.to_owned(), theme.fonts.caption.id(), p.muted);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.muted);
-    let at = Rect::from_min_max(pos2(rect.right() - CONTROLS - theme.spacing.s, rect.top()), rect.max);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+    // As much room above the controls as below them.
+    let right = rect.right() - theme.spacing.s;
+    let at = Rect::from_min_max(pos2(right - CONTROLS, rect.center().y - CONTROL[1] / 2.0), pos2(right, rect.center().y + CONTROL[1] / 2.0));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
         controls(ui, theme, keymap);
     });
 }

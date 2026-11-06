@@ -501,7 +501,7 @@ impl InboxApp {
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(half, half, gap))
+                .frame(around(gap, half, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, false)))
                 .inner;
             let (keymap, mailbox, onboarding) = (&self.keymap, &self.mailbox, &mut self.onboarding);
@@ -514,7 +514,7 @@ impl InboxApp {
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(half, half, gap))
+                .frame(around(gap, half, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
                 .inner;
             let reduce = self.reduce_motion();
@@ -528,7 +528,7 @@ impl InboxApp {
                 .resizable(true)
                 .default_size(s.folder_pane)
                 .show_separator_line(false)
-                .frame(around(half, half, gap))
+                .frame(around(gap, half, gap))
                 .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, &theme, &self.keymap, &self.mailbox, self.can_add)))
                 .inner;
             let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
