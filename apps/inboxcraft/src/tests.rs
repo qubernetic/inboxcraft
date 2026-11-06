@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
+use inboxcraft_ui_egui::keep::NoKeep;
 
 use super::{Source, Step, app, run, usage};
 
@@ -93,16 +94,30 @@ fn clock() -> Box<dyn Clock> {
 
 #[test]
 fn the_sample_window_shows_the_sample_mailbox_and_the_empty_one_nothing() {
-    let sample = app(Source::Sample, clock, None).unwrap();
+    let sample = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
     assert_eq!(sample.mailbox().accounts().len(), 2);
     assert_eq!(sample.mailbox().messages().len(), 11);
-    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {}))).unwrap();
+    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {})), Box::new(NoKeep)).unwrap();
     assert!(empty.mailbox().accounts().is_empty());
     assert_eq!(empty.mailbox().error(), None);
 }
 
 #[test]
 fn only_the_empty_window_adds_accounts() {
-    assert!(!app(Source::Sample, clock, None).unwrap().can_add(), "the sample connects nowhere");
-    assert!(app(Source::Empty, clock, None).unwrap().can_add());
+    assert!(!app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap().can_add(), "the sample connects nowhere");
+    assert!(app(Source::Empty, clock, None, Box::new(NoKeep)).unwrap().can_add());
+}
+
+#[test]
+fn both_windows_start_with_the_kept_appearance() {
+    use inboxcraft_engine::appearance::{Appearance, Typeface};
+    use inboxcraft_ui_egui::keep::{FILE, Keep, KeepFile};
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join(FILE);
+    let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
+    KeepFile::new(file.clone()).store(&chosen).unwrap();
+    for source in [Source::Sample, Source::Empty] {
+        let window = app(source, clock, None, Box::new(KeepFile::new(file.clone()))).unwrap();
+        assert_eq!(*window.appearance(), chosen, "{source:?}");
+    }
 }

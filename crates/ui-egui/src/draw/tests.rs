@@ -94,7 +94,7 @@ fn the_theme_follows_the_mode() {
     let harness = harness_with(sample_app(), egui::Theme::Dark);
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
     assert_eq!(harness.state().mode(), ModePreference::System);
-    assert_eq!(*harness.state().preset(), Preset::default());
+    assert_eq!(harness.state().preset(), Preset::default());
     assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &Preset::default()).palette.panel);
 }
 

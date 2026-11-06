@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 
+use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::{Applied, EngineError, MAX_LIST, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
@@ -404,6 +405,22 @@ impl Mailbox {
 
     fn settle(&mut self, result: Result<(), UiError>) {
         self.error = result.err().map(|error| error.to_string());
+    }
+
+    /// Shows `error` in the error banner until it is dismissed or the next command settles.
+    pub(crate) fn fail(&mut self, error: UiError) {
+        self.settle(Err(error));
+    }
+
+    /// The owner's appearance choices, as the `ui.*.set` commands left them.
+    #[must_use]
+    pub fn appearance(&self) -> &Appearance {
+        self.session.appearance()
+    }
+
+    /// Takes the appearance choices kept from an earlier run.
+    pub(crate) fn restore_appearance(&mut self, appearance: Appearance) {
+        self.session.set_appearance(appearance);
     }
 
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {

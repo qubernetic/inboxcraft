@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-05 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -70,6 +70,12 @@ pictures load without asking changes what leaves the computer. `mail.read` answe
 fetches a remote picture: the front end asks its fetch for the pictures the owner allowed, and the desktop app's
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
+
+The appearance commands (`ui.theme.set`, `ui.accent.set`, `ui.font.set`, `ui.icons.set`, `ui.text_scale.set`,
+`ui.motion.set`, all `safe`) change one choice each of the session's `Appearance` (`engine::appearance`) and
+answer the whole of it. The engine checks the values and makes a custom accent readable; it keeps nothing on disk.
+The front end installs a changed appearance in the frame it finds it and keeps it in a file of the config folder
+(`ui-egui::keep`), handing it back to the session with `Session::set_appearance` at the next start.
 
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
@@ -142,3 +148,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | The reader commands and where remote pictures are fetched (#33) |
 | 2026-11-05 | minor | Adding an account: `account.add`, `account.remove`, the credential store and the window's workers (#34) |
 | 2026-11-05 | minor | The window removes the session's passwords when it closes (#34) |
+| 2026-11-06 | minor | The appearance commands and where their result is kept (#86) |

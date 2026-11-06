@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, Face, Font, GHOST, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Weight, contrast, font_definitions, icon_ink_over,
-    ink_on, ink_over, install_fonts, mix, over, readable, rgb,
+    AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, Weight, contrast,
+    font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb,
 };
+use crate::iconset::IconSet;
 use crate::motion::MOTION;
 
 /// Every preset in both modes.
@@ -49,9 +50,9 @@ fn the_three_presets_are_one_table_entry_each_with_the_owners_colours() {
 #[test]
 fn the_mode_preference_is_system_by_default_and_maps_onto_egui() {
     assert_eq!(ModePreference::default(), ModePreference::System);
-    assert_eq!(egui::ThemePreference::from(ModePreference::System), egui::ThemePreference::System);
-    assert_eq!(egui::ThemePreference::from(ModePreference::Light), egui::ThemePreference::Light);
-    assert_eq!(egui::ThemePreference::from(ModePreference::Dark), egui::ThemePreference::Dark);
+    assert_eq!(preference(ModePreference::System), egui::ThemePreference::System);
+    assert_eq!(preference(ModePreference::Light), egui::ThemePreference::Light);
+    assert_eq!(preference(ModePreference::Dark), egui::ThemePreference::Dark);
     for (id, preference) in [("system", ModePreference::System), ("light", ModePreference::Light), ("dark", ModePreference::Dark)] {
         assert_eq!(ModePreference::named(id), Some(preference));
         assert_eq!(preference.id(), id);
@@ -334,17 +335,92 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
 }
 
 #[test]
-fn every_font_token_names_a_family_figtree_defines() {
+fn every_font_token_names_a_family_its_typeface_defines() {
     let definitions = font_definitions();
-    for font in Theme::new(Mode::Light, &Preset::default()).fonts.all() {
-        let id = font.id();
-        assert_eq!(id.size, font.size);
-        let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
-        let first = family.first().unwrap();
-        assert!(definitions.font_data.contains_key(first), "{first}");
-        match font.face {
-            Face::Mono => assert_eq!(first, "Hack"),
-            Face::Sans(_) => assert!(first.starts_with("Figtree-"), "{first}"),
+    for (typeface, prefix) in [(Typeface::Figtree, "Figtree-"), (Typeface::Inter, "Inter-")] {
+        let theme = Theme::new(Mode::Light, &Preset::default()).with_typeface(typeface);
+        assert_eq!(theme.typeface, typeface);
+        for font in theme.fonts.all() {
+            let id = font.id();
+            assert_eq!(id.size, font.size);
+            let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
+            let first = family.first().unwrap();
+            assert!(definitions.font_data.contains_key(first), "{first}");
+            match font.face {
+                Face::Mono => assert_eq!(first, "Hack"),
+                Face::Sans(_) => assert!(first.starts_with(prefix), "{first}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn the_typeface_and_the_text_scale_change_independently() {
+    let base = Theme::new(Mode::Dark, &Preset::default());
+    let large = TextScale::from_percent(130).unwrap();
+    let both = base.with_text_scale(large).with_typeface(Typeface::Inter);
+    assert_eq!(both, base.with_typeface(Typeface::Inter).with_text_scale(large));
+    assert_eq!(both.fonts.body.size, base.with_text_scale(large).fonts.body.size);
+    assert!(both.fonts.all().iter().all(|font| font.typeface == Typeface::Inter));
+    assert_eq!(both.with_typeface(Typeface::Figtree), base.with_text_scale(large));
+}
+
+#[test]
+fn inter_draws_with_its_own_shapes() {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let width = |typeface: Typeface| {
+        let font = Font { size: 14.0, face: Face::Sans(Weight::Regular), typeface };
+        ctx.fonts_mut(|fonts| "Budget for 2026".chars().map(|c| fonts.glyph_width(&font.id(), c)).sum::<f32>())
+    };
+    assert!((width(Typeface::Inter) - width(Typeface::Figtree)).abs() > 0.5, "Inter is a face of its own");
+}
+
+#[test]
+fn a_look_takes_the_owner_s_choices() {
+    use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Rgb};
+    let custom = CustomAccent { gradient: [Rgb(1, 2, 3), Rgb(4, 5, 6), Rgb(7, 8, 9)], accent: Rgb(0xff, 0xd6, 0x0a) };
+    let appearance =
+        Appearance { accent: Accent::Custom(custom), font: Typeface::Inter, icons: Icons::Lucide, text_scale: 110, ..Appearance::default() };
+    let look = Look::of(&appearance);
+    assert_eq!(look.preset.id, "custom");
+    assert_eq!(look.preset.gradient, [rgb(0x010203), rgb(0x040506), rgb(0x070809)]);
+    assert_eq!(look.preset.accent, rgb(0xffd60a));
+    assert_eq!(look.typeface, Typeface::Inter);
+    assert_eq!(look.icons, IconSet::Lucide);
+    assert_eq!(look.text_scale.percent(), 110);
+    let theme = Theme::of(Mode::Dark, &look);
+    assert_eq!((theme.typeface, theme.icons, theme.text_scale), (Typeface::Inter, IconSet::Lucide, look.text_scale));
+    assert_eq!(Look::of(&Appearance::default()), Look::default());
+    assert_eq!(Preset::of(&Accent::Preset("aurora")), *Preset::named("aurora").unwrap());
+    assert_eq!(Preset::of(&Accent::Preset("gone")), Preset::default(), "an id this front end does not ship is Electric");
+    assert_eq!(Look::of(&Appearance { text_scale: 95, ..Appearance::default() }).text_scale, TextScale::default());
+}
+
+#[test]
+fn the_engine_s_dark_surface_is_the_lightest_dark_neutral_and_every_preset_id_is_shipped() {
+    use inboxcraft_engine::appearance::{DARK_SURFACE, PRESETS as PRESET_IDS, Rgb};
+    let Rgb(r, g, b) = DARK_SURFACE;
+    assert_eq!(Color32::from_rgb(r, g, b), DARK.float);
+    for neutral in [DARK.background, DARK.panel, DARK.surface, DARK.field] {
+        assert!(contrast(neutral, BLACK) <= contrast(DARK.float, BLACK), "{}", hex(neutral));
+    }
+    assert_eq!(PRESET_IDS.to_vec(), PRESETS.iter().map(|preset| preset.id).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_custom_accent_the_engine_nudged_reads_in_dark_mode_for_any_gradient() {
+    use inboxcraft_engine::appearance::{Accent, CustomAccent, Rgb};
+    for gradient in [[Rgb(0, 0, 0); 3], [Rgb(255, 255, 255); 3], [Rgb(0xff, 0xd0, 0), Rgb(0, 0xe5, 0xff), Rgb(0x3d, 0x5a, 0xfe)]] {
+        let custom = CustomAccent { gradient, accent: Rgb(0x30, 0x10, 0x60) }.readable();
+        let preset = Preset::of(&Accent::Custom(custom));
+        for mode in [Mode::Light, Mode::Dark] {
+            let p = Theme::new(mode, &preset).palette;
+            for behind in [p.background, p.panel, p.surface] {
+                assert!(contrast(p.accent, behind) >= 4.5, "{mode:?} {}", hex(p.accent));
+                assert!(contrast(p.text, behind) >= 4.5, "{mode:?}");
+            }
         }
     }
 }
@@ -362,7 +438,7 @@ fn figtree_replaces_ubuntu_light_everywhere() {
     let monospace = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
     assert!(monospace.contains(&"Figtree-Regular".to_owned()), "Figtree stands in for Hack's missing signs: {monospace:?}");
     for weight in [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold] {
-        let family = Font { size: 14.0, face: Face::Sans(weight) }.id().family;
+        let family = Font { size: 14.0, face: Face::Sans(weight), typeface: Typeface::Inter }.id().family;
         let fonts = definitions.families.get(&family).unwrap();
         assert!(fonts.len() > 1, "{weight:?} falls back to the emoji and icon fonts");
     }
@@ -375,8 +451,8 @@ fn install_fonts_puts_figtree_into_the_context() {
     ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
     assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("Figtree-Regular"));
-    let bold = Font { size: 14.0, face: Face::Sans(Weight::Bold) };
-    let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular) };
+    let bold = Font { size: 14.0, face: Face::Sans(Weight::Bold), typeface: Typeface::Figtree };
+    let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular), typeface: Typeface::Figtree };
     let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
     assert!(width(bold) > width(regular), "the bold weight is its own face");
 }
@@ -411,17 +487,18 @@ fn mode_of_reads_the_context_and_apply_installs_both_modes_of_the_preset() {
     let ctx = egui::Context::default();
     let aurora = Preset::named("aurora").unwrap();
     let large = TextScale::from_percent(130).unwrap();
-    Theme::apply(&ctx, aurora, large);
+    let look = Look { preset: *aurora, text_scale: large, ..Look::default() };
+    Theme::apply(&ctx, &look);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, aurora).palette.panel);
     assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, aurora).palette.panel);
     let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
     assert_eq!(body, Some(Theme::new(Mode::Dark, aurora).with_text_scale(large).fonts.body.size));
     ctx.set_theme(egui::Theme::Dark);
     assert_eq!(Mode::of(&ctx), Mode::Dark);
-    assert_eq!(Theme::current(&ctx, aurora, large), Theme::new(Mode::Dark, aurora).with_text_scale(large));
+    assert_eq!(Theme::current(&ctx, &look), Theme::new(Mode::Dark, aurora).with_text_scale(large));
     ctx.set_theme(egui::Theme::Light);
     assert_eq!(Mode::of(&ctx), Mode::Light);
-    assert_eq!(Theme::current(&ctx, aurora, TextScale::default()), Theme::new(Mode::Light, aurora));
+    assert_eq!(Theme::current(&ctx, &Look { preset: *aurora, ..Look::default() }), Theme::new(Mode::Light, aurora));
 }
 
 /// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a

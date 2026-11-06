@@ -31,6 +31,25 @@ Everything here is original. Nothing is copied, traced or recreated from another
 - **Message text is data.** Subjects, names and previews are shown on one line: line breaks, tabs and NUL become
   spaces, bidi controls that could reorder what is shown are removed, and each is cut to 300 characters.
 
+## Appearance choices
+The owner's choices are the engine's `Appearance`, changed only through the `ui.*.set` commands (all `safe`):
+
+| Command | Parameters | Choices |
+|---|---|---|
+| `ui.theme.set` | `mode` | `system` (default), `light`, `dark` |
+| `ui.accent.set` | `preset` or `custom` | `electric` (default), `aurora`, `citrus`; or four `#rrggbb` colours, the gradient's three stops and the accent |
+| `ui.font.set` | `font` | `figtree` (default), `inter` |
+| `ui.icons.set` | `icons` | `phosphor` (default), `lucide` |
+| `ui.text_scale.set` | `percent` | 90, 100 (default), 110, 120, 130 |
+| `ui.motion.set` | `reduce` | `on`, `off`, `system` (default) |
+
+Each answers the whole appearance. A custom accent is the colour of links and accent text in dark mode, so it must
+reach WCAG AA (4.5:1) on the lightest dark surface (the dark float, `#1E2330`); one that does not is made lighter in
+steps of 1 % lightness, hue and saturation kept, and the answer has `nudged: true`, the colour asked for
+(`requested`), the contrast reached and why. Every other token comes from the four colours as from a preset and is
+checked by the theme. The window installs a changed appearance in the next frame and keeps it in
+`inboxcraft/appearance.json` in the config folder, so it is there after a restart.
+
 ## Mode
 System (the default) follows the computer's light or dark choice; Light and Dark keep one. egui switches between the
 two installed styles, so a change shows from the next frame.
@@ -102,7 +121,10 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 ## Type
 
 The typeface is **Figtree** (SIL Open Font Licence 1.1), bundled from its upstream release v2.0.3 in
-`assets/fonts/figtree/` (Regular, Medium, SemiBold, Bold) and compiled in; nothing is fetched at run time. It takes
+`assets/fonts/figtree/` (Regular, Medium, SemiBold, Bold) and compiled in; nothing is fetched at run time. The
+owner can choose **Inter** instead (`ui.font.set`; the same licence, release v4.1 in `assets/fonts/inter/`, the same
+four weights): every token keeps its size and weight and only the typeface changes. Both are installed from the first
+frame, so a change of typeface is a change of tokens. It takes
 the place of egui's Ubuntu Light everywhere; egui's Hack stays the monospaced face (with Figtree behind it for signs
 Hack lacks), and egui's emoji and icon fonts stay the last fallback. Each weight is a font family of its own, because
 egui has no notion of weight.
@@ -129,7 +151,7 @@ Sender and subject are strong and the preview muted; an unread row is set in hea
 against Medium and Regular) as well as marked by its dot, so it reads as unread in grey too.
 
 **Text scale.** 90 %, 100 % (the default), 110 %, 120 % or 130 %, applied to every token
-(`InboxApp::set_text_scale`; the command and the settings page come with the settings). Layout follows the font,
+(`ui.text_scale.set`; the settings page comes with E1.16b). Layout follows the font,
 never fixed points for text: the message rows, folder rows, folded thread rows and step marks take their height
 from the font's own line height at the current scale, and every cut line is measured and ends in an ellipsis. The
 reader's controls wrap onto a second line when there is no room, and the subject has the line below them to itself
@@ -152,13 +174,20 @@ The theme names the icon set (`Theme::icons`). Each set maps every id onto a gly
 `match`, so a new id without a glyph does not build, and keeps its own size and optical alignment (`Metrics`).
 `IconSet::paint` draws an icon into the middle of a square, as large as the square, in one colour token.
 
-The one set so far is **Phosphor** (MIT), bundled from its upstream release 2.1.1 in `assets/icons/phosphor/`
+The default set is **Phosphor** (MIT), bundled from its upstream release 2.1.1 in `assets/icons/phosphor/`
 (the Regular, Fill and Duotone fonts, unchanged) and compiled in; nothing is fetched at run time. A Phosphor glyph
 fills its em square with a margin of its own (a ring covers about 81 % of it) and sits in the middle of the line,
 so it is drawn at the square's side with no shift; a test paints the ring at 16, 20 and 32 points and fails when it
 is more than a pixel off the middle. Like the text fonts, the icon fonts are named only in `theme.rs`
 (`IconFont`); each is a font family of its own with nothing behind it, and a test checks that every glyph of every
 id and style is in its font.
+
+The second set is **Lucide** (ISC; the icons it took from Feather are MIT), chosen with `ui.icons.set` and bundled
+from release 1.70.0 in `assets/icons/lucide/` (its one font, unchanged). Lucide has lines only, so Fill and Duotone
+keep the line glyph and draw a filled disc behind it, 90 % of the square across: at 38 % of the icon's colour for
+Fill and at 20 % for Duotone. Callers draw active states in the accent colour, so an active Lucide icon is the accent
+on an accent disc. A Lucide glyph fills its em square to the edge and sits a little high, so it is drawn at 92 % of
+the square and moved down by 4.5 % of it; the same ring test holds it to a pixel of the middle.
 
 The app icon is not from a set: it stays drawn in code (see "The app icon").
 
@@ -241,7 +270,7 @@ about 0.1 s with a factor fixed inside egui that no style changes, so wheel scro
 motion on (see `docs/gaps.md`). A test refuses egui's animation calls anywhere else in the crate, and a test switches every component on with
 motion and with reduced motion and finds the first still moving and the second at rest. The flag's default follows
 the system where the system can be read (the web build), otherwise motion is on; the window holds it
-(`InboxApp::set_reduce_motion`) and a switch for it comes with the appearance settings. While something moves the
+through `ui.motion.set` (on, off or follow the system) and a switch for it comes with the settings page. While something moves the
 window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
@@ -319,7 +348,9 @@ and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<m
 Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
 buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
 tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
-for Electric). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
+for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
+list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
+(`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). Every picture is drawn with reduced motion, so it shows where each motion ends. Every UI change shows
 them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
@@ -347,3 +378,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |
 | 2026-11-06 | minor | Components, the avatar colours, the keymap, motion tokens and the reduced-motion flag; the gallery (#85) |
 | 2026-11-06 | minor | The group badge's icon: solid, white wherever it reaches 3:1; reduced motion and scrolling (#85) |
+| 2026-11-06 | minor | Appearance choices and their commands; Inter; Lucide with its disc for Fill and Duotone (#86) |

@@ -145,6 +145,21 @@ fn a_text_scale_draws_the_window_with_larger_type() {
 }
 
 #[test]
+fn a_font_and_an_icon_set_draw_the_window_the_gallery_and_the_sheet_in_them() {
+    for page in [r#""size": [600, 400]"#, r#""components": true"#, r#""icons": true"#] {
+        let plain = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", {page}}}"#))).unwrap();
+        let named = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "figtree", "icon_set": "phosphor", {page}}}"#))).unwrap();
+        assert_eq!(plain, named, "{page}: Figtree and Phosphor are the default");
+        let inter = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "inter", {page}}}"#))).unwrap();
+        let lucide = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "icon_set": "lucide", {page}}}"#))).unwrap();
+        if !page.contains("icons") {
+            assert_ne!(plain, inter, "{page}");
+        }
+        assert_ne!(plain, lucide, "{page}");
+    }
+}
+
+#[test]
 fn a_scale_of_two_doubles_the_picture() {
     let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [300, 200], "scale": 2}"#)).unwrap();
     assert_eq!((picture.width(), picture.height()), (600, 400));
@@ -180,6 +195,8 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
+        (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
+        (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");

@@ -21,7 +21,9 @@
 //! - [`picture`]: the PNG and JPEG pictures of a message decoded into RGBA, with their size checked first.
 //! - [`quote`]: a plain-text body split into what the sender wrote and the quotes the reader folds.
 //! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
-//! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor) maps it to a glyph.
+//! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor or Lucide) maps it to a
+//!   glyph.
+//! - [`keep`]: where the appearance choices (the `ui.*.set` commands) are kept between runs.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
 //! - [`keymap`]: which key runs which action; tooltips and chips read their keys from it.
 //! - [`component`]: the design system's components: card, icon button, pill, tooltip, avatar, badge, hover actions,
@@ -39,6 +41,7 @@ pub mod gradient;
 pub mod i18n;
 pub mod icons;
 pub mod iconset;
+pub mod keep;
 pub mod keymap;
 pub mod mailbox;
 pub mod motion;

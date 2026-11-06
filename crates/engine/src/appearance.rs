@@ -76,9 +76,13 @@ macro_rules! choice {
             pub fn named(id: &str) -> Option<Self> {
                 Self::ALL.into_iter().find(|choice| choice.id() == id)
             }
+        }
 
+        impl Default for $name {
             /// The choice of a fresh install.
-            pub const DEFAULT: Self = Self::$default;
+            fn default() -> Self {
+                Self::$default
+            }
         }
     };
 }
@@ -219,12 +223,12 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: ThemeMode::DEFAULT,
+            theme: ThemeMode::default(),
             accent: Accent::default(),
-            font: Typeface::DEFAULT,
-            icons: Icons::DEFAULT,
+            font: Typeface::default(),
+            icons: Icons::default(),
             text_scale: 100,
-            motion: Motion::DEFAULT,
+            motion: Motion::default(),
         }
     }
 }
