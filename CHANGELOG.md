@@ -373,6 +373,15 @@ All notable changes to InboxCraft are listed here. The format follows
   account picker with a chevron, Add account as a link, a MAILBOXES heading, an icon per folder, and each account
   lists only its own folders; the app icon is the InboxCraft mark (two cards entering a notched tray, Electric
   gradient, white tile)
+- The screens follow the design file (#104): the settings are a sheet over the dimmed window, with the sections on
+  the left (those not built yet faded) and each setting a row beside its control: segmented choices, accent and
+  window-frame cards, a text-size slider, a switch and a two-row preview; the custom accent's fields show only
+  while it is in use or being typed. The add-account form has its labels above the fields, the address beside
+  Detect, Detect's result in a box, rows for the names and for server, port and security, and "Check and add"; a
+  failed check names the step and its reason under the title and lists the steps on a card. The reader's subject
+  is set large with the message's group as a chip. In the list, "Show all" is an accent link under the rows' text,
+  the grouped cards show no account stripe, and a row's hover actions are Done, an envelope for read or unread,
+  Delete and Snooze (not available yet)
 - The reader's link status line shows only while the pointer is on a link, as a float over the reader's bottom
   left corner that takes no pointer; a notice still shows in a line at the bottom until dismissed (#90)
 - `inboxcraft` alone opens an empty window that adds accounts, with the window's jobs going to `net` workers;

@@ -476,3 +476,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | The design file in FigCraft, `docs/design/` (#96) |
 | 2026-11-06 | minor | The FigCraft design file is the source of truth for the look (#96) |
 | 2026-11-06 | minor | The file's rules in the code: text gradient, dark accent, outline group icons, inset rows; secondary buttons, `ui.frame.set` (#104) |
+| 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
