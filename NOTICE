@@ -29,6 +29,9 @@ Third-party material
 - Figtree (https://github.com/erikdkennedy/figtree, release v2.0.3), Copyright 2022 The Figtree Project Authors,
   SIL Open Font Licence 1.1: the Regular, Medium, SemiBold and Bold weights in `assets/fonts/figtree/`, compiled into
   the desktop app as its typeface. The licence text is `assets/fonts/figtree/OFL.txt`.
+- Phosphor Icons (https://github.com/phosphor-icons/web, release 2.1.1), Copyright (c) 2020-2021 Phosphor Icons, MIT:
+  the Regular, Fill and Duotone icon fonts in `assets/icons/phosphor/`, compiled into the desktop app as its icon
+  set. The licence text is `assets/icons/phosphor/LICENSE`.
 - egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
   (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0; still
   compiled in with that crate, but no text uses it since Figtree replaced it), Hack

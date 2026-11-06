@@ -362,6 +362,13 @@ All notable changes to InboxCraft are listed here. The format follows
   marks take their height from the font's metrics, and the reader's controls wrap above the subject, which wraps
   rather than being cut. A test draws the list and the reader at 90 % and 130 % and fails on text that sticks out
   of its row or button, is cut at the side of its pane, or lies over other text.
+- An icon painter with the Phosphor set (#84): views ask for an `IconId` (`ui-egui::iconset`) in a style, Regular
+  for toolbars and rows, Fill for active and selected states and Duotone for group badges and empty states; each
+  icon set maps every id onto a glyph of its font in an exhaustive `match`, so a missing mapping fails the build,
+  and keeps its own size and optical alignment. The Regular, Fill and Duotone fonts of Phosphor 2.1.1 (MIT) are
+  bundled in `assets/icons/phosphor/` with their licence and compiled in; nothing is fetched at run time. The
+  flagged row's flag, the attachment tile's file and the add-account steps' marks now come from the set instead of
+  shapes drawn in code; the app icon stays drawn in code. `ui_shot` draws an icon sheet with `"icons": true`.
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)

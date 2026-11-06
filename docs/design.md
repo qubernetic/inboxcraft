@@ -137,6 +137,31 @@ and wraps rather than being cut. `draw/fit_tests.rs` draws the list, a thread, t
 reader and the add-account page at 90 %, 100 % and 130 % and fails on text that sticks out of its row or button, is
 cut at the side of its pane, or lies over other text.
 
+## Icons
+Views ask for an **`IconId`** (`crates/ui-egui/src/iconset/`), which names a meaning (Inbox, Done, Archive, Delete,
+Snooze, Pin, Move, Reply, Reply all, Forward, Send, Search, Compose, Calendar, Attach, Settings, Notify, People,
+Flag, More, File, Failed, Waiting, Skipped), never a glyph, and a **style** that carries meaning too:
+
+| Style | Used for |
+|---|---|
+| Regular | lines: toolbars, rows, the attachment tile, a step that waits or was skipped |
+| Fill | active and selected states: a flagged message's flag, a step that passed or failed |
+| Duotone | group badges and empty states: the lines over the same shape filled at 20 % |
+
+The theme names the icon set (`Theme::icons`). Each set maps every id onto a glyph of its font in an exhaustive
+`match`, so a new id without a glyph does not build, and keeps its own size and optical alignment (`Metrics`).
+`IconSet::paint` draws an icon into the middle of a square, as large as the square, in one colour token.
+
+The one set so far is **Phosphor** (MIT), bundled from its upstream release 2.1.1 in `assets/icons/phosphor/`
+(the Regular, Fill and Duotone fonts, unchanged) and compiled in; nothing is fetched at run time. A Phosphor glyph
+fills its em square with a margin of its own (a ring covers about 81 % of it) and sits in the middle of the line,
+so it is drawn at the square's side with no shift; a test paints the ring at 16, 20 and 32 points and fails when it
+is more than a pixel off the middle. Like the text fonts, the icon fonts are named only in `theme.rs`
+(`IconFont`); each is a font family of its own with nothing behind it, and a test checks that every glyph of every
+id and style is in its font.
+
+The app icon is not from a set: it stays drawn in code (see "The app icon").
+
 ## Glass and floats
 - **Colour fields** (`glass::backdrop`): the background with three soft fields of the preset's stops, at 30 %
   (light) or 34 % (dark) at their centres and fading out smoothly: the first stop at the top towards the middle, the
@@ -178,8 +203,8 @@ cut at the side of its pane, or lies over other text.
   "All accounts") and how many messages; the search field on the right, with a Clear button while it holds text.
   Ctrl+F (Cmd+F on macOS) focuses it and Escape empties it.
 - **List**: newest first, one row per message: unread dot, sender, date (time today, "Yesterday", the weekday in
-  the last week, then the day and month, with the year for earlier years), subject and the preview in muted text, a
-  flag for flagged mail, and the account stripe when more than one account is shown.
+  the last week, then the day and month, with the year for earlier years), subject and the preview in muted text, the
+  Flag icon (Fill, in the flag colour, one subject line high) for flagged mail, and the account stripe when more than one account is shown.
 - **Search**: the text is looked for in subject, sender and recipients in every folder of the accounts shown, and
   the header says "Search". Opening a view or folder ends it.
 - **Empty states** say what is going on: no accounts yet (with the `--sample` hint), an empty folder, no match.
@@ -210,8 +235,8 @@ the icon sits among others at the same size.
   muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
   list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
   way.
-- **Attachments**: tiles with a page mark drawn in code beside the app icon (`icons.rs`: a page with a folded corner,
-  in the accent colour), the name, the size and Save.
+- **Attachments**: tiles with the File icon (Regular, in the accent colour, one and a half body lines high), the
+  name, the size and Save.
 - **Status line** (bottom): where the link under the pointer goes; a link whose text names another place shows
   "Careful: ..." in the error colour. Otherwise the last notice (a save, a copied link, an error) with Dismiss.
 
@@ -224,9 +249,9 @@ the icon sits among others at the same size.
   the name on sent mail, the user name, the password (dots), the IMAP server, the port and TLS or STARTTLS. A line
   says the password goes into the system's credential store. Errors show above the form in the error colour.
 - **Check**: "Checking <address>", a one-line summary (muted while it runs, the accent colour when signed in, the
-  error colour when a step failed), then one line per step with a mark drawn in code: a ring in the accent colour
-  while waiting, a disc with a tick in the accent colour when passed, a disc with a cross in the error colour when
-  failed, a muted ring with a dash when skipped, held back or not built yet. Under each step the host and port it
+  error colour when a step failed), then one line per step with an icon one body line high: Waiting (Regular) in
+  the accent colour while waiting, Done (Fill) in the accent colour when passed, Failed (Fill) in the error colour
+  when failed, Skipped (Regular) muted when skipped, held back or not built yet. Under each step the host and port it
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again, Change settings and Close after a failure; Close while it runs.
 
@@ -237,8 +262,10 @@ search, the reader (a reply with its quote, a newsletter before and after its pi
 width), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
-the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). Every UI change shows them in its
-PR.
+the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
+the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points
+and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<mode>.png`, `icons-<mode>.png` for
+Electric). Every UI change shows them in its PR.
 
 Each picture is also shown next to the mood sketch of the same preset and mode, to see at once where the effect
 falls short (the aim is not to match numbers). Put the sketches, from the planning issue's attachments, in
@@ -262,3 +289,4 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | Glass and floats: colour fields, glass layers, the float surfaces, the one gradient helper (#82) |
 | 2026-11-06 | minor | Glass and floats: nine-slice shadows, the sweep of unused pictures, no shadow over sharp text (#82) |
 | 2026-11-06 | minor | Type: Figtree, font tokens, unread by weight, the text scale and layout from the font's metrics (#83) |
+| 2026-11-06 | minor | Icons: `IconId`, styles, the painter per set, Phosphor; the marks moved onto it; the icon sheet (#84) |

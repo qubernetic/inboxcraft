@@ -14,6 +14,8 @@ use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
+use super::tests::drew_icon;
+use crate::iconset::{IconId, Style};
 use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, mailbox, proposal};
 use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
@@ -117,6 +119,9 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     harness.get_by_label("Connection (TCP): failed");
     harness.get_by_label(&ErrorKind::MailPortsBlocked.to_string());
     harness.get_by_label("Encryption (TLS): skipped");
+    for (id, style) in [(IconId::Done, Style::Fill), (IconId::Failed, Style::Fill), (IconId::Skipped, Style::Regular)] {
+        assert!(drew_icon(harness.output(), id, style), "{id:?} {style:?}");
+    }
     harness.check_accessibility();
     harness.get_by_label("Check again").click();
     harness.run();

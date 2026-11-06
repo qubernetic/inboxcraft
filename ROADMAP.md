@@ -68,6 +68,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | Theme tokens from the mode (System, Light, Dark) and an accent preset (Electric, Aurora, Citrus), WCAG AA checked for every preset in both modes; teal and coral gone; `cargo xtask side-by-side` puts each picture beside its mood sketch (#81) |
 | 2026-11-06 | Glass without blur: colour fields behind the window, the panes as glass layers, floats that go more opaque over sharp text, one dithered gradient helper; no repaint while idle (#82) |
 | 2026-11-06 | Figtree in place of Ubuntu Light, every text style a font token, unread rows by weight, a text scale of 90 % to 130 % with rows and the reader's toolbar following the font, checked for overflow, clipping and overlap (#83) |
+| 2026-11-06 | An icon painter: views ask for an `IconId` in Regular, Fill or Duotone, the set maps every id in an exhaustive match; Phosphor 2.1.1 bundled; the flag, the file tile and the step marks moved onto it (#84) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -104,3 +105,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: the side-by-side pictures (#81) |
 | 2026-11-06 | minor | Progress log: glass and floats (#82) |
 | 2026-11-06 | minor | Progress log: Figtree, font tokens and the text scale (#83) |
+| 2026-11-06 | minor | Progress log: the icon painter and Phosphor (#84) |

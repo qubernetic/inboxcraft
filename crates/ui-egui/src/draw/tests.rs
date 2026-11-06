@@ -14,6 +14,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
+use crate::iconset::{IconId, IconSet, Style};
 use crate::mailbox::{Mailbox, Place};
 use crate::sample;
 use crate::theme::{Mode, ModePreference, PRESETS, Preset, TextScale, Theme};
@@ -35,6 +36,33 @@ fn harness_with(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp>
 
 fn harness() -> Harness<'static, InboxApp> {
     harness_with(sample_app(), egui::Theme::Light)
+}
+
+/// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
+pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
+    fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
+        match shape {
+            egui::Shape::Text(text) => found.push(text),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+            _ => {}
+        }
+    }
+    let glyph = IconSet::default().glyph(id, style);
+    let Some((front, _)) = glyph.layers.last() else { return false };
+    let family = glyph.face.id(1.0).family;
+    let mut found = Vec::new();
+    output.shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
+    found.iter().any(|text| {
+        text.galley.job.text == front.to_string() && text.galley.job.sections.iter().all(|section| section.format.font_id.family == family)
+    })
+}
+
+#[test]
+fn a_flagged_row_shows_the_filled_flag_icon() {
+    let harness = harness();
+    harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
+    assert!(drew_icon(harness.output(), IconId::Flag, Style::Fill));
+    assert!(!drew_icon(harness.output(), IconId::Flag, Style::Regular));
 }
 
 #[test]

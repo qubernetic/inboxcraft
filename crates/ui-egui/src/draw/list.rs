@@ -6,7 +6,8 @@
 
 use egui::{Align, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui, WidgetInfo, pos2, vec2};
 
-use super::paint::{flag, focus_ring, line, line_height, selection};
+use super::paint::{focus_ring, line, line_height, selection};
+use crate::iconset::{IconId, Style};
 use crate::mailbox::{Mailbox, MessageRow};
 use crate::theme::Theme;
 use crate::tr;
@@ -110,14 +111,15 @@ fn row(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, message: &MessageRow, acco
     painter.galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
     let sender = line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left);
     painter.galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text);
-    let flag_size = (second_height * 0.75).max(1.0);
+    let flag_size = second_height.max(1.0);
     let flag_room = if message.flagged { flag_size + s.s } else { 0.0 };
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let preview = format!("   {}", message.preview);
     let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - flag_room - left);
     painter.galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
     if message.flagged {
-        flag(ui, p.flag, pos2(right - flag_size * 0.8, second + (second_height - flag_size) / 2.0), flag_size);
+        let at = Rect::from_min_size(pos2(right - flag_size, second + (second_height - flag_size) / 2.0), vec2(flag_size, flag_size));
+        theme.icons.paint(painter, at, IconId::Flag, Style::Fill, p.flag);
     }
     focus_ring(ui, theme, &response);
     response

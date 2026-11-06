@@ -10,10 +10,13 @@
 //! the only place that names a colour; a test refuses colour constants anywhere else in the crate.
 //!
 //! Every text style is a font token of [`Fonts`]: a weight of Figtree (bundled, replacing egui's Ubuntu Light) or the
-//! monospaced face, at a size the [`TextScale`] multiplies. This file is also the only place that names a font.
+//! monospaced face, at a size the [`TextScale`] multiplies. The icon fonts are [`IconFont`]s. This file is also the only
+//! place that names a font.
 
 use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
+
+use crate::iconset::IconSet;
 
 /// Light or dark: the mode shown now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +380,8 @@ pub struct Theme {
     pub text_scale: TextScale,
     /// Its font tokens, at the text scale.
     pub fonts: Fonts,
+    /// The icon set its icons are drawn from.
+    pub icons: IconSet,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -498,8 +503,36 @@ const FIGTREE: [(&str, &[u8]); 4] = [
     ("Figtree-Bold", include_bytes!("../../../assets/fonts/figtree/Figtree-Bold.ttf")),
 ];
 
+/// The font an icon set draws a weight with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IconFont {
+    /// Phosphor Regular: lines.
+    PhosphorRegular,
+    /// Phosphor Fill: solid shapes.
+    PhosphorFill,
+    /// Phosphor Duotone: each icon a back glyph and a line glyph.
+    PhosphorDuotone,
+}
+
+/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, each a family of its own.
+const PHOSPHOR: [(IconFont, &str, &[u8]); 3] = [
+    (IconFont::PhosphorRegular, "Phosphor", include_bytes!("../../../assets/icons/phosphor/Phosphor.ttf")),
+    (IconFont::PhosphorFill, "Phosphor-Fill", include_bytes!("../../../assets/icons/phosphor/Phosphor-Fill.ttf")),
+    (IconFont::PhosphorDuotone, "Phosphor-Duotone", include_bytes!("../../../assets/icons/phosphor/Phosphor-Duotone.ttf")),
+];
+
+impl IconFont {
+    /// egui's font for this icon font at `size` points.
+    #[must_use]
+    pub fn id(self, size: f32) -> FontId {
+        let name = PHOSPHOR.iter().find(|(font, _, _)| *font == self).map_or("Phosphor", |(_, name, _)| name);
+        FontId::new(size, FontFamily::Name(name.into()))
+    }
+}
+
 /// egui's fonts with Figtree in place of Ubuntu Light: each weight is a family of its own, followed by egui's emoji
-/// and icon fonts; the monospaced face (Hack) falls back to Figtree.
+/// and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family of its own too, with
+/// nothing behind it.
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
@@ -518,6 +551,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
     }
     let monospace = definitions.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(monospace.len().min(1), "Figtree-Regular".to_owned());
+    for (_, name, data) in PHOSPHOR {
+        definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
+        definitions.families.insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
+    }
     definitions
 }
 
@@ -630,7 +667,15 @@ impl Theme {
     #[must_use]
     pub fn new(mode: Mode, preset: &Preset) -> Self {
         let text_scale = TextScale::default();
-        Self { mode, preset: *preset, palette: Palette::derive(mode, preset), spacing: SPACING, text_scale, fonts: FONTS.scaled(text_scale.factor()) }
+        Self {
+            mode,
+            preset: *preset,
+            palette: Palette::derive(mode, preset),
+            spacing: SPACING,
+            text_scale,
+            fonts: FONTS.scaled(text_scale.factor()),
+            icons: IconSet::default(),
+        }
     }
 
     /// The same look with every font token at `scale`.

@@ -351,6 +351,15 @@ B = blocks the next stage.
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
+- Icons (#84): Phosphor is the only set; Lucide, the `ui.icons.set` command and the settings control come with
+  E1.16. The set has the ids the window and the triage actions need so far; a toolbar or a view that needs another
+  meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
+  toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
+  whole (about 1.5 MB, every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new
+  font file. An icon is one colour token (Duotone's back at 20 % of it); a gradient through a glyph (the gradient
+  helper on the icon's text) is not done. The unread dot and the account dots and
+  stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
+  only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
   `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
   follows the system's mode in Electric. The error colours are fixed per mode, not derived from
@@ -456,3 +465,4 @@ B = blocks the next stage.
 | 2026-11-06 | minor | Limits of glass and floats (#82) |
 | 2026-11-06 | minor | Glass and floats: resizes no longer rasterise the shadows; no float shadow over sharp text (#82) |
 | 2026-11-06 | minor | Figtree and the text scale: what is left, the fallback scripts, Ubuntu Light still compiled in (#83) |
+| 2026-11-06 | minor | Icons: one set, the ids so far, whole fonts bundled, no gradient through a glyph (#84) |
