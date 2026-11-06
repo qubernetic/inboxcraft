@@ -105,6 +105,7 @@ mailbox exist. The sample's own command, `sample.mail.set`, is refused in any ot
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
 | `cargo xtask stats` | Rust files, code lines and test lines (not blank) per crate, and a total; it only reports |
+| `cargo xtask cache-prune` | not a gate and not part of `ci`: for CI, before it saves the dependency cache; deletes from `target/` everything but cargo's marker files and the `deps`, `build` and `.fingerprint` folders of each profile, and in those every entry named after a package or target of this workspace (names from `cargo metadata`, hyphen and underscore forms); fails, deleting nothing, when `cargo metadata` fails or its names are empty or lack `xtask`, and fails when a path under `target/` is still named after one afterwards |
 | `cargo xtask side-by-side` | not a gate and not part of `ci`: writes each `ui_shot` picture beside the mood sketch of its preset and mode to `plan/side-by-side/` (sketches from `plan/mood/`, both gitignored; `--script`, `--mood`, `--out`); fails when a picture or sketch is missing (see `docs/design.md`, "Pictures") |
 | `cargo xtask help` | the commands and the exit codes |
 
@@ -429,3 +430,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-06 | minor | CI: no `flatpak` on a push to an epic branch; what that gives up (#78) |
 | 2026-11-06 | minor | `cargo xtask side-by-side` and its recipe (#81) |
 | 2026-11-06 | minor | What the sample mailbox lets the owner try (#89) |
+| 2026-11-06 | minor | `cargo xtask cache-prune` (#79) |

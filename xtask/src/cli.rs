@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::side_by_side::{self, Options};
-use crate::{Context, Error, FAILED, OK, USAGE, assets, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, cache_prune, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
@@ -16,6 +16,7 @@ usage: cargo xtask <command> [--root <dir>]
 commands:
   ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
+  cache-prune   delete from target/ all but third-party deps, build and .fingerprint entries (CI, before the cache save)
   cov [--check] line coverage per crate under cargo llvm-cov nextest; --check fails below the floors in .config/coverage.toml
   flatpak-sources        write contrib/flatpak/cargo-sources.json from Cargo.lock
   flatpak-sources-check  contrib/flatpak/cargo-sources.json matches Cargo.lock
@@ -38,6 +39,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Assets,
+    CachePrune,
     Ci,
     Cov { check: bool },
     FlatpakSources { check: bool },
@@ -68,6 +70,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
     let command = match args.next().transpose()?.as_deref() {
         None | Some("help" | "--help" | "-h") => Command::Help,
         Some("assets") => Command::Assets,
+        Some("cache-prune") => Command::CachePrune,
         Some("ci") => Command::Ci,
         Some("cov") => Command::Cov { check: false },
         Some("flatpak-sources") => Command::FlatpakSources { check: false },
@@ -137,6 +140,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, ctx: &mut Context, out: &mu
 fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error> {
     match command {
         Command::Assets => assets::gate(&ctx.root, out),
+        Command::CachePrune => cache_prune::prune(ctx, out),
         Command::Ci => ci::gate(ctx, out),
         Command::Cov { check } => cov::gate(ctx, *check, out),
         Command::FlatpakSources { check } => flatpak::gate(&ctx.root, *check, out),

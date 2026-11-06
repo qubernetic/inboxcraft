@@ -9,7 +9,7 @@
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::{Context, Error, assets, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
@@ -21,6 +21,17 @@ pub trait Runner {
     ///
     /// [`Error::Spawn`] when the program cannot be started.
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error>;
+
+    /// Runs `program` with `args` in `dir`, its standard error going to the terminal, and returns its standard
+    /// output, or `None` when it did not exit with 0. A runner that captures no output answers `None`, a failed call.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when the program cannot be started.
+    fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        let _ = (program, args, dir);
+        Ok(None)
+    }
 }
 
 /// The [`Runner`] that starts real processes.
@@ -35,6 +46,16 @@ impl Runner for ProcessRunner {
             .status()
             .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;
         Ok(status.success())
+    }
+
+    fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        let output = Command::new(program)
+            .args(args)
+            .current_dir(dir)
+            .stderr(Stdio::inherit())
+            .output()
+            .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;
+        Ok(output.status.success().then_some(output.stdout))
     }
 }
 

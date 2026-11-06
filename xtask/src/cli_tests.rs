@@ -54,6 +54,15 @@ fn root_takes_a_directory() {
 }
 
 #[test]
+fn cache_prune_is_a_command_in_the_help() {
+    assert_eq!(
+        parse(args(&["cache-prune", "--root", "/tmp/x"])),
+        Ok(Invocation { command: Command::CachePrune, root: Some(PathBuf::from("/tmp/x")) })
+    );
+    assert!(HELP.lines().any(|line| line.starts_with("  cache-prune ") && line.contains("third-party")), "{HELP}");
+}
+
+#[test]
 fn side_by_side_takes_its_folders() {
     let plain = parse(args(&["side-by-side"])).unwrap();
     assert_eq!(plain.command, Command::SideBySide(Options::default()));
