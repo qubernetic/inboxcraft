@@ -150,7 +150,8 @@ a size or an egui text style; `theme.rs` is the only file that names a font, and
 | subject unread | 14 | SemiBold | the subject of an unread message |
 | preview | 14 | Regular | the first words after the subject, in the muted colour |
 | heading | 15 | SemiBold | account names, empty-state titles, a message's sender, small headings in a message |
-| title | 20 | Bold | the view's name, the reader's subject, page titles, the app name |
+| title | 20 | Bold | the view's name, page titles, the app name |
+| display | 26 | Bold | the reader's subject |
 | mono | 13 | Hack | preformatted text and code |
 
 Sender and subject are strong and the preview muted; an unread row is set in heavier weights (Bold and SemiBold

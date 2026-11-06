@@ -297,8 +297,10 @@ pub struct Fonts {
     pub preview: Font,
     /// Account names, empty-state titles, message headings.
     pub heading: Font,
-    /// The view's name, the reader's subject, page titles.
+    /// The view's name, page titles.
     pub title: Font,
+    /// The reader's subject.
+    pub display: Font,
     /// Preformatted text and code.
     pub mono: Font,
 }
@@ -319,6 +321,7 @@ impl Fonts {
             self.preview,
             self.heading,
             self.title,
+            self.display,
             self.mono,
         ]
     }
@@ -336,6 +339,7 @@ impl Fonts {
             preview: f(self.preview),
             heading: f(self.heading),
             title: f(self.title),
+            display: f(self.display),
             mono: f(self.mono),
         }
     }
@@ -526,6 +530,7 @@ const FONTS: Fonts = Fonts {
     preview: Font::sans(14.0, Weight::Regular),
     heading: Font::sans(15.0, Weight::SemiBold),
     title: Font::sans(20.0, Weight::Bold),
+    display: Font::sans(26.0, Weight::Bold),
     mono: Font { size: 13.0, face: Face::Mono, typeface: Typeface::Figtree },
 };
 

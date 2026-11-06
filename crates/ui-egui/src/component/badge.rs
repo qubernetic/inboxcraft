@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Badges: an unread count in a pill of the badge colour, and a group's badge, its outline (Regular) icon in the muted
-//! colour without a background.
+//! colour without a background; and a chip, a short name on the preset's text gradient.
 
 use egui::{Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
+use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
-use crate::theme::Theme;
+use crate::theme::{Theme, text_gradient};
 
 use super::galley;
 
@@ -48,6 +49,26 @@ pub fn group(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, side: f32) ->
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, name));
     if ui.is_rect_visible(rect) {
         theme.icons.paint(ui.painter(), rect.shrink(side * 0.15), icon, Style::Regular, group_ink(theme));
+    }
+    response
+}
+
+/// A chip: `name` in the caption font on the preset's text gradient, in a pill; a screen reader reads `spoken`.
+pub fn chip(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str) -> Response {
+    let s = &theme.spacing;
+    let ([first, middle, last], ink) = text_gradient(theme.palette.gradient);
+    let text = galley(ui, name, theme.fonts.caption, ink);
+    let size = vec2(text.size().x + s.s * 2.0, text.size().y + s.xs);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
+    if ui.is_rect_visible(rect) {
+        let fill = Gradient::Linear {
+            from: pos2(0.0, 0.5),
+            to: pos2(1.0, 0.5),
+            stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
+        };
+        gradient::fill(ui.painter(), rect, rect.height() / 2.0, &fill);
+        ui.painter().galley(rect.center() - text.size() / 2.0, text, ink);
     }
     response
 }

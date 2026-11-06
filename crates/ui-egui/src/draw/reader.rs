@@ -25,7 +25,7 @@ use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
 use crate::component::button::{IconButton, TextButton};
-use crate::component::popup;
+use crate::component::{badge, popup};
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
@@ -176,13 +176,23 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .map(|opened| opened.header.subject.clone())
         .filter(|subject| !subject.is_empty())
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    ui.add_space(s.m);
-    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(p.text)).wrap());
+    ui.add_space(s.xl);
+    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.text)).wrap());
+    let group = reader.open_id().and_then(|id| mailbox.showcase().groups.iter().find(|group| group.messages.contains(&id)));
     let count = reader.thread().len();
-    if count > 1 {
-        let writers = reader.writers().join(", ");
-        let line = tr!("{writers} · {count} messages", writers = writers, count = count);
-        ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+    if group.is_some() || count > 1 {
+        // The message's group as a chip, then who wrote in the thread.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s;
+            if let Some(group) = group {
+                badge::chip(ui, theme, &group.name, &tr!("In {group}", group = group.name));
+            }
+            if count > 1 {
+                let writers = reader.writers().join(", ");
+                let line = tr!("{writers} · {count} messages", writers = writers, count = count);
+                ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+            }
+        });
     }
 }
 

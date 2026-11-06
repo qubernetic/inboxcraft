@@ -382,3 +382,31 @@ fn a_long_subject_wraps_and_is_never_cut_by_the_toolbar() {
     assert!(!galley.elided, "the subject is never cut");
     assert!(galley.rows.len() > 1, "it wraps instead");
 }
+
+#[test]
+fn the_subject_is_set_large_with_the_message_s_group_as_a_chip_beside_who_wrote() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    let showcase = sample::showcase(app.mailbox());
+    app.mailbox_mut().set_showcase(showcase);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let harness = harness_with(app, egui::Theme::Light);
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    let size = |wanted: &str| {
+        fn find(shape: &egui::Shape, wanted: &str) -> Option<f32> {
+            match shape {
+                egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+                egui::Shape::Text(text) if text.galley.text() == wanted => {
+                    text.galley.job.sections.first().map(|section| section.format.font_id.size)
+                }
+                _ => None,
+            }
+        }
+        harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+    };
+    assert_eq!(size("Allotment rota for November"), Some(theme.fonts.display.size), "the subject is in the display font");
+    let chip = harness.get_by_label("In People").rect();
+    let subject_line = harness.get_by_label("Allotment rota for November");
+    assert!(chip.top() >= subject_line.rect().bottom() - 1.0, "the chip sits under the subject");
+}
