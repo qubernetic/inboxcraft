@@ -34,7 +34,7 @@ mod settings;
 
 use std::sync::Arc;
 
-use egui::{CentralPanel, Frame, Key, Margin, Panel, RichText, Ui};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb, WindowFrame};
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -58,6 +58,9 @@ use crate::{UiError, tr};
 
 /// The width of the list beside the reader, in points.
 const LIST_WIDTH: f32 = 380.0;
+
+/// The widest the card of the window with no account gets, in points.
+const WELCOME_WIDTH: f32 = 640.0;
 
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
@@ -516,10 +519,12 @@ impl InboxApp {
         rail.settings = clicked_rail.settings;
         rail.sent = clicked_rail.sent;
         rail.search = clicked_rail.search;
-        if !full {
+        if self.mailbox.accounts().is_empty() {
+            add = self.welcome(ui, &theme, &mut layers);
+        } else if !full {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers);
-            let (mailbox, search, can_add, keymap) = (&self.mailbox, &mut self.search, self.can_add, &self.keymap);
+            let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Layers| {
                 layers.card(ui, Margin::ZERO, |ui| {
                     let searched = Panel::top("list-header")
@@ -534,12 +539,12 @@ impl InboxApp {
                             top: 0,
                             bottom: margin(s.m).bottom,
                         }))
-                        .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox, can_add))
+                        .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.add, listed.acted, listed.out)
+                    (searched, listed.clicked, listed.acted, listed.out)
                 })
             };
-            (searched, clicked, add, acted, out) = if self.reader.open_id().is_some() {
+            (searched, clicked, acted, out) = if self.reader.open_id().is_some() {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -683,6 +688,29 @@ impl InboxApp {
             .frame(around(s.gap, s.gap / 2.0, s.gap))
             .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.mailbox)));
         (shown.inner, s.gap / 2.0)
+    }
+
+    /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
+    fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> bool {
+        let s = theme.spacing;
+        let (keymap, can_add) = (&self.keymap, self.can_add);
+        CentralPanel::no_frame()
+            .frame(around(s.gap, s.gap, s.gap))
+            .show(ui, |ui| {
+                let room = ui.max_rect();
+                let pad = s.xl * 2.0;
+                let width = WELCOME_WIDTH.min(room.width());
+                let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
+                let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
+                list::welcome(&mut sizing, theme, keymap, can_add);
+                let height = (sizing.min_rect().height() + 2.0 * pad).min(room.height());
+                let card = Rect::from_center_size(room.center(), egui::vec2(width, height));
+                ui.scope_builder(UiBuilder::new().max_rect(card).layout(Layout::top_down(Align::Center)), |ui| {
+                    layers.card(ui, margin(pad), |ui| list::welcome(ui, theme, keymap, can_add))
+                })
+                .inner
+            })
+            .inner
     }
 
     /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,

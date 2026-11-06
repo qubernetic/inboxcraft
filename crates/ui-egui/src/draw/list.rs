@@ -291,8 +291,6 @@ const EDGE: f32 = 1.5;
 pub(super) struct Asked {
     /// The row clicked.
     pub(super) clicked: Option<u64>,
-    /// Add account, in the empty window.
-    pub(super) add: bool,
     /// A hover action pressed, and on which message.
     pub(super) acted: Option<(u64, Act)>,
     /// The row sliding out is all the way out, or was not drawn: its act can be done.
@@ -463,22 +461,35 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     clicked
 }
 
-/// The rows, or what to say when there are none. Returns the message clicked this frame, and whether Add account
-/// was (the empty window offers it when `can_add`).
-pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, can_add: bool) -> Asked {
-    if mailbox.accounts().is_empty() {
-        if !can_add {
-            empty(ui, theme, tr!("No accounts yet"), tr!("Start InboxCraft with --sample to look around an invented mailbox."));
-            return Asked { out: true, ..Asked::default() };
-        }
-        empty(ui, theme, tr!("No accounts yet"), tr!("Add an account to read its mail here. Nothing leaves this computer before you do."));
-        let mut add = false;
-        ui.vertical_centered(|ui| {
-            ui.add_space(theme.spacing.l);
-            add = button::text(ui, theme, keymap, tr!("Add account"), None, true).clicked();
-        });
-        return Asked { add, out: true, ..Asked::default() };
+/// The empty window's card: the inbox icon, "No accounts yet" and what to do. Where the window can add accounts
+/// (`can_add`), Add account, which opens the settings on Accounts; whether it was pressed.
+pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let side = line_height(ui, theme.fonts.body) * 3.6;
+    let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+    theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.accent);
+    ui.add_space(s.m);
+    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.text));
+    ui.add_space(s.xs);
+    let about = if can_add {
+        tr!("Add an account to read its mail here. Nothing leaves this computer before you do.")
+    } else {
+        tr!("Start InboxCraft with --sample to look around an invented mailbox.")
+    };
+    ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
+    if !can_add {
+        return false;
     }
+    ui.add_space(s.l);
+    let add = button::TextButton::new(tr!("Add account")).icon(IconId::Add).primary().show(ui, theme, keymap).clicked();
+    ui.add_space(s.xs);
+    ui.label(RichText::new(tr!("Opens Settings · Accounts")).font(theme.fonts.caption.id()).color(p.muted));
+    add
+}
+
+/// The rows, or what to say when there are none. Returns the message clicked this frame.
+pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.messages().is_empty() {
         if mailbox.query().is_empty() {
             empty(ui, theme, tr!("Nothing here"), tr!("This folder holds no messages."));
@@ -501,5 +512,5 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     };
     let clicked = if grouping { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, add: false, acted: rows.acted.get(), out: !drawn || out }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out }
 }

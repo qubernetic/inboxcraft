@@ -95,6 +95,18 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
 }
 
 #[test]
+fn the_empty_window_is_one_card_in_the_middle() {
+    let harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    let title = harness.get_by_label("No accounts yet").rect();
+    let add = harness.get_by_role_and_label(Role::Button, "Add account").rect();
+    harness.get_by_label("Opens Settings · Accounts");
+    assert!((add.center().x - title.center().x).abs() < 2.0, "{add:?} under {title:?}");
+    // The window is 1100 by 760; right of the rail its middle is near x 580, and the card stands in the middle.
+    assert!((500.0..660.0).contains(&title.center().x), "{title:?}");
+    assert!(title.top() > 150.0 && add.bottom() < 610.0, "{title:?} {add:?}");
+}
+
+#[test]
 fn closing_the_sheet_closes_the_form_on_it() {
     let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
     open_form(&mut harness);

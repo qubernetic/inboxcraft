@@ -18,7 +18,8 @@
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
-//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page. `showcase` set to `true` fills the parts of the list that have no data yet with
+//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page.
+//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
 //! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
@@ -121,6 +122,9 @@ pub struct Shot {
     /// Whether the settings sheet is open on Accounts.
     #[serde(default)]
     pub accounts: Option<bool>,
+    /// Whether the window has no account yet (and can add one) instead of the sample's.
+    #[serde(default)]
+    pub first: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
@@ -252,6 +256,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.onboard.is_some()
         || shot.settings.is_some()
         || shot.accounts.is_some()
+        || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
         || shot.act.is_some()
@@ -631,9 +636,17 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return icon_sheet(shot, mode, &look);
     }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
-    let session = sample::session(Box::new(FakeClock::new(time)))?;
+    let session = if shot.first == Some(true) {
+        let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
+        inboxcraft_engine::Session::new(Box::new(store), Box::new(FakeClock::new(time))).map_err(UiError::Engine)?
+    } else {
+        sample::session(Box::new(FakeClock::new(time)))?
+    };
     let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
+    if shot.first == Some(true) {
+        app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
+    }
     app.set_preset(preset);
     app.set_typeface(typeface);
     app.set_icons(icons);
