@@ -321,6 +321,9 @@ All notable changes to InboxCraft are listed here. The format follows
 - The fuzz workflow builds every target on every run, but a PR fuzzes for 30 s only the targets whose file under
   `fuzz/fuzz_targets/` is new or changed in the PR (`git diff` against the PR base); a push to `develop` now runs it
   too and fuzzes every target for 30 s; the nightly schedule and a manual dispatch are unchanged (#69)
+- The CI `test` job builds the third-party dependencies at opt-level 0 instead of 2 (local builds keep 2): a cold
+  job builds in 12 minutes instead of 31 and a warm one 15 s faster, the tests take 47 s instead of 26 s; the level
+  is part of the dependency cache key (#70)
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)
