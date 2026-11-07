@@ -196,7 +196,21 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   its last event (the answer, or `Failed`); `Session::start` hands the jobs an earlier run left over again, under
   their ids, before the start's own. Read jobs are not kept: the start syncs again anyway. Only a job with a last
   event is kept: a check or a watch runs in its session only, and one found in the queue is removed at the start.
-- Tray/background mode: the window can close while the engine keeps running.
+- Single instance and background mode (`apps/inboxcraft`): a start on the owner's mailbox claims the store's folder
+  (`instance`): the first holds `instance.lock` (the system's file lock, gone with the process) and listens on
+  `instance.sock` (Unix); a later start sends `show` (or `quit` for `--quit`) and leaves, so two runs never open
+  one store. Closing the window closes it for real (a Wayland window cannot be hidden) while InboxCraft keeps
+  running (`desktop::Desktop`): without a window the main thread waits for requests and pumps the workers every
+  half second; a request opens a new window on the same `InboxApp` on eframe's kept event loop. `--background`
+  starts that way. The sample, or a run nothing could bring a window back to (no socket, no tray), ends with its
+  window. `ui-egui` knows none of this: the app's own `eframe::App` wrapper calls `Desktop::tick` from
+  `App::logic`.
+- Tray (`tray`, Linux): a StatusNotifierItem over the session bus (`ksni`) with the unread count of every
+  account's inbox in its tooltip, a click to show the window and a menu with Open and Quit; each is a request to
+  the window, as from a later start. In the Flatpak it goes by its connection's name.
+- Autostart (`autostart`): an XDG autostart entry outside the Flatpak; inside it the Background portal
+  (`RequestBackground`, over `zbus`), which each start asks again so a desktop that ends background apps lets
+  InboxCraft run, with the same entry in the app's own config folder as the record of the choice.
 
 ## Start-up
 

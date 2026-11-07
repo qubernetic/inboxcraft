@@ -80,6 +80,12 @@ egui_kittest = { version = "0.37", default-features = false }
 # D-Bus (zbus, pure Rust) on Linux and the BSDs, Keychain on macOS, Credential Manager on Windows. Opens no network
 # connection.
 keyring = "4.2"
+# the desktop app on Linux only (approved for the daily-use epic): the tray icon, a StatusNotifierItem over D-Bus.
+# Opens no network connection.
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
+# the desktop app on Linux only (approved for the daily-use epic, already in the graph through `keyring`): the
+# Background portal and, in tests, a private session bus. Opens no network connection.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 # ui-egui only: writes the `ui_shot` pictures and reads the PNG pictures of a message
 png = "0.18"
 # ui-egui only: reads the JPEG pictures of a message (already in the graph through `image`, so no new crate)

@@ -263,11 +263,13 @@ fn the_manifest_installs_files_that_exist_under_the_app_id() {
 }
 
 #[test]
-fn the_desktop_file_opens_the_app_and_its_second_action_the_sample() {
+fn the_desktop_file_opens_the_app_and_its_actions_the_sample_and_quit() {
     let desktop = repo_file(&format!("contrib/flatpak/{APP_ID}.desktop"));
     assert!(desktop.contains("\nExec=inboxcraft\n") && desktop.contains(&format!("\nIcon={APP_ID}\n")), "{desktop}");
-    assert!(desktop.contains("\nActions=sample;\n") && desktop.contains("\n[Desktop Action sample]\n"), "{desktop}");
-    assert!(desktop.ends_with("\nExec=inboxcraft --sample\n"), "{desktop}");
+    assert!(desktop.contains("\nSingleMainWindow=true\n"), "one window: a second start brings it forward: {desktop}");
+    assert!(desktop.contains("\nActions=sample;quit;\n") && desktop.contains("\n[Desktop Action sample]\n"), "{desktop}");
+    assert!(desktop.contains("\nExec=inboxcraft --sample\n"), "{desktop}");
+    assert!(desktop.ends_with("\n[Desktop Action quit]\nName=Quit InboxCraft\nExec=inboxcraft --quit\n"), "{desktop}");
     let metainfo = repo_file(&format!("contrib/flatpak/{APP_ID}.metainfo.xml"));
     assert!(
         metainfo.contains(&format!("<id>{APP_ID}</id>"))

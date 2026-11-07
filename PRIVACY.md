@@ -25,6 +25,12 @@ and `~/Library/Application Support` on macOS. Only your own user account can rea
 - each message's own state: done, parked, pinned, snoozed or waiting for a reply;
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
+Beside the store, `inboxcraft/instance.lock` and `inboxcraft/instance.sock` keep a second start of InboxCraft from
+opening the same mail: the first is empty, the second is a socket through which a later start asks the running one to show its window or to quit. Only your user account can open either of them or the `inboxcraft` folder they are
+in. Neither holds anything of yours. Starting at login
+(`inboxcraft --autostart`) writes `autostart/io.github.qubernetic.inboxcraft.desktop` in your config folder, which
+names the program and nothing else; in the Flatpak the desktop's Background portal keeps the real entry.
+
 Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
 work still queued for it. What InboxCraft knows of senders is kept, because it is yours and not an account's: it
 stays until you delete the data folder, which removes everything above.

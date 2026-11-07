@@ -240,7 +240,7 @@ installed app, and it starts from the desktop's menu like any other: the entry o
 |---|---|
 | `io.github.qubernetic.inboxcraft.yml` | the manifest: the freedesktop 25.08 runtime with the `rust-stable` SDK extension, the build commands and the permissions |
 | `cargo-sources.json` | every crate of `Cargo.lock` as a download with its checksum, unpacked into a vendor folder for the offline build |
-| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, with the sample mailbox as its second action |
+| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, one main window, with the sample mailbox and Quit as its actions |
 | `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
 
 The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
@@ -249,8 +249,10 @@ file and the code differ.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
-GPU, the Secret Service for passwords and tokens, desktop notifications, and the Downloads folder, where Save puts
-attachments (under a new name, never over a file). The Background portal needs no permission. No other folder of
+GPU, the Secret Service for passwords and tokens, desktop notifications, the panel's StatusNotifierWatcher for the
+tray icon, and the Downloads folder, where Save puts attachments (under a new name, never over a file). The
+Background portal needs no permission, nor does the socket a later start reaches the running one through (it is in
+the app's own data folder). No other folder of
 yours is open to the app: everything it keeps lives in `~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails
 when a permission has no comment above it, or when the manifest opens a folder other than Downloads.
 
@@ -298,6 +300,10 @@ locally.
 The owner alone runs opt-in live tests, by hand, on two throwaway test accounts. Agents write and maintain these
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
+
+The desktop app's D-Bus tests (the tray, the Background portal) start a `dbus-daemon` of their own with a fake panel
+or portal on it, so they never reach the desktop's session bus; where `dbus-daemon` is not installed they print a
+note and pass without running.
 
 - **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs`: both accounts sign in and
   list their folders; the `live-imap` round trip (sign-in, folder list, run folder, APPEND of an invented message,
