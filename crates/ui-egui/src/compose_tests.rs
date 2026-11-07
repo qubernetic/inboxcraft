@@ -7,7 +7,7 @@ use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{Chip, Composer, Line, MAX_RECIPIENT_BYTES, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
+use super::{Answer, Chip, Composer, Line, MAX_RECIPIENT_BYTES, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
 use crate::mailbox::Mailbox;
 use crate::sample;
 
@@ -312,4 +312,105 @@ fn the_highlight_moves_within_the_suggestions_and_without_any_there_is_none() {
     assert_eq!(composer.highlighted(), Some(1));
     composer.dismiss_suggestions();
     assert_eq!((composer.suggestions(), composer.highlighted()), ((None, &[][..]), None));
+}
+
+/// Saves the template `name` on account 1, as the owner does in the settings.
+fn template(mailbox: &mut Mailbox, name: &str, subject: &str, text: &str) {
+    mailbox.run("template.save", &json!({ "account": 1, "name": name, "subject": subject, "text": text })).unwrap();
+}
+
+#[test]
+fn a_reply_opens_filled_in_from_the_message() {
+    let mut mailbox = mailbox();
+    let composer = Composer::answer(&mut mailbox, 1, Answer::Reply).unwrap();
+    assert_eq!(composer.title(), "Re: Allotment rota for November");
+    assert_eq!(composer.chips(Line::To).len(), 1);
+    assert!(composer.chips(Line::To)[0].text.contains("odile@example.org"));
+    assert!(composer.text().contains("> Hi all"), "the message is quoted: {}", composer.text());
+    assert!(composer.sendable());
+    assert!(!composer.floating() && !composer.changed());
+    assert_eq!(shown(&mut mailbox, composer.draft())["answers"], json!(1));
+}
+
+#[test]
+fn reply_all_and_forward_run_their_commands() {
+    let mut mailbox = mailbox();
+    let all = Composer::answer(&mut mailbox, 1, Answer::ReplyAll).unwrap();
+    assert_eq!(shown(&mut mailbox, all.draft())["answers"], json!(1));
+    assert!(!all.chips(Line::To).is_empty());
+    let forward = Composer::answer(&mut mailbox, 1, Answer::Forward).unwrap();
+    assert_eq!(shown(&mut mailbox, forward.draft())["forwards"], json!(1));
+    assert_eq!(forward.title(), "Fwd: Allotment rota for November");
+    assert!(forward.chips(Line::To).is_empty());
+    assert_eq!(forward.problem().as_deref(), Some("Add a recipient to send"));
+    assert!(Composer::answer(&mut mailbox, 9_999, Answer::Reply).is_err(), "no such message");
+}
+
+#[test]
+fn the_templates_of_the_drafts_account_are_offered_and_one_goes_in() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "Work party", "Hi {first_name},\nWe meet at {?time}.\n");
+    let mut composer = Composer::answer(&mut mailbox, 1, Answer::Reply).unwrap();
+    assert_eq!(composer.templates(), ["Plot"]);
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    assert!(composer.text().starts_with("Hi Odile,\nWe meet at [[time]].\n"), "{}", composer.text());
+    assert_eq!(composer.title(), "Re: Allotment rota for November", "a subject that is there stays");
+    assert!(!composer.sendable());
+    assert_eq!(composer.blank().as_deref(), Some("time"));
+    assert_eq!(composer.problem().as_deref(), Some("Fill in \"time\" to send"));
+    assert!(composer.use_template(&mut mailbox, "Gone").is_err());
+}
+
+#[test]
+fn a_blank_filled_in_takes_the_marks_place_and_send_is_free() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "At {?time}", "We meet at {?time} by {?place}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    assert_eq!(composer.subject(), "At [[time]]");
+    composer.fill(&mut mailbox).unwrap();
+    assert_eq!(composer.blank().as_deref(), Some("time"), "nothing typed fills nothing");
+    "ten\u{0} o'clock\n".clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert_eq!(composer.subject(), "At ten o'clock");
+    assert!(composer.text().starts_with("We meet at ten o'clock by [[place]]."));
+    assert_eq!(composer.filling(), "", "the field is empty for the next blank");
+    assert_eq!(composer.blank().as_deref(), Some("place"));
+    "the shed".clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert_eq!(composer.blank(), None);
+    assert_eq!(composer.problem().as_deref(), Some("Add a recipient to send"));
+    assert!(shown(&mut mailbox, composer.draft())["text"].as_str().unwrap().starts_with("We meet at ten o'clock by the shed."));
+}
+
+#[test]
+fn a_blank_typed_over_by_hand_is_no_longer_asked_for() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "", "At {?time}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    *composer.text_mut() = "At noon.".to_owned();
+    composer.edited();
+    composer.save(&mut mailbox).unwrap();
+    assert_eq!(composer.blank(), None);
+}
+
+#[test]
+fn the_templates_follow_the_account_the_draft_is_from() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "", "x");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    assert_eq!(composer.templates(), ["Plot"]);
+    composer.set_account(&mut mailbox, 2).unwrap();
+    assert!(composer.templates().is_empty(), "account 2 has none");
+}
+
+#[test]
+fn the_problems_of_a_draft_are_said_in_order() {
+    let blocked =
+        |blocks: Value, blanks: Value| Composer::over("compose.show", &json!({ "id": 1, "blocks": blocks, "blanks": blanks })).unwrap().problem();
+    assert_eq!(blocked(json!(["forward_body"]), json!([])).as_deref(), Some("The forwarded message is no longer here, so this cannot be sent"));
+    assert_eq!(blocked(json!(["no_recipient", "blank"]), json!(["[[day]]"])).as_deref(), Some("Add a recipient to send"));
+    assert_eq!(blocked(json!(["blank"]), json!(["[[day]]", 4])).as_deref(), Some("Fill in \"day\" to send"));
+    assert_eq!(blocked(json!(["other"]), json!([])).as_deref(), Some("This draft cannot be sent yet"));
 }

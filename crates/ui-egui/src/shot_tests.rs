@@ -422,6 +422,8 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         r#""compose": "bad""#,
         r#""compose": "suggest""#,
         r#""compose": "floating""#,
+        r#""compose": "reply""#,
+        r#""compose": "template""#,
         r#""sending": true"#,
     ] {
         let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], {place}}}"#))).unwrap();
@@ -430,7 +432,9 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
         seen.push(picture);
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "compose": "sent"}"#)).unwrap_err().to_string();
-    assert!(error.contains("is not new, written, bad, suggest or floating"), "{error}");
+    assert!(error.contains("is not new, written, bad, suggest, floating, reply or template"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "reply"}"#)).unwrap_err().to_string();
+    assert!(error.contains("the reply did not open"), "{error}");
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "new"}"#)).unwrap_err().to_string();
     assert!(error.contains("the composer did not open"), "{error}");
     for place in [r#""compose": "new""#, r#""sending": true"#] {
