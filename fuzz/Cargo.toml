@@ -18,6 +18,7 @@ inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-html = { path = "../crates/html" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
+inboxcraft-ical = { path = "../crates/ical" }
 inboxcraft-proto = { path = "../crates/proto" }
 inboxcraft-net = { path = "../crates/net" }
 inboxcraft-testkit = { path = "../crates/testkit" }
@@ -180,6 +181,20 @@ bench = false
 [[bin]]
 name = "control_lines"
 path = "fuzz_targets/control_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ical_calendar"
+path = "fuzz_targets/ical_calendar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ical_rule"
+path = "fuzz_targets/ical_rule.rs"
 test = false
 doc = false
 bench = false
