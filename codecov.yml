@@ -1,0 +1,16 @@
+# Codecov follows the in-repo coverage gate (docs/development.md, "The coverage gate"). `ignore` is exactly the
+# `exclude` and `workspace-exclude` lists of `.config/coverage.toml`; xtask/src/codecov_tests.rs keeps them in step.
+ignore:
+  - "apps/*/src/main.rs"
+  - "crates/ui-egui/src/draw/**"
+  - "xtask/src/main.rs"
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
