@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
 use inboxcraft_ui_egui::keep::NoKeep;
 
-use super::{Source, Step, app, run, usage};
+use super::{Source, Step, app, owner_keep, run, usage};
 
 fn run_with(args: &[&str]) -> (Step, String, String) {
     let mut out = Vec::new();
@@ -150,4 +150,47 @@ fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing was written");
     let again = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
     assert_eq!(again.mailbox().messages().len(), 11, "the next start shows the sample as it was");
+}
+
+/// Set in the child run of [`child_opens_both_windows_with_the_owner_s_keep`]; without it that test does nothing.
+const CHILD_VAR: &str = "INBOXCRAFT_APP_CHILD";
+
+/// In a child run: opens both windows on [`owner_keep`] and prints the typeface each starts with as `font=<name>`.
+#[test]
+fn child_opens_both_windows_with_the_owner_s_keep() {
+    if std::env::var_os(CHILD_VAR).is_none() {
+        return;
+    }
+    for source in [Source::Sample, Source::Empty] {
+        let window = app(source, clock, None, owner_keep()).unwrap();
+        println!("font={:?}", window.appearance().font);
+    }
+}
+
+/// What a child run of this test binary prints, with only `vars` of the folder variables set.
+fn child_with(vars: &[(&str, &str)]) -> Vec<String> {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["tests::child_opens_both_windows_with_the_owner_s_keep", "--exact", "--nocapture", "--test-threads=1"]).env(CHILD_VAR, "1");
+    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DOWNLOAD_DIR", "APPDATA"] {
+        command.env_remove(name);
+    }
+    command.envs(vars.iter().copied());
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap().lines().filter_map(|line| line.rsplit_once("font=").map(|(_, font)| font.to_owned())).collect()
+}
+
+#[test]
+fn the_owner_s_keep_is_the_file_in_the_config_folder_or_nothing_without_one() {
+    use inboxcraft_engine::appearance::{Appearance, Typeface};
+    use inboxcraft_ui_egui::keep::{FILE, Keep, KeepFile};
+    let dir = tempfile::tempdir().unwrap();
+    let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
+    KeepFile::new(dir.path().join("inboxcraft").join(FILE)).store(&chosen).unwrap();
+    let inter = format!("{:?}", Typeface::Inter);
+    assert_eq!(child_with(&[("XDG_CONFIG_HOME", dir.path().to_str().unwrap())]), [inter.clone(), inter.clone()]);
+    // Without a config folder nothing is kept, and without a downloads folder the windows still open.
+    let default = format!("{:?}", Appearance::default().font);
+    assert_ne!(default, inter);
+    assert_eq!(child_with(&[]), [default.clone(), default]);
 }

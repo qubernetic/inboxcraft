@@ -73,3 +73,62 @@ fn no_keep_keeps_nothing() {
     keep.store(&chosen()).unwrap();
     assert_eq!(keep.load(), None);
 }
+
+#[test]
+fn a_file_that_cannot_take_the_place_of_the_old_one_leaves_no_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    // A folder with something in it where the file should be: the temporary file is written, the move fails.
+    let path = dir.path().join(FILE);
+    std::fs::create_dir(&path).unwrap();
+    std::fs::write(path.join("inside"), b"kept").unwrap();
+    let error = KeepFile::new(path.clone()).store(&chosen()).unwrap_err();
+    assert!(error.starts_with(&path.display().to_string()), "{error}");
+    let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    assert_eq!(left, vec![std::ffi::OsString::from(FILE)], "the temporary file is gone");
+    // A path with no folder and no name: nothing is created, and the refusal is an error.
+    assert!(KeepFile::new(std::path::PathBuf::new()).store(&chosen()).is_err());
+}
+
+/// Set in the child run of [`child_prints_the_owner_s_file`]; without it that test does nothing.
+const CHILD_VAR: &str = "INBOXCRAFT_KEEP_CHILD";
+
+/// In a child run: prints the owner's file as `file=<path>`, or `file=none`.
+#[test]
+fn child_prints_the_owner_s_file() {
+    if std::env::var_os(CHILD_VAR).is_none() {
+        return;
+    }
+    match KeepFile::of_owner() {
+        Some(keep) => println!("file={}", keep.path().display()),
+        None => println!("file=none"),
+    }
+}
+
+/// The owner's file as a child run of this test binary sees it, with only `vars` of the folder variables set.
+fn owner_file_with(vars: &[(&str, &str)]) -> String {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["keep::tests::child_prints_the_owner_s_file", "--exact", "--nocapture", "--test-threads=1"]).env(CHILD_VAR, "1");
+    for name in ["HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA"] {
+        command.env_remove(name);
+    }
+    command.envs(vars.iter().copied());
+    let output = command.output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let out = String::from_utf8(output.stdout).unwrap();
+    out.lines().find_map(|line| line.rsplit_once("file=").map(|(_, file)| file.to_owned())).unwrap_or_else(|| panic!("no file line: {out}"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn the_owner_s_file_follows_xdg_config_home_then_home_and_is_none_without_either() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir_text = dir.path().to_str().unwrap();
+    let config = dir.path().join("config");
+    let expected = config.join("inboxcraft").join(FILE).display().to_string();
+    assert_eq!(owner_file_with(&[("XDG_CONFIG_HOME", config.to_str().unwrap()), ("HOME", "relative/home")]), expected);
+    let home = dir.path().join(".config").join("inboxcraft").join(FILE).display().to_string();
+    assert_eq!(owner_file_with(&[("XDG_CONFIG_HOME", "relative/config"), ("HOME", dir_text)]), home, "a relative XDG_CONFIG_HOME is passed over");
+    assert_eq!(owner_file_with(&[("USERPROFILE", dir_text)]), home);
+    assert_eq!(owner_file_with(&[("HOME", "relative/home")]), "none");
+    assert_eq!(owner_file_with(&[]), "none");
+}

@@ -3,8 +3,8 @@
 
 use std::net::TcpListener;
 use std::num::NonZeroU16;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use inboxcraft_model::{
@@ -13,10 +13,10 @@ use inboxcraft_model::{
 use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_time::SystemClock;
-use inboxcraft_ui_egui::onboard;
+use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{NetWorkers, SERVICE, described, detect, entry_name, proposal};
+use super::{NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
@@ -55,6 +55,21 @@ fn found() -> Found {
         asked: vec!["dns MX example.org".to_owned()],
         failed: vec![("dns SRV _imaps._tcp.example.org".to_owned(), ErrorKind::TimedOut)],
     }
+}
+
+#[test]
+fn without_a_credential_store_nothing_is_kept_and_no_password_comes_back() {
+    // A test never writes into a credential store the computer runs: this one asks only where there is none.
+    if keyring::Entry::store_status().is_ok() {
+        eprintln!("SKIP: this computer runs a credential store");
+        return;
+    }
+    let none = "no credential store is running (Secret Service, Keychain or Credential Manager)";
+    let keychain = OsKeychain;
+    assert_eq!(keychain.store(7, SECRET), Err(none.to_owned()));
+    assert_eq!(keychain.forget(7), Err(none.to_owned()));
+    let account = account(993);
+    assert!(Credentials::password(&keychain, &account).is_none());
 }
 
 #[test]
@@ -164,4 +179,36 @@ fn a_job_for_another_account_than_its_worker_fails_and_starts_over() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind, EventKind::Failed { kind: ErrorKind::ConnectionDropped, folder: None });
     assert_eq!(events[0].job, Some(JobId::new(5)));
+}
+
+#[test]
+fn once_the_window_is_gone_the_events_stop_waking_it() {
+    // The first wake holds the event thread until the window is gone; the wake itself lives as long as that thread.
+    let (woken, first_wake) = mpsc::channel::<()>();
+    let (release, released) = mpsc::channel::<()>();
+    let (woken, released) = (Mutex::new(woken), Mutex::new(released));
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&wakes);
+    let wake: inboxcraft_ui_egui::fetch::Wake = Arc::new(move || {
+        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _ = woken.lock().map(|woken| woken.send(()));
+            let _ = released.lock().map(|released| released.recv_timeout(Duration::from_secs(10)));
+        }
+    });
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut workers = NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(NoPassword), Some(wake));
+    let account = account(closed_port());
+    workers.send(&account, Job::new(JobId::new(1), account.id(), JobKind::Check { by_owner: true }));
+    first_wake.recv_timeout(Duration::from_secs(10)).unwrap();
+    // The window closes: its worker ends after the check, every step of which is now waiting for the event thread.
+    drop(workers);
+    release.send(()).unwrap();
+    for _ in 0..500 {
+        if Arc::strong_count(&wakes) == 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(Arc::strong_count(&wakes), 1, "the event thread ended");
+    assert_eq!(wakes.load(Ordering::SeqCst), 1, "no step after the first woke the window that is gone");
 }
