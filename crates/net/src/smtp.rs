@@ -10,7 +10,9 @@
 //! connection never asks before, so a server that lists AUTH in clear is not taken up on it.
 //!
 //! EHLO names the client as `[127.0.0.1]`, which tells the server nothing about the computer. A message goes to all
-//! of its recipients or to none: a refused recipient ends the transaction with RSET before the message is sent.
+//! of its recipients or to none: a refused recipient ends the transaction with RSET before the message is sent. A
+//! connection that ends once the message went and before the server answered it is [`ErrorKind::SendUnanswered`]:
+//! the server may have taken it, so sending it again may deliver it twice.
 
 use std::fmt;
 use std::io::{Read, Write};
@@ -36,6 +38,8 @@ pub struct SmtpConnection {
     stream: Stream,
     buffer: Box<[u8]>,
     connector: Connector,
+    /// Bytes of the message of the open DATA went to the socket.
+    message_out: bool,
 }
 
 impl fmt::Debug for SmtpConnection {
@@ -70,8 +74,13 @@ impl SmtpConnection {
             }
             Security::StartTls => Transport::Plain,
         };
-        let mut connection =
-            Self { client: Client::new(transport), stream, buffer: vec![0; READ_CHUNK].into_boxed_slice(), connector: connector.clone() };
+        let mut connection = Self {
+            client: Client::new(transport),
+            stream,
+            buffer: vec![0; READ_CHUNK].into_boxed_slice(),
+            connector: connector.clone(),
+            message_out: false,
+        };
         connection.greeting()?;
         connection.expect(Verb::Ehlo, |client| client.ehlo(CLIENT_NAME))?;
         if server.security() == Security::StartTls {
@@ -125,8 +134,9 @@ impl SmtpConnection {
     /// # Errors
     ///
     /// A connection error, a message the server's SIZE does not take ([`ErrorKind::TooLarge`]), an address or a
-    /// message the client cannot send or the server cannot take ([`ErrorKind::CommandRefused`]: nothing went out), or
-    /// a server that breaks the protocol.
+    /// message the client cannot send or the server cannot take ([`ErrorKind::CommandRefused`]: nothing went out), a
+    /// server that breaks the protocol, or any failure after the message went and before the server's answer
+    /// ([`ErrorKind::SendUnanswered`]: it may have gone).
     pub fn send(&mut self, from: &EmailAddress, recipients: &[EmailAddress], message: &[u8]) -> Result<Result<String, Refusal>, NetError> {
         if recipients.is_empty() {
             return Err(NetError::new(ErrorKind::CommandRefused, "a message without a recipient"));
@@ -143,7 +153,11 @@ impl SmtpConnection {
                 return Ok(Err(refusal));
             }
         }
-        Ok(self.ask(Verb::Data, |client| client.data(message))?.map(|answer| match answer {
+        self.message_out = false;
+        let answered = self.ask(Verb::Data, |client| client.data(message)).map_err(|error| {
+            if self.message_out { NetError::new(ErrorKind::SendUnanswered, format!("no answer to the message: {}", error.detail())) } else { error }
+        });
+        Ok(answered?.map(|answer| match answer {
             Answer::Sent(words) => words,
             _ => String::new(),
         }))
@@ -219,6 +233,7 @@ impl SmtpConnection {
         if output.is_empty() {
             return Ok(());
         }
+        self.message_out |= self.client.is_message_out();
         let now = self.connector.tls().clock().now();
         self.stream.write_all(&output).and_then(|()| self.stream.flush()).map_err(|error| NetError::io(&error, now))
     }

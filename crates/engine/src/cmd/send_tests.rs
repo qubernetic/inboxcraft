@@ -218,6 +218,12 @@ fn a_failed_send_keeps_the_draft_with_the_reason() {
     session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::TimedOut, reply: None })).unwrap();
     let outbox = session.store().outbox().unwrap();
     assert_eq!(outbox[0].state, OutboxState::Refused { reply: ErrorKind::TimedOut.to_string() });
+    // A message whose answer was lost says it may have gone.
+    session.run("mail.send", &json!({ "id": id })).unwrap();
+    session.take_jobs();
+    session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::SendUnanswered, reply: None })).unwrap();
+    let outbox = session.store().outbox().unwrap();
+    assert!(matches!(&outbox[0].state, OutboxState::Refused { reply } if reply.contains("may have gone")), "{outbox:?}");
 }
 
 #[test]

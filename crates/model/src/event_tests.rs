@@ -15,7 +15,7 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 24] = [
+const EVERY_ERROR: [ErrorKind; 25] = [
     ErrorKind::HostNotFound,
     ErrorKind::ConnectionRefused,
     ErrorKind::TimedOut,
@@ -40,6 +40,7 @@ const EVERY_ERROR: [ErrorKind; 24] = [
     ErrorKind::MessageGone,
     ErrorKind::MessageRefused,
     ErrorKind::NoSubmissionServer,
+    ErrorKind::SendUnanswered,
 ];
 
 #[test]

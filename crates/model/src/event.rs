@@ -115,6 +115,8 @@ pub enum ErrorKind {
     MessageRefused,
     /// The account has no submission (SMTP) server, so it cannot send.
     NoSubmissionServer,
+    /// The message went to the submission server and the connection ended before its answer: it may have gone.
+    SendUnanswered,
 }
 
 impl ErrorKind {
@@ -153,6 +155,7 @@ impl fmt::Display for ErrorKind {
             Self::MessageGone => "the message no longer exists on the server",
             Self::MessageRefused => "the mail server refused the message, so it was not sent",
             Self::NoSubmissionServer => "the account has no server for sending mail set",
+            Self::SendUnanswered => "the connection ended after the message went and before the server answered, so the message may have gone",
         })
     }
 }
@@ -278,7 +281,8 @@ pub enum EventKind {
         /// The draft it was made from.
         draft: DraftId,
     },
-    /// A [`crate::JobKind::Send`] job failed; the message went to nobody.
+    /// A [`crate::JobKind::Send`] job failed. The message went to nobody, except with [`ErrorKind::SendUnanswered`]:
+    /// the server got it and never answered, so it may have gone.
     SendFailed {
         /// The draft it was made from.
         draft: DraftId,

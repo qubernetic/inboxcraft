@@ -13,8 +13,8 @@ use std::time::Duration;
 use inboxcraft_model::{Account, AccountId, DraftId, EmailAddress, ErrorKind, Event, EventKind, Job, JobId, JobKind, Security};
 use inboxcraft_net::{Backoff, Credentials, Password, Worker, WorkerSettings};
 use inboxcraft_testkit::imap::FakeImap;
-use inboxcraft_testkit::smtp::{FakeSmtp, Outbox, PASSWORD, Reply, USER, When};
-use inboxcraft_testkit::{CertFault, FakeServer, Listen, TestPki};
+use inboxcraft_testkit::smtp::{Action, FakeSmtp, Outbox, PASSWORD, Reply, USER, When};
+use inboxcraft_testkit::{CertFault, FakeServer, Fault, Listen, TestPki};
 use support::{Result, connector, far_off, server, submission, wall};
 
 const ACCOUNT: AccountId = AccountId::new(1);
@@ -220,5 +220,23 @@ fn after_a_refused_imap_password_nothing_is_sent() -> Result {
     assert_eq!(run.sent(job)?.kind, failed(ErrorKind::LoginRefused, None));
     let (_imap, smtp) = run.finish();
     assert!(smtp.is_empty(), "{smtp:?}");
+    Ok(())
+}
+
+#[test]
+fn a_message_whose_answer_is_lost_may_have_gone() -> Result {
+    let pki = TestPki::new()?;
+    // The connection ends after the final dot, before the server's answer: the server may have taken it.
+    let smtp = FakeSmtp::new().on(When::Message, [Action::Fault(Fault::Drop)]);
+    let mut run = Sending::start(&pki, FakeImap::new(), smtp, Some(PASSWORD), None)?;
+    let job = run.send(&["bea@example.org"])?;
+    assert_eq!(run.sent(job)?.kind, failed(ErrorKind::SendUnanswered, None));
+    drop(run.finish());
+    // Ended at DATA, before a byte of the message went: nothing went.
+    let smtp = FakeSmtp::new().on(When::command("DATA"), [Action::Fault(Fault::Drop)]);
+    let mut run = Sending::start(&pki, FakeImap::new(), smtp, Some(PASSWORD), None)?;
+    let job = run.send(&["bea@example.org"])?;
+    assert_eq!(run.sent(job)?.kind, failed(ErrorKind::ConnectionDropped, None));
+    drop(run.finish());
     Ok(())
 }
