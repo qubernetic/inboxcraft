@@ -6,7 +6,8 @@
 //!
 //! `mail.send` (`owner`: mail leaves the computer) makes the draft into a message with its own `Message-ID` and
 //! `Date`, puts it in the outbox and hands it to its account's worker, which sends it through the submission server.
-//! Bcc recipients are in the envelope alone, never in a header. What the worker answers lands in `crate::send`:
+//! Bcc recipients are in the envelope alone, never in a header. A forward takes the attachments of the message it
+//! forwards from its kept body; one whose body is gone is refused. What the worker answers lands in `crate::send`:
 //! once sent, the draft and its copy in the Drafts folder go and the message is appended to the Sent folder; a
 //! failure keeps the draft, its outbox item showing the server's reply.
 
@@ -18,7 +19,7 @@ use inboxcraft_time::{MailDate, Zone};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::draft;
+use crate::{draft, reply};
 use crate::params::decode_quietly;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
@@ -62,7 +63,8 @@ fn send(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let now = context.now();
     let message_id = message_id(&draft, account.address(), now);
     let date = MailDate::new(now, Zone::Fixed(context.offsets().offset_at(now)));
-    let raw = draft::built(&account, &draft, date, Some(&message_id)).map_err(|_| bad("the draft cannot be made into a message"))?;
+    let attachments = reply::forwarded(context.store(), &draft)?.ok_or_else(|| bad("the message it forwards is no longer kept, so its attachments are not"))?;
+    let raw = draft::built(&account, &draft, date, Some(&message_id), &attachments).map_err(|_| bad("the draft cannot be made into a message"))?;
     let recipients = envelope(&draft);
     let answer = json!({ "id": params.id, "message_id": message_id, "recipients": recipients.len(), "state": "sending" });
     let outgoing = Outgoing { message: raw.clone(), ..Outgoing::new(draft.id, OutboxState::Sending) };
