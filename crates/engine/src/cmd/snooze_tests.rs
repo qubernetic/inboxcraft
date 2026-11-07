@@ -35,8 +35,10 @@ fn session_at(clock: &FakeClock) -> Session {
     session_over(store(), clock)
 }
 
+/// A session over `store` whose account 1 signed in to a server that removes only the messages named (UIDPLUS).
 fn session_over(store: Memory, clock: &FakeClock) -> Session {
     let mut session = Session::with_registry(Box::new(store), Box::new(clock.clone()), Registry::builtin().unwrap()).unwrap();
+    session.apply(&Event::new(AccountId::new(1), None, EventKind::Abilities { uid_expunge: true })).unwrap();
     change(&mut session, Change::SetFlags(MessageId::new(1), flags(&[Flag::Seen])));
     change(&mut session, Change::PutBody(MessageId::new(1), Body::new(RAW.to_vec(), "The numbers.").unwrap()));
     session
@@ -130,6 +132,35 @@ fn snooze_writes_the_time_into_a_copy_in_the_snoozed_folder() {
     let listed = session.run("mail.list", &json!({ "role": "snoozed" })).unwrap();
     assert_eq!(listed["messages"][0]["snoozed_until"], json!("2026-11-05T18:00:00Z"));
     assert_eq!(listed["messages"][0]["returned"], Value::Null);
+}
+
+#[test]
+fn without_uidplus_a_snooze_moves_and_writes_no_copy() {
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(&clock);
+    session.apply(&Event::new(AccountId::new(1), None, EventKind::Abilities { uid_expunge: false })).unwrap();
+    let answer = snooze(&mut session, 1, "2026-11-05T18:00:00Z");
+    assert_eq!(answer["written"], json!(false), "the old copy could not go, so no new one is written");
+    let snoozed = path("InboxCraft/Snoozed");
+    let moved = JobKind::Move {
+        folder: FolderId::new(1),
+        path: path("INBOX"),
+        uid_validity: validity(),
+        uids: uids(&[10]),
+        to: FolderId::new(SNOOZED),
+        to_path: snoozed.clone(),
+    };
+    assert_eq!(kinds(&session.take_jobs()), [JobKind::CreateFolder { path: snoozed }, moved]);
+    assert_eq!(schedule(&session), [(EVENING, Due::Unsnooze(MessageId::new(1)))]);
+}
+
+#[test]
+fn a_server_not_heard_from_yet_gets_a_plain_move() {
+    let clock = FakeClock::new(at(NOW));
+    let mut session = Session::with_registry(Box::new(store()), Box::new(clock.clone()), Registry::builtin().unwrap()).unwrap();
+    change(&mut session, Change::PutBody(MessageId::new(1), Body::new(RAW.to_vec(), "The numbers.").unwrap()));
+    assert_eq!(snooze(&mut session, 1, "2026-11-05T18:00:00Z")["written"], json!(false));
+    assert!(!session.take_jobs().iter().any(|job| matches!(job.kind, JobKind::Append { .. })));
 }
 
 #[test]

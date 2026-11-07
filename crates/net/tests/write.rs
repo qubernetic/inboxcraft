@@ -249,6 +249,19 @@ fn a_delete_for_good_without_uidplus_is_refused_before_anything_is_sent() -> Res
 }
 
 #[test]
+fn after_the_sign_in_the_worker_tells_whether_the_server_removes_one_message() -> Result {
+    for (fake, uid_expunge) in [(FakeImap::sample(), true), (FakeImap::sample().without(Capability::UidPlus), false)] {
+        let mut run = Run::start(fake, Some(inboxcraft_testkit::imap::PASSWORD), Default::default())?;
+        let job = run.job(sync_inbox(None)?)?;
+        let events = run.events_until(|event| event.job == Some(job) && matches!(event.kind, EventKind::FolderSynced { .. }))?;
+        let told: Vec<_> = events.iter().filter(|event| matches!(event.kind, EventKind::Abilities { .. })).map(|event| &event.kind).collect();
+        assert_eq!(told, [&EventKind::Abilities { uid_expunge }]);
+        run.finish()?;
+    }
+    Ok(())
+}
+
+#[test]
 fn append_tells_the_uid_the_message_got() -> Result {
     let mut run = Run::sample()?;
     let job = run.job(append(b"From: ada@example.org\r\nSubject: Plan\r\n\r\nA draft.\r\n")?)?;

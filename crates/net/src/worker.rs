@@ -28,6 +28,9 @@
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
 //!
+//! After each sign-in the worker tells what the server can do as far as the engine chooses by it
+//! ([`EventKind::Abilities`]): whether it removes only the messages named.
+//!
 //! A Check job runs at once on a connection of its own, also while the worker is offline, backing off or halted: it
 //! reports each step of the account check (see [`crate::check_account`]) under the job's id. After a refused or
 //! unanswered sign-in (the worker halted for it, or the last check's sign-in ended so), a check the owner did not
@@ -360,11 +363,13 @@ impl Run<'_> {
         self.out.report(ConnectionState::Connecting);
         let error = match sign_in(self.account, self.settings, self.credentials) {
             Ok(open) => {
+                let uid_expunge = write::uid_expunge(&open);
                 self.connection = Some(open);
                 self.stale = self.watch.is_some();
                 self.idle_refused = false;
                 self.sign_in_lost = false;
                 self.out.report(ConnectionState::Online);
+                self.out.say(None, EventKind::Abilities { uid_expunge });
                 return true;
             }
             Err(error) => error,

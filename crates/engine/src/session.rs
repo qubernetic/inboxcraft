@@ -267,6 +267,8 @@ pub(crate) struct AccountState {
     /// The roles no folder has, to ask the owner about.
     pub(crate) ask: Vec<Role>,
     pub(crate) connection: Option<ConnectionState>,
+    /// Whether the server, at the last sign-in, removes only the messages named (UID EXPUNGE); `false` until it said.
+    pub(crate) uid_expunge: bool,
     /// The last failure, until the account is online again.
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
     /// The last account check, running or done.

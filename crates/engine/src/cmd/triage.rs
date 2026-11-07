@@ -27,8 +27,9 @@
 //!
 //! `mail.snooze` (`safe`) puts a message away until a time (`until`, or a `preset` of `schedule.presets`): it goes to
 //! the account's `InboxCraft/Snoozed`, made on the server the first time, in a new copy that carries the time in
-//! InboxCraft's own header field, so another InboxCraft sees it (see `crate::arrive::snooze`); a message whose body is
-//! not kept yet is moved there without the field (`written` in the answer). At the time [`crate::Session::tick`]
+//! InboxCraft's own header field, so another InboxCraft sees it (see `crate::arrive::snooze`). The old copy can go only
+//! by UID EXPUNGE: on a server that has not said it can (`EventKind::Abilities`), and for a message whose body is not
+//! kept yet, the message is moved there without the field (`written` in the answer). At the time [`crate::Session::tick`]
 //! brings it back to the inbox unread, marked as returned and listed as if it arrived then; `mail.unsnooze` (`safe`)
 //! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put.
 //! `history.undo` takes a snooze back: the message where it was, its time as it was.
@@ -825,7 +826,9 @@ fn snooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let folder = own_folder(store, state, account, Role::Snoozed, &mut next, &mut effects)?
         .filter(|folder| folder.listing().is_selectable())
         .ok_or(EngineError::NotFound { what: "snoozed folder of account", id: account.get() })?;
-    let copy = match store.body(message.id())? {
+    // The old copy can go only by UID EXPUNGE: without it, a new copy would leave the message twice on the server.
+    let removes_one = state.accounts.get(&account).is_some_and(|held| held.uid_expunge);
+    let copy = match store.body(message.id())?.filter(|_| removes_one) {
         Some(body) => snoozing::with_field(body.source(), until),
         None => None,
     };

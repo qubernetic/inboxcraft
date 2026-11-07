@@ -216,6 +216,11 @@ pub enum EventKind {
     CheckStep(StepReport),
     /// The connection changed.
     Connection(ConnectionState),
+    /// What the server can do, as far as the engine chooses by it; told after each sign-in.
+    Abilities {
+        /// Whether it removes only the messages named (UID EXPUNGE: UIDPLUS or IMAP4rev2).
+        uid_expunge: bool,
+    },
     /// A [`crate::JobKind::StoreFlags`] job is done; the flags it left came before it as
     /// [`EventKind::MessagesChanged`].
     FlagsStored {
@@ -274,7 +279,7 @@ impl EventKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::Folders { .. } | Self::CheckStep(_) | Self::Connection(_) | Self::FolderCreated { .. } => None,
+            Self::Folders { .. } | Self::CheckStep(_) | Self::Connection(_) | Self::Abilities { .. } | Self::FolderCreated { .. } => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
             | Self::MessagesExpunged { folder, .. }

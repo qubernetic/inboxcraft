@@ -112,6 +112,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             }
             true
         }
+        EventKind::Abilities { uid_expunge } => {
+            plan.state.accounts.entry(account).or_default().uid_expunge = *uid_expunge;
+            true
+        }
         EventKind::Failed { kind, folder } => {
             plan.state.accounts.entry(account).or_default().failure = Some((*kind, *folder));
             if let Some(job) = event.job {

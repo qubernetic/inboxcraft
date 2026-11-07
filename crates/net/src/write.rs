@@ -53,7 +53,7 @@ pub(crate) fn run(connection: &mut ImapConnection, job: &Job, config: &SyncConfi
             say(EventKind::Moved { folder: *folder, uid_validity: *uid_validity, uids: uids.clone(), to: *to, copied });
         }
         JobKind::Expunge { folder, path, uid_validity, uids } => {
-            if !connection.capabilities_known().is_some_and(|caps| caps.has("UIDPLUS") || caps.has("IMAP4rev2")) {
+            if !uid_expunge(connection) {
                 return Err(NetError::new(ErrorKind::CommandRefused, "the server cannot remove only these messages (no UIDPLUS)"));
             }
             if select(connection, *folder, path, *uid_validity, say)? {
@@ -85,6 +85,11 @@ pub(crate) fn run(connection: &mut ImapConnection, job: &Job, config: &SyncConfi
         _ => return Err(NetError::new(ErrorKind::Protocol, "not a write job")),
     }
     Ok(())
+}
+
+/// Whether `connection`'s server removes only the messages named (UID EXPUNGE: UIDPLUS or IMAP4rev2).
+pub(crate) fn uid_expunge(connection: &ImapConnection) -> bool {
+    connection.capabilities_known().is_some_and(|caps| caps.has("UIDPLUS") || caps.has("IMAP4rev2"))
 }
 
 /// Whether `job`, cut off by its connection, may run again on `connection`'s server: not a move on a server without
