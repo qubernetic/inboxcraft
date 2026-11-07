@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use inboxcraft_model::{CheckStep, ErrorKind, Security, StepReport, StepStatus};
 use inboxcraft_net::{CheckTarget, Connector, Dialer, Password, check_account};
+use inboxcraft_testkit::dav::{FakeDav, Reply, When};
 use inboxcraft_testkit::imap::{Capability, FakeImap, PASSWORD, USER};
 use inboxcraft_testkit::smtp::FakeSmtp;
 use inboxcraft_testkit::{CertFault, FakeServer, HOST, Listen, TestPki};
@@ -109,7 +110,6 @@ fn both(imap: &FakeServer, smtp: &FakeServer, security: Security) -> Network {
 
 const PASSED: StepStatus = StepStatus::Passed;
 const SKIPPED: StepStatus = StepStatus::Skipped;
-const NOT_BUILT: StepStatus = StepStatus::NotBuilt;
 const NOT_SET: StepStatus = StepStatus::NotSet;
 
 fn signed_in(transcript: &[String]) -> bool {
@@ -128,7 +128,7 @@ fn every_step_passes_and_names_the_server_and_the_issuer() -> Result {
         let target = target(security)?.with_submission(Some(submission(security)?));
         let (reports, asked) =
             run(&target, &through(&pki, wall(), to_fake(&fake).port(security.submission_port().get(), Port::To(smtp.addr()))), Some(PASSWORD));
-        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, PASSED, PASSED, NOT_BUILT], "{security:?}");
+        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, PASSED, PASSED, NOT_SET], "{security:?}");
         assert_eq!(reports.iter().map(StepReport::step).collect::<Vec<_>>(), CheckStep::ALL);
         let (imap, smtp_steps): (Vec<&StepReport>, Vec<&StepReport>) = reports.iter().partition(|report| report.step() != CheckStep::SmtpLogin);
         assert!(imap.iter().all(|report| report.host().map(|host| host.as_str()) == Some(HOST) && report.port() == Some(993)));
@@ -161,7 +161,7 @@ fn each_certificate_fault_fails_the_certificate_step_with_its_own_message() -> R
             CertFault::WrongHost => ErrorKind::CertificateWrongHost,
             CertFault::ClockFarOff => ErrorKind::ClockFarOff,
         };
-        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, StepStatus::Failed(expected), SKIPPED, NOT_SET, NOT_BUILT], "{fault:?}");
+        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, StepStatus::Failed(expected), SKIPPED, NOT_SET, NOT_SET], "{fault:?}");
         let issuer = reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer);
         let expected_issuer = if fault == CertFault::UnknownCa { "CN=Stranger test CA" } else { "CN=InboxCraft test CA" };
         assert_eq!(issuer, Some(expected_issuer), "{fault:?}");
@@ -201,7 +201,7 @@ fn each_port_case_has_its_own_kind_and_message() -> Result {
     let mut messages = HashSet::new();
     for (network, expected) in cases {
         let (reports, asked) = run(&target(Security::Tls)?, &through(&pki, wall(), network), Some(PASSWORD));
-        assert_eq!(statuses(&reports), [PASSED, StepStatus::Failed(expected), SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_BUILT], "{expected:?}");
+        assert_eq!(statuses(&reports), [PASSED, StepStatus::Failed(expected), SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_SET], "{expected:?}");
         assert_eq!(asked, 0);
         messages.insert(expected.to_string());
     }
@@ -225,7 +225,7 @@ fn a_name_without_an_address_fails_the_dns_step() -> Result {
     let pki = TestPki::new()?;
     let connector = Connector::new(inboxcraft_net::TlsSettings::new(inboxcraft_net::Trust::Roots(vec![pki.ca()]), wall())).with_addresses(Vec::new());
     let (reports, _asked) = run(&target(Security::Tls)?, &connector, Some(PASSWORD));
-    assert_eq!(statuses(&reports), [StepStatus::Failed(ErrorKind::HostNotFound), SKIPPED, SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [StepStatus::Failed(ErrorKind::HostNotFound), SKIPPED, SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_SET]);
     Ok(())
 }
 
@@ -234,7 +234,7 @@ fn a_server_without_starttls_fails_the_tls_step() -> Result {
     let pki = TestPki::new()?;
     let fake = Listen::plain().start_imap(FakeImap::new().without(Capability::LoginDisabled))?;
     let (reports, asked) = run(&target(Security::StartTls)?, &through(&pki, wall(), to_fake(&fake)), Some(PASSWORD));
-    assert_eq!(statuses(&reports), [PASSED, PASSED, StepStatus::Failed(ErrorKind::StartTlsMissing), SKIPPED, SKIPPED, NOT_SET, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [PASSED, PASSED, StepStatus::Failed(ErrorKind::StartTlsMissing), SKIPPED, SKIPPED, NOT_SET, NOT_SET]);
     assert_eq!(asked, 0);
     let (transcript, _ended) = fake.finish_with_transcript();
     assert!(transcript.received().is_empty(), "{:?}", transcript.received());
@@ -266,7 +266,7 @@ fn detected_settings_get_no_password_until_the_owner_saw_them() -> Result {
 
     let fake = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
     let (reports, asked) = run(&detected, &through(&pki, wall(), to_fake(&fake)), Some(PASSWORD));
-    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, NOT_SET, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, NOT_SET, NOT_SET]);
     assert_eq!(asked, 0);
     let transcript = fake.finish()?;
     assert!(!signed_in(transcript.received()), "{:?}", transcript.received());
@@ -338,7 +338,7 @@ fn the_smtp_sign_in_waits_like_the_imap_one() -> Result {
     let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
     let smtp = submission_fake(&pki, Security::Tls)?;
     let (reports, asked) = run(&detected, &through(&pki, wall(), both(&imap, &smtp, Security::Tls)), Some(PASSWORD));
-    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, StepStatus::NeedsReview, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, StepStatus::NeedsReview, NOT_SET]);
     assert_eq!(asked, 0);
     drop(imap.finish()?);
     let (transcript, _ended) = smtp.finish_with_transcript();
@@ -365,5 +365,99 @@ fn a_target_names_its_submission_server() -> Result {
     assert_eq!(target.submission(), None);
     let with = target.with_submission(Some(submission(Security::StartTls)?));
     assert_eq!(with.submission(), Some(&submission(Security::StartTls)?));
+    Ok(())
+}
+
+/// The fake's address as the account has it: the certificate's host, over `https`.
+fn caldav() -> String {
+    format!("https://{HOST}/")
+}
+
+/// The CalDAV fake for one client, over TLS.
+fn dav_fake(pki: &TestPki, fake: FakeDav) -> Result<FakeServer> {
+    Ok(Listen::tls(pki.server_config(None)?).accept_timeout(Duration::from_millis(500)).start_dav(fake)?)
+}
+
+/// The IMAP fake on 993 and the CalDAV fake on 443.
+fn with_dav(pki: &TestPki, imap: &FakeServer, dav: &FakeServer) -> Connector {
+    through(pki, wall(), to_fake(imap).port(443, Port::To(dav.addr()))).with_addresses_on(443, vec![address(443)])
+}
+
+fn authorized(lines: &[String]) -> bool {
+    lines.iter().any(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+}
+
+#[test]
+fn the_caldav_discovery_runs_after_the_imap_sign_in_with_the_same_password() -> Result {
+    let pki = TestPki::new()?;
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let dav = dav_fake(&pki, FakeDav::new())?;
+    let target = target(Security::Tls)?.with_caldav(Some(&caldav()));
+    assert_eq!(target.caldav(), Some(caldav().as_str()));
+    let (reports, asked) = run(&target, &with_dav(&pki, &imap, &dav), Some(PASSWORD));
+    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, PASSED, NOT_SET, PASSED]);
+    assert_eq!(asked, 1, "the password is asked for once for every sign-in");
+    let found = reports.iter().find(|report| report.step() == CheckStep::CaldavDiscovery).ok_or("no CalDAV step")?;
+    assert_eq!((found.host().map(|host| host.as_str()), found.port()), (Some(HOST), Some(443)));
+    drop(imap.finish()?);
+    let transcript = dav.finish()?;
+    assert!(authorized(transcript.received()) && transcript.in_clear().is_empty());
+    Ok(())
+}
+
+#[test]
+fn the_caldav_discovery_fails_with_its_own_cause() -> Result {
+    let pki = TestPki::new()?;
+    let target = target(Security::Tls)?.with_caldav(Some(&caldav()));
+    let cases = [
+        (FakeDav::new().login(USER, "another-invented-password"), ErrorKind::LoginRefused),
+        (
+            FakeDav::new().reply(When::method("PROPFIND"), Reply::new(404)).reply(When::method("PROPFIND"), Reply::new(404)),
+            ErrorKind::NoCalendarServer,
+        ),
+    ];
+    for (fake, kind) in cases {
+        let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+        let dav = dav_fake(&pki, fake)?;
+        let (reports, _asked) = run(&target, &with_dav(&pki, &imap, &dav), Some(PASSWORD));
+        assert_eq!(status(&reports, CheckStep::CaldavDiscovery), Some(StepStatus::Failed(kind)), "{kind:?}");
+        drop((imap.finish()?, dav.finish_with_transcript()));
+    }
+    // An address that is not https: no connection, no password.
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let clear = target.clone().with_caldav(Some(&format!("http://{HOST}/")));
+    let (reports, _asked) = run(&clear, &through(&pki, wall(), to_fake(&imap)), Some(PASSWORD));
+    assert_eq!(status(&reports, CheckStep::CaldavDiscovery), Some(StepStatus::Failed(ErrorKind::NotEncrypted)));
+    drop(imap.finish()?);
+    Ok(())
+}
+
+#[test]
+fn the_caldav_discovery_waits_like_the_imap_sign_in() -> Result {
+    let pki = TestPki::new()?;
+    let waiting = [
+        (CheckTarget::detected(server(Security::Tls)?, USER).with_caldav(Some(&caldav())), StepStatus::NeedsReview, StepStatus::NeedsReview),
+        (target(Security::Tls)?.with_caldav(Some(&caldav())).held(), StepStatus::NeedsOwner, StepStatus::NeedsOwner),
+        (target(Security::Tls)?.with_caldav(Some(&caldav())).held_calendar(), PASSED, StepStatus::NeedsOwner),
+    ];
+    for (target, imap_status, caldav_status) in waiting {
+        let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+        let dav = dav_fake(&pki, FakeDav::new())?;
+        let (reports, _asked) = run(&target, &with_dav(&pki, &imap, &dav), Some(PASSWORD));
+        assert_eq!(status(&reports, CheckStep::ImapLogin), Some(imap_status), "{target:?}");
+        assert_eq!(status(&reports, CheckStep::CaldavDiscovery), Some(caldav_status), "{target:?}");
+        assert!(target.is_calendar_held() == (caldav_status == StepStatus::NeedsOwner && imap_status == PASSED));
+        drop(imap.finish()?);
+        let (transcript, _no_client) = dav.finish_with_transcript();
+        assert!(transcript.received().is_empty(), "{target:?}: {:?}", transcript.received());
+    }
+    // A refused IMAP password is not tried on the CalDAV server.
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let dav = dav_fake(&pki, FakeDav::new())?;
+    let (reports, _asked) = run(&target(Security::Tls)?.with_caldav(Some(&caldav())), &with_dav(&pki, &imap, &dav), Some("wrong"));
+    assert_eq!(status(&reports, CheckStep::CaldavDiscovery), Some(SKIPPED));
+    drop(imap.finish_with_transcript());
+    let (transcript, _no_client) = dav.finish_with_transcript();
+    assert!(transcript.received().is_empty());
     Ok(())
 }

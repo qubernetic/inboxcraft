@@ -21,10 +21,16 @@
 //!   A known folder is resynced: changed flags, removed and new messages (QRESYNC where the server offers it). The
 //!   folder of an Idle job is watched between jobs with IDLE ([`WatchConfig`]) and resynced after each change and
 //!   each reconnect; a folder whose UIDVALIDITY changed is reloaded.
+//! - The worker runs a calendar job ([`inboxcraft_model::CalendarJob`]) at once, like a send, on an HTTPS connection
+//!   of its own that drives `inboxcraft-dav`: discovery from the account's CalDAV address, a sync of one calendar
+//!   from its sync token or by entity tags, and the PUT or DELETE of one event with its entity tag, a change made
+//!   elsewhere coming back as a conflict. The password goes as Basic auth over verified TLS only, never to an `http`
+//!   address or after a redirect to another server, and not again once the CalDAV server refused it.
 //! - [`check_account`] runs the account check step by step ([`inboxcraft_model::CheckStep`]): DNS, TCP (with the
 //!   blocked-mail-ports test), TLS, the certificate (its issuer from [`certificate`], and the clock check) and the
 //!   IMAP sign-in, which sends a password only after the certificate verified and only to a [`CheckTarget`] the owner
-//!   has seen. A worker runs it for its account on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
+//!   has seen, then the SMTP sign-in and the CalDAV discovery with the same password. A worker runs it for its account
+//!   on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 //! - [`autoconfig`] reads Mozilla's autoconfig file: the encrypted IMAP and submission servers a provider publishes.
 //! - [`detect`] proposes settings from an address: MX ([`dns`]), autoconfig at the domain over HTTPS ([`web`]), the
@@ -41,6 +47,7 @@ pub mod certificate;
 mod check;
 mod compress;
 mod connect;
+mod dav;
 pub mod detect;
 pub mod dns;
 pub mod envelope;

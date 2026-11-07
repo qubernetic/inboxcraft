@@ -1,6 +1,6 @@
 # Where InboxCraft falls short
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
 
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
@@ -266,8 +266,8 @@ B = blocks the next stage.
 - `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
   first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
   it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
-  cannot run it. The CalDAV discovery reports "not built yet" until E4.2; the SMTP sign-in of an account without a
-  submission server reports "not set" (#28, #34, #119).
+  cannot run it. The SMTP sign-in of an account without a submission server, and the CalDAV discovery of one without
+  a CalDAV address, report "not set" (#28, #34, #119, #145).
 - `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
   stays running until the workers are started again (`Session::start`), which forgets it (#28).
 - After a refused or unanswered sign-in, an agent's `account.check` stops before the sign-in (`needs_owner`) and only
@@ -290,8 +290,8 @@ B = blocks the next stage.
 - Detect's MX domain is the MX host's last two labels, or three under a two-letter country label: a rule of thumb
   without the public suffix list, so a provider under a longer public suffix is not recognised by its MX (#28).
 - Detect stops at the first source that names an IMAP server and does not probe the candidates; the common host
-  names are hints, never checked until the owner asks. `/.well-known/caldav` and `carddav` with
-  `current-user-principal`, and the CalDAV SRV records (RFC 6764), come with CalDAV (E4.2) (#28).
+  names are hints, never checked until the owner asks. Detect proposes no CalDAV address: the CalDAV SRV records and
+  `/.well-known/caldav` at the address's domain (RFC 6764) are not asked, and no CardDAV (#28, #145).
 - The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
   domain whose provider publishes no autoconfig and no SRV records gets only the common host names as hints (#28).
 

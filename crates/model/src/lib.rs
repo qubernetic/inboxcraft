@@ -16,7 +16,7 @@
 //! - [`Message`]: our ids around the server's [`Summary`] ([`Envelope`], [`Flags`], size, preview); [`Address`]es
 //!   that are told apart by the address ([`labels`]); [`group_threads`] links replies into threads.
 //! - The read path: the [`Job`]s the engine gives a `net` worker and the [`Event`]s it reports back, with one
-//!   [`ErrorKind`] per cause. They live here because `net` (layer 3) may not depend on `engine` (layer 4).
+//!   [`ErrorKind`] per cause; the calendar's ([`CalendarJob`], [`CalendarReport`]) among them. They live here because `net` (layer 3) may not depend on `engine` (layer 4).
 //! - The local records the store keeps beside the mail: [`Draft`]s, the outbox ([`Outgoing`]), the schedule
 //!   ([`Scheduled`]), [`Sender`]s with the screener's decision and their [`Group`], each message's [`MessageState`]
 //!   (done, parked, pinned, snoozed, follow-up), and [`Calendar`]s with their [`CalendarEvent`]s and [`Alert`]s.
@@ -53,6 +53,7 @@
 
 mod account;
 mod address;
+mod calendar;
 mod check;
 mod event;
 mod flags;
@@ -69,6 +70,7 @@ mod uid_set;
 
 pub use account::{Account, AccountError, Host, Security, Server, Template};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
+pub use calendar::{CalendarJob, CalendarListing, CalendarReport, FetchedEvent, KnownEvent};
 pub use check::{CheckStep, MAX_ISSUER_CHARS, StepReport, StepStatus};
 pub use event::{ConnectionState, Copied, ErrorKind, Event, EventKind, FlagChange};
 pub use flags::{Flag, FlagError, Flags, Keyword};

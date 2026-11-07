@@ -114,6 +114,8 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::Sent { draft } => crate::send::sent(store, &mut plan, account, *draft)?,
         EventKind::SendFailed { draft, kind, reply } => crate::send::failed(store, &mut plan, account, *draft, *kind, reply.as_deref())?,
+        // The calendar engine takes these; until it does, they change nothing.
+        EventKind::Calendar(_) => false,
         EventKind::Abilities { uid_expunge } => {
             plan.state.accounts.entry(account).or_default().uid_expunge = *uid_expunge;
             true

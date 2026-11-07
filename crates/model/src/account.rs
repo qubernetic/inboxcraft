@@ -21,6 +21,9 @@ pub enum AccountError {
     BadHost,
     /// The user name is empty, longer than [`Account::MAX_USERNAME_LEN`] bytes or holds a control character.
     BadUsername,
+    /// The calendar (CalDAV) address is not an `https` URL with a host, at most [`Account::MAX_CALDAV_LEN`] bytes,
+    /// without a user name, white space or control characters.
+    BadCalendarUrl,
 }
 
 impl fmt::Display for AccountError {
@@ -28,6 +31,7 @@ impl fmt::Display for AccountError {
         f.write_str(match self {
             Self::BadHost => "the server name is not a host name or an IP address",
             Self::BadUsername => "the user name is empty, too long or holds a control character",
+            Self::BadCalendarUrl => "the calendar address is not an https URL",
         })
     }
 }
@@ -209,6 +213,7 @@ pub struct Account {
     submission: Option<Server>,
     signature: Option<String>,
     grouped: bool,
+    caldav: Option<String>,
     templates: Vec<Template>,
 }
 
@@ -227,6 +232,8 @@ struct RawAccount {
     #[serde(default = "on")]
     grouped: bool,
     #[serde(default)]
+    caldav: Option<String>,
+    #[serde(default)]
     templates: Vec<RawTemplate>,
 }
 
@@ -239,12 +246,13 @@ impl TryFrom<RawAccount> for Account {
     type Error = AccountError;
 
     fn try_from(raw: RawAccount) -> Result<Self, Self::Error> {
-        Ok(Self::new(raw.id, &raw.label, raw.address, &raw.username, raw.imap)?
+        Self::new(raw.id, &raw.label, raw.address, &raw.username, raw.imap)?
             .with_display_name(raw.display_name.as_deref())
             .with_submission(raw.submission)
             .with_signature(raw.signature.as_deref())
             .with_grouped(raw.grouped)
-            .with_templates(raw.templates.iter().filter_map(|template| Template::new(&template.name, &template.subject, &template.text)).collect()))
+            .with_templates(raw.templates.iter().filter_map(|template| Template::new(&template.name, &template.subject, &template.text)).collect())
+            .with_caldav(raw.caldav.as_deref())
     }
 }
 
@@ -254,6 +262,9 @@ impl Account {
 
     /// The longest signature, in characters; a longer one is cut.
     pub const MAX_SIGNATURE_CHARS: usize = 2_000;
+
+    /// The longest calendar address, in bytes.
+    pub const MAX_CALDAV_LEN: usize = 2_048;
 
     /// The most templates an account keeps.
     pub const MAX_TEMPLATES: usize = 100;
@@ -279,6 +290,7 @@ impl Account {
             submission: None,
             signature: None,
             grouped: true,
+            caldav: None,
             templates: Vec::new(),
         })
     }
@@ -322,6 +334,22 @@ impl Account {
     pub fn with_grouped(mut self, grouped: bool) -> Self {
         self.grouped = grouped;
         self
+    }
+
+    /// The same account with the address of its calendar (CalDAV) server, where discovery starts (RFC 6764: a bare
+    /// host starts at its well-known path). Trimmed; a blank one is none. The password goes there, so it is `https`
+    /// only.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::BadCalendarUrl`].
+    pub fn with_caldav(mut self, url: Option<&str>) -> Result<Self, AccountError> {
+        self.caldav = match url.map(str::trim).filter(|url| !url.is_empty()) {
+            Some(url) if is_https_url(url) => Some(url.to_owned()),
+            Some(_) => return Err(AccountError::BadCalendarUrl),
+            None => None,
+        };
+        Ok(self)
     }
 
     /// The same account with a submission (SMTP) server.
@@ -385,6 +413,12 @@ impl Account {
         self.grouped
     }
 
+    /// The address of the calendar (CalDAV) server, if set.
+    #[must_use]
+    pub fn caldav(&self) -> Option<&str> {
+        self.caldav.as_deref()
+    }
+
     /// The owner's templates for new text, in the order kept.
     #[must_use]
     pub fn templates(&self) -> &[Template] {
@@ -397,6 +431,34 @@ impl Account {
         let name = name.to_lowercase();
         self.templates.iter().find(|template| template.name.to_lowercase() == name)
     }
+}
+
+/// Whether `url` is an `https` URL with a host and no user name, white space or control character, short enough. The
+/// host and port follow the rules the CalDAV client parses them by, so an address saved here is one it can use: an
+/// ASCII host name or an IPv6 address in brackets, and a port of digits from 1 to 65535.
+fn is_https_url(url: &str) -> bool {
+    let Some(rest) = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).and_then(|_| url.get(8..)) else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    url.len() <= Account::MAX_CALDAV_LEN && is_authority(authority) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Whether `authority` is a host and an optional port, without a user name.
+fn is_authority(authority: &str) -> bool {
+    const MAX_HOST: usize = 253;
+    let (good_host, port) = if let Some(v6) = authority.strip_prefix('[') {
+        let Some((address, after)) = v6.split_once(']') else { return false };
+        let good = !address.is_empty() && address.chars().all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.'));
+        let port = match after.strip_prefix(':') {
+            Some(port) => Some(port),
+            None if after.is_empty() => None,
+            None => return false,
+        };
+        (good, port)
+    } else {
+        let (host, port) = authority.split_once(':').map_or((authority, None), |(host, port)| (host, Some(port)));
+        (!host.is_empty() && host.len() <= MAX_HOST && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')), port)
+    };
+    good_host && port.is_none_or(|digits| digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.parse::<u16>().is_ok_and(|port| port != 0))
 }
 
 /// A text the owner keeps to start a message with: a name to pick it by, a subject (may be empty) and the text. The
