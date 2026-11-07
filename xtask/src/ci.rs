@@ -22,6 +22,16 @@ pub trait Runner {
     /// [`Error::Spawn`] when the program cannot be started.
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error>;
 
+    /// [`Runner::run`] with the variables of `env` set for the program. A runner that starts no process ignores them.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when the program cannot be started.
+    fn run_with_env(&mut self, program: &OsStr, args: &[&str], env: &[(&str, &str)], dir: &Path) -> Result<bool, Error> {
+        let _ = env;
+        self.run(program, args, dir)
+    }
+
     /// Runs `program` with `args` in `dir`, its standard error going to the terminal, and returns its standard
     /// output, or `None` when it did not exit with 0. A runner that captures no output answers `None`, a failed call.
     ///
@@ -40,8 +50,13 @@ pub struct ProcessRunner;
 
 impl Runner for ProcessRunner {
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error> {
+        self.run_with_env(program, args, &[], dir)
+    }
+
+    fn run_with_env(&mut self, program: &OsStr, args: &[&str], env: &[(&str, &str)], dir: &Path) -> Result<bool, Error> {
         let status = Command::new(program)
             .args(args)
+            .envs(env.iter().copied())
             .current_dir(dir)
             .status()
             .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;

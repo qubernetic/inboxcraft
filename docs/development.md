@@ -151,6 +151,12 @@ builds in. Otherwise it prints one line per crate (lines, covered,
 cover, floor) and the workspace total. `just cov` runs it; `just cov --check` and `just ci` also fail below a floor.
 `lcov.info` stays in the root for the Codecov upload; a stale one is removed before the run.
 
+The run sets `CARGO_INCREMENTAL=1`, whatever the caller's environment, so CI (which sets 0 for the job) measures
+what a local run measures. Without incremental compilation rustc inlines small functions across crates, and every
+test binary that links a crate but never calls such a function carries an empty coverage record of it. llvm-cov
+keeps the first record of a function in the order of the binaries' names, so a line the tests run could count as
+uncovered only because a binary that sorts earlier links its crate.
+
 The floors live in one file, `.config/coverage.toml`:
 
 | Floor | Crates |
@@ -394,7 +400,8 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
   green `push` run whose ref is `refs/heads/develop`, `refs/heads/main` or `refs/heads/epic/*` and that did not
   create the branch (`!github.event.created`) prunes `target/` and saves it with `actions/cache/save`; a
   `pull_request` or `workflow_dispatch` run and the push that creates a branch never write it. Who may push to or
-  create those branches is set by the repository's rulesets, not by the workflow. The job sets `CARGO_INCREMENTAL=0`.
+  create those branches is set by the repository's rulesets, not by the workflow. The job sets `CARGO_INCREMENTAL=0`;
+  the coverage run alone builds incrementally (see "The coverage gate").
 - **The prune is an allow list.** `cargo xtask cache-prune` keeps only cargo's marker files and the `deps`, `build`
   and `.fingerprint` folders of `target/<profile>/` and `target/<triple>/<profile>/`, and deletes in those folders
   every entry named after a package or target of this workspace (`[lib]<name>-<16 hex digits>[.<ext>]`, hyphen and

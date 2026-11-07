@@ -156,6 +156,17 @@ fn the_process_runner_reports_the_exit_status() {
 }
 
 #[test]
+fn the_process_runner_sets_the_environment_it_is_given() {
+    let sh = OsStr::new("sh");
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let check = ["-c", "test \"$INBOXCRAFT_XTASK_PROBE\" = set"];
+    assert!(ProcessRunner.run_with_env(sh, &check, &[("INBOXCRAFT_XTASK_PROBE", "set")], here).unwrap());
+    assert!(!ProcessRunner.run_with_env(sh, &check, &[("INBOXCRAFT_XTASK_PROBE", "other")], here).unwrap());
+    let missing = PathBuf::from(here).join("inboxcraft-no-such-program");
+    assert!(matches!(ProcessRunner.run_with_env(missing.as_os_str(), &[], &[], here), Err(Error::Spawn { .. })));
+}
+
+#[test]
 fn the_process_runner_captures_standard_output() {
     let cargo = OsStr::new(env!("CARGO"));
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
