@@ -393,3 +393,23 @@ fn an_attached_message_type_other_than_message_global_is_refused() {
     let bytes = MessageBuilder::new().attach(Attachment::new("fwd.eml", "message/global", b"hi".to_vec())).build().unwrap();
     assert_eq!(parse(&bytes).unwrap().attachments()[0].decoded().unwrap().as_ref(), b"hi");
 }
+
+#[test]
+fn the_checks_tell_what_the_builder_takes() {
+    use crate::{is_media_type, is_message_id};
+    for id in ["<a.1@example.org>", "a.1@example.org", " <x@[192.0.2.1]> "] {
+        assert!(is_message_id(id), "{id}");
+        assert!(MessageBuilder::new().reference(id).build().is_ok(), "{id}");
+    }
+    for id in ["", "no-at-sign", "a b@example.org", "<a@example.org>\r\nBcc: x@example.org", "é@example.org", &format!("{}@x", "a".repeat(250))] {
+        assert!(!is_message_id(id), "{id}");
+        assert!(MessageBuilder::new().reference(id).build().is_err(), "{id}");
+    }
+    for media in ["image/png", "Application/PDF", "message/global"] {
+        assert!(is_media_type(media), "{media}");
+    }
+    for media in ["", "image", "multipart/mixed", "message/rfc822", "text/plain; charset=utf-8", "a/b\r\nX: y"] {
+        assert!(!is_media_type(media), "{media}");
+        assert!(MessageBuilder::new().attach(Attachment::new("a", media, Vec::new())).build().is_err(), "{media}");
+    }
+}

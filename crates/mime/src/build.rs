@@ -497,6 +497,19 @@ fn field_name(name: &str) -> Result<String, MimeError> {
     if ok { Ok(name.to_owned()) } else { Err(MimeError::BadHeader("field name")) }
 }
 
+/// Whether [`MessageBuilder`] writes `text` as a message id (in `Message-ID`, `In-Reply-To` or `References`): ASCII
+/// `dot-atom-text`, `@` and a `dot-atom-text` or domain literal, at most 250 bytes, with or without angle brackets.
+#[must_use]
+pub fn is_message_id(text: &str) -> bool {
+    message_id(text).is_ok()
+}
+
+/// Whether [`MessageBuilder`] takes `text` as the media type of an [`Attachment`].
+#[must_use]
+pub fn is_media_type(text: &str) -> bool {
+    media_type(text).is_ok()
+}
+
 /// A media type for an attachment: `type/subtype` of RFC 2045 tokens of at most 127 characters each, lower case, no
 /// multipart and no attached message but `message/global`: RFC 2046 section 5.2 allows the others only in an
 /// identity encoding, and every attachment is base64.
