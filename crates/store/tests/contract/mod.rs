@@ -13,6 +13,10 @@ use inboxcraft_model::{
 use inboxcraft_store::{Batch, Body, Change, Search, Storage, StoreError};
 use inboxcraft_time::Timestamp;
 
+mod local;
+#[allow(unused_imports)]
+pub use local::*;
+
 pub const DAY: i64 = 86_400;
 
 pub fn account(id: u64) -> Account {
@@ -204,7 +208,13 @@ pub fn a_replaced_message_keeps_its_body_and_opened_mark<S: Storage>(mut store: 
 pub fn flags_are_set_on_the_held_message<S: Storage>(mut store: S) {
     two_accounts(&mut store);
     let mut thread_message = message(1, 1, 1, 5, "x", None);
-    thread_message = thread_message.with_thread(Some(inboxcraft_model::ThreadId::new(4)));
+    let moving = inboxcraft_model::Moving {
+        folder: FolderId::new(2),
+        uid_validity: UidValidity::new(3).unwrap(),
+        uid: Uid::new(8).unwrap(),
+        flags: Flags::default(),
+    };
+    thread_message = thread_message.with_thread(Some(inboxcraft_model::ThreadId::new(4))).with_moving(Some(moving.clone()));
     put(&mut store, vec![Change::PutMessage(thread_message)]).unwrap();
     let mut flags = Flags::default();
     flags.insert(Flag::Seen);
@@ -213,6 +223,7 @@ pub fn flags_are_set_on_the_held_message<S: Storage>(mut store: S) {
     let held = store.message(m(1)).unwrap().unwrap();
     assert_eq!(held.message().summary().flags(), &flags);
     assert_eq!(held.message().thread(), Some(inboxcraft_model::ThreadId::new(4)));
+    assert_eq!(held.message().moving(), Some(&moving), "a move on its way stays noted");
     assert_eq!(put(&mut store, vec![Change::SetFlags(m(9), flags)]), Err(StoreError::UnknownMessage(m(9))));
 }
 
@@ -443,6 +454,21 @@ macro_rules! contract_tests {
             search_reads_operators_as_words,
             retention_drops_old_unopened_bodies,
             retention_names_the_bodies_to_fetch,
+            the_local_tables_start_empty,
+            jobs_wait_in_the_order_they_came,
+            a_job_needs_its_account,
+            drafts_read_back_per_account,
+            a_draft_needs_its_account,
+            the_outbox_follows_its_draft,
+            the_schedule_reads_back_by_due_time,
+            a_schedule_entry_needs_what_it_names,
+            a_schedule_entry_leaves_with_what_it_names,
+            a_removed_event_takes_the_entries_of_its_alerts,
+            senders_are_one_per_address_without_case,
+            message_state_is_kept_with_its_message,
+            calendars_hold_events_and_alerts,
+            a_removed_account_takes_its_local_records,
+            a_refused_batch_changes_no_local_record,
         );
     };
     ($make:expr; $($name:ident),+ $(,)?) => {

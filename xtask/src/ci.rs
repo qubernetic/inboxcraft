@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::{Context, Error, assets, cov, flatpak, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, assets, changes, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
 /// Runs an external tool.
 pub trait Runner {
@@ -21,6 +21,16 @@ pub trait Runner {
     ///
     /// [`Error::Spawn`] when the program cannot be started.
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error>;
+
+    /// [`Runner::run`] with the variables of `env` set for the program. A runner that starts no process ignores them.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when the program cannot be started.
+    fn run_with_env(&mut self, program: &OsStr, args: &[&str], env: &[(&str, &str)], dir: &Path) -> Result<bool, Error> {
+        let _ = env;
+        self.run(program, args, dir)
+    }
 
     /// Runs `program` with `args` in `dir`, its standard error going to the terminal, and returns its standard
     /// output, or `None` when it did not exit with 0. A runner that captures no output answers `None`, a failed call.
@@ -40,8 +50,13 @@ pub struct ProcessRunner;
 
 impl Runner for ProcessRunner {
     fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error> {
+        self.run_with_env(program, args, &[], dir)
+    }
+
+    fn run_with_env(&mut self, program: &OsStr, args: &[&str], env: &[(&str, &str)], dir: &Path) -> Result<bool, Error> {
         let status = Command::new(program)
             .args(args)
+            .envs(env.iter().copied())
             .current_dir(dir)
             .status()
             .map_err(|source| Error::Spawn { program: program.to_string_lossy().into_owned(), source })?;
@@ -63,6 +78,8 @@ pub(crate) enum Gate {
     Assets,
     /// `cargo` with these arguments.
     Cargo(&'static [&'static str]),
+    /// `changes`, without `--fold`.
+    Changes,
     /// `cov --check`.
     Cov,
     /// `flatpak-sources-check`.
@@ -82,6 +99,7 @@ pub(crate) const GATES: &[(&str, Gate)] = &[
     ("spdx", Gate::Spdx),
     ("test-files", Gate::TestFiles),
     ("assets", Gate::Assets),
+    ("changes", Gate::Changes),
     ("layers", Gate::Layers),
     ("flatpak-sources-check", Gate::FlatpakSources),
     ("doctests", Gate::Cargo(&["test", "--workspace", "--doc"])),
@@ -100,6 +118,7 @@ pub(crate) fn gate(ctx: &mut Context, out: &mut dyn Write) -> Result<bool, Error
         let result = match gate {
             Gate::Cargo(args) => ctx.runner.run(&ctx.cargo, args, &ctx.root),
             Gate::Assets => assets::gate(&ctx.root, out),
+            Gate::Changes => changes::gate(&ctx.root, false, &changes::today(), out),
             Gate::Cov => cov::gate(ctx, true, out),
             Gate::FlatpakSources => flatpak::gate(&ctx.root, true, out),
             Gate::Layers => layers::gate(&ctx.root, out),

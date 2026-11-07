@@ -42,7 +42,7 @@ pub enum EngineError {
     },
     /// The command names something the store does not hold.
     NotFound {
-        /// What kind of thing: `account`, `folder` or `message`.
+        /// What kind of thing: `account`, `folder`, `message` or `schedule entry`.
         what: &'static str,
         /// Its id.
         id: u64,
@@ -53,6 +53,13 @@ pub enum EngineError {
     Panicked(&'static str),
     /// The command runs only in a session over the invented sample mailbox (`Session::sample`).
     SampleOnly(&'static str),
+    /// The undo history is empty.
+    NothingToUndo,
+    /// The message's move is on its way, so the server's copy cannot be named yet.
+    StillMoving {
+        /// The message.
+        id: u64,
+    },
 }
 
 impl EngineError {
@@ -76,6 +83,8 @@ impl EngineError {
             Self::Store(_) => "store",
             Self::Panicked(_) => "panicked",
             Self::SampleOnly(_) => "sample_only",
+            Self::NothingToUndo => "nothing_to_undo",
+            Self::StillMoving { .. } => "still_moving",
         }
     }
 
@@ -103,6 +112,10 @@ impl fmt::Display for EngineError {
             Self::Store(error) => write!(f, "{error}"),
             Self::Panicked(id) => write!(f, "the command {id} failed inside; nothing was changed"),
             Self::SampleOnly(id) => write!(f, "the command {id} runs only on the sample mailbox (--sample)"),
+            Self::NothingToUndo => f.write_str("there is nothing to undo"),
+            Self::StillMoving { id } => {
+                write!(f, "the message {id} is still on its way to its folder; it can be deleted for good once the server has it there")
+            }
         }
     }
 }

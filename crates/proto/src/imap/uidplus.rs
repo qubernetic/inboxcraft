@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! UIDPLUS (RFC 4315): where copied and moved messages went (`COPYUID`).
+//! UIDPLUS (RFC 4315): where copied and moved messages went (`COPYUID`), and where an appended one went
+//! (`APPENDUID`).
 
 use inboxcraft_model::{Uid, UidSet, UidValidity};
 
@@ -102,6 +103,25 @@ impl CopyUid {
     }
 }
 
+/// `APPENDUID` (RFC 4315 section 3): the UID an appended message got, and the UIDVALIDITY it belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AppendUid {
+    /// The UIDVALIDITY of the mailbox the message went to.
+    pub uid_validity: UidValidity,
+    /// Its UID there.
+    pub uid: Uid,
+}
+
+impl AppendUid {
+    /// `<uidvalidity> <uid>`, the argument of an `APPENDUID` code for one message; a set (MULTIAPPEND) is none.
+    pub(crate) fn parse(arg: &str) -> Option<Self> {
+        let mut words = arg.split_ascii_whitespace();
+        let uid_validity = number(words.next()?).and_then(UidValidity::new)?;
+        let uid = number(words.next()?).and_then(Uid::new)?;
+        words.next().is_none().then_some(Self { uid_validity, uid })
+    }
+}
+
 /// How many UIDs a range names, `6:4` as three.
 fn span(first: Uid, last: Uid) -> u64 {
     u64::from(first.get().abs_diff(last.get())).saturating_add(1)
@@ -144,7 +164,7 @@ fn within(inner: &UidSet, outer: &UidSet) -> bool {
 }
 
 /// A UID set as the server wrote it, `304,6:4`: no `*`, no zero, at most [`MAX_SET_RANGES`] ranges.
-fn ranges(text: &str) -> Option<Vec<(Uid, Uid)>> {
+pub(crate) fn ranges(text: &str) -> Option<Vec<(Uid, Uid)>> {
     let uid = |part: &str| number(part).and_then(Uid::new);
     let parts: Vec<&str> = text.split(',').take(MAX_SET_RANGES.saturating_add(1)).collect();
     if parts.len() > MAX_SET_RANGES {

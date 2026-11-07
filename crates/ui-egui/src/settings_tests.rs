@@ -5,7 +5,7 @@ use egui::Color32;
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent};
 use serde_json::json;
 
-use super::{Settings, colour};
+use super::{Section, Settings, colour};
 use crate::theme::Preset;
 
 #[test]
@@ -66,4 +66,28 @@ fn following_a_preset_puts_its_colours_in_the_fields_and_drops_the_note() {
     let (draft, aurora) = (settings.draft().unwrap(), Preset::of(&appearance.accent));
     assert_eq!((draft.gradient, draft.accent), (aurora.gradient, aurora.accent));
     assert!(settings.note().is_none());
+}
+
+#[test]
+fn closing_forgets_the_key_waited_for_the_text_and_the_notes_so_the_sheet_opens_clean() {
+    let mut settings = Settings::default();
+    settings.open_at(Section::Shortcuts, &Appearance::default());
+    settings.find_mut().push_str("cal");
+    settings.capture(crate::keymap::CALENDAR);
+    assert_eq!(settings.capturing(), Some(crate::keymap::CALENDAR));
+    settings.captured(Some("Ctrl+2 was the key of Show the calendar".to_owned()));
+    assert_eq!(settings.capturing(), None);
+    assert!(settings.keys_note().is_some());
+    settings.capture(crate::keymap::MAIL);
+    assert_eq!(settings.keys_note(), None, "waiting for a key drops the last note");
+    settings.show(Section::Appearance);
+    assert_eq!(settings.capturing(), None, "another page stops the wait");
+    settings.show(Section::Shortcuts);
+    settings.capture(crate::keymap::MAIL);
+    settings.close();
+    assert!(!settings.is_open());
+    assert_eq!((settings.capturing(), settings.find(), settings.keys_note(), settings.note()), (None, "", None, None));
+    settings.find_mut().push_str("left over");
+    settings.open(&Appearance::default());
+    assert_eq!((settings.section(), settings.find()), (Section::Appearance, ""), "opening starts clean too");
 }

@@ -11,6 +11,13 @@ use crate::params::decode;
 use crate::view::{self, ROLES, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[LIST];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["account"];
+
 /// `folder.list`: the folders of every account or of one, the unified views by role, and the roles to ask the owner
 /// about.
 pub(crate) const LIST: CommandSpec = CommandSpec {

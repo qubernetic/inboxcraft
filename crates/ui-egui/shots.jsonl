@@ -16,6 +16,9 @@
 {"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
 {"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
+{"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
+{"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
 # Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
 # failed at the certificate. The check is scripted; nothing connects.
 {"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
@@ -53,7 +56,8 @@
 {"out": "docs/images/icons-aurora-dark.png", "mode": "dark", "preset": "aurora", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-light.png", "mode": "light", "preset": "citrus", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-dark.png", "mode": "dark", "preset": "citrus", "icons": true, "scale": 2}
-# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast.
+# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast;
+# the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
 {"out": "docs/images/components-aurora-light.png", "mode": "light", "preset": "aurora", "components": true}
@@ -104,3 +108,12 @@
 {"out": "docs/images/reader-full-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# The command palette, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
+{"out": "docs/images/palette-light.png", "mode": "light", "size": [1200, 820], "palette": ""}
+{"out": "docs/images/palette-dark.png", "mode": "dark", "size": [1200, 820], "palette": ""}
+{"out": "docs/images/palette-mode-light.png", "mode": "light", "size": [1200, 820], "palette": "mode"}
+{"out": "docs/images/palette-mode-dark.png", "mode": "dark", "size": [1200, 820], "palette": "mode"}
+{"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "calendar": true}
+{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "calendar": true}

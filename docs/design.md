@@ -245,6 +245,8 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
+| Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection gradient; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
+| Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel, Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -255,8 +257,12 @@ colours far enough apart, and that everyone in the sample mail gets an avatar co
 sender's avatar in the message header.
 
 **Keys.** The keymap (`keymap::Keymap`) names which key runs which action, by id (the engine's command ids once
-they have a key; `ui.search.focus`, Ctrl+F, until then). One key runs one action: binding a key takes it from the
-action that had it. Everything that shows a key (tooltips, menu rows, a toast's Undo) reads it when it is drawn.
+they have a key; `ui.search.focus`, Ctrl+F, until then). Every action of the window is listed with its name and icon
+(`keymap::actions`): the command palette shows them all and the Shortcuts page gives each one a key. One key runs one
+action: binding a key takes it from the action that had it. Everything that shows a key (tooltips, menu rows, a
+toast's Undo) reads it when it is drawn. A key without Ctrl, Alt or ⌘ runs nothing while a text field has the focus
+or the settings sheet is open, so a letter typed is typed. The keys are kept in `shortcuts.json` beside the
+appearance file, every action with its key or `null`; an action the file does not name keeps its first key.
 
 ## Motion
 Short and snappy, nothing decorative. Every duration is a motion token (`motion::MOTION`), none longer than 0.25 s:
@@ -282,11 +288,11 @@ window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
 - **Navigation rail** (the window's left edge, full height): the preset's three gradient stops at full strength from
-  top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
-  foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
-  (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
-  (Ctrl+1) leaves the settings sheet; the settings button (Ctrl+Comma) opens the settings page and
-  closes it again. The rail is one button and 8 points either side wide, and shows on every page.
+  top to bottom, the one place the palette runs undiluted. Mail and Calendar sit at the top and the appearance
+  settings at the foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise
+  the deep ink (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at
+  24 %. Mail (Ctrl+1) and Calendar (Ctrl+2) leave the settings sheet; the settings button (Ctrl+Comma) opens the
+  settings page and closes it again. The rail is one button and 8 points either side wide, and shows on every page.
 - **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
@@ -305,17 +311,24 @@ window asks for the next frame; once it has landed, nothing does.
   (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
   date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
   their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
-  Their keys work on the selected row: D Done, R read or unread, Delete; while a text field has the focus they are
-  the field's. They act on the sample mailbox only (`sample.mail.set`); anywhere else no action is drawn and no key
-  acts, until the commands for a real mailbox exist. Done marks the message read and moves it to its account's
-  Archive, Delete to its Trash, read and unread change the dot and the weight.
-- **Slide-out**: a row that Done or Delete takes out of the list slides to the right and fades over the
+  Their keys work on the selected row: D Done, R read or unread, Delete, and A Archive and S flag or not, which have
+  no button on the row; while a text field has the focus they are the field's. They act on a real account as on the
+  sample, through the engine's commands (`mail.seen`, `mail.flag`, `mail.archive`, `mail.delete`): the change shows
+  at once and goes to the server after. Done marks the message read and moves it to its account's Archive, Delete to
+  its Trash (in the Trash it deletes for good), read and unread change the dot and the weight.
+- **Opening** a message marks it read (`mail.open`), as an act Ctrl+Z can take back; a message an undo brought back
+  opens as it was.
+- **Slide-out**: a row that Done, Archive, Delete or a move takes out of the list slides to the right and fades over the
   `row_slide` token, clipped to its place; then it goes and the next-message rule picks the selection. With reduced
   motion it goes at once.
 - **Toast**: after an act, a toast rises from the bottom edge over the `toast` token (in place at once with reduced
-  motion) and says what was done ("Marked as read", "Marked as unread", "Marked as done", "Moved to Trash"), with
-  Undo and its key chip (Ctrl+Z, Cmd+Z on macOS). It stays six seconds; Undo puts the row back where it was, read or
-  unread as it was, and selected again when it was. A new act replaces the toast; once it has gone the act stays.
+  motion) and says what was done ("Marked as read", "Marked as unread", "Flagged", "Flag taken off", "Marked as
+  done", "Moved to Archive", "Moved to Trash", "Moved to <folder>", "Deleted for good"), with Undo and its key chip
+  (Ctrl+Z, Cmd+Z on macOS) when the act can be taken back (not a delete for good, not an act that changed nothing).
+  It stays six seconds; Undo takes the act back through the engine's history (`history.undo`) with every act after
+  it (the next message marked read as it opened), so the row is back where it was, read or unread as it was, and
+  selected again when it was. A new act replaces the toast; once it has gone, Ctrl+Z still walks back through the
+  session's acts, newest first, one at a time.
 - **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
   new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
   card's edge is the preset's gradient, 1.5 points wide.
@@ -345,13 +358,14 @@ the icon sits among others at the same size.
   back. More, Close ends the selection. The arrow keys step through the list while no field has the focus.
 - **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
   Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
-  room. Every action has a tooltip with its key. An action without a command is drawn disabled and its tooltip
-  says "Not available yet": on the sample mailbox Done (D) and Delete (Delete) act on the open message as the
-  list's hover actions do (the toast with Undo follows), everywhere else they are disabled too; Archive, Snooze, Pin
-  and Move wait for their commands.
-- **More**: a menu over the reader (the float over text) with Full width or Leave full width, Close, and the
-  next-message rule ("When a message leaves the list": show the next, show the previous, go back to the list), the
-  chosen one marked.
+  room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
+  as the list's hover actions do (the toast with Undo follows); Move to a folder opens a menu ("Move to") of the
+  folders of the message's account that hold mail but its own, each by its full path, and the one chosen moves it
+  there; with none it is drawn disabled. An action without a command is drawn disabled and its tooltip says "Not
+  available yet": Snooze and Pin wait for theirs.
+- **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
+  unread (R) for the open message, then Full width or Leave full width, Close, and the next-message rule ("When a
+  message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.
 - **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
   under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
@@ -398,11 +412,41 @@ the icon sits among others at the same size.
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again and Change settings after a failure; the link above the page leads back while it runs.
 
+## Command palette
+- **Where**: Ctrl+K anywhere opens it; it leaves the settings sheet. A float on a solid surface 640 points wide near the
+  top of the dimmed window, as on the design file's "Command palette · Ctrl+K" screen.
+- **Layout**: the field ("Type a command", with the magnifier), a line, then every action of the window with its icon,
+  its name and its key at the right end, eight rows in view and the rest scrolling; under them "↑↓ to move · Enter to
+  run · Esc to close" in the caption's muted colour.
+- **Behaviour**: typing narrows the list to the actions whose name (or id) holds every word typed, the names that
+  start with the text first; the first row is picked, on the hover fill. The arrows move the pick round the list,
+  Enter or a press runs it and closes the palette; Escape or a press beside the float closes it and runs nothing. An
+  action that cannot run here (Done with no message selected, Undo with nothing to undo) is listed faded and runs
+  nothing. While the palette is open its keys are its own: the arrows step nothing in the list.
+
+## Shortcuts
+- **Where**: the Shortcuts section of the settings sheet, as on the design file's "Settings · shortcuts" screen.
+- **Layout**: a line on the rule (one key runs one action), the field "Find a command" with Reset all keys at the
+  right, then a row per action: its name, and at the right end its key as a chip ("No key" when it has none) with
+  Remove (the Close icon) before it.
+- **Behaviour**: a press on the chip makes it wait: "press a key…" in the accent with the focus ring. The next key
+  pressed, with the modifiers held, becomes the action's; a key another action had moves, and a line over the list
+  says so ("Ctrl+K was the key of Command palette; it has none now."). Escape stops the wait and keeps the old key;
+  the press reaches nothing else. The new key shows at once everywhere it is shown.
+
+## Calendar
+- **Where**: the rail's Calendar button (Ctrl+2) shows the calendar screen in the place of the folders, the list and
+  the reader; Mail brings them back. The strip's title says "Calendar · InboxCraft".
+- **Empty state** (until calendar sync): one card in the middle with the Calendar icon in Duotone, "No calendars
+  yet" and a line on what will show there. The mail's keys (the arrows, D, R, Delete) rest while it shows.
+
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
-  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance and Accounts are built, the
-  rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it.
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts and Shortcuts are
+  built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
+  the rail's places and their keys; every way out forgets what the open sheet held (the text on the Shortcuts page,
+  an action waiting for a key, the notes), so it opens clean the next time.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
   the preview goes above the controls. The page scrolls.
@@ -433,20 +477,25 @@ sample window without a display and writes the PNGs under `docs/images/`: the un
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
 width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-<mode>.png`), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
+The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette-mode-<mode>.png`, `"palette"`),
+the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
+the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark.
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points
 and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<mode>.png`, `icons-<mode>.png` for
 Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
 buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
-tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
+tooltip, a popup menu and a toast with their key chips, and the time picker for snooze at Friday 14:30 with
+`thu 9` typed and a preset behind hidden (`components-<preset>-<mode>.png`, `components-<mode>.png`
 for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
 list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
 (`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
 page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
 (`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). `"act"` does a hover action to the
-selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done); with `"slide": true` the row of a Done
-or Delete is caught sliding out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
+selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done; `reader-archive-<mode>.png`, Archive on
+the open message, the next one open); with `"slide": true` the row of a Done, Archive or Delete is caught sliding
+out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
 the keyboard-selected row of `list-showcase-<preset>-<mode>.png`. Every picture but a slide is drawn with reduced
 motion, so it shows where each motion ends. Every UI change shows them in its PR.
 

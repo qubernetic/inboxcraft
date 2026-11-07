@@ -219,9 +219,12 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
     assert_ne!(stepped, toast);
     assert_ne!(toast, sliding);
     assert_ne!(toast, read, "another toast");
+    for act in ["flag", "unflag", "archive", "delete", "unread"] {
+        assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
+    }
     for (more, says) in [
-        (r#", "act": "archive""#, "not read, unread, done or delete"),
-        (r#", "act": "read", "slide": true"#, "only done and delete slide"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive or delete"),
+        (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {
         let error = shoot(&line(more)).unwrap_err().to_string();
@@ -384,4 +387,27 @@ fn the_picture_credential_store_takes_and_keeps_nothing() {
     use crate::onboard::Keychain as _;
     assert_eq!(super::Pictured.store(1, "invented-pass"), Ok(()));
     assert_eq!(super::Pictured.forget(1), Ok(()));
+}
+
+#[test]
+fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    for place in [
+        r#""palette": """#,
+        r#""palette": "mode""#,
+        r#""shortcuts": true"#,
+        r#""shortcuts": true, "capture": "ui.calendar.show""#,
+        r#""calendar": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600], {place}}}"#))).unwrap();
+        assert_ne!(picture, window, "{place}");
+    }
+    for bad in [r#""shortcuts": true, "capture": "mail.nothing""#, r#""capture": "ui.calendar.show""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("is not an action on the Shortcuts page"), "{error}");
+    }
+    for place in [r#""palette": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
 }

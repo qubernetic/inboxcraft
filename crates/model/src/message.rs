@@ -9,7 +9,7 @@ use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::text::clean_line;
-use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid};
+use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
 
 /// The longest subject kept, in characters.
 pub const MAX_SUBJECT_CHARS: usize = 1000;
@@ -75,7 +75,7 @@ impl fmt::Display for MessageRef {
 }
 
 /// [`Timestamp`]s as `[seconds, nanoseconds]`, checked on the way in.
-mod timestamp {
+pub(crate) mod timestamp {
     use inboxcraft_time::Timestamp;
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -327,6 +327,13 @@ impl Summary {
         Self { uid, envelope, flags: Flags::default(), size: 0, received: None, preview: None, modseq: None }
     }
 
+    /// With another UID: the same message in another folder, or before the server named its UID there.
+    #[must_use]
+    pub fn with_uid(mut self, uid: Uid) -> Self {
+        self.uid = uid;
+        self
+    }
+
     /// With the flags.
     #[must_use]
     pub fn with_flags(mut self, flags: Flags) -> Self {
@@ -405,6 +412,19 @@ impl Summary {
     }
 }
 
+/// Where the server keeps a message the owner moved, until the server's answer names its UID in the folder it went to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Moving {
+    /// The folder the server keeps it in.
+    pub folder: FolderId,
+    /// That folder's UIDVALIDITY.
+    pub uid_validity: UidValidity,
+    /// Its UID there.
+    pub uid: Uid,
+    /// Its flags there.
+    pub flags: Flags,
+}
+
 /// One copy of a message in one folder: our ids, its thread and the server's summary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -413,13 +433,17 @@ pub struct Message {
     folder: FolderId,
     thread: Option<ThreadId>,
     summary: Summary,
+    /// Set while a move the owner made is on its way: the folder is where the owner put it, the UID only ours. Boxed,
+    /// as most messages have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    moving: Option<Box<Moving>>,
 }
 
 impl Message {
     /// The message `id` in `folder` of `account`, in no thread yet.
     #[must_use]
     pub fn new(id: MessageId, account: AccountId, folder: FolderId, summary: Summary) -> Self {
-        Self { id, account, folder, thread: None, summary }
+        Self { id, account, folder, thread: None, summary, moving: None }
     }
 
     /// With its thread.
@@ -427,6 +451,19 @@ impl Message {
     pub fn with_thread(mut self, thread: Option<ThreadId>) -> Self {
         self.thread = thread;
         self
+    }
+
+    /// With where the server keeps it while a move is on its way, or `None` once the folder and UID are the server's.
+    #[must_use]
+    pub fn with_moving(mut self, moving: Option<Moving>) -> Self {
+        self.moving = moving.map(Box::new);
+        self
+    }
+
+    /// Where the server keeps it while a move the owner made is on its way; its UID here is then only ours.
+    #[must_use]
+    pub fn moving(&self) -> Option<&Moving> {
+        self.moving.as_deref()
     }
 
     /// Our id.

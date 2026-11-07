@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The message list on the design system: the list card, the grouped inbox and screener cards shown by the showcase
-//! `ui_shot` fills, and the hover actions, which act on the sample mailbox and are hidden everywhere else.
+//! `ui_shot` fills, and the hover actions, which act on a real account as on the sample.
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
@@ -15,9 +15,6 @@ use super::{InboxApp, TOAST_SECONDS};
 use crate::mailbox::{Mailbox, Place};
 use crate::sample;
 use crate::theme::install_fonts;
-
-/// The hover actions.
-const ACTIONS: [&str; 3] = ["Done", "Mark as read", "Delete"];
 
 /// The parts of the cards that have no data yet.
 const SHOWCASE_ONLY: [&str; 6] = ["Done all", "Review", "Show all (7)", "People", "Updates", "2 new senders"];
@@ -106,25 +103,23 @@ fn the_app_draws_no_group_or_screener_card() {
 }
 
 #[test]
-fn without_the_sample_no_hover_action_is_drawn_and_no_key_acts() {
+fn on_a_real_account_the_hover_actions_and_their_keys_act_too() {
     // The same mail in a session over a store, as an account's would be: not the sample.
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
-    let mut harness = harness_of(InboxApp::new(Mailbox::new(session, clock())));
-    harness.get_by_label(ODILE).hover();
-    harness.run();
-    harness.key_press(Key::ArrowDown);
-    harness.run();
-    assert!(harness.state().mailbox().keyed());
-    // The reader's toolbar shows Done and Delete too, disabled without the sample.
-    for name in ACTIONS.into_iter().chain(["Undo"]) {
-        assert!(harness.query_all_by_label(name).all(|node| node.accesskit_node().is_disabled()), "{name} shows without the sample");
-    }
-    for key in [Key::D, Key::R, Key::Delete] {
-        harness.key_press(key);
-        harness.run();
-    }
-    assert_eq!(rows(&harness), 11);
+    let mut app = InboxApp::new(Mailbox::new(session, clock()));
+    app.set_reduce_motion(true);
+    let mut harness = harness_of(app);
+    press(&mut harness, ODILE, "Mark as read");
+    harness.get_by_label(ODILE_READ);
+    harness.get_by_label("Marked as read");
+    undo(&mut harness);
     harness.get_by_label(ODILE);
+    press(&mut harness, TEODOR, "Delete");
+    assert!(harness.query_by_label(TEODOR).is_none());
+    assert_eq!(rows(&harness), 10);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.get_by_label(TEODOR);
 }
 
 #[test]
@@ -168,24 +163,37 @@ fn the_keys_act_on_the_keyboard_selected_row_and_the_undo_key_undoes() {
     let mut harness = still();
     harness.key_press(Key::ArrowDown);
     harness.run();
-    harness.key_press(Key::R);
-    harness.run();
     harness.get_by_label(ODILE_READ);
     harness.key_press(Key::R);
     harness.run();
     harness.get_by_label(ODILE);
+    harness.key_press(Key::R);
+    harness.run();
+    harness.get_by_label(ODILE_READ);
+    harness.key_press(Key::S);
+    harness.run();
+    harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, flagged");
+    harness.key_press(Key::S);
+    harness.run();
+    harness.get_by_label(ODILE_READ);
     harness.key_press(Key::D);
     harness.run();
-    assert!(harness.query_by_label(ODILE).is_none());
+    assert!(harness.query_by_label(ODILE_READ).is_none());
     harness.get_by_label("Ctrl+Z");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
-    harness.get_by_label(ODILE);
+    harness.get_by_label(ODILE_READ);
     let rota = harness.state().mailbox().messages()[0].id;
     assert_eq!(harness.state().mailbox().selected(), Some(rota), "selected again");
+    harness.key_press(Key::A);
+    harness.run();
+    assert!(harness.query_by_label(ODILE_READ).is_none());
+    harness.get_by_label("Moved to Archive");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
     harness.key_press(Key::Delete);
     harness.run();
-    assert!(harness.query_by_label(ODILE).is_none());
+    assert!(harness.query_by_label(ODILE_READ).is_none());
     harness.get_by_label("Moved to Trash");
 }
 

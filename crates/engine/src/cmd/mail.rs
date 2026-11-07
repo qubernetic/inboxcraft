@@ -11,9 +11,17 @@ use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::arrive::screener;
 use crate::params::{decode, parse_date};
 use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
+
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, THREAD];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
 
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
@@ -61,7 +69,18 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let entries = view::merged(context, &view::folders(context, view, account)?)?;
     let limit = limit(params.limit);
     let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
-    let messages: Vec<Value> = entries.iter().skip(offset).take(limit).map(json::message).collect();
+    let accounts = context.store().accounts()?;
+    let mut messages = Vec::new();
+    for entry in entries.iter().skip(offset).take(limit) {
+        let message = entry.message();
+        let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+        let new = screener::is_new(context.store(), context.state().screener, role, &accounts, message)?;
+        let mut shown = json::message(entry);
+        if let Value::Object(fields) = &mut shown {
+            fields.insert("new_sender".into(), json!(new));
+        }
+        messages.push(shown);
+    }
     let shown = match view {
         View::Folder(folder) => json!({ "folder": folder.get() }),
         View::Role(role) => json!({ "role": view::role_name(role) }),
@@ -95,14 +114,23 @@ struct ReadParams {
 
 fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: ReadParams = decode(READ.id, params)?;
-    let id = MessageId::new(params.id);
+    read_one(context, params.id)
+}
+
+/// `mail.read` of the message `id`.
+pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, EngineError> {
+    let id = MessageId::new(number);
     let store = context.store();
-    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: number })?;
     let message = entry.message();
     let body = store.body(id)?;
     let too_large = body.is_none() && context.state().too_large.contains(&id);
+    let blocked = blocked(context, message)?;
     let fetch = match (&body, context.state().validity.get(&message.folder())) {
-        (None, Some(uid_validity)) if !too_large => {
+        // A blocked sender's message is never fetched: it shows what is kept, or that nothing is.
+        _ if blocked => None,
+        // A message whose move is on its way has no UID of the server's yet; its body comes once it has.
+        (None, Some(uid_validity)) if !too_large && message.moving().is_none() => {
             store.folders(message.account())?.into_iter().find(|folder| folder.id() == message.folder()).map(|folder| JobKind::FetchBody {
                 folder: folder.id(),
                 path: folder.listing().path().clone(),
@@ -123,10 +151,19 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
     }
-    let body_error = too_large.then_some("too_large");
-    let remote_allowed = super::remote::allowed(context, envelope.from());
-    let mut outcome =
-        Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error, "remote_allowed": remote_allowed }));
+    let body_error = if too_large {
+        Some("too_large")
+    } else {
+        (blocked && body.is_none()).then_some("not_downloaded")
+    };
+    let remote_allowed = !blocked && super::remote::allowed(context, envelope.from());
+    let mut outcome = Outcome::new(json!({
+        "message": shown,
+        "fetching": fetch.is_some(),
+        "body_error": body_error,
+        "remote_allowed": remote_allowed,
+        "blocked": blocked,
+    }));
     if !entry.opened() {
         outcome = outcome.with_change(Change::MarkOpened(id));
     }
@@ -134,6 +171,18 @@ fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         outcome = outcome.with_fetch(message.account(), kind, id);
     }
     Ok(outcome)
+}
+
+/// Whether `message` is from a blocked sender, or in a blocked folder.
+fn blocked(context: &Context<'_>, message: &Message) -> Result<bool, EngineError> {
+    let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+    if role == Some(Role::Blocked) {
+        return Ok(true);
+    }
+    match screener::sender_of(message) {
+        Some(address) => Ok(context.store().sender(address)?.is_some_and(|sender| sender.screening == Some(inboxcraft_model::Screening::Blocked))),
+        None => Ok(false),
+    }
 }
 
 /// `mail.thread`: the thread a message is in, oldest first, across folders and accounts (linked by `Message-ID`,

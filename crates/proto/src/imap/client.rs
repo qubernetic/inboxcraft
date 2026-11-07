@@ -6,21 +6,22 @@
 use std::collections::{HashSet, VecDeque};
 use std::fmt;
 
-use inboxcraft_model::{Uid, UidSet, UidValidity};
+use inboxcraft_model::{Flags, Uid, UidSet, UidValidity};
 
 use super::capability::{Capabilities, MAX_CAPABILITIES, MAX_CAPABILITY_LEN, is_atom_char};
 use super::command::{Command, escaped};
 use super::fetch::{FetchAttributes, FetchItem};
-use super::frame::Framer;
+use super::frame::{Framer, MAX_LITERAL};
 use super::list::{ListEntry, MAX_MAILBOXES, check_mailbox};
 use super::mailbox::{MailboxStatus, flag_list};
 use super::notify::{MailboxCounts, Notify};
 use super::response::{Response, classify};
-use super::sasl::{check_credentials, plain_response};
+use super::sasl::{base64_forms, check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
+use super::store::{FlagStore, modified};
 use super::sync::{Extension, SelectOptions, vanished};
 use super::text::Secrets;
-use super::uidplus::CopyUid;
+use super::uidplus::{AppendUid, CopyUid};
 use super::value::{Piece, Status, StatusLine, Value, number};
 use crate::ProtoError;
 
@@ -158,6 +159,18 @@ pub enum Answer {
     Copied(Option<CopyUid>),
     /// UID MOVE, or the steps that stand in for it.
     Moved(Moved),
+    /// UID STORE: the flags the messages have now came as [`Event::Fetched`] (unless it was silent).
+    Stored {
+        /// The UIDs that changed since the UNCHANGEDSINCE given and were left as they were (`MODIFIED`); empty
+        /// without it.
+        modified: UidSet,
+    },
+    /// APPEND, with where the message went when the server says so (UIDPLUS).
+    Appended(Option<AppendUid>),
+    /// CREATE.
+    Created,
+    /// CLOSE or UNSELECT: no mailbox is open now.
+    Unselected,
     /// UID EXPUNGE: the messages that went came as [`Event::Expunged`] or [`Event::Vanished`].
     Expunged,
     /// COMPRESS DEFLATE: from the byte after this answer on, both directions are compressed (RFC 4978, raw DEFLATE
@@ -243,8 +256,14 @@ enum Kind {
     Search(Vec<Uid>),
     /// UID COPY of these UIDs.
     Copy(UidSet),
+    /// UID STORE of these UIDs.
+    Store(UidSet),
     Move(Moving),
     Expunge,
+    Append,
+    Create,
+    /// CLOSE or UNSELECT.
+    Unselect,
     Compress,
     /// NOTIFY SET (`set`) or NOTIFY NONE.
     Notify {
@@ -505,12 +524,29 @@ impl Client {
         if self.sign_in_capabilities()?.has("LOGINDISABLED") {
             return Err(ProtoError::NotOffered("LOGIN"));
         }
+        self.hide_credentials(user, password)?;
+        let command = Command::new("LOGIN").string(user.as_bytes()).string(password.as_bytes());
+        Ok(self.start(command, Kind::SignIn))
+    }
+
+    /// Checks the credentials and adds the password to what is never shown, in every form a server may write it
+    /// back in, whether it went out with LOGIN or AUTHENTICATE PLAIN.
+    fn hide_credentials(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
         check_credentials(user, password)?;
         self.secrets.add(password);
         // The form inside the quotes, when it differs: a server may write the argument back as it came.
         self.secrets.add(&String::from_utf8_lossy(&escaped(password.as_bytes())));
-        let command = Command::new("LOGIN").string(user.as_bytes()).string(password.as_bytes());
-        Ok(self.start(command, Kind::SignIn))
+        for form in base64_forms(user, password)? {
+            self.secrets.add(&form);
+        }
+        // And of the password without its edge white space, which a server may trim before it encodes it.
+        let trimmed = password.trim();
+        if !trimmed.is_empty() && trimmed != password {
+            for form in base64_forms(user, trimmed)? {
+                self.secrets.add(&form);
+            }
+        }
+        Ok(())
     }
 
     /// AUTHENTICATE PLAIN (RFC 4616), over an encrypted connection to a server that offers `AUTH=PLAIN`; with
@@ -527,8 +563,7 @@ impl Client {
         }
         let inline = capabilities.has("SASL-IR");
         let response = plain_response(user, password)?;
-        self.secrets.add(password);
-        self.secrets.add(&response);
+        self.hide_credentials(user, password)?;
         let command = Command::new("AUTHENTICATE PLAIN");
         if inline {
             return Ok(self.start(command.arg(&response), Kind::SignIn));
@@ -636,6 +671,68 @@ impl Client {
         Ok(self.start(command, Kind::Select(Opening { status, known: options.known.map(|known| known.uid_validity()), closing })))
     }
 
+    /// CLOSE: closes the mailbox open, and removes the messages marked `\Deleted` from it when it was opened
+    /// read-write, without telling which. [`unselect`](Self::unselect) removes nothing.
+    ///
+    /// # Errors
+    ///
+    /// A state error.
+    pub fn close(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("CLOSE", &[State::Selected])?;
+        Ok(self.start(Command::new("CLOSE"), Kind::Unselect))
+    }
+
+    /// UNSELECT (RFC 3691, in IMAP4rev2): closes the mailbox open and removes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::CapabilitiesUnknown`], [`ProtoError::NotOffered`] without UNSELECT or IMAP4rev2, or a state error.
+    pub fn unselect(&mut self) -> Result<Tag, ProtoError> {
+        self.ready("UNSELECT", &[State::Selected])?;
+        self.require_in_rev2("UNSELECT")?;
+        Ok(self.start(Command::new("UNSELECT"), Kind::Unselect))
+    }
+
+    /// CREATE: a new mailbox, the name as the server writes it (see [`crate::imap::encode_utf7`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::BadArgument`] for an empty or overlong name or one with a control character, a state error.
+    pub fn create(&mut self, mailbox: &str) -> Result<Tag, ProtoError> {
+        self.ready("CREATE", &[State::Authenticated, State::Selected])?;
+        check_mailbox(mailbox)?;
+        Ok(self.start(Command::new("CREATE").string(mailbox.as_bytes()), Kind::Create))
+    }
+
+    /// APPEND (RFC 9051 section 6.3.12) of the message `raw` (RFC 5322 bytes) to `mailbox`, with `flags`. The message
+    /// goes as a literal after the server's go-ahead; a server that refuses at once gets none of it. With UIDPLUS the
+    /// answer says the UID it got.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::BadArgument`] for a mailbox name that cannot be sent, an empty message, one with a NUL (no IMAP
+    /// literal carries it) or one larger than [`MAX_LITERAL`]; a state error.
+    pub fn append(&mut self, mailbox: &str, flags: &Flags, raw: &[u8]) -> Result<Tag, ProtoError> {
+        self.ready("APPEND", &[State::Authenticated, State::Selected])?;
+        check_mailbox(mailbox)?;
+        if raw.is_empty() {
+            return Err(ProtoError::BadArgument("empty message"));
+        }
+        if raw.contains(&0) {
+            return Err(ProtoError::BadArgument("message with a NUL"));
+        }
+        if raw.len() > MAX_LITERAL {
+            return Err(ProtoError::BadArgument("message too large"));
+        }
+        let mut command = Command::new("APPEND").string(mailbox.as_bytes());
+        if !flags.is_empty() {
+            // Checked atoms (`Flag`): nothing in them needs quoting.
+            let flags: Vec<String> = flags.iter().map(|flag| flag.to_string()).collect();
+            command = command.arg(&format!("({})", flags.join(" ")));
+        }
+        Ok(self.start(command.literal(raw), Kind::Append))
+    }
+
     /// UID FETCH of the messages in `set`, with their UID and `attributes`; they come as [`Event::Fetched`].
     ///
     /// # Errors
@@ -687,6 +784,25 @@ impl Client {
         check_mailbox(mailbox)?;
         let command = Command::new("UID COPY").arg(&set_text(set)?).string(mailbox.as_bytes());
         Ok(self.start(command, Kind::Copy(set.clone())))
+    }
+
+    /// UID STORE (RFC 9051 section 6.4.6) of the flags of the messages in `set`: see [`FlagStore`]. The flags they
+    /// have now come as [`Event::Fetched`] unless it is silent.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtoError::NotOffered`] for UNCHANGEDSINCE from a server without CONDSTORE, [`ProtoError::ReadOnly`],
+    /// [`ProtoError::BadArgument`] for a set that cannot be sent, or a state error.
+    pub fn uid_store(&mut self, set: &UidSet, store: &FlagStore) -> Result<Tag, ProtoError> {
+        self.ready("UID STORE", &[State::Selected])?;
+        if store.unchanged_since.is_some() {
+            self.require_condstore()?;
+        }
+        if self.read_only {
+            return Err(ProtoError::ReadOnly);
+        }
+        let command = store.command(set)?;
+        Ok(self.start(command, Kind::Store(set.clone())))
     }
 
     /// UID MOVE (RFC 6851) of the messages in `set` to `mailbox`, the name as the server wrote it. A server without
@@ -1195,7 +1311,19 @@ impl Client {
                 return Ok(None);
             }
             Kind::Copy(asked) => Answer::Copied(copy_uid(line, &asked)),
+            Kind::Store(asked) => {
+                let modified = if line.code == "MODIFIED" { modified(&line.arg, &asked) } else { UidSet::default() };
+                Answer::Stored { modified }
+            }
             Kind::Expunge => Answer::Expunged,
+            Kind::Append => Answer::Appended((line.code == "APPENDUID").then(|| AppendUid::parse(&line.arg)).flatten()),
+            Kind::Create => Answer::Created,
+            Kind::Unselect => {
+                self.state = State::Authenticated;
+                self.uid_validity = None;
+                self.read_only = false;
+                Answer::Unselected
+            }
             Kind::Compress => {
                 self.compressed = true;
                 // Not read here: the caller inflates it first.

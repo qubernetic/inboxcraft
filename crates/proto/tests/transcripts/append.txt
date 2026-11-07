@@ -1,0 +1,75 @@
+# APPEND (RFC 9051 section 6.3.12): a message added to a mailbox, always as a literal; APPENDUID (UIDPLUS, RFC 4315
+# section 3) says the UID it got there.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 UIDPLUS] ready
+= greeted preauth
+> append Drafts \Seen,\Draft Hi
+C: A0001 APPEND "Drafts" (\Seen \Draft) {2}
+S: + go ahead
+C: Hi
+S: A0001 OK [APPENDUID 38505 3955] APPEND completed
+= A0001 appended 38505 3955
+# Without flags there is no flag list; a message with line ends goes the same way.
+> append Sent - Line_one|Line_two
+C: A0002 APPEND "Sent" {18}
+S: + go ahead
+C: Line one
+C: Line two
+S: A0002 OK APPEND completed
+= A0002 appended
+# An APPENDUID that cannot be read is left out: a zero, words that are no number, a UID set (MULTIAPPEND).
+> append Sent - Hi
+C: A0003 APPEND "Sent" {2}
+S: + go ahead
+C: Hi
+S: A0003 OK [APPENDUID 0 7] APPEND completed
+= A0003 appended
+> append Sent - Hi
+C: A0004 APPEND "Sent" {2}
+S: + go ahead
+C: Hi
+S: A0004 OK [APPENDUID 38505 7:8] APPEND completed
+= A0004 appended
+> append Sent - Hi
+C: A0005 APPEND "Sent" {2}
+S: + go ahead
+C: Hi
+S: A0005 OK [APPENDUID 38505] APPEND completed
+= A0005 appended
+> append Sent - Hi
+C: A0006 APPEND "Sent" {2}
+S: + go ahead
+C: Hi
+S: A0006 OK [APPENDUID 38505 7 8] APPEND completed
+= A0006 appended
+# The server may refuse before the go-ahead: the message is not sent.
+> append Lists/Rust - Hi
+C: A0007 APPEND "Lists/Rust" {2}
+S: A0007 NO [TRYCREATE] No such mailbox
+= A0007 No [TRYCREATE] No such mailbox
+# A message no IMAP literal can carry, or none at all, is refused before anything is sent.
+> append Sent - Hi~
+! BadArgument("message with a NUL")
+> append Sent - -
+! BadArgument("empty message")
+# In a mailbox open, the new message is told as it comes.
+> select Sent
+C: A0008 SELECT "Sent"
+S: * 1 EXISTS
+S: A0008 OK [READ-WRITE] done
+= A0008 selected exists=1 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> append Sent - Hi
+C: A0009 APPEND "Sent" {2}
+S: + go ahead
+C: Hi
+S: * 2 EXISTS
+S: A0009 OK [APPENDUID 38505 8] APPEND completed
+= exists 2
+= A0009 appended 38505 8
+
+# Not signed in: no APPEND.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready
+= greeted
+> append Sent - Hi
+! WrongState { command: "APPEND", state: NotAuthenticated }
