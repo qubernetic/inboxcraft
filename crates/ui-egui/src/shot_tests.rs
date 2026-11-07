@@ -385,3 +385,26 @@ fn the_picture_credential_store_takes_and_keeps_nothing() {
     assert_eq!(super::Pictured.store(1, "invented-pass"), Ok(()));
     assert_eq!(super::Pictured.forget(1), Ok(()));
 }
+
+#[test]
+fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    for place in [
+        r#""palette": """#,
+        r#""palette": "mode""#,
+        r#""shortcuts": true"#,
+        r#""shortcuts": true, "capture": "ui.calendar.show""#,
+        r#""calendar": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600], {place}}}"#))).unwrap();
+        assert_ne!(picture, window, "{place}");
+    }
+    for bad in [r#""shortcuts": true, "capture": "mail.nothing""#, r#""capture": "ui.calendar.show""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("is not an action on the Shortcuts page"), "{error}");
+    }
+    for place in [r#""palette": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}

@@ -18,7 +18,10 @@
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
-//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page.
+//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
+//! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
+//! (`ui.calendar.show`). `palette` opens the command palette with that text typed (`""` for the whole list), and
+//! `calendar` set to `true` shows the calendar screen.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
@@ -122,6 +125,18 @@ pub struct Shot {
     /// Whether the settings sheet is open on Accounts.
     #[serde(default)]
     pub accounts: Option<bool>,
+    /// Whether the settings sheet is open on Shortcuts.
+    #[serde(default)]
+    pub shortcuts: Option<bool>,
+    /// The action waiting for a key on the Shortcuts page.
+    #[serde(default)]
+    pub capture: Option<String>,
+    /// The text typed into the command palette, which opens it.
+    #[serde(default)]
+    pub palette: Option<String>,
+    /// Whether the calendar screen shows.
+    #[serde(default)]
+    pub calendar: Option<bool>,
     /// Whether the window has no account yet (and can add one) instead of the sample's.
     #[serde(default)]
     pub first: Option<bool>,
@@ -247,6 +262,29 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
+/// command palette with its text.
+fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if shot.calendar == Some(true) {
+        app.show_calendar();
+    }
+    if shot.shortcuts == Some(true) {
+        app.open_shortcuts();
+    }
+    if let Some(waiting) = &shot.capture {
+        let Some(action) = crate::keymap::action(waiting).filter(|_| shot.shortcuts == Some(true)) else {
+            return Err(bad(format!("{}: capture {waiting:?} is not an action on the Shortcuts page", shot.out)));
+        };
+        app.settings_mut().capture(action.id);
+    }
+    if let Some(text) = &shot.palette {
+        let palette = app.palette_mut();
+        palette.open();
+        palette.set_query(text);
+    }
+    Ok(())
+}
+
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
@@ -256,6 +294,10 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.onboard.is_some()
         || shot.settings.is_some()
         || shot.accounts.is_some()
+        || shot.shortcuts.is_some()
+        || shot.capture.is_some()
+        || shot.palette.is_some()
+        || shot.calendar.is_some()
         || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
@@ -724,6 +766,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.accounts == Some(true) {
         app.open_accounts();
     }
+    places(&mut app, shot)?;
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
     render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer)
