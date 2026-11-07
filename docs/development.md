@@ -128,7 +128,7 @@ included) and fails on:
   `store` -> `model`, `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
-- `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
+- `testkit` with any dependency on `proto` or `dav` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
@@ -460,7 +460,9 @@ safe HTML display, `ui_reader`, the reader's picture decoder and quote splitter,
 typed into the time picker, `ui_keymap` (#130), the keys' file and a key written as text, `mcp_lines` (#141), the MCP
 server's input, `control_lines` (#142), the control channel's request and answer lines, and `ical_calendar` and
 `ical_rule` (#143): a calendar object read, written, read again and expanded over a day, and a recurrence rule read,
-written and expanded.
+written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the DAV XML and multistatus readers, the
+CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
+and XML readers and session.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.

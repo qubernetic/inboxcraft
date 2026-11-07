@@ -226,6 +226,20 @@ impl TestClient {
         }
     }
 
+    /// Reads what the server sent next, as it came: bytes buffered past the last line first, else one read from the
+    /// connection. For a client that frames the answers itself, such as an HTTP response reader.
+    ///
+    /// # Errors
+    ///
+    /// [`ErrorKind::Dropped`] when the server closed the connection, [`ErrorKind::Timeout`] when it did not answer.
+    pub fn read_some(&mut self) -> Result<Vec<u8>, ClientError> {
+        let bytes = self.reader.read_some(&mut self.link).map_err(|err| ClientError::from_io(&err, self.far_off))?;
+        if bytes.is_empty() {
+            return Err(ClientError::new(ErrorKind::Dropped, "the server closed the connection"));
+        }
+        Ok(bytes)
+    }
+
     /// Compresses both directions from now on, after the server answered `COMPRESS DEFLATE` with OK.
     pub fn compress(&mut self) {
         self.link.deflate = Some(Box::new(Deflate::new()));

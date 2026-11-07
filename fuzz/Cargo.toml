@@ -19,6 +19,7 @@ inboxcraft-html = { path = "../crates/html" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
 inboxcraft-ical = { path = "../crates/ical" }
+inboxcraft-dav = { path = "../crates/dav" }
 inboxcraft-proto = { path = "../crates/proto" }
 inboxcraft-net = { path = "../crates/net" }
 inboxcraft-testkit = { path = "../crates/testkit" }
@@ -195,6 +196,27 @@ bench = false
 [[bin]]
 name = "ical_rule"
 path = "fuzz_targets/ical_rule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dav_xml"
+path = "fuzz_targets/dav_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dav_client"
+path = "fuzz_targets/dav_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "testkit_dav"
+path = "fuzz_targets/testkit_dav.rs"
 test = false
 doc = false
 bench = false
