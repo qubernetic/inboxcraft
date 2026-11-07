@@ -208,7 +208,13 @@ pub fn a_replaced_message_keeps_its_body_and_opened_mark<S: Storage>(mut store: 
 pub fn flags_are_set_on_the_held_message<S: Storage>(mut store: S) {
     two_accounts(&mut store);
     let mut thread_message = message(1, 1, 1, 5, "x", None);
-    thread_message = thread_message.with_thread(Some(inboxcraft_model::ThreadId::new(4)));
+    let moving = inboxcraft_model::Moving {
+        folder: FolderId::new(2),
+        uid_validity: UidValidity::new(3).unwrap(),
+        uid: Uid::new(8).unwrap(),
+        flags: Flags::default(),
+    };
+    thread_message = thread_message.with_thread(Some(inboxcraft_model::ThreadId::new(4))).with_moving(Some(moving.clone()));
     put(&mut store, vec![Change::PutMessage(thread_message)]).unwrap();
     let mut flags = Flags::default();
     flags.insert(Flag::Seen);
@@ -217,6 +223,7 @@ pub fn flags_are_set_on_the_held_message<S: Storage>(mut store: S) {
     let held = store.message(m(1)).unwrap().unwrap();
     assert_eq!(held.message().summary().flags(), &flags);
     assert_eq!(held.message().thread(), Some(inboxcraft_model::ThreadId::new(4)));
+    assert_eq!(held.message().moving(), Some(&moving), "a move on its way stays noted");
     assert_eq!(put(&mut store, vec![Change::SetFlags(m(9), flags)]), Err(StoreError::UnknownMessage(m(9))));
 }
 
