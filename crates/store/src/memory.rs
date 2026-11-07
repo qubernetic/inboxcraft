@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use inboxcraft_model::{
-    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Flags, Folder, FolderId,
-    FolderState, Job, Message, MessageId, MessageState, Outgoing, ScheduleId, Scheduled, Sender, Uid,
+    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, Flags, Folder,
+    FolderId, FolderState, Job, Message, MessageId, MessageState, Outgoing, ScheduleId, Scheduled, Sender, Uid,
 };
 use inboxcraft_time::Timestamp;
 
@@ -144,6 +144,12 @@ impl State {
                 self.outbox.remove(id);
             }
             Change::PutScheduled(entry) => {
+                match entry.what {
+                    Due::Send(id) if !self.drafts.contains_key(&id) => return Err(StoreError::UnknownDraft(id)),
+                    Due::Unsnooze(id) | Due::FollowUp(id) if !self.messages.contains_key(&id) => return Err(StoreError::UnknownMessage(id)),
+                    Due::Alert(id) if !self.alerts.contains_key(&id) => return Err(StoreError::UnknownAlert(id)),
+                    _ => {}
+                }
                 self.schedule.insert(entry.id, entry.clone());
             }
             Change::RemoveScheduled(id) => {
@@ -186,9 +192,7 @@ impl State {
                 }
                 self.alerts.insert(alert.id, alert.clone());
             }
-            Change::RemoveAlert(id) => {
-                self.alerts.remove(id);
-            }
+            Change::RemoveAlert(id) => self.remove_alert(*id),
         }
         Ok(())
     }
@@ -200,6 +204,12 @@ impl State {
     fn remove_draft(&mut self, id: DraftId) {
         self.drafts.remove(&id);
         self.outbox.remove(&id);
+        self.schedule.retain(|_, entry| entry.what != Due::Send(id));
+    }
+
+    fn remove_alert(&mut self, id: AlertId) {
+        self.alerts.remove(&id);
+        self.schedule.retain(|_, entry| entry.what != Due::Alert(id));
     }
 
     fn remove_calendar(&mut self, id: CalendarId) {
@@ -212,7 +222,10 @@ impl State {
 
     fn remove_event(&mut self, id: CalendarEventId) {
         self.events.remove(&id);
-        self.alerts.retain(|_, alert| alert.event != id);
+        let alerts: Vec<AlertId> = self.alerts.values().filter(|alert| alert.event == id).map(|alert| alert.id).collect();
+        for alert in alerts {
+            self.remove_alert(alert);
+        }
     }
 
     fn held(&mut self, id: MessageId) -> Result<&mut Held, StoreError> {
@@ -267,6 +280,7 @@ impl State {
             self.forget_uid(&held.message);
         }
         self.states.remove(&id);
+        self.schedule.retain(|_, entry| !matches!(entry.what, Due::Unsnooze(message) | Due::FollowUp(message) if message == id));
     }
 
     fn forget_uid(&mut self, message: &Message) {

@@ -125,7 +125,25 @@ pub fn the_outbox_follows_its_draft<S: Storage>(mut store: S) {
     assert!(store.outbox().unwrap().is_empty(), "a removed draft takes its outbox item");
 }
 
+/// Draft 4, messages 2 and 3, and alert 1 (of event 1 in calendar 1): what schedule entries name.
+fn schedule_targets<S: Storage>(store: &mut S) {
+    two_accounts(store);
+    put(
+        store,
+        vec![
+            Change::PutDraft(draft(4, 1, "later")),
+            Change::PutMessage(message(2, 1, 1, 2, "two", Some(1))),
+            Change::PutMessage(message(3, 1, 1, 3, "three", Some(1))),
+            Change::PutCalendar(calendar(1, 1, "home")),
+            Change::PutCalendarEvent(event(1, 1)),
+            Change::PutAlert(alert(1, 1, 1)),
+        ],
+    )
+    .unwrap();
+}
+
 pub fn the_schedule_reads_back_by_due_time<S: Storage>(mut store: S) {
+    schedule_targets(&mut store);
     put(
         &mut store,
         vec![
@@ -142,6 +160,52 @@ pub fn the_schedule_reads_back_by_due_time<S: Storage>(mut store: S) {
     assert_eq!(ids(&store), [1, 2, 4]);
     assert_eq!(store.schedule().unwrap().last(), Some(&scheduled(4, 40, Due::Alert(AlertId::new(1)))));
     put(&mut store, vec![Change::RemoveScheduled(ScheduleId::new(99))]).unwrap();
+}
+
+pub fn a_schedule_entry_needs_what_it_names<S: Storage>(mut store: S) {
+    schedule_targets(&mut store);
+    let refused = |store: &mut S, what| put(store, vec![Change::PutScheduled(scheduled(1, 1, what))]);
+    assert_eq!(refused(&mut store, Due::Send(d(9))), Err(StoreError::UnknownDraft(d(9))));
+    assert_eq!(refused(&mut store, Due::Unsnooze(m(9))), Err(StoreError::UnknownMessage(m(9))));
+    assert_eq!(refused(&mut store, Due::FollowUp(m(9))), Err(StoreError::UnknownMessage(m(9))));
+    assert_eq!(refused(&mut store, Due::Alert(AlertId::new(9))), Err(StoreError::UnknownAlert(AlertId::new(9))));
+    assert!(store.schedule().unwrap().is_empty());
+    put(&mut store, vec![Change::PutScheduled(scheduled(1, 1, Due::Send(d(4)))), Change::PutScheduled(scheduled(1, 2, Due::Unsnooze(m(2))))])
+        .unwrap();
+    put(&mut store, vec![Change::RemoveDraft(d(4))]).unwrap();
+    assert_eq!(store.schedule().unwrap(), [scheduled(1, 2, Due::Unsnooze(m(2)))], "a replaced entry names its new target only");
+}
+
+/// An id can be handed out again once the record holding it is gone: an entry left behind would act on another one.
+pub fn a_schedule_entry_leaves_with_what_it_names<S: Storage>(mut store: S) {
+    schedule_targets(&mut store);
+    put(
+        &mut store,
+        vec![
+            Change::PutScheduled(scheduled(1, 1, Due::Send(d(4)))),
+            Change::PutScheduled(scheduled(2, 1, Due::Unsnooze(m(2)))),
+            Change::PutScheduled(scheduled(3, 1, Due::FollowUp(m(2)))),
+            Change::PutScheduled(scheduled(4, 1, Due::FollowUp(m(3)))),
+            Change::PutScheduled(scheduled(5, 1, Due::Alert(AlertId::new(1)))),
+        ],
+    )
+    .unwrap();
+    let ids = |store: &S| store.schedule().unwrap().iter().map(|entry| entry.id.get()).collect::<Vec<_>>();
+    put(&mut store, vec![Change::RemoveMessage(m(2))]).unwrap();
+    assert_eq!(ids(&store), [1, 4, 5], "a removed message takes its snooze and its follow-up");
+    put(&mut store, vec![Change::RemoveAlert(AlertId::new(1))]).unwrap();
+    assert_eq!(ids(&store), [1, 4], "a removed alert takes its entry");
+    put(&mut store, vec![Change::RemoveDraft(d(4))]).unwrap();
+    assert_eq!(ids(&store), [4], "a removed draft is not sent later");
+    put(&mut store, vec![Change::RemoveFolder(FolderId::new(1))]).unwrap();
+    assert!(store.schedule().unwrap().is_empty(), "and what goes with a folder takes its entries too");
+}
+
+pub fn a_removed_event_takes_the_entries_of_its_alerts<S: Storage>(mut store: S) {
+    schedule_targets(&mut store);
+    put(&mut store, vec![Change::PutScheduled(scheduled(1, 1, Due::Alert(AlertId::new(1))))]).unwrap();
+    put(&mut store, vec![Change::RemoveCalendarEvent(e(1))]).unwrap();
+    assert!(store.schedule().unwrap().is_empty());
 }
 
 pub fn senders_are_one_per_address_without_case<S: Storage>(mut store: S) {
@@ -255,7 +319,7 @@ pub fn a_removed_account_takes_its_local_records<S: Storage>(mut store: S) {
     assert!(store.calendars(AccountId::new(1)).unwrap().is_empty());
     assert_eq!(store.calendar_event(e(1)).unwrap(), None);
     assert!(store.alerts(e(1)).unwrap().is_empty());
-    assert_eq!(store.schedule().unwrap().len(), 1, "the schedule names no account; the engine drops what is due for nothing");
+    assert!(store.schedule().unwrap().is_empty(), "the account's draft took its schedule entry");
     assert_eq!(store.senders().unwrap().len(), 1, "senders are across accounts");
 }
 

@@ -3,7 +3,9 @@
 
 //! The local records in SQLite: the job queue, drafts, outbox, schedule, senders, message state and calendars.
 
-use inboxcraft_model::{AccountId, Alert, Calendar, CalendarEvent, CalendarId, Draft, Job, MessageId, MessageState, Outgoing, Scheduled, Sender};
+use inboxcraft_model::{
+    AccountId, Alert, Calendar, CalendarEvent, CalendarId, Draft, Due, Job, MessageId, MessageState, Outgoing, Scheduled, Sender,
+};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::{exists, json, key};
@@ -54,10 +56,29 @@ pub(super) fn put_outgoing(tx: &Transaction<'_>, outgoing: &Outgoing) -> Result<
 }
 
 pub(super) fn put_scheduled(tx: &Transaction<'_>, entry: &Scheduled) -> Result<(), StoreError> {
+    let (mut draft, mut message, mut alert) = (None, None, None);
+    match entry.what {
+        Due::Send(id) => {
+            let held_draft = key(id.get())?;
+            if !held(tx, "draft", held_draft)? {
+                return Err(StoreError::UnknownDraft(id));
+            }
+            draft = Some(held_draft);
+        }
+        Due::Unsnooze(id) | Due::FollowUp(id) => message = Some(exists(tx, id)?),
+        Due::Alert(id) => {
+            let held_alert = key(id.get())?;
+            if !held(tx, "alert", held_alert)? {
+                return Err(StoreError::UnknownAlert(id));
+            }
+            alert = Some(held_alert);
+        }
+    }
     tx.execute(
-        "INSERT INTO schedule (id, due, record) VALUES (?1, ?2, ?3)
-         ON CONFLICT (id) DO UPDATE SET due = excluded.due, record = excluded.record",
-        params![key(entry.id.get())?, entry.due.unix_seconds(), json(entry)?],
+        "INSERT INTO schedule (id, due, draft, message, alert, record) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (id) DO UPDATE SET due = excluded.due, draft = excluded.draft, message = excluded.message,
+             alert = excluded.alert, record = excluded.record",
+        params![key(entry.id.get())?, entry.due.unix_seconds(), draft, message, alert, json(entry)?],
     )?;
     Ok(())
 }

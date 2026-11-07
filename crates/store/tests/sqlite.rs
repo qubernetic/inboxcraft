@@ -12,8 +12,8 @@ use std::path::Path;
 
 use contract::{account, body, folder, m, message, two_accounts};
 use inboxcraft_model::{
-    Account, AccountId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind, MessageState,
-    OutboxState,
+    Account, AccountId, AlertId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind,
+    MessageState, OutboxState,
 };
 use inboxcraft_store::{Batch, Change, DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Search, Sqlite, Storage, StoreConfig, StoreError};
 
@@ -383,7 +383,9 @@ fn a_local_id_sqlite_cannot_hold_is_refused() {
         Change::QueueJob(Job::new(JobId::new(u64::MAX), AccountId::new(1), JobKind::SyncFolderList)),
         Change::PutDraft(contract::draft(u64::MAX, 1, "x")),
         Change::PutOutgoing(contract::outgoing(u64::MAX, OutboxState::Waiting)),
-        Change::PutScheduled(contract::scheduled(u64::MAX, 1, Due::Send(DraftId::new(1)))),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(u64::MAX)))),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::FollowUp(m(u64::MAX)))),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::Alert(AlertId::new(u64::MAX)))),
         Change::SetMessageState(m(u64::MAX), MessageState::default()),
         Change::PutCalendar(contract::calendar(u64::MAX, 1, "home")),
         Change::SetSyncToken(CalendarId::new(u64::MAX), None),
@@ -393,6 +395,9 @@ fn a_local_id_sqlite_cannot_hold_is_refused() {
     ] {
         assert_eq!(store.apply(&Batch::new().with(change)), out_of_range);
     }
+    store.apply(&Batch::new().with(Change::PutDraft(contract::draft(1, 1, "x")))).unwrap();
+    let entry = Change::PutScheduled(contract::scheduled(u64::MAX, 1, Due::Send(DraftId::new(1))));
+    assert_eq!(store.apply(&Batch::new().with(entry)), out_of_range);
     assert_eq!(store.drafts(AccountId::new(u64::MAX)), out_of_range.map(|()| Vec::new()));
 }
 

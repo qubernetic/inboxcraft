@@ -57,7 +57,9 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     "INSERT INTO body_text (body_text, rank) VALUES ('secure-delete', 1);",
     // 4: the local records beside the mail, every table the daily-use features need. Each row holds its record as
     // JSON, so a new field of a record needs no migration; the columns beside it are what rows are found and ordered
-    // by. A job's place in the queue is its `seq`, which AUTOINCREMENT never hands out twice.
+    // by. A job's place in the queue is its `seq`, which AUTOINCREMENT never hands out twice. A schedule entry names
+    // its draft, message or alert in one of three columns and leaves with it: an id can be handed out again once its
+    // record is gone, and an entry left behind would act on the new one.
     "CREATE TABLE job (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         id INTEGER NOT NULL UNIQUE,
@@ -78,9 +80,15 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     CREATE TABLE schedule (
         id INTEGER PRIMARY KEY,
         due INTEGER NOT NULL,
+        draft INTEGER REFERENCES draft (id) ON DELETE CASCADE,
+        message INTEGER REFERENCES message (id) ON DELETE CASCADE,
+        alert INTEGER REFERENCES alert (id) ON DELETE CASCADE,
         record TEXT NOT NULL
     );
     CREATE INDEX schedule_due ON schedule (due, id);
+    CREATE INDEX schedule_draft ON schedule (draft);
+    CREATE INDEX schedule_message ON schedule (message);
+    CREATE INDEX schedule_alert ON schedule (alert);
     CREATE TABLE sender (
         address TEXT PRIMARY KEY,
         record TEXT NOT NULL
