@@ -114,8 +114,27 @@ mailbox, and in a folder before its first sync, the acts change the store and qu
 
 New messages go through the arriving-mail pipeline (`engine::arrive`) after the sync put them in its batch: each
 message passes each stage in order, and a stage adds store changes, kept jobs or an act (a move, say) to the same
-batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; none is built
-in yet, the triage, outbox and calendar slices bring them.
+batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; the screener
+is the first, the outbox and calendar slices bring more.
+
+The screener (`engine::arrive::screener`, commands in `engine::cmd::triage`) keeps the known-sender index in the
+store's senders table, one record per address across the accounts: a sender is known once the owner received mail
+from it (the first sync of a folder that is not junk, trash, drafts, a virtual folder or our own; mail let into the
+inbox while the screener is off), wrote to it (every recipient of a message in the sent folder) or accepted it. The
+owner's own addresses and the senders of delivery reports (`MAILER-DAEMON`, `postmaster`) are never screened. Later
+mail into the inbox from a sender neither known nor decided goes by the mode (`screener.mode`, `owner`; the session
+keeps it and the front end hands it back at the start like the appearance): `before` holds it in our own
+`InboxCraft/Screener` folder, `inside` leaves it in the inbox with `new_sender` set in `mail.list`, `off` lets it in
+and learns the sender. Turning the screener on learns every sender the kept mail names. Our own folder is made on
+the server the first time (a kept `CreateFolder` job before the moves; a folder list that comes before the answer
+keeps it and does not sync it), beside the inbox with its delimiter, or under it where every folder lives there; an
+account without a hierarchy holds nothing. `screener.list` (`safe`) lists the senders waiting with their mail, and
+`mail.read` is the preview. `screener.accept` (`owner`, with a group, and `open` to mark the newest read or `done` to
+file the held mail in the archive as done) moves the held mail (also from the blocked folder) into the inbox and lets
+the sender's future mail through; `screener.block` (`owner`) moves the held mail, and the future mail in every mode,
+to `InboxCraft/Blocked`. A blocked sender's message is never fetched: `mail.read` shows the kept body or
+`not_downloaded`, and its remote content never loads. `history.undo` takes either decision back: the sender record
+as it was and the mail where it was.
 
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with

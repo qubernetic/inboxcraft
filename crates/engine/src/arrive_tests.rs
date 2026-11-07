@@ -59,8 +59,8 @@ fn arrival(session: &crate::Session, first_sync: bool) -> Arrival<'_> {
 }
 
 #[test]
-fn no_stage_is_built_in_yet() {
-    assert!(STAGES.is_empty(), "a stage is a file of its own in arrive/ and a name in the stages! line");
+fn the_screener_is_the_one_stage_so_far() {
+    assert_eq!(STAGES.len(), 1, "a stage is a file of its own in arrive/ and a name in the stages! line");
 }
 
 #[test]

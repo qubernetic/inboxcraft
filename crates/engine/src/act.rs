@@ -9,7 +9,8 @@
 //! ([`crate::write`]). An act on a message whose move is on its way changes only the store: the server follows once
 //! the answer names the message's place. The sample mailbox, and a folder not synced yet, get the change and no job.
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
 use inboxcraft_model::{AccountId, Flag, Flags, Folder, FolderId, FolderPath, JobKind, Message, Moving, Uid, UidSet, UidValidity};
 use inboxcraft_store::{Change, Storage};
@@ -31,6 +32,12 @@ impl Effects {
 
     pub(crate) fn job(&mut self, account: AccountId, kind: JobKind) {
         self.jobs.push((account, kind));
+    }
+
+    /// Adds `more` after these.
+    pub(crate) fn extend(&mut self, more: Self) {
+        self.changes.extend(more.changes);
+        self.jobs.extend(more.jobs);
     }
 }
 
@@ -89,14 +96,47 @@ pub(crate) fn mark(store: &dyn Storage, state: &State, message: &Message, flag: 
     Ok(Some(effects))
 }
 
+/// The UIDs the messages of `folder` in the store hold.
+pub(crate) fn taken(store: &dyn Storage, folder: FolderId) -> Result<BTreeSet<Uid>, EngineError> {
+    Ok(store.messages(folder)?.iter().map(|entry| entry.message().summary().uid()).collect())
+}
+
 /// Moves `message` to `to`, a folder of its account that holds mail; `None` when it is there already.
 pub(crate) fn relocate(store: &dyn Storage, state: &State, message: &Message, to: &Folder) -> Result<Option<Effects>, EngineError> {
+    relocate_beside(store, state, message, to, &mut taken(store, to.id())?)
+}
+
+/// Moves several messages in one go: each takes a UID of ours in its folder that no earlier one took.
+#[derive(Debug, Default)]
+pub(crate) struct Mover {
+    taken: BTreeMap<FolderId, BTreeSet<Uid>>,
+}
+
+impl Mover {
+    /// As [`relocate`].
+    pub(crate) fn relocate(&mut self, store: &dyn Storage, state: &State, message: &Message, to: &Folder) -> Result<Option<Effects>, EngineError> {
+        let taken = match self.taken.entry(to.id()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(taken(store, to.id())?),
+        };
+        relocate_beside(store, state, message, to, taken)
+    }
+}
+
+/// As [`relocate`], beside the UIDs `taken` in `to`; the one it takes is added.
+pub(crate) fn relocate_beside(
+    store: &dyn Storage,
+    state: &State,
+    message: &Message,
+    to: &Folder,
+    taken: &mut BTreeSet<Uid>,
+) -> Result<Option<Effects>, EngineError> {
     let from = message.folder();
     if from == to.id() {
         return Ok(None);
     }
-    let taken: BTreeSet<Uid> = store.messages(to.id())?.iter().map(|entry| entry.message().summary().uid()).collect();
-    let uid = free_uid(&taken).ok_or(EngineError::NotFound { what: "free UID in folder", id: to.id().get() })?;
+    let uid = free_uid(taken).ok_or(EngineError::NotFound { what: "free UID in folder", id: to.id().get() })?;
+    taken.insert(uid);
     let mut effects = Effects::default();
     let moving = match message.moving() {
         Some(moving) => Some(moving.clone()),

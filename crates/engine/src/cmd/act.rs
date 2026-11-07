@@ -218,19 +218,27 @@ fn undo(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     if !act.class.allows(context.caller()) {
         return Err(EngineError::NotAllowed { command: act.command, class: act.class });
     }
-    let id = act.inverse.message();
-    let answer = |undone: bool| json!({ "command": act.command, "id": id.get(), "undone": undone });
     let (store, state) = (context.store(), context.state());
-    let Some(entry) = store.message(id)? else { return Ok(Outcome::new(answer(false)).with_undo(Step::Pop)) };
-    let message = entry.message();
-    let effects = match &act.inverse {
-        Inverse::Mark { flag, set, .. } => acts::mark(store, state, message, flag, *set)?,
-        Inverse::Move { to, .. } => match acts::folder(store, message.account(), *to)? {
-            Some(folder) => acts::relocate(store, state, message, &folder)?,
-            None => return Ok(Outcome::new(answer(false)).with_undo(Step::Pop)),
-        },
+    let answer = |id: MessageId, undone: bool| Outcome::new(json!({ "command": act.command, "id": id.get(), "undone": undone })).with_undo(Step::Pop);
+    let (id, effects) = match &act.inverse {
+        Inverse::Screen(screened) => {
+            let effects = super::triage::undo(context, screened)?;
+            let address = screened.address.as_str().to_lowercase();
+            return Ok(Outcome::new(json!({ "command": act.command, "address": address, "undone": true })).with_effects(effects).with_undo(Step::Pop));
+        }
+        Inverse::Mark { message: id, flag, set } => {
+            let Some(entry) = store.message(*id)? else { return Ok(answer(*id, false)) };
+            (*id, acts::mark(store, state, entry.message(), flag, *set)?)
+        }
+        Inverse::Move { message: id, to } => {
+            let Some(entry) = store.message(*id)? else { return Ok(answer(*id, false)) };
+            match acts::folder(store, entry.message().account(), *to)? {
+                Some(folder) => (*id, acts::relocate(store, state, entry.message(), &folder)?),
+                None => return Ok(answer(*id, false)),
+            }
+        }
     };
-    let outcome = Outcome::new(answer(true)).with_undo(Step::Pop);
+    let outcome = answer(id, true);
     Ok(match effects {
         Some(effects) => outcome.with_effects(effects),
         None => outcome,
