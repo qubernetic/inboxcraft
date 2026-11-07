@@ -367,6 +367,10 @@ All notable changes to InboxCraft are listed here. The format follows
   search field is a pill with a magnifier (#104)
 
 ### Changed
+- Codecov follows the in-repo coverage gate (#109): `codecov.yml` ignores the files `.config/coverage.toml` counts
+  nowhere or leaves out of the workspace total (the apps' `main`, the `ui-egui` drawing code and `xtask`'s `main`),
+  lets the project coverage drop by at most 1 point against the base and asks 80 % of a patch; a test in `xtask`
+  fails when the ignore list and the gate's excludes differ.
 - Tests cover the weakest files of the read mail epic (#108): the account workers' event thread once the
   window is gone, the credential store where none runs, the owner's config folder for the kept appearance, a
   move that fails when the appearance is stored, an IDLE the server ends or refuses, and the pill's hover and focus
