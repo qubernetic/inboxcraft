@@ -400,6 +400,73 @@ fn a_refused_password_is_not_sent_again() -> Result {
 }
 
 #[test]
+fn a_forbidden_answer_does_not_hold_the_password() -> Result {
+    // A 403 is also how a server answers a write to a calendar the owner may only read, so it does not hold the
+    // password as a 401 does: each job sends it again, a discovery to the well-known path and to `/`, a sync with its
+    // report and then with the comparison by entity tags.
+    let pki = TestPki::new()?;
+    let mut fake = FakeDav::new();
+    for method in ["PROPFIND"; 6].into_iter().chain(["REPORT"; 2]) {
+        fake = fake.reply(When::method(method), Reply::new(403));
+    }
+    let server = serve(&pki, fake, 4)?;
+    let mut calendars = Calendars::start(&pki, server.addr(), Some(&dav()), Some(PASSWORD))?;
+    for _ in 0..2 {
+        assert_eq!(calendars.run(CalendarJob::Discover { url: None })?, CalendarReport::Failed { calendar: None, kind: ErrorKind::CommandRefused });
+    }
+    for _ in 0..2 {
+        assert_eq!(calendars.run(sync(None, Vec::new()))?, failed(ErrorKind::CommandRefused));
+    }
+    assert_eq!(calendars.asked(), 4);
+    drop(calendars);
+    let transcript = server.finish()?;
+    let requests = requests(transcript.received());
+    assert_eq!(
+        requests,
+        [
+            "PROPFIND /.well-known/caldav HTTP/1.1",
+            "PROPFIND / HTTP/1.1",
+            "PROPFIND /.well-known/caldav HTTP/1.1",
+            "PROPFIND / HTTP/1.1",
+            "REPORT /calendars/ada/work/ HTTP/1.1",
+            "PROPFIND /calendars/ada/work/ HTTP/1.1",
+            "REPORT /calendars/ada/work/ HTTP/1.1",
+            "PROPFIND /calendars/ada/work/ HTTP/1.1",
+        ]
+    );
+    assert_eq!(authorizations(transcript.received()), requests.len());
+    Ok(())
+}
+
+#[test]
+fn after_the_imap_server_refused_the_password_no_calendar_job_sends_it() -> Result {
+    let pki = TestPki::new()?;
+    let imap = Listen::tls(pki.server_config(None)?)
+        .accept_timeout(Duration::from_millis(500))
+        .start_imap(FakeImap::new().login(USER, "another-password"))?;
+    let fake = serve(&pki, FakeDav::new(), 1)?;
+    let account = Account::new(ACCOUNT, "Ada", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?.with_caldav(Some(&dav()))?;
+    let connector = connector(&pki, wall(), fake.addr()).with_addresses_on(993, vec![imap.addr()]);
+    let (sender, events) = mpsc::channel();
+    let credentials = Arc::new(Fixed(Some(PASSWORD), AtomicUsize::new(0)));
+    let worker = Worker::spawn(account, WorkerSettings::new(connector), Arc::clone(&credentials) as Arc<dyn Credentials>, sender)?;
+    let mut calendars = Calendars { worker, events, credentials, next: 0 };
+    calendars.next += 1;
+    let folders = JobId::new(calendars.next);
+    calendars.worker.send(Job::new(folders, ACCOUNT, JobKind::SyncFolderList)).map_err(|_| "job refused")?;
+    while calendars.events.recv_timeout(WAIT)?.job != Some(folders) {}
+    assert_eq!(calendars.asked(), 1);
+    assert_eq!(calendars.run(sync(None, Vec::new()))?, failed(ErrorKind::LoginRefused));
+    assert_eq!(calendars.run(CalendarJob::Discover { url: None })?, CalendarReport::Failed { calendar: None, kind: ErrorKind::LoginRefused });
+    assert_eq!(calendars.asked(), 1);
+    drop(calendars);
+    drop(imap.finish_with_transcript());
+    let (transcript, _no_client) = fake.finish_with_transcript();
+    assert!(transcript.received().is_empty(), "{:?}", transcript.received());
+    Ok(())
+}
+
+#[test]
 fn no_password_goes_to_an_address_that_is_not_https() -> Result {
     let pki = TestPki::new()?;
     let server = Listen::plain().accept_timeout(Duration::from_millis(500)).start_dav(FakeDav::new().auth_in_clear())?;
