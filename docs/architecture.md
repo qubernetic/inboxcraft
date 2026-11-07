@@ -151,6 +151,7 @@ account). `mail.list` says each row's `group` (`null` for an account not grouped
 Done, park and pin (commands in `engine::cmd::triage`) are the owner's own state of a message (`model::MessageState`,
 the store's message state table), which no server keeps. `mail.done` (`owner`) moves a message to its account's
 archive like `mail.archive` and keeps the folder it came from; done `false` moves it back there and clears the mark.
+A done message out of the archive (the server refused the move) is filed again by the next done.
 "Show done" is `mail.list` with `done`: the done mail whose old place is in the view is listed among the mail there,
 by date, with `done` set. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
 counts it in `parked` (the window's pill), `parked` lists it too, and `park.list` (`safe`) lists the pile across the
