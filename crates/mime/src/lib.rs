@@ -63,7 +63,7 @@ mod params;
 mod part;
 mod transfer;
 
-pub use build::{Attachment, Mailbox, MessageBuilder};
+pub use build::{Attachment, Mailbox, MessageBuilder, is_media_type, is_message_id};
 pub use dsn::{Action, DeliveryStatus, MAX_RECIPIENTS, RecipientStatus, Status, TypedValue};
 pub use error::MimeError;
 pub use header::{Field, Headers, MAX_FIELD_BYTES, MAX_FIELDS};

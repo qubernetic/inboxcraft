@@ -11,6 +11,7 @@ use std::num::NonZeroU16;
 use serde::{Deserialize, Serialize};
 
 use crate::address::clean_name;
+use crate::text::clean_line;
 use crate::{AccountId, EmailAddress};
 
 /// Why an account setting is not usable.
@@ -208,6 +209,7 @@ pub struct Account {
     submission: Option<Server>,
     signature: Option<String>,
     grouped: bool,
+    templates: Vec<Template>,
 }
 
 /// An [`Account`] as stored, before it is checked.
@@ -224,6 +226,8 @@ struct RawAccount {
     signature: Option<String>,
     #[serde(default = "on")]
     grouped: bool,
+    #[serde(default)]
+    templates: Vec<RawTemplate>,
 }
 
 /// A record written before the grouped inbox has it on.
@@ -239,7 +243,8 @@ impl TryFrom<RawAccount> for Account {
             .with_display_name(raw.display_name.as_deref())
             .with_submission(raw.submission)
             .with_signature(raw.signature.as_deref())
-            .with_grouped(raw.grouped))
+            .with_grouped(raw.grouped)
+            .with_templates(raw.templates.iter().filter_map(|template| Template::new(&template.name, &template.subject, &template.text)).collect()))
     }
 }
 
@@ -249,6 +254,9 @@ impl Account {
 
     /// The longest signature, in characters; a longer one is cut.
     pub const MAX_SIGNATURE_CHARS: usize = 2_000;
+
+    /// The most templates an account keeps.
+    pub const MAX_TEMPLATES: usize = 100;
 
     /// The account `id` for `address`, shown as `label` (cleaned like a display name; empty means the address),
     /// logging in to `imap` as `username`.
@@ -261,7 +269,18 @@ impl Account {
             return Err(AccountError::BadUsername);
         }
         let label = clean_name(label).unwrap_or_else(|| address.as_str().to_owned());
-        Ok(Self { id, label, address, display_name: None, username: username.to_owned(), imap, submission: None, signature: None, grouped: true })
+        Ok(Self {
+            id,
+            label,
+            address,
+            display_name: None,
+            username: username.to_owned(),
+            imap,
+            submission: None,
+            signature: None,
+            grouped: true,
+            templates: Vec::new(),
+        })
     }
 
     /// The same account with the owner's name for sent mail, cleaned like any display name.
@@ -282,6 +301,19 @@ impl Account {
             let kept = kept.trim_end();
             if kept.trim_start().is_empty() { None } else { Some(kept.to_owned()) }
         });
+        self
+    }
+
+    /// The same account with `templates`: the first of each name (without case), at most [`Self::MAX_TEMPLATES`].
+    #[must_use]
+    pub fn with_templates(mut self, templates: Vec<Template>) -> Self {
+        let mut kept: Vec<Template> = Vec::new();
+        for template in templates {
+            if kept.len() < Self::MAX_TEMPLATES && !kept.iter().any(|held| held.name.to_lowercase() == template.name.to_lowercase()) {
+                kept.push(template);
+            }
+        }
+        self.templates = kept;
         self
     }
 
@@ -351,6 +383,80 @@ impl Account {
     #[must_use]
     pub fn grouped(&self) -> bool {
         self.grouped
+    }
+
+    /// The owner's templates for new text, in the order kept.
+    #[must_use]
+    pub fn templates(&self) -> &[Template] {
+        &self.templates
+    }
+
+    /// The template called `name`, without case.
+    #[must_use]
+    pub fn template(&self, name: &str) -> Option<&Template> {
+        let name = name.to_lowercase();
+        self.templates.iter().find(|template| template.name.to_lowercase() == name)
+    }
+}
+
+/// A text the owner keeps to start a message with: a name to pick it by, a subject (may be empty) and the text. The
+/// subject and text may hold placeholders and blanks, which the engine fills in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Template {
+    name: String,
+    subject: String,
+    text: String,
+}
+
+/// A [`Template`] as stored in an account record, before it is checked.
+#[derive(Deserialize)]
+struct RawTemplate {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    text: String,
+}
+
+impl Template {
+    /// The longest name, in characters.
+    pub const MAX_NAME_CHARS: usize = 100;
+
+    /// The longest subject, in characters.
+    pub const MAX_SUBJECT_CHARS: usize = 500;
+
+    /// The longest text, in characters.
+    pub const MAX_TEXT_CHARS: usize = 16_000;
+
+    /// A template, or `None` when the name is blank. The name and the subject are one line each: control characters
+    /// go and white space runs become one space. The text keeps its lines (`\n`) and tabs and loses other control
+    /// characters. Each is cut at its longest.
+    #[must_use]
+    pub fn new(name: &str, subject: &str, text: &str) -> Option<Self> {
+        let name = clean_line(name, Self::MAX_NAME_CHARS)?;
+        let subject = clean_line(subject, Self::MAX_SUBJECT_CHARS).unwrap_or_default();
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = text.chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).take(Self::MAX_TEXT_CHARS).collect();
+        Some(Self { name, subject, text })
+    }
+
+    /// The name the owner picks it by.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The subject; empty when the template has none.
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
     }
 }
 

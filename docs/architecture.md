@@ -241,6 +241,28 @@ goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy 
 back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
 typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
 
+Replies and forwards (`engine::reply`) are drafts made from a message, from the account that holds it, all `safe`.
+`compose.reply` goes to the message's `Reply-To`, else its `From`, and a reply to the owner's own message to its `To`;
+`compose.reply_all` adds the other `To` and `Cc` recipients, each address once and none of the owner's own: the
+address and the login (where it is an address) of each account. A message's `Bcc` is never read. The subject gets `Re: ` or `Fwd: ` unless it starts with `Re:`, `Fw:` or `Fwd:` already. A reply keeps
+`In-Reply-To` (the message's `Message-ID`) and `References` (the message's `References`, else its `In-Reply-To`, then
+its `Message-ID`; only ids the builder can write, of a long thread the first and the newest 19) in the draft, so the
+sent message and its Sent copy join the thread (`model::group_threads`). It quotes the message's plain text, or its
+preview, below a line of our own (`Name <address> wrote on 5 Nov 2026 at 08:00:`), above the signature.
+`compose.forward` puts the text inline below the original's sender, date, subject and recipients and names the
+message in `Draft::forwards`: its attachments are read from the kept body whenever the draft is built (its Drafts
+copy, the send), each with its own media type where the builder writes it, else `application/octet-stream`. A
+forward needs the body kept; one whose body has gone since shows the block `forward_body`, and `mail.send` refuses
+it.
+
+Templates are kept on their account (`Account::templates`, in the account record): `template.list` (`safe`),
+`template.save` and `template.delete` (`owner`, a setting). `compose.template` (`safe`, `engine::template`) puts one
+into a draft: its text in front of the draft's, its subject where the draft has none, `{name}`, `{first_name}` (the
+first `To` recipient's) and `{my_name}` (the account's display name) filled in. A blank (`{?prompt}`), and a name
+that is not known, becomes a mark (`[[prompt]]`) the draft remembers in `Draft::blanks`; while one is still in its
+subject or text, `blocks` holds `blank` and Send is refused. A mark the draft or a filled-in name holds already
+(from a quote, or a sender's name) gets a number, so the sender's words do not keep Send blocked.
+
 Sending (`cmd::send`, `engine::send`): `mail.send` (`owner`) makes a draft that nothing blocks into a message with its
 own `Message-ID` and a `Date` in the computer's offset, puts it in the outbox (`Outgoing`, state `Sending`, the
 message kept for the Sent copy) and queues a `Send` job with the envelope: the account's address and the To, Cc and

@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU16;
 
-use super::{Account, AccountError, Host, Security, Server};
+use super::{Account, AccountError, Host, Security, Server, Template};
 use crate::{AccountId, EmailAddress};
 
 fn host(text: &str) -> Host {
@@ -166,4 +166,45 @@ fn the_grouped_inbox_is_on_until_the_owner_turns_it_off() {
     // A record written before the grouped inbox reads back with it on.
     let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
     assert!(serde_json::from_str::<Account>(old).unwrap().grouped());
+}
+
+#[test]
+fn a_template_is_cleaned_like_a_signature_and_needs_a_name() {
+    let template = Template::new(" Thanks\t\n", "Thank you,\r\n {first_name}\0", "Hi {first_name},\r\n\u{1b}thanks for {?what}.\n").unwrap();
+    assert_eq!(
+        (template.name(), template.subject(), template.text()),
+        ("Thanks", "Thank you, {first_name}", "Hi {first_name},\nthanks for {?what}.\n")
+    );
+    for blank in ["", " \t", "\0\n"] {
+        assert_eq!(Template::new(blank, "", "text"), None, "{blank:?}");
+    }
+    let long = Template::new(&"n".repeat(500), &"s".repeat(5_000), &"é".repeat(Template::MAX_TEXT_CHARS + 5)).unwrap();
+    assert_eq!(
+        (long.name().chars().count(), long.subject().chars().count(), long.text().chars().count()),
+        (Template::MAX_NAME_CHARS, Template::MAX_SUBJECT_CHARS, Template::MAX_TEXT_CHARS)
+    );
+}
+
+#[test]
+fn an_account_keeps_its_templates_once_by_name() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert!(account.templates().is_empty());
+    let thanks = Template::new("Thanks", "", "Thank you!").unwrap();
+    let again = Template::new("THANKS", "", "Thanks again").unwrap();
+    let later = Template::new("Later", "Re", "Later.").unwrap();
+    let kept = account.clone().with_templates(vec![thanks.clone(), again, later.clone()]);
+    assert_eq!(kept.templates(), [thanks.clone(), later.clone()]);
+    assert_eq!(kept.template("thanks"), Some(&thanks));
+    assert_eq!(kept.template("nope"), None);
+    let many = (0..Account::MAX_TEMPLATES + 3).map(|n| Template::new(&format!("t{n}"), "", "x").unwrap()).collect();
+    assert_eq!(account.clone().with_templates(many).templates().len(), Account::MAX_TEMPLATES);
+    let json = serde_json::to_string(&kept).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), kept);
+    // A record written before templates reads back without any, and a template without a name is dropped.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+    let unnamed = old.replace("null}", r#"null,"templates":[{"name":" ","subject":"","text":"x"},{"name":"Later","subject":"Re","text":"Later."}]}"#);
+    assert_eq!(serde_json::from_str::<Account>(&unnamed).unwrap().templates(), [later]);
 }
