@@ -3,10 +3,11 @@
 
 //! Every component on one page for `ui_shot` (`"components": true`), in the theme's colours over its colour fields:
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
-//! a tooltip, a popup menu and a toast. The data is invented; the keys come from [`keymap`], a keymap with a key for
-//! each action shown.
+//! a tooltip, a popup menu, a toast, and the time picker as a float at [`now`] with `thu 9` typed. The data is
+//! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
+use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
 use crate::glass::{self, Layers, Under};
 use crate::iconset::IconId;
@@ -17,13 +18,28 @@ use crate::tr;
 
 use super::button::IconButton;
 use super::hover::{self, Action};
+use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, line_height, pill, popup, tooltip};
 
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(980.0, 660.0)
+    vec2(1400.0, 660.0)
+}
+
+/// The width of the time picker's column, in points.
+const PICKER: f32 = 380.0;
+
+/// The time the page is drawn at: Friday 6 November 2026, 14:30 UTC.
+#[must_use]
+pub fn now() -> Timestamp {
+    at(6, 14, 30)
+}
+
+/// A time in November 2026, UTC.
+fn at(day: u8, hour: u8, minute: u8) -> Timestamp {
+    CivilDateTime::new(2026, 11, day, hour, minute, 0).and_then(|civil| civil.to_timestamp(Offset::UTC)).unwrap_or(Timestamp::UNIX_EPOCH)
 }
 
 /// The keys the page shows: the default keys and one for each action on it.
@@ -141,22 +157,47 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The time picker for snooze, with one preset behind (hidden) and `thu 9` typed; it keeps its state in `ui`'s memory.
+fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    let presets = [
+        Preset { name: tr!("This morning"), at: at(6, 8, 0) },
+        Preset { name: tr!("Later today"), at: at(6, 17, 30) },
+        Preset { name: tr!("This evening"), at: at(6, 20, 0) },
+        Preset { name: tr!("Tomorrow morning"), at: at(7, 8, 0) },
+        Preset { name: tr!("Next week"), at: at(9, 8, 0) },
+    ];
+    let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: Some(tr!("Notify me when it comes back")), presets: &presets };
+    let id = Id::unique("gallery-time-picker");
+    let mut state = ui.data_mut(|data| {
+        data.get_temp_mut_or_insert_with(id, || {
+            let mut state = TimePicker::with_alert(true);
+            state.set_typed("thu 9");
+            state
+        })
+        .clone()
+    });
+    caption(ui, theme, tr!("Time picker"));
+    popup::panel(ui, theme, Under::Sharp, 320.0, |ui| time_picker::show(ui, theme, &mut state, &ask, now(), Offset::UTC));
+    ui.data_mut(|data| data.insert_temp(id, state));
+}
+
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
     glass::backdrop(ui.painter(), theme, whole);
     let mut layers = Layers::begin(ui.painter());
-    let half = (whole.width() - s.gap * 3.0) / 2.0;
-    for (index, draw) in [left as fn(&mut Ui, &Theme, &Keymap), right].into_iter().enumerate() {
-        let x = s.gap + (half + s.gap) * index as f32;
-        let column = Rect::from_min_size(pos2(x, s.gap), vec2(half, whole.height() - s.gap * 2.0));
+    let half = (whole.width() - PICKER - s.gap * 4.0) / 2.0;
+    let mut x = s.gap;
+    for (width, draw) in [(half, left as fn(&mut Ui, &Theme, &Keymap)), (half, right), (PICKER, picker)] {
+        let column = Rect::from_min_size(pos2(x, s.gap), vec2(width, whole.height() - s.gap * 2.0));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
             layers.card(ui, super::margin(s.l, s.m), |ui| {
                 ui.set_min_size(ui.available_size());
                 draw(ui, theme, keymap);
             });
         });
+        x += width + s.gap;
     }
     layers.finish(ui.painter(), theme);
 }

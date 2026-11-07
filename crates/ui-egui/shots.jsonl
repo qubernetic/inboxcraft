@@ -53,7 +53,8 @@
 {"out": "docs/images/icons-aurora-dark.png", "mode": "dark", "preset": "aurora", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-light.png", "mode": "light", "preset": "citrus", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-dark.png", "mode": "dark", "preset": "citrus", "icons": true, "scale": 2}
-# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast.
+# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast;
+# the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
 {"out": "docs/images/components-aurora-light.png", "mode": "light", "preset": "aurora", "components": true}
