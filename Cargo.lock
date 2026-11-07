@@ -1836,6 +1836,7 @@ dependencies = [
  "inboxcraft-ui-egui",
  "keyring",
  "ksni",
+ "proptest",
  "tempfile",
  "zbus",
 ]
@@ -1882,6 +1883,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

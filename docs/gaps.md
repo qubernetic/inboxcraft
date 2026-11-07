@@ -205,13 +205,14 @@ B = blocks the next stage.
 - `net` opens and resyncs the watched folder again after every job, also after a job that opened no other folder:
   one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
   full sync, which reports every message as added again (#26).
-- `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
-  not run again (the engine decides). The worker's offline queue is in memory; a job the engine keeps
-  (`Outcome::with_kept_job`) is also in the store and goes out again at the next start, other jobs are gone. A
-  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
-  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
-  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
-  (#26).
+- `net`'s back-off has no random spread; a read job that was running when its connection ended is reported failed and
+  not run again (the engine decides); a write job runs again after the reconnect, three times at most (#115). The
+  worker's offline queue is in memory; a job the engine keeps (`Outcome::with_kept_job`) is also in the store and
+  goes out again at the next start, other jobs are gone. A certificate fault, a refused sign-in, a sign-in the server
+  never answered (one more try after a dropped or timed-out one) or a server without a sign-in method stops the tries
+  until the engine starts a new worker. A connection that drops during the sign-in twice for an ordinary network
+  reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next
+  job asks again (#26).
 - `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
   traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`
@@ -378,27 +379,24 @@ B = blocks the next stage.
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
-- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: they
-  wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
+- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: the
+  screener's commands (#124) and the grouped inbox's (#125) exist and both cards wait for the UI slice. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
   there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
   holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
-- Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
-  they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
-  that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
-  Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
-  be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
-  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) can be changed on
-  the Shortcuts page (#130).
-- Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
-  `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
-  (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
-  for the composer (E2.3). They are drawn disabled with "Not available yet" in their
-  tooltips. More holds Full width, Close and the next-message rule; Escape leaves full width but does not close the
+- Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
+  engine's commands (#131). Done means "read, and into the account's Archive", a stand-in until E3.3 says what Done
+  is; in the Archive it only marks the row read. Flag and Archive have keys (S, A) but no hover button: the design's
+  hover group is Done, read, Delete and Snooze. The leaving row slides out but the rows below jump up rather than
+  close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
+- Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
+  from More (#131); Snooze and Pin wait for their commands (E3.3, E3.5), Reply, Reply all and Forward for the
+  composer (E2.3). They are drawn disabled with "Not available yet" in their tooltips. More also holds Full width,
+  Close and the next-message rule; Escape leaves full width but does not close the
   reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
   still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
-  More menu or hover a link, so neither has a picture; the UI tests cover both. The thread's earlier messages fold
+  More menu or the Move menu or hover a link, so none of them has a picture; the UI tests cover them. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
@@ -442,8 +440,8 @@ B = blocks the next stage.
 - The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
   it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
 - The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
-  findings and builds anyway. The notification permission is there before the app uses it; the Secret Service
-  one is used for the account passwords since #34, and the Background portal (which needs none) since #137 (#31).
+  findings and builds anyway. The Secret Service permission is used for the account passwords since #34; the
+  Background portal (since #137) and the notification portal (since #138) need none (#31).
 
 - Onboarding (#34):
   - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and

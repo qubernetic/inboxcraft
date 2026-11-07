@@ -5,7 +5,8 @@
 //!
 //! On the owner's mailbox it first claims the store's folder ([`inboxcraft::arrive`]): a later start brings the running
 //! window forward and leaves. The first start listens for later ones, puts the tray up on Linux, and in the Flatpak asks
-//! the Background portal to let it run without a window. Closing the window leaves it running ([`Desktop`]); a new
+//! the Background portal to let it run without a window. On Linux, what the engine has to tell the owner shows as
+//! notifications (through the notification portal in the Flatpak). Closing the window leaves it running ([`Desktop`]); a new
 //! window opens on the same app when a later start or the tray asks for one.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -192,19 +193,22 @@ fn asking(send: Sender<Request>, wake: Wake) -> impl Fn(Request) + Send + 'stati
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::sync::mpsc::Sender;
+    use std::sync::mpsc::{self, Sender};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use inboxcraft::autostart::{self, portal};
     use inboxcraft::desktop::Desktop;
     use inboxcraft::instance::Request;
+    use inboxcraft::notify::{self, Click};
     use inboxcraft::tray::{self, InboxTray};
     use inboxcraft_ui_egui::fetch::Wake;
 
     /// How long the portal may take: the desktop may ask the person first.
     pub(crate) const PORTAL_PATIENCE: Duration = Duration::from_secs(120);
 
-    /// `desktop` with the tray, and whether the tray is up; in the Flatpak, the Background portal is asked on a thread.
+    /// `desktop` with the tray and the notifications, and whether the tray is up; in the Flatpak, the Background portal
+    /// is asked on a thread.
     pub(crate) fn desktop(desktop: Desktop, send: &Sender<Request>, wake: &Wake) -> (Desktop, bool) {
         let sandboxed = autostart::sandboxed();
         if sandboxed {
@@ -221,11 +225,36 @@ mod linux {
                 eprintln!("inboxcraft: the Background portal could not be asked: {error}");
             }
         }
+        let desktop = notices(desktop, sandboxed, wake);
         match tray::start(InboxTray::new(send.clone(), wake.clone()), sandboxed) {
             Ok(badge) => (desktop.with_badge(Box::new(badge)), true),
             Err(error) => {
                 eprintln!("inboxcraft: {error}");
                 (desktop, false)
+            }
+        }
+    }
+
+    /// `desktop` showing notifications over the session bus; without them where the bus has no notification server.
+    fn notices(desktop: Desktop, sandboxed: bool, wake: &Wake) -> Desktop {
+        let (send, clicks) = mpsc::channel::<Click>();
+        let send = Mutex::new(send);
+        let wake = wake.clone();
+        let clicked: notify::bus::Clicked = Arc::new(move |click| {
+            if let Ok(send) = send.lock()
+                && send.send(click).is_ok()
+            {
+                wake();
+            }
+        });
+        let connected = zbus::blocking::Connection::session()
+            .map_err(|error| format!("notifications cannot be shown: {error}"))
+            .and_then(|bus| notify::bus::connect(&bus, sandboxed, clicked));
+        match connected {
+            Ok(deliver) => desktop.with_notices(deliver, clicks),
+            Err(error) => {
+                eprintln!("inboxcraft: {error}");
+                desktop
             }
         }
     }

@@ -3,7 +3,7 @@
 
 //! The `Session`: the one place commands run and events land.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -15,8 +15,11 @@ use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
 use serde_json::Value;
 
+use crate::ScreenerMode;
 use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::draft;
+use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
 use crate::{Caller, EngineError, Registry, error};
@@ -35,6 +38,10 @@ pub struct Outcome {
     appearance: Option<Appearance>,
     /// What the command does to the undo history.
     undo: Option<Step>,
+    /// The screener's mode from now on.
+    screener: Option<ScreenerMode>,
+    /// The notification choices from now on.
+    notify: Option<Settings>,
 }
 
 /// A job before it has an id.
@@ -52,7 +59,17 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None }
+        Self {
+            value,
+            batch: Batch::new(),
+            jobs: Vec::new(),
+            senders: Vec::new(),
+            removed: Vec::new(),
+            appearance: None,
+            undo: None,
+            screener: None,
+            notify: None,
+        }
     }
 
     /// The outcome with `change` to make in the store.
@@ -109,6 +126,18 @@ impl Outcome {
     /// The outcome changing the appearance choices to `appearance`.
     pub(crate) fn with_appearance(mut self, appearance: Appearance) -> Self {
         self.appearance = Some(appearance);
+        self
+    }
+
+    /// The outcome changing the screener's mode to `mode`.
+    pub(crate) fn with_screener(mut self, mode: ScreenerMode) -> Self {
+        self.screener = Some(mode);
+        self
+    }
+
+    /// The outcome changing the notification choices to `settings`.
+    pub(crate) fn with_notify(mut self, settings: Settings) -> Self {
+        self.notify = Some(settings);
         self
     }
 
@@ -194,6 +223,15 @@ pub(crate) struct State {
     pub(crate) remote_senders: BTreeSet<String>,
     /// The owner's appearance choices; the front end keeps them on disk and hands them back at the start.
     pub(crate) appearance: Appearance,
+    /// What the screener does with the first mail of an unknown sender; the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) screener: ScreenerMode,
+    /// The owner's notification choices; the front end keeps them on disk and hands them back at the start.
+    pub(crate) notify: Settings,
+    /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
+    pub(crate) notices: VecDeque<Notice>,
+    /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
+    pub(crate) quiet: VecDeque<String>,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
     /// given again and a late event of its worker cannot land on a new account.
     pub(crate) next_account: u64,
@@ -201,6 +239,7 @@ pub(crate) struct State {
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
     pub(crate) next_schedule: u64,
+    pub(crate) next_draft: u64,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
     /// The acts to undo, the newest last.
@@ -241,7 +280,7 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, ..Self::default() };
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, next_draft: 1, ..Self::default() };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -254,6 +293,9 @@ impl State {
                 for entry in store.messages(folder.id())? {
                     state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
                 }
+            }
+            for draft in store.drafts(account.id())? {
+                state.next_draft = state.next_draft.max(draft.id.get().saturating_add(1));
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
@@ -400,6 +442,34 @@ impl Session {
         self.state.appearance = appearance;
     }
 
+    /// The screener's mode, as `screener.mode` left it.
+    #[must_use]
+    pub fn screener(&self) -> ScreenerMode {
+        self.state.screener
+    }
+
+    /// Takes the screener's mode kept from an earlier run.
+    pub fn set_screener(&mut self, mode: ScreenerMode) {
+        self.state.screener = mode;
+    }
+
+    /// The notification choices, as `notify.set` left them.
+    #[must_use]
+    pub fn notify_settings(&self) -> &Settings {
+        &self.state.notify
+    }
+
+    /// Takes the notification choices kept from an earlier run, read with [`Settings::from_value`].
+    pub fn set_notify_settings(&mut self, settings: Settings) {
+        self.state.notify = settings;
+    }
+
+    /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
+    /// account as one count.
+    pub fn take_notices(&mut self) -> Vec<Notice> {
+        notify::collapse(std::mem::take(&mut self.state.notices))
+    }
+
     /// Takes the computer's offset from UTC over time; until then the session works in UTC.
     pub fn set_offsets(&mut self, offsets: Box<dyn Offsets>) {
         self.offsets = offsets;
@@ -429,20 +499,43 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         if let Some(step) = undo {
             crate::undo::take(&mut self.state.history, step);
         }
+        let mut made = BTreeSet::new();
         for change in batch.changes() {
             match change {
                 Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
                 Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
+                Change::PutDraft(draft) => self.state.next_draft = self.state.next_draft.max(draft.id.get().saturating_add(1)),
+                Change::PutFolder(folder) => {
+                    self.state.next_folder = self.state.next_folder.max(folder.id().get().saturating_add(1));
+                    made.insert(folder.account());
+                }
                 _ => {}
             }
         }
+        // A folder a command made takes its role at once.
+        for account in made {
+            // The batch is made: a store that cannot list the folders now leaves the roles to the next folder list.
+            let Ok(folders) = self.store.folders(account) else { continue };
+            let held = self.state.accounts.entry(account).or_default();
+            let questions = held.roles.detect(&folders);
+            held.ask.extend(questions);
+            held.ask.retain(|role| held.roles.folder(*role).is_none());
+        }
+        if let Some(mode) = screener {
+            self.state.screener = mode;
+        }
+        if let Some(settings) = notify {
+            self.state.notify = settings;
+        }
         for account in removed {
             self.state.accounts.remove(&account);
+            self.state.notify.forget(account);
+            self.state.notices.retain(|notice| notice.account() != account);
             self.jobs.retain(|job| job.account != account);
         }
         for (sender, allowed) in senders {
@@ -478,8 +571,10 @@ impl Session {
     }
 
     /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
-    /// (see [`crate::schedule`]), in one batch. The front end calls it at [`Session::next_due`] and after
-    /// [`Session::start`].
+    /// (see [`crate::schedule`]), in one batch. A returned snooze and a follow-up reminder tell the owner as
+    /// [`Session::take_notices`] hands them over, unless they turned that off. Then hands each draft that has been
+    /// still long enough to its account's worker (see `crate::draft`). The front end calls it at
+    /// [`Session::next_due`] and after [`Session::start`].
     ///
     /// # Errors
     ///
@@ -487,18 +582,31 @@ impl Session {
     pub fn tick(&mut self) -> Result<Vec<Fired>, EngineError> {
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let started = self.started;
-        let plan = catch_unwind(AssertUnwindSafe(|| schedule::due(&context, started))).map_err(|_| EngineError::Panicked("schedule"))??;
+        let planned = catch_unwind(AssertUnwindSafe(|| {
+            let plan = schedule::due(&context, started)?;
+            let notices = notify::fired(context.store, &context.state.notify, &plan.fired)?;
+            Ok::<_, EngineError>((plan, notices))
+        }));
+        let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
         self.commit("schedule", None, &plan.batch, Vec::new())?;
+        for notice in notices {
+            notify::push(&mut self.state, notice);
+        }
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
+        let (batch, jobs) = catch_unwind(AssertUnwindSafe(|| draft::uploads(&context))).map_err(|_| EngineError::Panicked("draft"))??;
+        self.commit("draft", None, &batch, jobs)?;
         Ok(plan.fired)
     }
 
-    /// When the next schedule entry is due, if any.
+    /// When the next schedule entry or draft copy is due, if any.
     ///
     /// # Errors
     ///
     /// A store failure.
     pub fn next_due(&self) -> Result<Option<Timestamp>, EngineError> {
-        Ok(self.store.schedule()?.into_iter().map(|entry| entry.due).min())
+        let entry = self.store.schedule()?.into_iter().map(|entry| entry.due).min();
+        let upload = draft::next_upload(&*self.store, &self.state)?;
+        Ok(entry.into_iter().chain(upload).min())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.

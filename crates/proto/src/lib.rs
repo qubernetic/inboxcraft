@@ -13,7 +13,9 @@
 //!   QRESYNC (VANISHED, and a changed UIDVALIDITY reported as [`imap::Event::UidValidityChanged`]), IDLE and
 //!   NOTIFY; each is sent only to a server that offers it. UID MOVE falls back to UID COPY, a `\Deleted` flag
 //!   and UID EXPUNGE, and says how far it got ([`imap::Removal`]); COPYUID ([`imap::CopyUid`]) is kept only when it
-//!   fits what was asked for. COMPRESS=DEFLATE is negotiated here and run by `net`.
+//!   fits what was asked for. To write it has UID STORE ([`imap::FlagStore`], with UNCHANGEDSINCE and the MODIFIED
+//!   UIDs back), APPEND with APPENDUID ([`imap::AppendUid`]), CREATE, CLOSE and UNSELECT; a message is always sent
+//!   as a literal after the server's go-ahead. COMPRESS=DEFLATE is negotiated here and run by `net`.
 //! - [`smtp::Client`]: an SMTP submission client core, driven the same way. AUTH PLAIN, AUTH LOGIN and MAIL are
 //!   refused until the connection is encrypted, and EHLO is sent again after STARTTLS. MAIL says SIZE,
 //!   `BODY=8BITMIME` and SMTPUTF8 only to a server that offers them, DATA ends every line in CRLF and dot-stuffs the

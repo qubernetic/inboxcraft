@@ -11,6 +11,8 @@ use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::arrive::group::{self, Grouping};
+use crate::arrive::screener;
 use crate::params::{decode, parse_date};
 use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
@@ -20,7 +22,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, TH
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
 
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
@@ -45,6 +47,9 @@ struct ListParams {
     role: Option<String>,
     /// Only this account.
     account: Option<u64>,
+    /// Only this group of the grouped inbox (`people`, `updates`, `newsletters`, `invitations`), or `none` for the
+    /// mail of the accounts not grouped.
+    group: Option<String>,
     /// At most this many, 1 to [`MAX_LIST`].
     limit: Option<u64>,
     /// Skip this many first.
@@ -65,10 +70,38 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         (Some(_), Some(_)) => return Err(EngineError::bad_params(LIST.id, "give a folder or a role, not both")),
     };
     let account = params.account.map(AccountId::new);
-    let entries = view::merged(context, &view::folders(context, view, account)?)?;
+    let only = match params.group.as_deref() {
+        None => None,
+        Some("none") => Some(None),
+        Some(name) => Some(Some(group::named(name).ok_or_else(|| EngineError::bad_params(LIST.id, "the group is people, updates, newsletters, invitations or none"))?)),
+    };
+    let mut grouping = Grouping::new(context.store())?;
+    let mut entries = view::merged(context, &view::folders(context, view, account)?)?;
+    if let Some(only) = only {
+        let mut kept = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if grouping.of(entry.message())? == only {
+                kept.push(entry);
+            }
+        }
+        entries = kept;
+    }
     let limit = limit(params.limit);
     let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
-    let messages: Vec<Value> = entries.iter().skip(offset).take(limit).map(json::message).collect();
+    let accounts = context.store().accounts()?;
+    let mut messages = Vec::new();
+    for entry in entries.iter().skip(offset).take(limit) {
+        let message = entry.message();
+        let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+        let new = screener::is_new(context.store(), context.state().screener, role, &accounts, message)?;
+        let in_group = grouping.of(message)?.map(group::name);
+        let mut shown = json::message(entry);
+        if let Value::Object(fields) = &mut shown {
+            fields.insert("new_sender".into(), json!(new));
+            fields.insert("group".into(), json!(in_group));
+        }
+        messages.push(shown);
+    }
     let shown = match view {
         View::Folder(folder) => json!({ "folder": folder.get() }),
         View::Role(role) => json!({ "role": view::role_name(role) }),
@@ -76,6 +109,7 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({
         "view": shown,
         "account": account.map(AccountId::get),
+        "group": params.group,
         "total": entries.len(),
         "offset": offset,
         "limit": limit,
@@ -113,7 +147,10 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
     let message = entry.message();
     let body = store.body(id)?;
     let too_large = body.is_none() && context.state().too_large.contains(&id);
+    let blocked = blocked(context, message)?;
     let fetch = match (&body, context.state().validity.get(&message.folder())) {
+        // A blocked sender's message is never fetched: it shows what is kept, or that nothing is.
+        _ if blocked => None,
         // A message whose move is on its way has no UID of the server's yet; its body comes once it has.
         (None, Some(uid_validity)) if !too_large && message.moving().is_none() => {
             store.folders(message.account())?.into_iter().find(|folder| folder.id() == message.folder()).map(|folder| JobKind::FetchBody {
@@ -136,10 +173,19 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
     }
-    let body_error = too_large.then_some("too_large");
-    let remote_allowed = super::remote::allowed(context, envelope.from());
-    let mut outcome =
-        Outcome::new(json!({ "message": shown, "fetching": fetch.is_some(), "body_error": body_error, "remote_allowed": remote_allowed }));
+    let body_error = if too_large {
+        Some("too_large")
+    } else {
+        (blocked && body.is_none()).then_some("not_downloaded")
+    };
+    let remote_allowed = !blocked && super::remote::allowed(context, envelope.from());
+    let mut outcome = Outcome::new(json!({
+        "message": shown,
+        "fetching": fetch.is_some(),
+        "body_error": body_error,
+        "remote_allowed": remote_allowed,
+        "blocked": blocked,
+    }));
     if !entry.opened() {
         outcome = outcome.with_change(Change::MarkOpened(id));
     }
@@ -149,9 +195,21 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
     Ok(outcome)
 }
 
+/// Whether `message` is from a blocked sender, or in a blocked folder.
+fn blocked(context: &Context<'_>, message: &Message) -> Result<bool, EngineError> {
+    let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+    if role == Some(Role::Blocked) {
+        return Ok(true);
+    }
+    match screener::sender_of(message) {
+        Some(address) => Ok(context.store().sender(address)?.is_some_and(|sender| sender.screening == Some(inboxcraft_model::Screening::Blocked))),
+        None => Ok(false),
+    }
+}
+
 /// `mail.thread`: the thread a message is in, oldest first, across folders and accounts (linked by `Message-ID`,
 /// `In-Reply-To` and `References`, never by subject). A message that names no other is a thread of one. A thread of
-/// more than [`MAX_LIST`] messages gives its newest.
+/// more than [`MAX_LIST`] messages gives its newest. The drafts that answer a message of the thread come with it.
 pub(crate) const THREAD: CommandSpec =
     CommandSpec { id: "mail.thread", class: Some(AgentClass::Safe), summary: "List the thread a message is in, oldest first", run: thread };
 
@@ -179,7 +237,15 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
     let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
     let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
-    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown })))
+    let mut drafts = Vec::new();
+    for account in store.accounts()? {
+        for draft in store.drafts(account.id())? {
+            if draft.answers.is_some_and(|answers| thread.contains(&answers)) {
+                drafts.push(crate::draft::json(&draft));
+            }
+        }
+    }
+    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown, "drafts": drafts })))
 }
 
 /// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by

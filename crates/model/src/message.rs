@@ -9,7 +9,7 @@ use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::text::clean_line;
-use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
+use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, Signs, ThreadId, Uid, UidValidity};
 
 /// The longest subject kept, in characters.
 pub const MAX_SUBJECT_CHARS: usize = 1000;
@@ -94,7 +94,7 @@ pub(crate) mod timestamp {
 ///
 /// Every text is cleaned on the way in: the subject is one line of at most [`MAX_SUBJECT_CHARS`] characters, each
 /// address field keeps its first [`MAX_ADDRESSES`], `In-Reply-To` its first and `References` its last
-/// [`MAX_REFERENCES`] ids.
+/// [`MAX_REFERENCES`] ids. Beside them it keeps the [`Signs`] of the message's kind.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "RawEnvelope")]
 pub struct Envelope {
@@ -109,6 +109,7 @@ pub struct Envelope {
     message_id: Option<MessageRef>,
     in_reply_to: Vec<MessageRef>,
     references: Vec<MessageRef>,
+    signs: Signs,
 }
 
 /// An [`Envelope`] as stored, before it is cleaned.
@@ -125,6 +126,8 @@ struct RawEnvelope {
     message_id: Option<MessageRef>,
     in_reply_to: Vec<MessageRef>,
     references: Vec<MessageRef>,
+    #[serde(default)]
+    signs: Signs,
 }
 
 impl From<RawEnvelope> for Envelope {
@@ -139,6 +142,7 @@ impl From<RawEnvelope> for Envelope {
             .with_message_id(raw.message_id)
             .with_in_reply_to(raw.in_reply_to)
             .with_references(raw.references)
+            .with_signs(raw.signs)
     }
 }
 
@@ -279,6 +283,19 @@ impl Envelope {
     pub fn references(&self) -> &[MessageRef] {
         &self.references
     }
+
+    /// With the signs of the message's kind.
+    #[must_use]
+    pub fn with_signs(mut self, signs: Signs) -> Self {
+        self.signs = signs;
+        self
+    }
+
+    /// The signs of the message's kind, for the grouped inbox.
+    #[must_use]
+    pub fn signs(&self) -> &Signs {
+        &self.signs
+    }
 }
 
 /// What the server lists for one message of a folder: UID, envelope, flags, size, arrival time, PREVIEW text (RFC
@@ -331,6 +348,13 @@ impl Summary {
     #[must_use]
     pub fn with_uid(mut self, uid: Uid) -> Self {
         self.uid = uid;
+        self
+    }
+
+    /// With another envelope: the same message, its header read again.
+    #[must_use]
+    pub fn with_envelope(mut self, envelope: Envelope) -> Self {
+        self.envelope = envelope;
         self
     }
 

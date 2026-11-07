@@ -42,7 +42,6 @@ impl Plan {
     }
 
     /// An act's changes and kept jobs, as a stage of the arriving-mail pipeline adds them.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that act come with the triage slices"))]
     pub(crate) fn effects(&mut self, effects: Effects) {
         for change in effects.changes {
             self.change(change);
@@ -86,7 +85,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             write::moved(store, &mut plan, account, &moved)?
         }
         EventKind::Expunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
-        EventKind::Appended { .. } => true,
+        EventKind::Appended { folder, uid } => {
+            crate::draft::appended(store, &mut plan, account, event.job, *folder, *uid)?;
+            true
+        }
         EventKind::FolderCreated { .. } => {
             plan.job(account, JobKind::SyncFolderList);
             true
@@ -157,6 +159,16 @@ fn same_path(a: &FolderPath, b: &FolderPath) -> bool {
 /// folder that holds mail is synced, the inbox first, and the inbox is watched.
 fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &[FolderListing]) -> Result<bool, EngineError> {
     let held = store.folders(account)?;
+    // Our own folders on their way to the server: kept, and synced once the server lists them.
+    let making: Vec<FolderPath> = store
+        .queued_jobs()?
+        .into_iter()
+        .filter(|job| job.account == account)
+        .filter_map(|job| match job.kind {
+            JobKind::CreateFolder { path } => Some(path),
+            _ => None,
+        })
+        .collect();
     let mut next: Vec<Folder> = Vec::new();
     for listing in listings {
         if next.iter().any(|folder| same_path(folder.listing().path(), listing.path())) {
@@ -170,7 +182,13 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
         }
         next.push(folder);
     }
-    for gone in held.iter().filter(|folder| next.iter().all(|kept| kept.id() != folder.id())) {
+    let listed = next.len();
+    let missing: Vec<&Folder> = held.iter().filter(|folder| next.iter().all(|kept| kept.id() != folder.id())).collect();
+    for gone in missing {
+        if making.iter().any(|path| same_path(path, gone.listing().path())) {
+            next.push(gone.clone());
+            continue;
+        }
         plan.change(Change::RemoveFolder(gone.id()));
         plan.state.validity.remove(&gone.id());
     }
@@ -179,7 +197,7 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
     held_state.ask.extend(questions);
     held_state.ask.retain(|role| held_state.roles.folder(*role).is_none());
     let inbox = held_state.roles.folder(Role::Inbox);
-    let mut order: Vec<&Folder> = next.iter().filter(|folder| folder.listing().is_selectable()).collect();
+    let mut order: Vec<&Folder> = next.iter().take(listed).filter(|folder| folder.listing().is_selectable()).collect();
     order.sort_by_key(|folder| Some(folder.id()) != inbox);
     for folder in order {
         let known = if held.iter().any(|old| old.id() == folder.id()) { store.folder_state(folder.id())? } else { None };
@@ -300,7 +318,21 @@ fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity:
     let Some(message) = held(store, folder)?.remove(&uid) else { return Ok(false) };
     plan.state.fetching.retain(|_, out| *out != message.id());
     match Body::new(raw.to_vec(), &plain_text(raw)) {
-        Ok(body) => plan.change(Change::PutBody(message.id(), body)),
+        Ok(body) => {
+            plan.change(Change::PutBody(message.id(), body));
+            // A calendar part, known only now, makes the message an invitation in the grouped inbox.
+            let envelope = message.summary().envelope();
+            let calendar = arrive::group::calendar(raw);
+            if calendar != envelope.signs().calendar() {
+                let envelope = envelope.clone().with_signs(envelope.signs().with_calendar(calendar));
+                let summary = message.summary().clone().with_envelope(envelope);
+                let thread = message.thread();
+                let moving = message.moving().cloned();
+                plan.change(Change::PutMessage(
+                    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(thread).with_moving(moving),
+                ));
+            }
+        }
         Err(_) => {
             plan.state.too_large.insert(message.id());
         }

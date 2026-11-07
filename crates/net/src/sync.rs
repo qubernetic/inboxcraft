@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The read path's jobs on a signed-in connection: the folder list, the sync of a folder (headers with PREVIEW,
-//! then the bodies of the last days) and the body of one message.
+//! then the bodies of the last days) and the body of one message. The write jobs go on to [`crate::write`].
 //!
 //! Folders are opened with EXAMINE: the read path changes nothing on the server. Every answer streams out as
 //! events while it comes in, so a large folder never sits in memory whole.
@@ -99,9 +99,8 @@ pub(crate) fn run(
         JobKind::Idle { .. } => Ok(()),
         // The worker checks the account on a connection of its own (see `check`), never on this one.
         JobKind::Check { .. } => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
-        // The write path comes with M2b; until then a write fails, and the engine takes its act back.
         JobKind::StoreFlags { .. } | JobKind::Move { .. } | JobKind::Expunge { .. } | JobKind::Append { .. } | JobKind::CreateFolder { .. } => {
-            Err(NetError::new(ErrorKind::CommandRefused, "writing to the server is not built yet"))
+            crate::write::run(connection, job, config, &mut say)
         }
     }
 }
@@ -115,6 +114,11 @@ fn folder_list(connection: &mut ImapConnection) -> Result<Vec<FolderListing>, Ne
     }
 }
 
+/// The folder's name as the server writes it.
+pub(crate) fn mailbox(path: &FolderPath) -> String {
+    if path.is_inbox() { "INBOX".to_owned() } else { encode_utf7(path.name()) }
+}
+
 /// EXAMINE: the folder's status, with its UIDVALIDITY. With `known`, QRESYNC asks for what changed since then; the
 /// events it brings go to `on_event`.
 fn examine(
@@ -123,10 +127,22 @@ fn examine(
     known: Option<FolderState>,
     on_event: &mut dyn FnMut(ImapEvent),
 ) -> Result<(MailboxStatus, UidValidity), NetError> {
-    let mailbox = if path.is_inbox() { "INBOX".to_owned() } else { encode_utf7(path.name()) };
+    open(connection, path, known, false, on_event)
+}
+
+/// EXAMINE, or SELECT to `write`: as [`examine`].
+pub(crate) fn open(
+    connection: &mut ImapConnection,
+    path: &FolderPath,
+    known: Option<FolderState>,
+    write: bool,
+    on_event: &mut dyn FnMut(ImapEvent),
+) -> Result<(MailboxStatus, UidValidity), NetError> {
+    let mailbox = mailbox(path);
     let condstore = connection.capabilities_known().is_some_and(|caps| caps.has("CONDSTORE") || caps.has("QRESYNC"));
     let options = SelectOptions { condstore, known, ..SelectOptions::default() };
-    let status = match connection.run(|client| client.examine_with(&mailbox, &options), on_event)? {
+    let open = |client: &mut Client| if write { client.select_with(&mailbox, &options) } else { client.examine_with(&mailbox, &options) };
+    let status = match connection.run(open, on_event)? {
         Ok(Answer::Selected(status)) => status,
         Ok(_) => return Err(other_answer()),
         Err(refusal) if refusal.kind == RefusalKind::No => return Err(NetError::new(ErrorKind::FolderGone, refusal.code.unwrap_or_default())),
@@ -276,19 +292,19 @@ fn resync_flags(
 
 /// The UIDs of known messages a flags fetch brought back, as ascending ranges: servers answer in UID order, so a
 /// folder takes one range per gap however often a UID comes back. At most `cap` ranges.
-struct Present {
+pub(crate) struct Present {
     cap: usize,
-    ranges: Vec<(Uid, Uid)>,
-    overflowed: bool,
+    pub(crate) ranges: Vec<(Uid, Uid)>,
+    pub(crate) overflowed: bool,
 }
 
 impl Present {
-    fn new(cap: usize) -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         Self { cap, ranges: Vec::new(), overflowed: false }
     }
 
     /// Notes `uid`; `false` once there are more ranges than the cap, and from then on.
-    fn note(&mut self, uid: Uid) -> bool {
+    pub(crate) fn note(&mut self, uid: Uid) -> bool {
         if self.overflowed {
             return false;
         }
@@ -372,7 +388,7 @@ impl Told {
     }
 }
 
-fn flag_change(uid: Uid, flags: &[String], modseq: Option<ModSeq>) -> FlagChange {
+pub(crate) fn flag_change(uid: Uid, flags: &[String], modseq: Option<ModSeq>) -> FlagChange {
     FlagChange { uid, flags: flags.iter().filter_map(|flag| Flag::parse(flag).ok()).collect(), modseq }
 }
 
@@ -440,14 +456,14 @@ fn full_body(event: ImapEvent) -> Option<(Uid, Vec<u8>)> {
     Some((uid, raw))
 }
 
-fn refused_fetch(outcome: crate::imap::Outcome) -> Result<(), NetError> {
+pub(crate) fn refused_fetch(outcome: crate::imap::Outcome) -> Result<(), NetError> {
     match outcome {
         Ok(_) => Ok(()),
         Err(refusal) => Err(NetError::new(ErrorKind::CommandRefused, refusal.code.unwrap_or_default())),
     }
 }
 
-fn other_answer() -> NetError {
+pub(crate) fn other_answer() -> NetError {
     NetError::new(ErrorKind::Protocol, "an answer of another command")
 }
 

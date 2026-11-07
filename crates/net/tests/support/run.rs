@@ -145,6 +145,11 @@ impl Run {
         self.until(|kind| matches!(kind, EventKind::FolderSynced { .. } | EventKind::Failed { .. }))
     }
 
+    /// Waits until the server has got `count` IDLE commands: the worker reports watching before it sends one.
+    pub fn wait_for_idles(&self, count: usize) -> Result {
+        Ok(self.fake.wait_received(|lines| lines.iter().filter(|line| line.ends_with(" IDLE")).count() >= count, WAIT)?)
+    }
+
     /// Stops the worker and returns the lines the server got.
     pub fn finish(self) -> Result<Vec<String>> {
         self.worker.stop();

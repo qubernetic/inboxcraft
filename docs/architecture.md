@@ -37,8 +37,14 @@ engine's state.
 | `CreateFolder` | creates a folder (`CREATE`) | `FolderCreated` |
 
 The write jobs (`JobKind::writes`) are the owner's acts: they are kept in the store's queue until their last event.
-The worker runs them from the IMAP write path (M2b); until then it answers each with `Failed`, and the engine takes
-the act back.
+The worker runs them on the IMAP write path (`net::write`): it opens the folder with SELECT and checks its UIDVALIDITY
+against the job's (a changed one is told as `UidValidityReset`, and nothing is written); after a store it reads the
+flags back, so a message gone meanwhile comes as `MessagesExpunged`, not as a failure; a move names no new UID for
+it. It never sends CLOSE or EXPUNGE, which would remove every message marked `\Deleted`; a delete for good needs
+UID EXPUNGE. A write that a dropped or timed-out connection cut off runs again after the reconnect, three times at
+most; each write ends in the state one run leaves, except APPEND, which can add the message twice. A move on a server
+without MOVE is not run again: its fallback may have copied the messages before the cut, and a second run would copy
+them again. Any other failure is `Failed`, and the engine takes the act back.
 
 On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
 and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
@@ -108,13 +114,57 @@ mailbox, and in a folder before its first sync, the acts change the store and qu
 
 New messages go through the arriving-mail pipeline (`engine::arrive`) after the sync put them in its batch: each
 message passes each stage in order, and a stage adds store changes, kept jobs or an act (a move, say) to the same
-batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; none is built
-in yet, the triage, outbox and calendar slices bring them.
+batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; the screener
+is the first and the notify stage the second, the outbox and calendar slices bring more.
+
+The screener (`engine::arrive::screener`, commands in `engine::cmd::triage`) keeps the known-sender index in the
+store's senders table, one record per address across the accounts: a sender is known once the owner received mail
+from it (the first sync of a folder that is not junk, trash, drafts, a virtual folder or our own; mail let into the
+inbox while the screener is off), wrote to it (every recipient of a message in the sent folder) or accepted it. The
+owner's own addresses and the senders of delivery reports (`MAILER-DAEMON`, `postmaster`) are never screened. Later
+mail into the inbox from a sender neither known nor decided goes by the mode (`screener.mode`, `owner`; the session
+keeps it and the front end hands it back at the start like the appearance): `before` holds it in our own
+`InboxCraft/Screener` folder, `inside` leaves it in the inbox with `new_sender` set in `mail.list`, `off` lets it in
+and learns the sender. Turning the screener on learns every sender the kept mail names. Our own folder is made on
+the server the first time (a kept `CreateFolder` job before the moves; a folder list that comes before the answer
+keeps it and does not sync it), beside the inbox with its delimiter, or under it where every folder lives there; an
+account without a hierarchy holds nothing. `screener.list` (`safe`) lists the senders waiting with their mail, and
+`mail.read` is the preview. `screener.accept` (`owner`, with a group, and `open` to mark the newest read or `done` to
+file the held mail in the archive as done) moves the held mail (also from the blocked folder) into the inbox and lets
+the sender's future mail through; `screener.block` (`owner`) moves the held mail, and the future mail in every mode,
+to `InboxCraft/Blocked`. A blocked sender's message is never fetched: `mail.read` shows the kept body or
+`not_downloaded`, and its remote content never loads. `history.undo` takes either decision back: the sender record
+as it was and the mail where it was.
+
+The grouped inbox (`engine::arrive::group`, commands in `engine::cmd::triage`) puts each message of a grouped account
+in People, Updates, Newsletters or Invitations. `net` reads the signs of a message's kind from its header block into
+the envelope (`model::Signs`: a list field, `Precedence`, `Auto-Submitted`, a `text/calendar` type), and the engine adds
+whether a kept body holds a `text/calendar` part of its own when the body comes. The group is worked out when a list
+asks and never stored: the owner's choice for the sender first (`group.set`, `owner`, kept in the sender record with
+the screener's knowledge, so it moves the kept and the future mail at once, and `history.undo` takes it back;
+`auto` hands the sender back), then our classifier, first match wins: a calendar part, `Auto-Submitted` other than
+`no`, a list field or `Precedence: list` or `bulk`, `Precedence: junk` or a no-reply or delivery-report sender, and
+People for the rest. Grouping is on per account until the owner turns it off (`group.account`, `owner`, kept with the
+account). `mail.list` says each row's `group` (`null` for an account not grouped) and lists one group (`group`, or
+`none` for the mail no group holds); `group.list` (`safe`) counts the inbox's mail and its unread mail per group.
+
+Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
+notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
+still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own
+addresses, and not the owner's own move coming back: a moved message a server names no UID for is remembered by its
+Message-ID (or sender, subject and date) when it went to an inbox, so the sync that brings it back, as after
+`screener.accept`, tells nothing. The account's level (`notify.set`, `owner`; `notify.settings`, `safe`) has the last
+word: `all`, `people` (a sender known or accepted whose message is in People, by the owner's group for the sender or
+else the classifier) or `none`; `notify::tells` is the decision table. `Session::tick` adds a notice for a returned
+snooze and a follow-up reminder unless the owner turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
+(`Session::take_notices`), more than three new messages of one account as one count. A notice carries the sender's
+name and subject as one clean line of at most 120 characters, never markup.
 
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with
 `Session::sample` over the invented sample mailbox; any other session refuses it (`sample_only`). It queues no job,
-so nothing reaches a server; the sample's hover actions use it until the commands for a real mailbox exist.
+so nothing reaches a server. The window no longer uses it: its acts run the `mail.*` commands and `history.undo` on
+the sample as on a real account (#131).
 
 The scheduler (`engine::schedule`) works on the store's schedule: each entry is due at a moment and sends a draft,
 brings a snoozed message back, reminds of a reply that did not come or shows a calendar alert. `Session::tick` fires
@@ -128,6 +178,22 @@ morning (08:00). They are in the computer's wall-clock time, from the `inboxcraf
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
 (`owner`) takes one off.
+
+Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
+one from the account that last sent (the newest message in a Sent folder, else the first account) with that
+account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
+`compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
+the server named it; all
+`safe`. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
+`Name <address>` or a bare address: one that cannot be an address is marked with what is wrong, and it blocks Send
+(`blocks`), like a draft without a recipient. `mail.thread` lists the drafts that answer a message of the thread.
+`Session::tick` hands a draft that changed and has been still for ten seconds to its account's worker as a kept
+`Append` to the Drafts folder (`\Seen \Draft`, without Bcc and the recipients that are no address), and
+`Session::next_due` counts it. Where the server has UIDPLUS, the `Appended` answer names the copy's UID; the copy
+before it is then removed for good (`Expunge`), and a copy of a draft discarded or moved to another account meanwhile
+goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy can be neither replaced nor taken
+back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
+typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
 
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
@@ -149,11 +215,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 ## Decisions worth knowing
 - The engine does no I/O; protocols are sans-I/O (`proto`, `dav`); sockets and TLS live only in `net`.
 - No async runtime; one worker thread per account (`net::Worker`). It opens one connection at its first job, signs
-  in, runs the jobs in order and opens folders read-only (EXAMINE, `BODY.PEEK`), so the read path changes nothing on
-  the server. Answers stream out as events while they come in. Jobs wait in an offline queue while it reconnects
-  after a back-off with a cap. Between jobs it watches one folder with IDLE, reading in short ticks so a job ends the
-  IDLE; every change, and every reconnect, brings a resync of the folder from the state the last sync left (QRESYNC
-  where offered), so a change seen live and one made while offline are reported the same way.
+  in, runs the jobs in order and opens folders read-only for the read path (EXAMINE, `BODY.PEEK`), so reading changes
+  nothing on the server; only the write jobs open a folder with SELECT. Answers stream out as events while they come
+  in. Jobs wait in an offline queue while it reconnects after a back-off with a cap. Between jobs it watches one
+  folder with IDLE, reading in short ticks so a job ends the IDLE; every change, and every reconnect, brings a resync
+  of the folder from the state the last sync left (QRESYNC where offered), so a change seen live and one made while
+  offline are reported the same way.
 - TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
   checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
   `proto` only on an encrypted connection, and `proto` refuses it before as well.
@@ -211,6 +278,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - Autostart (`autostart`): an XDG autostart entry outside the Flatpak; inside it the Background portal
   (`RequestBackground`, over `zbus`), which each start asks again so a desktop that ends background apps lets
   InboxCraft run, with the same entry in the app's own config folder as the record of the choice.
+- Notifications (`notify`, Linux): `Desktop` takes the session's notices after each pump and shows them through the
+  notification portal in the Flatpak or `org.freedesktop.Notifications` elsewhere (`notify::bus`, over `zbus`), with
+  the body escaped where the server reads markup and the buttons (Done, Mark read) only where it shows actions. A
+  thread per connection listens for the clicks on what was shown; each comes to the window as a `Click`: a click
+  opens the message in the full-width reader and brings the window forward (or opens one), the buttons run the same
+  acts as the window. A later notice with the same key (the count of an account) takes the place of the first.
 
 ## Start-up
 

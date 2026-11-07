@@ -1,0 +1,80 @@
+# UID STORE (RFC 9051 section 6.4.6): flags set, added or cleared on messages named by UID; with UNCHANGEDSINCE
+# (CONDSTORE, RFC 7162 section 3.1.3) only on those not changed since, and MODIFIED names the others.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 CONDSTORE] ready
+= greeted preauth
+> store 1 add \Seen
+! WrongState { command: "UID STORE", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 3 EXISTS
+S: * OK [UIDVALIDITY 9] fine
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=3 recent=0 flags=- permanent=- uidvalidity=9 uidnext=none unseen=none modseq=none read-only=false
+# The server tells the flags each message has now.
+> store 4,7:8 add \Seen,\Flagged
+C: A0002 UID STORE 4,7:8 +FLAGS (\Seen \Flagged)
+S: * 1 FETCH (UID 4 FLAGS (\Seen \Flagged))
+S: * 3 FETCH (UID 8 FLAGS (\Seen \Flagged $Work))
+S: A0002 OK Store completed
+= fetch seq=1 uid=4 flags=\Seen,\Flagged
+= fetch seq=3 uid=8 flags=\Seen,\Flagged,$Work
+= A0002 stored
+> store 4 remove \Seen silent
+C: A0003 UID STORE 4 -FLAGS.SILENT (\Seen)
+S: A0003 OK Store completed
+= A0003 stored
+> store 4 replace $Work,\Answered
+C: A0004 UID STORE 4 FLAGS (\Answered $Work)
+S: * 1 FETCH (UID 4 FLAGS (\Answered $Work))
+S: A0004 OK Store completed
+= fetch seq=1 uid=4 flags=\Answered,$Work
+= A0004 stored
+# No flag at all clears them every one.
+> store 4 replace -
+C: A0005 UID STORE 4 FLAGS ()
+S: A0005 OK Store completed
+= A0005 stored
+# UNCHANGEDSINCE: 7 changed since, so it was left as it was.
+> store 4,7 add \Seen silent unchanged=12
+C: A0006 UID STORE 4,7 (UNCHANGEDSINCE 12) +FLAGS.SILENT (\Seen)
+S: * 1 FETCH (UID 4 MODSEQ (13))
+S: A0006 OK [MODIFIED 7] Conditional STORE failed
+= fetch seq=1 uid=4 modseq=13
+= A0006 stored modified 7
+# A MODIFIED set is kept to the UIDs asked for; one that cannot be read names them all.
+> store 4,7 add \Seen silent unchanged=12
+C: A0007 UID STORE 4,7 (UNCHANGEDSINCE 12) +FLAGS.SILENT (\Seen)
+S: A0007 OK [MODIFIED 3:7] Conditional STORE failed
+= A0007 stored modified 4,7
+> store 4,7 add \Seen silent unchanged=12
+C: A0008 UID STORE 4,7 (UNCHANGEDSINCE 12) +FLAGS.SILENT (\Seen)
+S: A0008 OK [MODIFIED 7:*] Conditional STORE failed
+= A0008 stored modified 4,7
+# A refused store.
+> store 4 add \Deleted
+C: A0009 UID STORE 4 +FLAGS (\Deleted)
+S: A0009 NO [CANNOT] Not now
+= A0009 No [CANNOT] Not now
+> logout
+C: A0010 LOGOUT
+S: * BYE bye
+S: A0010 OK done
+= A0010 logged out
+
+# Without CONDSTORE there is no UNCHANGEDSINCE; a mailbox opened read-only takes no store.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> store 4 add \Seen unchanged=12
+! NotOffered("CONDSTORE")
+> examine INBOX
+C: A0002 EXAMINE "INBOX"
+S: A0002 OK [READ-ONLY] done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+> store 4 add \Seen
+! ReadOnly

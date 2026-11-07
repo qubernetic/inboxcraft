@@ -80,6 +80,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | UI polish wave 3: the settings as a sheet with sections and setting rows, the add-account form and the check on the design, the reader's large subject with its group chip, the list's Show all link, stripes and hover actions; the own window frame fixed on Wayland (resizing, moving, hover after a move) with round corners (#104) |
 | 2026-11-06 | Accounts move to the settings sheet: the Accounts page lists them and adds one (form, Detect, the check), the empty window is one card, the folder pane drops Add account (#104) |
 | 2026-11-07 | Tests for the weakest files of the read mail epic: the account workers and the credential store without one, the owner's config folder, IDLE ended or refused by the server, the pill's hover and focus (#108) |
+| 2026-11-07 | The IDLE tests wait at the fake server for the IDLE they count (`FakeServer::wait_received`) instead of racing the worker's stop (#164) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -128,3 +129,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: UI polish wave 3 (#104) |
 | 2026-11-06 | minor | Progress log: accounts on the settings sheet (#104) |
 | 2026-11-07 | minor | Progress log: tests for the weakest files of the read mail epic (#108) |
+| 2026-11-07 | minor | Progress log: the IDLE tests wait for the IDLE they count (#164) |

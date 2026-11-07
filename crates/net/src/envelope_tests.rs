@@ -135,3 +135,22 @@ fn message_ids_are_read_between_angle_brackets() {
     assert_eq!(refs("<> < >"), Vec::<String>::new());
     assert_eq!(refs("bare@example.org"), Vec::<String>::new());
 }
+
+#[test]
+fn a_header_block_gives_the_signs_of_the_messages_kind() {
+    let header = b"From: Example News <news@example.org>\r\n\
+        List-Id: Example News <news.example.org>\r\n\
+        List-Unsubscribe: <mailto:leave@example.org>\r\n\
+        Precedence: Bulk\r\n\
+        Auto-Submitted: auto-generated\r\n\
+        Content-Type: multipart/alternative; boundary=\"b1\"\r\n\
+        \r\n";
+    let envelope = envelope(header);
+    let signs = envelope.signs();
+    assert!(signs.list());
+    assert_eq!(signs.precedence(), Some(inboxcraft_model::Precedence::Bulk));
+    assert!(signs.automatic());
+    assert!(!signs.calendar_type());
+    assert!(!signs.calendar(), "the parts are not known from the header");
+    assert!(super::envelope(b"From: anna@example.org\r\n\r\n").signs().is_empty());
+}

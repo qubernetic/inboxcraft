@@ -8,7 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use inboxcraft_model::{
-    Address, EmailAddress, Envelope, Flag, FolderListing, FolderPath, Host, MessageRef, detect_role, labels,
+    Address, EmailAddress, Envelope, Flag, FolderListing, FolderPath, Host, MessageRef, Signs, detect_role, labels,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -44,6 +44,8 @@ fuzz_target!(|data: &[u8]| {
         assert!(clean(reference.as_str()), "{reference:?}");
     }
     assert!(clean(Envelope::new(&text).subject()));
+    let signs = Signs::read([(head, tail), ("Precedence", tail), ("Auto-Submitted", head), ("Content-Type", text.as_ref())]);
+    assert!(!signs.calendar(), "a header knows no parts");
     let delimiter = tail.chars().next();
     if let Ok(path) = FolderPath::new(head, delimiter) {
         assert!(path.components().count() <= head.len().saturating_add(1));

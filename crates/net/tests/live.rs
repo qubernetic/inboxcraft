@@ -3,8 +3,9 @@
 
 //! The opt-in live tests of `net` on the owner's two throwaway accounts on the reference provider (`just it-live`,
 //! profile `live`): both `live-imap` and `live-imap2` sign in and list their folders; on `live-imap`, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
-//! IDLE, the resync of a new worker, and the folder removed; and `account.check`, whose every IMAP step passes on the
-//! real chain.
+//! IDLE, the resync of a new worker, and the folder removed; the write path in the run folder (APPEND by the worker, a
+//! flag, CREATE of a folder inside it and a move there); and `account.check`, whose every IMAP step passes on the real
+//! chain.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
 //! agent sandbox and in CI. Agents never run it. The accounts are reached over implicit TLS on port 993, checked by
@@ -20,18 +21,20 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security,
-    Server, StepReport, StepStatus,
+    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags, FolderId, FolderPath, FolderState, Host, JobId, JobKind,
+    Security, Server, StepReport, StepStatus, UidSet,
 };
 use inboxcraft_net::{CheckTarget, Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings, check_account};
-use inboxcraft_testkit::live::{self, LiveConfig, RunFolder};
+use inboxcraft_testkit::live::{self, Folders, LiveConfig, RunFolder};
 use inboxcraft_time::SystemClock;
 use support::Result;
 use support::admin::Admin;
-use support::run::{added, state};
+use support::run::{added, changed, expunged, state};
 
 const ACCOUNT: AccountId = AccountId::new(1);
 const RUN: FolderId = FolderId::new(1);
+/// The folder the write test makes inside the run folder.
+const MOVED: FolderId = FolderId::new(2);
 /// How long a step may take on a real server.
 const STEP: Duration = Duration::from_secs(120);
 
@@ -174,6 +177,76 @@ fn live_imap_round_trip() -> Result {
     again.worker.stop();
     admin.logout();
     println!("live: run folder removed");
+    Ok(())
+}
+
+#[test]
+fn live_imap_writes_in_the_run_folder() -> Result {
+    let Some(config) = live::start("live_imap_writes_in_the_run_folder")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut worker = Live::start(config.imap(), &tls)?;
+    worker.job(JobKind::SyncFolderList)?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
+    let Some(EventKind::Folders { listings }) = events.last() else { return Err("no folder list".into()) };
+    let delimiter = listings.iter().find(|listing| listing.path().is_inbox()).and_then(|listing| listing.path().delimiter()).unwrap_or('/');
+
+    let imap = config.imap();
+    let mut admin = Admin::connect_host(imap.host(), tls.client_config()?, imap.user(), imap.secret().expose())?;
+    let mut folder = RunFolder::create(&mut admin, &config, delimiter)?;
+    let name = folder.name().to_owned();
+    let path = FolderPath::new(&name, Some(delimiter))?;
+    // Inside the run folder, so the test touches nothing else of the account.
+    let moved_name = format!("{name}{delimiter}Moved");
+    let moved_path = FolderPath::new(&moved_name, Some(delimiter))?;
+
+    // APPEND by the worker; the first sync finds the message.
+    let raw = config.invented_message(1).into_bytes();
+    worker.job(JobKind::Append { folder: RUN, path: path.clone(), flags: Flags::default(), raw, draft: None })?;
+    worker.until(|kind| matches!(kind, EventKind::Appended { .. }))?;
+    worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: None })?;
+    let events = worker.synced()?;
+    assert_eq!(subjects(&events), [subject(&config, 1)]);
+    let message = added(&events).into_iter().next().ok_or("no message")?;
+    let state = state(&events).ok_or("no state")?;
+    let uids: UidSet = std::iter::once(message.uid()).collect();
+    println!("live: APPEND done, the sync found the message");
+
+    // A flag, as the server then has it.
+    let flagged: Flags = std::iter::once(Flag::Flagged).collect();
+    let uid_validity = state.uid_validity();
+    worker.job(JobKind::StoreFlags { folder: RUN, path: path.clone(), uid_validity, uids: uids.clone(), add: flagged, remove: Flags::default() })?;
+    let events = worker.until(|kind| matches!(kind, EventKind::FlagsStored { .. }))?;
+    assert!(changed(&events).iter().any(|change| change.uid == message.uid() && change.flags.is_flagged()));
+    println!("live: flag stored");
+
+    // A folder of its own, and the message moved there with its flag. The folder goes before anything is checked: a
+    // server may refuse to delete the run folder while it has a child.
+    let moved = || -> Result<(Vec<EventKind>, Vec<EventKind>)> {
+        worker.job(JobKind::CreateFolder { path: moved_path.clone() })?;
+        worker.until(|kind| matches!(kind, EventKind::FolderCreated { .. }))?;
+        worker.job(JobKind::Move { folder: RUN, path: path.clone(), uid_validity, uids, to: MOVED, to_path: moved_path.clone() })?;
+        let events = worker.until(|kind| matches!(kind, EventKind::Moved { .. }))?;
+        println!("live: moved, new UID named: {}", matches!(events.last(), Some(EventKind::Moved { copied: Some(_), .. })));
+        worker.job(JobKind::SyncFolder { folder: MOVED, path: moved_path.clone(), known: None })?;
+        let in_moved = worker.synced()?;
+        worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(state) })?;
+        Ok((in_moved, worker.synced()?))
+    };
+    let outcome = moved();
+    worker.worker.stop();
+    let removed = folder.folders().delete(&moved_name);
+    let (in_moved, in_run) = outcome?;
+    removed?;
+    assert_eq!(subjects(&in_moved), [subject(&config, 1)]);
+    assert!(added(&in_moved).iter().all(|summary| summary.flags().is_flagged()));
+    assert!(expunged(&in_run).contains(&message.uid().get()), "the message is still in the run folder");
+    println!("live: the message is in the new folder only");
+
+    folder.remove()?;
+    admin.logout();
+    println!("live: folders removed");
     Ok(())
 }
 

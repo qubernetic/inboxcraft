@@ -53,7 +53,7 @@ pub use fixture::{Mailbox, Message};
 pub use happen::{Action, When};
 
 use crate::Error;
-use crate::server::{Ending, FakeServer, Listen, Transcript};
+use crate::server::{Ending, FakeServer, Listen};
 use crate::wire::Wire;
 use happen::Rules;
 use session::{Effect, Session};
@@ -182,8 +182,8 @@ impl Listen {
     ///
     /// [`Error::Io`] when the port cannot be bound or the thread cannot be started.
     pub fn start_imap(self, fake: FakeImap) -> Result<FakeServer, Error> {
-        self.spawn(move |wire, stop| {
-            let mut session = Session::new(fake, wire.is_tls());
+        self.spawn(move |wire, stop, transcript| {
+            let mut session = Session::new(fake, wire.is_tls()).recording(transcript);
             let ended = serve(&mut session, wire, stop);
             (session.transcript(), ended)
         })
@@ -202,9 +202,9 @@ impl Listen {
     /// [`Error::Io`] when the port cannot be bound or the thread cannot be started.
     pub fn start_imap_many(self, fake: FakeImap, connections: usize) -> Result<FakeServer, Error> {
         let mut state = Some(fake);
-        self.spawn_many(connections, move |wire, stop| {
-            let Some(fake) = state.take() else { return (Transcript::default(), Err(Error::Thread)) };
-            let mut session = Session::new(fake, wire.is_tls());
+        self.spawn_many(connections, move |wire, stop, transcript| {
+            let Some(fake) = state.take() else { return (transcript, Err(Error::Thread)) };
+            let mut session = Session::new(fake, wire.is_tls()).recording(transcript);
             let ended = serve(&mut session, wire, stop);
             let transcript = session.transcript();
             state = Some(session.into_fake());

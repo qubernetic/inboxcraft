@@ -57,6 +57,12 @@ pub(crate) mod act_tests;
 #[path = "add_tests.rs"]
 mod add_tests;
 #[cfg(test)]
+#[path = "compose_tests.rs"]
+pub(crate) mod compose_tests;
+#[cfg(test)]
+#[path = "group_tests.rs"]
+mod group_tests;
+#[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;
 #[cfg(test)]
@@ -74,6 +80,9 @@ mod schedule_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "triage_tests.rs"]
+mod triage_tests;
 #[cfg(test)]
 #[path = "ui_tests.rs"]
 mod ui_tests;
