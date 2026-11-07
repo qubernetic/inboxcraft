@@ -108,3 +108,21 @@ fn a_client_watching_the_mailbox_hears_of_the_report() -> Result<(), Box<dyn std
     imap_server.finish()?;
     Ok(())
 }
+
+#[test]
+fn a_bare_cr_in_the_paths_stays_out_of_the_report_header() -> Result<(), Box<dyn std::error::Error>> {
+    let imap = FakeImap::new();
+    let fake = FakeSmtp::new().bounce(Bounce::new("no\rbody@example.org", &imap.postbox()));
+    assert_eq!(send(&fake, "ada\r@example.org", &["nobody@example.org"]), "250 2.0.0 Queued as 1");
+    let bytes = fetch(&imap, 1);
+    let end = bytes.windows(4).position(|window| window == b"\r\n\r\n").ok_or("no header block")?;
+    let header = bytes.get(..end + 2).unwrap_or_default();
+    let bare = header.iter().enumerate().any(|(at, &byte)| byte == b'\r' && header.get(at + 1) != Some(&b'\n'));
+    assert!(!bare, "{}", String::from_utf8_lossy(header));
+    let report = inboxcraft_mime::parse(&bytes)?;
+    assert_eq!(report.headers().get("To"), Some("<ada@example.org>"));
+    let status = report.delivery_status()?;
+    let [recipient] = status.recipients.as_slice() else { return Err(format!("{status:?}").into()) };
+    assert_eq!(recipient.final_recipient.value, "nobody@example.org");
+    Ok(())
+}

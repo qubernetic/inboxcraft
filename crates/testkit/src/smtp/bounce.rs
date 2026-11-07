@@ -33,10 +33,11 @@ pub struct Bounce {
 
 impl Bounce {
     /// Reports `recipient` with `5.1.1` and `550 5.1.1 The mailbox does not exist`, into `INBOX` through `postbox`.
+    /// CR, LF and NUL are dropped from `recipient`, as from every other text that goes into the report's header.
     #[must_use]
     pub fn new(recipient: &str, postbox: &Postbox) -> Self {
         Self {
-            recipient: recipient.to_ascii_lowercase(),
+            recipient: clean(recipient).to_ascii_lowercase(),
             status: "5.1.1".to_owned(),
             diagnostic: "550 5.1.1 The mailbox does not exist".to_owned(),
             mailbox: "INBOX".to_owned(),
@@ -69,7 +70,8 @@ impl Bounce {
         let headers = submission.data.windows(4).position(|window| window == b"\r\n\r\n").map_or(submission.data.len(), |at| at + 2);
         let headers = String::from_utf8_lossy(submission.data.get(..headers).unwrap_or_default());
         let id = submission.id;
-        let (from, recipient, status, diagnostic) = (&submission.from, &self.recipient, &self.status, &self.diagnostic);
+        let from = clean(&submission.from);
+        let (recipient, status, diagnostic) = (&self.recipient, &self.status, &self.diagnostic);
         let text = format!(
             "From: Mail Delivery System <MAILER-DAEMON@{DOMAIN}>\n\
              To: <{from}>\n\
