@@ -99,6 +99,10 @@ pub(crate) fn run(
         JobKind::Idle { .. } => Ok(()),
         // The worker checks the account on a connection of its own (see `check`), never on this one.
         JobKind::Check { .. } => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
+        // The write path comes with M2b; until then a write fails, and the engine takes its act back.
+        JobKind::StoreFlags { .. } | JobKind::Move { .. } | JobKind::Expunge { .. } | JobKind::Append { .. } | JobKind::CreateFolder { .. } => {
+            Err(NetError::new(ErrorKind::CommandRefused, "writing to the server is not built yet"))
+        }
     }
 }
 

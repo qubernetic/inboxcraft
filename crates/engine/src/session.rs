@@ -15,8 +15,10 @@ use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
 use serde_json::Value;
 
+use crate::act::Effects;
 use crate::appearance::Appearance;
 use crate::schedule::{self, Fired};
+use crate::undo::{Act, Step};
 use crate::{Caller, EngineError, Registry, error};
 
 /// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
@@ -31,6 +33,8 @@ pub struct Outcome {
     removed: Vec<AccountId>,
     /// The appearance choices from now on.
     appearance: Option<Appearance>,
+    /// What the command does to the undo history.
+    undo: Option<Step>,
 }
 
 /// A job before it has an id.
@@ -48,7 +52,7 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None }
     }
 
     /// The outcome with `change` to make in the store.
@@ -72,6 +76,28 @@ impl Outcome {
     pub fn with_kept_job(mut self, account: AccountId, kind: JobKind) -> Self {
         self.jobs.push(Pending { account, kind, message: None, keep: true });
         self
+    }
+
+    /// The outcome with an act's store changes and its kept jobs.
+    pub(crate) fn with_effects(mut self, effects: Effects) -> Self {
+        for change in effects.changes {
+            self.batch.push(change);
+        }
+        for (account, kind) in effects.jobs {
+            self = self.with_kept_job(account, kind);
+        }
+        self
+    }
+
+    /// The outcome doing `step` to the undo history.
+    pub(crate) fn with_undo(mut self, step: Step) -> Self {
+        self.undo = Some(step);
+        self
+    }
+
+    /// The answer, to add to.
+    pub(crate) fn value_mut(&mut self) -> &mut Value {
+        &mut self.value
     }
 
     /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
@@ -177,6 +203,8 @@ pub(crate) struct State {
     pub(crate) next_schedule: u64,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
+    /// The acts to undo, the newest last.
+    pub(crate) history: Vec<Act>,
     /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
     pub(crate) sample: bool,
 }
@@ -355,6 +383,12 @@ impl Session {
         &*self.store
     }
 
+    /// The store, to change as a test sets the scene.
+    #[cfg(test)]
+    pub(crate) fn store_mut(&mut self) -> &mut dyn Storage {
+        &mut *self.store
+    }
+
     /// The owner's appearance choices, as the `ui.*.set` commands left them.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
@@ -395,8 +429,11 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
+        if let Some(step) = undo {
+            crate::undo::take(&mut self.state.history, step);
+        }
         for change in batch.changes() {
             match change {
                 Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
@@ -557,16 +594,27 @@ impl Session {
     }
 }
 
-/// Whether `kind` is the last event of the job that caused it: the answer of a folder list, folder sync or body
-/// fetch, or its failure.
+/// Whether `kind` is the last event of the job that caused it: the answer of a folder list, folder sync, body fetch
+/// or write, or its failure.
 pub(crate) fn ends_job(kind: &EventKind) -> bool {
-    matches!(kind, EventKind::Folders { .. } | EventKind::FolderSynced { .. } | EventKind::BodyFetched { .. } | EventKind::Failed { .. })
+    matches!(
+        kind,
+        EventKind::Folders { .. }
+            | EventKind::FolderSynced { .. }
+            | EventKind::BodyFetched { .. }
+            | EventKind::FlagsStored { .. }
+            | EventKind::Moved { .. }
+            | EventKind::Expunged { .. }
+            | EventKind::Appended { .. }
+            | EventKind::FolderCreated { .. }
+            | EventKind::Failed { .. }
+    )
 }
 
 /// Whether a job of `kind` may be kept in the store's queue: one with a last event ([`ends_job`]) to take it off. A
 /// check ends with its steps and a watch never ends, so either would be handed out again at every start.
 pub(crate) fn keepable(kind: &JobKind) -> bool {
-    matches!(kind, JobKind::SyncFolderList | JobKind::SyncFolder { .. } | JobKind::FetchBody { .. })
+    kind.writes() || matches!(kind, JobKind::SyncFolderList | JobKind::SyncFolder { .. } | JobKind::FetchBody { .. })
 }
 
 #[cfg(test)]
