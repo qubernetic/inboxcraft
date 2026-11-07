@@ -75,7 +75,7 @@ pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};
 pub use job::{FolderState, Job, JobKind};
 pub use local::{Alert, Calendar, CalendarEvent, Draft, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
-pub use message::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Summary};
+pub use message::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Moving, Summary};
 pub use role::{Role, RoleError, RoleMap, RoleSource, detect_role};
 pub use text::is_invisible_mark;
 pub use thread::{Thread, group_threads};
