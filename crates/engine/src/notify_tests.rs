@@ -114,6 +114,23 @@ mod session {
     }
 
     #[test]
+    fn people_follows_the_classifier_unless_the_owner_chose_a_group() {
+        let mut session = session();
+        level(&mut session, 1, "people");
+        change(&mut session, known("news@example.com"));
+        change(&mut session, known("club@example.com"));
+        let people = Sender { known: true, group: Some(Group::People), ..Sender::new(EmailAddress::new("club@example.com").unwrap()) };
+        change(&mut session, Change::PutSender(people));
+        let list = |n: u32, sender: &str| {
+            let summary = from(n, sender);
+            let envelope = summary.envelope().clone().with_signs(inboxcraft_model::Signs::read([("List-Id", "<list.example.com>")]));
+            summary.with_envelope(envelope)
+        };
+        arrive(&mut session, 1, vec![list(20, "news@example.com"), list(21, "club@example.com")]);
+        assert_eq!(session.take_notices(), vec![mail(&session, 21, "Someone", "Hello")], "a known sender's newsletter tells nothing");
+    }
+
+    #[test]
     fn none_tells_nothing_of_that_account() {
         let mut session = session();
         level(&mut session, 1, "none");

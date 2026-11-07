@@ -154,9 +154,9 @@ still in the inbox after the screener (held or blocked mail tells nothing), not 
 addresses, and not the owner's own move coming back: a moved message a server names no UID for is remembered by its
 Message-ID (or sender, subject and date) when it went to an inbox, so the sync that brings it back, as after
 `screener.accept`, tells nothing. The account's level (`notify.set`, `owner`; `notify.settings`, `safe`) has the last
-word: `all`, `people` (a sender known or accepted and not in another group than People) or `none`; `notify::tells`
-is the decision table. `Session::tick` adds a notice for a returned snooze and a follow-up reminder unless the owner
-turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
+word: `all`, `people` (a sender known or accepted whose message is in People, by the owner's group for the sender or
+else the classifier) or `none`; `notify::tells` is the decision table. `Session::tick` adds a notice for a returned
+snooze and a follow-up reminder unless the owner turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
 (`Session::take_notices`), more than three new messages of one account as one count. A notice carries the sender's
 name and subject as one clean line of at most 120 characters, never markup.
 
