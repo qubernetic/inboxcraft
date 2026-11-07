@@ -2,32 +2,38 @@
 
 > **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** major
 
-`inboxcraft-cli` runs InboxCraft's commands by id, headless, on a local store. It is the way an agent or a script
-reads mail without the window. It runs as an agent: only `safe` commands run.
+`inboxcraft-cli` runs InboxCraft's commands by id: in the running app, through its control channel
+([control-protocol.md](control-protocol.md)), or headless on a local store with `--store`. It is the way an agent or
+a script reads mail without the window. It runs as an agent: only `safe` commands run.
 
 ## Running a command
 
 ```sh
-inboxcraft-cli --store <dir> [--json] <command> [<params>]
+inboxcraft-cli [--store <dir>] [--json] <command> [<params>]
 inboxcraft-cli [--json] commands
-inboxcraft-cli --store <dir> mcp
+inboxcraft-cli [--store <dir>] mcp
 inboxcraft-cli --version
 inboxcraft-cli --help
 ```
 
-- `--store <dir>` (or `--store=<dir>`) names the directory of a store the app wrote: the one with
-  `store.sqlite3` in it. The CLI never creates a store: a directory without one is an error, so a mistyped path
+- Without `--store` the command runs in the running app: the CLI finds its socket in `$XDG_RUNTIME_DIR` and reads
+  the token from the OS credential store. When the app is not running it says so (`not_running`) and runs nothing.
+- `--store <dir>` (or `--store=<dir>`) runs the command on the store in `<dir>` instead, without the app: the
+  directory of a store the app wrote, the one with `store.sqlite3` in it. The CLI never creates a store: a directory without one is an error, so a mistyped path
   does not become a new, empty mailbox.
 - `<command>` is a command id from the engine's registry, such as `mail.list`. `commands` lists every command with
   its agent class and a one-line summary; it needs no store.
 - `<params>` is one JSON object, `{}` when it is left out. Unknown fields are refused, as everywhere.
 - `--json` writes the answer as one JSON object on one line. Without it the answer is text, one field a line.
 - Options and words can come in any order; `--` ends the options.
-- `mcp` runs the read-only MCP server on the store over stdin and stdout until stdin ends ([mcp.md](mcp.md)). Run
-  it only while the app is closed, or on a copy of the store: the store takes no lock yet, and opening it tidies
-  files away, so a message the running app has not finished writing can be lost.
+- `mcp` runs the read-only MCP server over stdin and stdout until stdin ends ([mcp.md](mcp.md)), in the running
+  app or, with `--store`, on the store.
+- Give `--store` only while the app is closed, or a copy of the store: the store takes no lock yet, and opening it
+  tidies files away, so a message the running app has not finished writing can be lost. While the app runs, leave
+  `--store` out.
 
 ```sh
+inboxcraft-cli --json mail.list '{"role":"inbox","limit":20}'
 inboxcraft-cli --store ~/mail-store --json mail.list '{"role":"inbox","limit":20}'
 inboxcraft-cli --store ~/mail-store mail.read '{"id":42}'
 inboxcraft-cli --store ~/mail-store --json mail.search '{"from":"ada@example.org","since":"2026-11-01"}'
@@ -37,7 +43,7 @@ The commands and their parameters are the engine's (`crates/engine/src/cmd/`); `
 
 ## Agent classes
 
-Every command has an agent class. The CLI runs headless, so nobody is there to approve anything:
+Every command has an agent class. Nobody is there to approve anything, in the app or on a store:
 
 | Class | In the CLI |
 |---|---|
@@ -75,7 +81,7 @@ one object on one line:
 | Exit code | Meaning | Codes |
 |---|---|---|
 | 0 | done | |
-| 1 | the command or the store failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `output`, `io` (`mcp`) |
+| 1 | the command, the store or the app failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `output`, `io` (`mcp`); from the app also `not_running`, `no_token`, `unauthorized`, `busy`, `closing`, `bad_line`, `bad_answer`, `closed` ([control-protocol.md](control-protocol.md)) |
 | 2 | wrong arguments, or no store in the directory | `usage`, `no_store` |
 
 The codes are stable snake_case; new ones may be added.
@@ -83,12 +89,10 @@ The codes are stable snake_case; new ones may be added.
 ## What it does not do
 
 - It never prompts, and only `mcp` reads stdin.
-- It does no network I/O. A job a command asks for, such as fetching a body that is not kept yet or checking an
-  account, is not run; `mail.read` answers with what the store holds.
+- It does no network I/O itself. On a store, a job a command asks for, such as fetching a body that is not kept yet
+  or checking an account, is not run; `mail.read` answers with what the store holds. In the app, the app runs it.
 - The appearance commands (`ui.*.set`) change the session, not the store, so headless they last for the one command
   only.
-- It does not talk to the running app yet: that is the control channel, a later slice; until then `mcp` runs on a
-  store too.
 
 ## Revision history
 | Date | Change | Summary |

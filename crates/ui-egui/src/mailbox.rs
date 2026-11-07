@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::Notice;
-use inboxcraft_engine::{Applied, EngineError, MAX_LIST, Session};
+use inboxcraft_engine::{Applied, Caller, EngineError, MAX_LIST, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
@@ -742,6 +742,23 @@ impl Mailbox {
         self.runs = self.runs.saturating_add(1);
         self.last = Some(command);
         Ok(self.session.run(command, params)?)
+    }
+
+    /// Runs the command `id` with `params` for an agent (the control channel): only a `safe` command runs. The list is
+    /// read again. An act of the agent's (an answer that `changed` or `undone` something) ends the window's undo for
+    /// the acts before it, so the window's Undo never takes the agent's act back in place of the owner's.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::run_as`]: [`EngineError::NotAllowed`] for an `owner` or `never` command.
+    pub fn run_for_agent(&mut self, id: &str, params: &Value) -> Result<Value, EngineError> {
+        let answer = self.session.run_as(Caller::Agent, id, params)?;
+        if ["changed", "undone"].iter().any(|field| answer.get(field).and_then(Value::as_bool) == Some(true)) {
+            self.undo = None;
+            self.history = 0;
+        }
+        self.refresh();
+        Ok(answer)
     }
 
     /// The id of the last command run through [`Mailbox::run`], answered or refused.

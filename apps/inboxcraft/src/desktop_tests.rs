@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui::{self, RawInput, ViewportCommand, ViewportEvent, ViewportId, ViewportInfo};
+use inboxcraft_control_key::Failure;
 use inboxcraft_engine::Session;
 use inboxcraft_model::{Account, AccountId, EmailAddress, Event, Host, Job, JobKind, Security, Server};
 use inboxcraft_store::{Batch, Change, Memory, Storage};
@@ -15,8 +16,10 @@ use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{NoDetect, NoKeychain};
 use inboxcraft_ui_egui::sample;
 use inboxcraft_ui_egui::workers::Workers;
+use serde_json::json;
 
 use super::{Badge, Desktop, unread};
+use crate::control::Call;
 use crate::instance::Request;
 
 /// How long a windowless wait lasts in these tests when no request comes.
@@ -359,4 +362,32 @@ fn the_buttons_mark_the_message_read_or_done() {
     click.send(Click::Done(id)).unwrap();
     tick(&mut desktop, &ctx, false);
     assert!(desktop.app().mailbox().messages().iter().all(|row| row.id != id), "done leaves the inbox");
+}
+
+/// A call of `command` with `params` over the control channel, with where its answer arrives.
+fn call(command: &str, params: serde_json::Value) -> (Call, mpsc::Receiver<Result<serde_json::Value, Failure>>) {
+    let (send, answer) = mpsc::channel();
+    (Call::new(command.to_owned(), params, send), answer)
+}
+
+#[test]
+fn a_control_call_runs_for_an_agent_with_or_without_a_window() {
+    let (send, heard) = mpsc::channel();
+    let (calls_in, calls) = mpsc::channel();
+    let mut desktop = Desktop::new(sample_app(), heard).with_control(calls);
+    let (listing, listed) = call("account.list", json!({}));
+    calls_in.send(listing).unwrap();
+    tick(&mut desktop, &egui::Context::default(), false);
+    assert!(listed.try_recv().unwrap().unwrap()["accounts"].is_array());
+    let (archive, archived) = call("mail.archive", json!({ "id": 1 }));
+    calls_in.send(archive).unwrap();
+    let ctx = egui::Context::default();
+    tick(&mut desktop, &ctx, true);
+    assert!(!desktop.has_window());
+    assert_eq!(archived.try_recv().unwrap().unwrap_err().code, "not_allowed", "only safe commands run for an agent");
+    let (listing, listed) = call("account.list", json!({}));
+    calls_in.send(listing).unwrap();
+    desktop.wait(SHORT);
+    assert!(listed.try_recv().unwrap().is_ok(), "answered without a window");
+    drop(send);
 }

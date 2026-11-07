@@ -6,16 +6,20 @@
 //! On the owner's mailbox it first claims the store's folder ([`inboxcraft::arrive`]): a later start brings the running
 //! window forward and leaves. The first start listens for later ones, puts the tray up on Linux, and in the Flatpak asks
 //! the Background portal to let it run without a window. On Linux, what the engine has to tell the owner shows as
-//! notifications (through the notification portal in the Flatpak). Closing the window leaves it running ([`Desktop`]); a new
-//! window opens on the same app when a later start or the tray asks for one.
+//! notifications (through the notification portal in the Flatpak). The CLI and the MCP server reach it through the control
+//! channel ([`inboxcraft::control`]), with the token in the credential store. Closing the window leaves it running
+//! ([`Desktop`]); a new window opens on the same app when a later start or the tray asks for one.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
+use inboxcraft::accounts::{Entries, OsEntries};
+use inboxcraft::control::Listening;
 use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
 use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
@@ -171,12 +175,27 @@ fn owner(background: bool) -> ExitCode {
         desktop = desktop.without_window();
     }
     let (desktop, tray) = linux::desktop(desktop, &send, &wake);
+    let (desktop, control) = control(desktop, &wake);
     // Closing the window ends InboxCraft when nothing could bring a window back.
     let desktop = if reachable || tray { desktop } else { desktop.closing_ends() };
     drop(send);
     let ended = windows(desktop, &shown);
+    drop(control);
     drop(listening);
     ended
+}
+
+/// `desktop` answering the control channel, and the channel's socket; without it where it cannot be served.
+fn control(desktop: Desktop, wake: &Wake) -> (Desktop, Option<Listening>) {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    let entries: Arc<dyn Entries> = Arc::new(OsEntries);
+    match inboxcraft::control::start(runtime.as_deref(), inboxcraft::autostart::sandboxed(), entries, &inboxcraft::control::fresh, Arc::clone(wake)) {
+        Ok((listening, calls)) => (desktop.with_control(calls), Some(listening)),
+        Err(error) => {
+            eprintln!("inboxcraft: {error}; the CLI and MCP cannot reach this InboxCraft");
+            (desktop, None)
+        }
+    }
 }
 
 /// Hands a request to the window and wakes it to answer.
@@ -310,5 +329,8 @@ fn main() -> ExitCode {
         Step::Background => owner(true),
         Step::Quit => quit(),
         Step::Autostart(on) => autostart(on),
+        Step::RevokeControl => {
+            ExitCode::from(inboxcraft::control::revoke(&OsEntries, &inboxcraft::control::fresh, &mut std::io::stdout(), &mut std::io::stderr()))
+        }
     }
 }
