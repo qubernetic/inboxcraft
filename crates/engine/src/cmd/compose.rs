@@ -143,6 +143,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
             outcome = outcome.with_kept_job(from.id(), kind);
         }
         draft.synced = None;
+        draft.unnamed = false;
         draft.account = to.id();
     }
     draft.saved = context.now();

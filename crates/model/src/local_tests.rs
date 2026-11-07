@@ -27,6 +27,7 @@ fn draft() -> Draft {
         answers: Some(MessageId::new(4)),
         uploaded: Some(DraftCopy { folder: FolderId::new(6), uid_validity: UidValidity::new(9).unwrap(), uid: Uid::new(17).unwrap() }),
         synced: Some(at(900)),
+        unnamed: true,
         ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
     }
 }
@@ -37,7 +38,7 @@ fn a_new_draft_is_empty() {
     assert_eq!((draft.id, draft.account, draft.saved), (DraftId::new(3), AccountId::new(1), at(1_000)));
     assert!(draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty());
     assert!(draft.subject.is_empty() && draft.text.is_empty());
-    assert_eq!((draft.answers, draft.uploaded, draft.synced), (None, None, None));
+    assert_eq!((draft.answers, draft.uploaded, draft.synced, draft.unnamed), (None, None, None, false));
 }
 
 #[test]

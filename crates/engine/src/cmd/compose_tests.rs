@@ -177,12 +177,13 @@ fn changing_the_account_changes_the_signature_and_takes_the_copy_back() {
     let mut kept = session.store().draft(DraftId::new(id)).unwrap().unwrap();
     kept.uploaded = Some(DraftCopy { folder: FolderId::new(6), uid_validity: validity(), uid: Uid::new(30).unwrap() });
     kept.synced = Some(kept.saved);
+    kept.unnamed = true;
     session.store_mut().apply(&Batch::new().with(Change::PutDraft(kept))).unwrap();
     session.take_jobs();
     let answer = session.run("compose.update", &json!({ "id": id, "account": 2 })).unwrap();
     assert_eq!((answer["account"].clone(), answer["text"].clone()), (json!(2), json!("Hi Bob,")));
     let kept = session.store().draft(DraftId::new(id)).unwrap().unwrap();
-    assert_eq!((kept.uploaded, kept.synced), (None, None));
+    assert_eq!((kept.uploaded, kept.synced, kept.unnamed), (None, None, false), "the new account has no copy yet");
     let jobs = session.take_jobs();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].account, AccountId::new(1));

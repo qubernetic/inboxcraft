@@ -13,7 +13,8 @@
 //!   worker as a kept `APPEND` (`\Seen \Draft`), without Bcc and without the recipients that are no address. A draft
 //!   with nothing typed, or of an account without a Drafts folder, stays here. The server's answer names the copy's
 //!   UID (`APPENDUID`); the copy before it is then removed for good, and so is a copy that comes back for a draft
-//!   discarded meanwhile. A failed upload waits for the draft's next change.
+//!   discarded meanwhile. A server without UIDPLUS names no UID: that copy can be neither replaced nor taken back, so
+//!   no further copy of the draft goes up and it leaves at most one. A failed upload waits for the draft's next change.
 
 use std::time::Duration;
 
@@ -147,13 +148,13 @@ fn typed(draft: &Draft, account: &Account) -> bool {
     recipients || !draft.subject.trim().is_empty() || text
 }
 
-/// The drafts whose copy is due some time, each with its account and Drafts folder.
+/// The drafts whose copy is due some time, each with its account and Drafts folder; not one with an unnamed copy.
 fn waiting(store: &dyn Storage, state: &State) -> Result<Vec<(Account, inboxcraft_model::Folder, Draft)>, EngineError> {
     let mut found = Vec::new();
     for account in store.accounts()? {
         let Some(folder) = drafts_folder(store, state, account.id())? else { continue };
         for draft in store.drafts(account.id())? {
-            if draft.synced != Some(draft.saved) && typed(&draft, &account) {
+            if draft.synced != Some(draft.saved) && !draft.unnamed && typed(&draft, &account) {
                 found.push((account.clone(), folder.clone(), draft));
             }
         }
@@ -208,7 +209,7 @@ fn mailbox(name: Option<&str>, address: &EmailAddress) -> Mailbox {
 }
 
 /// The answer to a kept `APPEND` of `account`: the draft it copied now has its copy at `uid` in `folder`, and the copy
-/// before goes; a copy of a draft that is gone goes too.
+/// before goes; a copy of a draft that is gone goes too. Without a UID the draft is marked as having an unnamed copy.
 pub(crate) fn appended(
     store: &dyn Storage,
     plan: &mut Plan,
@@ -227,7 +228,7 @@ pub(crate) fn appended(
     let copy = uid.map(|(uid_validity, uid)| DraftCopy { folder, uid_validity, uid });
     let gone = match store.draft(draft)? {
         Some(held) if held.account == account => {
-            plan.change(Change::PutDraft(Draft { uploaded: copy, ..held.clone() }));
+            plan.change(Change::PutDraft(Draft { uploaded: copy, unnamed: copy.is_none(), ..held.clone() }));
             held.uploaded.filter(|old| Some(*old) != copy)
         }
         _ => copy,

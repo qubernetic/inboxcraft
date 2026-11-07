@@ -149,7 +149,23 @@ fn a_copy_without_a_uid_still_replaces_the_one_before() {
     let (job, _) = upload(&mut session);
     appended(&mut session, job.id, None);
     assert_eq!(draft(&session, id).uploaded, None, "a server without UIDPLUS names no UID");
+    assert!(draft(&session, id).unnamed);
     assert_eq!(session.take_jobs().len(), 1, "the copy before goes");
+}
+
+#[test]
+fn without_a_uid_a_draft_leaves_at_most_one_copy() {
+    let (mut session, clock) = session();
+    let id = typed(&mut session);
+    wait(&clock, UPLOAD_AFTER.as_secs());
+    let (job, _) = upload(&mut session);
+    appended(&mut session, job.id, None);
+    assert!(draft(&session, id).unnamed, "an unnamed copy is in the Drafts folder");
+    session.run("compose.update", &json!({ "id": id.get(), "text": "Hello Béla, the budget." })).unwrap();
+    assert_eq!(session.next_due().unwrap(), None);
+    wait(&clock, UPLOAD_AFTER.as_secs());
+    session.tick().unwrap();
+    assert!(session.take_jobs().is_empty(), "no second copy goes up");
 }
 
 #[test]

@@ -53,6 +53,10 @@ pub struct Draft {
     /// an upload.
     #[serde(default, with = "optional")]
     pub synced: Option<Timestamp>,
+    /// A copy the server did not name (no UIDPLUS) is in the account's Drafts folder. Nothing can replace or take it
+    /// back, so no further copy goes up while the draft stays on this account.
+    #[serde(default)]
+    pub unnamed: bool,
 }
 
 /// Where the server keeps a copy of a draft.
@@ -82,6 +86,7 @@ impl Draft {
             answers: None,
             uploaded: None,
             synced: None,
+            unnamed: false,
         }
     }
 }
@@ -98,6 +103,7 @@ impl fmt::Debug for Draft {
             .field("answers", &self.answers)
             .field("uploaded", &self.uploaded)
             .field("synced", &self.synced)
+            .field("unnamed", &self.unnamed)
             .finish()
     }
 }
