@@ -1904,6 +1904,10 @@ dependencies = [
 [[package]]
 name = "inboxcraft-ical"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-time",
+ "proptest",
+]
 
 [[package]]
 name = "inboxcraft-mcp"
