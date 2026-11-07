@@ -10,9 +10,12 @@ use crate::imap::Message;
 /// Messages on their way into a [`FakeImap`](crate::imap::FakeImap)'s mailboxes from another thread, such as the
 /// delivery reports of [`crate::smtp::Bounce`]. Every clone is the same postbox.
 ///
-/// The fake IMAP server takes what has arrived before it answers each command, and the client hears of it as of any
-/// new mail: `EXISTS` at once for the open mailbox, `STATUS` for another one NOTIFY covers. A client that idles hears
-/// of it only at its next command.
+/// The postbox keeps what it was given. Before it answers each command, a session of the fake IMAP server delivers what
+/// arrived since its fake last looked, and the client hears of it as of any new mail: `EXISTS` at once for the open
+/// mailbox, `STATUS` for another one NOTIFY covers. A client that idles hears of it only at its next command. So every
+/// session started from the [`FakeImap`](crate::imap::FakeImap) the postbox came from finds the message, each
+/// [`FakeImap::answer`](crate::imap::FakeImap::answer) call among them, and the connections of
+/// [`crate::Listen::start_imap_many`], which carry the mailboxes over, find it once.
 #[derive(Debug, Clone, Default)]
 pub struct Postbox(Arc<Mutex<Vec<(String, Message)>>>);
 
@@ -28,8 +31,8 @@ impl Postbox {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).push((mailbox.to_owned(), message));
     }
 
-    /// Takes everything that has arrived, in order.
-    pub(crate) fn take(&self) -> Vec<(String, Message)> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    /// Everything that arrived after the first `seen` messages, in order.
+    pub(crate) fn since(&self, seen: usize) -> Vec<(String, Message)> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(seen..).unwrap_or_default().to_vec()
     }
 }

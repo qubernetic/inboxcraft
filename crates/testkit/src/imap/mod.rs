@@ -77,6 +77,8 @@ pub struct FakeImap {
     /// The UIDVALIDITY of the mailbox CREATE made last.
     last_created: u32,
     postbox: Postbox,
+    /// How many of the postbox's messages these mailboxes hold already.
+    posted: usize,
 }
 
 impl Default for FakeImap {
@@ -99,6 +101,7 @@ impl FakeImap {
             mailboxes: vec![Mailbox::new("INBOX")],
             last_created: 0,
             postbox: Postbox::default(),
+            posted: 0,
         }
     }
 
@@ -163,7 +166,8 @@ impl FakeImap {
     }
 
     /// Where mail from outside a session arrives, such as the reports of [`crate::smtp::Bounce`]. The handle is
-    /// shared: what it takes reaches every session of this fake, also those on a socket started after it was taken.
+    /// shared and keeps what it is given: every session of this fake finds it, also one on a socket started after the
+    /// delivery and each [`FakeImap::answer`] call, which plays on a copy of the fake.
     #[must_use]
     pub fn postbox(&self) -> Postbox {
         self.postbox.clone()

@@ -126,3 +126,29 @@ fn a_bare_cr_in_the_paths_stays_out_of_the_report_header() -> Result<(), Box<dyn
     assert_eq!(recipient.final_recipient.value, "nobody@example.org");
     Ok(())
 }
+
+#[test]
+fn a_report_reaches_every_later_session_once() -> Result<(), Box<dyn std::error::Error>> {
+    let imap = FakeImap::new().without(inboxcraft_testkit::imap::Capability::LoginDisabled);
+    let fake = FakeSmtp::new().bounce(Bounce::new("nobody@example.org", &imap.postbox()));
+    send(&fake, "ada@example.org", &["nobody@example.org"]);
+    let select = format!("a1 LOGIN {USER} {PASSWORD}\r\na2 SELECT INBOX\r\n");
+    for _ in 0..2 {
+        let out = String::from_utf8_lossy(&imap.answer(select.as_bytes())).into_owned();
+        assert!(out.contains("* 1 EXISTS\r\n"), "{out}");
+    }
+    assert!(!fetch(&imap, 1).is_empty());
+
+    // Over a socket the mailboxes carry over from one connection to the next, the report with them, never twice.
+    let server = Listen::plain().accept_timeout(Duration::from_millis(500)).start_imap_many(imap, 2)?;
+    for tag in ["b", "c"] {
+        let mut client = TestClient::plain(server.addr(), TIMEOUT)?;
+        client.read_line()?;
+        client.command(&format!("{tag}1 LOGIN {USER} {PASSWORD}"))?;
+        let selected = client.command(&format!("{tag}2 SELECT INBOX"))?;
+        assert!(selected.contains(&"* 1 EXISTS".to_owned()), "{selected:?}");
+        client.command(&format!("{tag}3 LOGOUT"))?;
+    }
+    server.finish()?;
+    Ok(())
+}
