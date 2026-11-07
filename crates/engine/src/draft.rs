@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use inboxcraft_mime::{Mailbox, MessageBuilder, MimeError};
 use inboxcraft_model::{
-    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, Role, Uid, UidSet,
-    UidValidity,
+    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, OutboxState, Role,
+    Uid, UidSet, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{MailDate, Offset, Timestamp, Zone};
@@ -60,6 +60,12 @@ pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
         blocks.push("bad_address");
     }
     blocks
+}
+
+/// Whether `draft` is on its way: its outbox item waits for the worker's answer. Such a draft is neither sent
+/// again, changed nor discarded, so the answer finds it as it went.
+pub(crate) fn on_its_way(store: &dyn Storage, draft: DraftId) -> Result<bool, EngineError> {
+    Ok(store.outbox()?.into_iter().any(|item| item.draft == draft && !matches!(item.state, OutboxState::Refused { .. })))
 }
 
 /// A draft as the commands answer it, every recipient checked.
@@ -190,11 +196,20 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
 /// The copy of `draft` of `account`: From, Date (its saved time), To and Cc with the addresses that are ones, Subject
 /// and the text.
 fn message(account: &Account, draft: &Draft) -> Result<Vec<u8>, MimeError> {
+    built(account, draft, MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)), None)
+}
+
+/// `draft` of `account` as a message: From, `date`, To and Cc with the addresses that are ones, Subject,
+/// `message_id` and the text. Bcc is never in it.
+pub(crate) fn built(account: &Account, draft: &Draft, date: Option<MailDate>, message_id: Option<&str>) -> Result<Vec<u8>, MimeError> {
     let address = account.address().as_str();
     let from = account.display_name().map_or_else(|| Mailbox::new(address), |name| Mailbox::named(name, address));
     let mut builder = MessageBuilder::new().from(from).subject(&draft.subject).text(&draft.text);
-    if let Some(date) = MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)) {
+    if let Some(date) = date {
         builder = builder.date(date);
+    }
+    if let Some(id) = message_id {
+        builder = builder.message_id(id);
     }
     for (name, address) in draft.to.iter().filter_map(|text| recipient(text).ok()) {
         builder = builder.to(mailbox(name, &address));

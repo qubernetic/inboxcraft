@@ -404,6 +404,10 @@ impl Session {
             let batch = stray.iter().fold(Batch::new(), |batch, job| batch.with(Change::RemoveJob(job.id)));
             store.apply(&batch)?;
         }
+        let cut = crate::send::cut_off(&*store)?;
+        if !cut.is_empty() {
+            store.apply(&cut)?;
+        }
         let state = State::load(&*store)?;
         Ok(Self { store, clock, offsets: Box::new(Offset::UTC), started: None, registry, state, jobs: Vec::new(), replay })
     }

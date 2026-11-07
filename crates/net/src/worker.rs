@@ -35,7 +35,11 @@
 //! reports each step of the account check (see [`crate::check_account`]) under the job's id. After a refused or
 //! unanswered sign-in (the worker halted for it, or the last check's sign-in ended so), a check the owner did not
 //! start stops before the sign-in with [`inboxcraft_model::StepStatus::NeedsOwner`]: an agent that checks in a loop
-//! cannot send the password again and lock the account at the provider.
+//! cannot send the password again and lock the account at the provider. The submission server is held the same way on
+//! its own: after it refused the password or left it unanswered, in a check or a send, a check the owner did not start
+//! reports the SMTP step as [`inboxcraft_model::StepStatus::NeedsOwner`] and sends it nothing, while its IMAP steps
+//! run; a sign-in there that passes, in an owner's check or a send, ends the hold. A send is the owner's own act, so
+//! it signs in.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -45,14 +49,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
+    Account, AccountId, CheckStep, ConnectionState, DraftId, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job,
+    JobId, JobKind, StepStatus,
 };
 
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
-use crate::write;
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
+use crate::{smtp, write};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
@@ -177,6 +182,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new() },
         connection: None,
         halted: None,
+        submission_halted: None,
         pending: VecDeque::new(),
         open: true,
         attempt: 0,
@@ -253,6 +259,8 @@ struct Run<'a> {
     connection: Option<ImapConnection>,
     /// Why the worker stopped trying for good.
     halted: Option<NetError>,
+    /// The submission server's last sign-in was refused or went unanswered: only the owner signs in there again.
+    submission_halted: Option<ErrorKind>,
     /// The offline queue: jobs taken from the channel and not run yet.
     pending: VecDeque<Job>,
     /// The engine can still send jobs.
@@ -287,6 +295,10 @@ impl Run<'_> {
         if !self.open && (self.pending.is_empty() || self.connection.is_none()) {
             return false;
         }
+        // A check or a send ran on a connection of its own: nothing needs this one.
+        if self.pending.is_empty() && self.watch.is_none() {
+            return self.out.listening;
+        }
         if let Some(error) = self.halted.clone() {
             self.fail_pending(&error);
             self.watch = None;
@@ -319,6 +331,8 @@ impl Run<'_> {
     fn take(&mut self, job: Job) {
         if let JobKind::Check { by_owner } = job.kind {
             self.check(job.id, by_owner);
+        } else if let JobKind::Send { draft, from, recipients, raw } = &job.kind {
+            self.send(job.id, *draft, from, recipients, raw);
         } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
@@ -327,18 +341,25 @@ impl Run<'_> {
     }
 
     /// Runs a check; it signs in only when the owner started it or the worker has not halted for a refused or
-    /// unanswered sign-in. A check whose sign-in ends so halts the worker like its own would; one that signs in ends
-    /// such a halt, as the password works again.
+    /// unanswered sign-in, and the same for the submission server on its own. A check whose sign-in ends so halts the
+    /// worker like its own would; one that signs in ends such a halt, as the password works again.
     fn check(&mut self, job: JobId, by_owner: bool) {
         let refused = self.halted.as_ref().is_some_and(|error| refuses_the_password(error.kind()));
-        let target = CheckTarget::of(self.account);
-        let target = if refused && !by_owner { target.held() } else { target };
+        let mut target = CheckTarget::of(self.account);
+        if refused && !by_owner {
+            target = target.held();
+        }
+        if self.submission_halted.is_some() && !by_owner {
+            target = target.held_submission();
+        }
         let (account, credentials) = (self.account, self.credentials);
-        let mut signed_in = None;
+        let (mut signed_in, mut submitted) = (None, None);
         let out = &mut self.out;
         check_account(&target, &self.settings.connector, &mut || credentials.password(account), &mut |report| {
-            if report.step() == CheckStep::ImapLogin {
-                signed_in = Some(report.status());
+            match report.step() {
+                CheckStep::ImapLogin => signed_in = Some(report.status()),
+                CheckStep::SmtpLogin => submitted = Some(report.status()),
+                _ => {}
             }
             out.say(Some(job), EventKind::CheckStep(report));
         });
@@ -349,6 +370,32 @@ impl Run<'_> {
             }
             _ => {}
         }
+        match submitted {
+            Some(StepStatus::Passed) => self.submission_halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.submission_halted = Some(kind),
+            _ => {}
+        }
+    }
+
+    /// Sends a message on a submission connection of its own, at once: it needs no IMAP connection. After the
+    /// password was refused or went unanswered, nothing is sent until the engine starts a new worker.
+    fn send(&mut self, job: JobId, draft: DraftId, from: &EmailAddress, recipients: &[EmailAddress], raw: &[u8]) {
+        let halted = self.halted.as_ref().filter(|error| refuses_the_password(error.kind()));
+        let sent = match halted {
+            Some(error) => Err(error.clone()),
+            None => smtp::submit(self.account, &self.settings.connector, self.credentials, from, recipients, raw),
+        };
+        match &sent {
+            Ok(_) => self.submission_halted = None,
+            Err(error) if halted.is_none() && refuses_the_password(error.kind()) => self.submission_halted = Some(error.kind()),
+            Err(_) => {}
+        }
+        let kind = match sent {
+            Ok(Ok(_)) => EventKind::Sent { draft },
+            Ok(Err(refusal)) => EventKind::SendFailed { draft, kind: ErrorKind::MessageRefused, reply: Some(smtp::reply(&refusal)) },
+            Err(error) => EventKind::SendFailed { draft, kind: error.kind(), reply: None },
+        };
+        self.out.say(Some(job), kind);
     }
 
     fn fail_pending(&mut self, error: &NetError) {

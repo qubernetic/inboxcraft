@@ -7,7 +7,9 @@
 //! A draft is in the store after every command that changes it, so a kill loses nothing typed; its copy goes to the
 //! server later (see `crate::draft`). Writing, changing and discarding a draft is `safe`: nothing leaves the
 //! computer but the copy in the owner's own Drafts folder. The signature is a setting, so `owner`. A complaint about
-//! the parameters repeats nothing that was sent, so no word of a draft lands in an error.
+//! the parameters repeats nothing that was sent, so no word of a draft lands in an error. A draft on its way (sent,
+//! and the server's answer not in yet) is neither changed nor discarded: the answer would lose the change, or find no
+//! draft and keep no Sent copy of the message that went.
 
 use inboxcraft_model::{Account, AccountId, Draft, DraftId, MessageId};
 use inboxcraft_store::Change;
@@ -39,6 +41,9 @@ pub(crate) const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
 
 /// The longest signature, in bytes.
 pub(crate) const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
+
+/// Why a draft on its way is not changed or discarded.
+const ON_ITS_WAY: &str = "the draft is on its way";
 
 /// `compose.new`: a new draft, kept at once.
 pub(crate) const NEW: CommandSpec = CommandSpec {
@@ -127,6 +132,9 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         return Err(EngineError::bad_params(UPDATE.id, "the text is too long"));
     }
     let mut draft = held_draft(context, params.id)?;
+    if draft::on_its_way(context.store(), draft.id)? {
+        return Err(EngineError::bad_params(UPDATE.id, ON_ITS_WAY));
+    }
     let mut outcome = Outcome::new(Value::Null);
     draft.to = params.to.unwrap_or(draft.to);
     draft.cc = params.cc.unwrap_or(draft.cc);
@@ -184,6 +192,9 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 fn discard(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: IdParams = decode_quietly(DISCARD.id, params)?;
     let draft = held_draft(context, params.id)?;
+    if draft::on_its_way(context.store(), draft.id)? {
+        return Err(EngineError::bad_params(DISCARD.id, ON_ITS_WAY));
+    }
     let mut outcome = Outcome::new(json!({ "discarded": params.id })).with_change(Change::RemoveDraft(draft.id));
     if let Some(copy) = draft.uploaded
         && let Some(kind) = draft::take_back(context.store(), draft.account, copy)?

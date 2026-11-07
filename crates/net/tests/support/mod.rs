@@ -57,6 +57,11 @@ pub fn server(security: Security) -> Result<Server> {
     Ok(Server::new(Host::new(HOST)?, NonZeroU16::new(993).ok_or("port")?, security))
 }
 
+/// The account's submission server: [`HOST`] on its usual port for `security`.
+pub fn submission(security: Security) -> Result<Server> {
+    Ok(Server::new(Host::new(HOST)?, security.submission_port(), security))
+}
+
 /// The computer's clock, which the test can set back as the owner or the network would; its monotonic time runs on.
 #[derive(Debug, Default)]
 pub struct SetBack {

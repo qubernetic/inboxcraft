@@ -38,8 +38,8 @@ fn a_check_lists_every_step_and_queues_one_job() {
     let names: Vec<&str> = steps.iter().map(|step| step["step"].as_str().unwrap()).collect();
     assert_eq!(names, ["dns", "tcp", "tls", "certificate", "imap_login", "smtp_login", "caldav_discovery"]);
     let statuses: Vec<&str> = steps.iter().map(|step| step["status"].as_str().unwrap()).collect();
-    assert_eq!(statuses, ["pending", "pending", "pending", "pending", "pending", "not_built", "not_built"]);
-    assert_eq!(steps[5]["message"], json!("not built yet"));
+    assert_eq!(statuses, ["pending", "pending", "pending", "pending", "pending", "pending", "not_built"]);
+    assert_eq!(steps[6]["message"], json!("not built yet"));
     assert_eq!(session.take_jobs().iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::Check { by_owner: false }]);
     assert_eq!(listed_check(&mut session)["running"], json!(true));
 }
@@ -71,7 +71,7 @@ fn the_steps_land_as_the_worker_reports_them_and_the_last_ends_the_check() {
     for step in [CheckStep::Tls, CheckStep::Certificate, CheckStep::ImapLogin] {
         session.apply(&step_event(job, step, StepStatus::Skipped)).unwrap();
     }
-    session.apply(&step_event(job, CheckStep::SmtpLogin, StepStatus::NotBuilt)).unwrap();
+    session.apply(&step_event(job, CheckStep::SmtpLogin, StepStatus::NotSet)).unwrap();
     assert_eq!(listed_check(&mut session)["running"], json!(true));
     session.apply(&step_event(job, CheckStep::CaldavDiscovery, StepStatus::NotBuilt)).unwrap();
     let check = listed_check(&mut session);

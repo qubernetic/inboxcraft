@@ -107,3 +107,20 @@ fn every_state_and_verb_has_a_name() {
     let names: Vec<String> = verbs.iter().map(ToString::to_string).collect();
     assert_eq!(names, ["EHLO", "STARTTLS", "AUTH", "MAIL", "RCPT", "DATA", "RSET", "QUIT"]);
 }
+
+#[test]
+fn the_message_is_out_from_the_go_ahead_to_its_answer() {
+    let mut client = signed_in(Transport::Tls);
+    assert_eq!(client.mail("ada@example.org", crate::smtp::MailOptions::default()), Ok(()));
+    assert_eq!(client.receive(b"250 OK\r\n"), Ok(()));
+    assert_eq!(client.rcpt("bea@example.org"), Ok(()));
+    assert_eq!(client.receive(b"250 OK\r\n"), Ok(()));
+    assert!(!client.is_message_out());
+    assert_eq!(client.data(b"Subject: Hi\r\n\r\nHello\r\n"), Ok(()));
+    // DATA alone: the server has not got a byte of the message.
+    assert!(!client.is_message_out());
+    assert_eq!(client.receive(b"354 Go ahead\r\n"), Ok(()));
+    assert!(client.is_message_out());
+    assert_eq!(client.receive(b"250 2.0.0 Queued as 1\r\n"), Ok(()));
+    assert!(!client.is_message_out());
+}

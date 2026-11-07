@@ -83,7 +83,14 @@ Credential Manager on Windows.
 - Your own mail and calendar servers, with the settings you gave (IMAP, SMTP, CalDAV).
 - When you use "Try to detect" (see below): your domain's DNS records and autoconfig address, and Mozilla's ISPDB
   only if you switch it on.
-- When you check an account: the account's own IMAP server, as for reading mail (see below).
+- When you check an account: the account's own IMAP server, as for reading mail (see below), and its SMTP server,
+  which gets the same user name and password, only after the IMAP server took them.
+- When you send a message: the account's own SMTP server, over TLS only (from the first byte on port 465, or after
+  STARTTLS on 587, refused when the server does not offer it). The password goes only over the encrypted connection.
+  The server is greeted as `[127.0.0.1]`, which names nothing of your computer. The message goes to every address in
+  To, Cc and Bcc; Bcc is never written into the message, so the other recipients do not see it. The message has a
+  `Message-ID` made of the time and a number at your address's domain, and a `Date` in your computer's time zone. A
+  copy goes to the account's Sent folder.
 - Pictures in a message, only when you ask to show them (see "Remote pictures" below).
 - <Update checks: GitHub Releases, if switched on.>
 
@@ -114,7 +121,8 @@ it also tries to open (and closes at once, sending nothing) port 443 of the same
 other mail ports (993, 465, 587), to tell a network that blocks mail from a server that is down. The password goes out only after the
 certificate verified, as when reading mail. After the server refused the password or never answered the sign-in, a
 check an agent asks for stops before the sign-in and says it needs you; only a check you start sends the password
-again, so an agent cannot get the account locked at your provider by checking over and over.
+again, so an agent cannot get the account locked at your provider by checking over and over. The SMTP server is held
+the same way on its own, after it refused the password in a check or when you sent a message.
 
 ## Remote pictures
 A message can name pictures on someone else's server. InboxCraft shows none of them until you ask: the reader shows

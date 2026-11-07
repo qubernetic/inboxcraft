@@ -83,6 +83,7 @@ fn step(report: &StepReport) -> Value {
                 StepStatus::NeedsOwner => {
                     Some("not run: the last sign-in was refused or went unanswered, so only a check the owner starts sends the password again")
                 }
+                StepStatus::NotSet => Some("not run: the account has no submission server"),
                 StepStatus::NotBuilt => Some("not built yet"),
                 StepStatus::Pending | StepStatus::Passed | StepStatus::Failed(_) => None,
             };

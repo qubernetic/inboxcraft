@@ -161,7 +161,7 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("IMAP sign-in: passed");
     harness.get_by_label("Certificate: passed");
     harness.get_by_label("imap.example.org:993 · issued by Example Test CA");
-    harness.get_by_label("SMTP sign-in: not built yet");
+    harness.get_by_label("SMTP sign-in: no server set");
     harness.check_accessibility();
     harness.get_by_label("Done").click();
     harness.run();

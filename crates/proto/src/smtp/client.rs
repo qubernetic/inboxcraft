@@ -241,6 +241,13 @@ impl Client {
         self.signed_in
     }
 
+    /// Whether the message of the open DATA is out: the server gave its go-ahead, the message went into the output,
+    /// and the server has not answered it yet. A connection lost now may have left the message with the server.
+    #[must_use]
+    pub fn is_message_out(&self) -> bool {
+        self.in_flight.as_ref().is_some_and(|flight| flight.verb == Verb::Data && flight.waiting.is_empty())
+    }
+
     /// What the server said it can do, `None` until EHLO is answered (and again after STARTTLS, until then).
     #[must_use]
     pub fn extensions(&self) -> Option<&Extensions> {

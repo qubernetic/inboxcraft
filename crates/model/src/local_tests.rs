@@ -59,7 +59,8 @@ fn every_record_reads_back() {
     round_trip(&draft());
     round_trip(&Draft::new(DraftId::new(3), AccountId::new(1), at(-5)));
     for state in [OutboxState::Waiting, OutboxState::Sending, OutboxState::Refused { reply: "550 5.1.1 no such user".to_owned() }] {
-        round_trip(&Outgoing { draft: DraftId::new(3), state });
+        round_trip(&Outgoing::new(DraftId::new(3), state.clone()));
+        round_trip(&Outgoing { message: b"Subject: Hi\r\n\r\nHello\r\n".to_vec(), ..Outgoing::new(DraftId::new(3), state) });
     }
     for what in [Due::Send(DraftId::new(3)), Due::Unsnooze(MessageId::new(4)), Due::FollowUp(MessageId::new(5)), Due::Alert(AlertId::new(6))] {
         round_trip(&Scheduled { id: ScheduleId::new(1), due: at(2_000), what });
@@ -116,6 +117,8 @@ fn left_out_fields_take_their_defaults() {
     assert_eq!(calendar.colour, None);
     let event: CalendarEvent = serde_json::from_str(r#"{"id": 7, "calendar": 2, "href": "/c/a.ics", "ical": ""}"#).unwrap();
     assert_eq!(event.etag, None);
+    let outgoing: Outgoing = serde_json::from_str(r#"{"draft": 3, "state": "Sending"}"#).unwrap();
+    assert_eq!(outgoing, Outgoing::new(DraftId::new(3), OutboxState::Sending));
     let alert: Alert = serde_json::from_str(r#"{"id": 6, "event": 7, "at": [5000, 0]}"#).unwrap();
     assert!(!alert.dismissed);
 }
@@ -152,4 +155,7 @@ fn debug_shows_no_mail_text() {
     };
     let shown = format!("{event:?}");
     assert!(!shown.contains("Dentist") && shown.contains("ical_bytes: 15"), "{shown}");
+    let outgoing = Outgoing { message: b"Subject: Budget\r\n\r\nSecret".to_vec(), ..Outgoing::new(DraftId::new(3), OutboxState::Sending) };
+    let shown = format!("{outgoing:?}");
+    assert!(!shown.contains("Budget") && shown.contains("message_bytes: 25"), "{shown}");
 }
