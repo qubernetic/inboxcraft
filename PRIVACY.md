@@ -33,6 +33,14 @@ seconds:
   back; where it does not, the draft's first copy stays there, no later one goes up, and you remove it with your
   mail program or the server's web mail.
 
+A snoozed message is kept on your mail server too, in the account's own `InboxCraft/Snoozed` folder, so another
+InboxCraft on the same account brings it back at the same time:
+- InboxCraft writes a new copy of the message there, the same message with one line on top,
+  `InboxCraft-Snoozed-Until`, saying when it comes back (in UTC); once the server has the copy, the old one is
+  deleted. The copy keeps the line when it comes back to the inbox, so another mail program can see that you snoozed
+  it and until when;
+- a message whose text InboxCraft has not downloaded yet is moved to the folder as it is, without the line.
+
 Beside the store, `inboxcraft/instance.lock` and `inboxcraft/instance.sock` keep a second start of InboxCraft from
 opening the same mail: the first is empty, the second is a socket through which a later start asks the running one to show its window or to quit. Only your user account can open either of them or the `inboxcraft` folder they are
 in. Neither holds anything of yours. Starting at login

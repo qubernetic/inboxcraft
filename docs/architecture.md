@@ -161,6 +161,22 @@ it and the front end hands it back at the start, `Session::pins_outlast_done`). 
 and `pinned`. `history.undo` takes each act back: the state as it was and, for done, the message back where it was
 when that folder still holds mail.
 
+Snooze (`mail.snooze`, `safe`, in `engine::cmd::triage`; the stage and the return in `engine::arrive::snooze`) puts
+a message away until a time, given as `until` or a preset of `schedule.presets`. The message goes to the account's
+`InboxCraft/Snoozed` (made on the server the first time) in a new copy whose header has InboxCraft's own field on
+top, `InboxCraft-Snoozed-Until` (`model::SNOOZED_UNTIL`) with the time as an RFC 5322 date in UTC: the copy goes up
+with `APPEND` (`JobKind::Append` naming the message), and only the answer queues the delete for good of the old copy
+and gives the message the new copy's UID (`APPENDUID`); a failed copy deletes nothing and leaves the message where the
+server keeps it. A server that names no UID gets the copy from the folder's next sync under a new id. A message whose
+body is not kept yet, or whose move is still on its way, is moved without the field (`written` is `false`). The
+message's state keeps the time (`snoozed_until`) and a schedule entry brings it back. The snooze stage reads the field
+(`net` puts it in the envelope) of mail that arrives in the snoozed folder, so a message another InboxCraft snoozed,
+or our own copy back without a UID, is snoozed until its time here too; elsewhere the field is ignored. When the
+entry fires, a message still in the snoozed folder comes back to the inbox unread, with `returned` set to the time
+(`mail.list` sorts it as if it arrived then and says `returned` and `snoozed_until` on each row); one the owner moved
+on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once; `history.undo` takes a snooze
+back, its time and schedule entry included.
+
 Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
 notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
 still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own
@@ -182,7 +198,8 @@ the sample as on a real account (#131).
 The scheduler (`engine::schedule`) works on the store's schedule: each entry is due at a moment and sends a draft,
 brings a snoozed message back, reminds of a reply that did not come or shows a calendar alert. `Session::tick` fires
 every entry whose time has come on the session's clock, in time order: the entry leaves the schedule in the same
-batch as what it changes (a returned snooze or a fired reminder clears its time in the message's state), and comes
+batch as what it changes (a returned snooze or a fired reminder clears its time in the message's state, and a
+returned snooze comes back to the inbox with its jobs), and comes
 back as a `Fired` event, `missed` when it was due before `Session::start` or is handled more than a minute late (the
 computer was asleep). `Session::next_due` tells the front end when to tick next. Commands add entries with an id from
 `Context::next_schedule_id`. `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
