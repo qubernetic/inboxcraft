@@ -7,7 +7,10 @@ use std::io::{self, Write};
 use inboxcraft_time::{Clock, FakeClock, Timestamp};
 use inboxcraft_ui_egui::keep::NoKeep;
 
-use super::{Source, Step, app, owner_keep, run, usage};
+use inboxcraft_store::Memory;
+
+use super::store::Owned;
+use super::{Mail, Source, Step, app, owner_keep, run, usage};
 
 fn run_with(args: &[&str]) -> (Step, String, String) {
     let mut out = Vec::new();
@@ -39,7 +42,7 @@ fn help_prints_the_usage() {
 
 #[test]
 fn no_arguments_open_an_empty_window_and_sample_the_sample() {
-    assert_eq!(run_with(&[]).0, Step::Window(Source::Empty));
+    assert_eq!(run_with(&[]).0, Step::Window(Source::Owner));
     assert_eq!(run_with(&["--sample"]).0, Step::Window(Source::Sample));
 }
 
@@ -88,24 +91,36 @@ fn a_closed_output_is_an_error_code_not_a_panic() {
     Broken.flush().unwrap_err();
 }
 
+/// The owner's mail in a store that is gone with the test.
+fn owned() -> Mail {
+    Mail::Store(Owned { store: Box::new(Memory::default()), id: "0a1b".to_owned() })
+}
+
+fn mail(source: Source) -> Mail {
+    match source {
+        Source::Sample => Mail::Sample,
+        Source::Owner => owned(),
+    }
+}
+
 fn clock() -> Box<dyn Clock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
 }
 
 #[test]
 fn the_sample_window_shows_the_sample_mailbox_and_the_empty_one_nothing() {
-    let sample = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
+    let sample = app(Mail::Sample, clock, None, Box::new(NoKeep)).unwrap();
     assert_eq!(sample.mailbox().accounts().len(), 2);
     assert_eq!(sample.mailbox().messages().len(), 11);
-    let empty = app(Source::Empty, clock, Some(std::sync::Arc::new(|| {})), Box::new(NoKeep)).unwrap();
+    let empty = app(owned(), clock, Some(std::sync::Arc::new(|| {})), Box::new(NoKeep)).unwrap();
     assert!(empty.mailbox().accounts().is_empty());
     assert_eq!(empty.mailbox().error(), None);
 }
 
 #[test]
 fn only_the_empty_window_adds_accounts() {
-    assert!(!app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap().can_add(), "the sample connects nowhere");
-    assert!(app(Source::Empty, clock, None, Box::new(NoKeep)).unwrap().can_add());
+    assert!(!app(Mail::Sample, clock, None, Box::new(NoKeep)).unwrap().can_add(), "the sample connects nowhere");
+    assert!(app(owned(), clock, None, Box::new(NoKeep)).unwrap().can_add());
 }
 
 #[test]
@@ -116,8 +131,8 @@ fn both_windows_start_with_the_kept_appearance() {
     let file = dir.path().join(FILE);
     let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
     KeepFile::new(file.clone()).store(&chosen).unwrap();
-    for source in [Source::Sample, Source::Empty] {
-        let window = app(source, clock, None, Box::new(KeepFile::new(file.clone()))).unwrap();
+    for source in [Source::Sample, Source::Owner] {
+        let window = app(mail(source), clock, None, Box::new(KeepFile::new(file.clone()))).unwrap();
         assert_eq!(*window.appearance(), chosen, "{source:?}");
     }
 }
@@ -128,7 +143,7 @@ fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
     use inboxcraft_ui_egui::mailbox::Act;
     use inboxcraft_ui_egui::workers::Scripted;
     let dir = tempfile::tempdir().unwrap();
-    let mut window = app(Source::Sample, clock, None, Box::new(KeepFile::new(dir.path().join(FILE)))).unwrap();
+    let mut window = app(Mail::Sample, clock, None, Box::new(KeepFile::new(dir.path().join(FILE)))).unwrap();
     assert!(window.mailbox().can_act());
     let mut workers = Scripted::default();
     let ids: Vec<u64> = window.mailbox().messages().iter().map(|row| row.id).collect();
@@ -148,7 +163,7 @@ fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
     assert_eq!(window.mailbox().messages().len(), 10);
     assert!(workers.sent.is_empty(), "no job went to a worker: {:?}", workers.sent);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "nothing was written");
-    let again = app(Source::Sample, clock, None, Box::new(NoKeep)).unwrap();
+    let again = app(Mail::Sample, clock, None, Box::new(NoKeep)).unwrap();
     assert_eq!(again.mailbox().messages().len(), 11, "the next start shows the sample as it was");
 }
 
@@ -161,8 +176,8 @@ fn child_opens_both_windows_with_the_owner_s_keep() {
     if std::env::var_os(CHILD_VAR).is_none() {
         return;
     }
-    for source in [Source::Sample, Source::Empty] {
-        let window = app(source, clock, None, owner_keep()).unwrap();
+    for source in [Source::Sample, Source::Owner] {
+        let window = app(mail(source), clock, None, owner_keep()).unwrap();
         println!("font={:?}", window.appearance().font);
     }
 }

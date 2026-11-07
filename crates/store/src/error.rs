@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use inboxcraft_model::{AccountId, FolderId, MessageId, Uid};
+use inboxcraft_model::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, MessageId, Uid};
 
 /// Why the store refused a change or could not answer.
 ///
@@ -18,6 +18,14 @@ pub enum StoreError {
     UnknownFolder(FolderId),
     /// A change names a message the store does not hold.
     UnknownMessage(MessageId),
+    /// A change names a draft the store does not hold.
+    UnknownDraft(DraftId),
+    /// A change names a calendar the store does not hold.
+    UnknownCalendar(CalendarId),
+    /// A change names a calendar event the store does not hold.
+    UnknownCalendarEvent(CalendarEventId),
+    /// A change names an alert the store does not hold.
+    UnknownAlert(AlertId),
     /// A folder or message belongs to another account than the change says.
     WrongAccount {
         /// The folder.
@@ -55,6 +63,10 @@ impl fmt::Display for StoreError {
             Self::UnknownAccount(id) => write!(f, "no account {id} in the store"),
             Self::UnknownFolder(id) => write!(f, "no folder {id} in the store"),
             Self::UnknownMessage(id) => write!(f, "no message {id} in the store"),
+            Self::UnknownDraft(id) => write!(f, "no draft {id} in the store"),
+            Self::UnknownCalendar(id) => write!(f, "no calendar {id} in the store"),
+            Self::UnknownCalendarEvent(id) => write!(f, "no calendar event {id} in the store"),
+            Self::UnknownAlert(id) => write!(f, "no alert {id} in the store"),
             Self::WrongAccount { folder, account } => write!(f, "folder {folder} does not belong to account {account}"),
             Self::DuplicateUid { folder, uid } => write!(f, "folder {folder} already holds UID {uid}"),
             Self::TooLarge => write!(f, "the message source is too large to keep"),

@@ -7,8 +7,9 @@
 //! on native and wasm. Our own model is the centre: protocols and formats are translated into it at the edge, so
 //! the engine, the store and the front ends never see a protocol type.
 //!
-//! - Our own ids ([`AccountId`], [`FolderId`], [`MessageId`], [`ThreadId`], [`JobId`]) and the server's numbers
-//!   ([`Uid`], [`UidValidity`], [`ModSeq`], [`UidSet`]).
+//! - Our own ids ([`AccountId`], [`FolderId`], [`MessageId`], [`ThreadId`], [`JobId`], [`DraftId`], [`ScheduleId`],
+//!   [`CalendarId`], [`CalendarEventId`], [`AlertId`]) and the server's numbers ([`Uid`], [`UidValidity`], [`ModSeq`],
+//!   [`UidSet`]).
 //! - [`Account`] with its [`Server`]s: TLS or STARTTLS, no unencrypted choice, no secret.
 //! - [`Folder`], its [`FolderPath`] and [`SpecialUse`] attributes; [`Role`]s from SPECIAL-USE first, then English
 //!   and Hungarian names ([`detect_role`]), then the owner, asked once ([`RoleMap`]).
@@ -16,6 +17,9 @@
 //!   that are told apart by the address ([`labels`]); [`group_threads`] links replies into threads.
 //! - The read path: the [`Job`]s the engine gives a `net` worker and the [`Event`]s it reports back, with one
 //!   [`ErrorKind`] per cause. They live here because `net` (layer 3) may not depend on `engine` (layer 4).
+//! - The local records the store keeps beside the mail: [`Draft`]s, the outbox ([`Outgoing`]), the schedule
+//!   ([`Scheduled`]), [`Sender`]s with the screener's decision and their [`Group`], each message's [`MessageState`]
+//!   (done, parked, pinned, snoozed, follow-up), and [`Calendar`]s with their [`CalendarEvent`]s and [`Alert`]s.
 //! - The account check: its [`CheckStep`]s in order and the [`StepReport`] of each (host, port, the certificate's
 //!   issuer and a [`StepStatus`]).
 //!
@@ -55,6 +59,7 @@ mod flags;
 mod folder;
 mod id;
 mod job;
+mod local;
 mod message;
 mod role;
 mod text;
@@ -67,8 +72,9 @@ pub use check::{CheckStep, MAX_ISSUER_CHARS, StepReport, StepStatus};
 pub use event::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
 pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
-pub use id::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
+pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};
 pub use job::{FolderState, Job, JobKind};
+pub use local::{Alert, Calendar, CalendarEvent, Draft, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
 pub use message::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Summary};
 pub use role::{Role, RoleError, RoleMap, RoleSource, detect_role};
 pub use text::is_invisible_mark;

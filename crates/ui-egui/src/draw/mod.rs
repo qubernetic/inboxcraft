@@ -237,7 +237,8 @@ impl InboxApp {
         changed
     }
 
-    /// For the window's end: removes the passwords of the accounts added in it from the credential store.
+    /// For the end of a window over a store that is not kept: removes the passwords of the accounts added in it from
+    /// the credential store. A window over a kept store does not call it; a password stays until its account goes.
     pub fn on_exit(&mut self) {
         self.onboarding.forget_passwords();
     }

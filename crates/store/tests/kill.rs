@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! A store killed while it writes loses no committed batch and keeps no half of one.
+//! A store killed while it writes loses no committed batch and keeps no half of one, in the mail tables and the
+//! local ones alike.
 //!
 //! The test runs this test binary again as a child (`child_writes_until_killed`), reads the number of each batch the
 //! child committed, kills it at some point inside the next write, and opens the store.
@@ -14,8 +15,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use contract::{body, message, two_accounts};
-use inboxcraft_model::{FolderId, MessageId};
+use contract::{body, draft, job, message, two_accounts};
+use inboxcraft_model::{AccountId, DraftId, FolderId, JobId, MessageId, MessageState};
 use inboxcraft_store::{Batch, Change, DATABASE_FILE, SOURCES_DIR, Sqlite, Storage, StoreConfig};
 
 /// The store directory of the child; without it the child test does nothing.
@@ -28,15 +29,24 @@ fn text(n: u64) -> String {
     format!("message number {n} {}", "padding ".repeat(usize::try_from(n % 50).unwrap()))
 }
 
-/// One batch: message `n` in INBOX with its body, and a flag change on the message before it.
+/// One batch: message `n` in INBOX with its body, draft `n` and job `n` in the queue; the message before it marked
+/// opened and pinned, and its job off the queue.
 fn batch(n: u64) -> Batch {
     let mut batch = Batch::new()
         .with(Change::PutMessage(message(n, 1, 1, u32::try_from(n).unwrap(), &format!("Subject {n}"), Some(1))))
-        .with(Change::PutBody(MessageId::new(n), body(&text(n))));
+        .with(Change::PutBody(MessageId::new(n), body(&text(n))))
+        .with(Change::PutDraft(draft(n, 1, &text(n))))
+        .with(Change::QueueJob(job(n, 1)));
     if n > 1 {
         batch.push(Change::MarkOpened(MessageId::new(n - 1)));
+        batch.push(Change::SetMessageState(MessageId::new(n - 1), pinned()));
+        batch.push(Change::RemoveJob(JobId::new(n - 1)));
     }
     batch
+}
+
+fn pinned() -> MessageState {
+    MessageState { pinned: true, ..MessageState::default() }
 }
 
 #[test]
@@ -94,7 +104,12 @@ fn check(dir: &Path, committed: u64) -> u64 {
         assert!(entry.has_body(), "message {n} without its body");
         assert_eq!(store.body(MessageId::new(n)).unwrap(), Some(body(&text(n))), "body {n}");
         assert_eq!(entry.opened(), n < held, "message {n} opened by the batch after it");
+        let state = if n < held { pinned() } else { MessageState::default() };
+        assert_eq!(store.message_state(MessageId::new(n)).unwrap(), state, "message {n} pinned by the batch after it");
+        assert_eq!(store.draft(DraftId::new(n)).unwrap(), Some(draft(n, 1, &text(n))), "draft {n}");
     }
+    assert_eq!(store.queued_jobs().unwrap(), [job(held, 1)], "only the last batch's job waits");
+    assert_eq!(store.drafts(AccountId::new(1)).unwrap().len() as u64, held);
     let files = std::fs::read_dir(dir.join(SOURCES_DIR)).unwrap().count();
     assert_eq!(files as u64, held, "one source file per kept body, no orphan");
     let conn = rusqlite::Connection::open(dir.join(DATABASE_FILE)).unwrap();

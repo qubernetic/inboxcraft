@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use super::{AccountId, FolderId, JobId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
+use super::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};
 
 #[test]
 fn our_ids_show_their_kind_in_logs() {
@@ -10,6 +10,11 @@ fn our_ids_show_their_kind_in_logs() {
     assert_eq!(MessageId::new(333).to_string(), "m333");
     assert_eq!(ThreadId::new(4).to_string(), "t4");
     assert_eq!(JobId::new(5).to_string(), "j5");
+    assert_eq!(DraftId::new(6).to_string(), "d6");
+    assert_eq!(ScheduleId::new(7).to_string(), "s7");
+    assert_eq!(CalendarId::new(8).to_string(), "c8");
+    assert_eq!(CalendarEventId::new(9).to_string(), "e9");
+    assert_eq!(AlertId::new(10).to_string(), "l10");
     assert_eq!(MessageId::new(7).get(), 7);
 }
 
