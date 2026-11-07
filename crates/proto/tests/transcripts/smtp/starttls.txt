@@ -101,6 +101,39 @@ S: 454 4.7.0 TLS not available, sign in at http://example.org/
 ? Ready
 > auth-login ada@example.org secret
 ! NotEncrypted
+> tls
+! WrongSmtpState { command: "STARTTLS", state: Ready }
+> mail ada@example.org
+! NotEncrypted
+
+# What the server listed before TLS is not used after it: only the second EHLO counts.
+@ plain
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250-AUTH PLAIN
+S: 250-SIZE 10
+S: 250 STARTTLS
+= EHLO hello AUTH SIZE STARTTLS
+> starttls
+C: STARTTLS
+S: 220 go ahead
+= STARTTLS go ahead
+> tls
+C: EHLO client.example.org
+> auth-plain ada@example.org secret
+! Busy
+S: 250-smtp.example.org
+S: 250 AUTH LOGIN
+= EHLO hello AUTH
+> auth-plain ada@example.org secret
+! NotOffered("AUTH PLAIN")
+> mail ada@example.org size=100
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
 
 # Over implicit TLS, STARTTLS is refused.
 @ tls
