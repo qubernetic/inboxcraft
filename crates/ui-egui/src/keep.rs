@@ -1,23 +1,30 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Where the appearance choices are kept between runs: through a [`Keep`] the app hands in.
+//! Where the appearance choices and the keys are kept between runs: through a [`Keep`] the app hands in.
 //!
 //! The desktop app keeps them in `inboxcraft/appearance.json` in the owner's config folder ([`KeepFile`]), the sample
 //! window too: the file holds no mail and nothing about an account. The file is read as outside data
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
-//! the old choices. A window without a config folder gets [`NoKeep`].
+//! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]). A window
+//! without a config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use inboxcraft_engine::appearance::Appearance;
+use serde_json::Value;
+
+use crate::keymap::Keymap;
 
 /// The file's name.
 pub const FILE: &str = "appearance.json";
 
-/// The largest file read, in bytes; an appearance takes a few hundred.
+/// The name of the keys' file, beside [`FILE`].
+pub const KEYS_FILE: &str = "shortcuts.json";
+
+/// The largest file read, in bytes; an appearance takes a few hundred, the keys about a thousand.
 pub const MAX_FILE: usize = 16 * 1024;
 
 /// Keeps the appearance choices between runs.
@@ -31,6 +38,20 @@ pub trait Keep: Send {
     ///
     /// Why nothing was kept, as the owner reads it.
     fn store(&mut self, appearance: &Appearance) -> Result<(), String>;
+
+    /// The keys kept, if any could be read; none by default.
+    fn load_keys(&self) -> Option<Keymap> {
+        None
+    }
+
+    /// Keeps `keymap` in place of the keys kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_keys(&mut self, _keymap: &Keymap) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// The keeping of a window that may not write files: nothing.
@@ -86,33 +107,58 @@ impl KeepFile {
     }
 }
 
+impl KeepFile {
+    /// The keys' file, beside the appearance's; none when the appearance's path names no file.
+    fn keys_path(&self) -> Option<PathBuf> {
+        self.path.file_name().map(|_| self.path.with_file_name(KEYS_FILE))
+    }
+}
+
+/// The JSON in `path`, unless it is missing, larger than [`MAX_FILE`] or not JSON.
+fn read_json(path: &Path) -> Option<Value> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    // One byte past the cap tells a file that is too large from one that is just large enough.
+    file.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > MAX_FILE {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Writes `value` into `path` through a temporary file moved over the old one.
+fn write_json(path: &Path, value: &Value) -> Result<(), String> {
+    let failed = |error: std::io::Error| format!("{}: {error}", path.display());
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder).map_err(failed)?;
+    }
+    let text = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.new");
+    let written = std::fs::File::create(&temporary).and_then(|mut file| file.write_all(text.as_bytes()).and_then(|()| file.sync_all()));
+    if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, path)) {
+        // Nothing is left half written; a temporary file that could not be removed is overwritten next time.
+        let _ = std::fs::remove_file(&temporary);
+        return Err(failed(error));
+    }
+    Ok(())
+}
+
 impl Keep for KeepFile {
     fn load(&self) -> Option<Appearance> {
-        let file = std::fs::File::open(&self.path).ok()?;
-        let mut bytes = Vec::new();
-        // One byte past the cap tells a file that is too large from one that is just large enough.
-        file.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
-        if bytes.len() > MAX_FILE {
-            return None;
-        }
-        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-        Some(Appearance::from_value(&value))
+        read_json(&self.path).map(|value| Appearance::from_value(&value))
     }
 
     fn store(&mut self, appearance: &Appearance) -> Result<(), String> {
-        let failed = |error: std::io::Error| format!("{}: {error}", self.path.display());
-        if let Some(folder) = self.path.parent() {
-            std::fs::create_dir_all(folder).map_err(failed)?;
-        }
-        let text = serde_json::to_string_pretty(&appearance.to_value()).map_err(|error| error.to_string())?;
-        let temporary = self.path.with_extension("json.new");
-        let written = std::fs::File::create(&temporary).and_then(|mut file| file.write_all(text.as_bytes()).and_then(|()| file.sync_all()));
-        if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, &self.path)) {
-            // Nothing is left half written; a temporary file that could not be removed is overwritten next time.
-            let _ = std::fs::remove_file(&temporary);
-            return Err(failed(error));
-        }
-        Ok(())
+        write_json(&self.path, &appearance.to_value())
+    }
+
+    fn load_keys(&self) -> Option<Keymap> {
+        read_json(&self.keys_path()?).map(|value| Keymap::from_value(&value))
+    }
+
+    fn store_keys(&mut self, keymap: &Keymap) -> Result<(), String> {
+        let path = self.keys_path().ok_or_else(|| format!("{}: no file to keep the keys beside", self.path.display()))?;
+        write_json(&path, &keymap.to_value())
     }
 }
 

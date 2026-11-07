@@ -80,7 +80,7 @@ fn the_rail_opens_sent_and_says_which_views_are_not_built_yet() {
         .with_context_setup(install_fonts)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app());
     harness.run();
-    for name in ["Start", "Calendar", "Pins"] {
+    for name in ["Start", "Pins"] {
         assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name}");
     }
     harness.get_by_role_and_label(Role::Button, "Sent mail").click();

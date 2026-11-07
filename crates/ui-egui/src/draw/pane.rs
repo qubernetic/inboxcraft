@@ -7,6 +7,7 @@
 
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
+use super::Screen;
 use super::paint::{NavRow, line_height, nav_row};
 use crate::component::avatar;
 use crate::component::button::IconButton;
@@ -39,7 +40,17 @@ pub(super) struct Rail {
     pub(super) mail: bool,
     pub(super) sent: bool,
     pub(super) search: bool,
+    pub(super) calendar: bool,
     pub(super) settings: bool,
+}
+
+impl Rail {
+    /// The actions of the buttons pressed, besides the settings, which the rail's button opens and closes.
+    pub(super) fn actions(&self) -> impl Iterator<Item = &'static str> {
+        [(self.mail, keymap::MAIL), (self.sent, keymap::SENT), (self.search, keymap::FIND), (self.calendar, keymap::CALENDAR)]
+            .into_iter()
+            .filter_map(|(pressed, action)| pressed.then_some(action))
+    }
 }
 
 /// The app's mark at the rail's top: the mail icon on a tile of the ink, faint.
@@ -77,10 +88,20 @@ pub(super) struct RailPlace {
     pub(super) top: f32,
 }
 
-/// Draws the rail over the whole of `ui`: the app's mark, the views (Mail active unless `settings` or `adding` show
-/// another page; the views not built yet disabled, saying so), and at the foot the settings and the owner. Its left
-/// corners follow the window's `corner`.
-pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool, place: RailPlace) -> Rail {
+/// Draws the rail over the whole of `ui`: the app's mark, the views (the `screen` shown active unless `settings` or
+/// `adding` show another page; the views not built yet disabled, saying so), and at the foot the settings and the
+/// owner. Its left corners follow the window's `corner`.
+#[expect(clippy::too_many_arguments, reason = "the rail reads the window's state, which is not one value")]
+pub(super) fn rail(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    screen: Screen,
+    settings: bool,
+    adding: bool,
+    place: RailPlace,
+) -> Rail {
     let corner = place.corner;
     let s = &theme.spacing;
     let rect = ui.max_rect();
@@ -94,7 +115,8 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let ink = rail_ink(theme);
     let not_yet = tr!("Not available yet");
     let tile = RAIL_TILE;
-    let mail_shown = !settings && !adding;
+    let shown = !settings && !adding;
+    let mail_shown = shown && screen == Screen::Mail;
     let in_sent = mail_shown && mailbox.place() == Place::View(FolderRole::Sent);
     let mut asked = Rail::default();
     ui.vertical_centered(|ui| {
@@ -111,9 +133,21 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             .side(tile)
             .show(ui, theme, keymap)
             .clicked();
-        IconButton::new(IconId::Calendar, tr!("Calendar")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
+        asked.calendar = IconButton::new(IconId::Calendar, tr!("Calendar"))
+            .action(keymap::CALENDAR)
+            .active(shown && screen == Screen::Calendar)
+            .ink(ink)
+            .side(tile)
+            .show(ui, theme, keymap)
+            .clicked();
         IconButton::new(IconId::Pin, tr!("Pins")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
-        asked.sent = IconButton::new(IconId::Send, tr!("Sent mail")).active(in_sent).ink(ink).side(tile).show(ui, theme, keymap).clicked();
+        asked.sent = IconButton::new(IconId::Send, tr!("Sent mail"))
+            .action(keymap::SENT)
+            .active(in_sent)
+            .ink(ink)
+            .side(tile)
+            .show(ui, theme, keymap)
+            .clicked();
         asked.search = IconButton::new(IconId::Search, tr!("Search mail")).action(keymap::FIND).ink(ink).side(tile).show(ui, theme, keymap).clicked();
     });
     ui.with_layout(Layout::bottom_up(Align::Center), |ui| {

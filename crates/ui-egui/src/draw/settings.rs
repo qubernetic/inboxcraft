@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance and Accounts; the others not built
-//! yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Each setting is a row: its name and a note on the left, its control on the right (or
+//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts and Shortcuts; the others
+//! not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Shortcuts lists every action of
+//! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
 //! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
 //! for "Reduce motion"; a preview in the look the controls choose closes the page.
@@ -16,12 +17,13 @@ use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
+use crate::component::field;
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
-use crate::keymap::Keymap;
+use crate::keymap::{Action, Keymap};
 use crate::mailbox::Mailbox;
 use crate::onboard::Onboarding;
 use crate::settings::{MAX_CHARS, Section, Settings};
@@ -65,6 +67,12 @@ pub(super) enum Asked {
     Back,
     /// Something on the form or the check.
     Page(super::onboard::Asked),
+    /// Wait for the next key pressed, for the action.
+    Capture(&'static str),
+    /// Take the action's key away.
+    Unbind(&'static str),
+    /// Give every action its first key again.
+    ResetKeys,
     Close,
 }
 
@@ -133,7 +141,7 @@ fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
         (IconId::Funnel, tr!("Triage"), None),
         (IconId::Send, tr!("Sending"), None),
         (IconId::Calendar, tr!("Calendar"), None),
-        (IconId::Keyboard, tr!("Shortcuts"), None),
+        (IconId::Keyboard, tr!("Shortcuts"), Some(Section::Shortcuts)),
         (IconId::Shield, tr!("Privacy"), None),
         (IconId::Info, tr!("About"), None),
     ]
@@ -144,6 +152,7 @@ fn section_name(section: Section) -> &'static str {
     match section {
         Section::Appearance => tr!("Appearance"),
         Section::Accounts => tr!("Accounts"),
+        Section::Shortcuts => tr!("Shortcuts"),
     }
 }
 
@@ -601,6 +610,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let on_page = match section {
         Section::Appearance => appearance(ui, theme, keymap, view.settings, view.current, view.reduce),
         Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
+        Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
     };
     asked.or(on_page)
 }
@@ -618,6 +628,102 @@ fn appearance(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settin
         ui.set_max_width(ui.available_width() - theme.spacing.m);
         asked = rows(ui, theme, keymap, settings, current, reduce);
         preview(ui, &shown);
+    });
+    asked
+}
+
+/// A key as a chip that can be pressed: `shown` in a rounded frame, ringed in the focus colour while it `waits`.
+fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool) -> Response {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let ink = if waits { p.accent } else { p.text };
+    let galley = line(ui, &[(shown, theme.fonts.caption, ink)], f32::INFINITY);
+    let size = galley.size() + vec2(s.s * 2.0, s.xs * 2.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken));
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, s.corner, if response.hovered() { p.hover } else { p.panel });
+        let edge = if waits { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
+        painter.rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
+        painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
+        focus_ring(ui, theme, &response);
+    }
+    response
+}
+
+/// The key of `action` on its row, drawn from the right in `ui`: the chip, which waits for a key when pressed, and
+/// Remove before it while it has one.
+fn key_control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
+    let mut asked = None;
+    let chip = keymap.chip(ui.ctx(), action.id);
+    let (shown, spoken) = match (&chip, waits) {
+        (_, true) => (tr!("press a key…").to_owned(), tr!("{name}: press a key, or Escape to keep the old one", name = action.name)),
+        (Some(chip), false) => (chip.clone(), tr!("Key of {name}: {key}", name = action.name, key = chip)),
+        (None, false) => (tr!("No key").to_owned(), tr!("{name} has no key", name = action.name)),
+    };
+    if key_button(ui, theme, &shown, &spoken, waits).clicked() && !waits {
+        asked = Some(Asked::Capture(action.id));
+    }
+    if chip.is_some() && !waits {
+        let remove = tr!("Remove the key of {name}", name = action.name);
+        if IconButton::new(IconId::Close, &remove).show(ui, theme, keymap).clicked() {
+            asked = Some(Asked::Unbind(action.id));
+        }
+    }
+    asked
+}
+
+/// One action of the Shortcuts page: its name, and its key at the right end; a line under it.
+fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
+    let s = &theme.spacing;
+    let height = line_height(ui, theme.fonts.body) + s.m * 2.0;
+    let asked = ui
+        .allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_height(height);
+            ui.label(RichText::new(action.name).font(theme.fonts.body.id()).color(theme.palette.text));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| key_control(ui, theme, keymap, action, waits)).inner
+        })
+        .inner;
+    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
+    ui.add_space(1.0);
+    asked
+}
+
+/// The Shortcuts page under its title: a field that narrows the list and Reset all keys, the note on the last key
+/// given, then every action with its key, scrolling.
+fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
+    let s = &theme.spacing;
+    let mut asked = None;
+    note(ui, theme, tr!("Every action can have a key. One key runs one action: giving a key takes it from the action that had it."));
+    ui.add_space(s.s);
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() * 0.6).max(1.0);
+        let find = field::search(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), tr!("Find a command"), width);
+        ui.ctx().accesskit_node_builder(find.id, |node| node.set_label(tr!("Find a command")));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if TextButton::new(tr!("Reset all keys")).show(ui, theme, keymap).clicked() {
+                asked = Some(Asked::ResetKeys);
+            }
+        });
+    });
+    if let Some(text) = settings.keys_note() {
+        ui.add_space(s.xs);
+        note(ui, theme, text);
+    }
+    let waiting = settings.capturing();
+    let list = crate::palette::matching(settings.find());
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width(ui.available_width() - s.m);
+        if list.is_empty() {
+            ui.add_space(s.l);
+            note(ui, theme, &tr!("No command matches “{text}”.", text = settings.find()));
+        }
+        for action in &list {
+            if let Some(pressed) = key_row(ui, theme, keymap, action, waiting == Some(action.id)) {
+                asked = Some(pressed);
+            }
+        }
     });
     asked
 }

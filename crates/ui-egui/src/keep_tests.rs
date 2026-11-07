@@ -3,7 +3,7 @@
 
 use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 
-use super::{FILE, Keep, KeepFile, MAX_FILE, NoKeep};
+use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
 fn chosen() -> Appearance {
     Appearance {
@@ -131,4 +131,43 @@ fn the_owner_s_file_follows_xdg_config_home_then_home_and_is_none_without_either
     assert_eq!(owner_file_with(&[("USERPROFILE", dir_text)]), home);
     assert_eq!(owner_file_with(&[("HOME", "relative/home")]), "none");
     assert_eq!(owner_file_with(&[]), "none");
+}
+
+#[test]
+fn the_keys_are_kept_beside_the_appearance_and_come_back() {
+    use egui::{Key, KeyboardShortcut, Modifiers};
+
+    use crate::keymap::{self, Keymap};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_keys(), None, "nothing kept yet");
+    let mut keymap = Keymap::default();
+    keymap.bind(keymap::SENT, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num3));
+    keymap.unbind(keymap::DONE);
+    keep.store_keys(&keymap).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_keys(), Some(keymap.clone()));
+    let kept = dir.path().join("nested").join(KEYS_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"ui.sent.show\": \"Command+3\""), "{text}");
+    assert_eq!(keep.load(), None, "the appearance file is another file");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"keys\": { \"ui.sent.show\": 3 } }").unwrap();
+    assert_eq!(keep.load_keys(), Some(Keymap::default()));
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_keys(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_keys(), None);
+    // NoKeep keeps no key either.
+    let mut none = NoKeep;
+    none.store_keys(&keymap).unwrap();
+    assert_eq!(none.load_keys(), None);
+    // A keys file that cannot be written is an error.
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_keys(&keymap).is_err());
+    // A path that names no file has no keys' file beside it.
+    assert!(KeepFile::new(std::path::PathBuf::new()).store_keys(&keymap).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::new()).load_keys(), None);
 }

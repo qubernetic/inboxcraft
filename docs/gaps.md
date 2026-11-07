@@ -364,7 +364,7 @@ B = blocks the next stage.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; of the sheet's sections only Appearance and Accounts are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  runs them exist; of the sheet's sections only Appearance, Accounts and Shortcuts (#130) are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
@@ -380,15 +380,15 @@ B = blocks the next stage.
   wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
   there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
-  holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
+  holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
 - Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
   they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
   that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
   Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
   be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
-  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
-  the keymap can be changed in the settings.
+  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) can be changed on
+  the Shortcuts page (#130).
 - Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
   `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
   (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
@@ -400,8 +400,8 @@ B = blocks the next stage.
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
-  settings); the arrow keys and Escape are still read directly, and changing a key is
-  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
+  settings); the arrow keys and Escape are still read directly; the other keys are changed on the Shortcuts page
+  (#130). Reduced motion is set with
   `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
@@ -467,8 +467,8 @@ B = blocks the next stage.
   where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
-- **The rail** (#104) offers Start, Calendar and Pins before those views exist: they are disabled and say "Not
-  available yet". The owner's initials at its foot come from the first account's address, as no account holds a
+- **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
+  yet". Calendar shows the calendar's empty state until calendar sync (#130). The owner's initials at its foot come from the first account's address, as no account holds a
   name of the person yet.
 - **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
   reached through the unified views, narrowed to the account with the picker.
