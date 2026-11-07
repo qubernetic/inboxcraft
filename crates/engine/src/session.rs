@@ -65,7 +65,8 @@ impl Outcome {
     }
 
     /// The outcome with a job for the `net` worker of `account` that is kept in the store's job queue, in the same
-    /// batch as the outcome's changes, until its last event comes: a restart before then runs it again.
+    /// batch as the outcome's changes, until its last event comes: a restart before then runs it again. Only a job
+    /// with a last event is kept ([`keepable`]); a check or a watch runs in this session only.
     #[must_use]
     pub fn with_kept_job(mut self, account: AccountId, kind: JobKind) -> Self {
         self.jobs.push(Pending { account, kind, message: None, keep: true });
@@ -291,8 +292,14 @@ impl Session {
     ///
     /// A store that cannot be read.
     pub fn with_registry(store: Box<dyn Storage>, clock: Box<dyn Clock>, registry: Registry) -> Result<Self, EngineError> {
+        let mut store = store;
+        let (replay, stray): (Vec<Job>, Vec<Job>) = store.queued_jobs()?.into_iter().partition(|job| keepable(&job.kind));
+        if !stray.is_empty() {
+            // No last event would take them off the queue, and a check could sign in again without the owner asking.
+            let batch = stray.iter().fold(Batch::new(), |batch, job| batch.with(Change::RemoveJob(job.id)));
+            store.apply(&batch)?;
+        }
         let state = State::load(&*store)?;
-        let replay = store.queued_jobs()?;
         Ok(Self { store, clock, registry, state, jobs: Vec::new(), replay })
     }
 
@@ -438,7 +445,10 @@ impl Session {
 
     /// Makes `batch` with the kept jobs among `jobs` added to the store's queue, then takes `state` and queues `jobs`;
     /// nothing of it when the batch fails.
-    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, jobs: Vec<Pending>) -> Result<(), EngineError> {
+    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, mut jobs: Vec<Pending>) -> Result<(), EngineError> {
+        for pending in &mut jobs {
+            pending.keep &= keepable(&pending.kind);
+        }
         let mut next_job = self.state.next_job;
         let mut kept = Vec::new();
         for pending in jobs.iter().filter(|pending| pending.keep) {
@@ -495,6 +505,12 @@ impl Session {
 /// fetch, or its failure.
 pub(crate) fn ends_job(kind: &EventKind) -> bool {
     matches!(kind, EventKind::Folders { .. } | EventKind::FolderSynced { .. } | EventKind::BodyFetched { .. } | EventKind::Failed { .. })
+}
+
+/// Whether a job of `kind` may be kept in the store's queue: one with a last event ([`ends_job`]) to take it off. A
+/// check ends with its steps and a watch never ends, so either would be handed out again at every start.
+pub(crate) fn keepable(kind: &JobKind) -> bool {
+    matches!(kind, JobKind::SyncFolderList | JobKind::SyncFolder { .. } | JobKind::FetchBody { .. })
 }
 
 #[cfg(test)]

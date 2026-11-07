@@ -15,7 +15,12 @@ fn keeps(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({}))
         .with_change(Change::RemoveMessage(MessageId::new(1)))
         .with_job(AccountId::new(2), JobKind::SyncFolderList)
-        .with_kept_job(AccountId::new(1), JobKind::Check { by_owner: false }))
+        .with_kept_job(AccountId::new(1), JobKind::SyncFolderList))
+}
+
+fn keeps_a_check(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> {
+    let idle = JobKind::Idle { folder: FolderId::new(1), path: inboxcraft_model::FolderPath::new("INBOX", None).unwrap() };
+    Ok(Outcome::new(json!({})).with_kept_job(AccountId::new(1), JobKind::Check { by_owner: true }).with_kept_job(AccountId::new(1), idle))
 }
 
 fn keeps_then_fails(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> {
@@ -26,7 +31,7 @@ fn keeps_then_fails(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> 
 
 fn registry() -> Registry {
     let mut registry = Registry::new();
-    for (id, run) in [("test.keeps", keeps as crate::Run), ("test.keeps_then_fails", keeps_then_fails)] {
+    for (id, run) in [("test.keeps", keeps as crate::Run), ("test.keeps_then_fails", keeps_then_fails), ("test.keeps_a_check", keeps_a_check)] {
         registry.register(CommandSpec { id, class: Some(AgentClass::Safe), summary: "A test command", run }).unwrap();
     }
     registry
@@ -121,4 +126,43 @@ fn every_last_event_of_a_job_ends_it() {
     assert!(ends_job(&ended(1).kind));
     assert!(!ends_job(&EventKind::Connection(ConnectionState::Online)));
     assert!(!ends_job(&EventKind::MessagesAdded { folder, uid_validity: validity, messages: vec![] }));
+}
+
+#[test]
+fn a_check_or_a_watch_is_never_kept() {
+    let mut session = session_with(mailbox(), registry());
+    session.run("test.keeps_a_check", &json!({})).unwrap();
+    let kinds: Vec<JobKind> = session.take_jobs().into_iter().map(|job| job.kind).collect();
+    assert!(matches!(kinds.as_slice(), [JobKind::Check { by_owner: true }, JobKind::Idle { .. }]), "they run in this session: {kinds:?}");
+    assert!(queued(session.store()).is_empty(), "no last event ends them, so the queue would hand them out at every start");
+}
+
+#[test]
+fn a_check_or_a_watch_in_the_stored_queue_is_not_handed_out_again() {
+    let mut store = left_over();
+    let idle = JobKind::Idle { folder: FolderId::new(1), path: inboxcraft_model::FolderPath::new("INBOX", None).unwrap() };
+    let batch = Batch::new()
+        .with(Change::QueueJob(Job::new(JobId::new(8), AccountId::new(1), JobKind::Check { by_owner: true })))
+        .with(Change::QueueJob(Job::new(JobId::new(9), AccountId::new(1), idle)));
+    store.apply(&batch).unwrap();
+    let mut session = session_with(store, Registry::builtin().unwrap());
+    session.start();
+    let jobs = session.take_jobs();
+    assert!(jobs.iter().all(|job| matches!(job.kind, JobKind::SyncFolderList)), "{jobs:?}");
+    assert_eq!(jobs.first().map(|job| job.id.get()), Some(7), "the job that can end is still handed out");
+    assert_eq!(queued(session.store()).iter().map(|job| job.id.get()).collect::<Vec<_>>(), [7], "the others left the store");
+}
+
+#[test]
+fn only_a_job_with_a_last_event_is_kept() {
+    use super::keepable;
+    let path = inboxcraft_model::FolderPath::new("INBOX", None).unwrap();
+    let validity = inboxcraft_model::UidValidity::new(1).unwrap();
+    let folder = FolderId::new(1);
+    assert!(keepable(&JobKind::SyncFolderList));
+    assert!(keepable(&JobKind::SyncFolder { folder, path: path.clone(), known: None }));
+    let uid = inboxcraft_model::Uid::new(1).unwrap();
+    assert!(keepable(&JobKind::FetchBody { folder, path: path.clone(), uid_validity: validity, uid }));
+    assert!(!keepable(&JobKind::Check { by_owner: false }));
+    assert!(!keepable(&JobKind::Idle { folder, path }));
 }
