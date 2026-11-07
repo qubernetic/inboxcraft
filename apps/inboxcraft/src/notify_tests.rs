@@ -71,8 +71,25 @@ fn a_click_is_read_from_the_key_and_the_action() {
         ("", ""),
         ("mail-7", "Open"),
         ("mail-7", "rm -rf"),
+        ("mail-+7", "open"),
+        ("mail-007", "open"),
+        ("mails-+1", "default"),
+        ("mail- 7", "open"),
     ] {
         assert_eq!(clicked(key, action), None, "{key:?} {action:?}");
+    }
+}
+
+proptest::proptest! {
+    #[test]
+    fn a_click_is_taken_only_on_a_key_written_the_way_it_is_made(key in "(mails?|returned|reminder|x)?-?[+0 ]{0,2}[0-9]{0,4}[a-z-]{0,2}", action in "(open|default|done|read|.{0,8})") {
+        if let Some(click) = clicked(&key, &action) {
+            let (kind, id) = key.split_once('-').unwrap();
+            let id: u64 = id.parse().unwrap();
+            proptest::prop_assert_eq!(format!("{kind}-{id}"), key.clone());
+            proptest::prop_assert!(id > 0);
+            proptest::prop_assert!(matches!(click, Click::Show) || matches!(click, Click::Open(n) | Click::Done(n) | Click::Read(n) if n == id));
+        }
     }
 }
 

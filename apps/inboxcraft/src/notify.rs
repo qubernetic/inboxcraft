@@ -113,11 +113,11 @@ pub fn shown(notice: &Notice, account: Option<&str>) -> Shown {
 }
 
 /// The click that `action` on the notification `key` stands for; `None` for anything else. Both come over the bus,
-/// so both are read as text from outside.
+/// so both are read as text from outside: the key counts only written exactly as [`shown`] writes it.
 #[must_use]
 pub fn clicked(key: &str, action: &str) -> Option<Click> {
     let (kind, id) = key.split_once('-')?;
-    let id = id.parse::<u64>().ok().filter(|id| *id > 0)?;
+    let id = id.parse::<u64>().ok().filter(|id| *id > 0 && format!("{kind}-{id}") == key)?;
     let open = action == OPEN || action == "default";
     match (kind, action) {
         ("mails", _) if open => Some(Click::Show),
