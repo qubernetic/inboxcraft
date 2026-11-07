@@ -85,13 +85,16 @@ are the ones the owner asks for: an attachment saved, and the appearance choices
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
 - the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and moves it to its
-  account's Archive, R marks it read or unread, Delete moves it to Trash. A row that leaves the list slides out; a
-  toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was;
+  account's Archive, R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+  toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
+  slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  Ctrl+Z after it walks back through the earlier acts;
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, preset, typeface, icons, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 
-Without `--sample` the hover actions are hidden and their keys do nothing, until the commands that act on a real
-mailbox exist. The sample's own command, `sample.mail.set`, is refused in any other session.
+The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
+`mail.delete`, `mail.move`, `mail.open`, `history.undo`); there the change also goes to the server. The sample's own
+command, `sample.mail.set`, is refused in any other session.
 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
