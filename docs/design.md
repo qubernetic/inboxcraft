@@ -293,7 +293,7 @@ window asks for the next frame; once it has landed, nothing does.
   the deep ink (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at
   24 %. Mail (Ctrl+1) and Calendar (Ctrl+2) leave the settings sheet; the settings button (Ctrl+Comma) opens the
   settings page and closes it again. The rail is one button and 8 points either side wide, and shows on every page.
-- **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
+- **Folder pane** (left of the list): the app name with New message (the Compose icon, C) at its right end, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
   view and folder with unread mail carries a badge with the count.
@@ -372,7 +372,7 @@ the icon sits among others at the same size.
   colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
   strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
   message ends with Reply (primary, on the preset's gradient), Reply all and Forward, disabled with "Not available
-  yet" until the composer comes.
+  yet" until the composer fills them in (E2.4).
 - **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
   it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
   To, Copy and the date in full.
@@ -389,6 +389,34 @@ the icon sits among others at the same size.
   goes; a link whose text names another place shows "Careful: ..." in the error colour. The float takes no
   pointer, so the link under it stays hovered. A notice (a save, a copied link, an error) shows in a line at the
   bottom with Dismiss until it is dismissed.
+
+## The composer
+- **Where**: New message in the folder pane, C or the command palette writes a new message in the reader's place,
+  the list a column beside it, as on the design file's "Composer · in place of the reader" screen. There is one at a
+  time: New message brings back the one being written. A message pressed in the list, or the calendar, sends the
+  composer to its floating panel at the window's bottom right (the frosted float: the Compose icon, the subject or
+  "New message", its key, Close); a press on it brings the composer back whole. The keys that act on a message (D,
+  A, R, S, Delete, the arrows) rest while the composer hides it.
+- **Layout**: the title ("New message", or the subject once there is one) with Close; then a line each, its name
+  muted in a column on the left and a rule under it: From (the sender as "Name <address>" with a chevron, a menu of
+  the accounts; the account's name muted at the right end), To (the chips, then the field, "Name or address" while
+  it is empty; "Cc Bcc" at the right end shows those two lines), Subject; then the text, scrolling, and at the foot
+  Discard (the Delete icon) on the left and Send (primary, Ctrl+Enter) on the right with why it is blocked before it.
+- **Chips**: a fully rounded chip on the panel colour with the recipient's avatar, the name (or the address) and a
+  cross that removes it; one that is no address is on the error colour with a warning instead of the avatar, and
+  Send is blocked with "<address> is not an address" (or "Add a recipient to send" without any). Enter, a comma, a
+  semicolon or leaving the line makes a chip of what was typed; Backspace in the empty field removes the last chip.
+  A recipient is there once across To, Cc and Bcc.
+- **Suggestions**: typing shows the people in the mail kept here whose name or address holds the text (at most six,
+  not the owner's own addresses or a recipient already there) on a float under the field. The arrows move the
+  highlight (the Done mark), Enter or a press takes it instead of what was typed, Escape puts the list away.
+- **Drafts**: the draft is kept at once and after every change (`compose.update`), with nothing to press and
+  nothing shown. Close keeps it (the toast says "Draft saved"); Discard removes it here and on the server ("Draft
+  discarded"); Send hands it to the account's submission server ("Sending your message"). A refusal shows in the
+  error banner and leaves the composer open with everything in it.
+- **Sending page**: the settings sheet's Sending section has each account's signature in a field (its name and
+  address over it) with Save, disabled until the text differs; an empty field clears it. A new message starts with
+  the signature under "-- "; another account in From swaps it while it is still at the end as it was.
 
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
@@ -443,8 +471,8 @@ the icon sits among others at the same size.
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
-  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts and Shortcuts are
-  built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts, Sending and
+  Shortcuts are built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
   the rail's places and their keys; every way out forgets what the open sheet held (the text on the Shortcuts page,
   an action waiting for a key, the notes), so it opens clean the next time.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
@@ -479,7 +507,10 @@ width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette-mode-<mode>.png`, `"palette"`),
 the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
-the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark.
+the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark, and so are the
+composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
+`compose-suggest-<mode>.png`, and `compose-floating-<mode>.png` with a message opened over it) and the Sending page
+(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature.
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points
