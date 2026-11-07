@@ -33,12 +33,12 @@ impl Plan {
     }
 
     pub(crate) fn job(&mut self, account: AccountId, kind: JobKind) {
-        self.jobs.push(Pending { account, kind, message: None, keep: false });
+        self.jobs.push(Pending { account, kind, message: None, keep: false, until: None });
     }
 
     /// A job kept in the store's queue until its last event.
     pub(crate) fn kept_job(&mut self, account: AccountId, kind: JobKind) {
-        self.jobs.push(Pending { account, kind, message: None, keep: true });
+        self.jobs.push(Pending { account, kind, message: None, keep: true, until: None });
     }
 
     /// An act's changes and kept jobs, as a stage of the arriving-mail pipeline adds them.
@@ -114,8 +114,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::Sent { draft } => crate::send::sent(store, &mut plan, account, *draft)?,
         EventKind::SendFailed { draft, kind, reply } => crate::send::failed(store, &mut plan, account, *draft, *kind, reply.as_deref())?,
-        // The calendar engine takes these; until it does, they change nothing.
-        EventKind::Calendar(_) => false,
+        EventKind::Calendar(report) => crate::calendar::report(store, &mut plan, account, report)?,
         EventKind::Abilities { uid_expunge } => {
             plan.state.accounts.entry(account).or_default().uid_expunge = *uid_expunge;
             true

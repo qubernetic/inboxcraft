@@ -1887,6 +1887,7 @@ dependencies = [
 name = "inboxcraft-engine"
 version = "0.1.0"
 dependencies = [
+ "inboxcraft-ical",
  "inboxcraft-mime",
  "inboxcraft-model",
  "inboxcraft-store",

@@ -221,6 +221,7 @@ fn undo(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let (store, state) = (context.store(), context.state());
     let answer = |id: MessageId, undone: bool| Outcome::new(json!({ "command": act.command, "id": id.get(), "undone": undone })).with_undo(Step::Pop);
     let (id, effects) = match &act.inverse {
+        Inverse::Event(undo) => return super::calendar::undo(context, act.command, undo),
         Inverse::Screen(screened) => {
             let effects = super::triage::undo(context, screened)?;
             let address = screened.address.as_str().to_lowercase();
