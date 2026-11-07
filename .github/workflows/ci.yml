@@ -95,6 +95,7 @@ jobs:
     timeout-minutes: 60
     env:
       # Incremental data only pays off on a warm machine, and it would hold our own code: never built, never cached.
+      # The coverage run sets 1 for itself (xtask/src/cov.rs, `INCREMENTAL`).
       CARGO_INCREMENTAL: 0
       # Third-party dependencies unoptimised in CI only (Cargo.toml keeps 2 for local builds): on one runner a cold
       # job builds 19 minutes faster and a warm one 15 s faster, the tests run 21 s slower (#70).

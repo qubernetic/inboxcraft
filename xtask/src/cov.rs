@@ -25,6 +25,13 @@ use crate::{Context, Error};
 /// The floors, relative to the workspace root.
 pub(crate) const CONFIG: &str = ".config/coverage.toml";
 
+/// The environment of the coverage run: an incremental build, whatever the caller's `CARGO_INCREMENTAL` (CI sets 0).
+/// Without incremental compilation rustc inlines small functions across crates, and every test binary that links a
+/// crate without calling such a function carries an empty coverage record of it. llvm-cov keeps the first record of a
+/// function in the order of the binaries' names, so whether a line counts as covered would depend on which binaries
+/// link the crate and how they sort.
+const INCREMENTAL: &[(&str, &str)] = &[("CARGO_INCREMENTAL", "1")];
+
 /// The report `cov` writes when the context names no other.
 const REPORT: &str = "lcov.info";
 
@@ -187,7 +194,7 @@ pub(crate) fn gate(ctx: &mut Context, check: bool, out: &mut dyn Write) -> Resul
     writeln!(out, "cov: running cargo llvm-cov nextest (profile ci)")?;
     out.flush()?;
     let args = ["llvm-cov", "nextest", "--workspace", "--profile", "ci", "--lcov", "--output-path", output];
-    if !ctx.runner.run(&ctx.cargo, &args, &ctx.root)? {
+    if !ctx.runner.run_with_env(&ctx.cargo, &args, INCREMENTAL, &ctx.root)? {
         writeln!(out, "cov: the tests failed (a failing test or a build error, see the nextest output above); no coverage floor was checked")?;
         return Ok(false);
     }
