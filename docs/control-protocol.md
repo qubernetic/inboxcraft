@@ -62,7 +62,7 @@ answer each, in order; the CLI opens one for each command.
 | `unauthorized` | the token is missing, not 64 hex digits, wrong or revoked, or the credential store holds none | the connection is closed |
 | `bad_line` | the line is not UTF-8, not one JSON object, names no command (or one over 128 bytes), or its `params` are not an object | the connection goes on |
 | `too_long` | the line is over 1 MiB | the connection is closed |
-| `busy` | eight clients are connected already, or the window did not answer within 30 seconds | closed for the ninth client; goes on after a late answer |
+| `busy` | eight clients are connected already, or the window did not answer within 30 seconds | closed for the ninth client; goes on after a late answer, and the late call may still run, so a client that tries again can run it twice |
 | `closing` | the app is ending | the connection is closed |
 | an engine code | the command was refused or failed: `not_allowed`, `bad_params`, `not_found`, `unknown_command`, ... | the connection goes on |
 
