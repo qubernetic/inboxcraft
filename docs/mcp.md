@@ -3,24 +3,29 @@
 > **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** major
 
 An agent (Claude Desktop or Code, Codex, any MCP client) reads InboxCraft's mail through the Model Context Protocol.
-The server is the crate `inboxcraft-mcp` (layer 5); `inboxcraft-cli mcp` runs it headless on a local store. It is
-read-only: its tools run `safe` commands as an agent, and it does no network I/O.
+The server is the crate `inboxcraft-mcp` (layer 5); `inboxcraft-cli mcp` runs it in the running app, through the
+control channel ([control-protocol.md](control-protocol.md)), or with `--store` headless on a local store. It is
+read-only: its tools run `safe` commands as an agent.
 
 ## Starting it
 
 ```sh
+inboxcraft-cli mcp
 inboxcraft-cli --store <dir> mcp
 ```
 
 The server reads JSON-RPC 2.0 requests from stdin, one a line, and writes one answer a line to stdout until stdin
-ends; then it exits with 0. `<dir>` is a store the app wrote, as for every CLI command ([cli.md](cli.md)). A client
-configuration names the command and its arguments, for example:
+ends; then it exits with 0. Without `--store` it runs every tool in the running app, which runs the jobs a tool asks
+for (fetching a body, checking an account) as the window's own; when the app is not running, `mcp` says so and exits
+with 1 before it reads a line. A refusal of the app (a revoked token, `unauthorized`) comes back as a tool error. A
+client configuration names the command and its arguments, for example:
 
 ```json
-{ "mcpServers": { "inboxcraft": { "command": "inboxcraft-cli", "args": ["--store", "/home/me/mail-store-copy", "mcp"] } } }
+{ "mcpServers": { "inboxcraft": { "command": "inboxcraft-cli", "args": ["mcp"] } } }
 ```
 
-Run it only while the app is closed, or on a copy of the store. The store takes no lock yet, and opening it tidies
+With `--store <dir>`, `<dir>` is a store the app wrote, as for every CLI command ([cli.md](cli.md)), and no job is
+run. Give it only while the app is closed, or a copy of the store. The store takes no lock yet, and opening it tidies
 files away: a message the running app has not finished writing can be lost.
 
 ## The protocol
@@ -91,8 +96,7 @@ a message asks for it, and every tool is `safe`.
 
 ## What it does not do
 
-- It does not talk to the running app yet (the control channel is a later slice), so it serves a store and runs no
-  job: no body is fetched and no account is checked.
+- On a store it runs no job: no body is fetched and no account is checked.
 - It has no resources, prompts, sampling or `outputSchema`; the results are text only, not the CLI's JSON.
 - `mail_list` has no group column yet: the grouped inbox is a later slice.
 - An HTML-only message gives no text yet.
