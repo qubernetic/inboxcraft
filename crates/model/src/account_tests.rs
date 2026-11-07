@@ -178,7 +178,7 @@ fn a_calendar_server_is_an_https_url_or_none() {
         "https://dav.example.org",
         "HTTPS://dav.example.org/",
         "https://dav.example.org:8443/dav/",
-        "https://dav_1.example.org?x#y",
+        "https://dav_1.example.org/",
         "https://[2001:db8::1]:8443/",
         "https://[::1]",
     ] {
@@ -207,6 +207,10 @@ fn a_calendar_server_is_an_https_url_or_none() {
         "https://[::1/",
         "https://[::1]x/",
         "https://[zz]/",
+        // A token typed into the query or the fragment would be repeated in answers and logs.
+        "https://dav.example.org/?token=x",
+        "https://dav.example.org/#x",
+        "https://dav.example.org?x",
         long.as_str(),
     ] {
         assert_eq!(account.clone().with_caldav(Some(url)), Err(AccountError::BadCalendarUrl), "{url}");
