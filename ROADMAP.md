@@ -2,7 +2,7 @@
 
 **Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -79,6 +79,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | UI polish toward the design file, waves 1 and 2: primary and secondary buttons on the text gradient, the search pill, the dark accent from the middle stop, inset rows and outline group icons; the rail with the app mark and its views, the folder pane on the design, the app's own window frame (`ui.frame.set`) and the brand mark as the app icon (#104) |
 | 2026-11-06 | UI polish wave 3: the settings as a sheet with sections and setting rows, the add-account form and the check on the design, the reader's large subject with its group chip, the list's Show all link, stripes and hover actions; the own window frame fixed on Wayland (resizing, moving, hover after a move) with round corners (#104) |
 | 2026-11-06 | Accounts move to the settings sheet: the Accounts page lists them and adds one (form, Detect, the check), the empty window is one card, the folder pane drops Add account (#104) |
+| 2026-11-07 | Tests for the weakest files of the read mail epic: the account workers and the credential store without one, the owner's config folder, IDLE ended or refused by the server, the pill's hover and focus (#108) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -126,3 +127,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: UI polish waves 1 and 2 (#104) |
 | 2026-11-06 | minor | Progress log: UI polish wave 3 (#104) |
 | 2026-11-06 | minor | Progress log: accounts on the settings sheet (#104) |
+| 2026-11-07 | minor | Progress log: tests for the weakest files of the read mail epic (#108) |

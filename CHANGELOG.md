@@ -367,6 +367,9 @@ All notable changes to InboxCraft are listed here. The format follows
   search field is a pill with a magnifier (#104)
 
 ### Changed
+- Tests cover the weakest files of the read mail epic (#108): the account workers' event thread once the
+  window is gone, the credential store where none runs, the owner's config folder for the kept appearance, a
+  move that fails when the appearance is stored, an IDLE the server ends or refuses, and the pill's hover and focus
 - The look follows the design file (#104): dark mode's accent is the preset's middle stop lightened; primary
   buttons sit on the text gradient, the stops darkened until white reads (at most 30 %); list rows sit 6 points
   inside their card; a group's header shows an outline icon in the muted colour; the folder pane has an outlined
