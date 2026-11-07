@@ -5,7 +5,7 @@
 
 use inboxcraft_time::Timestamp;
 
-use crate::{Component, IcalError, Property, Rule, Span, When, escape_text, unescape_text};
+use crate::{Component, IcalError, Param, Property, Rule, Span, When, escape_text, unescape_text};
 
 /// Whether an event takes place.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -93,6 +93,9 @@ impl PartStat {
     }
 }
 
+/// The parameters of an organizer or attendee read into fields of their own.
+const READ_PARAMS: [&str; 4] = ["CN", "ROLE", "PARTSTAT", "RSVP"];
+
 /// An organizer or an attendee: an address (`mailto:` and the like, as written) and a name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Attendee {
@@ -106,13 +109,30 @@ pub struct Attendee {
     pub status: PartStat,
     /// Whether an answer is asked for (`RSVP=TRUE`).
     pub rsvp: bool,
+    /// The other parameters (`SCHEDULE-AGENT`, `CUTYPE` and the like), kept as written so they go back unchanged.
+    pub params: Vec<Param>,
 }
 
 impl Attendee {
     /// `address`, nothing else known.
     #[must_use]
     pub fn new(address: &str) -> Self {
-        Self { address: address.to_owned(), name: None, role: None, status: PartStat::NeedsAction, rsvp: false }
+        Self { address: address.to_owned(), name: None, role: None, status: PartStat::NeedsAction, rsvp: false, params: Vec::new() }
+    }
+
+    /// The first value of the other parameter `name` (any case).
+    #[must_use]
+    pub fn param(&self, name: &str) -> Option<&str> {
+        self.params.iter().find(|param| param.name().eq_ignore_ascii_case(name)).and_then(|param| param.values().first()).map(String::as_str)
+    }
+
+    /// Sets the other parameter `name` to `value`, in place of the one it had.
+    pub fn set_param(&mut self, name: &str, value: &str) {
+        let param = Param::new(name, vec![value.to_owned()]);
+        match self.params.iter_mut().find(|held| held.name() == param.name()) {
+            Some(held) => *held = param,
+            None => self.params.push(param),
+        }
     }
 
     fn read(property: &Property) -> Self {
@@ -122,6 +142,7 @@ impl Attendee {
             role: property.param("ROLE").map(str::to_owned),
             status: property.param("PARTSTAT").map_or(PartStat::NeedsAction, |value| named(value, &PART_STATS, PartStat::Other)),
             rsvp: property.param("RSVP").is_some_and(|value| value.eq_ignore_ascii_case("TRUE")),
+            params: property.params().iter().filter(|param| !READ_PARAMS.contains(&param.name())).cloned().collect(),
         }
     }
 
@@ -138,6 +159,9 @@ impl Attendee {
         }
         if self.rsvp {
             property = property.with_param("RSVP", "TRUE");
+        }
+        for param in &self.params {
+            property = property.with_param_values(param.name(), param.values().to_vec());
         }
         property
     }

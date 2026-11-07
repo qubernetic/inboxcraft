@@ -470,3 +470,34 @@ fn a_sync_brings_events_whose_delete_is_held_in_another_calendar() {
     session.apply(&Event::new(inboxcraft_model::AccountId::new(1), None, EventKind::Calendar(synced))).unwrap();
     assert_eq!(object(&session, 2).events[0].summary.as_deref(), Some("Late lunch"));
 }
+
+/// The `ORGANIZER` and `ATTENDEE` lines of event `id`, unfolded.
+fn people(session: &Session, id: u64) -> Vec<String> {
+    let held = session.store().calendar_event(CalendarEventId::new(id)).unwrap().unwrap();
+    held.ical.replace("\r\n ", "").lines().filter(|line| line.starts_with("ORGANIZER") || line.starts_with("ATTENDEE")).map(str::to_owned).collect()
+}
+
+#[test]
+fn the_server_is_told_not_to_mail_the_guests() {
+    let (mut session, _) = session();
+    let id = create(&mut session, json!({ "calendar": 1, "summary": "Planning", "start": "2026-11-12T10:00:00Z", "guests": ["dora@example.com"] }));
+    let people = people(&session, id);
+    assert_eq!(people.len(), 2, "{people:?}");
+    assert!(people.iter().all(|line| line.contains(";SCHEDULE-AGENT=CLIENT")), "{people:?}");
+    let event = &object(&session, id).events[0];
+    assert!(event.attendees.iter().chain(&event.organizer).all(|person| person.param("SCHEDULE-AGENT") == Some("CLIENT")));
+}
+
+#[test]
+fn an_edit_keeps_what_the_guests_carry_and_tells_the_server_not_to_mail_them() {
+    let (mut session, _) = session();
+    let lunch = session.store().calendar_event(CalendarEventId::new(2)).unwrap().unwrap();
+    let marked = lunch.ical.replace("ATTENDEE;CN=Dora:", "ATTENDEE;CN=Dora;SCHEDULE-AGENT=SERVER;X-SEEN=yes:");
+    crate::test_support::change(&mut session, inboxcraft_store::Change::PutCalendarEvent(inboxcraft_model::CalendarEvent { ical: marked, ..lunch }));
+    session.run("event.update", &json!({ "id": 2, "summary": "Long lunch" })).unwrap();
+    let people = people(&session, 2);
+    assert!(people.iter().any(|line| line == "ATTENDEE;CN=Dora;SCHEDULE-AGENT=CLIENT;X-SEEN=yes:mailto:dora@example.com"), "{people:?}");
+    assert!(people.iter().any(|line| line == "ORGANIZER;SCHEDULE-AGENT=CLIENT:mailto:anna@example.org"), "{people:?}");
+    let jobs = calendar_jobs(&mut session);
+    assert!(matches!(jobs.as_slice(), [CalendarJob::Put { ical, .. }] if ical.contains("X-SEEN=yes")), "{jobs:?}");
+}

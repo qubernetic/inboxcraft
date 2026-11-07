@@ -391,6 +391,7 @@ pub(crate) fn create(uid: &str, times: Times, details: Details, organizer: &Emai
     event.end = Some(end);
     event.stamp = Some(now);
     details.apply(&mut event, organizer);
+    unscheduled(&mut event);
     let mut calendar = Calendar::new(PRODUCT);
     calendar.events.push(event);
     calendar.write().ok()
@@ -448,6 +449,7 @@ pub(crate) fn edit(
     event.duration = None;
     event.stamp = Some(now);
     details.apply(event, organizer);
+    unscheduled(event);
     let guests = event.attendees.len();
     if notify && guests > 0 {
         event.sequence = event.sequence.saturating_add(1);
@@ -531,6 +533,14 @@ fn placed(times: Times, form: &Form, zone: &dyn Offsets, local: &dyn Offsets) ->
             };
             Some((at(start)?, at(end)?))
         }
+    }
+}
+
+/// `event` marked so that a CalDAV server that schedules on its own (RFC 6638) mails nobody of it: the organiser and
+/// every guest carry `SCHEDULE-AGENT=CLIENT`, the client's task, until InboxCraft sends the invitations itself.
+fn unscheduled(event: &mut Event) {
+    for person in event.attendees.iter_mut().chain(event.organizer.as_mut()) {
+        person.set_param("SCHEDULE-AGENT", "CLIENT");
     }
 }
 
