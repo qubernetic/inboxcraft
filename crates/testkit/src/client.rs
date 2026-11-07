@@ -12,6 +12,7 @@ use std::time::Duration;
 use rustls::pki_types::ServerName;
 use rustls::{CertificateError, ClientConnection, StreamOwned};
 
+use crate::deflate::Deflate;
 use crate::line::{Line, LineReader};
 use crate::pki::TlsClient;
 
@@ -129,10 +130,39 @@ impl Write for Stream {
     }
 }
 
+/// The connection with its deflate state once compressed.
+#[derive(Debug)]
+struct Link {
+    stream: Stream,
+    deflate: Option<Box<Deflate>>,
+}
+
+impl Read for Link {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match &mut self.deflate {
+            Some(deflate) => deflate.read(&mut self.stream, buf),
+            None => self.stream.read(buf),
+        }
+    }
+}
+
+impl Write for Link {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match &mut self.deflate {
+            Some(deflate) => deflate.write(&mut self.stream, buf).map(|()| buf.len()),
+            None => self.stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
 /// A line client connected to a fake server.
 #[derive(Debug)]
 pub struct TestClient {
-    stream: Stream,
+    link: Link,
     reader: LineReader,
     far_off: bool,
 }
@@ -145,7 +175,7 @@ impl TestClient {
     /// A [`ClientError`] of kind [`ErrorKind::Io`] or [`ErrorKind::Timeout`].
     pub fn plain(addr: SocketAddr, timeout: Duration) -> Result<Self, ClientError> {
         let stream = connect(addr, timeout).map_err(|err| ClientError::from_io(&err, false))?;
-        Ok(Self { stream: Stream::Plain(stream), reader: LineReader::default(), far_off: false })
+        Ok(Self { link: Link { stream: Stream::Plain(stream), deflate: None }, reader: LineReader::default(), far_off: false })
     }
 
     /// Connects with implicit TLS and completes the handshake, so a certificate fault shows up here.
@@ -156,14 +186,29 @@ impl TestClient {
     /// the certificate faults, [`ErrorKind::Tls`] for any other TLS failure (a host that is not a DNS name, a server
     /// that does not speak TLS), and the socket kinds of [`TestClient::plain`].
     pub fn tls(addr: SocketAddr, tls: &TlsClient, timeout: Duration) -> Result<Self, ClientError> {
+        let sock = connect(addr, timeout).map_err(|err| ClientError::from_io(&err, tls.clock.is_far_off()))?;
+        Self::handshake(sock, tls)
+    }
+
+    /// Turns a plain connection into TLS, after the server answered STARTTLS, and completes the handshake.
+    ///
+    /// # Errors
+    ///
+    /// The kinds of [`TestClient::tls`]; [`ErrorKind::Tls`] when the connection already is TLS.
+    pub fn start_tls(self, tls: &TlsClient) -> Result<Self, ClientError> {
+        let Stream::Plain(sock) = self.link.stream else { return Err(ClientError::new(ErrorKind::Tls, "the connection already is TLS")) };
+        Self::handshake(sock, tls)
+    }
+
+    fn handshake(mut sock: TcpStream, tls: &TlsClient) -> Result<Self, ClientError> {
         let far_off = tls.clock.is_far_off();
         let name = ServerName::try_from(tls.host.clone()).map_err(|err| ClientError::new(ErrorKind::Tls, err.to_string()))?;
         let mut conn = ClientConnection::new(Arc::clone(&tls.config), name).map_err(|err| ClientError::from_tls(&err, far_off))?;
-        let mut sock = connect(addr, timeout).map_err(|err| ClientError::from_io(&err, far_off))?;
         while conn.is_handshaking() {
             conn.complete_io(&mut sock).map_err(|err| ClientError::from_io(&err, far_off))?;
         }
-        Ok(Self { stream: Stream::Tls(Box::new(StreamOwned::new(conn, sock))), reader: LineReader::default(), far_off })
+        let stream = Stream::Tls(Box::new(StreamOwned::new(conn, sock)));
+        Ok(Self { link: Link { stream, deflate: None }, reader: LineReader::default(), far_off })
     }
 
     /// Reads one line, without its terminator.
@@ -173,11 +218,35 @@ impl TestClient {
     /// [`ErrorKind::Dropped`] when the server closed the connection, [`ErrorKind::Timeout`] when it did not answer,
     /// [`ErrorKind::Garbage`] for bytes that are not a printable UTF-8 line.
     pub fn read_line(&mut self) -> Result<String, ClientError> {
-        let line = self.reader.read_line(&mut self.stream).map_err(|err| ClientError::from_io(&err, self.far_off))?;
+        let line = self.reader.read_line(&mut self.link).map_err(|err| ClientError::from_io(&err, self.far_off))?;
         match line {
             Line::Complete(bytes) => printable(bytes),
             Line::Eof => Err(ClientError::new(ErrorKind::Dropped, "the server closed the connection")),
-            Line::TooLong => Err(ClientError::new(ErrorKind::Garbage, "the server sent a line that is too long")),
+            Line::TooLong(_) => Err(ClientError::new(ErrorKind::Garbage, "the server sent a line that is too long")),
+        }
+    }
+
+    /// Compresses both directions from now on, after the server answered `COMPRESS DEFLATE` with OK.
+    pub fn compress(&mut self) {
+        self.link.deflate = Some(Box::new(Deflate::new()));
+    }
+
+    /// Sends a tagged command line and reads the server's lines up to and including the one with its tag.
+    ///
+    /// # Errors
+    ///
+    /// The kinds of [`TestClient::send_line`] and [`TestClient::read_line`].
+    pub fn command(&mut self, line: &str) -> Result<Vec<String>, ClientError> {
+        let tag = format!("{} ", line.split(' ').next().unwrap_or_default());
+        self.send_line(line)?;
+        let mut lines = Vec::new();
+        loop {
+            let got = self.read_line()?;
+            let done = got.starts_with(&tag);
+            lines.push(got);
+            if done {
+                return Ok(lines);
+            }
         }
     }
 
@@ -189,8 +258,17 @@ impl TestClient {
     pub fn send_line(&mut self, line: &str) -> Result<(), ClientError> {
         let mut bytes: Vec<u8> = line.bytes().filter(|byte| !matches!(byte, b'\r' | b'\n' | b'\0')).collect();
         bytes.extend_from_slice(b"\r\n");
+        self.send_bytes(&bytes)
+    }
+
+    /// Sends `bytes` as they are in one write, such as several pipelined lines or a line without its end.
+    ///
+    /// # Errors
+    ///
+    /// A [`ClientError`] from the socket.
+    pub fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), ClientError> {
         let far_off = self.far_off;
-        self.stream.write_all(&bytes).and_then(|()| self.stream.flush()).map_err(|err| ClientError::from_io(&err, far_off))
+        self.link.write_all(bytes).and_then(|()| self.link.flush()).map_err(|err| ClientError::from_io(&err, far_off))
     }
 }
 

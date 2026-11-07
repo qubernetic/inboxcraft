@@ -40,7 +40,7 @@ fn only_the_run_from_the_archive_carries_the_credentials() -> Result<(), Box<dyn
         assert!(!run.contains(refused), "the run with the credentials has {refused:?}: {run}");
     }
     let build = execs.iter().find(|line| line.contains("nextest archive")).ok_or("no build step")?;
-    assert!(build.contains("-p inboxcraft-testkit --test live --archive-file \"$archive\""), "{build}");
+    assert!(build.contains("-p inboxcraft-testkit -p inboxcraft-net --test live --archive-file \"$archive\""), "{build}");
     Ok(())
 }
 
@@ -50,6 +50,25 @@ fn the_build_runs_before_any_credential_is_read() -> Result<(), Box<dyn std::err
     let build = position(&body, "nextest archive")?;
     assert!(build < position(&body, "value=\"$(lookup")?, "{body:#?}");
     assert!(build < position(&body, "export \"$var=")?, "{body:#?}");
+    Ok(())
+}
+
+#[test]
+fn the_archive_folder_is_made_before_the_build() -> Result<(), Box<dyn std::error::Error>> {
+    // A fresh checkout has no `target/nextest`, and `nextest archive` does not make it (exit 103).
+    let body = recipe()?;
+    let mkdir = position(&body, "mkdir -p target/nextest")?;
+    assert!(mkdir < position(&body, "nextest archive")?, "{body:#?}");
+    assert!(position(&body, "archive=target/nextest/")? < position(&body, "nextest archive")?, "{body:#?}");
+    Ok(())
+}
+
+#[test]
+fn the_values_of_both_accounts_are_read() -> Result<(), Box<dyn std::error::Error>> {
+    let body = recipe()?;
+    let accounts = position(&body, "for account in ")?;
+    assert_eq!(body.get(accounts).map(String::as_str), Some("for account in IMAP IMAP2; do"), "{body:#?}");
+    assert!(body.get(accounts + 1).is_some_and(|line| line.contains("for field in ADDRESS HOST USER SECRET; do")), "{body:#?}");
     Ok(())
 }
 
@@ -86,7 +105,7 @@ fn the_scan_covers_the_secrets_addresses_and_login_names() -> Result<(), Box<dyn
     let start = scan.iter().position(|line| line.starts_with("for var in ")).ok_or("no scan loop")?;
     let end = scan.iter().skip(start).position(|line| line.ends_with("; do")).ok_or("no end of the scan loop's list")?;
     let names = scan.iter().skip(start).take(end + 1).cloned().collect::<Vec<_>>().join(" ");
-    for account in ["IMAP", "GOOGLE"] {
+    for account in ["IMAP", "IMAP2"] {
         for field in ["SECRET", "ADDRESS", "USER"] {
             let var = format!("INBOXCRAFT_LIVE_{account}_{field}");
             assert!(names.contains(&var), "the scan misses {var}: {names}");

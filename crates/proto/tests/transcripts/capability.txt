@@ -1,0 +1,21 @@
+# CAPABILITY when the greeting did not list them.
+@ tls
+S: * OK ready
+= greeted
+> login ada@example.org secret
+! CapabilitiesUnknown
+> capability
+C: A0001 CAPABILITY
+> capability
+! Busy
+S: * CAPABILITY IMAP4rev1 AUTH=PLAIN ID imap4rev1
+S: A0001 OK CAPABILITY completed
+= A0001 capabilities IMAP4REV1 AUTH=PLAIN ID
+> capability
+C: A0002 CAPABILITY
+S: A0002 NO not today
+= A0002 No not today
+> capability
+C: A0003 CAPABILITY
+S: A0003 OK nothing to say
+= A0003 capabilities IMAP4REV1 AUTH=PLAIN ID

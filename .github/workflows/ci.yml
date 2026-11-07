@@ -1,13 +1,30 @@
 # The workspace CI: `cargo xtask ci`, every gate `just ci` runs, in the same order (docs/development.md, "CI").
 #
-# Ready-only: a draft PR runs only the one-step `draft` job; the full run starts on ready_for_review, on every later
-# push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
+# Ready-only: on a draft PR every job is skipped, so no runner starts; the full run starts on ready_for_review, on
+# every later push to a ready PR, on pushes to develop, main and the epic branches, and on manual dispatch
 # (gh workflow run ci.yml --ref <branch>). The `ci` job is the gate: it succeeds only when the full run did.
 #
-# Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, no cache a PR run could write
-# for a later one, every action pinned by commit SHA. Only the `codecov` job has `id-token: write`: it uploads the
-# coverage and test results with the job's GitHub OIDC token (the repository is private) and runs no repository
-# code.
+# The `flatpak` job builds the dev Flatpak (contrib/flatpak) into a bundle as build proof and keeps it as an artifact.
+# It runs on a push to develop or main and on every manual run, on a PR only when the PR changes one of the Flatpak
+# inputs (the `changes` job; docs/development.md, "CI"), and never on a push to an epic branch: the merged epic tree is
+# not built in the Flatpak SDK after each slice, only by the epic's PR into develop (when the epic changed an input)
+# and by the push to develop.
+#
+# Hardening: no pull_request_target, a read-only token everywhere, no stored secrets, every action pinned by commit
+# SHA. Only the `codecov` job has `id-token: write`: it uploads the coverage and test results with the job's GitHub
+# OIDC token (the repository is private) and runs no repository code.
+#
+# The one cache, in the `test` job only: compiled third-party dependencies and the cargo registry. Every full run
+# restores it. Only a green `push` run to develop, main or epic/* that did not create the branch prunes target/ and
+# saves it; a pull_request or workflow_dispatch run and the push that creates a branch never do. Who may push or
+# create those branches is the repository's rulesets, not this file. The prune (`cargo xtask cache-prune`) is an
+# allow list: only the deps, build and .fingerprint folders of each profile and cargo's marker files stay, minus
+# every entry named after a package or target of this workspace; it fails, and nothing is saved, when it cannot
+# read those names or when a path under target/ is still named after one. A test in xtask (ci_workflow_tests.rs)
+# checks these conditions in this file. The key rotates weekly and changes with the runner image, rust-toolchain.toml,
+# .cargo/config.toml, Cargo.lock, the [profile.*] sections of Cargo.toml and the job's dependency opt-level. The
+# `codecov` and `flatpak` jobs and fuzz.yml use no cache. Purging every entry with `gh cache delete --all` needs a
+# token with `actions: write`, the owner's; this workflow's token cannot.
 
 name: ci
 
@@ -30,22 +47,99 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # A draft run with no job left would show no check at all.
-  draft:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+  # Whether this run builds the Flatpak: always on a push to develop or main and on a manual run; never on a push to
+  # an epic branch (the epic's PR into develop builds it when the epic changed an input, the push to develop always);
+  # on a PR only when the PR changes what the manifest builds from, apart from our own Rust sources (a Rust change
+  # that breaks only the Flatpak build shows on the next push to develop or main). For a PR, GitHub checks out a
+  # merge commit whose first parent is the base tip, so its diff against that parent is the PR's change. No
+  # third-party action.
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    timeout-minutes: 1
+    timeout-minutes: 5
+    outputs:
+      flatpak: ${{ steps.flatpak.outputs.run }}
     steps:
-      - run: echo "Draft PR - the full CI runs when the PR is marked ready (gh pr ready)."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Did the Flatpak inputs change
+        id: flatpak
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          # The manifest folder (manifest, cargo-sources.json, desktop file, metainfo), the workspace's Cargo files
+          # and .cargo/, the app's Cargo.toml, the icon the manifest installs, and this workflow.
+          inputs=(contrib/flatpak Cargo.toml Cargo.lock .cargo apps/inboxcraft/Cargo.toml assets/app-icon
+            .github/workflows/ci.yml)
+          if [ "$EVENT" = push ] && [[ "$REF" == refs/heads/epic/* ]]; then
+            echo "A push to an epic branch: the epic's PR into develop builds the Flatpak" >&2
+            run=false
+          elif [ "$EVENT" != pull_request ]; then
+            run=true
+          elif ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not the PR's merge commit, so the Flatpak builds" >&2
+            run=true
+          else
+            changed=$(git diff --name-only 'HEAD^1' HEAD -- "${inputs[@]}")
+            echo "Flatpak inputs this PR changes: ${changed:-none}"
+            if [ -n "$changed" ]; then run=true; else run=false; fi
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
 
   test:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # Incremental data only pays off on a warm machine, and it would hold our own code: never built, never cached.
+      CARGO_INCREMENTAL: 0
+      # Third-party dependencies unoptimised in CI only (Cargo.toml keeps 2 for local builds): on one runner a cold
+      # job builds 19 minutes faster and a warm one 15 s faster, the tests run 21 s slower (#70).
+      DEPS_OPT_LEVEL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # [profile] settings in cargo's own config take precedence over Cargo.toml's.
+      - name: Set the dependency opt-level
+        run: |
+          mkdir -p ~/.cargo
+          printf '\n[profile.dev.package."*"]\nopt-level = %s\n' "$DEPS_OPT_LEVEL" >> ~/.cargo/config.toml
+      # The cache key: runner image, ISO week, toolchain, .cargo/config.toml, [profile.*] sections, the dependency
+      # opt-level, Cargo.lock. A run whose Cargo.lock has no entry yet restores the newest one of the same image, week,
+      # toolchain, cargo config and profiles and rebuilds only what changed.
+      - name: Compute the cache key
+        id: cache-key
+        shell: bash
+        env:
+          TOOLCHAIN: ${{ hashFiles('rust-toolchain.toml') }}
+          CARGO_CONFIG: ${{ hashFiles('.cargo/config.toml') }}
+          LOCK: ${{ hashFiles('Cargo.lock') }}
+        run: |
+          if [ -z "${ImageOS:-}" ] || [ -z "${ImageVersion:-}" ]; then
+            echo "ImageOS or ImageVersion is not set: not a GitHub-hosted runner image" >&2
+            exit 1
+          fi
+          profiles=$(awk '/^\[/ { keep = /^\[profile\./ } keep' Cargo.toml | sha256sum | cut -d' ' -f1)
+          week=$(date -u +%G-W%V)
+          prefix="deps-v1-$RUNNER_OS-$ImageOS-$ImageVersion-$week-$TOOLCHAIN-$CARGO_CONFIG-$profiles-o$DEPS_OPT_LEVEL-"
+          echo "Cache key prefix: $prefix"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "key=$prefix$LOCK" >> "$GITHUB_OUTPUT"
+      # Every run restores; the save step at the end runs on pushes only. The paths match the save step's.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ${{ steps.cache-key.outputs.prefix }}
       # The Dockerfile's list without the base image's build-essential, ca-certificates, curl and git.
       - name: Install the system packages
         run: |
@@ -76,7 +170,7 @@ jobs:
           fallback: none
       - name: cargo xtask ci
         run: cargo xtask ci
-      # lcov.info from the cov gate, junit.xml from the nextest gate (profile ci).
+      # lcov.info and junit.xml (nextest profile ci) both from the cov gate, the one test run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
@@ -86,6 +180,31 @@ jobs:
             target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 7
+      # Only after a green run, only on a push to develop, main or epic/* that did not create the branch (the push that
+      # creates one carries no reviewed change). What stays in target/: cargo's marker files and the deps, build and
+      # .fingerprint folders of each profile, minus every entry named after a package or target of this workspace
+      # (xtask/src/cache_prune.rs). It fails, so nothing is saved, when it cannot read those names or when a path under
+      # target/ is still named after one. xtask/src/ci_workflow_tests.rs holds these conditions.
+      - name: Drop our own crates from target/
+        if: >-
+          github.event_name == 'push' && !github.event.created && (github.ref == 'refs/heads/develop' ||
+          github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/epic/'))
+        shell: bash
+        run: |
+          cargo xtask cache-prune
+          du -sh target ~/.cargo/registry/index ~/.cargo/registry/cache
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: >-
+          github.event_name == 'push' && !github.event.created && (github.ref == 'refs/heads/develop' ||
+          github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/epic/')) &&
+          steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cache-key.outputs.key }}
 
   codecov:
     needs: test
@@ -121,18 +240,56 @@ jobs:
           files: reports/target/nextest/ci/junit.xml
           disable_search: true
 
+  # Build proof for the dev Flatpak: the manifest `just flatpak` builds on the host, built offline from this checkout
+  # and cargo-sources.json into a single-file bundle (docs/development.md, "Install the bundle from CI").
+  flatpak:
+    needs: changes
+    if: needs.changes.outputs.flatpak == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Flathub's builder image with the 25.08 runtime and SDK, pinned by digest. Privileged because flatpak-builder runs
+    # every build step in a bubblewrap sandbox; the job token stays read-only and the job holds no secret.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08@sha256:c91a88269eee8fcdd73ecf43064232fbebe27411f926f63f38bdf70c51f2ceae
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No flatpak-builder cache: nothing a PR run writes feeds a later run.
+      - name: Build the bundle
+        run: |
+          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
+            --state-dir=target/flatpak/state --repo=target/flatpak/repo \
+            target/flatpak/build contrib/flatpak/io.github.qubernetic.inboxcraft.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            target/flatpak/repo inboxcraft.flatpak io.github.qubernetic.inboxcraft
+          ls -l inboxcraft.flatpak
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flatpak
+          path: inboxcraft.flatpak
+          if-no-files-found: error
+          retention-days: 7
+
   # The gate for the required-checks list: a skipped check reports as passing, so this job runs on every full run and
-  # fails unless every job before it succeeded.
+  # fails unless every job before it succeeded. `flatpak` may be skipped only when `changes` said it was not needed
+  # (a PR without a Flatpak input, or a push to an epic branch).
   ci:
-    needs: [test, codecov]
+    needs: [changes, test, codecov, flatpak]
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - name: Every job succeeded
         env:
+          CHANGES: ${{ needs.changes.result }}
+          FLATPAK_NEEDED: ${{ needs.changes.outputs.flatpak }}
           TEST: ${{ needs.test.result }}
           CODECOV: ${{ needs.codecov.result }}
+          FLATPAK: ${{ needs.flatpak.result }}
         run: |
-          echo "test: $TEST, codecov: $CODECOV"
-          [ "$TEST" = success ] && [ "$CODECOV" = success ]
+          echo "changes: $CHANGES (flatpak needed: $FLATPAK_NEEDED), test: $TEST, codecov: $CODECOV, flatpak: $FLATPAK"
+          [ "$CHANGES" = success ] && [ "$TEST" = success ] && [ "$CODECOV" = success ] || exit 1
+          [ "$FLATPAK" = success ] || { [ "$FLATPAK_NEEDED" = false ] && [ "$FLATPAK" = skipped ]; }

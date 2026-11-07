@@ -1,0 +1,31 @@
+# LOGIN over implicit TLS; the capabilities are read again when the answer does not list them.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready
+= greeted
+> login ada@example.org correct"horse\battery
+C: A0001 LOGIN "ada@example.org" "correct\"horse\\battery"
+S: A0001 OK Logged in
+C: A0002 CAPABILITY
+S: * CAPABILITY IMAP4rev1 IDLE MOVE
+S: A0002 OK done
+= A0001 authenticated IMAP4REV1 IDLE MOVE
+? Authenticated
+> login ada@example.org again
+! WrongState { command: "LOGIN", state: Authenticated }
+
+# A refusal: the server's words, with the password it echoed hidden.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> login ada@example.org hunter2
+C: A0001 LOGIN "ada@example.org" "hunter2"
+S: A0001 NO [AUTHENTICATIONFAILED] Invalid credentials for hunter2
+= A0001 No [AUTHENTICATIONFAILED] Invalid credentials for ***
+? NotAuthenticated
+
+# LOGINDISABLED: no password goes out, even over TLS.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 LOGINDISABLED AUTH=PLAIN] ready
+= greeted
+> login ada@example.org secret
+! NotOffered("LOGIN")

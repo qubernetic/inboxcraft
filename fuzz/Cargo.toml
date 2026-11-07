@@ -1,0 +1,141 @@
+# The fuzz targets, one per parser (docs/development.md, "CI"). An own workspace: cargo-fuzz needs nightly Rust
+# and libFuzzer, which the main workspace never sees. Run with `cargo +nightly fuzz run <target>`.
+[package]
+name = "inboxcraft-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+inboxcraft-time = { path = "../crates/time" }
+inboxcraft-charset = { path = "../crates/charset" }
+inboxcraft-html = { path = "../crates/html" }
+inboxcraft-model = { path = "../crates/model" }
+inboxcraft-mime = { path = "../crates/mime" }
+inboxcraft-proto = { path = "../crates/proto" }
+inboxcraft-net = { path = "../crates/net" }
+inboxcraft-testkit = { path = "../crates/testkit" }
+inboxcraft-store = { path = "../crates/store" }
+inboxcraft-engine = { path = "../crates/engine" }
+inboxcraft-ui-egui = { path = "../crates/ui-egui" }
+serde_json = "1"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "rfc5322_date"
+path = "fuzz_targets/rfc5322_date.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "charset_decode"
+path = "fuzz_targets/charset_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rfc2047_words"
+path = "fuzz_targets/rfc2047_words.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "model_values"
+path = "fuzz_targets/model_values.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_message"
+path = "fuzz_targets/mime_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_headers"
+path = "fuzz_targets/mime_headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_dsn"
+path = "fuzz_targets/mime_dsn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "imap_client"
+path = "fuzz_targets/imap_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "testkit_imap"
+path = "fuzz_targets/testkit_imap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_envelope"
+path = "fuzz_targets/net_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_certificate"
+path = "fuzz_targets/net_certificate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_autoconfig"
+path = "fuzz_targets/net_autoconfig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_dns"
+path = "fuzz_targets/net_dns.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "engine_params"
+path = "fuzz_targets/engine_params.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "html_display"
+path = "fuzz_targets/html_display.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ui_reader"
+path = "fuzz_targets/ui_reader.rs"
+test = false
+doc = false
+bench = false

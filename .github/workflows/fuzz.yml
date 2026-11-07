@@ -1,8 +1,13 @@
-# Nightly fuzzing of every target in fuzz/ with cargo-fuzz (docs/development.md, "CI").
+# Fuzzing of the targets in fuzz/ with cargo-fuzz (docs/development.md, "CI").
 #
-# GitHub runs a schedule only from the default branch (main), so the nightly run starts with the first release; until
-# then a PR that touches fuzz/ or this file runs it, and so does a manual dispatch once the file is on main
-# (gh workflow run fuzz.yml --ref develop). No targets yet: the job lists none and passes.
+# Every run builds every target, so a target that does not build fails the run. What it fuzzes depends on the event:
+# - a PR that touches fuzz/ or this file fuzzes for 30 s only the targets whose file under fuzz/fuzz_targets/ is new
+#   or changed in the PR; the others are built, not fuzzed;
+# - a push to develop fuzzes every target for 30 s, so an older target meets a changed parser there;
+# - the nightly schedule and a manual dispatch fuzz every target for 300 s.
+# GitHub runs a schedule only from the default branch (main), so the nightly run starts with the first release; a
+# manual dispatch needs the file on main (gh workflow run fuzz.yml --ref develop). With no targets the job lists none
+# and passes.
 #
 # Hardening as in ci.yml: read-only token, no secrets, no cache, every action pinned by commit SHA.
 
@@ -11,6 +16,8 @@ name: fuzz
 on:
   schedule:
     - cron: '17 2 * * *'
+  push:
+    branches: [develop]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [develop, main, 'epic/**']
@@ -31,8 +38,8 @@ env:
   # cargo-fuzz needs a nightly toolchain; pinned by date, bumped with rust-toolchain.toml.
   FUZZ_TOOLCHAIN: nightly-2026-11-01
   CARGO_FUZZ_VERSION: 0.13.2
-  # Seconds per target: the nightly run goes deeper than a PR run.
-  FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '30' || '300' }}
+  # Seconds per target: the nightly run goes deeper than a PR or push run.
+  FUZZ_SECONDS: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '30' || '300' }}
 
 jobs:
   fuzz:
@@ -40,9 +47,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      # Depth 2: for a PR, GitHub checks out a merge commit whose first parent is the base tip, so its diff against
+      # that parent is the PR's change. No third-party action.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - name: List the fuzz targets
         id: targets
         run: |
@@ -55,10 +65,37 @@ jobs:
         run: |
           rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
           cargo +"$FUZZ_TOOLCHAIN" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
-      - name: Fuzz every target
+      - name: Build every target
         if: steps.targets.outputs.count != '0'
+        run: cargo +"$FUZZ_TOOLCHAIN" fuzz build
+      - name: Choose the targets to fuzz
+        id: chosen
+        if: steps.targets.outputs.count != '0'
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
-          for target in $(cargo +"$FUZZ_TOOLCHAIN" fuzz list); do
+          all=$(cargo +"$FUZZ_TOOLCHAIN" fuzz list)
+          if [ "$EVENT" != pull_request ]; then
+            chosen=$(paste -sd' ' <<<"$all")
+          elif ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not the PR's merge commit, so every target is fuzzed" >&2
+            chosen=$(paste -sd' ' <<<"$all")
+          else
+            # New, changed or renamed target files that cargo-fuzz lists; a deleted one has nothing left to fuzz.
+            chosen=
+            for file in $(git diff --name-only --diff-filter=d 'HEAD^1' HEAD -- 'fuzz/fuzz_targets/*.rs'); do
+              name=$(basename "$file" .rs)
+              if grep -qxF -- "$name" <<<"$all"; then chosen+="${chosen:+ }$name"; fi
+            done
+          fi
+          echo "Targets to fuzz: ${chosen:-none}"
+          echo "list=$chosen" >> "$GITHUB_OUTPUT"
+      - name: Fuzz the chosen targets
+        if: steps.chosen.outputs.list != ''
+        env:
+          TARGETS: ${{ steps.chosen.outputs.list }}
+        run: |
+          for target in $TARGETS; do
             echo "fuzz: $target for ${FUZZ_SECONDS}s"
             cargo +"$FUZZ_TOOLCHAIN" fuzz run "$target" -- -max_total_time="$FUZZ_SECONDS"
           done

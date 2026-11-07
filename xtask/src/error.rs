@@ -15,6 +15,8 @@ pub enum Error {
     Io { path: PathBuf, source: io::Error },
     /// A configuration file is missing a value or cannot be parsed.
     Config { path: PathBuf, message: String },
+    /// A picture could not be read or written.
+    Image { path: PathBuf, message: String },
     /// A tool could not be started.
     Spawn { program: String, source: io::Error },
     /// The report could not be written.
@@ -25,7 +27,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
-            Self::Config { path, message } => write!(f, "{}: {message}", path.display()),
+            Self::Config { path, message } | Self::Image { path, message } => write!(f, "{}: {message}", path.display()),
             Self::Spawn { program, source } => write!(f, "cannot run `{program}`: {source}"),
             Self::Output(source) => write!(f, "cannot write the report: {source}"),
         }
@@ -36,7 +38,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } | Self::Spawn { source, .. } | Self::Output(source) => Some(source),
-            Self::Config { .. } => None,
+            Self::Config { .. } | Self::Image { .. } => None,
         }
     }
 }
