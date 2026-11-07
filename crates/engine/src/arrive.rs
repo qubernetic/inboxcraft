@@ -9,6 +9,9 @@
 //! where it arrived, and adds to the plan: store changes, kept jobs, or an act of `crate::act` such as a move to
 //! another folder. What a stage adds lands with the sync's own changes in one batch, so a later stage sees an earlier
 //! one's decision only in the plan.
+//!
+//! The grouped inbox's classifier lives here too (`group`), though it is no stage: a message's group is worked out
+//! when a list asks, so the owner's later choices and a body kept later count at once.
 
 use inboxcraft_model::{AccountId, FolderId, Message, Role};
 use inboxcraft_store::Storage;
@@ -48,6 +51,8 @@ macro_rules! stages {
 }
 
 stages!(screener, notify);
+
+pub(crate) mod group;
 
 /// Runs every message of `messages`, which arrived as `arrival` says, through `stages` in order.
 pub(crate) fn arrived(stages: &[Stage], arrival: &Arrival<'_>, messages: &[Message], plan: &mut Plan) -> Result<(), EngineError> {

@@ -136,15 +136,27 @@ to `InboxCraft/Blocked`. A blocked sender's message is never fetched: `mail.read
 `not_downloaded`, and its remote content never loads. `history.undo` takes either decision back: the sender record
 as it was and the mail where it was.
 
+The grouped inbox (`engine::arrive::group`, commands in `engine::cmd::triage`) puts each message of a grouped account
+in People, Updates, Newsletters or Invitations. `net` reads the signs of a message's kind from its header block into
+the envelope (`model::Signs`: a list field, `Precedence`, `Auto-Submitted`, a `text/calendar` type), and the engine adds
+whether a kept body holds a `text/calendar` part of its own when the body comes. The group is worked out when a list
+asks and never stored: the owner's choice for the sender first (`group.set`, `owner`, kept in the sender record with
+the screener's knowledge, so it moves the kept and the future mail at once, and `history.undo` takes it back;
+`auto` hands the sender back), then our classifier, first match wins: a calendar part, `Auto-Submitted` other than
+`no`, a list field or `Precedence: list` or `bulk`, `Precedence: junk` or a no-reply or delivery-report sender, and
+People for the rest. Grouping is on per account until the owner turns it off (`group.account`, `owner`, kept with the
+account). `mail.list` says each row's `group` (`null` for an account not grouped) and lists one group (`group`, or
+`none` for the mail no group holds); `group.list` (`safe`) counts the inbox's mail and its unread mail per group.
+
 Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
 notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
 still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own
 addresses, and not the owner's own move coming back: a moved message a server names no UID for is remembered by its
 Message-ID (or sender, subject and date) when it went to an inbox, so the sync that brings it back, as after
 `screener.accept`, tells nothing. The account's level (`notify.set`, `owner`; `notify.settings`, `safe`) has the last
-word: `all`, `people` (a sender known or accepted and not in another group than People) or `none`; `notify::tells`
-is the decision table. `Session::tick` adds a notice for a returned snooze and a follow-up reminder unless the owner
-turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
+word: `all`, `people` (a sender known or accepted whose message is in People, by the owner's group for the sender or
+else the classifier) or `none`; `notify::tells` is the decision table. `Session::tick` adds a notice for a returned
+snooze and a follow-up reminder unless the owner turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
 (`Session::take_notices`), more than three new messages of one account as one count. A notice carries the sender's
 name and subject as one clean line of at most 120 characters, never markup.
 

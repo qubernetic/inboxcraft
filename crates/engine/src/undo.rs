@@ -29,12 +29,13 @@ pub(crate) enum Inverse {
     Mark { message: MessageId, flag: Flag, set: bool },
     /// Move `message` back to `to`.
     Move { message: MessageId, to: FolderId },
-    /// Take a screener decision back.
+    /// Take a screener decision or a group chosen for a sender back.
     Screen(Box<Screened>),
 }
 
-/// What takes a screener decision on `address` back: the sender as it was `before` (`None`: nothing known of it),
-/// each message of `moves` back to its folder, the read mark off `opened` and each message of `states` in its state.
+/// What takes a screener decision or a group choice on `address` back: the sender as it was `before` (`None`:
+/// nothing known of it), each message of `moves` back to its folder, the read mark off `opened` and each message of
+/// `states` in its state. A group choice moves no mail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Screened {
     pub(crate) address: EmailAddress,
