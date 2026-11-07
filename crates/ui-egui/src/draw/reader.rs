@@ -311,7 +311,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                     };
                     button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
-                action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
+                // A done message, open under "Show done", is brought back by the same button.
+                let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+                let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
+                action(ui, IconId::Done, name, Some((act, keymap::DONE)));
                 action(ui, IconId::Archive, tr!("Archive"), Some((Act::Archive, keymap::ARCHIVE)));
                 action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
                 divider(ui, theme);

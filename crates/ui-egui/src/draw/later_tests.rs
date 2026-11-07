@@ -104,6 +104,23 @@ fn with_show_done_the_d_key_leaves_the_row_in_place_and_dims_it() {
 }
 
 #[test]
+fn the_reader_s_done_reads_not_done_on_a_done_message_and_brings_it_back() {
+    let mut app = app();
+    app.mailbox_mut().set_show_done(true);
+    let rota = id_of(&app, ROTA);
+    app.mailbox_mut().select(Some(rota));
+    app.mailbox_mut().act(rota, Act::Done);
+    let mut harness = harness_of(app);
+    settle(&mut harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Done").is_none(), "no Done on a done message");
+    harness.get_by_role_and_label(Role::Button, "Not done").click();
+    settle(&mut harness);
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == rota && !row.done));
+    assert_eq!(harness.state().mailbox().undoable().map(|undo| undo.text.as_str()), Some("Back in its place"));
+    harness.get_by_role_and_label(Role::Button, "Done");
+}
+
+#[test]
 fn the_park_pill_shows_while_mail_is_parked_and_opens_the_pile() {
     let mut app = app();
     let rota = id_of(&app, ROTA);
