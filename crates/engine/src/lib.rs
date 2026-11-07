@@ -30,6 +30,10 @@
 //!   a password (the front end keeps it in the OS credential store under the account's id), with the owner's first
 //!   check queued; a new account's first check that signs in starts its sync. Removing drops the account's mail,
 //!   state and queued jobs; an id is never given twice in a session.
+//! - The acts on messages: `mail.flag`, `mail.seen` and `mail.open` (`safe`), `mail.move`, `mail.archive` and
+//!   `mail.delete` (`owner`). Each changes the store at once and queues a kept write job; a moved message keeps its
+//!   id and waits under a UID of ours until the server's answer names its new one, and a failed write is taken back.
+//!   Each act but a delete for good goes into the undo history, and `history.undo` takes the newest back.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
