@@ -19,10 +19,11 @@
 //!
 //! Done, park and pin are the owner's own state of a message, kept in the store and never on the server
 //! ([`MessageState`]). `mail.done` (`owner`) files a message in its account's archive and keeps the folder it was in,
-//! where "show done" (`mail.list` with `done`) lists it; done `false` brings it back there. `mail.park` (`safe`) puts
-//! a message on the park pile, which `mail.list` leaves out and counts, and `park.list` lists; `mail.pin` (`safe`) pins
-//! it, and `pin.list` is the pins view across the accounts. Done takes a pin off unless `pin.set` (`owner`, a setting)
-//! keeps it. `history.undo` takes each back: the state as it was and, for done, the message where it was.
+//! where "show done" (`mail.list` with `done`) lists it; done `false` brings it back there. A done message out of the
+//! archive (its move failed) is filed again by the next done. `mail.park` (`safe`) puts a message on the park pile,
+//! which `mail.list` leaves out and counts, and `park.list` lists; `mail.pin` (`safe`) pins it, and `pin.list` is the
+//! pins view across the accounts. Done takes a pin off unless `pin.set` (`owner`, a setting) keeps it. `history.undo`
+//! takes each back: the state as it was and, for done, the message where it was.
 
 use std::collections::BTreeMap;
 
@@ -663,14 +664,17 @@ fn done(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         let answer = json!({ "id": params.id, "done": false, "folder": folder, "changed": true });
         return Ok(stated(&DONE, answer, &message, was.clone(), MessageState { done: None, ..was }, moved));
     }
-    if let Some(from) = was.done {
+    let account = message.account();
+    let archive = role_folder(store, state, account, Role::Archive)?.filter(|folder| folder.listing().is_selectable());
+    // Done already, and in the archive: nothing to do. Done but elsewhere (its move failed, or it was moved on by
+    // hand): it is filed again, from where it is now.
+    if let Some(from) = was.done
+        && archive.as_ref().is_none_or(|archive| archive.id() == message.folder())
+    {
         let answer = json!({ "id": params.id, "done": true, "folder": here, "was": from.get(), "changed": false, "pinned": was.pinned });
         return Ok(Outcome::new(answer));
     }
-    let account = message.account();
-    let archive = role_folder(store, state, account, Role::Archive)?
-        .filter(|folder| folder.listing().is_selectable())
-        .ok_or(EngineError::NotFound { what: "archive folder of account", id: account.get() })?;
+    let archive = archive.ok_or(EngineError::NotFound { what: "archive folder of account", id: account.get() })?;
     let moved = acts::relocate(store, state, &message, &archive)?;
     let pinned = was.pinned && state.pins_outlast_done;
     let answer = json!({ "id": params.id, "done": true, "folder": archive.id().get(), "was": here, "changed": true, "pinned": pinned });

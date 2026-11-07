@@ -4,12 +4,12 @@
 //! Done, park and pin: `mail.done`, `mail.park`, `mail.pin`, the park pile and the pins view, "show done" in
 //! `mail.list`, the setting that keeps a pin through done, and the undo of each.
 
-use inboxcraft_model::{FolderId, JobKind, MessageId, MessageState};
+use inboxcraft_model::{AccountId, Copied, ErrorKind, Event, EventKind, FolderId, JobKind, MessageId, MessageState};
 use inboxcraft_store::Change;
 use serde_json::{Value, json};
 
 use crate::arrive::screener::tests::settle;
-use crate::cmd::act_tests::{held, path, session, uids, validity};
+use crate::cmd::act_tests::{held, path, session, uid, uids, validity};
 use crate::test_support::change;
 use crate::{AgentClass, Caller, Registry, Session};
 
@@ -116,6 +116,50 @@ fn done_again_changes_nothing_and_leaves_nothing_to_undo() {
     assert_eq!(undo(&mut session)["command"], json!("mail.done"), "the first done is still on top");
     assert_eq!(done(&mut session, 2, false), json!({ "id": 2, "done": false, "folder": 1, "changed": false }));
     assert_eq!(session.run("history.undo", &json!({})).unwrap_err().code(), "nothing_to_undo");
+}
+
+/// Files message 1 as done and answers its move out of the inbox with `kind`.
+fn done_and_answer(session: &mut Session, kind: impl FnOnce(inboxcraft_model::JobId) -> EventKind) {
+    done(session, 1, true);
+    let jobs = session.take_jobs();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    let job = jobs.first().unwrap().id;
+    session.apply(&Event::new(AccountId::new(1), Some(job), kind(job))).unwrap();
+    session.take_jobs();
+}
+
+#[test]
+fn done_whose_move_failed_files_it_again() {
+    let mut session = session();
+    done_and_answer(&mut session, |_| EventKind::Failed { kind: ErrorKind::CommandRefused, folder: Some(FolderId::new(1)) });
+    assert_eq!(held(&session, 1).folder(), FolderId::new(1), "the server kept it in the inbox");
+    let again = done(&mut session, 1, true);
+    assert_eq!(again, json!({ "id": 1, "done": true, "folder": 3, "was": 1, "changed": true, "pinned": false }));
+    assert_eq!(held(&session, 1).folder(), FolderId::new(3));
+    assert_eq!(state(&session, 1).done, Some(FolderId::new(1)));
+    let jobs: Vec<JobKind> = session.take_jobs().into_iter().map(|job| job.kind).collect();
+    assert!(matches!(jobs.as_slice(), [JobKind::Move { to, .. }] if *to == FolderId::new(3)), "{jobs:?}");
+}
+
+#[test]
+fn done_keeps_its_state_once_the_server_names_the_new_uid() {
+    let mut session = session();
+    session.set_pins_outlast_done(true);
+    session.run("mail.pin", &json!({ "id": 1, "pinned": true })).unwrap();
+    let copied = Copied { uid_validity: validity(), uids: [(uid(10), uid(55))].into_iter().collect() };
+    done_and_answer(&mut session, |_| EventKind::Moved {
+        folder: FolderId::new(1),
+        uid_validity: validity(),
+        uids: uids(&[10]),
+        to: FolderId::new(3),
+        copied: Some(copied),
+    });
+    let message = held(&session, 1);
+    assert_eq!((message.folder(), message.summary().uid(), message.moving()), (FolderId::new(3), uid(55), None));
+    assert_eq!(state(&session, 1), MessageState { done: Some(FolderId::new(1)), pinned: true, ..MessageState::default() });
+    let shown = session.run("mail.list", &json!({ "account": 1, "done": true })).unwrap();
+    assert_eq!(ids(&shown), [2, 1]);
+    assert_eq!(done(&mut session, 1, false)["folder"], json!(1), "the way back is still there");
 }
 
 #[test]
