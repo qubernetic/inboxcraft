@@ -11,17 +11,32 @@ are kept by the operating system's credential store (Secret Service, Keychain or
 InboxCraft's files. Deleting InboxCraft's data folder removes everything it stored there, but not what is in the
 credential store.
 
-The mail InboxCraft keeps (your accounts' settings, folders, messages, the bodies it keeps and the work it still has
-to do on the server) is in one folder, `inboxcraft/store` in your data folder: `$XDG_DATA_HOME` (in the Flatpak
-`~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux, `~/Library/Application Support`
-on macOS and `%LOCALAPPDATA%` on Windows. Only your own user account can read it.
+What InboxCraft keeps is in one folder, `inboxcraft/store` in your data folder: `%LOCALAPPDATA%` on Windows, else
+`$XDG_DATA_HOME` (in the Flatpak `~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux
+and `~/Library/Application Support` on macOS. Only your own user account can read it. It holds:
+- your accounts' settings, their folders and messages, the message bodies it keeps, and the work it still has to do
+  on the server;
+- your drafts, with everything you typed into them: the recipients (Bcc included), the subject and the text, and
+  where each one stands in the outbox, with the server's reply if it refused one;
+- the schedule: what is to happen at a set time (a draft to send later, a snoozed message to bring back, a
+  follow-up reminder, a calendar alert);
+- what InboxCraft knows of each sender address, across your accounts: that you know it, the screener's decision
+  (accepted or blocked) and its group;
+- each message's own state: done, parked, pinned, snoozed or waiting for a reply;
+- your calendars, with their events as the server sent them (iCalendar text) and their alerts.
+
+Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
+work still queued for it. What InboxCraft knows of senders is kept, because it is yours and not an account's: it
+stays until you delete the data folder, which removes everything above.
 
 An account's password is one entry in the credential store: service `io.github.qubernetic.inboxcraft`, user name
-`account-<number>` (`account-1` for the first account added). InboxCraft keeps your accounts from one start to the
-next, so the entry stays when you close the window; it removes it when you remove the account ("Change settings").
-If InboxCraft crashes, is killed, or the credential store refuses at that moment, an entry can stay behind. You can see and remove it with your system's own tool: "Passwords and Keys" (Seahorse) or
-`secret-tool clear service io.github.qubernetic.inboxcraft` on Linux, Keychain Access on macOS, Credential Manager
-on Windows.
+`account-<store id>-<number>`, where the store id is a random number the store got when it was made, so two copies
+of InboxCraft (the Flatpak and another build, say) never share or overwrite each other's passwords. InboxCraft keeps
+your accounts from one start to the next, so the entry stays when you close the window; it removes it when you
+remove the account ("Change settings"). If InboxCraft crashes, is killed, or the credential store refuses at that
+moment, an entry can stay behind. You can see and remove it with your system's own tool: "Passwords and Keys"
+(Seahorse) or `secret-tool clear service io.github.qubernetic.inboxcraft` on Linux, Keychain Access on macOS,
+Credential Manager on Windows.
 
 ## What InboxCraft connects to, and when
 - Your own mail and calendar servers, with the settings you gave (IMAP, SMTP, CalDAV).
