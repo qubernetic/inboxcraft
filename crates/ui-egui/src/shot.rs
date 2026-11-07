@@ -21,7 +21,9 @@
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page. `palette` opens the command palette with that text
-//! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen. `compose` opens the
+//! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
+//! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
+//! that summary, whose details show in the side panel. `compose` opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
 //! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
@@ -53,6 +55,7 @@ use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
+use crate::calendar::{EventRow, View};
 use crate::component::gallery;
 use crate::compose::Line;
 use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Place};
@@ -159,6 +162,12 @@ pub struct Shot {
     /// Whether the calendar screen shows.
     #[serde(default)]
     pub calendar: Option<bool>,
+    /// The calendar's view (`day`, `week`, `month` or `agenda`), which shows the calendar screen.
+    #[serde(default)]
+    pub calendar_view: Option<String>,
+    /// The summary of the calendar event picked, which shows the calendar screen and the event's details.
+    #[serde(default)]
+    pub event: Option<String>,
     /// Whether the window has no account yet (and can add one) instead of the sample's.
     #[serde(default)]
     pub first: Option<bool>,
@@ -297,14 +306,30 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// Puts the calendar screen in the view of `shot` and picks its event.
+fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    let (calendar, mailbox) = app.calendar_mut();
+    if let Some(name) = &shot.calendar_view {
+        let view = View::named(name).ok_or_else(|| bad(format!("{}: calendar view {name:?} is not day, week, month or agenda", shot.out)))?;
+        calendar.set_view(mailbox, view);
+    }
+    if let Some(summary) = &shot.event {
+        let key = calendar.events().find(|event| event.summary == *summary).map(EventRow::key);
+        let Some(key) = key else { return Err(bad(format!("{}: no calendar event {summary:?} in the view", shot.out))) };
+        calendar.pick(Some(key));
+    }
+    Ok(())
+}
+
 /// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
 /// command palette with its text.
 fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     if let Some(scene) = &shot.compose {
         compose(app, &shot.out, scene)?;
     }
-    if shot.calendar == Some(true) {
+    if shot.calendar == Some(true) || shot.calendar_view.is_some() || shot.event.is_some() {
         app.show_calendar();
+        calendar(app, shot)?;
     }
     if shot.triage == Some(true) {
         let appearance = *app.appearance();
@@ -420,6 +445,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.capture.is_some()
         || shot.palette.is_some()
         || shot.calendar.is_some()
+        || shot.calendar_view.is_some()
+        || shot.event.is_some()
         || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
