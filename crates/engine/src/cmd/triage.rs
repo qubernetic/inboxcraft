@@ -270,6 +270,8 @@ fn mark_seen(store: &dyn Storage, state: &State, message: Message, seen: bool, e
 #[derive(Debug, Default)]
 struct Done {
     moves: Vec<(inboxcraft_model::MessageId, FolderId)>,
+    /// The message the accept marked read; `None` when it was read already.
+    marked: Option<inboxcraft_model::MessageId>,
     states: Vec<(inboxcraft_model::MessageId, MessageState)>,
 }
 
@@ -285,7 +287,7 @@ fn screened(spec: &CommandSpec, address: &EmailAddress, before: Option<Sender>, 
         address: address.clone(),
         before,
         moves: done.moves,
-        opened: opened.map(inboxcraft_model::MessageId::new),
+        opened: done.marked,
         states: done.states,
     }));
     Outcome::new(answer).with_effects(effects).with_undo(Step::Push(Act { command: spec.id, class: AgentClass::Owner, inverse }))
@@ -318,6 +320,9 @@ fn accept(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         let mut message = message;
         if then == Then::Open && opened.is_none() {
             opened = Some(message.id().get());
+            if !message.summary().flags().contains(&Flag::Seen) {
+                done.marked = Some(message.id());
+            }
             message = mark_seen(store, state, message, true, &mut effects)?;
         }
         let to = match then {

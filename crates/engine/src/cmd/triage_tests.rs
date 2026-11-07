@@ -169,6 +169,20 @@ fn accept_and_open_marks_the_newest_read_and_names_it() {
 }
 
 #[test]
+fn undo_of_accept_and_open_keeps_a_read_mark_it_did_not_make() {
+    let mut session = screened("before");
+    let id = arrived(&session, 21).id().get();
+    session.run("mail.seen", &json!({ "id": id, "seen": true })).unwrap();
+    session.take_jobs();
+    let answer = session.run("screener.accept", &json!({ "address": "new@example.com", "then": "open" })).unwrap();
+    assert_eq!(answer["open"], json!(id));
+    undo(&mut session);
+    assert!(arrived(&session, 21).summary().flags().contains(&Flag::Seen), "undo cleared a read mark the accept did not set");
+    let jobs: Vec<JobKind> = session.take_jobs().into_iter().map(|job| job.kind).collect();
+    assert!(!jobs.iter().any(|job| matches!(job, JobKind::StoreFlags { remove, .. } if remove.contains(&Flag::Seen))), "{jobs:?}");
+}
+
+#[test]
 fn accept_and_done_files_the_held_mail_as_done() {
     let mut session = screened("before");
     let answer = session.run("screener.accept", &json!({ "address": "new@example.com", "then": "done" })).unwrap();
