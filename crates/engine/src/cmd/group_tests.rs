@@ -151,6 +151,23 @@ fn grouping_is_on_or_off_per_account_and_kept_with_the_account() {
 }
 
 #[test]
+fn account_list_says_whether_each_account_is_grouped() {
+    let mut session = grouped();
+    let listed = |session: &mut Session| -> Vec<(u64, bool)> {
+        let answer = session.run("account.list", &json!({})).unwrap();
+        answer["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|account| (account["id"].as_u64().unwrap(), account["grouped"].as_bool().unwrap()))
+            .collect()
+    };
+    assert_eq!(listed(&mut session), [(1, true), (2, true)]);
+    session.run("group.account", &json!({ "account": 1, "grouped": false })).unwrap();
+    assert_eq!(listed(&mut session), [(1, false), (2, true)]);
+}
+
+#[test]
 fn group_list_counts_each_group_of_the_inbox() {
     let mut session = grouped();
     let answer = session.run("group.list", &json!({})).unwrap();

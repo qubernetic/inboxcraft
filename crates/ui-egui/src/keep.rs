@@ -7,22 +7,56 @@
 //! window too: the file holds no mail and nothing about an account. The file is read as outside data
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
-//! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]). A window
+//! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
+//! triage choices (the screener's mode, the inbox view) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
 //! without a config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::Appearance;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::keymap::Keymap;
+use crate::mailbox::InboxView;
 
 /// The file's name.
 pub const FILE: &str = "appearance.json";
 
 /// The name of the keys' file, beside [`FILE`].
 pub const KEYS_FILE: &str = "shortcuts.json";
+
+/// The name of the triage choices' file, beside [`FILE`].
+pub const TRIAGE_FILE: &str = "triage.json";
+
+/// The triage choices kept between runs: what the screener does with a new sender's first mail, and how the unified
+/// inbox shows its groups.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Triage {
+    /// The screener's mode.
+    pub screener: ScreenerMode,
+    /// How the unified inbox shows its groups.
+    pub view: InboxView,
+}
+
+impl Triage {
+    /// The choices `value` holds, read as outside data: a choice that cannot be read is the default.
+    #[must_use]
+    pub fn from_value(value: &Value) -> Self {
+        let named = |key: &str| value.get(key).and_then(Value::as_str);
+        Self {
+            screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
+            view: named("view").and_then(InboxView::named).unwrap_or_default(),
+        }
+    }
+
+    /// The choices as they are written.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        json!({ "screener": self.screener.name(), "view": self.view.id() })
+    }
+}
 
 /// The largest file read, in bytes; an appearance takes a few hundred, the keys about a thousand.
 pub const MAX_FILE: usize = 16 * 1024;
@@ -50,6 +84,20 @@ pub trait Keep: Send {
     ///
     /// Why nothing was kept, as the owner reads it.
     fn store_keys(&mut self, _keymap: &Keymap) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The triage choices kept, if any could be read; none by default.
+    fn load_triage(&self) -> Option<Triage> {
+        None
+    }
+
+    /// Keeps `triage` in place of the choices kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_triage(&mut self, _triage: &Triage) -> Result<(), String> {
         Ok(())
     }
 }
@@ -110,7 +158,12 @@ impl KeepFile {
 impl KeepFile {
     /// The keys' file, beside the appearance's; none when the appearance's path names no file.
     fn keys_path(&self) -> Option<PathBuf> {
-        self.path.file_name().map(|_| self.path.with_file_name(KEYS_FILE))
+        self.beside(KEYS_FILE)
+    }
+
+    /// The file `name` beside the appearance's; none when the appearance's path names no file.
+    fn beside(&self, name: &str) -> Option<PathBuf> {
+        self.path.file_name().map(|_| self.path.with_file_name(name))
     }
 }
 
@@ -159,6 +212,15 @@ impl Keep for KeepFile {
     fn store_keys(&mut self, keymap: &Keymap) -> Result<(), String> {
         let path = self.keys_path().ok_or_else(|| format!("{}: no file to keep the keys beside", self.path.display()))?;
         write_json(&path, &keymap.to_value())
+    }
+
+    fn load_triage(&self) -> Option<Triage> {
+        read_json(&self.beside(TRIAGE_FILE)?).map(|value| Triage::from_value(&value))
+    }
+
+    fn store_triage(&mut self, triage: &Triage) -> Result<(), String> {
+        let path = self.beside(TRIAGE_FILE).ok_or_else(|| format!("{}: no file to keep the triage choices beside", self.path.display()))?;
+        write_json(&path, &triage.to_value())
     }
 }
 
