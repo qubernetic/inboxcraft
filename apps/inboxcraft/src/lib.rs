@@ -3,13 +3,15 @@
 
 //! The desktop app: reads the command line and builds the window's content; `main` opens the window.
 //!
-//! `inboxcraft --sample` shows the invented sample mailbox, `inboxcraft` alone an empty one where the owner adds
-//! accounts, `--version` and `--help` print and leave. The sample connects nowhere: its accounts point at
-//! `imap.example.org`, their workers are never started, and its remote pictures are drawn in code.
+//! `inboxcraft --sample` shows the invented sample mailbox, `inboxcraft` alone the owner's mailbox, where they add
+//! accounts; `--version` and `--help` print and leave. The sample lives in memory and connects nowhere: its accounts
+//! point at `imap.example.org`, their workers are never started, and its remote pictures are drawn in code.
 //!
-//! The empty window adds accounts ([`accounts`]): each password goes into the OS credential store, Detect asks the
-//! system's name servers and the web, and every account runs on a `net` worker of its own. Besides those, the one
-//! request the window makes is for a remote picture the owner allowed, through `net`'s picture client.
+//! The owner's mailbox is kept on disk ([`store`]): the SQLite store in the owner's data folder, with its accounts,
+//! mail and job queue, so the next start shows what the last one held and runs the jobs it left. The window adds
+//! accounts ([`accounts`]): each password goes into the OS credential store, Detect asks the system's name servers
+//! and the web, and every account runs on a `net` worker of its own. Besides those, the one request the window makes
+//! is for a remote picture the owner allowed, through `net`'s picture client.
 //!
 //! Both windows keep the owner's appearance choices through the [`Keep`] they are given; `main` gives them the file in
 //! the owner's config folder ([`KeepFile::of_owner`]). The file holds no mail and nothing about an account.
@@ -24,7 +26,6 @@ use std::time::Duration;
 use inboxcraft_engine::Session;
 use inboxcraft_net::picture::PictureClient;
 use inboxcraft_net::{Connector, TlsSettings, Trust, WorkerSettings};
-use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::{Fetch, Get, Threaded, Wake};
 use inboxcraft_ui_egui::keep::{Keep, KeepFile, NoKeep};
@@ -34,14 +35,17 @@ use inboxcraft_ui_egui::save::{Downloads, NoSave, Save};
 use inboxcraft_ui_egui::{InboxApp, UiError, sample};
 
 pub mod accounts;
+pub mod store;
+
+pub use store::Mail;
 
 /// Which mailbox the window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     /// The invented sample mailbox (`--sample`).
     Sample,
-    /// An empty mailbox: no accounts yet.
-    Empty,
+    /// The owner's mailbox, kept on disk; empty until they add an account.
+    Owner,
 }
 
 /// What to do after reading the command line.
@@ -72,7 +76,7 @@ pub fn usage() -> String {
 /// Reads the command-line arguments (without the program name) and says what to do next; prints `--version` and
 /// `--help` to `out` and refusals to `err`.
 ///
-/// No arguments open the window on an empty mailbox and `--sample` on the sample mailbox. `--version` (or `-V`) and
+/// No arguments open the window on the owner's mailbox and `--sample` on the sample mailbox. `--version` (or `-V`) and
 /// `--help` (or `-h`) print and leave with 0. Anything else, or more than one argument, is refused with 2. A failed
 /// write leaves with 1.
 pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &mut dyn Write) -> Step {
@@ -80,7 +84,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
     let name = env!("CARGO_PKG_NAME");
     let printed = |result: std::io::Result<()>| Step::Exit(if result.is_ok() { 0 } else { 1 });
     match args.as_slice() {
-        [] => Step::Window(Source::Empty),
+        [] => Step::Window(Source::Owner),
         [flag] if flag == "--sample" => Step::Window(Source::Sample),
         [flag] if flag == "--version" || flag == "-V" => printed(writeln!(out, "{name} {}", env!("CARGO_PKG_VERSION"))),
         [flag] if flag == "--help" || flag == "-h" => printed(write!(out, "{}", usage())),
@@ -96,31 +100,37 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
 /// How long one remote picture may take.
 pub const PICTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The window's content over `source`, dated by the clocks `clock` makes (one for the session, one for the list);
-/// `wake` draws the window again when a remote picture arrived; the appearance choices are kept in `keep`.
+/// The window's content over `mail` ([`store::mail`]), dated by the clocks `clock` makes (one for the session, one
+/// for the list); `wake` draws the window again when a remote picture arrived; the appearance choices are kept in
+/// `keep`.
 ///
-/// The sample draws its remote pictures in code and connects nowhere. Otherwise a remote picture the owner allowed
-/// is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public addresses
-/// only) on threads of its own, and the window adds accounts: passwords into the OS credential store, Detect on a
-/// thread, one `net` worker per account. Attachments are saved into the owner's downloads folder, never over a file.
+/// The sample draws its remote pictures in code and connects nowhere. On a store, the session starts at once: the
+/// jobs the last run left go out again, then every held account syncs its folder list. A remote picture the owner
+/// allowed is fetched by `net`'s picture client (HTTPS only, a fixed user agent, no cookies, no referrer, public
+/// addresses only) on threads of its own, and the window adds accounts: passwords into the OS credential store,
+/// Detect on a thread, one `net` worker per account. Attachments are saved into the owner's downloads folder, never over a file.
 ///
 /// # Errors
 ///
 /// A sample or a session that could not be built.
-pub fn app(source: Source, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, keep: Box<dyn Keep>) -> Result<InboxApp, UiError> {
+pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, keep: Box<dyn Keep>) -> Result<InboxApp, UiError> {
     let save: Box<dyn Save> = match Downloads::of_owner() {
         Some(downloads) => Box::new(downloads),
         None => Box::new(NoSave),
     };
-    if source == Source::Sample {
-        let mailbox = Mailbox::new(sample::session(clock())?, clock());
-        return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
-    }
+    let store = match mail {
+        Mail::Sample => {
+            let mailbox = Mailbox::new(sample::session(clock())?, clock());
+            return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
+        }
+        Mail::Store(store) => store,
+    };
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
     let get: Get = Arc::new(move |url: &str| client.fetch(url).map(|picture| picture.bytes).map_err(|error| error.to_string()));
     let fetch: Box<dyn Fetch> = Box::new(Threaded::new(get, wake.clone()));
-    let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock())?;
+    let mut session = Session::new(store, clock())?;
+    session.start();
     let detecting = tls.clone();
     let run: Run = Arc::new(move |address: &str, ispdb: bool| accounts::detect(&detecting, address, ispdb));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));

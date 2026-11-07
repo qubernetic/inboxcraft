@@ -11,11 +11,15 @@ are kept by the operating system's credential store (Secret Service, Keychain or
 InboxCraft's files. Deleting InboxCraft's data folder removes everything it stored there, but not what is in the
 credential store.
 
+The mail InboxCraft keeps (your accounts' settings, folders, messages, the bodies it keeps and the work it still has
+to do on the server) is in one folder, `inboxcraft/store` in your data folder: `$XDG_DATA_HOME` (in the Flatpak
+`~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux, `~/Library/Application Support`
+on macOS and `%LOCALAPPDATA%` on Windows. Only your own user account can read it.
+
 An account's password is one entry in the credential store: service `io.github.qubernetic.inboxcraft`, user name
-`account-<number>` (`account-1` for the first account added in a session). InboxCraft does not keep accounts from
-one start to the next yet, so it removes the entry again when you remove the account ("Change settings") or close
-the window. If InboxCraft crashes, is killed, or the credential store refuses at that moment, an entry can stay
-behind. You can see and remove it with your system's own tool: "Passwords and Keys" (Seahorse) or
+`account-<number>` (`account-1` for the first account added). InboxCraft keeps your accounts from one start to the
+next, so the entry stays when you close the window; it removes it when you remove the account ("Change settings").
+If InboxCraft crashes, is killed, or the credential store refuses at that moment, an entry can stay behind. You can see and remove it with your system's own tool: "Passwords and Keys" (Seahorse) or
 `secret-tool clear service io.github.qubernetic.inboxcraft` on Linux, Keychain Access on macOS, Credential Manager
 on Windows.
 

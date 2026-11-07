@@ -204,7 +204,8 @@ B = blocks the next stage.
   one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
   full sync, which reports every message as added again (#26).
 - `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
-  not run again (the engine decides). The offline queue is in memory: what is queued when the app ends is gone. A
+  not run again (the engine decides). The worker's offline queue is in memory; a job the engine keeps
+  (`Outcome::with_kept_job`) is also in the store and goes out again at the next start, other jobs are gone. A
   certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
   timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
   connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
@@ -302,12 +303,10 @@ B = blocks the next stage.
   shown text keeps the joiners, variation selectors and tag characters emoji and flags need (#29).
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
-- The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, and so is its
-  password: when the window closes, it removes the credential store entry (`io.github.qubernetic.inboxcraft`,
-  `account-<id>`) of every account added in it, trying again one the store refused to remove in "Change settings".
-  A crash, a killed process or a store that refuses at exit leaves the entry behind; the next account with that id
-  in a later session overwrites it, and `PRIVACY.md` says how to remove one by hand (#34).
+- `--sample` shows an invented mailbox in memory that is forgotten on exit (#30). `inboxcraft` alone keeps the
+  owner's store on disk with its accounts, so their passwords stay in the credential store
+  (`io.github.qubernetic.inboxcraft`, `account-<id>`) until the account is removed in "Change settings"; a crash or
+  a store that refuses then leaves the entry behind, and `PRIVACY.md` says how to remove one by hand (#34, #113).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
