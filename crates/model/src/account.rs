@@ -207,6 +207,7 @@ pub struct Account {
     imap: Server,
     submission: Option<Server>,
     signature: Option<String>,
+    grouped: bool,
 }
 
 /// An [`Account`] as stored, before it is checked.
@@ -221,6 +222,13 @@ struct RawAccount {
     submission: Option<Server>,
     #[serde(default)]
     signature: Option<String>,
+    #[serde(default = "on")]
+    grouped: bool,
+}
+
+/// A record written before the grouped inbox has it on.
+const fn on() -> bool {
+    true
 }
 
 impl TryFrom<RawAccount> for Account {
@@ -230,7 +238,8 @@ impl TryFrom<RawAccount> for Account {
         Ok(Self::new(raw.id, &raw.label, raw.address, &raw.username, raw.imap)?
             .with_display_name(raw.display_name.as_deref())
             .with_submission(raw.submission)
-            .with_signature(raw.signature.as_deref()))
+            .with_signature(raw.signature.as_deref())
+            .with_grouped(raw.grouped))
     }
 }
 
@@ -252,7 +261,7 @@ impl Account {
             return Err(AccountError::BadUsername);
         }
         let label = clean_name(label).unwrap_or_else(|| address.as_str().to_owned());
-        Ok(Self { id, label, address, display_name: None, username: username.to_owned(), imap, submission: None, signature: None })
+        Ok(Self { id, label, address, display_name: None, username: username.to_owned(), imap, submission: None, signature: None, grouped: true })
     }
 
     /// The same account with the owner's name for sent mail, cleaned like any display name.
@@ -273,6 +282,13 @@ impl Account {
             let kept = kept.trim_end();
             if kept.trim_start().is_empty() { None } else { Some(kept.to_owned()) }
         });
+        self
+    }
+
+    /// The same account with its inbox grouped (People, Updates, Newsletters, Invitations) or not.
+    #[must_use]
+    pub fn with_grouped(mut self, grouped: bool) -> Self {
+        self.grouped = grouped;
         self
     }
 
@@ -329,6 +345,12 @@ impl Account {
     #[must_use]
     pub fn signature(&self) -> Option<&str> {
         self.signature.as_deref()
+    }
+
+    /// Whether the account's inbox is grouped; on unless the owner turned it off.
+    #[must_use]
+    pub fn grouped(&self) -> bool {
+        self.grouped
     }
 }
 
