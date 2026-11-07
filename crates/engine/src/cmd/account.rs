@@ -36,6 +36,7 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 /// reports each as it ends, and `account.list` shows them. While a check of the account runs, another one starts
 /// nothing (`started`: false), so the password is not sent over and over. After a refused or unanswered sign-in, a
 /// check an agent asked for stops before the sign-in (`needs_owner`); only the owner's check sends the password again.
+/// The submission server is held so on its own: its sign-in alone waits, and the IMAP steps run.
 pub(crate) const CHECK: CommandSpec = CommandSpec {
     id: "account.check",
     class: Some(AgentClass::Safe),

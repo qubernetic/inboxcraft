@@ -121,7 +121,8 @@ it also tries to open (and closes at once, sending nothing) port 443 of the same
 other mail ports (993, 465, 587), to tell a network that blocks mail from a server that is down. The password goes out only after the
 certificate verified, as when reading mail. After the server refused the password or never answered the sign-in, a
 check an agent asks for stops before the sign-in and says it needs you; only a check you start sends the password
-again, so an agent cannot get the account locked at your provider by checking over and over.
+again, so an agent cannot get the account locked at your provider by checking over and over. The SMTP server is held
+the same way on its own, after it refused the password in a check or when you sent a message.
 
 ## Remote pictures
 A message can name pictures on someone else's server. InboxCraft shows none of them until you ask: the reader shows
