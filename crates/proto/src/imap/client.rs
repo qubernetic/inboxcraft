@@ -520,6 +520,13 @@ impl Client {
         for form in base64_forms(user, password)? {
             self.secrets.add(&form);
         }
+        // And of the password without its edge white space, which a server may trim before it encodes it.
+        let trimmed = password.trim();
+        if !trimmed.is_empty() && trimmed != password {
+            for form in base64_forms(user, trimmed)? {
+                self.secrets.add(&form);
+            }
+        }
         Ok(())
     }
 

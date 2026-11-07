@@ -195,6 +195,50 @@ fn the_password_in_base64_is_hidden_whichever_way_it_was_sent() {
 }
 
 #[test]
+fn the_trimmed_password_in_base64_is_hidden_too() {
+    for plain in [false, true] {
+        for password in ["hunter23\t", " hunter23", " hunter23 "] {
+            let mut client = greeted();
+            if plain { client.authenticate_plain("tim", password) } else { client.login("tim", password) }.unwrap();
+            // A server that trims the password before it echoes the PLAIN token or the password alone.
+            client.receive(b"A0001 NO AHRpbQBodW50ZXIyMw== or AHRpbQBodW50ZXIyMw or aHVudGVyMjM=\r\n").unwrap();
+            let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+            assert_eq!(refusal.text, "*** or *** or ***", "plain: {plain}, {password:?}");
+        }
+    }
+}
+
+/// Base64 with padding, for the tokens a server may echo.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let at = |i: usize| u32::from(chunk.get(i).copied().unwrap_or(0));
+        let group = (at(0) << 16) | (at(1) << 8) | at(2);
+        for (index, shift) in [18_u32, 12, 6, 0].into_iter().enumerate() {
+            out.push(if index <= chunk.len() { char::from(ALPHABET[((group >> shift) & 0x3F) as usize]) } else { '=' });
+        }
+    }
+    out
+}
+
+/// Every base64 token of `password` and of its trimmed form a server may echo: the PLAIN token of `tim` and the
+/// password alone, each with and without its padding.
+fn tokens(password: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for password in [password, password.trim()] {
+        for padded in [base64(format!("\0tim\0{password}").as_bytes()), base64(password.as_bytes())] {
+            for token in [padded.trim_end_matches('=').to_owned(), padded] {
+                if !tokens.contains(&token) {
+                    tokens.push(token);
+                }
+            }
+        }
+    }
+    tokens
+}
+
+#[test]
 fn a_response_code_is_kept_only_as_a_clean_word() {
     let refused_code = |line: &[u8]| {
         let mut client = greeted();
@@ -303,7 +347,21 @@ proptest! {
         pieces in session_bytes(),
         commands in proptest::collection::vec(0_u8..22, 0..8),
         password in prop_oneof![Just("hunter2"), Just("hun\"ter\\2"), Just("hun\\\\ter2"), Just(" hunter2"), Just("hunter2\t"), Just(" hun\"ter\\2 ")],
+        // After which piece the server echoes which token of the drawn password; drawn last, so that the recorded
+        // seeds draw the same pieces, commands and password as before.
+        echoes in proptest::collection::vec(proptest::option::of(any::<prop::sample::Index>()), 0..12),
     ) {
+        let tokens = tokens(password);
+        let pieces: Vec<Vec<u8>> = pieces
+            .into_iter()
+            .enumerate()
+            .map(|(n, mut piece)| {
+                if let Some(Some(echo)) = echoes.get(n) {
+                    piece.extend_from_slice(format!("* OK [ALERT] {}\r\n", echo.get(&tokens)).as_bytes());
+                }
+                piece
+            })
+            .collect();
         // The password as LOGIN quotes it; also how `Debug` writes it.
         let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
         let mut client = Client::new(Transport::Tls);
@@ -389,8 +447,10 @@ proptest! {
             prop_assert!(!text.contains(password) && !text.contains(&quoted), "{}", text);
             // A server line is trimmed, so the password may come back without its edge white space.
             prop_assert!(!text.contains(password.trim()) && !text.contains(quoted.trim()), "{}", text);
-            // The PLAIN token of `tim` and `hunter2`, whichever way the password was sent; a secret of no other one.
-            prop_assert!(password != "hunter2" || !text.contains("AHRpbQBodW50ZXIy"), "{}", text);
+            // The base64 tokens of this password, as sent and trimmed, whichever way it was sent.
+            for token in &tokens {
+                prop_assert!(!text.contains(token.as_str()), "{} in {}", token, text);
+            }
         }
     }
 }
