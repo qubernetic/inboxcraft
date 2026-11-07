@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{FolderState, Job, JobKind};
-use crate::{AccountId, FolderId, FolderPath, JobId, ModSeq, Uid, UidValidity};
+use crate::{AccountId, DraftId, FolderId, FolderPath, JobId, ModSeq, Uid, UidValidity};
 
 fn inbox() -> FolderPath {
     FolderPath::new("INBOX", Some('/')).unwrap()
@@ -81,7 +81,11 @@ fn every_write_job_names_its_folder_and_round_trips() {
             Some(folder),
         ),
         (JobKind::Expunge { folder, path: inbox(), uid_validity: validity, uids }, Some(folder)),
-        (JobKind::Append { folder, path: inbox(), flags: seen, raw: b"Subject: Hi\r\n\r\nHello".to_vec() }, Some(folder)),
+        (JobKind::Append { folder, path: inbox(), flags: seen.clone(), raw: b"Subject: Hi\r\n\r\nHello".to_vec(), draft: None }, Some(folder)),
+        (
+            JobKind::Append { folder, path: inbox(), flags: seen, raw: b"Subject: Hi\r\n\r\nHello".to_vec(), draft: Some(DraftId::new(4)) },
+            Some(folder),
+        ),
         (JobKind::CreateFolder { path: archive }, None),
     ];
     for (id, (kind, expected)) in (10..).zip(jobs) {

@@ -85,7 +85,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             write::moved(store, &mut plan, account, &moved)?
         }
         EventKind::Expunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
-        EventKind::Appended { .. } => true,
+        EventKind::Appended { folder, uid } => {
+            crate::draft::appended(store, &mut plan, account, event.job, *folder, *uid)?;
+            true
+        }
         EventKind::FolderCreated { .. } => {
             plan.job(account, JobKind::SyncFolderList);
             true

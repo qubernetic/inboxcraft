@@ -10,7 +10,8 @@
 //! - [`Script`] is what the server does: lines to send, lines to expect, and the faults of [`Fault`] (drop, delay,
 //!   garbage).
 //! - [`Listen`] starts a [`FakeServer`] on a free loopback port, over plain TCP or implicit TLS. It serves one client
-//!   and [`FakeServer::finish`] returns the [`Transcript`] of what the client sent.
+//!   and [`FakeServer::finish`] returns the [`Transcript`] of what the client sent; while it runs,
+//!   [`FakeServer::wait_received`] waits for the lines the client has sent so far.
 //! - [`TestPki`] generates a test CA the client trusts and a stranger CA it does not, in memory at test time; no key
 //!   or certificate file exists anywhere. It makes the server configurations for the certificate faults of
 //!   [`CertFault`]: a chain from the stranger CA, an expired certificate, a certificate for the wrong host name, and a

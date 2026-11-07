@@ -155,6 +155,22 @@ hands over with `Session::set_offsets` (UTC until then); a wall-clock time the c
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
 (`owner`) takes one off.
 
+Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
+one from the account that last sent (the newest message in a Sent folder, else the first account) with that
+account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
+`compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
+the server named it; all
+`safe`. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
+`Name <address>` or a bare address: one that cannot be an address is marked with what is wrong, and it blocks Send
+(`blocks`), like a draft without a recipient. `mail.thread` lists the drafts that answer a message of the thread.
+`Session::tick` hands a draft that changed and has been still for ten seconds to its account's worker as a kept
+`Append` to the Drafts folder (`\Seen \Draft`, without Bcc and the recipients that are no address), and
+`Session::next_due` counts it. Where the server has UIDPLUS, the `Appended` answer names the copy's UID; the copy
+before it is then removed for good (`Expunge`), and a copy of a draft discarded or moved to another account meanwhile
+goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy can be neither replaced nor taken
+back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
+typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
+
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
 no account had in this session and queues the owner's first check. The front end puts the password into the OS

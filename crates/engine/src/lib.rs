@@ -37,6 +37,10 @@
 //! - The scheduler ([`schedule`]): [`Session::tick`] fires the store's schedule entries whose time has come and hands
 //!   them back as [`schedule::Fired`] events, missed ones marked; `schedule.presets` and `schedule.list` (`safe`)
 //!   and `schedule.cancel` (`owner`). The presets are in the computer's wall-clock time ([`Session::set_offsets`]).
+//! - Drafts (`draft`): `compose.new`, `compose.update`, `compose.show`, `compose.list` and `compose.discard`
+//!   (`safe`) keep a draft in the store at every change, from the account that last sent and with its signature
+//!   (`compose.signature`, `owner`), its recipients checked; [`Session::tick`] copies a draft that has been still a
+//!   while to the Drafts folder, each copy replacing the one before where the server names it.
 //! - The screener (`screener.*`): new mail from a sender the owner neither knows nor decided is held before the
 //!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
 //!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
@@ -63,6 +67,7 @@ pub mod appearance;
 mod arrive;
 mod class;
 mod cmd;
+mod draft;
 mod error;
 mod json;
 mod params;
