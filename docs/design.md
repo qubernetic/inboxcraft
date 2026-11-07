@@ -360,8 +360,9 @@ the icon sits among others at the same size.
   Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
   room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
   as the list's hover actions do (the toast with Undo follows); Move to a folder opens a menu ("Move to") of the
-  folders of the message's account but its own, each by its full path, and the one chosen moves it there. An action
-  without a command is drawn disabled and its tooltip says "Not available yet": Snooze and Pin wait for theirs.
+  folders of the message's account that hold mail but its own, each by its full path, and the one chosen moves it
+  there; with none it is drawn disabled. An action without a command is drawn disabled and its tooltip says "Not
+  available yet": Snooze and Pin wait for theirs.
 - **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
   unread (R) for the open message, then Full width or Leave full width, Close, and the next-message rule ("When a
   message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.

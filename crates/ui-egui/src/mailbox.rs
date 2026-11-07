@@ -139,6 +139,9 @@ pub struct FolderRow {
     pub unread: u64,
     /// All messages in it.
     pub messages: u64,
+    /// Whether it can hold mail: a `\Noselect` or `\NonExistent` folder cannot. Fails closed: `false` when
+    /// `folder.list` leaves it out, so a move is never offered into a folder the engine would refuse.
+    pub selectable: bool,
 }
 
 /// A row of the message list. Sender, subject and preview are the sender's text: data, shown and never run.
@@ -579,11 +582,11 @@ impl Mailbox {
         Ok(answer)
     }
 
-    /// The folders the message `id` can be moved to: those of its account but the one it is in.
+    /// The folders the message `id` can be moved to: those of its account that hold mail, but the one it is in.
     #[must_use]
     pub fn move_targets(&self, id: u64) -> Vec<&FolderRow> {
         let Some(row) = self.messages.iter().find(|row| row.id == id) else { return Vec::new() };
-        self.folders.iter().filter(|folder| folder.account == row.account && folder.id != row.folder).collect()
+        self.folders.iter().filter(|folder| folder.account == row.account && folder.id != row.folder && folder.selectable).collect()
     }
 
     /// Starts `act` on the message `id`: an act that takes the row out of the list lets it slide out first
@@ -777,6 +780,7 @@ impl Mailbox {
                     role: folder.get("role").and_then(Value::as_str).and_then(role),
                     unread: number(folder, "unread"),
                     messages: number(folder, "messages"),
+                    selectable: folder.get("selectable").and_then(Value::as_bool) == Some(true),
                 }
             })
             .collect();

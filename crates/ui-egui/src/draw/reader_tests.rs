@@ -464,6 +464,32 @@ fn move_to_a_folder_lists_the_folders_of_the_message_s_account_and_moves_it() {
 }
 
 #[test]
+fn move_to_a_folder_never_offers_a_folder_that_holds_no_mail() {
+    use inboxcraft_model::{AccountId, Folder, FolderId, FolderListing, FolderPath};
+    use inboxcraft_store::{Batch, Change, Storage as _};
+    // A real account whose only other folder is a `\Noselect` parent.
+    let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    let mut batch = Batch::new();
+    for id in 11..=15 {
+        batch.push(Change::RemoveFolder(FolderId::new(id)));
+    }
+    let listing = FolderListing::new(FolderPath::new("Projects", Some('/')).unwrap(), Vec::new(), false);
+    batch.push(Change::PutFolder(Folder::new(FolderId::new(16), AccountId::new(2), listing)));
+    store.apply(&batch).unwrap();
+    let mut app = InboxApp::with_outside(
+        Mailbox::new(inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap(), clock()),
+        Box::new(Recorder::default()),
+        Box::new(NoSave),
+    );
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
+    assert!(app.mailbox().folders_of(2).iter().any(|folder| folder.name == "Projects" && !folder.selectable));
+    assert!(app.mailbox().move_targets(id).is_empty(), "Projects holds no mail");
+    app.mailbox_mut().select(Some(id));
+    let harness = harness_with(app, egui::Theme::Light);
+    assert!(harness.get_by_role_and_label(Role::Button, "Move to a folder").accesskit_node().is_disabled());
+}
+
+#[test]
 fn more_flags_the_open_message_and_takes_the_flag_off() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Allotment rota for November");
