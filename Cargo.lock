@@ -1822,6 +1822,16 @@ dependencies = [
 [[package]]
 name = "inboxcraft-cli"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-engine",
+ "inboxcraft-model",
+ "inboxcraft-store",
+ "inboxcraft-testkit",
+ "inboxcraft-time",
+ "proptest",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "inboxcraft-control-key"
@@ -1921,9 +1931,13 @@ name = "inboxcraft-testkit"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "inboxcraft-model",
+ "inboxcraft-store",
+ "inboxcraft-time",
  "proptest",
  "rcgen",
  "rustls",
+ "tempfile",
  "time",
 ]
 

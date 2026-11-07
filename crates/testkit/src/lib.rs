@@ -18,6 +18,9 @@
 //! - [`TestClient`] drives a server and reports each failure with its own [`ErrorKind`]. It stands in for the real
 //!   client until `net` exists; later slices drive `net` against the same servers.
 //!
+//! The [`store`] module writes the fixture store: a small invented mailbox on disk, for tests that open a store the
+//! way the apps do.
+//!
 //! The [`live`] module is the harness of the opt-in live tests the owner runs by hand on two throwaway test
 //! accounts (`just it-live`); without their credentials, and always in the agent sandbox and in CI, they skip.
 //!
@@ -55,6 +58,7 @@ pub mod live;
 mod pki;
 mod script;
 mod server;
+pub mod store;
 mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};
