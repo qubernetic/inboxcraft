@@ -726,6 +726,35 @@ fn an_agent_runs_safe_commands_only() {
     assert!(answer["accounts"].is_array(), "{answer}");
 }
 
+/// What the store holds, as the window's own reads see it.
+fn stored(mailbox: &mut Mailbox) -> Vec<Value> {
+    let mut seen = Vec::new();
+    for id in ["account.list", "folder.list", "mail.list", "compose.list", "schedule.list"] {
+        if mailbox.session.registry().get(id).is_some() {
+            seen.push(mailbox.session.run(id, &json!({})).unwrap_or_else(|error| json!({ "error": error.code() })));
+        }
+    }
+    seen
+}
+
+#[test]
+fn an_agent_is_refused_every_command_that_is_not_safe_and_nothing_changes() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let params = json!({ "id": rota, "ids": [rota], "account": 1, "folder": 1, "to": "someone@example.org" });
+    let refused: Vec<&'static str> =
+        mailbox.session.registry().specs().filter(|spec| spec.class != Some(inboxcraft_engine::AgentClass::Safe)).map(|spec| spec.id).collect();
+    assert!(refused.contains(&"mail.archive") && refused.contains(&"account.remove"), "{refused:?}");
+    drop(mailbox.session.take_jobs());
+    let before = stored(&mut mailbox);
+    for id in refused {
+        let error = mailbox.run_for_agent(id, &params).unwrap_err();
+        assert_eq!(error.code(), "not_allowed", "{id}");
+    }
+    assert_eq!(stored(&mut mailbox), before, "nothing changed");
+    assert!(mailbox.session.take_jobs().is_empty(), "nothing was asked of the servers");
+}
+
 #[test]
 fn an_agents_act_shows_in_the_list_and_ends_the_windows_undo() {
     let mut mailbox = mailbox();
