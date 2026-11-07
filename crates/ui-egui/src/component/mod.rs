@@ -14,6 +14,7 @@
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
+//! - [`switch`]: a track with a knob, on or off.
 //!
 //! [`gallery`] draws every one of them on one page for `ui_shot`.
 
@@ -26,6 +27,7 @@ pub mod gallery;
 pub mod hover;
 pub mod pill;
 pub mod popup;
+pub mod switch;
 pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
