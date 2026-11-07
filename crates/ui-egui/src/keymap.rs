@@ -30,6 +30,9 @@ pub const SETTINGS: &str = "ui.settings.open";
 /// Done: mark the selected message read and move it to its account's Archive.
 pub const DONE: &str = "ui.message.done";
 
+/// Open the time picker over the open message: snooze it, or set the reminder of a message the owner sent.
+pub const SNOOZE: &str = "ui.message.snooze";
+
 /// Move the selected message to its account's Archive as it is.
 pub const ARCHIVE: &str = "ui.message.archive";
 
@@ -53,6 +56,9 @@ pub const CALENDAR: &str = "ui.calendar.show";
 
 /// Show the sent mail of every account (the rail's Sent mail button).
 pub const SENT: &str = "ui.sent.show";
+
+/// Show "Later": the snoozed mail, the pins and the park pile (the rail's Later button).
+pub const LATER: &str = "ui.later.show";
 
 /// Open the settings on the Shortcuts page.
 pub const SHORTCUTS: &str = "ui.shortcuts.open";
@@ -101,11 +107,13 @@ pub fn actions() -> Vec<Action> {
         action(FIND, tr!("Search mail"), IconId::Search),
         action(MAIL, tr!("Show mail"), IconId::Inbox),
         action(SENT, tr!("Show sent mail"), IconId::Send),
+        action(LATER, tr!("Show later: snoozed, pins and parked"), IconId::Pin),
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
+        action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
         action(READ, tr!("Mark read or unread"), IconId::MarkRead),
         action(FLAG, tr!("Flag or take the flag off"), IconId::Flag),
         action(DELETE, tr!("Delete"), IconId::Delete),
@@ -207,6 +215,7 @@ impl Default for Keymap {
         keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
         keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));
         keymap.bind(ARCHIVE, KeyboardShortcut::new(Modifiers::NONE, Key::A));
+        keymap.bind(SNOOZE, KeyboardShortcut::new(Modifiers::NONE, Key::H));
         keymap.bind(READ, KeyboardShortcut::new(Modifiers::NONE, Key::R));
         keymap.bind(FLAG, KeyboardShortcut::new(Modifiers::NONE, Key::S));
         keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));

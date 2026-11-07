@@ -269,16 +269,13 @@ fn the_find_shortcut_leaves_full_width_for_the_search() {
 }
 
 #[test]
-fn the_toolbar_holds_the_mail_actions_and_those_without_a_command_are_disabled() {
+fn the_toolbar_holds_the_mail_actions() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     full_width(&mut harness, "Full width");
     let disabled = |name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled();
-    for name in ["Done", "Archive", "Delete", "Move to a folder"] {
+    for name in ["Done", "Archive", "Delete", "Snooze", "Pin", "Move to a folder"] {
         assert!(!disabled(name), "{name} acts on the open message");
-    }
-    for name in ["Snooze", "Pin"] {
-        assert!(disabled(name), "{name} has no command yet");
     }
     assert!(!disabled("More"));
     for icon in [IconId::Done, IconId::Archive, IconId::Delete, IconId::Snooze, IconId::Pin, IconId::Move, IconId::More] {
@@ -291,13 +288,13 @@ fn a_disabled_action_says_why_in_its_tooltip() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     assert!(harness.query_by_label("Not available yet").is_none());
-    harness.get_by_role_and_label(Role::Button, "Snooze").hover();
+    harness.get_by_role_and_label(Role::Button, "Start").hover();
     for _ in 0..4 {
         harness.run();
     }
     harness.get_by_label("Not available yet");
     let before = harness.state().mailbox().last_run();
-    harness.get_by_role_and_label(Role::Button, "Snooze").click();
+    harness.get_by_role_and_label(Role::Button, "Start").click();
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), before, "a disabled action runs nothing");
 }

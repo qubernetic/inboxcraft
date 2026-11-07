@@ -38,7 +38,10 @@
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
 //! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
-//! at `[x, y]` points, so what lies under it shows its hover;
+//! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
+//! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
+//! or `parked`), `show_done` set to `true` lists the done mail in its old place, and `picker` opens the time picker
+//! over the selected message with that text typed (`""` for none);
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -55,7 +58,7 @@ use serde::Deserialize;
 
 use crate::component::gallery;
 use crate::compose::Line;
-use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Place};
+use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Pile, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Look, Mode, Preset, TextScale, Theme};
@@ -193,6 +196,18 @@ pub struct Shot {
     /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
     #[serde(default)]
     pub pointer: Option<[f32; 2]>,
+    /// Some of the sample's mail snoozed, pinned, parked, done and back from a snooze first ([`sample::put_away`]).
+    #[serde(default)]
+    pub put_away: Option<bool>,
+    /// The pile of "Later" to open: `snoozed`, `pins` or `parked`.
+    #[serde(default)]
+    pub later: Option<String>,
+    /// Whether "Show done" lists the done mail in its old place.
+    #[serde(default)]
+    pub show_done: Option<bool>,
+    /// The time picker open over the selected message, with this text typed (`""` for none).
+    #[serde(default)]
+    pub picker: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -428,6 +443,10 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || shot.frame.is_some()
+        || shot.put_away.is_some()
+        || shot.later.is_some()
+        || shot.show_done.is_some()
+        || shot.picker.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -834,6 +853,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         let view = InboxView::named(name).ok_or_else(|| bad(format!("{}: view {name:?} is not cards, list or simple", shot.out)))?;
         app.mailbox_mut().set_inbox_view(view);
     }
+    if shot.put_away == Some(true) {
+        sample::put_away(app.mailbox_mut())?;
+    }
+    if shot.show_done == Some(true) {
+        app.mailbox_mut().set_show_done(true);
+    }
     match &shot.open {
         Some(Open::Role(name)) if name == "senders" => app.mailbox_mut().open(Place::Senders),
         Some(Open::Role(name)) => {
@@ -845,6 +870,10 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
         Some(Open::Folder(id)) => app.mailbox_mut().open(Place::Folder(*id)),
         None => {}
+    }
+    if let Some(name) = &shot.later {
+        let pile = Pile::named(name).ok_or_else(|| bad(format!("{}: pile {name:?} is not snoozed, pins or parked", shot.out)))?;
+        app.mailbox_mut().open(Place::Later(pile));
     }
     if let Some(text) = &shot.search {
         app.search(text);
@@ -884,6 +913,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
     }
     act(&mut app, shot)?;
+    if let Some(typed) = &shot.picker {
+        if app.mailbox().selected().is_none() {
+            return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));
+        }
+        app.open_picker(typed);
+    }
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;
     }

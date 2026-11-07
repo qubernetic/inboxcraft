@@ -147,3 +147,16 @@
 {"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
 {"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "list"}
 {"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
+# Done, park, pin, snooze and follow-up (E3.3, E3.5, E3.7): Later from the rail on the snoozed pile and on the pins,
+# the inbox with "Show done" (a done message dimmed, one back from a snooze marked), the time picker of Snooze with a
+# typed time, and the reminder picker over a sent message.
+{"out": "docs/images/later-snoozed-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
+{"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
+{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "pins"}
+{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "pins"}
+{"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
+{"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
+{"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
+{"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
+{"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+{"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}

@@ -19,6 +19,10 @@
 //! Accept (`screener.accept`, with a group and "open"), Block (`screener.block`) and a sender's group (`group.set`)
 //! are acts like the others: a toast with Undo, taken back through `history.undo`. The groups of the unified inbox
 //! show as cards or a grouped list, or not at all in the simple list ([`InboxView`]).
+//!
+//! Done (`mail.done`), park (`mail.park`), pin (`mail.pin`), snooze (`mail.snooze`) and follow-up reminders
+//! (`mail.follow_up`) are acts too. "Show done" lists the done mail in its old place; [`Place::Later`] shows a pile
+//! of "Later": the snoozed folders, `pin.list` or `park.list`. The time picker's presets come from `schedule.presets`.
 
 use std::collections::BTreeMap;
 
@@ -85,7 +89,7 @@ pub fn role_text(role: Role) -> &'static str {
     }
 }
 
-/// What the list shows: a unified view by role, one folder, or the mail the screener holds.
+/// What the list shows: a unified view by role, one folder, the mail the screener holds, or a pile of "Later".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     /// The folders with this role across the accounts shown.
@@ -95,6 +99,58 @@ pub enum Place {
     /// "New senders": the mail held from senders the owner has not let in yet, in the screener folders and, while the
     /// screener marks them inside the inbox, in the inboxes.
     Senders,
+    /// "Later": the snoozed mail, the pins or the park pile, across the accounts shown.
+    Later(Pile),
+}
+
+/// A pile of "Later": mail put away for now, reachable from the rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pile {
+    /// The snoozed mail, by the time it comes back (`mail.list` of the snoozed folders).
+    Snoozed,
+    /// The pinned mail, wherever it is (`pin.list`).
+    Pins,
+    /// The park pile: mail set aside without a time (`park.list`).
+    Parked,
+}
+
+impl Pile {
+    /// Every pile, in the order "Later" offers them.
+    pub const ALL: [Self; 3] = [Self::Snoozed, Self::Pins, Self::Parked];
+
+    /// Its name in scripts.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Snoozed => "snoozed",
+            Self::Pins => "pins",
+            Self::Parked => "parked",
+        }
+    }
+
+    /// The pile a script calls `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|pile| pile.id() == name)
+    }
+
+    /// Its name as the person reads it.
+    #[must_use]
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Snoozed => tr!("Snoozed"),
+            Self::Pins => tr!("Pins"),
+            Self::Parked => tr!("Parked"),
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Snoozed => 0,
+            Self::Pins => 1,
+            Self::Parked => 2,
+        }
+    }
 }
 
 /// A group of the grouped inbox, as the engine names it.
@@ -288,6 +344,18 @@ pub struct MessageRow {
     pub group: Option<GroupKind>,
     /// Its sender is new: the screener holds it, or marks it inside the inbox.
     pub new_sender: bool,
+    /// Done: filed in its account's archive, listed in its old place only while "show done" is on.
+    pub done: bool,
+    /// On the park pile.
+    pub parked: bool,
+    /// Pinned.
+    pub pinned: bool,
+    /// Snoozed until this time.
+    pub snoozed_until: Option<Timestamp>,
+    /// When it came back from a snooze.
+    pub returned: Option<Timestamp>,
+    /// The time its follow-up reminder is due, when it has one.
+    pub follow_up: Option<Timestamp>,
 }
 
 /// A sender the screener holds back until the owner lets them in.
@@ -341,8 +409,23 @@ pub enum Act {
     Flag,
     /// Take its flag off (`mail.flag`).
     Unflag,
-    /// Mark it read and move it to its account's Archive folder (`mail.seen`, `mail.archive`): it leaves the inbox.
+    /// Mark it read and file it as done in its account's Archive folder (`mail.seen`, `mail.done`): it leaves the
+    /// inbox, and "show done" lists it there again, dimmed.
     Done,
+    /// Bring a done message back to where it was done from (`mail.done`).
+    Undone,
+    /// Put it on the park pile (`true`) or take it off (`mail.park`).
+    Park(bool),
+    /// Pin it (`true`) or take its pin off (`mail.pin`).
+    Pin(bool),
+    /// Snooze it until a time (`mail.snooze`): it waits in the snoozed folder and comes back unread then.
+    Snooze(Timestamp),
+    /// Bring a snoozed message back to the inbox now (`mail.unsnooze`), which the history does not hold.
+    Unsnooze,
+    /// Remind the owner at a time if a message they sent gets no reply by then (`mail.follow_up`).
+    FollowUp(Timestamp),
+    /// Take the follow-up reminder off (`mail.cancel_follow_up`).
+    CancelFollowUp,
     /// Move it to its account's Archive folder as it is (`mail.archive`).
     Archive,
     /// Move it to its account's Trash folder, or delete it for good when it is in the Trash (`mail.delete`).
@@ -368,7 +451,7 @@ impl Act {
     /// Whether the row slides out of the list first: the message leaves the list.
     #[must_use]
     pub fn slides(self) -> bool {
-        matches!(self, Self::Done | Self::Archive | Self::Delete | Self::Move(_))
+        matches!(self, Self::Done | Self::Archive | Self::Delete | Self::Move(_) | Self::Park(true) | Self::Snooze(_))
     }
 }
 
@@ -425,6 +508,14 @@ pub struct Mailbox {
     history: usize,
     /// The message an undo brought back, which opens without being marked read.
     restored: Option<u64>,
+    /// "Show done": the done mail is listed in its old place, dimmed.
+    show_done: bool,
+    /// How many messages of the place shown are on the park pile, from `mail.list`.
+    parked: u64,
+    /// How many messages each pile of "Later" holds, read while "Later" shows.
+    piles: [u64; 3],
+    /// The time presets still ahead, as the time picker names them, from `schedule.presets`.
+    presets: Vec<(String, Timestamp)>,
     after: After,
     error: Option<String>,
     runs: u64,
@@ -502,6 +593,32 @@ fn message_row(value: &Value) -> MessageRow {
         flagged: value.get("flagged").and_then(Value::as_bool).unwrap_or(false),
         group: value.get("group").and_then(Value::as_str).and_then(GroupKind::named),
         new_sender: value.get("new_sender").and_then(Value::as_bool).unwrap_or(false),
+        done: value.get("done").and_then(Value::as_bool).unwrap_or(false),
+        parked: value.get("parked").and_then(Value::as_bool).unwrap_or(false),
+        pinned: value.get("pinned").and_then(Value::as_bool).unwrap_or(false),
+        snoozed_until: value.get("snoozed_until").and_then(Value::as_str).and_then(parse_date),
+        returned: value.get("returned").and_then(Value::as_str).and_then(parse_date),
+        follow_up: value.get("follow_up").and_then(Value::as_str).and_then(parse_date),
+    }
+}
+
+/// `at` as the engine reads a time (`2026-11-05T09:30:00Z`).
+fn engine_date(at: Timestamp) -> String {
+    match at.to_civil(Offset::UTC) {
+        Some(civil) => {
+            format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", civil.year(), civil.month(), civil.day(), civil.hour(), civil.minute(), civil.second())
+        }
+        None => String::new(),
+    }
+}
+
+/// The name of the engine's time preset `name` (`schedule.presets`), as the time picker shows it.
+fn preset_text(name: &str) -> Option<&'static str> {
+    match name {
+        "later_today" => Some(tr!("Later today")),
+        "this_evening" => Some(tr!("This evening")),
+        "tomorrow_morning" => Some(tr!("Tomorrow morning")),
+        _ => None,
     }
 }
 
@@ -581,6 +698,10 @@ impl Mailbox {
             acts: 0,
             history: 0,
             restored: None,
+            show_done: false,
+            parked: 0,
+            piles: [0; 3],
+            presets: Vec::new(),
             after: After::Next,
             error: None,
             runs: 0,
@@ -751,6 +872,32 @@ impl Mailbox {
         }
     }
 
+    /// Marks every message of `ids` read and done ("Done all" on a group's card), with one toast whose Undo brings them
+    /// all back. The first refusal stops it, and the messages done before it stay done.
+    pub fn done_all(&mut self, ids: &[u64]) {
+        let Some(first) = ids.first().copied() else { return };
+        let (before, selected) = (self.history, self.selected.is_some_and(|id| ids.contains(&id)));
+        let mut result = Ok(());
+        for id in ids {
+            if let Err(error) = self.acted(*id, Act::Done) {
+                result = Err(error);
+                break;
+            }
+        }
+        if self.history != before {
+            self.refresh();
+        }
+        match result {
+            Ok(()) => {
+                self.acts = self.acts.saturating_add(1);
+                let text = tr!("Marked {count} as done", count = ids.len());
+                self.undo =
+                    Some(Undo { act: Act::Done, id: first, serial: self.acts, text, undoable: self.history > before, depth: before, selected });
+            }
+            Err(error) => self.fail(error),
+        }
+    }
+
     /// Runs the commands of `act` on the message `id`; what its toast says.
     fn acted(&mut self, id: u64, act: Act) -> Result<String, UiError> {
         let one = json!({ "id": id });
@@ -765,8 +912,37 @@ impl Mailbox {
             }
             Act::Done => {
                 self.write("mail.seen", &json!({ "id": id, "seen": true }))?;
-                self.write("mail.archive", &one)?;
+                self.write("mail.done", &json!({ "id": id, "done": true }))?;
                 tr!("Marked as done")
+            }
+            Act::Undone => {
+                self.write("mail.done", &json!({ "id": id, "done": false }))?;
+                tr!("Back in its place")
+            }
+            Act::Park(parked) => {
+                self.write("mail.park", &json!({ "id": id, "parked": parked }))?;
+                if parked { tr!("Parked") } else { tr!("Taken off the park pile") }
+            }
+            Act::Pin(pinned) => {
+                self.write("mail.pin", &json!({ "id": id, "pinned": pinned }))?;
+                if pinned { tr!("Pinned") } else { tr!("Pin taken off") }
+            }
+            Act::Snooze(until) => {
+                self.write("mail.snooze", &json!({ "id": id, "until": engine_date(until) }))?;
+                return Ok(tr!("Snoozed until {when}", when = self.long_date(until)));
+            }
+            Act::Unsnooze => {
+                // Bringing it back early is no act of the history: Undo has nothing to take back.
+                self.run("mail.unsnooze", &one)?;
+                tr!("Back in the inbox")
+            }
+            Act::FollowUp(until) => {
+                self.write("mail.follow_up", &json!({ "id": id, "until": engine_date(until) }))?;
+                return Ok(tr!("Reminder set for {when}", when = self.long_date(until)));
+            }
+            Act::CancelFollowUp => {
+                self.write("mail.cancel_follow_up", &one)?;
+                tr!("Reminder taken off")
             }
             Act::Archive => {
                 self.write("mail.archive", &one)?;
@@ -873,7 +1049,8 @@ impl Mailbox {
     /// ([`Mailbox::leaving`], then [`Mailbox::left`]); the others are done at once. A row still sliding is done first.
     pub fn start(&mut self, id: u64, act: Act) {
         self.left();
-        if act.slides() {
+        // With "show done" a done message stays where it is, dimmed.
+        if act.slides() && !(act == Act::Done && self.show_done) {
             self.leaving = Some((id, act));
         } else {
             self.act(id, act);
@@ -1139,19 +1316,46 @@ impl Mailbox {
     }
 
     fn list(&mut self, place: Place) -> Result<Vec<MessageRow>, UiError> {
-        if place == Place::Senders {
-            return self.senders();
-        }
         let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
         if let Value::Object(fields) = &mut params {
             match place {
                 Place::View(role) => fields.insert("role".to_owned(), Value::String(role.label().to_ascii_lowercase())),
                 Place::Folder(id) => fields.insert("folder".to_owned(), json!(id)),
-                Place::Senders => None,
+                Place::Senders => return self.senders(),
+                Place::Later(pile) => return self.later(pile),
             };
+            if self.show_done {
+                fields.insert("done".to_owned(), Value::Bool(true));
+            }
         }
         let answer = self.run("mail.list", &params)?;
+        self.parked = number(&answer, "parked");
         Ok(array("mail.list", &answer, "messages")?.iter().map(message_row).collect())
+    }
+
+    /// The rows of `pile`, and how many each pile holds.
+    fn later(&mut self, pile: Pile) -> Result<Vec<MessageRow>, UiError> {
+        let mut shown = Vec::new();
+        for each in Pile::ALL {
+            let (command, params) = match each {
+                Pile::Snoozed => ("mail.list", json!({ "account": self.narrowed, "role": "snoozed", "limit": MAX_LIST })),
+                Pile::Pins => ("pin.list", json!({ "account": self.narrowed, "limit": MAX_LIST })),
+                Pile::Parked => ("park.list", json!({ "account": self.narrowed, "limit": MAX_LIST })),
+            };
+            let answer = self.run(command, &params)?;
+            if let Some(count) = self.piles.get_mut(each.index()) {
+                *count = number(&answer, "total");
+            }
+            if each == pile {
+                shown = array(command, &answer, "messages")?.iter().map(message_row).collect();
+            }
+        }
+        if pile == Pile::Snoozed {
+            // The one coming back first on top.
+            shown.sort_by_key(|row: &MessageRow| (row.snoozed_until.is_none(), row.snoozed_until));
+        }
+        self.parked = 0;
+        Ok(shown)
     }
 
     /// The mail held from new senders: the screener folders', and the inbox rows marked as from a new sender; newest
@@ -1301,7 +1505,128 @@ impl Mailbox {
             Place::View(role) => role_text(role).to_owned(),
             Place::Folder(id) => self.folders.iter().find(|folder| folder.id == id).map(|folder| folder.leaf.clone()).unwrap_or_default(),
             Place::Senders => tr!("New senders").to_owned(),
+            Place::Later(_) => tr!("Later").to_owned(),
         }
+    }
+
+    /// Whether "show done" lists the done mail in its old place.
+    #[must_use]
+    pub fn show_done(&self) -> bool {
+        self.show_done
+    }
+
+    /// Turns "show done" on or off and reads the list again.
+    pub fn set_show_done(&mut self, show: bool) {
+        self.show_done = show;
+        let result = self.load_list(self.place);
+        self.settle(result);
+    }
+
+    /// How many messages of the place shown wait on the park pile.
+    #[must_use]
+    pub fn parked(&self) -> u64 {
+        self.parked
+    }
+
+    /// How many messages `pile` held when "Later" was last read.
+    #[must_use]
+    pub fn pile_count(&self, pile: Pile) -> u64 {
+        self.piles.get(pile.index()).copied().unwrap_or(0)
+    }
+
+    /// The time presets still ahead, by the name the picker shows, as last read by [`Mailbox::load_presets`].
+    #[must_use]
+    pub fn presets(&self) -> &[(String, Timestamp)] {
+        &self.presets
+    }
+
+    /// Reads the time presets still ahead (`schedule.presets`), when a time picker opens.
+    pub fn load_presets(&mut self) {
+        match self.run("schedule.presets", &json!({})) {
+            Ok(answer) => {
+                self.presets = answer
+                    .get("presets")
+                    .and_then(Value::as_array)
+                    .map(|presets| {
+                        presets
+                            .iter()
+                            .filter_map(|preset| {
+                                let name = preset_text(preset.get("preset").and_then(Value::as_str)?)?;
+                                Some((name.to_owned(), parse_date(preset.get("at").and_then(Value::as_str)?)?))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            Err(error) => self.fail(error),
+        }
+    }
+
+    /// The time now, on the list's clock.
+    #[must_use]
+    pub fn now(&self) -> Timestamp {
+        self.clock.now()
+    }
+
+    /// The wall clock's offset the list shows times in.
+    #[must_use]
+    pub fn offset(&self) -> Offset {
+        self.offset
+    }
+
+    /// `at` in full, as the time picker reads a time out: "Saturday 7 November, 09:00".
+    fn long_date(&self, at: Timestamp) -> String {
+        crate::component::typed_time::long(at, self.clock.now(), self.offset)
+    }
+
+    /// The date a row shows: when it comes back in the snoozed pile, else when it came.
+    #[must_use]
+    pub fn row_date(&self, row: &MessageRow) -> String {
+        match (self.place, row.snoozed_until) {
+            (Place::Later(Pile::Snoozed), Some(until)) if self.query.is_empty() => {
+                crate::component::typed_time::short(until, self.clock.now(), self.offset)
+            }
+            _ => self.when(row),
+        }
+    }
+
+    /// Whether the message `id` is one the owner sent: it is in a folder for sent mail. A follow-up reminder goes on
+    /// such a message only.
+    #[must_use]
+    pub fn is_sent(&self, id: u64) -> bool {
+        let Some(row) = self.messages.iter().find(|row| row.id == id) else { return false };
+        self.folders.iter().any(|folder| folder.id == row.folder && folder.role == Some(Role::Sent))
+    }
+
+    /// Whether the message `id` is snoozed: it has a time to come back, or it is in a snoozed folder.
+    #[must_use]
+    pub fn is_snoozed(&self, id: u64) -> bool {
+        let Some(row) = self.messages.iter().find(|row| row.id == id) else { return false };
+        row.snoozed_until.is_some() || self.folders.iter().any(|folder| folder.id == row.folder && folder.role == Some(Role::Snoozed))
+    }
+
+    /// Whether `row` shows the returned mark: it came back from a snooze and is still unread.
+    #[must_use]
+    pub fn returned(&self, row: &MessageRow) -> bool {
+        row.returned.is_some() && !row.seen
+    }
+
+    /// Whether a pin stays on a message when it is done.
+    #[must_use]
+    pub fn pins_outlast_done(&self) -> bool {
+        self.session.pins_outlast_done()
+    }
+
+    /// Sets whether a pin stays on a message when it is done (`pin.set`).
+    pub fn set_pins_outlast_done(&mut self, keep: bool) {
+        if let Err(error) = self.run("pin.set", &json!({ "keep_on_done": keep })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the pin choice kept from an earlier run.
+    pub(crate) fn restore_pins(&mut self, keep: bool) {
+        self.session.set_pins_outlast_done(keep);
     }
 
     /// Whose mail the list shows: the narrowed account's address, or all accounts.
@@ -1339,12 +1664,13 @@ impl Mailbox {
         when(date, self.clock.now(), self.offset)
     }
 
-    /// The row as a screen reader says it: sender, subject, date, and whether it is unread or flagged.
+    /// The row as a screen reader says it: sender, subject, the date it shows, and whether it is unread, flagged, from a
+    /// new sender, pinned, done or back from a snooze.
     #[must_use]
     pub fn spoken(&self, row: &MessageRow) -> String {
         let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
         let mut parts = vec![row.sender.clone(), subject.to_owned()];
-        let date = self.when(row);
+        let date = self.row_date(row);
         if !date.is_empty() {
             parts.push(date);
         }
@@ -1357,10 +1683,22 @@ impl Mailbox {
         if row.new_sender {
             parts.push(tr!("new sender").to_owned());
         }
+        if row.pinned {
+            parts.push(tr!("pinned").to_owned());
+        }
+        if row.done {
+            parts.push(tr!("done").to_owned());
+        }
+        if self.returned(row) {
+            parts.push(tr!("returned").to_owned());
+        }
         parts.join(", ")
     }
 }
 
+#[cfg(test)]
+#[path = "later_tests.rs"]
+mod later_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

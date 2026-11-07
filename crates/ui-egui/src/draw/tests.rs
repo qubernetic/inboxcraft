@@ -69,7 +69,9 @@ fn a_flagged_row_shows_the_filled_flag_icon() {
 fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     let mut app = sample_app();
     app.mailbox_mut().set_inbox_view(InboxView::Simple);
-    let harness = harness_with(app, egui::Theme::Light);
+    // Tall enough for every row under the header and its pills.
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread");
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
     harness.get_by_label("Inbox");

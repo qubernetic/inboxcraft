@@ -39,6 +39,7 @@ pub(super) fn rail_width(theme: &Theme) -> f32 {
 pub(super) struct Rail {
     pub(super) mail: bool,
     pub(super) sent: bool,
+    pub(super) later: bool,
     pub(super) search: bool,
     pub(super) calendar: bool,
     pub(super) settings: bool,
@@ -47,9 +48,15 @@ pub(super) struct Rail {
 impl Rail {
     /// The actions of the buttons pressed, besides the settings, which the rail's button opens and closes.
     pub(super) fn actions(&self) -> impl Iterator<Item = &'static str> {
-        [(self.mail, keymap::MAIL), (self.sent, keymap::SENT), (self.search, keymap::FIND), (self.calendar, keymap::CALENDAR)]
-            .into_iter()
-            .filter_map(|(pressed, action)| pressed.then_some(action))
+        [
+            (self.mail, keymap::MAIL),
+            (self.sent, keymap::SENT),
+            (self.later, keymap::LATER),
+            (self.search, keymap::FIND),
+            (self.calendar, keymap::CALENDAR),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, action)| pressed.then_some(action))
     }
 }
 
@@ -118,6 +125,7 @@ pub(super) fn rail(
     let shown = !settings && !adding;
     let mail_shown = shown && screen == Screen::Mail;
     let in_sent = mail_shown && mailbox.place() == Place::View(FolderRole::Sent);
+    let in_later = mail_shown && matches!(mailbox.place(), Place::Later(_));
     let mut asked = Rail::default();
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = s.s;
@@ -128,7 +136,7 @@ pub(super) fn rail(
         IconButton::new(IconId::Home, tr!("Start")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
         asked.mail = IconButton::new(IconId::Inbox, tr!("Mail"))
             .action(keymap::MAIL)
-            .active(mail_shown && !in_sent)
+            .active(mail_shown && !in_sent && !in_later)
             .ink(ink)
             .side(tile)
             .show(ui, theme, keymap)
@@ -140,7 +148,8 @@ pub(super) fn rail(
             .side(tile)
             .show(ui, theme, keymap)
             .clicked();
-        IconButton::new(IconId::Pin, tr!("Pins")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
+        asked.later =
+            IconButton::new(IconId::Pin, tr!("Later")).action(keymap::LATER).active(in_later).ink(ink).side(tile).show(ui, theme, keymap).clicked();
         asked.sent = IconButton::new(IconId::Send, tr!("Sent mail"))
             .action(keymap::SENT)
             .active(in_sent)
