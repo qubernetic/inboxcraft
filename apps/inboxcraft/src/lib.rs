@@ -20,6 +20,7 @@
 
 use std::ffi::OsString;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,8 +36,14 @@ use inboxcraft_ui_egui::save::{Downloads, NoSave, Save};
 use inboxcraft_ui_egui::{InboxApp, UiError, sample};
 
 pub mod accounts;
+pub mod autostart;
+pub mod desktop;
+pub mod instance;
 pub mod store;
+#[cfg(target_os = "linux")]
+pub mod tray;
 
+use instance::{Claim, Instance, Request};
 pub use store::Mail;
 
 /// Which mailbox the window shows.
@@ -55,6 +62,12 @@ pub enum Step {
     Exit(u8),
     /// Open the window on this mailbox.
     Window(Source),
+    /// Run on the owner's mailbox without showing the window (`--background`), as a start at login does.
+    Background,
+    /// Ask the running InboxCraft to quit (`--quit`).
+    Quit,
+    /// Start InboxCraft at login in the background, or no longer (`--autostart`, `--no-autostart`).
+    Autostart(bool),
 }
 
 /// What `--help` prints.
@@ -63,11 +76,18 @@ pub fn usage() -> String {
     format!(
         "{name} {version}\n\
          \n\
-         Usage: {name} [--sample]\n\
+         Usage: {name} [--sample | --background | --quit | --autostart | --no-autostart]\n\
          \n\
-         \x20 --sample      show an invented sample mailbox (nothing connects anywhere)\n\
-         \x20 -V, --version print the version\n\
-         \x20 -h, --help    print this help\n",
+         \x20 --sample       show an invented sample mailbox (nothing connects anywhere)\n\
+         \x20 --background   keep the mail in step without showing the window\n\
+         \x20 --quit         end the running InboxCraft\n\
+         \x20 --autostart    start in the background at login\n\
+         \x20 --no-autostart no longer start at login\n\
+         \x20 -V, --version  print the version\n\
+         \x20 -h, --help     print this help\n\
+         \n\
+         Closing the window keeps the owner's mailbox running in the background; starting\n\
+         {name} again brings the window back.\n",
         name = env!("CARGO_PKG_NAME"),
         version = env!("CARGO_PKG_VERSION"),
     )
@@ -86,6 +106,10 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
     match args.as_slice() {
         [] => Step::Window(Source::Owner),
         [flag] if flag == "--sample" => Step::Window(Source::Sample),
+        [flag] if flag == "--background" => Step::Background,
+        [flag] if flag == "--quit" => Step::Quit,
+        [flag] if flag == "--autostart" => Step::Autostart(true),
+        [flag] if flag == "--no-autostart" => Step::Autostart(false),
         [flag] if flag == "--version" || flag == "-V" => printed(writeln!(out, "{name} {}", env!("CARGO_PKG_VERSION"))),
         [flag] if flag == "--help" || flag == "-h" => printed(write!(out, "{}", usage())),
         _ => {
@@ -139,6 +163,94 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
     Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(keychain, detect, workers).with_keep(keep))
 }
 
+/// The folder a start on the owner's mailbox claims ([`instance`]): the one that holds the store.
+#[must_use]
+pub fn instance_dir() -> Option<PathBuf> {
+    store::store_dir().and_then(|dir| dir.parent().map(Path::to_path_buf))
+}
+
+/// A start on the owner's mailbox claims `dir`: the first start gets the [`Instance`] and opens the store; a later one
+/// brings the running window forward (or, starting `background` at login, leaves the running one alone) and leaves
+/// with the exit code in `Err`. Refusals go to `err`.
+///
+/// # Errors
+///
+/// The exit code to leave with: 0 when the running start was reached or left alone, 1 when it was not or `dir` could
+/// not be claimed.
+pub fn arrive(dir: &Path, background: bool, err: &mut dyn Write) -> Result<Instance, u8> {
+    arrive_with(dir, background, instance::PATIENCE, err)
+}
+
+/// [`arrive`], trying for `patience` to reach the running start.
+///
+/// # Errors
+///
+/// As [`arrive`].
+pub fn arrive_with(dir: &Path, background: bool, patience: Duration, err: &mut dyn Write) -> Result<Instance, u8> {
+    let name = env!("CARGO_PKG_NAME");
+    match instance::claim(dir) {
+        Ok(Claim::First(instance)) => Ok(instance),
+        Ok(Claim::Running(_)) if background => Err(0),
+        Ok(Claim::Running(running)) => match running.with_patience(patience).send(Request::Show) {
+            Ok(()) => Err(0),
+            Err(error) => {
+                let _ = writeln!(err, "{name}: {error}");
+                Err(1)
+            }
+        },
+        Err(error) => {
+            let _ = writeln!(err, "{name}: {error}");
+            Err(1)
+        }
+    }
+}
+
+/// `--quit`: asks the start that holds `dir` to end. 0 when it was asked, 1 when none runs or it was not reached.
+pub fn quit(dir: &Path, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    let name = env!("CARGO_PKG_NAME");
+    let refused = |err: &mut dyn Write, error: &dyn std::fmt::Display| {
+        let _ = writeln!(err, "{name}: {error}");
+        1
+    };
+    match instance::claim(dir) {
+        Ok(Claim::First(_)) => refused(err, &"InboxCraft is not running"),
+        Ok(Claim::Running(running)) => match running.send(Request::Quit) {
+            Ok(()) => {
+                let _ = writeln!(out, "{name}: asked InboxCraft to quit");
+                0
+            }
+            Err(error) => refused(err, &error),
+        },
+        Err(error) => refused(err, &error),
+    }
+}
+
+/// `--autostart` and `--no-autostart`: [`autostart::choose`] in `dir` (the `autostart` folder of the config folder),
+/// through `portal` in the Flatpak. 0 when done, 1 when not.
+pub fn set_autostart(
+    on: bool,
+    dir: Option<&Path>,
+    program: &Path,
+    portal: Option<autostart::Ask<'_>>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    let name = env!("CARGO_PKG_NAME");
+    let chosen = dir
+        .ok_or_else(|| "there is no folder for the autostart entry: HOME (or XDG_CONFIG_HOME) is not set".to_owned())
+        .and_then(|dir| autostart::choose(on, dir, program, portal));
+    match chosen {
+        Ok(said) => {
+            let _ = writeln!(out, "{name}: {said}");
+            0
+        }
+        Err(error) => {
+            let _ = writeln!(err, "{name}: {error}");
+            1
+        }
+    }
+}
+
 /// Where the owner's appearance choices are kept: the file in their config folder, or nowhere without one.
 #[must_use]
 pub fn owner_keep() -> Box<dyn Keep> {
@@ -150,3 +262,7 @@ pub fn owner_keep() -> Box<dyn Keep> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[cfg(target_os = "linux")]
+mod bus_tests;

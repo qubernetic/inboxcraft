@@ -10,8 +10,13 @@ Categories=Network;Email;
 Keywords=mail;email;imap;inbox;
 StartupNotify=true
 StartupWMClass=io.github.qubernetic.inboxcraft
-Actions=sample;
+SingleMainWindow=true
+Actions=sample;quit;
 
 [Desktop Action sample]
 Name=Open the Sample Mailbox
 Exec=inboxcraft --sample
+
+[Desktop Action quit]
+Name=Quit InboxCraft
+Exec=inboxcraft --quit
