@@ -9,8 +9,9 @@ use inboxcraft_ui_egui::keep::NoKeep;
 
 use inboxcraft_store::Memory;
 
+use super::instance::{self, Instance, Request};
 use super::store::Owned;
-use super::{Mail, Source, Step, app, owner_keep, run, usage};
+use super::{Mail, Source, Step, app, arrive, arrive_with, autostart, instance_dir, owner_keep, quit, run, set_autostart, store, usage};
 
 fn run_with(args: &[&str]) -> (Step, String, String) {
     let mut out = Vec::new();
@@ -44,6 +45,18 @@ fn help_prints_the_usage() {
 fn no_arguments_open_an_empty_window_and_sample_the_sample() {
     assert_eq!(run_with(&[]).0, Step::Window(Source::Owner));
     assert_eq!(run_with(&["--sample"]).0, Step::Window(Source::Sample));
+}
+
+#[test]
+fn background_quit_and_autostart_are_steps_of_their_own() {
+    assert_eq!(run_with(&["--background"]).0, Step::Background);
+    assert_eq!(run_with(&["--quit"]).0, Step::Quit);
+    assert_eq!(run_with(&["--autostart"]).0, Step::Autostart(true));
+    assert_eq!(run_with(&["--no-autostart"]).0, Step::Autostart(false));
+    for flag in ["--background", "--quit", "--autostart", "--no-autostart"] {
+        assert!(usage().contains(flag), "{flag}");
+    }
+    assert_eq!(run_with(&["--background", "--sample"]).0, Step::Exit(2), "the sample has nothing to keep running");
 }
 
 #[test]
@@ -208,4 +221,102 @@ fn the_owner_s_keep_is_the_file_in_the_config_folder_or_nothing_without_one() {
     let default = format!("{:?}", Appearance::default().font);
     assert_ne!(default, inter);
     assert_eq!(child_with(&[]), [default.clone(), default]);
+}
+
+fn first(dir: &std::path::Path) -> Instance {
+    let mut err = Vec::new();
+    let instance = arrive(dir, false, &mut err).unwrap();
+    assert!(err.is_empty());
+    instance
+}
+
+#[cfg(unix)]
+#[test]
+fn a_second_start_brings_the_running_window_forward_and_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sent, heard) = std::sync::mpsc::channel();
+    let _listening = first(dir.path()).listen(move |request| {
+        let _ = sent.send(request);
+    });
+    let mut err = Vec::new();
+    assert_eq!(arrive(dir.path(), false, &mut err).err(), Some(0));
+    assert_eq!(heard.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), Request::Show);
+    // A start at login finds InboxCraft already running and leaves it alone.
+    assert_eq!(arrive(dir.path(), true, &mut err).err(), Some(0));
+    assert!(heard.try_recv().is_err());
+    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
+}
+
+#[test]
+fn a_running_start_that_cannot_be_reached_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let _held = first(dir.path());
+    let mut err = Vec::new();
+    assert_eq!(arrive_with(dir.path(), false, std::time::Duration::from_millis(200), &mut err).err(), Some(1));
+    assert!(String::from_utf8_lossy(&err).contains("already running"), "{}", String::from_utf8_lossy(&err));
+}
+
+#[test]
+fn a_folder_that_cannot_be_claimed_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a file");
+    std::fs::write(&file, b"").unwrap();
+    let mut err = Vec::new();
+    assert_eq!(arrive(&file, false, &mut err).err(), Some(1));
+    assert!(String::from_utf8_lossy(&err).contains("a file"));
+    let mut out = Vec::new();
+    assert_eq!(quit(&file, &mut out, &mut err), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn quit_ends_the_running_inboxcraft() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sent, heard) = std::sync::mpsc::channel();
+    let _listening = first(dir.path()).listen(move |request| {
+        let _ = sent.send(request);
+    });
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    assert_eq!(quit(dir.path(), &mut out, &mut err), 0);
+    assert_eq!(heard.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), Request::Quit);
+}
+
+#[test]
+fn quit_with_nothing_running_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    assert_eq!(quit(dir.path(), &mut out, &mut err), 1);
+    assert!(String::from_utf8_lossy(&err).contains("not running"));
+    assert!(matches!(instance::claim(dir.path()).unwrap(), instance::Claim::First(_)), "the folder is left free");
+}
+
+#[test]
+fn autostart_writes_the_entry_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = std::path::Path::new("/usr/bin/inboxcraft");
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    assert_eq!(set_autostart(true, Some(dir.path()), program, None, &mut out, &mut err), 0);
+    assert!(String::from_utf8_lossy(&out).contains("starts at login"));
+    assert!(autostart::is_on(dir.path()));
+    assert_eq!(set_autostart(false, Some(dir.path()), program, None, &mut out, &mut err), 0);
+    assert!(!autostart::is_on(dir.path()));
+    assert!(err.is_empty());
+}
+
+#[test]
+fn autostart_without_a_config_folder_or_with_a_refusal_fails() {
+    let program = std::path::Path::new("/usr/bin/inboxcraft");
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    assert_eq!(set_autostart(true, None, program, None, &mut out, &mut err), 1);
+    assert!(String::from_utf8_lossy(&err).contains("no folder"), "{}", String::from_utf8_lossy(&err));
+    let dir = tempfile::tempdir().unwrap();
+    let refuse = |_: bool| Err::<autostart::Granted, String>("refused".to_owned());
+    let mut err = Vec::new();
+    assert_eq!(set_autostart(true, Some(dir.path()), program, Some(&refuse), &mut out, &mut err), 1);
+    assert!(String::from_utf8_lossy(&err).contains("refused"));
+}
+
+#[test]
+fn the_instance_folder_holds_the_store() {
+    assert_eq!(instance_dir(), store::store_dir().and_then(|dir| dir.parent().map(std::path::Path::to_path_buf)));
 }
