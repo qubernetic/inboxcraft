@@ -60,7 +60,7 @@ impl Ids {
     }
 
     /// Whether `sender` is the server that gave the ids.
-    fn from_owner(&self, sender: Option<&str>) -> bool {
+    fn sent_by_owner(&self, sender: Option<&str>) -> bool {
         sender.is_some() && sender == self.owner.as_deref()
     }
 
@@ -121,14 +121,14 @@ impl Notifications {
                     match header.member().map(|member| member.as_str()) {
                         Some("ActionInvoked") => {
                             let Ok((id, action)) = body.deserialize::<(u32, String)>() else { continue };
-                            let key = heard.lock().ok().filter(|ids| ids.from_owner(sender)).and_then(|ids| ids.keys.get(&id).cloned());
+                            let key = heard.lock().ok().filter(|ids| ids.sent_by_owner(sender)).and_then(|ids| ids.keys.get(&id).cloned());
                             if let Some(click) = key.and_then(|key| super::clicked(&key, &action)) {
                                 clicked(click);
                             }
                         }
                         Some("NotificationClosed") => {
                             if let (Ok((id, _reason)), Ok(mut ids)) = (body.deserialize::<(u32, u32)>(), heard.lock())
-                                && ids.from_owner(sender)
+                                && ids.sent_by_owner(sender)
                             {
                                 ids.remove(id);
                             }
