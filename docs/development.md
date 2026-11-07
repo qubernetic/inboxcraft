@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-07 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -162,11 +162,18 @@ The floors live in one file, `.config/coverage.toml`:
   A file belongs to the member whose directory holds it most closely.
 - `exclude` lists files counted nowhere: `xtask/src/main.rs`, the `main` dispatch.
 - `workspace-exclude` lists files counted for their own crate but not for the workspace total: the apps' `main`
-  (`apps/*/src/main.rs`); the `ui-egui` drawing code joins it when it lands.
+  (`apps/*/src/main.rs`) and the `ui-egui` drawing code (`crates/ui-egui/src/draw/**`).
 - Patterns are paths of `/`-separated components: a name, `*` for one component, or `**` last for one or more.
 - A crate with no lines has nothing to fall below. Cover is printed rounded down, so a crate below its floor never
   prints as on it.
 - A floor is never lowered in the PR that falls below it; lowering one needs the project owner.
+
+Codecov reads the same `lcov.info` and follows this gate through `codecov.yml`. Its `ignore` list is exactly the
+`exclude` and `workspace-exclude` patterns above; a test in `xtask` (`codecov_tests.rs`) reads both files and fails
+when the two lists differ, so a file the gate leaves out is left out of Codecov's numbers too. `codecov/project`
+fails when the project coverage drops by more than 1 point against the base branch (`target: auto`,
+`threshold: 1%`); `codecov/patch` fails when less than 80 % of the changed lines are covered. Both are statuses on
+the PR; the in-repo floors stay the gate `just ci` checks.
 
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
@@ -445,3 +452,4 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-06 | minor | What the sample mailbox lets the owner try (#89) |
 | 2026-11-06 | minor | `cargo xtask cache-prune` (#79) |
 | 2026-11-06 | minor | CI: the cache prune is `cargo xtask cache-prune`, an allow list; prune and save only on a push that creates no branch; the key follows the runner image and `.cargo/config.toml` (#79) |
+| 2026-11-07 | minor | The coverage gate: what Codecov checks, its ignore list kept equal to the gate's excludes (#109) |
