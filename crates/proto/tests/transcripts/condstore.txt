@@ -1,0 +1,67 @@
+# CONDSTORE (RFC 7162 section 3.1): SELECT (CONDSTORE), MODSEQ in FETCH, UID FETCH CHANGEDSINCE.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 CONDSTORE] ready
+= greeted preauth
+> select-with INBOX condstore
+C: A0001 SELECT "INBOX" (CONDSTORE)
+S: * 3 EXISTS
+S: * OK [UIDVALIDITY 7] UIDs valid
+S: * OK [HIGHESTMODSEQ 90060115205545359] Highest
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=3 recent=0 flags=- permanent=- uidvalidity=7 uidnext=none unseen=none modseq=90060115205545359 read-only=false
+> fetch 1:3 flags modseq
+C: A0002 UID FETCH 1:3 (UID FLAGS MODSEQ)
+S: * 1 FETCH (UID 1 FLAGS (\Seen) MODSEQ (624140003))
+S: * 2 FETCH (MODSEQ (624140007) UID 2 FLAGS ())
+# A MODSEQ that is no modification sequence is left out.
+S: * 3 FETCH (UID 3 MODSEQ (0))
+S: A0002 OK done
+= fetch seq=1 uid=1 flags=\Seen modseq=624140003
+= fetch seq=2 uid=2 flags=- modseq=624140007
+= fetch seq=3 uid=3
+= A0002 fetched
+> fetch 1:4294967295 flags since=624140003
+C: A0003 UID FETCH 1:4294967295 (UID FLAGS MODSEQ) (CHANGEDSINCE 624140003)
+S: * 2 FETCH (UID 2 FLAGS (\Flagged) MODSEQ (624140009))
+S: A0003 OK done
+= fetch seq=2 uid=2 flags=\Flagged modseq=624140009
+= A0003 fetched
+# VANISHED needs QRESYNC, enabled.
+> fetch 1 flags since=624140003 vanished
+! NotEnabled("QRESYNC")
+> fetch 1 flags vanished
+! BadArgument("VANISHED without CHANGEDSINCE")
+# A mailbox that keeps no modification sequences.
+> examine-with Archive condstore
+C: A0004 EXAMINE "Archive" (CONDSTORE)
+S: * OK [NOMODSEQ] Sorry, this mailbox format does not support modsequences
+S: A0004 OK [READ-ONLY] done
+= A0004 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+
+# QRESYNC in the capabilities brings CONDSTORE with it.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 QRESYNC] ready
+= greeted preauth
+> select-with INBOX condstore
+C: A0001 SELECT "INBOX" (CONDSTORE)
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+
+# A server that lacks CONDSTORE: nothing that needs it is sent, a plain SELECT and FETCH still are.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select-with INBOX condstore
+! NotOffered("CONDSTORE")
+> select-with INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> fetch 1 flags modseq
+! NotOffered("CONDSTORE")
+> fetch 1 flags since=5
+! NotOffered("CONDSTORE")
+> fetch 1 flags
+C: A0002 UID FETCH 1 (UID FLAGS)
+S: A0002 OK done
+= A0002 fetched

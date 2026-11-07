@@ -1,0 +1,434 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The `Session`: the one place commands run and events land.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+use inboxcraft_model::{
+    AccountId, CheckStep, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, StepReport, UidValidity,
+};
+use inboxcraft_store::{Batch, Change, Storage};
+use inboxcraft_time::{Clock, Timestamp};
+use serde_json::Value;
+
+use crate::appearance::Appearance;
+use crate::{Caller, EngineError, Registry, error};
+
+/// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outcome {
+    value: Value,
+    batch: Batch,
+    jobs: Vec<Pending>,
+    /// Senders (lower case) whose remote pictures load without asking from now on (`true`) or no longer (`false`).
+    senders: Vec<(String, bool)>,
+    /// Accounts removed: the session forgets what it knows of them and drops their queued jobs.
+    removed: Vec<AccountId>,
+    /// The appearance choices from now on.
+    appearance: Option<Appearance>,
+}
+
+/// A job before it has an id.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Pending {
+    pub(crate) account: AccountId,
+    pub(crate) kind: JobKind,
+    /// The message a `FetchBody` job is for, so the same body is not asked for twice while one job is out.
+    pub(crate) message: Option<MessageId>,
+}
+
+impl Outcome {
+    /// The answer `value`, with nothing to change.
+    #[must_use]
+    pub fn new(value: Value) -> Self {
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None }
+    }
+
+    /// The outcome with `change` to make in the store.
+    #[must_use]
+    pub fn with_change(mut self, change: Change) -> Self {
+        self.batch.push(change);
+        self
+    }
+
+    /// The outcome with a job for the `net` worker of `account`.
+    #[must_use]
+    pub fn with_job(mut self, account: AccountId, kind: JobKind) -> Self {
+        self.jobs.push(Pending { account, kind, message: None });
+        self
+    }
+
+    /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
+    pub(crate) fn with_sender(mut self, sender: String, allowed: bool) -> Self {
+        self.senders.push((sender, allowed));
+        self
+    }
+
+    /// The outcome changing the appearance choices to `appearance`.
+    pub(crate) fn with_appearance(mut self, appearance: Appearance) -> Self {
+        self.appearance = Some(appearance);
+        self
+    }
+
+    /// The outcome removing `account` from the store, and from what the session knows and has queued.
+    pub(crate) fn with_removed(mut self, account: AccountId) -> Self {
+        self.batch.push(Change::RemoveAccount(account));
+        self.removed.push(account);
+        self
+    }
+
+    /// The outcome with a `FetchBody` job for `message`, unless one is already out.
+    pub(crate) fn with_fetch(mut self, account: AccountId, kind: JobKind, message: MessageId) -> Self {
+        self.jobs.push(Pending { account, kind, message: Some(message) });
+        self
+    }
+
+    /// The answer.
+    #[must_use]
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+}
+
+/// What a command may read: the store, the session's state, the time and who asked.
+#[derive(Clone, Copy)]
+pub struct Context<'a> {
+    store: &'a dyn Storage,
+    state: &'a State,
+    now: Timestamp,
+    caller: Caller,
+}
+
+impl<'a> Context<'a> {
+    /// The store.
+    #[must_use]
+    pub fn store(&self) -> &'a dyn Storage {
+        self.store
+    }
+
+    /// The time the command runs at.
+    #[must_use]
+    pub fn now(&self) -> Timestamp {
+        self.now
+    }
+
+    /// Who asked for the command; [`Caller::Agent`] while an event from a worker is applied, which nobody asked for.
+    #[must_use]
+    pub fn caller(&self) -> Caller {
+        self.caller
+    }
+
+    pub(crate) fn state(&self) -> &'a State {
+        self.state
+    }
+}
+
+/// What the session knows besides the store: lost on a restart and rebuilt from the store and the next sync.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct State {
+    pub(crate) accounts: BTreeMap<AccountId, AccountState>,
+    /// The UIDVALIDITY the UIDs we hold of each folder belong to.
+    pub(crate) validity: BTreeMap<FolderId, UidValidity>,
+    /// The `FetchBody` jobs out, by job.
+    pub(crate) fetching: BTreeMap<JobId, MessageId>,
+    /// The messages whose body came back too large to keep; not asked for again in this session.
+    pub(crate) too_large: BTreeSet<MessageId>,
+    /// The senders (addresses in lower case) whose remote pictures the owner lets load without asking. Kept for the
+    /// session only until settings are kept on disk.
+    pub(crate) remote_senders: BTreeSet<String>,
+    /// The owner's appearance choices; the front end keeps them on disk and hands them back at the start.
+    pub(crate) appearance: Appearance,
+    /// The id the next added account gets: past every id this session has held, so a removed account's id is not
+    /// given again and a late event of its worker cannot land on a new account.
+    pub(crate) next_account: u64,
+    pub(crate) next_folder: u64,
+    pub(crate) next_message: u64,
+    pub(crate) next_job: u64,
+    /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
+    pub(crate) sample: bool,
+}
+
+/// What the session knows of one account.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AccountState {
+    /// The folder roles: SPECIAL-USE, then names, then the owner.
+    pub(crate) roles: RoleMap,
+    /// The roles no folder has, to ask the owner about.
+    pub(crate) ask: Vec<Role>,
+    pub(crate) connection: Option<ConnectionState>,
+    /// The last failure, until the account is online again.
+    pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
+    /// The last account check, running or done.
+    pub(crate) check: Option<Check>,
+}
+
+/// An account check: every step as it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Check {
+    /// The Check job while the check runs; `None` once its last step came.
+    pub(crate) job: Option<JobId>,
+    /// Every step of [`CheckStep::ALL`], in order.
+    pub(crate) steps: Vec<StepReport>,
+}
+
+impl Check {
+    pub(crate) fn is_running(&self) -> bool {
+        self.job.is_some()
+    }
+}
+
+impl State {
+    /// The state of what `store` holds.
+    fn load(store: &dyn Storage) -> Result<Self, EngineError> {
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
+        for account in store.accounts()? {
+            let folders = store.folders(account.id())?;
+            let mut roles = RoleMap::default();
+            let ask = roles.detect(&folders);
+            for folder in &folders {
+                state.next_folder = state.next_folder.max(folder.id().get().saturating_add(1));
+                if let Some(folder_state) = store.folder_state(folder.id())? {
+                    state.validity.insert(folder.id(), folder_state.uid_validity());
+                }
+                for entry in store.messages(folder.id())? {
+                    state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
+                }
+            }
+            state.next_account = state.next_account.max(account.id().get().saturating_add(1));
+            state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
+        }
+        Ok(state)
+    }
+
+    /// The id for an account to add: past every account in `held` and every id given before.
+    pub(crate) fn next_account(&self, held: &[inboxcraft_model::Account]) -> AccountId {
+        let past = held.iter().map(|account| account.id().get().saturating_add(1)).max().unwrap_or(1);
+        AccountId::new(self.next_account.max(past))
+    }
+
+    pub(crate) fn folder_id(&mut self) -> FolderId {
+        let id = FolderId::new(self.next_folder);
+        self.next_folder = self.next_folder.saturating_add(1);
+        id
+    }
+
+    pub(crate) fn message_id(&mut self) -> MessageId {
+        let id = MessageId::new(self.next_message);
+        self.next_message = self.next_message.saturating_add(1);
+        id
+    }
+
+    fn job_id(&mut self) -> JobId {
+        let id = JobId::new(self.next_job);
+        self.next_job = self.next_job.saturating_add(1);
+        id
+    }
+}
+
+/// Whether an applied event changed anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applied {
+    /// The event was applied.
+    Changed,
+    /// The event was stale or named something the session does not hold, and was dropped.
+    Dropped,
+}
+
+/// The engine: commands in by id, jobs out to the `net` workers, events back in.
+///
+/// Every command runs through [`Session::run`]. A command only reads; the session makes the store changes it
+/// returns as one batch and queues its jobs, so a command that fails changes nothing. A command that panics, despite
+/// the rules, becomes [`EngineError::Panicked`] and also changes nothing.
+pub struct Session {
+    store: Box<dyn Storage>,
+    clock: Box<dyn Clock>,
+    registry: Registry,
+    state: State,
+    jobs: Vec<Job>,
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session").field("registry", &self.registry).field("jobs", &self.jobs.len()).finish_non_exhaustive()
+    }
+}
+
+impl Session {
+    /// A session over `store` with InboxCraft's own commands.
+    ///
+    /// # Errors
+    ///
+    /// A store that cannot be read.
+    pub fn new(store: Box<dyn Storage>, clock: Box<dyn Clock>) -> Result<Self, EngineError> {
+        Self::with_registry(store, clock, Registry::builtin()?)
+    }
+
+    /// A session over `store` with the commands of `registry`.
+    ///
+    /// # Errors
+    ///
+    /// A store that cannot be read.
+    pub fn with_registry(store: Box<dyn Storage>, clock: Box<dyn Clock>, registry: Registry) -> Result<Self, EngineError> {
+        let state = State::load(&*store)?;
+        Ok(Self { store, clock, registry, state, jobs: Vec::new() })
+    }
+
+    /// A session over the invented sample mailbox in `store`, with InboxCraft's own commands: the `sample.*` commands
+    /// run in it and nowhere else. Nothing in it reaches a server; the front end starts no worker for it.
+    ///
+    /// # Errors
+    ///
+    /// A store that cannot be read.
+    pub fn sample(store: Box<dyn Storage>, clock: Box<dyn Clock>) -> Result<Self, EngineError> {
+        let mut session = Self::new(store, clock)?;
+        session.state.sample = true;
+        Ok(session)
+    }
+
+    /// Whether this is a session over the sample mailbox ([`Session::sample`]).
+    #[must_use]
+    pub fn is_sample(&self) -> bool {
+        self.state.sample
+    }
+
+    /// The commands.
+    #[must_use]
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    /// The store.
+    #[must_use]
+    pub fn store(&self) -> &dyn Storage {
+        &*self.store
+    }
+
+    /// The owner's appearance choices, as the `ui.*.set` commands left them.
+    #[must_use]
+    pub fn appearance(&self) -> &Appearance {
+        &self.state.appearance
+    }
+
+    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`].
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        self.state.appearance = appearance;
+    }
+
+    /// Runs the command `id` with `params` for the owner.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::run_as`].
+    pub fn run(&mut self, id: &str, params: &Value) -> Result<Value, EngineError> {
+        self.run_as(Caller::Owner, id, params)
+    }
+
+    /// Runs the command `id` with `params` for `caller` and returns its answer.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::UnknownCommand`] (also for a command that was refused as unclassified), [`EngineError::NotAllowed`] when the
+    /// command's class does not let `caller` run it, the command's own error, a store failure, or
+    /// [`EngineError::Panicked`]. On every error the session is as it was.
+    pub fn run_as(&mut self, caller: Caller, id: &str, params: &Value) -> Result<Value, EngineError> {
+        // The registry holds classified commands only.
+        let (spec, class) = self.registry.lookup(id).ok_or_else(|| EngineError::UnknownCommand(error::clean(id)))?;
+        if !class.allows(caller) {
+            return Err(EngineError::NotAllowed { command: spec.id, class });
+        }
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
+        let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
+        let Outcome { value, batch, jobs, senders, removed, appearance } = outcome;
+        self.commit(spec.id, None, &batch, jobs)?;
+        for change in batch.changes() {
+            if let Change::PutAccount(account) = change {
+                self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1));
+            }
+        }
+        for account in removed {
+            self.state.accounts.remove(&account);
+            self.jobs.retain(|job| job.account != account);
+        }
+        for (sender, allowed) in senders {
+            if allowed {
+                self.state.remote_senders.insert(sender);
+            } else {
+                self.state.remote_senders.remove(&sender);
+            }
+        }
+        if let Some(appearance) = appearance {
+            self.state.appearance = appearance;
+        }
+        Ok(value)
+    }
+
+    /// Asks every account's worker for its folder list; the answers bring the folder syncs. A check still running is
+    /// over: the worker that ran it is gone, so its last step never comes, and the account can be checked again.
+    pub fn start(&mut self) {
+        for held in self.state.accounts.values_mut() {
+            if let Some(check) = held.check.as_mut() {
+                check.job = None;
+            }
+        }
+        let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
+        for account in accounts {
+            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None });
+        }
+    }
+
+    /// The jobs queued since the last call, in order, for the `net` workers.
+    pub fn take_jobs(&mut self) -> Vec<Job> {
+        std::mem::take(&mut self.jobs)
+    }
+
+    /// Applies an event from a `net` worker.
+    ///
+    /// # Errors
+    ///
+    /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
+    pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller: Caller::Agent };
+        let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
+        let Some(plan) = plan else { return Ok(Applied::Dropped) };
+        self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
+        Ok(Applied::Changed)
+    }
+
+    /// Makes `batch`, then takes `state` and queues `jobs`; nothing of it when the batch fails.
+    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, jobs: Vec<Pending>) -> Result<(), EngineError> {
+        if !batch.is_empty() {
+            let store = &mut self.store;
+            catch_unwind(AssertUnwindSafe(|| store.apply(batch))).map_err(|_| EngineError::Panicked(what))??;
+        }
+        if let Some(state) = state {
+            self.state = state;
+        }
+        for job in jobs {
+            self.queue(job);
+        }
+        Ok(())
+    }
+
+    fn queue(&mut self, pending: Pending) {
+        if let Some(message) = pending.message
+            && self.state.fetching.values().any(|out| *out == message)
+        {
+            return;
+        }
+        let id = self.state.job_id();
+        if let Some(message) = pending.message {
+            self.state.fetching.insert(id, message);
+        }
+        if matches!(pending.kind, JobKind::Check { .. }) {
+            self.state.accounts.entry(pending.account).or_default().check = Some(Check { job: Some(id), steps: CheckStep::plan() });
+        }
+        self.jobs.push(Job::new(id, pending.account, pending.kind));
+    }
+}
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;

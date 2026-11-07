@@ -17,6 +17,10 @@ fn every_error_names_what_failed() {
     assert_eq!(config.to_string(), "Cargo.toml: no licence");
     assert!(config.source().is_none());
 
+    let image = Error::Image { path: PathBuf::from("a.png"), message: "not a PNG".to_owned() };
+    assert_eq!(image.to_string(), "a.png: not a PNG");
+    assert!(image.source().is_none());
+
     let spawn = Error::Spawn { program: "cargo".to_owned(), source: io::Error::other("not found") };
     assert_eq!(spawn.to_string(), "cannot run `cargo`: not found");
     assert!(spawn.source().is_some());

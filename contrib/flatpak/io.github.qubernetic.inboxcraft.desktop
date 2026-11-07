@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=InboxCraft
+GenericName=Mail
+Comment=Read your mail on your own computer
+Icon=io.github.qubernetic.inboxcraft
+Exec=inboxcraft
+Terminal=false
+Categories=Network;Email;
+Keywords=mail;email;imap;inbox;
+StartupNotify=true
+StartupWMClass=io.github.qubernetic.inboxcraft
+Actions=sample;
+
+[Desktop Action sample]
+Name=Open the Sample Mailbox
+Exec=inboxcraft --sample
