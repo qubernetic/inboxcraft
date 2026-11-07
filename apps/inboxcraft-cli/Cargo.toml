@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 inboxcraft-engine = { workspace = true }
+inboxcraft-mcp = { workspace = true }
 inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
 serde_json = { workspace = true }
