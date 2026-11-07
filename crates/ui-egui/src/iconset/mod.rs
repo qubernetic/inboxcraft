@@ -97,11 +97,13 @@ pub enum IconId {
     Close,
     /// Back: an arrow to the left, before the name of the page it leads back to.
     Back,
+    /// Caret: a chevron pointing down, after a choice that opens a menu.
+    Caret,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -140,6 +142,7 @@ impl IconId {
         Self::Info,
         Self::Close,
         Self::Back,
+        Self::Caret,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -184,6 +187,7 @@ impl IconId {
             Self::Info => 35,
             Self::Close => 36,
             Self::Back => 37,
+            Self::Caret => 38,
         }
     }
 }

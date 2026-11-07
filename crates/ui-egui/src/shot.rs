@@ -20,8 +20,10 @@
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
-//! (`ui.calendar.show`). `palette` opens the command palette with that text typed (`""` for the whole list), and
-//! `calendar` set to `true` shows the calendar screen.
+//! (`ui.calendar.show`), `sending` set to `true` the Sending page. `palette` opens the command palette with that text
+//! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen. `compose` opens the
+//! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
+//! be) or `floating` (a message opened over it); the first account then has an invented signature.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
@@ -49,6 +51,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
 use crate::component::gallery;
+use crate::compose::Line;
 use crate::mailbox::{Act, Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
@@ -129,6 +132,14 @@ pub struct Shot {
     /// Whether the settings sheet is open on Shortcuts.
     #[serde(default)]
     pub shortcuts: Option<bool>,
+    /// Whether the settings sheet is open on Sending, the first account signed.
+    #[serde(default)]
+    pub sending: Option<bool>,
+    /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
+    /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
+    /// could be under it) or `floating` (written, then a message opened).
+    #[serde(default)]
+    pub compose: Option<String>,
     /// The action waiting for a key on the Shortcuts page.
     #[serde(default)]
     pub capture: Option<String>,
@@ -269,8 +280,16 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
 /// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
 /// command palette with its text.
 fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(scene) = &shot.compose {
+        compose(app, &shot.out, scene)?;
+    }
     if shot.calendar == Some(true) {
         app.show_calendar();
+    }
+    if shot.sending == Some(true) {
+        sign(app);
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Sending, &appearance);
     }
     if shot.shortcuts == Some(true) {
         app.open_shortcuts();
@@ -289,6 +308,55 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     Ok(())
 }
 
+/// Signs the first account's messages with an invented signature.
+fn sign(app: &mut InboxApp) {
+    // The sample takes every signature; a refusal would only leave the picture without one.
+    let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": 1, "signature": "Mira\nPlot 14" }));
+    app.mailbox_mut().refresh();
+}
+
+/// Opens the composer as `scene` asks.
+fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
+    if !["new", "written", "bad", "suggest", "floating"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest or floating")));
+    }
+    sign(app);
+    app.compose();
+    let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+    let mut to = |text: &str| -> Result<(), UiError> {
+        if let Some(field) = composer.typing_mut(Line::To) {
+            text.clone_into(field);
+        }
+        composer.typed(mailbox, Line::To)
+    };
+    match scene {
+        "written" | "bad" | "floating" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "suggest" => to("Odile Brannock <odile@example.org>, te")?,
+        _ => {}
+    }
+    if scene == "bad" {
+        to("ansel.example.org,")?;
+    }
+    if scene != "new" {
+        "Work party on Saturday".clone_into(composer.subject_mut());
+        let text = format!(
+            "Hi both,\n\nWe meet at the plot at ten and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.{}",
+            composer.text()
+        );
+        *composer.text_mut() = text;
+        composer.edited();
+        composer.save(mailbox)?;
+    }
+    if scene == "suggest" {
+        composer.step(true);
+    }
+    if scene == "floating" {
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
+        app.mailbox_mut().select(id);
+    }
+    Ok(())
+}
+
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
@@ -299,6 +367,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.settings.is_some()
         || shot.accounts.is_some()
         || shot.shortcuts.is_some()
+        || shot.sending.is_some()
+        || shot.compose.is_some()
         || shot.capture.is_some()
         || shot.palette.is_some()
         || shot.calendar.is_some()

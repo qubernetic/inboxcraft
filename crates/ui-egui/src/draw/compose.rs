@@ -1,0 +1,393 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The composer in the reader's place, and the floating panel it shrinks to while the list and the reader have the
+//! window. The title bar says "New message" (or the subject) with Close, which keeps the draft. Under it a line each:
+//! From (the account, a menu of the accounts), To with its chips and the field to type in ("Cc Bcc" shows those two
+//! lines), Subject; then the text, and the toolbar at the foot with Discard, why Send is blocked, and Send.
+//!
+//! A chip shows the recipient's avatar and name (the address when there is none) with a button that removes it; one
+//! that is no address shows on the error colour with a warning instead of the avatar. Typing in a recipient line shows
+//! the people the mail knows under it: the arrows move the highlight, Enter takes it (or what was typed), Escape puts
+//! the list away, and Backspace in an empty line removes its last chip.
+//!
+//! Drawing changes only the text in the fields; everything else it asks for ([`Asked`]) is applied after the frame,
+//! through the [`Composer`]'s methods, which run the engine's commands.
+
+use egui::{
+    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit, Ui, WidgetInfo, vec2,
+};
+
+use super::paint::{line, line_height};
+use crate::component::avatar;
+use crate::component::button::{IconButton, TextButton};
+use crate::component::popup;
+use crate::compose::{Chip, Composer, Line};
+use crate::glass::Under;
+use crate::iconset::{IconId, Style};
+use crate::keymap::{self, Keymap};
+use crate::mailbox::Mailbox;
+use crate::theme::Theme;
+use crate::tr;
+
+/// The width of the line names (From, To, Subject), in body-size units.
+const NAMES: f32 = 4.5;
+
+/// The narrowest the recipient field gets after the chips, in body-size units.
+const FIELD: f32 = 10.0;
+
+/// The width of the floating panel, in body-size units.
+const FLOATING: f32 = 22.0;
+
+/// The width of the suggestions and of the accounts' menu, in body-size units.
+const MENU: f32 = 22.0;
+
+/// What the person asked for in the composer this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Asked {
+    /// What is typed in the line changed.
+    Typed(Line),
+    /// Enter, or the line left: what is typed (or the highlighted suggestion) becomes a chip.
+    Take(Line),
+    /// A suggestion was pressed.
+    Pick(usize),
+    /// The highlight moves down (`true`) or up.
+    Step(bool),
+    /// Escape put the suggestions away.
+    Dismiss,
+    /// A chip's remove button.
+    Remove(Line, usize),
+    /// Backspace in an empty line.
+    RemoveLast(Line),
+    /// The subject or the text changed.
+    Edited,
+    /// Show the Cc and Bcc lines.
+    Copies,
+    /// Write from this account.
+    From(u64),
+    Send,
+    Discard,
+    /// Close, keeping the draft.
+    Close,
+    /// Back in the reader's place, from the floating panel.
+    Open,
+}
+
+/// The id of the field of `line`, to give it the focus.
+pub(super) fn field_id(line: Line) -> Id {
+    Id::unique("compose-line").with(line.key())
+}
+
+/// The id of the subject's field.
+pub(super) fn subject_id() -> Id {
+    Id::unique("compose-subject")
+}
+
+/// The id of the text's field.
+pub(super) fn text_id() -> Id {
+    Id::unique("compose-text")
+}
+
+fn suggestions_id() -> Id {
+    Id::unique("compose-suggestions")
+}
+
+/// A line's name on the left, in the muted colour, `width` points wide and in the middle of the first `height` points.
+fn name(ui: &mut Ui, theme: &Theme, text: &str, width: f32, height: f32) {
+    let galley = line(ui, &[(text, theme.fonts.body, theme.palette.muted)], width);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, galley.size().y.max(height)), Sense::hover());
+    ui.painter().galley(egui::pos2(rect.left(), rect.top() + (rect.height() - galley.size().y) / 2.0), galley, theme.palette.muted);
+}
+
+/// How tall a chip is.
+fn chip_height(ui: &Ui, theme: &Theme) -> f32 {
+    line_height(ui, theme.fonts.body) * 1.2 + 4.0
+}
+
+/// A rule under a line.
+fn rule(ui: &mut Ui, theme: &Theme) {
+    ui.add_space(theme.spacing.xs);
+    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
+    ui.add_space(theme.spacing.xs + 1.0);
+}
+
+/// A recipient's chip with its remove button; whether that was pressed.
+fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let (fill, ink, edge) = if chip.ok { (p.panel, p.text, p.field_border) } else { (p.error, p.on_error, p.error) };
+    let side = line_height(ui, theme.fonts.body) * 1.2;
+    let shown = chip.shown();
+    let mut removed = false;
+    Frame::new().fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(255).inner_margin(egui::Margin::symmetric(3, 2)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.xs;
+            let galley = line(ui, &[(&shown, theme.fonts.body, ink)], f32::INFINITY);
+            let (rect, response) = ui.allocate_exact_size(vec2(side + s.xs + galley.size().x, side), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, chip.spoken()));
+            let mark = Rect::from_min_size(rect.min, vec2(side, side));
+            if chip.ok {
+                avatar::paint(ui.painter(), theme, mark, &shown, &chip.address());
+            } else {
+                theme.icons.paint(ui.painter(), mark.shrink(1.0), IconId::Junk, Style::Regular, ink);
+            }
+            ui.painter().galley(egui::pos2(mark.right() + s.xs, rect.center().y - galley.size().y / 2.0), galley, ink);
+            let remove = tr!("Remove {recipient}", recipient = shown);
+            removed = IconButton::new(IconId::Close, &remove).ink(ink).side(side).show(ui, theme, keymap).clicked();
+        });
+    });
+    removed
+}
+
+/// The keys of a recipient line that has the focus, read before its field takes them.
+fn line_keys(ui: &Ui, composer: &Composer, line: Line, asked: &mut Vec<Asked>) {
+    let (suggesting, found) = composer.suggestions();
+    if suggesting == Some(line) && !found.is_empty() {
+        for (key, step) in [(Key::ArrowDown, true), (Key::ArrowUp, false)] {
+            if ui.input_mut(|input| input.consume_key(Modifiers::NONE, key)) {
+                asked.push(Asked::Step(step));
+            }
+        }
+    }
+    if composer.typing(line).is_empty() && ui.input(|input| input.key_pressed(Key::Backspace)) {
+        asked.push(Asked::RemoveLast(line));
+    }
+}
+
+/// A recipient line: its name, its chips and the field to type in; the To line ends with "Cc Bcc" while those are
+/// hidden.
+fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, line: Line, asked: &mut Vec<Asked>) {
+    let body = theme.fonts.body.size;
+    ui.horizontal_top(|ui| {
+        name(ui, theme, line.name(), body * NAMES, chip_height(ui, theme));
+        let copies = line == Line::To && !composer.copies();
+        let link = copies.then(|| line_width(ui, theme, tr!("Cc  Bcc")));
+        let room = ui.available_width() - link.unwrap_or(0.0);
+        ui.allocate_ui_with_layout(vec2(room.max(1.0), 0.0), Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+            ui.spacing_mut().item_spacing = vec2(theme.spacing.xs, theme.spacing.xs);
+            for (at, shown) in composer.chips(line).to_vec().iter().enumerate() {
+                if chip(ui, theme, keymap, shown) {
+                    asked.push(Asked::Remove(line, at));
+                }
+            }
+            let id = field_id(line);
+            if ui.memory(|memory| memory.has_focus(id)) {
+                line_keys(ui, composer, line, asked);
+            }
+            // The rest of the chips' row, or a row of its own when that is too narrow.
+            let rest = ui.available_size_before_wrap().x;
+            let width = if rest >= body * FIELD { rest } else { ui.available_width() };
+            let hint = if composer.chips(line).is_empty() { tr!("Name or address") } else { "" };
+            let Some(typing) = composer.typing_mut(line) else { return };
+            let edit = TextEdit::singleline(typing).id(id).frame(Frame::NONE).hint_text(hint).desired_width(width);
+            let response = ui.add(edit.min_size(vec2(0.0, chip_height(ui, theme))).align(Align2::LEFT_CENTER));
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(line.name()));
+            if response.changed() {
+                asked.push(Asked::Typed(line));
+            }
+            if response.lost_focus() {
+                let entered = ui.input(|input| input.key_pressed(Key::Enter));
+                // A press on a suggestion takes the field's focus first; the suggestion is taken, not the text.
+                let on_list = ui
+                    .ctx()
+                    .pointer_latest_pos()
+                    .zip(ui.ctx().data(|data| data.get_temp::<Rect>(suggestions_id())))
+                    .is_some_and(|(at, list)| list.contains(at));
+                let escaped = ui.input(|input| input.key_pressed(Key::Escape));
+                if entered {
+                    asked.push(Asked::Take(line));
+                    response.request_focus();
+                } else if escaped && !composer.suggestions().1.is_empty() {
+                    // Escape puts the suggestions away and leaves the text and the focus where they are.
+                    asked.push(Asked::Dismiss);
+                    response.request_focus();
+                } else if !escaped && !on_list && !composer.typing(line).trim().is_empty() {
+                    asked.push(Asked::Take(line));
+                }
+            }
+            if composer.suggestions().0 == Some(line) {
+                suggestions(ui.ctx(), theme, composer, response.rect.left_bottom(), asked);
+            }
+        });
+        if copies && crate::component::button::link(ui, theme, keymap, tr!("Cc  Bcc")).clicked() {
+            asked.push(Asked::Copies);
+        }
+    });
+}
+
+/// The width of `text` as a link, with its margins.
+fn line_width(ui: &Ui, theme: &Theme, text: &str) -> f32 {
+    line(ui, &[(text, theme.fonts.caption, theme.palette.accent)], f32::INFINITY).size().x + theme.spacing.m * 2.0
+}
+
+/// The people offered under a recipient field, the highlighted one marked.
+fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2, asked: &mut Vec<Asked>) {
+    let found = composer.suggestions().1;
+    if found.is_empty() {
+        return;
+    }
+    let width = theme.fonts.body.size * MENU;
+    let rect = popup::show(ctx, theme, suggestions_id(), at, Under::Sharp, width, |ui| {
+        for (index, person) in found.iter().enumerate() {
+            if popup::choice(ui, theme, &person.shown(), composer.highlighted() == Some(index)).clicked() {
+                asked.push(Asked::Pick(index));
+            }
+        }
+        ui.min_rect()
+    });
+    ctx.data_mut(|data| data.insert_temp(suggestions_id(), rect.expand(theme.spacing.xs)));
+}
+
+/// The From line: the account as a button that opens the accounts' menu, its label at the right end.
+fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
+    let p = &theme.palette;
+    let body = theme.fonts.body.size;
+    let Some(account) = mailbox.account(composer.account()) else { return };
+    ui.horizontal(|ui| {
+        name(ui, theme, tr!("From"), body * NAMES, 0.0);
+        let sender =
+            if account.name.is_empty() { account.address.clone() } else { tr!("{name} <{address}>", name = account.name, address = account.address) };
+        let galley = line(ui, &[(&sender, theme.fonts.body, p.text)], ui.available_width() * 0.7);
+        let caret = line_height(ui, theme.fonts.body) * 0.8;
+        let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + theme.spacing.xs + caret, galley.size().y.max(caret)), Sense::click());
+        let spoken = tr!("From {sender}", sender = sender);
+        response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, &spoken));
+        if response.hovered() {
+            ui.painter().rect_filled(rect.expand(2.0), theme.spacing.corner, p.hover);
+        }
+        ui.painter().galley(rect.left_top(), galley, p.text);
+        let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
+        theme.icons.paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
+        super::paint::focus_ring(ui, theme, &response);
+        Popup::menu(&response).frame(Frame::NONE).show(|ui| {
+            popup::panel(ui, theme, Under::Sharp, body * MENU, |ui| {
+                for choice in mailbox.accounts() {
+                    let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
+                    if popup::choice(ui, theme, &text, choice.id == account.id).clicked() && choice.id != account.id {
+                        asked.push(Asked::From(choice.id));
+                    }
+                }
+            });
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(&account.label).font(theme.fonts.caption.id()).color(p.muted));
+        });
+    });
+}
+
+/// The toolbar at the foot: Discard, then why Send is blocked and Send at the right end.
+fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, asked: &mut Vec<Asked>) {
+    let p = &theme.palette;
+    ui.horizontal(|ui| {
+        if IconButton::new(IconId::Delete, tr!("Discard the draft")).show(ui, theme, keymap).clicked() {
+            asked.push(Asked::Discard);
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let send = TextButton::new(tr!("Send")).primary().icon(IconId::Send).action(keymap::SEND);
+            let problem = composer.problem();
+            match &problem {
+                Some(problem) => {
+                    send.unavailable(problem).show(ui, theme, keymap);
+                }
+                None => {
+                    if send.show(ui, theme, keymap).clicked() {
+                        asked.push(Asked::Send);
+                    }
+                }
+            }
+            if let Some(problem) = problem {
+                ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.text));
+                let side = line_height(ui, theme.fonts.caption);
+                let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                theme.icons.paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.error);
+            }
+        });
+    });
+}
+
+/// Draws the composer into `ui`, in the reader's place; what was asked for, applied after the frame.
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &mut Composer) -> Vec<Asked> {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let mut asked = Vec::new();
+    Frame::new().inner_margin(super::margin(s.l)).show(ui, |ui| {
+        ui.set_min_size(ui.available_size());
+        super::frame::beside(ui, theme, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::Label::new(RichText::new(composer.title()).font(theme.fonts.title.id()).color(p.text)).truncate());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if IconButton::new(IconId::Close, tr!("Close; the draft is kept")).show(ui, theme, keymap).clicked() {
+                        asked.push(Asked::Close);
+                    }
+                });
+            });
+        });
+        ui.add_space(s.s);
+        from(ui, theme, mailbox, composer, &mut asked);
+        rule(ui, theme);
+        let lines: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
+        for line in lines {
+            recipients(ui, theme, keymap, composer, *line, &mut asked);
+            rule(ui, theme);
+        }
+        ui.horizontal(|ui| {
+            name(ui, theme, tr!("Subject"), theme.fonts.body.size * NAMES, 0.0);
+            let edit = TextEdit::singleline(composer.subject_mut()).id(subject_id()).frame(Frame::NONE).desired_width(ui.available_width());
+            let response = ui.add(edit);
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(tr!("Subject")));
+            if response.changed() {
+                asked.push(Asked::Edited);
+            }
+        });
+        rule(ui, theme);
+        let foot = crate::component::control_side(ui, theme) + s.m;
+        let height = (ui.available_height() - foot).max(line_height(ui, theme.fonts.body) * 3.0);
+        let rows = (height / line_height(ui, theme.fonts.body)).floor().max(3.0);
+        egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
+            // A whole number of rows, fewer than a few hundred: the cast keeps it.
+            let edit = TextEdit::multiline(composer.text_mut())
+                .id(text_id())
+                .frame(Frame::NONE)
+                .desired_width(ui.available_width())
+                .desired_rows(rows as usize);
+            let response = ui.add(edit);
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(tr!("Message text")));
+            if response.changed() {
+                asked.push(Asked::Edited);
+            }
+        });
+        ui.add_space(s.s);
+        toolbar(ui, theme, keymap, composer, &mut asked);
+    });
+    asked
+}
+
+/// The floating panel at the bottom right of `screen`: the composer's title, which opens it again in the reader's
+/// place, and Close; what was asked for.
+pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, composer: &Composer, screen: Rect) -> Vec<Asked> {
+    let s = &theme.spacing;
+    let mut asked = Vec::new();
+    let width = theme.fonts.body.size * FLOATING;
+    let corner = screen.right_bottom() - vec2(s.gap * 2.0, s.gap * 2.0);
+    Area::new(Id::unique("compose-floating")).order(Order::Foreground).pivot(Align2::RIGHT_BOTTOM).fixed_pos(corner).show(ctx, |ui| {
+        popup::panel(ui, theme, Under::Fading, width, |ui| {
+            ui.horizontal(|ui| {
+                let title = composer.title();
+                let open = tr!("Open the draft {title}", title = title);
+                let side = crate::component::control_side(ui, theme);
+                let room = (ui.available_width() - side - s.xs).max(1.0);
+                let response = ui.allocate_ui_with_layout(vec2(room, side), Layout::top_down(Align::Min), |ui| {
+                    popup::item(ui, theme, keymap, IconId::Compose, &title, Some(keymap::COMPOSE))
+                });
+                response.inner.widget_info(|| WidgetInfo::labeled(Role::Button, true, &open));
+                if response.inner.clicked() {
+                    asked.push(Asked::Open);
+                }
+                if IconButton::new(IconId::Close, tr!("Close; the draft is kept")).side(side).show(ui, theme, keymap).clicked() {
+                    asked.push(Asked::Close);
+                }
+            });
+        });
+    });
+    asked
+}

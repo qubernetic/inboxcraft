@@ -72,6 +72,12 @@ pub const SYSTEM_MODE: &str = "ui.mode.system";
 /// Turn reduced motion on or off (`ui.motion.set`).
 pub const MOTION: &str = "ui.motion.toggle";
 
+/// Write a new message (`compose.new`), or bring back the one being written.
+pub const COMPOSE: &str = "ui.compose.new";
+
+/// Send the message being written (`mail.send`).
+pub const SEND: &str = "ui.compose.send";
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -95,6 +101,8 @@ pub fn actions() -> Vec<Action> {
         action(FIND, tr!("Search mail"), IconId::Search),
         action(MAIL, tr!("Show mail"), IconId::Inbox),
         action(SENT, tr!("Show sent mail"), IconId::Send),
+        action(COMPOSE, tr!("New message"), IconId::Compose),
+        action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
@@ -205,6 +213,8 @@ impl Default for Keymap {
         keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));
         keymap.bind(PALETTE, KeyboardShortcut::new(Modifiers::COMMAND, Key::K));
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
+        keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
+        keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
         keymap
     }
 }

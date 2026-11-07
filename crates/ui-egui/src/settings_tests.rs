@@ -91,3 +91,20 @@ fn closing_forgets_the_key_waited_for_the_text_and_the_notes_so_the_sheet_opens_
     settings.open(&Appearance::default());
     assert_eq!((settings.section(), settings.find()), (Section::Appearance, ""), "opening starts clean too");
 }
+
+#[test]
+fn a_signature_typed_shows_until_it_is_saved_or_the_sheet_closes() {
+    let mut settings = Settings::default();
+    settings.open_at(Section::Sending, &Appearance::default());
+    assert_eq!(settings.signature(1), None);
+    assert_eq!(settings.signature_mut(1, "Mira").as_str(), "Mira", "the one the account has");
+    settings.signature_mut(1, "Mira").push_str("\nPlot 14");
+    assert_eq!(settings.signature_mut(1, "ignored").as_str(), "Mira\nPlot 14", "typed text stays");
+    settings.saved_signature(1);
+    assert_eq!(settings.signature(1), None);
+    settings.signature_mut(2, "").push_str("Studio");
+    settings.close();
+    assert_eq!(settings.signature(2), None, "closing forgets what was not saved");
+    let long = "ő".repeat(super::MAX_SIGNATURE_BYTES);
+    assert!(settings.signature_mut(3, &long).len() <= super::MAX_SIGNATURE_BYTES, "cut to what the engine keeps");
+}

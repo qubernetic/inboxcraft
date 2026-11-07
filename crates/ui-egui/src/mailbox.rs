@@ -108,6 +108,10 @@ pub struct AccountRow {
     pub label: String,
     /// Its address.
     pub address: String,
+    /// The name its mail is sent under; empty when it has none.
+    pub name: String,
+    /// The signature its new drafts get; empty when it has none.
+    pub signature: String,
     /// Its place in the account list, which picks its colour.
     pub index: usize,
 }
@@ -778,7 +782,14 @@ impl Mailbox {
         self.accounts = array("account.list", &answer, "accounts")?
             .iter()
             .enumerate()
-            .map(|(index, account)| AccountRow { id: number(account, "id"), label: text(account, "label"), address: text(account, "address"), index })
+            .map(|(index, account)| AccountRow {
+                id: number(account, "id"),
+                label: text(account, "label"),
+                address: text(account, "address"),
+                name: text(account, "display_name"),
+                signature: account.get("signature").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                index,
+            })
             .collect();
         if self.narrowed.is_some_and(|id| self.account(id).is_none()) {
             self.narrowed = None;

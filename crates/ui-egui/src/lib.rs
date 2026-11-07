@@ -37,6 +37,7 @@
 
 pub mod calendar;
 pub mod component;
+pub mod compose;
 mod draw;
 mod error;
 pub mod fetch;

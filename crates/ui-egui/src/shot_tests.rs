@@ -411,3 +411,30 @@ fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
         assert!(error.contains("has no window"), "{error}");
     }
 }
+
+#[test]
+fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let mut seen = Vec::new();
+    for place in [
+        r#""compose": "new""#,
+        r#""compose": "written""#,
+        r#""compose": "bad""#,
+        r#""compose": "suggest""#,
+        r#""compose": "floating""#,
+        r#""sending": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], {place}}}"#))).unwrap();
+        assert_ne!(picture, window, "{place}");
+        assert!(!seen.contains(&picture), "{place} shows something of its own");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "compose": "sent"}"#)).unwrap_err().to_string();
+    assert!(error.contains("is not new, written, bad, suggest or floating"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "new"}"#)).unwrap_err().to_string();
+    assert!(error.contains("the composer did not open"), "{error}");
+    for place in [r#""compose": "new""#, r#""sending": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
