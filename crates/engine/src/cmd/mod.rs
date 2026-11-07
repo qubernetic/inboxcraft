@@ -69,6 +69,9 @@ pub(crate) mod compose_tests;
 #[path = "done_tests.rs"]
 mod done_tests;
 #[cfg(test)]
+#[path = "event_chain_tests.rs"]
+mod event_chain_tests;
+#[cfg(test)]
 #[path = "event_tests.rs"]
 mod event_tests;
 #[cfg(test)]

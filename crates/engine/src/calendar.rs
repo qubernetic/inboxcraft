@@ -197,7 +197,10 @@ fn synced(store: &dyn Storage, plan: &mut Plan, calendar: &Held, changed: &[Fetc
         })
         .collect();
     let mut ids: BTreeMap<&str, CalendarEventId> = held.iter().map(|event| (event.href.as_str(), event.id)).collect();
-    for fetched in changed.iter().filter(|fetched| !deleting.contains(&fetched.url)) {
+    // An event with a write of the owner's out keeps the owner's copy: the server's is older.
+    let writing: BTreeSet<&str> =
+        changed.iter().filter(|fetched| plan.state.writes.busy(calendar.id, &fetched.url)).map(|fetched| fetched.url.as_str()).collect();
+    for fetched in changed.iter().filter(|fetched| !deleting.contains(&fetched.url) && !writing.contains(fetched.url.as_str())) {
         let id = match ids.get(fetched.url.as_str()) {
             Some(id) => *id,
             None => {

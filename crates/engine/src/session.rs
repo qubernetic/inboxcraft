@@ -22,6 +22,7 @@ use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
+use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
 
 /// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
@@ -277,6 +278,8 @@ pub(crate) struct State {
     pub(crate) kept: BTreeSet<JobId>,
     /// Kept jobs held back from the workers until a time, in the order they came (see [`Outcome::with_held_job`]).
     pub(crate) held: Vec<(Timestamp, Job)>,
+    /// The calendar writes out, one for each event, and the ones waiting for them (see [`crate::writes`]).
+    pub(crate) writes: Writes,
     /// The acts to undo, the newest last.
     pub(crate) history: Vec<Act>,
     /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
@@ -571,6 +574,7 @@ impl Session {
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
             self.state.held.retain(|(_, held)| held.id != job);
+            self.state.writes.withdraw(job);
             self.state.kept.remove(&job);
         }
         if let Some(step) = undo {
@@ -614,6 +618,7 @@ impl Session {
             self.state.notices.retain(|notice| notice.account() != account);
             self.jobs.retain(|job| job.account != account);
             self.state.held.retain(|(_, job)| job.account != account);
+            self.state.writes.forget(account);
         }
         for (sender, allowed) in senders {
             if allowed {
@@ -636,7 +641,9 @@ impl Session {
     /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such.
     pub fn start(&mut self) {
         self.started = Some(self.clock.now());
-        self.jobs.append(&mut self.replay);
+        for job in std::mem::take(&mut self.replay) {
+            self.hand_out(job);
+        }
         for held in self.state.accounts.values_mut() {
             if let Some(check) = held.check.as_mut() {
                 check.job = None;
@@ -667,7 +674,9 @@ impl Session {
         let now = self.clock.now();
         let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.state.held).into_iter().partition(|(until, _)| *until <= now);
         self.state.held = waiting;
-        self.jobs.extend(due.into_iter().map(|(_, job)| job));
+        for (_, job) in due {
+            self.hand_out(job);
+        }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
@@ -712,24 +721,36 @@ impl Session {
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let ended = event.job.filter(|job| self.state.kept.contains(job) && ends_job(&event.kind));
+        // The calendar writes the event lets go, with the new tags of the ones that still wait, in the same batch.
+        let (mut writes, mut held) = (self.state.writes.clone(), self.state.held.clone());
+        let Settled { jobs: released, changes: retagged } = writes.settle(&mut held, event);
         let applied = match plan {
             Some(mut plan) => {
                 if let Some(job) = ended {
                     plan.batch.push(Change::RemoveJob(job));
                 }
+                for change in retagged {
+                    plan.batch.push(change);
+                }
+                plan.state.writes = writes;
+                plan.state.held = held;
                 self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
                 Applied::Changed
             }
             None => {
-                if let Some(job) = ended {
-                    self.commit("event", None, &Batch::new().with(Change::RemoveJob(job)), Vec::new())?;
+                let batch = ended.into_iter().map(Change::RemoveJob).chain(retagged).fold(Batch::new(), Batch::with);
+                if !batch.is_empty() {
+                    self.commit("event", None, &batch, Vec::new())?;
                 }
+                self.state.writes = writes;
+                self.state.held = held;
                 Applied::Dropped
             }
         };
         if let Some(job) = ended {
             self.state.kept.remove(&job);
         }
+        self.jobs.extend(released);
         Ok(applied)
     }
 
@@ -768,13 +789,20 @@ impl Session {
                     self.state.kept.insert(job.id);
                     match pending.until {
                         Some(until) => self.state.held.push((until, job)),
-                        None => self.jobs.push(job),
+                        None => self.hand_out(job),
                     }
                 }
                 None => self.queue(pending),
             }
         }
         Ok(())
+    }
+
+    /// Hands the kept `job` to its worker, unless it is a calendar write that waits for an earlier one.
+    fn hand_out(&mut self, job: Job) {
+        if let Some(job) = self.state.writes.hand_out(job) {
+            self.jobs.push(job);
+        }
     }
 
     fn queue(&mut self, pending: Pending) {

@@ -479,10 +479,12 @@ pub(crate) fn undo(context: &Context<'_>, command: &'static str, undo: &EventUnd
             Ok(answer(true).with_change(Change::PutCalendarEvent(back)).with_kept_job(calendar.account, JobKind::Calendar(job)))
         }
         EventUndo::Delete(was) => {
-            let deleting = context.state().held.iter().find(|(_, job)| {
+            // Held for the undo window, or waiting for a write still out to the same event.
+            let state = context.state();
+            let deleting = state.held.iter().map(|(_, job)| job).chain(state.writes.waiting()).find(|job| {
                 matches!(&job.kind, JobKind::Calendar(CalendarJob::Delete { event, .. }) if *event == id)
             });
-            let Some((_, job)) = deleting else { return Ok(answer(false)) };
+            let Some(job) = deleting else { return Ok(answer(false)) };
             Ok(answer(true).with_change(Change::PutCalendarEvent(was.clone())).with_withdrawn(job.id))
         }
     }

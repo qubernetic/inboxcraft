@@ -238,8 +238,11 @@ a repeating one on the computer's wall clock (floating) so it keeps its time of 
 edit keeps the event's own form (its zone, the wall clock or UTC). A delete is a kept job the session holds back for
 the undo window (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it
 to the worker once the window is over, `history.undo` before then withdraws it from the queue and puts the event back,
-and a restart hands it out at once. Editing an event with guests counts its `SEQUENCE` on only when the owner asks to
-tell them (`notify`).
+and a restart hands it out at once. Writes to one event go out one at a time (`engine::writes`): a second write (an
+edit, an undo, a delete whose window is over) waits until the server has taken the first, then goes with the entity
+tag that one got, or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps
+the owner's copy. So the owner's changes never conflict with each other. Editing an event with guests counts its
+`SEQUENCE` on only when the owner asks to tell them (`notify`).
 
 Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that

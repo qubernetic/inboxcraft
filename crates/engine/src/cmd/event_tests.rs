@@ -353,20 +353,30 @@ fn a_sync_during_the_window_does_not_bring_the_deleted_event_back() {
 #[test]
 fn undo_takes_a_new_event_off_again_and_an_edit_back() {
     let (mut session, _) = session();
+    let written = |session: &mut Session, job, event: u64, etag: &str| {
+        let report = CalendarReport::Written { calendar: CalendarId::new(1), event: CalendarEventId::new(event), etag: Some(etag.to_owned()) };
+        session.apply(&Event::new(inboxcraft_model::AccountId::new(1), Some(job), EventKind::Calendar(report))).unwrap();
+    };
     let id = create(&mut session, json!({ "calendar": 1, "summary": "Dentist", "start": "2026-11-12T08:00:00Z" }));
-    session.take_jobs();
+    let made = session.take_jobs()[0].id;
     session.run("event.update", &json!({ "id": 2, "summary": "Long lunch" })).unwrap();
-    session.take_jobs();
+    let edited = session.take_jobs()[0].id;
     let undone = session.run("history.undo", &json!({})).unwrap();
     assert_eq!(undone, json!({ "command": "event.update", "id": 2, "undone": true }));
     assert_eq!(object(&session, 2).events[0].summary.as_deref(), Some("Lunch"));
+    // Each undo goes out once the server has taken the write it takes back, with the tag that write got.
+    written(&mut session, edited, 2, "\"l2\"");
     let jobs = calendar_jobs(&mut session);
-    assert!(matches!(jobs.as_slice(), [CalendarJob::Put { etag: Some(_), ical, .. }] if ical.contains("SUMMARY:Lunch")), "{jobs:?}");
+    assert!(
+        matches!(jobs.as_slice(), [CalendarJob::Put { etag: Some(etag), ical, .. }] if etag == "\"l2\"" && ical.contains("SUMMARY:Lunch")),
+        "{jobs:?}"
+    );
     let undone = session.run("history.undo", &json!({})).unwrap();
     assert_eq!(undone, json!({ "command": "event.create", "id": id, "undone": true }));
     assert_eq!(session.store().calendar_event(CalendarEventId::new(id)).unwrap(), None);
+    written(&mut session, made, id, "\"d1\"");
     let jobs = calendar_jobs(&mut session);
-    assert!(matches!(jobs.as_slice(), [CalendarJob::Delete { etag: None, .. }]), "{jobs:?}");
+    assert!(matches!(jobs.as_slice(), [CalendarJob::Delete { etag: Some(etag), .. }] if etag == "\"d1\""), "{jobs:?}");
 }
 
 #[test]
