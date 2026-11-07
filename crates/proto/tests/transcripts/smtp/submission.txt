@@ -1,0 +1,76 @@
+# Sending one message over implicit TLS (port 465): greeting, EHLO, AUTH PLAIN, MAIL, RCPT, DATA, QUIT.
+@ tls
+? Greeting
+S: 220 smtp.example.org ESMTP ready
+= greeted
+? Connected
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org greets client.example.org
+S: 250-SIZE 10240000
+S: 250-8BITMIME
+S: 250-ENHANCEDSTATUSCODES
+S: 250-AUTH PLAIN LOGIN
+S: 250 SMTPUTF8
+= EHLO hello SIZE 8BITMIME ENHANCEDSTATUSCODES AUTH SMTPUTF8
+? Ready
+> auth-plain ada@example.org secret
+C: AUTH PLAIN AGFkYUBleGFtcGxlLm9yZwBzZWNyZXQ=
+S: 235 2.7.0 Authentication successful
+= AUTH signed in
+> mail ada@example.org size=120
+C: MAIL FROM:<ada@example.org> SIZE=120
+S: 250 2.1.0 Sender OK
+= MAIL sender accepted
+? Mail
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 2.1.5 Recipient OK
+= RCPT recipient accepted
+> rcpt nobody@example.org
+C: RCPT TO:<nobody@example.org>
+S: 550 5.1.1 <nobody@example.org>: no such user
+= RCPT refused 550 5.1.1 <nobody@example.org>: no such user
+> rcpt cili@example.org
+C: RCPT TO:<cili@example.org>
+S: 451 4.3.0 Try again later
+= RCPT refused for now 451 4.3.0 Try again later
+> data From: ada@example.org\r\nTo: bela@example.org\r\nSubject: Lunch\r\n\r\nNoon at the usual place?\r\n.\r\n..two dots\r\n
+C: DATA
+S: 354 End data with <CR><LF>.<CR><LF>
+C: From: ada@example.org
+C: To: bela@example.org
+C: Subject: Lunch
+C:
+C: Noon at the usual place?
+C: ..
+C: ...two dots
+C: .
+S: 250 2.0.0 Ok: queued as 4F2A1
+= DATA sent Ok: queued as 4F2A1
+? Ready
+
+# A second message in the same session.
+> mail -
+C: MAIL FROM:<>
+S: 250 2.1.0 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 251 2.1.5 User not local; will forward
+= RCPT recipient accepted
+> data Hi
+C: DATA
+S: 354 go ahead
+C: Hi
+C: .
+S: 250 2.0.0 queued
+= DATA sent queued
+> quit
+C: QUIT
+? Quitting
+S: 221 2.0.0 Bye
+= QUIT bye
+? Closed
+> quit
+! Closed

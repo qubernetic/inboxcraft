@@ -1,0 +1,89 @@
+# One command at a time, each in its state.
+@ tls
+> ehlo client.example.org
+! WrongSmtpState { command: "EHLO", state: Greeting }
+> quit
+! WrongSmtpState { command: "QUIT", state: Greeting }
+S: 220 smtp.example.org ESMTP
+= greeted
+> mail ada@example.org
+! WrongSmtpState { command: "MAIL", state: Connected }
+> rset
+! WrongSmtpState { command: "RSET", state: Connected }
+> auth-plain ada@example.org secret
+! WrongSmtpState { command: "AUTH", state: Connected }
+> ehlo client.example.org
+C: EHLO client.example.org
+> ehlo client.example.org
+! Busy
+> quit
+! Busy
+S: 250 smtp.example.org
+= EHLO hello
+> ehlo client.example.org
+! WrongSmtpState { command: "EHLO", state: Ready }
+> rcpt bela@example.org
+! WrongSmtpState { command: "RCPT", state: Ready }
+> data Hi
+! WrongSmtpState { command: "DATA", state: Ready }
+> rset
+C: RSET
+S: 250 OK
+= RSET reset
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> mail ada@example.org
+! WrongSmtpState { command: "MAIL", state: Mail }
+> rset
+C: RSET
+S: 500 what
+= RSET refused 500 what
+? Mail
+> quit
+C: QUIT
+S: 500 still here
+= QUIT refused 500 still here
+? Closed
+
+# A go-ahead to QUIT is not a refusal: the server broke the protocol.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> quit
+C: QUIT
+S: 335 go on
+! Unexpected("go-ahead")
+? Closed
+
+# Arguments that cannot go on a command line are refused before anything is written.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo
+! BadArgument("EHLO domain")
+> ehlo client example.org
+! BadArgument("EHLO domain")
+> ehlo client.example.org\r\nQUIT
+! BadArgument("EHLO domain")
+> ehlo \xc3\xa1rv\xc3\xadz.example.org
+! BadArgument("EHLO domain")
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org>\r\nRCPT\x20TO:<eve@example.org
+! BadArgument("address with a space, a control character, an invisible mark or an angle bracket")
+> mail ada\x20@example.org
+! BadArgument("address with a space, a control character, an invisible mark or an angle bracket")
+> mail ada\xe2\x80\xae@example.org
+! BadArgument("address with a space, a control character, an invisible mark or an angle bracket")
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt
+! BadArgument("empty address")
+> rcpt <bela@example.org>
+! BadArgument("address with a space, a control character, an invisible mark or an angle bracket")

@@ -8,6 +8,9 @@
 
 use inboxcraft_model::is_invisible_mark;
 
+use super::sasl::{base64_forms, check_credentials};
+use crate::ProtoError;
+
 /// Most characters kept of a text the server wrote for people.
 pub const MAX_TEXT_CHARS: usize = 300;
 
@@ -57,6 +60,22 @@ impl Secrets {
         }
         // Longest first, so a secret inside another one cannot leave a piece behind.
         self.0.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    }
+
+    /// Checks the credentials and adds the password, as sent and in every base64 form a server may write it back in
+    /// (the PLAIN token and the password alone, with and without padding), also of the password without its edge
+    /// white space, which a server may trim before it encodes it. Shared by the IMAP and SMTP clients.
+    pub(crate) fn add_credentials(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
+        check_credentials(user, password)?;
+        self.add(password);
+        let trimmed = password.trim();
+        let passwords = if trimmed.is_empty() || trimmed == password { vec![password] } else { vec![password, trimmed] };
+        for password in passwords {
+            for form in base64_forms(user, password)? {
+                self.add(&form);
+            }
+        }
+        Ok(())
     }
 
     /// Whether `text` holds a secret, in any case of ASCII letters: for words the server upper-cases.

@@ -43,7 +43,7 @@ pub(crate) fn base64_forms(user: &str, password: &str) -> Result<Vec<String>, Pr
 }
 
 /// Base64 with padding.
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     let sextet = |group: u32, shift: u32| ALPHABET.get(((group >> shift) & 0x3F) as usize).copied().map_or('A', char::from);
     let mut out = String::with_capacity(bytes.len().div_ceil(3).saturating_mul(4));
     for chunk in bytes.chunks(3) {
