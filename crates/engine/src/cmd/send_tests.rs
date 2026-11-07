@@ -164,6 +164,41 @@ fn a_sent_draft_goes_and_its_copy_lands_in_sent() {
 }
 
 #[test]
+fn a_draft_on_its_way_is_neither_changed_nor_discarded() {
+    let mut session = session();
+    let id = draft(&mut session);
+    session.run("mail.send", &json!({ "id": id })).unwrap();
+    let (_, _, _, raw) = sent_job(&mut session);
+    let held = session.store().draft(DraftId::new(id)).unwrap();
+    for caller in [Caller::Owner, Caller::Agent] {
+        for params in [json!({ "id": id, "text": "Changed." }), json!({ "id": id, "account": 2 }), json!({ "id": id })] {
+            assert!(bad(session.run_as(caller, "compose.update", &params)), "{params}");
+        }
+        assert!(bad(session.run_as(caller, "compose.discard", &json!({ "id": id }))));
+    }
+    assert_eq!(session.store().draft(DraftId::new(id)).unwrap(), held);
+    assert_eq!(session.store().outbox().unwrap()[0].state, OutboxState::Sending);
+    assert!(session.take_jobs().is_empty());
+    // The answer still finds the draft: it goes, and the message that went lands in Sent.
+    session.apply(&event(EventKind::Sent { draft: DraftId::new(id) })).unwrap();
+    assert_eq!(session.store().draft(DraftId::new(id)).unwrap(), None);
+    let jobs = session.take_jobs();
+    assert!(jobs.iter().any(|job| matches!(&job.kind, JobKind::Append { raw: appended, .. } if *appended == raw)), "{jobs:?}");
+}
+
+#[test]
+fn a_refused_draft_can_be_changed_and_discarded() {
+    let mut session = session();
+    let id = draft(&mut session);
+    session.run("mail.send", &json!({ "id": id })).unwrap();
+    session.take_jobs();
+    session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::MessageRefused, reply: None })).unwrap();
+    session.run("compose.update", &json!({ "id": id, "text": "Changed." })).unwrap();
+    session.run("compose.discard", &json!({ "id": id })).unwrap();
+    assert_eq!(session.store().draft(DraftId::new(id)).unwrap(), None);
+}
+
+#[test]
 fn a_failed_send_keeps_the_draft_with_the_reason() {
     let mut session = session();
     let id = draft(&mut session);

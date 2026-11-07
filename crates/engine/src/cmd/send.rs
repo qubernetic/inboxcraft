@@ -47,8 +47,7 @@ fn send(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     if let Some(block) = draft::blocks(&draft).first() {
         return Err(bad(&format!("the draft cannot be sent: {block}")));
     }
-    let on_its_way = context.store().outbox()?.into_iter().any(|item| item.draft == draft.id && !matches!(item.state, OutboxState::Refused { .. }));
-    if on_its_way {
+    if draft::on_its_way(context.store(), draft.id)? {
         return Err(bad("the draft is on its way already"));
     }
     let account = context

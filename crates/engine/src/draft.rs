@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use inboxcraft_mime::{Mailbox, MessageBuilder, MimeError};
 use inboxcraft_model::{
-    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, Role, Uid, UidSet,
-    UidValidity,
+    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, OutboxState, Role,
+    Uid, UidSet, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{MailDate, Offset, Timestamp, Zone};
@@ -60,6 +60,12 @@ pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
         blocks.push("bad_address");
     }
     blocks
+}
+
+/// Whether `draft` is on its way: its outbox item waits for the worker's answer. Such a draft is neither sent
+/// again, changed nor discarded, so the answer finds it as it went.
+pub(crate) fn on_its_way(store: &dyn Storage, draft: DraftId) -> Result<bool, EngineError> {
+    Ok(store.outbox()?.into_iter().any(|item| item.draft == draft && !matches!(item.state, OutboxState::Refused { .. })))
 }
 
 /// A draft as the commands answer it, every recipient checked.
