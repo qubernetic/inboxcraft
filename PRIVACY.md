@@ -31,6 +31,11 @@ in. Neither holds anything of yours. Starting at login
 (`inboxcraft --autostart`) writes `autostart/io.github.qubernetic.inboxcraft.desktop` in your config folder, which
 names the program and nothing else; in the Flatpak the desktop's Background portal keeps the real entry.
 
+When new mail comes in, InboxCraft tells you with a notification on your desktop: the sender's name and the subject
+go to your desktop's notification service (in the Flatpak, through its notification portal), which runs on your
+computer and may also show them on the lock screen. Snoozed mail that comes back and follow-up reminders do the same.
+You can choose per account to be told of all new mail, of the people you know, or of nothing (`notify.set`).
+
 Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
 work still queued for it. What InboxCraft knows of senders is kept, because it is yours and not an account's: it
 stays until you delete the data folder, which removes everything above.
