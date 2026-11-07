@@ -1,0 +1,166 @@
+# DATA: lines end in CRLF whatever they came with, a line that starts with a dot gets another, and the message ends
+# with a line that is a lone dot.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 8BITMIME
+= EHLO hello 8BITMIME
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> data no recipient yet
+! BadArgument("message without an accepted recipient")
+> rcpt nobody@example.org
+C: RCPT TO:<nobody@example.org>
+S: 550 no such user
+= RCPT refused 550 no such user
+> data no recipient yet
+! BadArgument("message without an accepted recipient")
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data unix\nmac\rdos\r\n.\n\n.end
+C: DATA
+S: 354 go ahead
+C: unix
+C: mac
+C: dos
+C: ..
+C:
+C: ..end
+C: .
+S: 250 queued
+= DATA sent queued
+
+# An empty message is the terminating line alone.
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data
+C: DATA
+S: 354 go ahead
+C: .
+S: 250 queued
+= DATA sent queued
+
+# 8-bit text needs BODY=8BITMIME (or SMTPUTF8), and no message carries a NUL.
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data \xc3\xa1rv\xc3\xadz
+! BadArgument("8-bit message without BODY=8BITMIME")
+> data a\0b
+! BadArgument("message with a NUL")
+> rset
+C: RSET
+S: 250 OK
+= RSET reset
+? Ready
+> mail ada@example.org 8bit
+C: MAIL FROM:<ada@example.org> BODY=8BITMIME
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data \xc3\xa1rv\xc3\xadz
+C: DATA
+S: 354 go ahead
+C: \xc3\xa1rv\xc3\xadz
+C: .
+S: 250 queued
+= DATA sent queued
+
+# DATA refused before the message: the transaction stays open, so the caller can try again or reset it.
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data Hi
+C: DATA
+S: 451 not now
+= DATA refused for now 451 not now
+? Mail
+> rset
+C: RSET
+S: 250 OK
+= RSET reset
+
+# The message refused after it went: the transaction is over either way.
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data Hi
+C: DATA
+S: 354 go ahead
+C: Hi
+C: .
+S: 554 rejected as spam
+= DATA refused 554 rejected as spam
+? Ready
+
+# A server that answers DATA with 250 instead of 354, or with a go-ahead that is not 354, breaks the protocol.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data Hi
+C: DATA
+S: 250 OK
+! Unexpected("reply to DATA")
+? Closed
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data Hi
+C: DATA
+S: 334 VXNlcm5hbWU6
+! Unexpected("go-ahead")

@@ -448,15 +448,15 @@ cargo-fuzz needs nightly Rust: the toolchain is pinned by date in the workflow. 
 kept as the `fuzz-artifacts` artifact; it becomes a regression test. With no targets the job passes. GitHub runs a
 schedule only from the default branch, `main`, so the nightly run starts with the first release.
 
-`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
-new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
-runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
-`charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
-(#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
-(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations, and
-`html_display` (#29), the safe HTML display, `ui_reader`, the reader's picture decoder and quote splitter, and
-`ui_typed_time` (#129), a time typed into the time picker, `ui_keymap` (#130), the keys' file and a key
+`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A new
+parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it runs
+with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15), `charset_decode`
+and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn` (#18), `imap_client`
+(#20), `smtp_client` (#117), the SMTP client and its reply parser, `testkit_imap` (#23), the fake IMAP server's own
+command reader, `net_envelope` (#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`,
+`net_autoconfig` and `net_dns` (#28): a server's certificate, an autoconfig file, and DNS answers and resolver
+configurations, and `html_display` (#29), the safe HTML display, `ui_reader`, the reader's picture decoder and quote
+splitter, and `ui_typed_time` (#129), a time typed into the time picker, `ui_keymap` (#130), the keys' file and a key
 written as text, `mcp_lines` (#141), the MCP server's input, and `control_lines` (#142), the control channel's
 request and answer lines.
 

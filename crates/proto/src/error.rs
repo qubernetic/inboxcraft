@@ -6,6 +6,7 @@
 use std::fmt;
 
 use crate::imap::State;
+use crate::smtp::State as SmtpState;
 
 /// Why a command was not sent, or why the session is over.
 ///
@@ -15,7 +16,8 @@ use crate::imap::State;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProtoError {
-    /// A password would go over a connection that is not encrypted: LOGIN and AUTHENTICATE need TLS first.
+    /// A password or a message would go over a connection that is not encrypted: LOGIN and AUTHENTICATE (IMAP), AUTH
+    /// and MAIL (SMTP) need TLS first.
     NotEncrypted,
     /// STARTTLS on a connection that is encrypted already.
     AlreadyEncrypted,
@@ -40,10 +42,31 @@ pub enum ProtoError {
     BadArgument(&'static str),
     /// The open mailbox is read-only (EXAMINE, or `READ-ONLY`): nothing in it can be removed.
     ReadOnly,
+    /// The SMTP command is not allowed in the session's state (RCPT before MAIL, EHLO twice).
+    WrongSmtpState {
+        /// The command, as SMTP names it.
+        command: &'static str,
+        /// The state the session was in.
+        state: SmtpState,
+    },
+    /// AUTH after a successful AUTH (RFC 4954 section 4).
+    AlreadySignedIn,
+    /// The message is larger than the server takes (its SIZE, RFC 1870).
+    TooLarge {
+        /// The message's size in bytes.
+        size: u64,
+        /// The server's limit.
+        limit: u64,
+    },
 
     /// The server sent a line, or the text of one response, longer than `limit` bytes.
     LineTooLong {
         /// The cap, [`crate::imap::MAX_LINE`].
+        limit: usize,
+    },
+    /// An SMTP reply has more than `limit` lines.
+    TooManyLines {
+        /// The cap, [`crate::smtp::MAX_REPLY_LINES`].
         limit: usize,
     },
     /// The server announced a literal of `size` bytes, more than the `limit` one response may carry.
@@ -93,6 +116,9 @@ impl ProtoError {
                 | Self::NotEnabled(_)
                 | Self::BadArgument(_)
                 | Self::ReadOnly
+                | Self::WrongSmtpState { .. }
+                | Self::AlreadySignedIn
+                | Self::TooLarge { .. }
         )
     }
 }
@@ -110,7 +136,11 @@ impl fmt::Display for ProtoError {
             Self::NotEnabled(what) => write!(f, "{what} is not enabled"),
             Self::BadArgument(what) => write!(f, "the {what} cannot be sent"),
             Self::ReadOnly => f.write_str("the mailbox is open read-only"),
+            Self::WrongSmtpState { command, state } => write!(f, "{command} cannot be sent in the {state} state"),
+            Self::AlreadySignedIn => f.write_str("the session is signed in already"),
+            Self::TooLarge { size, limit } => write!(f, "the message of {size} bytes is larger than the {limit} bytes the server takes"),
             Self::LineTooLong { limit } => write!(f, "the server sent a response longer than {limit} bytes"),
+            Self::TooManyLines { limit } => write!(f, "the server sent a reply of more than {limit} lines"),
             Self::LiteralTooLarge { size, limit } => write!(f, "the server announced {size} bytes in one response, more than {limit}"),
             Self::TooManyLiterals { limit } => write!(f, "the server sent more than {limit} literals in one response"),
             Self::TooDeep { limit } => write!(f, "the server nested lists deeper than {limit}"),

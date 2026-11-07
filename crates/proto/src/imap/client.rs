@@ -16,7 +16,7 @@ use super::list::{ListEntry, MAX_MAILBOXES, check_mailbox};
 use super::mailbox::{MailboxStatus, flag_list};
 use super::notify::{MailboxCounts, Notify};
 use super::response::{Response, classify};
-use super::sasl::{base64_forms, check_credentials, plain_response};
+use super::sasl::plain_response;
 use super::search::{self, SearchKey, set_text};
 use super::store::{FlagStore, modified};
 use super::sync::{Extension, SelectOptions, vanished};
@@ -532,20 +532,9 @@ impl Client {
     /// Checks the credentials and adds the password to what is never shown, in every form a server may write it
     /// back in, whether it went out with LOGIN or AUTHENTICATE PLAIN.
     fn hide_credentials(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
-        check_credentials(user, password)?;
-        self.secrets.add(password);
+        self.secrets.add_credentials(user, password)?;
         // The form inside the quotes, when it differs: a server may write the argument back as it came.
         self.secrets.add(&String::from_utf8_lossy(&escaped(password.as_bytes())));
-        for form in base64_forms(user, password)? {
-            self.secrets.add(&form);
-        }
-        // And of the password without its edge white space, which a server may trim before it encodes it.
-        let trimmed = password.trim();
-        if !trimmed.is_empty() && trimmed != password {
-            for form in base64_forms(user, trimmed)? {
-                self.secrets.add(&form);
-            }
-        }
         Ok(())
     }
 
