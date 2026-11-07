@@ -37,6 +37,7 @@ use inboxcraft_ui_egui::{InboxApp, UiError, sample};
 
 pub mod accounts;
 pub mod autostart;
+pub mod control;
 pub mod desktop;
 pub mod instance;
 pub mod notify;
@@ -69,6 +70,8 @@ pub enum Step {
     Quit,
     /// Start InboxCraft at login in the background, or no longer (`--autostart`, `--no-autostart`).
     Autostart(bool),
+    /// Put a new control token in the place of the old one (`--revoke-control`).
+    RevokeControl,
 }
 
 /// What `--help` prints.
@@ -77,13 +80,17 @@ pub fn usage() -> String {
     format!(
         "{name} {version}\n\
          \n\
-         Usage: {name} [--sample | --background | --quit | --autostart | --no-autostart]\n\
+         Usage: {name} [--sample | --background | --quit | --autostart | --no-autostart |\n\
+         \x20                  --revoke-control]\n\
          \n\
          \x20 --sample       show an invented sample mailbox (nothing connects anywhere)\n\
          \x20 --background   keep the mail in step without showing the window\n\
          \x20 --quit         end the running InboxCraft\n\
          \x20 --autostart    start in the background at login\n\
          \x20 --no-autostart no longer start at login\n\
+         \x20 --revoke-control\n\
+         \x20                put a new control token in the credential store; the CLI and\n\
+         \x20                MCP clients that kept the old one are refused\n\
          \x20 -V, --version  print the version\n\
          \x20 -h, --help     print this help\n\
          \n\
@@ -111,6 +118,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
         [flag] if flag == "--quit" => Step::Quit,
         [flag] if flag == "--autostart" => Step::Autostart(true),
         [flag] if flag == "--no-autostart" => Step::Autostart(false),
+        [flag] if flag == "--revoke-control" => Step::RevokeControl,
         [flag] if flag == "--version" || flag == "-V" => printed(writeln!(out, "{name} {}", env!("CARGO_PKG_VERSION"))),
         [flag] if flag == "--help" || flag == "-h" => printed(write!(out, "{}", usage())),
         _ => {

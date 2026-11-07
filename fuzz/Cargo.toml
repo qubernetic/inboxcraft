@@ -13,6 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
+inboxcraft-control-key = { path = "../crates/control-key" }
 inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-html = { path = "../crates/html" }
 inboxcraft-model = { path = "../crates/model" }
@@ -165,6 +166,13 @@ bench = false
 [[bin]]
 name = "mcp_lines"
 path = "fuzz_targets/mcp_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_lines"
+path = "fuzz_targets/control_lines.rs"
 test = false
 doc = false
 bench = false

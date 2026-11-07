@@ -6,11 +6,11 @@
 //! A tool's name is its command id with an underscore for the dot (`mail_list` runs `mail.list`), since the model
 //! APIs the clients hand tools to take letters, digits, `_` and `-` only; `thread_read` runs `mail.thread`.
 
-use inboxcraft_engine::{Caller, MAX_LIST, Session};
+use inboxcraft_engine::MAX_LIST;
 use serde_json::{Value, json};
 
 use crate::render;
-use crate::{RpcError, code, echo};
+use crate::{Commands, RpcError, code, echo};
 
 /// How many messages a list or a search gives when the agent does not say: a page an agent reads cheaply.
 pub(crate) const DEFAULT_LIMIT: u64 = 25;
@@ -155,7 +155,7 @@ pub(crate) fn list() -> Vec<Value> {
 
 /// Runs `tools/call`. A tool that fails answers a result marked `isError`, which the model reads; only a call that
 /// names no tool is a protocol error.
-pub(crate) fn call(session: &mut Session, params: &Value) -> Result<Value, RpcError> {
+pub(crate) fn call(commands: &mut dyn Commands, params: &Value) -> Result<Value, RpcError> {
     let name = params.get("name").and_then(Value::as_str).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, "tools/call names no tool"))?;
     let tool =
         TOOLS.iter().find(|tool| tool.name == name).ok_or_else(|| RpcError::new(code::INVALID_PARAMS, format!("there is no tool {}", echo(name))))?;
@@ -170,9 +170,9 @@ pub(crate) fn call(session: &mut Session, params: &Value) -> Result<Value, RpcEr
     {
         fields.insert("limit".to_owned(), json!(DEFAULT_LIMIT));
     }
-    Ok(match session.run_as(Caller::Agent, tool.command, &arguments) {
+    Ok(match commands.run(tool.command, &arguments) {
         Ok(answer) => json!({ "content": [{ "type": "text", "text": (tool.render)(&arguments, &answer) }], "isError": false }),
-        Err(error) => failed(error.code(), &error.to_string()),
+        Err(failure) => failed(&failure.code, &failure.message),
     })
 }
 

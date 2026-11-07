@@ -76,7 +76,8 @@ egui = { version = "0.37", default-features = false, features = ["default_fonts"
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
 # ui-egui tests only: drives the UI through its AccessKit tree and refuses controls without an accessible name
 egui_kittest = { version = "0.37", default-features = false }
-# the desktop app only: the OS credential store for the account passwords (approved for E1): Secret Service over
+# the desktop app and the CLI only: the OS credential store for the account passwords and the control token (approved
+# for E1; the CLI reads the token): Secret Service over
 # D-Bus (zbus, pure Rust) on Linux and the BSDs, Keychain on macOS, Credential Manager on Windows. Opens no network
 # connection.
 keyring = "4.2"
