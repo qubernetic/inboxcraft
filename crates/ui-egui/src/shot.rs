@@ -25,8 +25,9 @@
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
-//! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
-//! `slide` set to `true` catches a `done` or `delete` row sliding out instead, four frames in with motion on.
+//! does an act to the selected row (`read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`), so the toast
+//! shows; `slide` set to `true` catches a `done`, `archive` or `delete` row sliding out instead, four frames in with
+//! motion on.
 //! `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
@@ -245,14 +246,17 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let act = match name.as_str() {
         "read" => Act::Read,
         "unread" => Act::Unread,
+        "flag" => Act::Flag,
+        "unflag" => Act::Unflag,
         "done" => Act::Done,
+        "archive" => Act::Archive,
         "delete" => Act::Delete,
-        other => return Err(bad(format!("{}: act {other:?} is not read, unread, done or delete", shot.out))),
+        other => return Err(bad(format!("{}: act {other:?} is not read, unread, flag, unflag, done, archive or delete", shot.out))),
     };
     let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: an act needs a selected row", shot.out))) };
     if shot.slide == Some(true) {
         if !act.slides() {
-            return Err(bad(format!("{}: only done and delete slide out", shot.out)));
+            return Err(bad(format!("{}: only done, archive and delete slide out", shot.out)));
         }
         app.set_reduce_motion(false);
         app.mailbox_mut().start(id, act);

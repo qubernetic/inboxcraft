@@ -120,7 +120,8 @@ in yet, the triage, outbox and calendar slices bring them.
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with
 `Session::sample` over the invented sample mailbox; any other session refuses it (`sample_only`). It queues no job,
-so nothing reaches a server; the sample's hover actions use it until the commands for a real mailbox exist.
+so nothing reaches a server. The window no longer uses it: its acts run the `mail.*` commands and `history.undo` on
+the sample as on a real account (#131).
 
 The scheduler (`engine::schedule`) works on the store's schedule: each entry is due at a moment and sends a draft,
 brings a snoozed message back, reminds of a reply that did not come or shows a calendar alert. `Session::tick` fires

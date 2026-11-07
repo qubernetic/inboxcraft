@@ -27,16 +27,22 @@ pub const MAIL: &str = "ui.mail.show";
 /// Open the appearance settings (the rail's settings button).
 pub const SETTINGS: &str = "ui.settings.open";
 
-/// Done: mark the selected message read and move it out of the inbox (the sample only, for now).
+/// Done: mark the selected message read and move it to its account's Archive.
 pub const DONE: &str = "ui.message.done";
 
-/// Mark the selected message read, or unread when it is read (the sample only, for now).
+/// Move the selected message to its account's Archive as it is.
+pub const ARCHIVE: &str = "ui.message.archive";
+
+/// Mark the selected message read, or unread when it is read.
 pub const READ: &str = "ui.message.read";
 
-/// Delete the selected message: move it to Trash (the sample only, for now).
+/// Flag the selected message, or take its flag off when it has one.
+pub const FLAG: &str = "ui.message.flag";
+
+/// Delete the selected message: move it to Trash, or delete it for good when it is in the Trash.
 pub const DELETE: &str = "ui.message.delete";
 
-/// Undo the last act while its toast shows.
+/// Undo the act of the toast while it shows, else the newest act of the session.
 pub const UNDO: &str = "ui.undo";
 
 /// Open the command palette.
@@ -91,7 +97,9 @@ pub fn actions() -> Vec<Action> {
         action(SENT, tr!("Show sent mail"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
         action(DONE, tr!("Done"), IconId::Done),
+        action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(READ, tr!("Mark read or unread"), IconId::MarkRead),
+        action(FLAG, tr!("Flag or take the flag off"), IconId::Flag),
         action(DELETE, tr!("Delete"), IconId::Delete),
         action(UNDO, tr!("Undo"), IconId::Back),
         action(FULL_WIDTH, tr!("Reader full width"), IconId::Mail),
@@ -190,7 +198,9 @@ impl Default for Keymap {
         keymap.bind(MAIL, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num1));
         keymap.bind(SETTINGS, KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma));
         keymap.bind(DONE, KeyboardShortcut::new(Modifiers::NONE, Key::D));
+        keymap.bind(ARCHIVE, KeyboardShortcut::new(Modifiers::NONE, Key::A));
         keymap.bind(READ, KeyboardShortcut::new(Modifiers::NONE, Key::R));
+        keymap.bind(FLAG, KeyboardShortcut::new(Modifiers::NONE, Key::S));
         keymap.bind(DELETE, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
         keymap.bind(UNDO, KeyboardShortcut::new(Modifiers::COMMAND, Key::Z));
         keymap.bind(PALETTE, KeyboardShortcut::new(Modifiers::COMMAND, Key::K));

@@ -9,9 +9,9 @@
 //! from the mailbox's [`Showcase`], which only `ui_shot` fills, so the app draws none of them: the screener card on
 //! top of the unified inbox and the grouped inbox's cards (badge, name, unread count, "Done all", "Show all (n)").
 //!
-//! On the sample mailbox ([`Mailbox::can_act`]) a hovered row and a row selected by keyboard show the hover actions
-//! alike, the row's text fading out before them: Done, mark read or unread, Delete. Done and Delete let the row slide
-//! out first; the window does the act once it is out and shows the toast with Undo. Anywhere else no action is drawn.
+//! A hovered row and a row selected by keyboard show the hover actions alike, the row's text fading out before them:
+//! Done, mark read or unread, Delete, on a real account as on the sample. Done and Delete let the row slide out first;
+//! the window does the act once it is out and shows the toast with Undo.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -203,7 +203,7 @@ fn paint_row(
     } else if response.hovered() {
         ui.painter().rect_filled(rect, s.corner, p.hover);
     }
-    let reach = mailbox.can_act() && !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
+    let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
     let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
     let acted = shown.clicked.and_then(|index| act(message, index));
     let until = (shown.openness > 0.0).then_some(shown.left - s.xs);

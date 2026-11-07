@@ -274,9 +274,10 @@ fn the_toolbar_holds_the_mail_actions_and_those_without_a_command_are_disabled()
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     full_width(&mut harness, "Full width");
     let disabled = |name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled();
-    assert!(!disabled("Done"), "the sample mailbox can mark it done");
-    assert!(!disabled("Delete"), "and delete it");
-    for name in ["Archive", "Snooze", "Pin", "Move to a folder"] {
+    for name in ["Done", "Archive", "Delete", "Move to a folder"] {
+        assert!(!disabled(name), "{name} acts on the open message");
+    }
+    for name in ["Snooze", "Pin"] {
         assert!(disabled(name), "{name} has no command yet");
     }
     assert!(!disabled("More"));
@@ -299,21 +300,6 @@ fn a_disabled_action_says_why_in_its_tooltip() {
     harness.get_by_role_and_label(Role::Button, "Snooze").click();
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), before, "a disabled action runs nothing");
-}
-
-#[test]
-fn outside_the_sample_done_and_delete_are_disabled_too() {
-    let fetch = Recorder::default();
-    let store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
-    let session = inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap();
-    let mut app = InboxApp::with_outside(Mailbox::new(session, clock()), Box::new(fetch.clone()), Box::new(NoSave));
-    assert!(!app.mailbox().can_act());
-    let id = app.mailbox().messages().first().unwrap().id;
-    app.mailbox_mut().select(Some(id));
-    let harness = harness_with(app, egui::Theme::Light);
-    for name in ["Done", "Delete"] {
-        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name}");
-    }
 }
 
 #[test]
@@ -409,4 +395,138 @@ fn the_subject_is_set_large_with_the_message_s_group_as_a_chip_beside_who_wrote(
     let chip = harness.get_by_label("In People").rect();
     let subject_line = harness.get_by_label("Allotment rota for November");
     assert!(chip.top() >= subject_line.rect().bottom() - 1.0, "the chip sits under the subject");
+}
+
+/// Runs a few frames, so a press, the act, the list read again and the toast all show.
+fn settle(harness: &mut Harness<'static, InboxApp>) {
+    for _ in 0..4 {
+        harness.run();
+    }
+}
+
+fn row_of(harness: &Harness<'static, InboxApp>, id: u64) -> Option<crate::mailbox::MessageRow> {
+    harness.state().mailbox().messages().iter().find(|row| row.id == id).cloned()
+}
+
+#[test]
+fn opening_a_message_marks_it_read_and_ctrl_z_marks_it_unread_again() {
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    assert_eq!(app.mailbox().messages().iter().find(|row| row.id == id).map(|row| row.seen), Some(false));
+    app.mailbox_mut().select(Some(id));
+    let mut harness = harness_with(app, egui::Theme::Light);
+    assert_eq!(row_of(&harness, id).map(|row| row.seen), Some(true), "opened, it is read");
+    harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    settle(&mut harness);
+    assert_eq!(row_of(&harness, id).map(|row| row.seen), Some(false), "Ctrl+Z takes the read back");
+    assert_eq!(harness.state().reader().open_id(), Some(id), "and the message stays open");
+}
+
+#[test]
+fn archive_in_the_toolbar_moves_the_open_message_to_the_archive_and_undo_brings_it_back() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    // Full width, so the folder pane's Archive is not drawn beside the toolbar's.
+    full_width(&mut harness, "Full width");
+    harness.get_by_role_and_label(Role::Button, "Archive").click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none(), "it left the inbox");
+    harness.get_by_label("Moved to Archive");
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_some());
+    assert_eq!(harness.state().reader().open_id(), Some(id), "open again, as it was");
+}
+
+#[test]
+fn move_to_a_folder_lists_the_folders_of_the_message_s_account_and_moves_it() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    harness.get_by_role_and_label(Role::Button, "Move to a folder").click();
+    harness.run();
+    harness.get_by_label("Move to");
+    for name in ["Archive", "Receipts", "Travel/2026"] {
+        harness.get_by_role_and_label(Role::MenuItem, name);
+    }
+    assert!(harness.query_by_role_and_label(Role::MenuItem, "INBOX").is_none(), "not the folder it is in");
+    assert!(harness.query_by_role_and_label(Role::MenuItem, "Clients").is_none(), "not another account's");
+    harness.get_by_role_and_label(Role::MenuItem, "Receipts").click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none());
+    harness.get_by_label("Moved to Receipts");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_some(), "Ctrl+Z brings it back");
+}
+
+#[test]
+fn move_to_a_folder_never_offers_a_folder_that_holds_no_mail() {
+    use inboxcraft_model::{AccountId, Folder, FolderId, FolderListing, FolderPath};
+    use inboxcraft_store::{Batch, Change, Storage as _};
+    // A real account whose only other folder is a `\Noselect` parent.
+    let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    let mut batch = Batch::new();
+    for id in 11..=15 {
+        batch.push(Change::RemoveFolder(FolderId::new(id)));
+    }
+    let listing = FolderListing::new(FolderPath::new("Projects", Some('/')).unwrap(), Vec::new(), false);
+    batch.push(Change::PutFolder(Folder::new(FolderId::new(16), AccountId::new(2), listing)));
+    store.apply(&batch).unwrap();
+    let mut app = InboxApp::with_outside(
+        Mailbox::new(inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap(), clock()),
+        Box::new(Recorder::default()),
+        Box::new(NoSave),
+    );
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
+    assert!(app.mailbox().folders_of(2).iter().any(|folder| folder.name == "Projects" && !folder.selectable));
+    assert!(app.mailbox().move_targets(id).is_empty(), "Projects holds no mail");
+    app.mailbox_mut().select(Some(id));
+    let harness = harness_with(app, egui::Theme::Light);
+    assert!(harness.get_by_role_and_label(Role::Button, "Move to a folder").accesskit_node().is_disabled());
+}
+
+#[test]
+fn more_flags_the_open_message_and_takes_the_flag_off() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Allotment rota for November");
+    let id = harness.state().reader().open_id().unwrap();
+    for (name, flagged, told) in [("Flag", true, "Flagged"), ("Take the flag off", false, "Flag taken off")] {
+        harness.get_by_role_and_label(Role::Button, "More").click();
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItem, name).click();
+        settle(&mut harness);
+        assert_eq!(row_of(&harness, id).map(|row| row.flagged), Some(flagged), "{name}");
+        harness.get_by_label(told);
+    }
+}
+
+#[test]
+fn more_marks_the_open_message_unread_and_read_again() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Allotment rota for November");
+    let id = harness.state().reader().open_id().unwrap();
+    for (name, seen, told) in [("Mark as unread", false, "Marked as unread"), ("Mark as read", true, "Marked as read")] {
+        harness.get_by_role_and_label(Role::Button, "More").click();
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItem, name).click();
+        settle(&mut harness);
+        assert_eq!(row_of(&harness, id).map(|row| row.seen), Some(seen), "{name}");
+        harness.get_by_label(told);
+    }
+}
+
+#[test]
+fn delete_in_the_trash_deletes_for_good_with_a_toast_without_undo() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(13), "Studio Collective news");
+    let id = harness.state().reader().open_id().unwrap();
+    harness.get_by_role_and_label(Role::Button, "Delete").click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none());
+    harness.get_by_label("Deleted for good");
+    assert!(harness.query_by_role_and_label(Role::Button, "Undo").is_none(), "nothing to undo it with");
 }
