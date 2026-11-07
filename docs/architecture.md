@@ -148,6 +148,19 @@ People for the rest. Grouping is on per account until the owner turns it off (`g
 account). `mail.list` says each row's `group` (`null` for an account not grouped) and lists one group (`group`, or
 `none` for the mail no group holds); `group.list` (`safe`) counts the inbox's mail and its unread mail per group.
 
+Done, park and pin (commands in `engine::cmd::triage`) are the owner's own state of a message (`model::MessageState`,
+the store's message state table), which no server keeps. `mail.done` (`owner`) moves a message to its account's
+archive like `mail.archive` and keeps the folder it came from; done `false` moves it back there and clears the mark.
+A done message out of the archive (the server refused the move) is filed again by the next done.
+"Show done" is `mail.list` with `done`: the done mail whose old place is in the view is listed among the mail there,
+by date, with `done` set. `mail.park` (`safe`) puts a message on the park pile: `mail.list` leaves the pile out and
+counts it in `parked` (the window's pill), `parked` lists it too, and `park.list` (`safe`) lists the pile across the
+accounts. `mail.pin` (`safe`) pins a message: it stays in its lists, and `pin.list` (`safe`) is the pins view across
+the accounts. Done takes the pin off unless the owner keeps pins through done (`pin.set`, `owner`; the session keeps
+it and the front end hands it back at the start, `Session::pins_outlast_done`). Each list row says `done`, `parked`
+and `pinned`. `history.undo` takes each act back: the state as it was and, for done, the message back where it was
+when that folder still holds mail.
+
 Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
 notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
 still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own
