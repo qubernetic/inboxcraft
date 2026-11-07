@@ -387,7 +387,7 @@ B = blocks the next stage.
   the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
   one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
   group menu is a right click on a row or the reader's More menu; it has no key. The rail
-  holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
+  holds Mail, the calendar and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
   engine's commands (#131). Done means "read, and into the account's Archive", a stand-in until E3.3 says what Done
@@ -473,7 +473,7 @@ B = blocks the next stage.
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
 - **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
-  yet". Calendar shows the calendar's empty state until calendar sync (#130). The owner's initials at its foot come from the first account's address, as no account holds a
+  yet". Calendar shows the calendars, or their empty state while there is none (#130, #147). The owner's initials at its foot come from the first account's address, as no account holds a
   name of the person yet.
 - **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
   reached through the unified views, narrowed to the account with the picker.
