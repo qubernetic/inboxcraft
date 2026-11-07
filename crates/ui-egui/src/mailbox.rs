@@ -344,7 +344,7 @@ fn message_row(value: &Value) -> MessageRow {
     }
 }
 
-fn month_text(month: u8) -> &'static str {
+pub(crate) fn month_text(month: u8) -> &'static str {
     match month {
         1 => tr!("Jan"),
         2 => tr!("Feb"),
@@ -361,7 +361,7 @@ fn month_text(month: u8) -> &'static str {
     }
 }
 
-fn weekday_text(weekday: Weekday) -> &'static str {
+pub(crate) fn weekday_text(weekday: Weekday) -> &'static str {
     match weekday {
         Weekday::Monday => tr!("Monday"),
         Weekday::Tuesday => tr!("Tuesday"),
@@ -374,7 +374,7 @@ fn weekday_text(weekday: Weekday) -> &'static str {
 }
 
 /// The day number of a civil date, counted from an arbitrary start: only differences mean anything.
-fn day_number(civil: CivilDateTime) -> Option<i64> {
+pub(crate) fn day_number(civil: CivilDateTime) -> Option<i64> {
     CivilDateTime::new(civil.year(), civil.month(), civil.day(), 0, 0, 0)?.to_timestamp(Offset::UTC).map(|t| t.unix_seconds().div_euclid(86_400))
 }
 
