@@ -1879,6 +1879,9 @@ dependencies = [
 [[package]]
 name = "inboxcraft-dav"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-testkit",
+]
 
 [[package]]
 name = "inboxcraft-engine"

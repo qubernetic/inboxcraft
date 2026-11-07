@@ -103,6 +103,8 @@ fn testkit_depending_on_a_parser_its_fakes_test_fails() {
     fails_with(&[("inboxcraft-testkit", &dep("inboxcraft-proto")), ("inboxcraft-proto", "")], message);
     let dev = "[dev-dependencies]\ninboxcraft-proto = { path = \"x\" }\n";
     fails_with(&[("inboxcraft-testkit", dev), ("inboxcraft-proto", "")], message);
+    let message = "`inboxcraft-testkit` depends on `inboxcraft-dav`; a fake server never uses the parser it tests";
+    fails_with(&[("inboxcraft-testkit", &dep("inboxcraft-dav")), ("inboxcraft-dav", "")], message);
 }
 
 #[test]
