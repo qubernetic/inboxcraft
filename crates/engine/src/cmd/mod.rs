@@ -81,6 +81,9 @@ mod sample_tests;
 #[path = "schedule_tests.rs"]
 mod schedule_tests;
 #[cfg(test)]
+#[path = "snooze_tests.rs"]
+mod snooze_tests;
+#[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]

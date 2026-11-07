@@ -199,6 +199,7 @@ fn an_append_that_is_not_a_draft_changes_no_draft() {
         flags: inboxcraft_model::Flags::default(),
         raw: b"Subject: x\r\n\r\n".to_vec(),
         draft: None,
+        message: None,
     };
     let job = Job::new(JobId::new(77), AccountId::new(1), kind);
     crate::test_support::change(&mut session, Change::QueueJob(job));

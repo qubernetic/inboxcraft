@@ -154,3 +154,15 @@ fn a_header_block_gives_the_signs_of_the_messages_kind() {
     assert!(!signs.calendar(), "the parts are not known from the header");
     assert!(super::envelope(b"From: anna@example.org\r\n\r\n").signs().is_empty());
 }
+
+#[test]
+fn inboxcrafts_own_field_gives_the_time_a_snooze_ends() {
+    let header = b"From: anna@example.org\r\n\
+        InboxCraft-Snoozed-Until: Thu, 05 Nov 2026 18:00:00 +0000\r\n\
+        inboxcraft-snoozed-until: Fri, 06 Nov 2026 08:00:00 +0000\r\n\
+        \r\n";
+    assert_eq!(envelope(header).snoozed_until(), Timestamp::from_unix(1_793_901_600, 0), "the first field counts");
+    assert_eq!(envelope(b"From: anna@example.org\r\n\r\n").snoozed_until(), None);
+    let broken = b"From: anna@example.org\r\nInboxCraft-Snoozed-Until: soon\r\n\r\n";
+    assert_eq!(envelope(broken).snoozed_until(), None, "a time that cannot be read is no time");
+}

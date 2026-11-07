@@ -8,8 +8,9 @@
 //! remind of a reply that did not come, show a calendar alert. [`crate::Session::tick`] fires every entry whose
 //! time has come, on the session's clock: the entry leaves the schedule, a returned snooze or a fired reminder
 //! clears its time in the message's state, and the session hands the entry back as a [`Fired`] event, `missed` when
-//! its time passed while InboxCraft was off or asleep. Firing an entry twice cannot happen: it leaves the schedule in
-//! the same batch.
+//! its time passed while InboxCraft was off or asleep. A snoozed message still in the snoozed folder comes back to the
+//! inbox then, unread and marked as returned (`crate::arrive::snooze`). Firing an entry twice cannot happen: it leaves
+//! the schedule in the same batch.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -18,6 +19,9 @@ use inboxcraft_model::{Due, MessageId, MessageState, Scheduled};
 use inboxcraft_store::{Batch, Change};
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
+use crate::act::{Effects, Mover};
+use crate::arrive::snooze;
+use crate::session::Pending;
 use crate::{Context, EngineError};
 
 /// An entry fired later than this after its time was missed: InboxCraft was off, or the computer was asleep.
@@ -104,9 +108,10 @@ pub struct Fired {
     pub missed: bool,
 }
 
-/// What a tick does: the store changes, and the entries it fires.
+/// What a tick does: the store changes, the kept jobs, and the entries it fires.
 pub(crate) struct Plan {
     pub(crate) batch: Batch,
+    pub(crate) jobs: Vec<Pending>,
     pub(crate) fired: Vec<Fired>,
 }
 
@@ -116,6 +121,7 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     let store = context.store();
     let mut batch = Batch::new();
     let mut states: BTreeMap<MessageId, MessageState> = BTreeMap::new();
+    let mut returning = Vec::new();
     let mut fired = Vec::new();
     for entry in store.schedule()?.into_iter().filter(|entry| entry.due <= now) {
         batch.push(Change::RemoveScheduled(entry.id));
@@ -126,6 +132,9 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
             };
             let state = cleared(held.clone(), &entry);
             if state != held {
+                if matches!(entry.what, Due::Unsnooze(_)) {
+                    returning.push(message);
+                }
                 states.insert(message, state);
             }
         }
@@ -133,10 +142,25 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
         let missed = late || started.is_some_and(|started| entry.due < started);
         fired.push(Fired { entry, missed });
     }
+    let mut effects = Effects::default();
+    let mut mover = Mover::default();
+    for id in returning {
+        if let Some(entry) = store.message(id)?
+            && snooze::is_snoozed(context.state(), entry.message())
+            && let Some(state) = states.get_mut(&id)
+        {
+            snooze::back(store, context.state(), entry.message(), &mut mover, &mut effects)?;
+            state.returned = Some(now);
+        }
+    }
+    for change in effects.changes {
+        batch.push(change);
+    }
     for (message, state) in states {
         batch.push(Change::SetMessageState(message, state));
     }
-    Ok(Plan { batch, fired })
+    let jobs = effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true }).collect();
+    Ok(Plan { batch, jobs, fired })
 }
 
 /// `state` without the time `entry` stood for: a message snoozed or followed up again for another time keeps it.

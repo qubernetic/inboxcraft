@@ -86,7 +86,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::Expunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
         EventKind::Appended { folder, uid } => {
-            crate::draft::appended(store, &mut plan, account, event.job, *folder, *uid)?;
+            match write::copy_of(store, &plan, event.job)? {
+                Some(message) => write::appended(store, &mut plan, message, *folder, *uid)?,
+                None => crate::draft::appended(store, &mut plan, account, event.job, *folder, *uid)?,
+            }
             true
         }
         EventKind::FolderCreated { .. } => {

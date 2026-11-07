@@ -596,7 +596,8 @@ impl Session {
     }
 
     /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
-    /// (see [`crate::schedule`]), in one batch. A returned snooze and a follow-up reminder tell the owner as
+    /// (see [`crate::schedule`]: a snoozed message comes back to the inbox), in one batch, and the jobs that make it on
+    /// the server. A returned snooze and a follow-up reminder tell the owner as
     /// [`Session::take_notices`] hands them over, unless they turned that off. Then hands each draft that has been
     /// still long enough to its account's worker (see `crate::draft`). The front end calls it at
     /// [`Session::next_due`] and after [`Session::start`].
@@ -613,7 +614,7 @@ impl Session {
             Ok::<_, EngineError>((plan, notices))
         }));
         let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
-        self.commit("schedule", None, &plan.batch, Vec::new())?;
+        self.commit("schedule", None, &plan.batch, plan.jobs)?;
         for notice in notices {
             notify::push(&mut self.state, notice);
         }

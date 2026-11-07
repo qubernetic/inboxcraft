@@ -8,6 +8,9 @@
 //! the UID range down, with [`Moving`] noting where the server keeps it; the server's answer gives it its UID there
 //! ([`crate::write`]). An act on a message whose move is on its way changes only the store: the server follows once
 //! the answer names the message's place. The sample mailbox, and a folder not synced yet, get the change and no job.
+//!
+//! A message can also be replaced by a new copy of its own ([`rewrite`]): the server gets the copy (`APPEND`), and the
+//! old copy goes only once the answer says the new one is there.
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
@@ -73,6 +76,30 @@ pub(crate) fn free_uid(taken: &BTreeSet<Uid>) -> Option<Uid> {
 /// The message as it now is in `folder` under `uid`, with `moving` noting where the server keeps it.
 pub(crate) fn placed(message: &Message, folder: FolderId, uid: Uid, moving: Option<Moving>) -> Message {
     Message::new(message.id(), message.account(), folder, message.summary().clone().with_uid(uid)).with_thread(message.thread()).with_moving(moving)
+}
+
+/// `message` with `flags`.
+pub(crate) fn flagged(message: &Message, flags: Flags) -> Message {
+    Message::new(message.id(), message.account(), message.folder(), message.summary().clone().with_flags(flags))
+        .with_thread(message.thread())
+        .with_moving(message.moving().cloned())
+}
+
+/// Sets or clears the read mark on `message`: the changes into `effects`, the message as it now is back.
+pub(crate) fn mark_seen(store: &dyn Storage, state: &State, message: Message, seen: bool, effects: &mut Effects) -> Result<Message, EngineError> {
+    match mark(store, state, &message, &Flag::Seen, seen)? {
+        Some(marked) => {
+            let mut flags = message.summary().flags().clone();
+            if seen {
+                flags.insert(Flag::Seen);
+            } else {
+                flags.remove(&Flag::Seen);
+            }
+            effects.extend(marked);
+            Ok(flagged(&message, flags))
+        }
+        None => Ok(message),
+    }
 }
 
 /// Sets (`set`) or clears `flag` on `message`; `None` when it already is so.
@@ -153,6 +180,25 @@ pub(crate) fn relocate_beside(
         },
     };
     effects.change(Change::PutMessage(placed(message, to.id(), uid, moving)));
+    Ok(Some(effects))
+}
+
+/// Replaces `message` by the new copy `raw` in `to`, a folder of its account that holds mail (it may be the folder
+/// the message is in): the store has it in `to` at once under a UID of ours, with [`Moving`] noting where the server
+/// keeps the old copy, and the server gets the new one; the answer ([`crate::write`]) takes the old copy away. `None`
+/// when no copy can go out: in the sample mailbox, before the folder's first sync, or while a move is on its way.
+pub(crate) fn rewrite(store: &dyn Storage, state: &State, message: &Message, to: &Folder, raw: Vec<u8>) -> Result<Option<Effects>, EngineError> {
+    if message.moving().is_some() {
+        return Ok(None);
+    }
+    let Some(uid_validity) = writable(state, message.folder()) else { return Ok(None) };
+    let uid = free_uid(&taken(store, to.id())?).ok_or(EngineError::NotFound { what: "free UID in folder", id: to.id().get() })?;
+    let flags = message.summary().flags().clone();
+    let mut effects = Effects::default();
+    let path = to.listing().path().clone();
+    effects.job(message.account(), JobKind::Append { folder: to.id(), path, flags: flags.clone(), raw, draft: None, message: Some(message.id()) });
+    let place = Moving { folder: message.folder(), uid_validity, uid: message.summary().uid(), flags };
+    effects.change(Change::PutMessage(placed(message, to.id(), uid, Some(place))));
     Ok(Some(effects))
 }
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `triage`: the screener (`screener.*`), the grouped inbox (`group.*`), and done, park and pin; snooze and follow-up
+//! `triage`: the screener (`screener.*`), the grouped inbox (`group.*`), done, park and pin, and snooze; follow-up
 //! reminders come later.
 //! A new command goes into [`COMMANDS`] and its parameter names into `FIELDS`.
 //!
@@ -24,30 +24,43 @@
 //! which `mail.list` leaves out and counts, and `park.list` lists; `mail.pin` (`safe`) pins it, and `pin.list` is the
 //! pins view across the accounts. Done takes a pin off unless `pin.set` (`owner`, a setting) keeps it. `history.undo`
 //! takes each back: the state as it was and, for done, the message where it was.
+//!
+//! `mail.snooze` (`safe`) puts a message away until a time (`until`, or a `preset` of `schedule.presets`): it goes to
+//! the account's `InboxCraft/Snoozed`, made on the server the first time, in a new copy that carries the time in
+//! InboxCraft's own header field, so another InboxCraft sees it (see `crate::arrive::snooze`); a message whose body is
+//! not kept yet is moved there without the field (`written` in the answer). At the time [`crate::Session::tick`]
+//! brings it back to the inbox unread, marked as returned and listed as if it arrived then; `mail.unsnooze` (`safe`)
+//! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put.
+//! `history.undo` takes a snooze back: the message where it was, its time as it was.
 
 use std::collections::BTreeMap;
 
 use inboxcraft_model::{AccountId, EmailAddress, Flag, Folder, FolderId, Group, Message, MessageId, MessageState, Role, Screening, Sender};
 use inboxcraft_store::{Change, Storage};
+use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::mail::MAX_LIST;
-use crate::act::{self as acts, Effects, Mover};
+use crate::act::{self as acts, Effects, Mover, mark_seen};
 use crate::arrive::group::{self as grouping, Grouping};
 use crate::arrive::screener::{self, ScreenerMode};
-use crate::params::{NoParams, decode};
+use crate::arrive::snooze as snoozing;
+use crate::params::{NoParams, decode, parse_date};
+use crate::schedule::presets;
 use crate::session::State;
 use crate::undo::{Act, Inverse, Screened, Step};
 use crate::view;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET];
+pub(crate) const COMMANDS: &[CommandSpec] =
+    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, SNOOZE, UNSNOOZE];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done"];
+pub(crate) const FIELDS: &[&str] =
+    &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done", "until", "preset"];
 
 /// `screener.mode`: what the screener does with the first mail of a sender the owner does not know.
 pub(crate) const MODE: CommandSpec = CommandSpec {
@@ -251,30 +264,6 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({ "mode": context.state().screener.name(), "senders": senders })))
 }
 
-/// `message` with `flags`.
-fn flagged(message: &Message, flags: inboxcraft_model::Flags) -> Message {
-    Message::new(message.id(), message.account(), message.folder(), message.summary().clone().with_flags(flags))
-        .with_thread(message.thread())
-        .with_moving(message.moving().cloned())
-}
-
-/// Sets or clears the read mark on `message`: the changes into `effects`, the message as it now is back.
-fn mark_seen(store: &dyn Storage, state: &State, message: Message, seen: bool, effects: &mut Effects) -> Result<Message, EngineError> {
-    match acts::mark(store, state, &message, &Flag::Seen, seen)? {
-        Some(marked) => {
-            let mut flags = message.summary().flags().clone();
-            if seen {
-                flags.insert(Flag::Seen);
-            } else {
-                flags.remove(&Flag::Seen);
-            }
-            effects.extend(marked);
-            Ok(flagged(&message, flags))
-        }
-        None => Ok(message),
-    }
-}
-
 /// What an accept or a block did, to take back.
 #[derive(Debug, Default)]
 struct Done {
@@ -370,7 +359,7 @@ fn block(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
         let to = match blocked.get(&account) {
             Some(folder) => folder.clone(),
             None => {
-                let folder = blocked_folder(store, state, account, &mut next, &mut effects)?;
+                let folder = own_folder(store, state, account, Role::Blocked, &mut next, &mut effects)?;
                 blocked.insert(account, folder.clone());
                 folder
             }
@@ -384,12 +373,13 @@ fn block(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
     Ok(screened(&BLOCK, &address, before, effects, done, None))
 }
 
-/// The blocked folder of `account`, made (with an id from `next`) when it has none; `None` when it cannot be.
-fn blocked_folder(store: &dyn Storage, state: &State, account: AccountId, next: &mut u64, effects: &mut Effects) -> Result<Option<Folder>, EngineError> {
+/// Our own folder of `account` with `role` (blocked, snoozed), made (with an id from `next`) when it has none, on the
+/// server too unless this is the sample mailbox; `None` when it cannot be.
+fn own_folder(store: &dyn Storage, state: &State, account: AccountId, role: Role, next: &mut u64, effects: &mut Effects) -> Result<Option<Folder>, EngineError> {
     let Some(held) = state.accounts.get(&account) else { return Ok(None) };
     let Some(inbox) = held.roles.folder(Role::Inbox) else { return Ok(None) };
     let folders = store.folders(account)?;
-    let made = screener::own_folder(&folders, &held.roles, inbox, Role::Blocked, || {
+    let made = screener::own_folder(&folders, &held.roles, inbox, role, || {
         let id = FolderId::new(*next);
         *next = next.saturating_add(1);
         id
@@ -397,7 +387,9 @@ fn blocked_folder(store: &dyn Storage, state: &State, account: AccountId, next: 
     Ok(made.map(|(folder, job)| {
         if let Some(job) = job {
             effects.change(Change::PutFolder(folder.clone()));
-            effects.job(account, job);
+            if !state.sample {
+                effects.job(account, job);
+            }
         }
         folder
     }))
@@ -756,7 +748,8 @@ fn pin_set(_: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({ "keep_on_done": params.keep_on_done })).with_pins_outlast_done(params.keep_on_done))
 }
 
-/// Takes done, park or pin back on `message`: back in the folder `to` when it is still there, and in `state`.
+/// Takes done, park, pin or snooze back on `message`: back in the folder `to` when it is still there, and in `state`,
+/// with the schedule bringing it back at the time `state` says and no other.
 pub(crate) fn restore(context: &Context<'_>, message: &Message, to: Option<FolderId>, state: &MessageState) -> Result<Effects, EngineError> {
     let store = context.store();
     let mut effects = Effects::default();
@@ -767,5 +760,114 @@ pub(crate) fn restore(context: &Context<'_>, message: &Message, to: Option<Folde
         effects.extend(moved);
     }
     effects.change(Change::SetMessageState(message.id(), state.clone()));
+    effects.changes.extend(snoozing::reschedule(store, message.id(), state.snoozed_until, context.next_schedule_id())?);
     Ok(effects)
+}
+
+/// `mail.snooze`: put a message away until a time.
+pub(crate) const SNOOZE: CommandSpec = CommandSpec {
+    id: "mail.snooze",
+    class: Some(AgentClass::Safe),
+    summary: "Snooze a message until a time: it leaves for the snoozed folder and comes back to the inbox unread then",
+    run: snooze,
+};
+
+/// `mail.unsnooze`: bring a snoozed message back now.
+pub(crate) const UNSNOOZE: CommandSpec =
+    CommandSpec { id: "mail.unsnooze", class: Some(AgentClass::Safe), summary: "Bring a snoozed message back to the inbox now", run: unsnooze };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnoozeParams {
+    /// The message.
+    id: u64,
+    /// The time it comes back: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
+    until: Option<String>,
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    preset: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnsnoozeParams {
+    /// The message.
+    id: u64,
+}
+
+/// The time `params` names, ahead of the context's time.
+fn until(context: &Context<'_>, params: &SnoozeParams) -> Result<Timestamp, EngineError> {
+    let now = context.now();
+    let until = match (params.until.as_deref(), params.preset.as_deref()) {
+        (Some(text), None) => {
+            parse_date(text.trim()).ok_or_else(|| EngineError::bad_params(SNOOZE.id, "until is a time such as 2026-11-05T18:00:00Z"))?
+        }
+        (None, Some(name)) => presets(now, context.offsets())
+            .into_iter()
+            .find(|(preset, _)| preset.name() == name)
+            .map(|(_, at)| at)
+            .ok_or_else(|| EngineError::bad_params(SNOOZE.id, "the preset is one of schedule.presets still ahead"))?,
+        _ => return Err(EngineError::bad_params(SNOOZE.id, "give until or a preset")),
+    };
+    if until <= now {
+        return Err(EngineError::bad_params(SNOOZE.id, "the time has passed"));
+    }
+    Ok(until)
+}
+
+fn snooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: SnoozeParams = decode(SNOOZE.id, params)?;
+    let until = until(context, &params)?;
+    let message = message(context, params.id)?;
+    let (store, state) = (context.store(), context.state());
+    let account = message.account();
+    let mut effects = Effects::default();
+    let mut next = state.next_folder;
+    let folder = own_folder(store, state, account, Role::Snoozed, &mut next, &mut effects)?
+        .filter(|folder| folder.listing().is_selectable())
+        .ok_or(EngineError::NotFound { what: "snoozed folder of account", id: account.get() })?;
+    let copy = match store.body(message.id())? {
+        Some(body) => snoozing::with_field(body.source(), until),
+        None => None,
+    };
+    let rewritten = match copy {
+        Some(raw) => acts::rewrite(store, state, &message, &folder, raw)?,
+        None => None,
+    };
+    let written = rewritten.is_some();
+    let moved = match rewritten {
+        Some(effects) => Some(effects),
+        None => acts::relocate(store, state, &message, &folder)?,
+    };
+    let from = moved.is_some().then_some(message.folder());
+    effects.extend(moved.unwrap_or_default());
+    let was = store.message_state(message.id())?;
+    let now = MessageState { snoozed_until: Some(until), returned: None, ..was.clone() };
+    effects.change(Change::SetMessageState(message.id(), now));
+    effects.changes.extend(snoozing::reschedule(store, message.id(), Some(until), context.next_schedule_id())?);
+    let answer = json!({
+        "id": params.id,
+        "until": crate::json::date(until),
+        "folder": folder.id().get(),
+        "was": message.folder().get(),
+        "changed": true,
+        "written": written,
+    });
+    let act = Act { command: SNOOZE.id, class: AgentClass::Safe, inverse: Inverse::State { message: message.id(), to: from, state: was } };
+    Ok(Outcome::new(answer).with_effects(effects).with_undo(Step::Push(act)))
+}
+
+fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: UnsnoozeParams = decode(UNSNOOZE.id, params)?;
+    let message = message(context, params.id)?;
+    let (store, state) = (context.store(), context.state());
+    let was = store.message_state(message.id())?;
+    if was.snoozed_until.is_none() && !snoozing::is_snoozed(state, &message) {
+        return Ok(Outcome::new(json!({ "id": params.id, "folder": message.folder().get(), "changed": false })));
+    }
+    let mut effects = Effects::default();
+    let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
+    let folder = inbox.map_or(message.folder(), |inbox| inbox.id());
+    effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned: Some(context.now()), ..was }));
+    effects.changes.extend(snoozing::reschedule(store, message.id(), None, context.next_schedule_id())?);
+    Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true })).with_effects(effects))
 }

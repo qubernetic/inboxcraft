@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, DraftId, Flags, FolderId, FolderPath, JobId, ModSeq, Uid, UidSet, UidValidity};
+use crate::{AccountId, DraftId, Flags, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidSet, UidValidity};
 
 /// What we know of a folder from the last sync: where a resync starts (CONDSTORE and QRESYNC, RFC 7162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +159,10 @@ pub enum JobKind {
         /// The draft it is a copy of, whose earlier copy the answer replaces.
         #[serde(default)]
         draft: Option<DraftId>,
+        /// The message it is a new copy of (a snooze writes its time into one): the answer gives the message the
+        /// copy's place, and the old copy goes.
+        #[serde(default)]
+        message: Option<MessageId>,
     },
     /// Create a folder (`CREATE`); answered with [`crate::EventKind::FolderCreated`].
     CreateFolder {
