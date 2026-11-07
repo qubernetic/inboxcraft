@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `triage`: the screener now (`screener.*`); the groups, done, park, pin, snooze and follow-up reminders come later.
+//! `triage`: the screener (`screener.*`) and the grouped inbox (`group.*`); done, park, pin, snooze and follow-up
+//! reminders come later.
 //! A new command goes into [`COMMANDS`] and its parameter names into `FIELDS`.
 //!
 //! The screener's mode is the owner's (`screener.mode`); turning it on learns every sender the owner has mail from or
@@ -10,6 +11,11 @@
 //! as done, or opens the newest) and the sender's future mail too; `screener.block` files the held mail and the
 //! future mail in `InboxCraft/Blocked`, made on the server the first time. Both are the owner's acts, and
 //! `history.undo` takes either back: the sender as it was and the mail where it was.
+//!
+//! The grouped inbox (see `crate::arrive::group`): `group.set` (`owner`) puts a sender's mail, the kept and the
+//! future, in a group of the owner's choice or back in the classifier's hands, and `history.undo` takes it back;
+//! `group.account` (`owner`) turns an account's grouping on or off, kept with the account; `group.list` (`safe`)
+//! counts the inbox's mail per group. `mail.list` says each row's group and lists one group.
 
 use std::collections::BTreeMap;
 
@@ -20,6 +26,7 @@ use serde_json::{Value, json};
 
 use super::mail::MAX_LIST;
 use crate::act::{self as acts, Effects, Mover};
+use crate::arrive::group::{self as grouping, Grouping};
 use crate::arrive::screener::{self, ScreenerMode};
 use crate::params::{NoParams, decode};
 use crate::session::State;
@@ -28,11 +35,11 @@ use crate::view;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ACCEPT, BLOCK, LIST, MODE];
+pub(crate) const COMMANDS: &[CommandSpec] = &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["address", "group", "then", "mode"];
+pub(crate) const FIELDS: &[&str] = &["address", "group", "then", "mode", "account", "grouped"];
 
 /// `screener.mode`: what the screener does with the first mail of a sender the owner does not know.
 pub(crate) const MODE: CommandSpec = CommandSpec {
@@ -103,15 +110,9 @@ fn address(command: &'static str, text: &str) -> Result<EmailAddress, EngineErro
     EmailAddress::new(text.trim()).map_err(|error| EngineError::bad_params(command, &error.to_string()))
 }
 
-/// The group named `name`.
-fn group(name: &str) -> Result<Group, EngineError> {
-    match name {
-        "people" => Ok(Group::People),
-        "updates" => Ok(Group::Updates),
-        "newsletters" => Ok(Group::Newsletters),
-        "invitations" => Ok(Group::Invitations),
-        _ => Err(EngineError::bad_params(ACCEPT.id, "the group is people, updates, newsletters or invitations")),
-    }
+/// The group named `name`, as `command` reads it.
+fn group(command: &'static str, name: &str) -> Result<Group, EngineError> {
+    grouping::named(name).ok_or_else(|| EngineError::bad_params(command, "the group is people, updates, newsletters or invitations"))
 }
 
 /// The folder of `account` with `role`.
@@ -296,7 +297,7 @@ fn screened(spec: &CommandSpec, address: &EmailAddress, before: Option<Sender>, 
 fn accept(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: AcceptParams = decode(ACCEPT.id, params)?;
     let address = address(ACCEPT.id, &params.address)?;
-    let group = params.group.as_deref().map(group).transpose()?;
+    let group = params.group.as_deref().map(|name| group(ACCEPT.id, name)).transpose()?;
     let then = match params.then.as_deref() {
         None => Then::Nothing,
         Some("open") => Then::Open,
@@ -394,8 +395,8 @@ fn blocked_folder(store: &dyn Storage, state: &State, account: AccountId, next: 
     }))
 }
 
-/// Takes a screening act back: the sender as it was, the mail moved back where it was, the read mark and the done
-/// state as they were. A message gone meanwhile is skipped.
+/// Takes a screening act or a group choice back: the sender as it was, the mail moved back where it was, the read
+/// mark and the done state as they were. A message gone meanwhile is skipped.
 pub(crate) fn undo(context: &Context<'_>, screened: &Screened) -> Result<Effects, EngineError> {
     let Screened { address, before, moves, opened, states } = screened;
     let (store, state) = (context.store(), context.state());
@@ -427,4 +428,120 @@ pub(crate) fn undo(context: &Context<'_>, screened: &Screened) -> Result<Effects
         }
     }
     Ok(effects)
+}
+
+/// `group.set`: the group a sender's mail goes to, kept and future.
+pub(crate) const GROUP_SET: CommandSpec = CommandSpec {
+    id: "group.set",
+    class: Some(AgentClass::Owner),
+    summary: "Put a sender's mail, kept and future, in a group, or back in the classifier's hands",
+    run: group_set,
+};
+
+/// `group.account`: an account's grouping on or off.
+pub(crate) const GROUP_ACCOUNT: CommandSpec = CommandSpec {
+    id: "group.account",
+    class: Some(AgentClass::Owner),
+    summary: "Turn the grouped inbox of an account on or off",
+    run: group_account,
+};
+
+/// `group.list`: the inbox's mail counted per group.
+pub(crate) const GROUP_LIST: CommandSpec =
+    CommandSpec { id: "group.list", class: Some(AgentClass::Safe), summary: "Count the inbox's mail and its unread mail per group", run: group_list };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupSetParams {
+    /// The sender's address.
+    address: String,
+    /// `people`, `updates`, `newsletters`, `invitations`, or `auto` for the classifier's choice.
+    group: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupAccountParams {
+    /// The account.
+    account: u64,
+    /// Whether its inbox is grouped.
+    grouped: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupListParams {
+    /// Only this account.
+    account: Option<u64>,
+}
+
+fn group_set(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: GroupSetParams = decode(GROUP_SET.id, params)?;
+    let address = address(GROUP_SET.id, &params.address)?;
+    let chosen = match params.group.as_str() {
+        "auto" => None,
+        name => Some(group(GROUP_SET.id, name)?),
+    };
+    let before = context.store().sender(&address)?;
+    let mut sender = before.clone().unwrap_or_else(|| Sender::new(address.clone()));
+    sender.group = chosen;
+    let answer = json!({ "address": address.as_str().to_lowercase(), "group": chosen.map(grouping::name) });
+    let inverse = Inverse::Screen(Box::new(Screened { address, before, moves: Vec::new(), opened: None, states: Vec::new() }));
+    Ok(Outcome::new(answer)
+        .with_change(Change::PutSender(sender))
+        .with_undo(Step::Push(Act { command: GROUP_SET.id, class: AgentClass::Owner, inverse })))
+}
+
+fn group_account(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: GroupAccountParams = decode(GROUP_ACCOUNT.id, params)?;
+    let account = context
+        .store()
+        .accounts()?
+        .into_iter()
+        .find(|account| account.id().get() == params.account)
+        .ok_or(EngineError::NotFound { what: "account", id: params.account })?;
+    let answer = json!({ "account": params.account, "grouped": params.grouped });
+    Ok(Outcome::new(answer).with_change(Change::PutAccount(account.with_grouped(params.grouped))))
+}
+
+/// A count of messages and of the unread among them.
+#[derive(Default)]
+struct Count {
+    total: u64,
+    unread: u64,
+}
+
+impl Count {
+    fn add(&mut self, message: &Message) {
+        self.total = self.total.saturating_add(1);
+        if !message.summary().flags().contains(&Flag::Seen) {
+            self.unread = self.unread.saturating_add(1);
+        }
+    }
+
+}
+
+fn group_list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: GroupListParams = decode(GROUP_LIST.id, params)?;
+    let account = params.account.map(AccountId::new);
+    let entries = view::merged(context, &view::folders(context, view::View::Role(Role::Inbox), account)?)?;
+    let mut grouping = Grouping::new(context.store())?;
+    let mut counts: BTreeMap<&'static str, Count> = BTreeMap::new();
+    let mut ungrouped = Count::default();
+    for entry in &entries {
+        match grouping.of(entry.message())? {
+            Some(group) => counts.entry(grouping::name(group)).or_default().add(entry.message()),
+            None => ungrouped.add(entry.message()),
+        }
+    }
+    let groups: Vec<Value> = grouping::ALL
+        .into_iter()
+        .map(|group| {
+            let name = grouping::name(group);
+            let count = counts.remove(name).unwrap_or_default();
+            json!({ "group": name, "total": count.total, "unread": count.unread })
+        })
+        .collect();
+    let ungrouped = json!({ "total": ungrouped.total, "unread": ungrouped.unread });
+    Ok(Outcome::new(json!({ "account": params.account, "groups": groups, "ungrouped": ungrouped })))
 }

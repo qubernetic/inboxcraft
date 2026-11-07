@@ -11,6 +11,7 @@ use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::arrive::group::{self, Grouping};
 use crate::arrive::screener;
 use crate::params::{decode, parse_date};
 use crate::view::{self, View};
@@ -21,7 +22,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, TH
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
 
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
@@ -46,6 +47,9 @@ struct ListParams {
     role: Option<String>,
     /// Only this account.
     account: Option<u64>,
+    /// Only this group of the grouped inbox (`people`, `updates`, `newsletters`, `invitations`), or `none` for the
+    /// mail of the accounts not grouped.
+    group: Option<String>,
     /// At most this many, 1 to [`MAX_LIST`].
     limit: Option<u64>,
     /// Skip this many first.
@@ -66,7 +70,22 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         (Some(_), Some(_)) => return Err(EngineError::bad_params(LIST.id, "give a folder or a role, not both")),
     };
     let account = params.account.map(AccountId::new);
-    let entries = view::merged(context, &view::folders(context, view, account)?)?;
+    let only = match params.group.as_deref() {
+        None => None,
+        Some("none") => Some(None),
+        Some(name) => Some(Some(group::named(name).ok_or_else(|| EngineError::bad_params(LIST.id, "the group is people, updates, newsletters, invitations or none"))?)),
+    };
+    let mut grouping = Grouping::new(context.store())?;
+    let mut entries = view::merged(context, &view::folders(context, view, account)?)?;
+    if let Some(only) = only {
+        let mut kept = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if grouping.of(entry.message())? == only {
+                kept.push(entry);
+            }
+        }
+        entries = kept;
+    }
     let limit = limit(params.limit);
     let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
     let accounts = context.store().accounts()?;
@@ -75,9 +94,11 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         let message = entry.message();
         let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
         let new = screener::is_new(context.store(), context.state().screener, role, &accounts, message)?;
+        let in_group = grouping.of(message)?.map(group::name);
         let mut shown = json::message(entry);
         if let Value::Object(fields) = &mut shown {
             fields.insert("new_sender".into(), json!(new));
+            fields.insert("group".into(), json!(in_group));
         }
         messages.push(shown);
     }
@@ -88,6 +109,7 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({
         "view": shown,
         "account": account.map(AccountId::get),
+        "group": params.group,
         "total": entries.len(),
         "offset": offset,
         "limit": limit,

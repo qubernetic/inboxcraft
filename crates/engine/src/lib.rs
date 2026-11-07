@@ -45,6 +45,10 @@
 //!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
 //!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
 //!   decision back. A blocked sender's mail goes to `InboxCraft/Blocked` and is never fetched.
+//! - The grouped inbox (`group.*`): each message of a grouped account is in People, Updates, Newsletters or
+//!   Invitations, by the owner's choice for its sender (`group.set`, `owner`, undoable) or our classifier of its
+//!   header and body; `group.account` (`owner`) turns an account's grouping on or off, `group.list` (`safe`) counts
+//!   the inbox per group, and `mail.list` says and filters each row's group.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
