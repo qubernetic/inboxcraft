@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use inboxcraft_model::{Due, MessageId, MessageState, Scheduled};
-use inboxcraft_store::{Batch, Change};
+use inboxcraft_model::{Due, MessageId, MessageState, ScheduleId, Scheduled};
+use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
 use crate::act::{Effects, Mover};
@@ -161,6 +161,24 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     }
     let jobs = effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true }).collect();
     Ok(Plan { batch, jobs, fired })
+}
+
+/// The changes that make the schedule do `what` at `due` and at no other time: its other entries for `what` go, and
+/// one for `due` comes under `id` when there is none.
+pub(crate) fn reschedule(store: &dyn Storage, what: Due, due: Option<Timestamp>, id: ScheduleId) -> Result<Vec<Change>, EngineError> {
+    let mut changes = Vec::new();
+    let mut kept = false;
+    for entry in store.schedule()?.into_iter().filter(|entry| entry.what == what) {
+        if Some(entry.due) == due && !kept {
+            kept = true;
+        } else {
+            changes.push(Change::RemoveScheduled(entry.id));
+        }
+    }
+    if let Some(due) = due.filter(|_| !kept) {
+        changes.push(Change::PutScheduled(Scheduled { id, due, what }));
+    }
+    Ok(changes)
 }
 
 /// `state` without the time `entry` stood for: a message snoozed or followed up again for another time keeps it.

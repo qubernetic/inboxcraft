@@ -182,6 +182,16 @@ entry fires, a message still in the snoozed folder comes back to the inbox unrea
 on stays where it was put. `mail.unsnooze` (`safe`) brings a message back at once; `history.undo` takes a snooze
 back, its time and schedule entry included.
 
+Follow-up reminders (`mail.follow_up`, `safe`, in `engine::cmd::triage`; the stage in `engine::arrive::followup`):
+"remind me if no reply by" a time, given as `until` or a preset of `schedule.presets`, on a message the owner sent (in
+a Sent folder, or from one of the owner's own addresses). The reminder is ours alone and sends nothing to the server:
+the message's state keeps the time (`follow_up`, said on each `mail.list` row) and a schedule entry fires it. The
+follow-up stage, after snooze and before notify, cancels it when a reply arrives while it waits: a message whose
+`In-Reply-To` or `References` names the sent message's Message-ID, not from one of the owner's own addresses and not
+in a Sent or Drafts folder. At the time `Session::tick` fires the entry, clears the time and adds a reminder notice
+that opens the sent message. `mail.cancel_follow_up` (`safe`) takes a reminder off; `history.undo` takes either back,
+time and schedule entry included.
+
 Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
 notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
 still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own

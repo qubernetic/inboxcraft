@@ -149,6 +149,7 @@ pub(super) fn row(context: &Context<'_>, grouping: &mut Grouping<'_>, accounts: 
         fields.insert("pinned".into(), json!(state.is_some_and(|state| state.pinned)));
         fields.insert("snoozed_until".into(), state.and_then(|state| state.snoozed_until).map_or(Value::Null, json::date));
         fields.insert("returned".into(), state.and_then(|state| state.returned).map_or(Value::Null, json::date));
+        fields.insert("follow_up".into(), state.and_then(|state| state.follow_up).map_or(Value::Null, json::date));
     }
     Ok(shown)
 }

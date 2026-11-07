@@ -10,7 +10,7 @@
 //! schedule entry here too. At the time ([`back`]) the message comes back to the inbox, unread, marked as returned and
 //! listed as if it arrived then.
 
-use inboxcraft_model::{Due, Folder, Message, MessageId, MessageState, Role, SNOOZED_UNTIL, ScheduleId, Scheduled};
+use inboxcraft_model::{Due, Folder, Message, MessageState, Role, SNOOZED_UNTIL, ScheduleId, Scheduled};
 use inboxcraft_store::{Change, Storage};
 use inboxcraft_time::{MailDate, Offset, Timestamp, Zone};
 
@@ -62,24 +62,6 @@ fn past_line(raw: &[u8]) -> &[u8] {
         Some(end) => raw.get(end.saturating_add(1)..).unwrap_or_default(),
         None => &[],
     }
-}
-
-/// The changes that make the schedule bring `message` back at `until` and at no other time: its other entries go,
-/// and one for `until` comes under `id` when there is none.
-pub(crate) fn reschedule(store: &dyn Storage, message: MessageId, until: Option<Timestamp>, id: ScheduleId) -> Result<Vec<Change>, EngineError> {
-    let mut changes = Vec::new();
-    let mut kept = false;
-    for entry in store.schedule()?.into_iter().filter(|entry| entry.what == Due::Unsnooze(message)) {
-        if Some(entry.due) == until && !kept {
-            kept = true;
-        } else {
-            changes.push(Change::RemoveScheduled(entry.id));
-        }
-    }
-    if let Some(due) = until.filter(|_| !kept) {
-        changes.push(Change::PutScheduled(Scheduled { id, due, what: Due::Unsnooze(message) }));
-    }
-    Ok(changes)
 }
 
 /// The folder of `message`'s account with `role`, if it has one.

@@ -63,6 +63,9 @@ pub(crate) mod compose_tests;
 #[path = "done_tests.rs"]
 mod done_tests;
 #[cfg(test)]
+#[path = "follow_up_tests.rs"]
+mod follow_up_tests;
+#[cfg(test)]
 #[path = "group_tests.rs"]
 mod group_tests;
 #[cfg(test)]
