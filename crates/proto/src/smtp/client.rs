@@ -541,6 +541,9 @@ impl Client {
         };
         if flight.verb == Verb::Quit {
             self.state = State::Closed;
+            if reply.is_intermediate() {
+                return Err(ProtoError::Unexpected("go-ahead"));
+            }
             let outcome = if reply.is_positive() { Ok(Answer::Quit) } else { Err(self.refusal(reply)) };
             self.events.push_back(Event::Completed { command: Verb::Quit, outcome });
             return Ok(());

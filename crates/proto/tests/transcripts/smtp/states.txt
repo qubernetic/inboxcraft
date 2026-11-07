@@ -47,6 +47,16 @@ S: 500 still here
 = QUIT refused 500 still here
 ? Closed
 
+# A go-ahead to QUIT is not a refusal: the server broke the protocol.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> quit
+C: QUIT
+S: 335 go on
+! Unexpected("go-ahead")
+? Closed
+
 # Arguments that cannot go on a command line are refused before anything is written.
 @ tls
 S: 220 smtp.example.org ESMTP

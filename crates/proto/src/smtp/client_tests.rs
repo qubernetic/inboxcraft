@@ -63,6 +63,24 @@ fn a_refusal_knows_whether_it_is_for_good() {
 }
 
 #[test]
+fn every_refusal_is_4yz_or_5yz() {
+    type Command = fn(&mut Client) -> Result<(), ProtoError>;
+    let commands: [Command; 2] = [Client::rset, Client::quit];
+    for command in commands {
+        for code in [200, 250, 299, 300, 335, 354, 399, 400, 451, 500, 554, 599] {
+            let mut client = signed_in(Transport::Tls);
+            assert_eq!(command(&mut client), Ok(()));
+            let _ = client.receive(format!("{code} words\r\n").as_bytes());
+            while let Some(event) = client.next_event() {
+                if let Event::Completed { outcome: Err(refusal), .. } = event {
+                    assert!((400..600).contains(&refusal.code), "{refusal:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn every_state_and_verb_has_a_name() {
     let states = [State::Greeting, State::Connected, State::Ready, State::StartingTls, State::Mail, State::Quitting, State::Closed];
     let mut names: Vec<String> = states.iter().map(ToString::to_string).collect();
