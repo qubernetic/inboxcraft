@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security, Server, StepStatus,
+    Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
+    Server, StepStatus,
 };
 use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
@@ -281,4 +282,35 @@ fn once_the_window_is_gone_the_events_stop_waking_it() {
     }
     assert_eq!(Arc::strong_count(&wakes), 1, "the event thread ended");
     assert_eq!(wakes.load(Ordering::SeqCst), 1, "no step after the first woke the window that is gone");
+}
+
+/// The kind of the calendar failure of job `id` among `events`, if one came.
+fn calendar_failure(events: &[Event], id: u64) -> Option<ErrorKind> {
+    events.iter().find_map(|event| match &event.kind {
+        EventKind::Calendar(CalendarReport::Failed { kind, .. }) if event.job == Some(JobId::new(id)) => Some(*kind),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_worker_starts_afresh_when_its_accounts_servers_change() {
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut workers = NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(NoPassword), None);
+    let before = account(closed_port());
+    let discover =
+        |id: u64, url: Option<&str>| Job::new(JobId::new(id), before.id(), JobKind::Calendar(CalendarJob::Discover { url: url.map(str::to_owned) }));
+    workers.send(&before, discover(1, None));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 1).is_some());
+    assert_eq!(calendar_failure(&events, 1), Some(ErrorKind::NoCalendarServer));
+    // The address set: the next job reaches a worker that holds it, and only the password is missing.
+    let url = format!("https://127.0.0.1:{}/", closed_port());
+    let after = before.clone().with_caldav(Some(&url)).unwrap();
+    workers.send(&after, discover(2, Some(&url)));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 2).is_some());
+    assert_eq!(calendar_failure(&events, 2), Some(ErrorKind::CredentialMissing));
+    // Another address: the worker of the one before is gone, so a job for the old address is refused.
+    let moved = after.clone().with_caldav(Some("https://127.0.0.2/")).unwrap();
+    workers.send(&moved, discover(3, Some(&url)));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 3).is_some());
+    assert_eq!(calendar_failure(&events, 3), Some(ErrorKind::OtherServer));
 }

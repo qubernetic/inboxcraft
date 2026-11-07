@@ -85,6 +85,7 @@ fn found_calendars_are_kept_by_url_new_ones_added_and_gone_ones_removed() {
 #[test]
 fn a_new_calendar_takes_an_id_past_every_id_held_and_the_next_one_counts_on() {
     let mut session = session();
+    session.run("calendar.server", &json!({ "account": 2, "url": "https://dav.example.net/" })).unwrap();
     let found = |url: &str| CalendarReport::Found { home: String::new(), calendars: vec![listing(url, Some("One"), true)] };
     report(&mut session, 2, found("https://dav.example.net/calendars/bob/a/"));
     report(&mut session, 2, found("https://dav.example.net/calendars/bob/b/"));
@@ -179,7 +180,8 @@ fn calendar_sync_asks_each_account_with_a_caldav_address_for_its_calendars() {
     let jobs = session.take_jobs();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].account, AccountId::new(1));
-    assert_eq!(jobs[0].kind, JobKind::Calendar(CalendarJob::Discover { url: None }));
+    // The address goes with the job, so a worker that still holds another one refuses it.
+    assert_eq!(jobs[0].kind, JobKind::Calendar(CalendarJob::Discover { url: Some("https://dav.example.org/".to_owned()) }));
     let refused = session.run("calendar.sync", &json!({ "account": 2 })).unwrap_err();
     assert_eq!(refused.code(), "bad_params");
     assert_eq!(session.run("calendar.sync", &json!({ "account": 8 })).unwrap_err(), EngineError::NotFound { what: "account", id: 8 });
@@ -192,7 +194,7 @@ fn calendar_server_sets_the_address_and_finds_the_calendars_there() {
     assert_eq!(answer, json!({ "account": 2, "url": "https://dav.example.net/" }));
     let account = session.store().accounts().unwrap().into_iter().find(|held| held.id() == AccountId::new(2)).unwrap();
     assert_eq!(account.caldav(), Some("https://dav.example.net/"));
-    assert_eq!(calendar_jobs(&mut session), [CalendarJob::Discover { url: None }]);
+    assert_eq!(calendar_jobs(&mut session), [CalendarJob::Discover { url: Some("https://dav.example.net/".to_owned()) }]);
 }
 
 #[test]
@@ -221,7 +223,7 @@ fn calendar_server_on_another_server_forgets_the_calendars_and_the_held_writes()
         assert!(session.store().calendars(AccountId::new(1)).unwrap().is_empty(), "{url}");
         assert!(session.store().calendar_events(CalendarId::new(1)).unwrap().is_empty(), "{url}");
         assert_eq!(session.store().queued_jobs().unwrap().len(), 0, "{url}");
-        assert_eq!(calendar_jobs(&mut session), [CalendarJob::Discover { url: None }]);
+        assert_eq!(calendar_jobs(&mut session), [CalendarJob::Discover { url: Some(url.to_owned()) }]);
         clock.advance(std::time::Duration::from_secs(10));
         session.tick().unwrap();
         assert!(calendar_jobs(&mut session).is_empty(), "{url}");
@@ -266,13 +268,15 @@ fn calendar_server_refuses_an_address_that_is_not_https_without_repeating_it() {
 fn the_start_asks_for_the_calendars_of_each_account_with_a_caldav_address() {
     let mut session = session();
     session.start();
-    let discover: Vec<AccountId> = session
+    let discover: Vec<(AccountId, Option<String>)> = session
         .take_jobs()
         .into_iter()
-        .filter(|job| matches!(job.kind, JobKind::Calendar(CalendarJob::Discover { .. })))
-        .map(|job| job.account)
+        .filter_map(|job| match job.kind {
+            JobKind::Calendar(CalendarJob::Discover { url }) => Some((job.account, url)),
+            _ => None,
+        })
         .collect();
-    assert_eq!(discover, [AccountId::new(1)]);
+    assert_eq!(discover, [(AccountId::new(1), Some("https://dav.example.org/".to_owned()))]);
 }
 
 #[test]
@@ -283,4 +287,73 @@ fn a_discovery_keeps_at_most_a_hundred_calendars() {
     let held = names(&session, 1);
     assert_eq!(held.len(), crate::calendar::MAX_CALENDARS);
     assert_eq!(held[0].2, "c0");
+}
+
+#[test]
+fn calendar_server_on_another_server_drops_the_writes_already_handed_out() {
+    let mut session = session();
+    session.run("event.create", &json!({ "calendar": 1, "summary": "Dentist", "start": "2026-11-12T08:00:00Z" })).unwrap();
+    session.run("event.update", &json!({ "id": 2, "summary": "Long lunch" })).unwrap();
+    assert_eq!(calendar_jobs(&mut session).len(), 2);
+    session.run("calendar.server", &json!({ "account": 1, "url": "https://cal.example.net/" })).unwrap();
+    let queued = session.store().queued_jobs().unwrap();
+    assert!(queued.iter().all(|job| !matches!(job.kind, JobKind::Calendar(_))), "{queued:?}");
+}
+
+/// What a discovery of the server at `origin` finds: one calendar there.
+fn found_at(origin: &str) -> CalendarReport {
+    CalendarReport::Found {
+        home: format!("{origin}calendars/anna/"),
+        calendars: vec![listing(&format!("{origin}calendars/anna/old/"), Some("Old"), true)],
+    }
+}
+
+#[test]
+fn a_late_discovery_of_a_server_the_account_left_is_dropped() {
+    let mut session = session();
+    session.run("calendar.server", &json!({ "account": 1, "url": null })).unwrap();
+    session.take_jobs();
+    assert_eq!(report(&mut session, 1, found_at("https://dav.example.org/")), Applied::Dropped);
+    assert!(names(&session, 1).is_empty());
+    assert!(calendar_jobs(&mut session).is_empty());
+    session.run("calendar.server", &json!({ "account": 1, "url": "https://cal.example.net/" })).unwrap();
+    session.take_jobs();
+    assert_eq!(report(&mut session, 1, found_at("https://dav.example.org/")), Applied::Dropped);
+    assert!(names(&session, 1).is_empty(), "the old server's calendars are left out");
+    assert!(calendar_jobs(&mut session).is_empty());
+    let held = vec![(4, "https://cal.example.net/calendars/anna/old/".to_owned(), "Old".to_owned())];
+    assert_eq!(report(&mut session, 1, found_at("https://cal.example.net/")), Applied::Changed);
+    assert_eq!(names(&session, 1), held);
+    session.take_jobs();
+    // The right host on another port is another server, and one URL elsewhere makes the whole answer suspect.
+    assert_eq!(report(&mut session, 1, found_at("https://cal.example.net:8443/")), Applied::Dropped);
+    let mixed = CalendarReport::Found {
+        home: "https://cal.example.net/calendars/anna/".to_owned(),
+        calendars: vec![listing("https://dav.example.org/calendars/anna/work/", Some("Work"), true)],
+    };
+    assert_eq!(report(&mut session, 1, mixed), Applied::Dropped);
+    assert_eq!(names(&session, 1), held);
+    assert!(calendar_jobs(&mut session).is_empty());
+}
+
+#[test]
+fn a_sync_naming_events_outside_its_calendar_changes_nothing_of_them() {
+    let mut session = session();
+    let outside = |url: &str| FetchedEvent { url: url.to_owned(), etag: Some("\"x1\"".to_owned()), ical: lunch() };
+    let synced = CalendarReport::Synced {
+        calendar: CalendarId::new(1),
+        changed: vec![
+            outside("https://dav.example.org/calendars/anna/home/off.ics"),
+            outside("https://cal.example.net/calendars/anna/work/x.ics"),
+            outside(&format!("{WORK}../home/x.ics")),
+            outside(WORK),
+            outside("https://dav.example.org/calendars/anna/workshop.ics"),
+        ],
+        removed: vec!["https://dav.example.org/calendars/anna/home/off.ics".to_owned()],
+        token: Some("t".to_owned()),
+        full: false,
+    };
+    report(&mut session, 1, synced);
+    assert_eq!(session.store().calendar_events(CalendarId::new(1)).unwrap().len(), 3);
+    assert_eq!(session.store().calendar_events(CalendarId::new(2)).unwrap().len(), 1);
 }

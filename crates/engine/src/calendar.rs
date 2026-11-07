@@ -101,9 +101,29 @@ pub(crate) const MAX_CALENDARS: usize = 100;
 /// The longest name taken from a calendar's URL when the server gives it none, in characters.
 const MAX_URL_NAME_CHARS: usize = 64;
 
-/// The job that finds an account's calendars at its CalDAV address.
-pub(crate) fn discover() -> JobKind {
-    JobKind::Calendar(CalendarJob::Discover { url: None })
+/// The job that finds an account's calendars at its CalDAV address `url`. The address goes with the job: a worker
+/// that still holds the account as it was before the address changed refuses it rather than ask the old server.
+pub(crate) fn discover(url: &str) -> JobKind {
+    JobKind::Calendar(CalendarJob::Discover { url: Some(url.to_owned()) })
+}
+
+/// The origin of an `https` URL: its host in lower case and its port; `None` for another scheme.
+pub(crate) fn origin(url: &str) -> Option<(String, u16)> {
+    let rest = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).and_then(|_| url.get(8..))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default().to_ascii_lowercase();
+    Some(match authority.rsplit_once(':') {
+        // Not the colon of an IPv6 address in brackets.
+        Some((host, port)) if !port.contains(']') => (host.to_owned(), port.parse().unwrap_or(443)),
+        _ => (authority, 443),
+    })
+}
+
+/// Whether `url` names something inside the collection `href`: below it, on its origin, without a `.` or `..` step.
+fn inside(href: &str, url: &str) -> bool {
+    let base = href.trim_end_matches('/');
+    let Some(rest) = url.get(base.len()..).filter(|_| url.get(..base.len()) == Some(base)) else { return false };
+    let Some(path) = rest.strip_prefix('/') else { return false };
+    !path.is_empty() && !path.contains(['?', '#']) && path.split('/').all(|step| step != "." && step != ".." && !step.is_empty())
 }
 
 /// The job that brings `calendar` in step from `token`, naming every event held with its entity tag. An event
@@ -117,7 +137,18 @@ pub(crate) fn sync_job(store: &dyn Storage, calendar: &Held, token: Option<Strin
 /// the account does not hold.
 pub(crate) fn report(store: &dyn Storage, plan: &mut Plan, account: AccountId, report: &CalendarReport) -> Result<bool, EngineError> {
     match report {
-        CalendarReport::Found { calendars, .. } => found(store, plan, account, calendars),
+        CalendarReport::Found { home, calendars } => {
+            // From the account's current server only: a late answer of a server it left, or after its address was
+            // cleared, would put the old calendars back and remove the new ones.
+            let Some(own) = store.accounts()?.into_iter().find(|held| held.id() == account).and_then(|held| held.caldav().and_then(origin)) else {
+                return Ok(false);
+            };
+            let elsewhere = |url: &str| origin(url).as_ref() != Some(&own);
+            if (!home.is_empty() && elsewhere(home)) || calendars.iter().any(|listing| elsewhere(&listing.url)) {
+                return Ok(false);
+            }
+            found(store, plan, account, calendars)
+        }
         CalendarReport::Synced { calendar, changed, removed, token, .. } => {
             let Some(calendar) = calendar_of(store, account, *calendar)? else { return Ok(false) };
             synced(store, plan, &calendar, changed, removed)?;
@@ -200,7 +231,10 @@ fn synced(store: &dyn Storage, plan: &mut Plan, calendar: &Held, changed: &[Fetc
     // An event with a write of the owner's out keeps the owner's copy: the server's is older.
     let writing: BTreeSet<&str> =
         changed.iter().filter(|fetched| plan.state.writes.busy(calendar.id, &fetched.url)).map(|fetched| fetched.url.as_str()).collect();
-    for fetched in changed.iter().filter(|fetched| !deleting.contains(&fetched.url) && !writing.contains(fetched.url.as_str())) {
+    // An event the server names outside the calendar's collection is not the calendar's.
+    let mine = |url: &str| inside(&calendar.href, url);
+    for fetched in changed.iter().filter(|fetched| mine(&fetched.url) && !deleting.contains(&fetched.url) && !writing.contains(fetched.url.as_str()))
+    {
         let id = match ids.get(fetched.url.as_str()) {
             Some(id) => *id,
             None => {
@@ -213,8 +247,8 @@ fn synced(store: &dyn Storage, plan: &mut Plan, calendar: &Held, changed: &[Fetc
         let event = CalendarEvent { id, calendar: calendar.id, href: fetched.url.clone(), etag: fetched.etag.clone(), ical: fetched.ical.clone() };
         plan.change(Change::PutCalendarEvent(event));
     }
-    for url in removed {
-        if let Some(event) = held.iter().find(|event| event.href == *url) {
+    for url in removed.iter().filter(|url| mine(url)) {
+        if let Some(event) = held.iter().find(|event| event.href == **url) {
             plan.change(Change::RemoveCalendarEvent(event.id));
         }
     }

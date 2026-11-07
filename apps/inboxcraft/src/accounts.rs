@@ -158,6 +158,8 @@ pub struct NetWorkers {
     settings: WorkerSettings,
     credentials: Arc<dyn Credentials>,
     workers: BTreeMap<AccountId, Worker>,
+    /// The account each worker was started with: it signs in to these servers until it ends.
+    started: BTreeMap<AccountId, Account>,
     /// What the workers send on; each worker gets a copy.
     sender: Sender<Event>,
     events: Receiver<Event>,
@@ -188,7 +190,7 @@ impl NetWorkers {
                 }
             }
         });
-        let mut workers = Self { settings, credentials, workers: BTreeMap::new(), sender, events, failed: Vec::new() };
+        let mut workers = Self { settings, credentials, workers: BTreeMap::new(), started: BTreeMap::new(), sender, events, failed: Vec::new() };
         if spawned.is_err() {
             // Without the thread no event reaches the window: the workers send straight to it, unwoken.
             let (sender, events) = mpsc::channel();
@@ -196,6 +198,14 @@ impl NetWorkers {
             workers.events = events;
         }
         workers
+    }
+
+    /// Lets the worker of `id` end, off the window's thread: a worker signs out before it ends, which can take a while.
+    fn stop(&mut self, id: AccountId) {
+        self.started.remove(&id);
+        if let Some(worker) = self.workers.remove(&id) {
+            let _ = thread::Builder::new().name("inboxcraft-stop".to_owned()).spawn(move || worker.stop());
+        }
     }
 
     fn fail(&mut self, job: &Job, kind: inboxcraft_model::ErrorKind) {
@@ -206,10 +216,17 @@ impl NetWorkers {
 impl Workers for NetWorkers {
     fn send(&mut self, account: &Account, job: Job) {
         let id = account.id();
+        // The servers or the user name changed (a CalDAV address set, cleared or moved): the worker that holds the
+        // account as it was ends after the jobs it has, and another one starts, so the password goes to no server the
+        // account no longer uses.
+        if self.started.get(&id).is_some_and(|held| !same_servers(held, account)) {
+            self.stop(id);
+        }
         if !self.workers.contains_key(&id) {
             match Worker::spawn(account.clone(), self.settings.clone(), Arc::clone(&self.credentials), self.sender.clone()) {
                 Ok(worker) => {
                     self.workers.insert(id, worker);
+                    self.started.insert(id, account.clone());
                 }
                 Err(error) => return self.fail(&job, error.kind()),
             }
@@ -218,6 +235,7 @@ impl Workers for NetWorkers {
         if let Some(Err(job)) = refused {
             // The worker ended: the next job starts another.
             self.workers.remove(&id);
+            self.started.remove(&id);
             self.fail(&job, inboxcraft_model::ErrorKind::ConnectionDropped);
         }
     }
@@ -225,10 +243,7 @@ impl Workers for NetWorkers {
     fn keep(&mut self, accounts: &[AccountId]) {
         let gone: Vec<AccountId> = self.workers.keys().filter(|id| !accounts.contains(id)).copied().collect();
         for id in gone {
-            if let Some(worker) = self.workers.remove(&id) {
-                // A worker signs out before it ends, which can take a while: not on the window's thread.
-                let _ = thread::Builder::new().name("inboxcraft-stop".to_owned()).spawn(move || worker.stop());
-            }
+            self.stop(id);
         }
     }
 
@@ -237,6 +252,11 @@ impl Workers for NetWorkers {
         events.extend(self.events.try_iter());
         events
     }
+}
+
+/// Whether `a` and `b` sign in alike: the same user name, IMAP, submission and CalDAV servers.
+fn same_servers(a: &Account, b: &Account) -> bool {
+    a.username() == b.username() && a.imap() == b.imap() && a.submission() == b.submission() && a.caldav() == b.caldav()
 }
 
 /// `found` as the form shows it.

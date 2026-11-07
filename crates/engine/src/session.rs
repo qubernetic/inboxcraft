@@ -654,8 +654,10 @@ impl Session {
             self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None, keep: false, until: None });
         }
         // A store that cannot list the accounts now leaves the calendars to `calendar.sync`.
-        for account in self.store.accounts().unwrap_or_default().into_iter().filter(|account| account.caldav().is_some()) {
-            self.queue(Pending { account: account.id(), kind: crate::calendar::discover(), message: None, keep: false, until: None });
+        for account in self.store.accounts().unwrap_or_default() {
+            if let Some(url) = account.caldav() {
+                self.queue(Pending { account: account.id(), kind: crate::calendar::discover(url), message: None, keep: false, until: None });
+            }
         }
     }
 
