@@ -68,6 +68,7 @@ with nothing changed. Events go the same way: `Session::apply` plans the changes
 | `BodyFetched` | the body kept with its plain text for the search; the fetch ends; a body over 64 MiB is not kept, and the message is marked so it is not asked for again in this session |
 | `FolderSynced` | the folder's state recorded for the next sync |
 | `Connection`, `Failed` | shown by `account.list`; online again clears the failure; a failed `FetchBody` job ends its fetch |
+| `Abilities` | kept for the account until the next sign-in: whether the server removes only the messages named (UID EXPUNGE), which a snooze chooses its way by |
 | `CheckStep` | the step takes its place in the account's running check (from `account.check`), shown by `account.list`; the last step ends the check; a step of another job is dropped |
 | `FlagsStored`, `Expunged`, `Appended` | the write's job ends; `Expunged` removes the messages if a sync has not yet |
 | `Moved` | each moved message takes its server UID in the folder it went to; one the owner moved on or flagged meanwhile gets the jobs for that now; with no new UIDs it goes, and that folder is synced again |
@@ -167,10 +168,14 @@ a message away until a time, given as `until` or a preset of `schedule.presets`.
 top, `InboxCraft-Snoozed-Until` (`model::SNOOZED_UNTIL`) with the time as an RFC 5322 date in UTC: the copy goes up
 with `APPEND` (`JobKind::Append` naming the message), and only the answer queues the delete for good of the old copy
 and gives the message the new copy's UID (`APPENDUID`); a failed copy deletes nothing and leaves the message where the
-server keeps it. A server that names no UID gets the copy from the folder's next sync under a new id. A message whose
-body is not kept yet, or whose move is still on its way, is moved without the field (`written` is `false`). The
-message's state keeps the time (`snoozed_until`) and a schedule entry brings it back. The snooze stage reads the field
-(`net` puts it in the envelope) of mail that arrives in the snoozed folder, so a message another InboxCraft snoozed,
+server keeps it. A server that names no UID gets the copy from the folder's next sync under a new id. The copy is
+written only where the old one can go: on a server that removes only the messages named (UID EXPUNGE, UIDPLUS or
+IMAP4rev2, told by `net` after each sign-in as `Abilities`). Elsewhere, before the first sign-in of the session, for a
+message whose body is not kept yet, and for one whose move is still on its way, the message is moved without the field
+(`written` is `false`). A field an earlier snooze left on top is replaced, not added to. The message's state keeps the
+time (`snoozed_until`) and a schedule entry brings it back. The snooze stage reads the field (`net` puts it in the
+envelope, and only when it is the first field of the header, where InboxCraft writes it) of mail that arrives in the
+snoozed folder, so a message another InboxCraft snoozed,
 or our own copy back without a UID, is snoozed until its time here too; elsewhere the field is ignored. When the
 entry fires, a message still in the snoozed folder comes back to the inbox unread, with `returned` set to the time
 (`mail.list` sorts it as if it arrived then and says `returned` and `snoozed_until` on each row); one the owner moved
