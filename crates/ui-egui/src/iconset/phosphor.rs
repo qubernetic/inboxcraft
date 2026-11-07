@@ -55,6 +55,7 @@ const fn point(id: IconId) -> char {
         IconId::Info => '\u{e2ce}',     // info
         IconId::Close => '\u{e4f6}',    // x
         IconId::Back => '\u{e058}',     // arrow-left
+        IconId::Caret => '\u{e136}',    // caret-down
     }
 }
 

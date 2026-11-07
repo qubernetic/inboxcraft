@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts and Shortcuts; the others
-//! not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Shortcuts lists every action of
+//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Sending and Shortcuts; the
+//! others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Sending holds each
+//! account's signature, saved with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
 //! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
@@ -73,6 +74,8 @@ pub(super) enum Asked {
     Unbind(&'static str),
     /// Give every action its first key again.
     ResetKeys,
+    /// Save the signature of the account as typed.
+    Signature(u64),
     Close,
 }
 
@@ -139,7 +142,7 @@ fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
         (IconId::At, tr!("Accounts"), Some(Section::Accounts)),
         (IconId::Notify, tr!("Notifications"), None),
         (IconId::Funnel, tr!("Triage"), None),
-        (IconId::Send, tr!("Sending"), None),
+        (IconId::Send, tr!("Sending"), Some(Section::Sending)),
         (IconId::Calendar, tr!("Calendar"), None),
         (IconId::Keyboard, tr!("Shortcuts"), Some(Section::Shortcuts)),
         (IconId::Shield, tr!("Privacy"), None),
@@ -153,6 +156,7 @@ fn section_name(section: Section) -> &'static str {
         Section::Appearance => tr!("Appearance"),
         Section::Accounts => tr!("Accounts"),
         Section::Shortcuts => tr!("Shortcuts"),
+        Section::Sending => tr!("Sending"),
     }
 }
 
@@ -611,6 +615,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
         Section::Appearance => appearance(ui, theme, keymap, view.settings, view.current, view.reduce),
         Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
+        Section::Sending => sending(ui, theme, keymap, view.settings, view.mailbox),
     };
     asked.or(on_page)
 }
@@ -723,6 +728,44 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
             if let Some(pressed) = key_row(ui, theme, keymap, action, waiting == Some(action.id)) {
                 asked = Some(pressed);
             }
+        }
+    });
+    asked
+}
+
+/// The Sending page under its title: each account with its signature in a field, and Save while it differs from the
+/// one the account has; scrolling.
+fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
+    let s = &theme.spacing;
+    let mut asked = None;
+    note(ui, theme, tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."));
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width(ui.available_width() - s.m);
+        if mailbox.accounts().is_empty() {
+            ui.add_space(s.l);
+            note(ui, theme, tr!("Add an account first: a signature belongs to the account it is sent from."));
+        }
+        for account in mailbox.accounts() {
+            ui.add_space(s.l);
+            heading(ui, theme, Some(IconId::At), &account.label, &[&account.address], ui.available_width());
+            ui.add_space(s.xs);
+            let label = tr!("Signature of {account}", account = account.label);
+            let typed = settings.signature_mut(account.id, &account.signature);
+            let edit = TextEdit::multiline(typed).id(Id::unique("signature").with(account.id)).desired_rows(3).desired_width(ui.available_width());
+            let field = ui.add(edit);
+            ui.ctx().accesskit_node_builder(field.id, |node| node.set_label(&label));
+            let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
+            ui.add_space(s.xs);
+            let save = tr!("Save the signature of {account}", account = account.label);
+            let button = TextButton::new(tr!("Save"));
+            let response = if changed { button.show(ui, theme, keymap) } else { button.unavailable(tr!("Nothing changed")).show(ui, theme, keymap) };
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(&save));
+            if changed && response.clicked() {
+                asked = Some(Asked::Signature(account.id));
+            }
+            ui.add_space(s.m);
+            ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
+            ui.add_space(1.0);
         }
     });
     asked

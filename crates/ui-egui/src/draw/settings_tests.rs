@@ -268,3 +268,34 @@ fn the_window_frame_row_runs_ui_frame_set() {
     assert_eq!(press(&mut harness, "Title bar"), "ui.frame.set");
     assert_eq!(harness.state().appearance().frame, WindowFrame::System);
 }
+
+#[test]
+fn the_sending_page_saves_each_accounts_signature_for_its_new_messages() {
+    let mut harness = opened();
+    harness.get_by_label("Sending, settings page").click();
+    harness.run();
+    assert_eq!(harness.state().settings().section(), Section::Sending);
+    assert!(harness.get_by_role_and_label(Role::Button, "Save the signature of Personal").accesskit_node().is_disabled(), "nothing typed");
+    let field = harness.get_by_role_and_label(Role::MultilineTextInput, "Signature of Personal");
+    field.focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Signature of Personal").type_text("Mira\nPlot 14\n");
+    harness.run();
+    press(&mut harness, "Save the signature of Personal");
+    assert_eq!(
+        harness.state().mailbox().account(1).map(|account| account.signature.as_str()),
+        Some("Mira\nPlot 14"),
+        "kept without the line after it"
+    );
+    assert!(harness.get_by_role_and_label(Role::Button, "Save the signature of Personal").accesskit_node().is_disabled(), "saved");
+    let draft = harness.state_mut().mailbox_mut().run("compose.new", &serde_json::json!({ "account": 1 })).unwrap();
+    assert_eq!(draft["text"], serde_json::json!("\n\n-- \nMira\nPlot 14"));
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Signature of Personal").focus();
+    harness.run();
+    for _ in 0.."Mira\nPlot 14".chars().count() {
+        harness.key_press(Key::Backspace);
+    }
+    harness.run();
+    press(&mut harness, "Save the signature of Personal");
+    assert_eq!(harness.state().mailbox().account(1).map(|account| account.signature.as_str()), Some(""), "an empty field clears it");
+}
