@@ -245,6 +245,8 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
+| Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection gradient; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
+| Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel, Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -439,7 +441,8 @@ the icon sheet instead of the window: every icon in Regular (text colour), Fill 
 and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<mode>.png`, `icons-<mode>.png` for
 Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
 buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
-tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
+tooltip, a popup menu and a toast with their key chips, and the time picker for snooze at Friday 14:30 with
+`thu 9` typed and a preset behind hidden (`components-<preset>-<mode>.png`, `components-<mode>.png`
 for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
 list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
 (`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
