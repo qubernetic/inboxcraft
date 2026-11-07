@@ -369,7 +369,8 @@ window asks for the next frame; once it has landed, nothing does.
   back from a snooze says "Returned" in the accent after the sender while it is unread. A screen reader hears
   "pinned", "done" and "returned".
 - **Done all** on a group's card marks every message of the group read and done, one toast ("Marked n as done") whose
-  Undo brings them all back.
+  Undo brings them all back. The engine's history holds the newest 100 acts, and each message takes one (two when
+  it was unread): when the group takes more, the toast says "Marked n as done, too many to undo" and has no Undo.
 - **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
   key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
   deep ink, whichever reads at 4.5:1 on every stop).
@@ -392,7 +393,8 @@ the icon sits among others at the same size.
 - **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
   Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
   room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
-  as the list's hover actions do (the toast with Undo follows); Move to a folder opens a menu ("Move to") of the
+  as the list's hover actions do (the toast with Undo follows); on a done message, open under "Show done", Done reads
+  "Not done" and brings it back, as the row does; Move to a folder opens a menu ("Move to") of the
   folders of the message's account that hold mail but its own, each by its full path, and the one chosen moves it
   there; with none it is drawn disabled. Snooze (H) opens the time picker under it ("Snooze until", the presets of
   `schedule.presets` still ahead, a typed time, Snooze); on a message in a sent folder the same button is "Remind me
