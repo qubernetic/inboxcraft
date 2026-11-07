@@ -1868,6 +1868,16 @@ version = "0.1.0"
 [[package]]
 name = "inboxcraft-mcp"
 version = "0.1.0"
+dependencies = [
+ "inboxcraft-engine",
+ "inboxcraft-model",
+ "inboxcraft-store",
+ "inboxcraft-testkit",
+ "inboxcraft-time",
+ "proptest",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "inboxcraft-mime"

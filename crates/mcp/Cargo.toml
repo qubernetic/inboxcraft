@@ -8,5 +8,17 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+inboxcraft-engine = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+inboxcraft-model = { workspace = true }
+inboxcraft-store = { workspace = true }
+inboxcraft-testkit = { workspace = true }
+inboxcraft-time = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

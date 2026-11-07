@@ -21,6 +21,8 @@ inboxcraft-charset = 98
 inboxcraft-dav = 98
 inboxcraft-engine = 98
 inboxcraft-ical = 98
+# The MCP server: the issue asks 95 % of it (#141).
+inboxcraft-mcp = 95
 inboxcraft-mime = 98
 inboxcraft-model = 98
 inboxcraft-proto = 98
