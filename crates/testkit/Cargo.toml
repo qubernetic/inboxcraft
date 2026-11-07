@@ -10,12 +10,16 @@ publish = false
 
 [dependencies]
 flate2 = { workspace = true }
+inboxcraft-model = { workspace = true }
+inboxcraft-store = { workspace = true }
+inboxcraft-time = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 time = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
