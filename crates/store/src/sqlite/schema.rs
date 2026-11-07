@@ -8,7 +8,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use crate::StoreError;
 
 /// The schema version this build writes: the number of [`MIGRATIONS`].
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Migration `n` (from 0) takes a database from version `n` to `n + 1`. A released migration never changes; a new
 /// schema is a new migration at the end.
@@ -55,6 +55,60 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     END;",
     // 3: a deleted body's words leave the index segments at once, not at some later merge.
     "INSERT INTO body_text (body_text, rank) VALUES ('secure-delete', 1);",
+    // 4: the local records beside the mail, every table the daily-use features need. Each row holds its record as
+    // JSON, so a new field of a record needs no migration; the columns beside it are what rows are found and ordered
+    // by. A job's place in the queue is its `seq`, which AUTOINCREMENT never hands out twice.
+    "CREATE TABLE job (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER NOT NULL UNIQUE,
+        account INTEGER NOT NULL REFERENCES account (id) ON DELETE CASCADE,
+        record TEXT NOT NULL
+    );
+    CREATE INDEX job_account ON job (account);
+    CREATE TABLE draft (
+        id INTEGER PRIMARY KEY,
+        account INTEGER NOT NULL REFERENCES account (id) ON DELETE CASCADE,
+        record TEXT NOT NULL
+    );
+    CREATE INDEX draft_account ON draft (account, id);
+    CREATE TABLE outbox (
+        draft INTEGER PRIMARY KEY REFERENCES draft (id) ON DELETE CASCADE,
+        record TEXT NOT NULL
+    );
+    CREATE TABLE schedule (
+        id INTEGER PRIMARY KEY,
+        due INTEGER NOT NULL,
+        record TEXT NOT NULL
+    );
+    CREATE INDEX schedule_due ON schedule (due, id);
+    CREATE TABLE sender (
+        address TEXT PRIMARY KEY,
+        record TEXT NOT NULL
+    );
+    CREATE TABLE message_state (
+        message INTEGER PRIMARY KEY REFERENCES message (id) ON DELETE CASCADE,
+        record TEXT NOT NULL
+    );
+    CREATE TABLE calendar (
+        id INTEGER PRIMARY KEY,
+        account INTEGER NOT NULL REFERENCES account (id) ON DELETE CASCADE,
+        record TEXT NOT NULL,
+        sync_token TEXT
+    );
+    CREATE INDEX calendar_account ON calendar (account, id);
+    CREATE TABLE calendar_event (
+        id INTEGER PRIMARY KEY,
+        calendar INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        record TEXT NOT NULL
+    );
+    CREATE INDEX calendar_event_calendar ON calendar_event (calendar, id);
+    CREATE TABLE alert (
+        id INTEGER PRIMARY KEY,
+        event INTEGER NOT NULL REFERENCES calendar_event (id) ON DELETE CASCADE,
+        at INTEGER NOT NULL,
+        record TEXT NOT NULL
+    );
+    CREATE INDEX alert_event ON alert (event, at, id);",
 ];
 
 /// Brings `conn` to [`SCHEMA_VERSION`] in one transaction.
