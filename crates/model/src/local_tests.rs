@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::{Alert, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
-use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid, UidValidity};
+use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, MessageRef, ScheduleId, Uid, UidValidity};
 
 fn at(seconds: i64) -> Timestamp {
     Timestamp::from_unix(seconds, 0).unwrap()
@@ -28,6 +28,10 @@ fn draft() -> Draft {
         uploaded: Some(DraftCopy { folder: FolderId::new(6), uid_validity: UidValidity::new(9).unwrap(), uid: Uid::new(17).unwrap() }),
         synced: Some(at(900)),
         unnamed: true,
+        in_reply_to: MessageRef::new("<a.1@example.org>"),
+        references: vec![MessageRef::new("root@example.org").unwrap(), MessageRef::new("a.1@example.org").unwrap()],
+        forwards: Some(MessageId::new(5)),
+        blanks: vec!["[[the date]]".to_owned()],
         ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
     }
 }
@@ -39,6 +43,7 @@ fn a_new_draft_is_empty() {
     assert!(draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty());
     assert!(draft.subject.is_empty() && draft.text.is_empty());
     assert_eq!((draft.answers, draft.uploaded, draft.synced, draft.unnamed), (None, None, None, false));
+    assert_eq!((draft.in_reply_to, draft.references.len(), draft.forwards, draft.blanks.len()), (None, 0, None, 0));
 }
 
 #[test]
@@ -51,7 +56,8 @@ fn a_draft_record_without_the_newer_fields_reads_back() {
 fn a_draft_debug_shows_no_words() {
     let shown = format!("{:?}", draft());
     assert!(!shown.contains("bela") && !shown.contains("Budget") && !shown.contains("attached"), "{shown}");
-    assert!(shown.contains("synced"), "{shown}");
+    assert!(!shown.contains("a.1@example.org") && !shown.contains("the date"), "{shown}");
+    assert!(shown.contains("synced") && shown.contains("forwards"), "{shown}");
 }
 
 #[test]
