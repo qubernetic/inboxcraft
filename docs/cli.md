@@ -10,6 +10,7 @@ reads mail without the window. It runs as an agent: only `safe` commands run.
 ```sh
 inboxcraft-cli --store <dir> [--json] <command> [<params>]
 inboxcraft-cli [--json] commands
+inboxcraft-cli --store <dir> mcp
 inboxcraft-cli --version
 inboxcraft-cli --help
 ```
@@ -22,6 +23,9 @@ inboxcraft-cli --help
 - `<params>` is one JSON object, `{}` when it is left out. Unknown fields are refused, as everywhere.
 - `--json` writes the answer as one JSON object on one line. Without it the answer is text, one field a line.
 - Options and words can come in any order; `--` ends the options.
+- `mcp` runs the read-only MCP server on the store over stdin and stdout until stdin ends ([mcp.md](mcp.md)). Run
+  it only while the app is closed, or on a copy of the store: the store takes no lock yet, and opening it tidies
+  files away, so a message the running app has not finished writing can be lost.
 
 ```sh
 inboxcraft-cli --store ~/mail-store --json mail.list '{"role":"inbox","limit":20}'
@@ -71,20 +75,20 @@ one object on one line:
 | Exit code | Meaning | Codes |
 |---|---|---|
 | 0 | done | |
-| 1 | the command or the store failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `output` |
+| 1 | the command or the store failed | `not_allowed`, `bad_params`, `not_found`, `unknown_command`, `sample_only`, `store`, `panicked`, `output`, `io` (`mcp`) |
 | 2 | wrong arguments, or no store in the directory | `usage`, `no_store` |
 
 The codes are stable snake_case; new ones may be added.
 
 ## What it does not do
 
-- It never prompts and never reads stdin.
+- It never prompts, and only `mcp` reads stdin.
 - It does no network I/O. A job a command asks for, such as fetching a body that is not kept yet or checking an
   account, is not run; `mail.read` answers with what the store holds.
 - The appearance commands (`ui.*.set`) change the session, not the store, so headless they last for the one command
   only.
-- It does not talk to the running app yet: that is the control channel, a later slice. The MCP server
-  (`inboxcraft-cli mcp`) is a later slice too.
+- It does not talk to the running app yet: that is the control channel, a later slice; until then `mcp` runs on a
+  store too.
 
 ## Revision history
 | Date | Change | Summary |
