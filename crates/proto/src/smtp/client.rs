@@ -11,7 +11,7 @@ use super::ehlo::Extensions;
 use super::enhanced::EnhancedCode;
 use super::reply::{Reader, Reply};
 use crate::ProtoError;
-use crate::imap::sasl::{base64, base64_forms, check_credentials, plain_response};
+use crate::imap::sasl::{base64, plain_response};
 use crate::imap::text::Secrets;
 
 /// How the connection started.
@@ -345,7 +345,7 @@ impl Client {
     pub fn auth_plain(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
         self.sign_in_ready("PLAIN")?;
         let response = plain_response(user, password)?;
-        self.hide_credentials(user, password)?;
+        self.secrets.add_credentials(user, password)?;
         self.start(Verb::Auth, format!("AUTH PLAIN {response}").into_bytes(), VecDeque::new());
         Ok(())
     }
@@ -357,7 +357,7 @@ impl Client {
     /// As [`auth_plain`](Self::auth_plain).
     pub fn auth_login(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
         self.sign_in_ready("LOGIN")?;
-        self.hide_credentials(user, password)?;
+        self.secrets.add_credentials(user, password)?;
         let steps = [user, password].into_iter().map(|step| format!("{}\r\n", base64(step.as_bytes())).into_bytes()).collect();
         self.start(Verb::Auth, b"AUTH LOGIN".to_vec(), steps);
         Ok(())
@@ -492,17 +492,6 @@ impl Client {
         }
         if !self.extensions.as_ref().is_some_and(|extensions| extensions.offers_auth(mechanism)) {
             return Err(ProtoError::NotOffered(if mechanism == "PLAIN" { "AUTH PLAIN" } else { "AUTH LOGIN" }));
-        }
-        Ok(())
-    }
-
-    /// Checks the credentials and adds the password to what is never shown, as sent and in every base64 form a
-    /// server may write it back in.
-    fn hide_credentials(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
-        check_credentials(user, password)?;
-        self.secrets.add(password);
-        for form in base64_forms(user, password)? {
-            self.secrets.add(&form);
         }
         Ok(())
     }

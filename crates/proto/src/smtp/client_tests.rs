@@ -52,6 +52,22 @@ fn neither_debug_nor_an_error_shows_the_password() {
 }
 
 #[test]
+fn the_trimmed_password_in_base64_is_hidden_too() {
+    for password in ["hunter2\t", " hunter2 "] {
+        let mut client = Client::new(Transport::Tls);
+        let _ = client.receive(b"220 smtp.example.org\r\n");
+        let _ = client.ehlo("client.example.org");
+        let _ = client.receive(b"250-smtp.example.org\r\n250-ENHANCEDSTATUSCODES\r\n250 AUTH PLAIN LOGIN\r\n");
+        while client.next_event().is_some() {}
+        assert_eq!(client.auth_login("tim", password), Ok(()));
+        // `\0tim\0hunter2` and `hunter2` in base64.
+        assert_eq!(client.receive(b"535 5.7.8 AHRpbQBodW50ZXIy or aHVudGVyMg== is wrong\r\n"), Ok(()));
+        let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+        assert_eq!(refusal.text, "*** or *** is wrong", "{password:?}");
+    }
+}
+
+#[test]
 fn a_refusal_knows_whether_it_is_for_good() {
     let mut client = signed_in(Transport::Tls);
     assert_eq!(client.rset(), Ok(()));

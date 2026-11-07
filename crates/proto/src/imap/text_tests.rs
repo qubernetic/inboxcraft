@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{MAX_TEXT_CHARS, Secrets, tidy};
+use crate::ProtoError;
 
 #[test]
 fn server_text_is_tidied() {
@@ -65,4 +66,26 @@ fn a_secret_is_found_in_any_case() {
     assert!(secrets.shows("hunter2"));
     assert!(!secrets.shows("HUNTER"));
     assert!(!Secrets::default().shows("HUNTER2"));
+}
+
+#[test]
+fn credentials_are_hidden_in_every_form_as_sent_and_trimmed() {
+    let mut secrets = Secrets::default();
+    assert_eq!(secrets.add_credentials("tim", "hunter2\t"), Ok(()));
+    // The password, its PLAIN token and the password alone in base64, with and without padding, as sent and trimmed.
+    for form in [
+        "hunter2\t",
+        "hunter2",
+        "AHRpbQBodW50ZXIyCQ==",
+        "AHRpbQBodW50ZXIyCQ",
+        "aHVudGVyMgk=",
+        "aHVudGVyMgk",
+        "AHRpbQBodW50ZXIy",
+        "aHVudGVyMg==",
+        "aHVudGVyMg",
+    ] {
+        assert_eq!(secrets.tidy(&format!("wrong: {form} here")), "wrong: *** here", "{form:?}");
+    }
+    assert_eq!(Secrets::default().add_credentials("tim", ""), Err(ProtoError::BadArgument("empty user name or password")));
+    assert_eq!(Secrets::default().add_credentials("tim", "a\0b"), Err(ProtoError::BadArgument("user name or password with a NUL")));
 }
