@@ -8,8 +8,8 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use inboxcraft_model::{
-    AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, ScheduleId,
-    StepReport, UidValidity,
+    AccountId, CalendarJob, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap,
+    ScheduleId, StepReport, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
@@ -22,6 +22,7 @@ use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
+use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
 
 /// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
@@ -44,6 +45,8 @@ pub struct Outcome {
     notify: Option<Settings>,
     /// Whether a pin outlasts done from now on.
     pins_outlast_done: Option<bool>,
+    /// Held jobs withdrawn: their removal from the store's queue is in the batch.
+    withdrawn: Vec<JobId>,
 }
 
 /// A job before it has an id.
@@ -55,6 +58,9 @@ pub(crate) struct Pending {
     pub(crate) message: Option<MessageId>,
     /// Kept in the store's job queue until it ends, so a restart runs it again.
     pub(crate) keep: bool,
+    /// A kept job is held back until then before the worker gets it, so it can still be withdrawn: a delete waiting
+    /// out its undo window. A restart hands it out at once.
+    pub(crate) until: Option<Timestamp>,
 }
 
 impl Outcome {
@@ -72,6 +78,7 @@ impl Outcome {
             screener: None,
             notify: None,
             pins_outlast_done: None,
+            withdrawn: Vec::new(),
         }
     }
 
@@ -85,7 +92,7 @@ impl Outcome {
     /// The outcome with a job for the `net` worker of `account`.
     #[must_use]
     pub fn with_job(mut self, account: AccountId, kind: JobKind) -> Self {
-        self.jobs.push(Pending { account, kind, message: None, keep: false });
+        self.jobs.push(Pending { account, kind, message: None, keep: false, until: None });
         self
     }
 
@@ -94,7 +101,7 @@ impl Outcome {
     /// with a last event is kept ([`keepable`]); a check or a watch runs in this session only.
     #[must_use]
     pub fn with_kept_job(mut self, account: AccountId, kind: JobKind) -> Self {
-        self.jobs.push(Pending { account, kind, message: None, keep: true });
+        self.jobs.push(Pending { account, kind, message: None, keep: true, until: None });
         self
     }
 
@@ -106,6 +113,20 @@ impl Outcome {
         for (account, kind) in effects.jobs {
             self = self.with_kept_job(account, kind);
         }
+        self
+    }
+
+    /// The outcome with a job for the `net` worker of `account` that is kept in the store's queue at once but held
+    /// back from the worker until `until` (see [`Session::tick`]); [`Outcome::with_withdrawn`] takes it back before then.
+    pub(crate) fn with_held_job(mut self, account: AccountId, kind: JobKind, until: Timestamp) -> Self {
+        self.jobs.push(Pending { account, kind, message: None, keep: true, until: Some(until) });
+        self
+    }
+
+    /// The outcome taking the held job `job` back: off the store's queue and never handed to the worker.
+    pub(crate) fn with_withdrawn(mut self, job: JobId) -> Self {
+        self.batch.push(Change::RemoveJob(job));
+        self.withdrawn.push(job);
         self
     }
 
@@ -159,7 +180,7 @@ impl Outcome {
 
     /// The outcome with a `FetchBody` job for `message`, unless one is already out.
     pub(crate) fn with_fetch(mut self, account: AccountId, kind: JobKind, message: MessageId) -> Self {
-        self.jobs.push(Pending { account, kind, message: Some(message), keep: false });
+        self.jobs.push(Pending { account, kind, message: Some(message), keep: false, until: None });
         self
     }
 
@@ -251,8 +272,14 @@ pub(crate) struct State {
     pub(crate) next_job: u64,
     pub(crate) next_schedule: u64,
     pub(crate) next_draft: u64,
+    pub(crate) next_calendar: u64,
+    pub(crate) next_event: u64,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
+    /// Kept jobs held back from the workers until a time, in the order they came (see [`Outcome::with_held_job`]).
+    pub(crate) held: Vec<(Timestamp, Job)>,
+    /// The calendar writes out, one for each event, and the ones waiting for them (see [`crate::writes`]).
+    pub(crate) writes: Writes,
     /// The acts to undo, the newest last.
     pub(crate) history: Vec<Act>,
     /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
@@ -293,7 +320,17 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, next_draft: 1, ..Self::default() };
+        let mut state = Self {
+            next_account: 1,
+            next_folder: 1,
+            next_message: 1,
+            next_job: 1,
+            next_schedule: 1,
+            next_draft: 1,
+            next_calendar: 1,
+            next_event: 1,
+            ..Self::default()
+        };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -309,6 +346,12 @@ impl State {
             }
             for draft in store.drafts(account.id())? {
                 state.next_draft = state.next_draft.max(draft.id.get().saturating_add(1));
+            }
+            for calendar in store.calendars(account.id())? {
+                state.next_calendar = state.next_calendar.max(calendar.id.get().saturating_add(1));
+                for event in store.calendar_events(calendar.id)? {
+                    state.next_event = state.next_event.max(event.id.get().saturating_add(1));
+                }
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
@@ -527,8 +570,13 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done, withdrawn } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
+        for job in withdrawn {
+            self.state.held.retain(|(_, held)| held.id != job);
+            self.state.writes.withdraw(job);
+            self.state.kept.remove(&job);
+        }
         if let Some(step) = undo {
             crate::undo::take(&mut self.state.history, step);
         }
@@ -538,6 +586,7 @@ impl Session {
                 Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
                 Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
                 Change::PutDraft(draft) => self.state.next_draft = self.state.next_draft.max(draft.id.get().saturating_add(1)),
+                Change::PutCalendarEvent(event) => self.state.next_event = self.state.next_event.max(event.id.get().saturating_add(1)),
                 Change::PutFolder(folder) => {
                     self.state.next_folder = self.state.next_folder.max(folder.id().get().saturating_add(1));
                     made.insert(folder.account());
@@ -568,6 +617,8 @@ impl Session {
             self.state.notify.forget(account);
             self.state.notices.retain(|notice| notice.account() != account);
             self.jobs.retain(|job| job.account != account);
+            self.state.held.retain(|(_, job)| job.account != account);
+            self.state.writes.forget(account);
         }
         for (sender, allowed) in senders {
             if allowed {
@@ -583,13 +634,16 @@ impl Session {
     }
 
     /// Hands the jobs an earlier run left in the store's queue over again, then asks every account's worker for its
-    /// folder list; the answers bring the folder syncs. A check still running is over: the worker that ran it is gone,
+    /// folder list, and each account with a CalDAV address for its calendars; the answers bring the folder and
+    /// calendar syncs. A check still running is over: the worker that ran it is gone,
     /// so its last step never comes, and the account can be checked again.
     ///
     /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such.
     pub fn start(&mut self) {
         self.started = Some(self.clock.now());
-        self.jobs.append(&mut self.replay);
+        for job in std::mem::take(&mut self.replay) {
+            self.hand_out(job);
+        }
         for held in self.state.accounts.values_mut() {
             if let Some(check) = held.check.as_mut() {
                 check.job = None;
@@ -597,11 +651,18 @@ impl Session {
         }
         let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
         for account in accounts {
-            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None, keep: false });
+            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None, keep: false, until: None });
+        }
+        // A store that cannot list the accounts now leaves the calendars to `calendar.sync`.
+        for account in self.store.accounts().unwrap_or_default() {
+            if let Some(url) = account.caldav() {
+                self.queue(Pending { account: account.id(), kind: crate::calendar::discover(url), message: None, keep: false, until: None });
+            }
         }
     }
 
-    /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
+    /// Hands the held jobs whose time has come to the workers (a delete whose undo window is over), then fires every
+    /// schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
     /// (see [`crate::schedule`]: a snoozed message comes back to the inbox), in one batch, and the jobs that make it on
     /// the server. A returned snooze and a follow-up reminder tell the owner as
     /// [`Session::take_notices`] hands them over, unless they turned that off. Then hands each draft that has been
@@ -612,6 +673,12 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; nothing fires then, and the next tick tries again.
     pub fn tick(&mut self) -> Result<Vec<Fired>, EngineError> {
+        let now = self.clock.now();
+        let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.state.held).into_iter().partition(|(until, _)| *until <= now);
+        self.state.held = waiting;
+        for (_, job) in due {
+            self.hand_out(job);
+        }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
@@ -630,7 +697,7 @@ impl Session {
         Ok(plan.fired)
     }
 
-    /// When the next schedule entry or draft copy is due, if any.
+    /// When the next schedule entry, draft copy or held job is due, if any.
     ///
     /// # Errors
     ///
@@ -638,7 +705,8 @@ impl Session {
     pub fn next_due(&self) -> Result<Option<Timestamp>, EngineError> {
         let entry = self.store.schedule()?.into_iter().map(|entry| entry.due).min();
         let upload = draft::next_upload(&*self.store, &self.state)?;
-        Ok(entry.into_iter().chain(upload).min())
+        let held = self.state.held.iter().map(|(until, _)| *until).min();
+        Ok(entry.into_iter().chain(upload).chain(held).min())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
@@ -655,24 +723,36 @@ impl Session {
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let ended = event.job.filter(|job| self.state.kept.contains(job) && ends_job(&event.kind));
+        // The calendar writes the event lets go, with the new tags of the ones that still wait, in the same batch.
+        let (mut writes, mut held) = (self.state.writes.clone(), self.state.held.clone());
+        let Settled { jobs: released, changes: retagged } = writes.settle(&mut held, event);
         let applied = match plan {
             Some(mut plan) => {
                 if let Some(job) = ended {
                     plan.batch.push(Change::RemoveJob(job));
                 }
+                for change in retagged {
+                    plan.batch.push(change);
+                }
+                plan.state.writes = writes;
+                plan.state.held = held;
                 self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
                 Applied::Changed
             }
             None => {
-                if let Some(job) = ended {
-                    self.commit("event", None, &Batch::new().with(Change::RemoveJob(job)), Vec::new())?;
+                let batch = ended.into_iter().map(Change::RemoveJob).chain(retagged).fold(Batch::new(), Batch::with);
+                if !batch.is_empty() {
+                    self.commit("event", None, &batch, Vec::new())?;
                 }
+                self.state.writes = writes;
+                self.state.held = held;
                 Applied::Dropped
             }
         };
         if let Some(job) = ended {
             self.state.kept.remove(&job);
         }
+        self.jobs.extend(released);
         Ok(applied)
     }
 
@@ -709,12 +789,22 @@ impl Session {
             match job {
                 Some(job) => {
                     self.state.kept.insert(job.id);
-                    self.jobs.push(job);
+                    match pending.until {
+                        Some(until) => self.state.held.push((until, job)),
+                        None => self.hand_out(job),
+                    }
                 }
                 None => self.queue(pending),
             }
         }
         Ok(())
+    }
+
+    /// Hands the kept `job` to its worker, unless it is a calendar write that waits for an earlier one.
+    fn hand_out(&mut self, job: Job) {
+        if let Some(job) = self.state.writes.hand_out(job) {
+            self.jobs.push(job);
+        }
     }
 
     fn queue(&mut self, pending: Pending) {
@@ -747,14 +837,23 @@ pub(crate) fn ends_job(kind: &EventKind) -> bool {
             | EventKind::Expunged { .. }
             | EventKind::Appended { .. }
             | EventKind::FolderCreated { .. }
+            | EventKind::Calendar(_)
             | EventKind::Failed { .. }
     )
 }
 
 /// Whether a job of `kind` may be kept in the store's queue: one with a last event ([`ends_job`]) to take it off. A
-/// check ends with its steps and a watch never ends, so either would be handed out again at every start.
+/// check ends with its steps and a watch never ends, so either would be handed out again at every start. Of the
+/// calendar jobs, the writes are kept; a discovery or a sync is asked for again at the next start.
 pub(crate) fn keepable(kind: &JobKind) -> bool {
-    kind.writes() || matches!(kind, JobKind::SyncFolderList | JobKind::SyncFolder { .. } | JobKind::FetchBody { .. })
+    kind.writes()
+        || matches!(
+            kind,
+            JobKind::SyncFolderList
+                | JobKind::SyncFolder { .. }
+                | JobKind::FetchBody { .. }
+                | JobKind::Calendar(CalendarJob::Put { .. } | CalendarJob::Delete { .. })
+        )
 }
 
 #[cfg(test)]

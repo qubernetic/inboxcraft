@@ -159,7 +159,7 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     for (message, state) in states {
         batch.push(Change::SetMessageState(message, state));
     }
-    let jobs = effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true }).collect();
+    let jobs = effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true, until: None }).collect();
     Ok(Plan { batch, jobs, fired })
 }
 

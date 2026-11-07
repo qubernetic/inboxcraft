@@ -4,7 +4,7 @@
 //! The undo history: each act the owner or an agent makes stores its inverse, and `history.undo` walks back through
 //! them, newest first. It lives for the session only and holds at most [`MAX_HISTORY`] acts.
 
-use inboxcraft_model::{EmailAddress, Flag, FolderId, MessageId, MessageState, Sender};
+use inboxcraft_model::{CalendarEvent, CalendarEventId, EmailAddress, Flag, FolderId, MessageId, MessageState, Sender};
 
 use crate::AgentClass;
 
@@ -33,6 +33,19 @@ pub(crate) enum Inverse {
     Screen(Box<Screened>),
     /// Put `message` in `state` again, and back in `to` when it moved: done, park and pin.
     State { message: MessageId, to: Option<FolderId>, state: MessageState },
+    /// Take a calendar event's change back.
+    Event(Box<EventUndo>),
+}
+
+/// What takes a change to a calendar event back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EventUndo {
+    /// Take the new event `event` off again, on the server too.
+    Create(CalendarEventId),
+    /// Put the event back as it `was`, on the server too.
+    Update(CalendarEvent),
+    /// Bring the deleted event back as it `was`, while its delete is still held.
+    Delete(CalendarEvent),
 }
 
 /// What takes a screener decision or a group choice on `address` back: the sender as it was `before` (`None`:

@@ -18,13 +18,20 @@ pub const MAX_DEPTH: usize = 8;
 const FOLD_AT: usize = 75;
 
 /// A property parameter: a name and one or more values.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Param {
     name: String,
     values: Vec<String>,
 }
 
 impl Param {
+    /// The parameter `name` (put in capitals) with `values` (one empty value when there are none).
+    #[must_use]
+    pub fn new(name: &str, values: Vec<String>) -> Self {
+        let values = if values.is_empty() { vec![String::new()] } else { values };
+        Self { name: name.to_ascii_uppercase(), values }
+    }
+
     /// The parameter's name, in capitals.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -65,10 +72,9 @@ impl Property {
     /// The property with the parameter `name` set to `values` (one empty value when there are none).
     #[must_use]
     pub fn with_param_values(mut self, name: &str, values: Vec<String>) -> Self {
-        let name = name.to_ascii_uppercase();
-        let values = if values.is_empty() { vec![String::new()] } else { values };
-        self.params.retain(|param| param.name != name);
-        self.params.push(Param { name, values });
+        let param = Param::new(name, values);
+        self.params.retain(|held| held.name != param.name);
+        self.params.push(param);
         self
     }
 

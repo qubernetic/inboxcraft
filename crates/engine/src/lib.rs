@@ -67,6 +67,11 @@
 //!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
 //!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and
 //!   follow-up reminders. The front end takes the notices with [`Session::take_notices`].
+//! - Calendars (`calendar`): the start and `calendar.sync` (`safe`) ask each account with a CalDAV address
+//!   (`calendar.server`, `owner`) for its calendars, and the worker's reports land in the store's calendar tables.
+//!   `calendar.list` and `event.list` (`safe`) read them, repeating events expanded, each occurrence on the computer's
+//!   clock with the event's own zone when it differs; `event.create`, `event.update` and `event.delete` (`owner`)
+//!   write to the server, a delete only once its undo window is over, and `history.undo` takes each back.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -87,6 +92,7 @@
 mod act;
 pub mod appearance;
 mod arrive;
+mod calendar;
 mod class;
 mod cmd;
 mod draft;
@@ -104,6 +110,7 @@ mod template;
 mod undo;
 mod view;
 mod write;
+mod writes;
 
 pub use arrive::screener::ScreenerMode;
 pub use class::{AgentClass, Caller};

@@ -433,13 +433,16 @@ impl Account {
     }
 }
 
-/// Whether `url` is an `https` URL with a host and no user name, white space or control character, short enough. The
-/// host and port follow the rules the CalDAV client parses them by, so an address saved here is one it can use: an
-/// ASCII host name or an IPv6 address in brackets, and a port of digits from 1 to 65535.
+/// Whether `url` is an `https` URL with a host and no user name, query, fragment, white space or control character,
+/// short enough: a token typed into a query would be repeated wherever the address is shown. The host and port follow
+/// the rules the CalDAV client parses them by, so an address saved here is one it can use: an ASCII host name or an
+/// IPv6 address in brackets, and a port of digits from 1 to 65535.
 fn is_https_url(url: &str) -> bool {
     let Some(rest) = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).and_then(|_| url.get(8..)) else { return false };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    url.len() <= Account::MAX_CALDAV_LEN && is_authority(authority) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+    url.len() <= Account::MAX_CALDAV_LEN
+        && is_authority(authority)
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '?' | '#'))
 }
 
 /// Whether `authority` is a host and an optional port, without a user name.
