@@ -10,9 +10,12 @@
 //! writes one error to stderr (with `--json`, one object `{"error":{"code":..,"message":..}}`) and exits non-zero:
 //! 1 when the command or the store failed, 2 when the arguments were wrong or `<dir>` holds no store.
 //!
-//! The CLI never prompts and never reads stdin. It does no network I/O: a job a command asks for (fetching a body,
-//! checking an account) is not run. It never creates a store, so a mistyped directory is an error, not a new empty
-//! mailbox.
+//! `inboxcraft-cli mcp --store <dir>` runs the read-only MCP server ([`inboxcraft_mcp::Server`]) on the store over
+//! stdin and stdout until stdin ends (`docs/mcp.md`).
+//!
+//! The CLI never prompts, and only `mcp` reads stdin. It does no network I/O: a job a command asks for (fetching a
+//! body, checking an account) is not run. It never creates a store, so a mistyped directory is an error, not a new
+//! empty mailbox.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -20,10 +23,11 @@ mod text;
 
 use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 
 use inboxcraft_engine::{Caller, EngineError, Registry, Session};
+use inboxcraft_mcp::Server;
 use inboxcraft_store::{DATABASE_FILE, Sqlite, StoreConfig};
 use inboxcraft_time::SystemClock;
 use serde_json::{Value, json};
@@ -44,11 +48,13 @@ const HELP: &str = "\
 Usage:
   inboxcraft-cli --store <dir> [--json] <command> [<params>]
   inboxcraft-cli [--json] commands
+  inboxcraft-cli --store <dir> mcp
   inboxcraft-cli --version
   inboxcraft-cli --help
 
 Runs one command by id (`mail.list`) on the store in <dir>, as an agent: only safe commands run.
 <params> is a JSON object, `{}` when left out. `commands` lists every command with its class.
+`mcp` serves the read-only MCP tools on the store over stdin and stdout until stdin ends.
 --json writes the answer, or the error, as one JSON object on one line.
 Exit codes: 0 done, 1 the command or the store failed, 2 wrong arguments or no store in <dir>.
 ";
@@ -82,15 +88,17 @@ enum Request {
     Help,
     Commands,
     Run { store: PathBuf, id: String, params: Value },
+    Mcp { store: PathBuf },
 }
 
 /// Runs the app with its command-line arguments (without the program name) and returns the process exit code.
 ///
 /// The answer goes to `out`; a failure writes one error to `err` and nothing to `out`. A failed write is exit code 1.
-pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+/// Only `mcp` reads `input`, its requests, until it ends.
+pub fn run_with_input(args: impl IntoIterator<Item = OsString>, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let args: Vec<OsString> = args.into_iter().take(MAX_ARGS.saturating_add(1)).collect();
     let json = args.iter().take_while(|arg| *arg != "--").any(|arg| arg == "--json");
-    let answer = parse(&args).and_then(|request| answer(request, json));
+    let answer = parse(&args).and_then(|request| answer(request, json, input, out));
     let failure = match answer {
         Ok(text) => match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
             Ok(()) => return 0,
@@ -106,6 +114,11 @@ pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &
     // The exit code reports the failure; a closed stderr leaves nothing else to report on.
     let _ = writeln!(err, "{shown}");
     failure.exit
+}
+
+/// [`run_with_input`] with an empty input: `mcp` ends at once, every other command reads none.
+pub fn run(args: impl IntoIterator<Item = OsString>, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    run_with_input(args, &mut io::empty(), out, err)
 }
 
 /// The request the arguments make.
@@ -152,9 +165,10 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
     match words.as_slice() {
         [] => Err(Failure::usage("give a command id, or `commands` for the list (see --help)")),
         ["commands"] => Ok(Request::Commands),
+        ["mcp"] => Ok(Request::Mcp { store: store.ok_or_else(no_store)? }),
+        ["mcp", ..] => Err(Failure::usage("mcp takes no parameters: the tools take theirs from the client")),
         [id, rest @ ..] if rest.len() <= 1 => {
-            let store = store
-                .ok_or_else(|| Failure::usage("give --store <dir>: the CLI runs on a local store (talking to the running app is not built yet)"))?;
+            let store = store.ok_or_else(no_store)?;
             let params = match rest.first() {
                 Some(text) => serde_json::from_str::<Value>(text)
                     .map_err(|error| Failure::usage(format!("the parameters are not JSON: {}", echo(&error.to_string()))))?,
@@ -169,24 +183,35 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
     }
 }
 
-/// The text to write for `request`.
-fn answer(request: Request, json: bool) -> Result<String, Failure> {
+/// The usage error of a command without `--store`.
+fn no_store() -> Failure {
+    Failure::usage("give --store <dir>: the CLI runs on a local store (talking to the running app is not built yet)")
+}
+
+/// A session on the store in `store`, which must hold one: the CLI never creates a store.
+fn open(store: &Path) -> Result<Session, Failure> {
+    if !store.join(DATABASE_FILE).is_file() {
+        return Err(Failure { code: "no_store", message: format!("there is no store in {}", echo(&store.display().to_string())), exit: USAGE });
+    }
+    let opened = Sqlite::open(store, StoreConfig::default()).map_err(|error| Failure::engine(&error.into()))?;
+    Session::new(Box::new(opened), Box::new(SystemClock::new())).map_err(|error| Failure::engine(&error))
+}
+
+/// The text to write for `request`. `mcp` writes its answers to `out` itself, one a line, as it reads `input`.
+fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn Write) -> Result<String, Failure> {
     let value = match request {
         Request::Version => return Ok(format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
         Request::Help => return Ok(HELP.to_owned()),
         Request::Commands if !json => return commands_text(),
         Request::Commands => commands()?,
-        Request::Run { store, id, params } => {
-            if !store.join(DATABASE_FILE).is_file() {
-                return Err(Failure {
-                    code: "no_store",
-                    message: format!("there is no store in {}", echo(&store.display().to_string())),
-                    exit: USAGE,
-                });
-            }
-            let opened = Sqlite::open(&store, StoreConfig::default()).map_err(|error| Failure::engine(&error.into()))?;
-            let mut session = Session::new(Box::new(opened), Box::new(SystemClock::new())).map_err(|error| Failure::engine(&error))?;
-            session.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error))?
+        Request::Run { store, id, params } => open(&store)?.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error))?,
+        Request::Mcp { store } => {
+            Server::new(open(&store)?).serve(input, out).map_err(|error| Failure {
+                code: "io",
+                message: format!("the MCP connection failed: {error}"),
+                exit: FAILED,
+            })?;
+            return Ok(String::new());
         }
     };
     Ok(if json { format!("{value}\n") } else { text::render(&value) })
