@@ -40,7 +40,7 @@ macro_rules! modules {
     };
 }
 
-modules!(account, act, compose, folder, mail, notify, outbox, remote, sample, schedule, send, triage, ui);
+modules!(account, act, compose, folder, mail, notify, outbox, remote, sample, schedule, send, template, triage, ui);
 
 /// Every built-in command.
 pub(crate) fn all() -> Vec<CommandSpec> {
@@ -78,6 +78,9 @@ mod modules_tests;
 #[path = "reader_tests.rs"]
 mod reader_tests;
 #[cfg(test)]
+#[path = "reply_tests.rs"]
+pub(crate) mod reply_tests;
+#[cfg(test)]
 #[path = "sample_tests.rs"]
 mod sample_tests;
 #[cfg(test)]
@@ -89,6 +92,9 @@ mod send_tests;
 #[cfg(test)]
 #[path = "snooze_tests.rs"]
 mod snooze_tests;
+#[cfg(test)]
+#[path = "template_tests.rs"]
+mod template_tests;
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;

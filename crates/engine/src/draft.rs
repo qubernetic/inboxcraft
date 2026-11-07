@@ -18,10 +18,10 @@
 
 use std::time::Duration;
 
-use inboxcraft_mime::{Mailbox, MessageBuilder, MimeError};
+use inboxcraft_mime::{Attachment, Mailbox, MessageBuilder, MimeError};
 use inboxcraft_model::{
-    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, OutboxState, Role,
-    Uid, UidSet, UidValidity,
+    Account, AccountId, AddressError, Draft, DraftCopy, DraftId, EmailAddress, Flag, Flags, FolderId, JobId, JobKind, MessageId, MessageRef,
+    OutboxState, Role, Uid, UidSet, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{MailDate, Offset, Timestamp, Zone};
@@ -29,7 +29,13 @@ use serde_json::{Value, json};
 
 use crate::session::{Pending, State};
 use crate::sync::Plan;
-use crate::{Context, EngineError, act, json, view};
+use crate::{Context, EngineError, act, json, reply, template, view};
+
+/// The longest subject, in bytes.
+pub(crate) const MAX_SUBJECT_BYTES: usize = 998;
+
+/// The longest text, in bytes.
+pub(crate) const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
 
 /// How long a draft stays still before its copy goes to the server.
 pub(crate) const UPLOAD_AFTER: Duration = Duration::from_secs(10);
@@ -50,8 +56,10 @@ pub(crate) fn recipient(text: &str) -> Result<(Option<&str>, EmailAddress), Addr
     Ok((name, EmailAddress::new(address)?))
 }
 
-/// What keeps the draft from being sent: `no_recipient`, `bad_address`; none when it can go.
-pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
+/// What keeps the draft from being sent: `no_recipient`, `bad_address`, `blank` (a template's blank not filled in),
+/// `forward_body` (the body of the message it forwards is no longer kept, so neither are its attachments); none when
+/// it can go.
+pub(crate) fn blocks(store: &dyn Storage, draft: &Draft) -> Result<Vec<&'static str>, EngineError> {
     let mut blocks = Vec::new();
     if draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty() {
         blocks.push("no_recipient");
@@ -59,7 +67,15 @@ pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
     if draft.to.iter().chain(&draft.cc).chain(&draft.bcc).any(|text| recipient(text).is_err()) {
         blocks.push("bad_address");
     }
-    blocks
+    if !template::open_blanks(draft).is_empty() {
+        blocks.push("blank");
+    }
+    if let Some(message) = draft.forwards
+        && store.body(message)?.is_none()
+    {
+        blocks.push("forward_body");
+    }
+    Ok(blocks)
 }
 
 /// Whether `draft` is on its way: its outbox item waits for the worker's answer. Such a draft is neither sent
@@ -69,9 +85,9 @@ pub(crate) fn on_its_way(store: &dyn Storage, draft: DraftId) -> Result<bool, En
 }
 
 /// A draft as the commands answer it, every recipient checked.
-pub(crate) fn json(draft: &Draft) -> Value {
-    let blocks = blocks(draft);
-    json!({
+pub(crate) fn json(store: &dyn Storage, draft: &Draft) -> Result<Value, EngineError> {
+    let blocks = blocks(store, draft)?;
+    Ok(json!({
         "id": draft.id.get(),
         "account": draft.account.get(),
         "saved": json::date(draft.saved),
@@ -81,10 +97,14 @@ pub(crate) fn json(draft: &Draft) -> Value {
         "subject": draft.subject,
         "text": draft.text,
         "answers": draft.answers.map(MessageId::get),
+        "in_reply_to": draft.in_reply_to.as_ref().map(MessageRef::as_str),
+        "references": draft.references.iter().map(MessageRef::as_str).collect::<Vec<_>>(),
+        "forwards": draft.forwards.map(MessageId::get),
+        "blanks": template::open_blanks(draft),
         "uploaded": draft.uploaded.is_some(),
         "sendable": blocks.is_empty(),
         "blocks": blocks,
-    })
+    }))
 }
 
 fn recipients(list: &[String]) -> Value {
@@ -181,8 +201,10 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
         if draft.saved.saturating_add(UPLOAD_AFTER) > context.now() {
             continue;
         }
-        // A copy the builder refuses is not sent; the draft waits for its next change.
-        if let Ok(raw) = message(&account, &draft) {
+        // A copy the builder refuses is not sent; the draft waits for its next change. A forward whose message's body
+        // is gone goes up without its attachments: it is a copy, and Send refuses it.
+        let attachments = reply::forwarded(context.store(), &draft)?.unwrap_or_default();
+        if let Ok(raw) = message(&account, &draft, &attachments) {
             let flags: Flags = [Flag::Seen, Flag::Draft].into_iter().collect();
             let kind =
                 JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw, draft: Some(draft.id), message: None };
@@ -193,15 +215,21 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
     Ok((batch, jobs))
 }
 
-/// The copy of `draft` of `account`: From, Date (its saved time), To and Cc with the addresses that are ones, Subject
-/// and the text.
-fn message(account: &Account, draft: &Draft) -> Result<Vec<u8>, MimeError> {
-    built(account, draft, MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)), None)
+/// The copy of `draft` of `account`: From, Date (its saved time), To and Cc with the addresses that are ones, Subject,
+/// the thread's ids, the text and `attachments`.
+fn message(account: &Account, draft: &Draft, attachments: &[Attachment]) -> Result<Vec<u8>, MimeError> {
+    built(account, draft, MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)), None, attachments)
 }
 
 /// `draft` of `account` as a message: From, `date`, To and Cc with the addresses that are ones, Subject,
-/// `message_id` and the text. Bcc is never in it.
-pub(crate) fn built(account: &Account, draft: &Draft, date: Option<MailDate>, message_id: Option<&str>) -> Result<Vec<u8>, MimeError> {
+/// `message_id`, `In-Reply-To` and `References`, the text and `attachments`. Bcc is never in it.
+pub(crate) fn built(
+    account: &Account,
+    draft: &Draft,
+    date: Option<MailDate>,
+    message_id: Option<&str>,
+    attachments: &[Attachment],
+) -> Result<Vec<u8>, MimeError> {
     let address = account.address().as_str();
     let from = account.display_name().map_or_else(|| Mailbox::new(address), |name| Mailbox::named(name, address));
     let mut builder = MessageBuilder::new().from(from).subject(&draft.subject).text(&draft.text);
@@ -210,6 +238,15 @@ pub(crate) fn built(account: &Account, draft: &Draft, date: Option<MailDate>, me
     }
     if let Some(id) = message_id {
         builder = builder.message_id(id);
+    }
+    if let Some(id) = &draft.in_reply_to {
+        builder = builder.in_reply_to(id.as_str());
+    }
+    for id in &draft.references {
+        builder = builder.reference(id.as_str());
+    }
+    for attachment in attachments {
+        builder = builder.attach(attachment.clone());
     }
     for (name, address) in draft.to.iter().filter_map(|text| recipient(text).ok()) {
         builder = builder.to(mailbox(name, &address));

@@ -13,7 +13,7 @@ use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::message::timestamp as optional;
-use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid, UidValidity};
+use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, MessageRef, ScheduleId, Uid, UidValidity};
 
 /// A message the owner is writing, kept on every change so a kill loses none of it.
 ///
@@ -57,6 +57,19 @@ pub struct Draft {
     /// back, so no further copy goes up while the draft stays on this account.
     #[serde(default)]
     pub unnamed: bool,
+    /// The `Message-ID` of the message it answers, for `In-Reply-To`.
+    #[serde(default)]
+    pub in_reply_to: Option<MessageRef>,
+    /// The ids of the thread up to the message it answers, oldest first, for `References`.
+    #[serde(default)]
+    pub references: Vec<MessageRef>,
+    /// The message it forwards, whose attachments go with it.
+    #[serde(default)]
+    pub forwards: Option<MessageId>,
+    /// The marks of the blanks a template left in it; while one of them is still in the subject or the text, the
+    /// draft cannot be sent.
+    #[serde(default)]
+    pub blanks: Vec<String>,
 }
 
 /// Where the server keeps a copy of a draft.
@@ -87,6 +100,10 @@ impl Draft {
             uploaded: None,
             synced: None,
             unnamed: false,
+            in_reply_to: None,
+            references: Vec::new(),
+            forwards: None,
+            blanks: Vec::new(),
         }
     }
 }
@@ -104,6 +121,9 @@ impl fmt::Debug for Draft {
             .field("uploaded", &self.uploaded)
             .field("synced", &self.synced)
             .field("unnamed", &self.unnamed)
+            .field("threaded", &(self.in_reply_to.is_some(), self.references.len()))
+            .field("forwards", &self.forwards)
+            .field("blanks", &self.blanks.len())
             .finish()
     }
 }

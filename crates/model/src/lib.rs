@@ -68,7 +68,7 @@ mod text;
 mod thread;
 mod uid_set;
 
-pub use account::{Account, AccountError, Host, Security, Server};
+pub use account::{Account, AccountError, Host, Security, Server, Template};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
 pub use calendar::{CalendarJob, CalendarListing, CalendarReport, FetchedEvent, KnownEvent};
 pub use check::{CheckStep, MAX_ISSUER_CHARS, StepReport, StepStatus};

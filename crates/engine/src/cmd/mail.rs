@@ -278,7 +278,7 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     for account in store.accounts()? {
         for draft in store.drafts(account.id())? {
             if draft.answers.is_some_and(|answers| thread.contains(&answers)) {
-                drafts.push(crate::draft::json(&draft));
+                drafts.push(crate::draft::json(store, &draft)?);
             }
         }
     }

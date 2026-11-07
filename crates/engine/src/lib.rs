@@ -41,6 +41,12 @@
 //!   (`safe`) keep a draft in the store at every change, from the account that last sent and with its signature
 //!   (`compose.signature`, `owner`), its recipients checked; [`Session::tick`] copies a draft that has been still a
 //!   while to the Drafts folder, each copy replacing the one before where the server names it.
+//! - Replies and forwards (`reply`): `compose.reply`, `compose.reply_all` and `compose.forward` (`safe`) make a draft
+//!   from a message: the right recipients without the owner's own addresses, `Re: ` or `Fwd: `, `In-Reply-To` and
+//!   `References` so the reply joins the thread, the message quoted below a line of our own, and a forward's
+//!   attachments taken from the kept body when the draft is built. Templates live on their account
+//!   (`template.list`, `safe`; `template.save` and `template.delete`, `owner`); `compose.template` (`safe`) fills
+//!   one into a draft, and a blank left in it blocks Send.
 //! - The screener (`screener.*`): new mail from a sender the owner neither knows nor decided is held before the
 //!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
 //!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
@@ -89,10 +95,12 @@ mod json;
 pub mod notify;
 mod params;
 mod registry;
+mod reply;
 pub mod schedule;
 mod send;
 mod session;
 mod sync;
+mod template;
 mod undo;
 mod view;
 mod write;

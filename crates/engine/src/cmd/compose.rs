@@ -7,7 +7,9 @@
 //! A draft is in the store after every command that changes it, so a kill loses nothing typed; its copy goes to the
 //! server later (see `crate::draft`). Writing, changing and discarding a draft is `safe`: nothing leaves the
 //! computer but the copy in the owner's own Drafts folder. The signature is a setting, so `owner`. A complaint about
-//! the parameters repeats nothing that was sent, so no word of a draft lands in an error. A draft on its way (sent,
+//! the parameters repeats nothing that was sent, so no word of a draft lands in an error. Reply, reply all and forward
+//! make a draft from a message (see `crate::reply`), and `compose.template` puts one of the account's templates into
+//! a draft (see `crate::template`); all are `safe` like any draft. A draft on its way (sent,
 //! and the server's answer not in yet) is neither changed nor discarded: the answer would lose the change, or find no
 //! draft and keep no Sent copy of the message that went.
 
@@ -18,14 +20,15 @@ use serde_json::{Value, json};
 
 use crate::draft::{self, json as draft_json};
 use crate::params::decode_quietly;
+use crate::reply::Kind;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[NEW, UPDATE, SHOW, LIST, DISCARD, SIGNATURE];
+pub(crate) const COMMANDS: &[CommandSpec] = &[NEW, UPDATE, SHOW, LIST, DISCARD, SIGNATURE, REPLY, REPLY_ALL, FORWARD, TEMPLATE];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "subject", "text", "signature"];
+pub(crate) const FIELDS: &[&str] = &["id", "account", "answers", "to", "cc", "bcc", "subject", "text", "signature", "name"];
 
 /// The most recipients in one of `to`, `cc` and `bcc`.
 pub(crate) const MAX_RECIPIENTS: usize = 500;
@@ -33,11 +36,7 @@ pub(crate) const MAX_RECIPIENTS: usize = 500;
 /// The longest recipient as typed, in bytes.
 pub(crate) const MAX_RECIPIENT_BYTES: usize = 998;
 
-/// The longest subject, in bytes.
-pub(crate) const MAX_SUBJECT_BYTES: usize = 998;
-
-/// The longest text, in bytes.
-pub(crate) const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) use crate::draft::{MAX_SUBJECT_BYTES, MAX_TEXT_BYTES};
 
 /// The longest signature, in bytes.
 pub(crate) const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
@@ -76,6 +75,34 @@ pub(crate) const SIGNATURE: CommandSpec = CommandSpec {
     run: signature,
 };
 
+/// `compose.reply`: a draft answering a message's sender.
+pub(crate) const REPLY: CommandSpec =
+    CommandSpec { id: "compose.reply", class: Some(AgentClass::Safe), summary: "Start a reply to a message's sender, quoting it", run: reply };
+
+/// `compose.reply_all`: a draft answering a message's sender and its other recipients, but the owner.
+pub(crate) const REPLY_ALL: CommandSpec = CommandSpec {
+    id: "compose.reply_all",
+    class: Some(AgentClass::Safe),
+    summary: "Start a reply to a message's sender and every other recipient, quoting it",
+    run: reply_all,
+};
+
+/// `compose.forward`: a draft forwarding a message inline, with its attachments.
+pub(crate) const FORWARD: CommandSpec = CommandSpec {
+    id: "compose.forward",
+    class: Some(AgentClass::Safe),
+    summary: "Start a forward of a message, inline and with its attachments",
+    run: forward,
+};
+
+/// `compose.template`: puts a template into a draft, its names filled in and its blanks marked.
+pub(crate) const TEMPLATE: CommandSpec = CommandSpec {
+    id: "compose.template",
+    class: Some(AgentClass::Safe),
+    summary: "Put a template into a draft, names filled in and blanks marked",
+    run: use_template,
+};
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NewParams {
@@ -96,7 +123,67 @@ fn new(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         None => None,
     };
     let draft = Draft { text: draft::signed(&account), answers, ..Draft::new(draft::next_id(context.state()), account.id(), context.now()) };
-    Ok(Outcome::new(draft_json(&draft)).with_change(Change::PutDraft(draft)))
+    Ok(Outcome::new(draft_json(context.store(), &draft)?).with_change(Change::PutDraft(draft)))
+}
+
+/// The message a reply or forward is made from.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessageParams {
+    /// The message.
+    id: u64,
+}
+
+fn reply(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    made(context, decode_quietly(REPLY.id, params)?, Kind::Reply)
+}
+
+fn reply_all(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    made(context, decode_quietly(REPLY_ALL.id, params)?, Kind::ReplyAll)
+}
+
+fn forward(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    made(context, decode_quietly(FORWARD.id, params)?, Kind::Forward)
+}
+
+/// The draft `kind` makes from the message, kept at once; a forward's answer lists the attachments that go with it.
+fn made(context: &Context<'_>, params: MessageParams, kind: Kind) -> Result<Outcome, EngineError> {
+    let entry = context.store().message(MessageId::new(params.id))?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let message = entry.message();
+    let account = held_account(context, message.account().get())?;
+    let (draft, attachments) = crate::reply::make(context, &account, message, kind)?;
+    let mut answer = draft_json(context.store(), &draft)?;
+    if kind == Kind::Forward
+        && let Some(fields) = answer.as_object_mut()
+    {
+        fields.insert("attachments".into(), attachments);
+    }
+    Ok(Outcome::new(answer).with_change(Change::PutDraft(draft)))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TemplateParams {
+    /// The draft.
+    id: u64,
+    /// The template's name, without case.
+    name: String,
+}
+
+fn use_template(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: TemplateParams = decode_quietly(TEMPLATE.id, params)?;
+    let mut draft = held_draft(context, params.id)?;
+    if draft::on_its_way(context.store(), draft.id)? {
+        return Err(EngineError::bad_params(TEMPLATE.id, ON_ITS_WAY));
+    }
+    let account = held_account(context, draft.account.get())?;
+    let template = account.template(&params.name).ok_or_else(|| EngineError::bad_params(TEMPLATE.id, "the account has no template of that name"))?;
+    crate::template::apply(template, &mut draft, &account);
+    if draft.text.len() > MAX_TEXT_BYTES || draft.subject.len() > MAX_SUBJECT_BYTES {
+        return Err(EngineError::bad_params(TEMPLATE.id, "the text would be too long"));
+    }
+    draft.saved = context.now();
+    Ok(Outcome::new(draft_json(context.store(), &draft)?).with_change(Change::PutDraft(draft)))
 }
 
 #[derive(Deserialize)]
@@ -155,7 +242,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         draft.account = to.id();
     }
     draft.saved = context.now();
-    *outcome.value_mut() = draft_json(&draft);
+    *outcome.value_mut() = draft_json(context.store(), &draft)?;
     Ok(outcome.with_change(Change::PutDraft(draft)))
 }
 
@@ -168,7 +255,7 @@ struct IdParams {
 
 fn show(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: IdParams = decode_quietly(SHOW.id, params)?;
-    Ok(Outcome::new(draft_json(&held_draft(context, params.id)?)))
+    Ok(Outcome::new(draft_json(context.store(), &held_draft(context, params.id)?)?))
 }
 
 #[derive(Deserialize)]
@@ -186,7 +273,8 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         drafts.extend(context.store().drafts(account)?);
     }
     drafts.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
-    Ok(Outcome::new(json!({ "drafts": drafts.iter().map(draft_json).collect::<Vec<_>>() })))
+    let drafts = drafts.iter().map(|draft| draft_json(context.store(), draft)).collect::<Result<Vec<_>, _>>()?;
+    Ok(Outcome::new(json!({ "drafts": drafts })))
 }
 
 fn discard(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
@@ -223,7 +311,7 @@ fn signature(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErr
     Ok(Outcome::new(answer).with_change(Change::PutAccount(account)))
 }
 
-fn held_account(context: &Context<'_>, id: u64) -> Result<Account, EngineError> {
+pub(crate) fn held_account(context: &Context<'_>, id: u64) -> Result<Account, EngineError> {
     context.store().accounts()?.into_iter().find(|account| account.id().get() == id).ok_or(EngineError::NotFound { what: "account", id })
 }
 
