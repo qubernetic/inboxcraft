@@ -439,7 +439,8 @@ runs with `cargo +nightly fuzz run <name>` from the repository root. The targets
 (#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
 (#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
 (#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations, and
-`html_display` (#29), the safe HTML display.
+`html_display` (#29), the safe HTML display, `ui_reader`, the reader's picture decoder and quote splitter, and
+`ui_typed_time` (#129), a time typed into the time picker.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
