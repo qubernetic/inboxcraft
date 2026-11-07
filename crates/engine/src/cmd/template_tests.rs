@@ -162,3 +162,16 @@ fn compose_template_refuses_what_is_not_there() {
     assert!(bad(session.run("compose.template", &json!({ "id": draft, "name": "Ok" }))));
     assert_eq!(session.store().draft(DraftId::new(draft)).unwrap().unwrap().text, "\n\n-- \nAnna\nExample Ltd.");
 }
+
+#[test]
+fn a_name_that_looks_like_a_blank_does_not_keep_send_blocked() {
+    let mut session = session();
+    save(&mut session, 1, "when", "", "{name}, which {?date}?");
+    let id = draft_to(&mut session, "[[date]] <odd@example.org>");
+    let answer = session.run("compose.template", &json!({ "id": id, "name": "when" })).unwrap();
+    assert_eq!(answer["blanks"], json!(["[[date 2]]"]));
+    let text = answer["text"].as_str().unwrap().replace("[[date 2]]", "Friday");
+    let filled = session.run("compose.update", &json!({ "id": id, "text": text })).unwrap();
+    assert!(filled["text"].as_str().unwrap().starts_with("[[date]], which Friday?"));
+    assert_eq!(filled["sendable"], json!(true));
+}

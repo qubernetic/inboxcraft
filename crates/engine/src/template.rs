@@ -7,8 +7,9 @@
 //! name and the first word of it) and `{my_name}` (the account's display name). `{?prompt}` is a blank the owner
 //! fills in. A filled-in template marks each blank, and each placeholder whose name is not known, as `[[prompt]]`
 //! (`[[name]]`, `[[first name]]`, `[[my name]]`); the draft remembers the marks, and while one of them is still in its
-//! subject or text it cannot be sent. A mark the draft holds already (a quoted message may) is made unique with a
-//! number (`[[day 2]]`), so the sender's text does not keep Send blocked. Anything else in braces stays as it is.
+//! subject or text it cannot be sent. A mark the draft or a filled-in name holds already (a quoted message may) is
+//! made unique with a number (`[[day 2]]`), so the sender's words do not keep Send blocked. Anything else in braces
+//! stays as it is.
 
 use inboxcraft_model::{Account, Draft, Template};
 
@@ -27,8 +28,10 @@ const MAX_PLACEHOLDER_BYTES: usize = 2 + MAX_PROMPT_CHARS * 4;
 /// none, and the marks of its blanks remembered.
 pub(crate) fn apply(template: &Template, draft: &mut Draft, account: &Account) {
     let recipient = draft.to.iter().find_map(|text| draft::recipient(text).ok().and_then(|(name, _)| name.map(str::to_owned)));
-    let mut fill =
-        Fill { recipient, me: account.display_name().map(str::to_owned), taken: format!("{}\n{}", draft.subject, draft.text), marks: Vec::new() };
+    let me = account.display_name().map(str::to_owned);
+    // The names filled in are taken too: a mark found in one would keep Send blocked once the blank is filled.
+    let taken = format!("{}\n{}\n{}\n{}", draft.subject, draft.text, recipient.as_deref().unwrap_or_default(), me.as_deref().unwrap_or_default());
+    let mut fill = Fill { recipient, me, taken, marks: Vec::new() };
     let subject = fill.text(template.subject());
     let text = fill.text(template.text());
     if draft.subject.trim().is_empty() {
@@ -51,7 +54,7 @@ pub(crate) fn open_blanks(draft: &Draft) -> Vec<&str> {
 struct Fill {
     recipient: Option<String>,
     me: Option<String>,
-    /// The draft's own words, which a new mark must not be found in.
+    /// The draft's own words and the names filled in, which a new mark must not be found in.
     taken: String,
     /// Each prompt and its mark.
     marks: Vec<(String, String)>,
