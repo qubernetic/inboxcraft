@@ -204,6 +204,53 @@ fn calendar_server_without_an_address_forgets_the_calendars() {
     assert!(session.take_jobs().is_empty());
 }
 
+/// The session with event 2 deleted, its delete held for the undo window.
+fn with_a_held_delete() -> (Session, inboxcraft_time::FakeClock) {
+    let clock = inboxcraft_time::FakeClock::new(crate::test_support::at(crate::test_support::NOW));
+    let mut session = super::calendar_tests::session_at(&clock);
+    session.run("event.delete", &json!({ "id": 2 })).unwrap();
+    assert_eq!(session.store().queued_jobs().unwrap().len(), 1);
+    (session, clock)
+}
+
+#[test]
+fn calendar_server_on_another_server_forgets_the_calendars_and_the_held_writes() {
+    for url in ["https://cal.example.net/", "https://dav.example.org:8443/", "https://cal.example.net/calendars/anna/"] {
+        let (mut session, clock) = with_a_held_delete();
+        session.run("calendar.server", &json!({ "account": 1, "url": url })).unwrap();
+        assert!(session.store().calendars(AccountId::new(1)).unwrap().is_empty(), "{url}");
+        assert!(session.store().calendar_events(CalendarId::new(1)).unwrap().is_empty(), "{url}");
+        assert_eq!(session.store().queued_jobs().unwrap().len(), 0, "{url}");
+        assert_eq!(calendar_jobs(&mut session), [CalendarJob::Discover { url: None }]);
+        clock.advance(std::time::Duration::from_secs(10));
+        session.tick().unwrap();
+        assert!(calendar_jobs(&mut session).is_empty(), "{url}");
+        assert_eq!(session.next_due().unwrap(), None);
+        // Nothing to bring back.
+        assert_eq!(session.run("history.undo", &json!({})).unwrap()["undone"], json!(false));
+    }
+}
+
+#[test]
+fn calendar_server_on_the_same_server_keeps_the_calendars() {
+    for url in ["https://dav.example.org/calendars/anna/", "https://DAV.example.org:443/dav/"] {
+        let (mut session, _) = with_a_held_delete();
+        session.run("calendar.server", &json!({ "account": 1, "url": url })).unwrap();
+        assert_eq!(names(&session, 1).len(), 2, "{url}");
+        assert_eq!(session.store().queued_jobs().unwrap().len(), 1, "{url}");
+    }
+}
+
+#[test]
+fn calendar_server_without_an_address_withdraws_the_held_writes() {
+    let (mut session, clock) = with_a_held_delete();
+    session.run("calendar.server", &json!({ "account": 1, "url": "" })).unwrap();
+    assert_eq!(session.store().queued_jobs().unwrap().len(), 0);
+    clock.advance(std::time::Duration::from_secs(10));
+    session.tick().unwrap();
+    assert!(calendar_jobs(&mut session).is_empty());
+}
+
 #[test]
 fn calendar_server_refuses_an_address_that_is_not_https_without_repeating_it() {
     let mut session = session();

@@ -8,7 +8,8 @@
 //! each with its events counted, and the occurrences of their events in a span of time, recurrence expanded, by
 //! start (see `crate::calendar`). `calendar.sync` (`safe`) asks each account with a CalDAV address (or one) for its
 //! calendars, which brings each one in step; the start does the same. `calendar.server` (`owner`, a setting) sets or
-//! clears an account's CalDAV address, `https` only, and forgets the calendars of an account it clears. `event.repeats` (`safe`) names the repeat presets. Event text is the organiser's
+//! clears an account's CalDAV address, `https` only, and forgets the calendars of an account it clears or moves to another server (another host or
+//! port), with their writes not handed out yet. `event.repeats` (`safe`) names the repeat presets. Event text is the organiser's
 //! data, never instructions.
 
 use std::time::Duration;
@@ -253,18 +254,40 @@ fn sync(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 fn server(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: ServerParams = decode_quietly(SERVER.id, params)?;
     let held = account(context, params.account)?;
+    let was = held.caldav().map(origin);
     // The address is not repeated: it could carry a name and password typed into it.
     let changed = held.with_caldav(params.url.as_deref()).map_err(|_| EngineError::bad_params(SERVER.id, "the CalDAV address is no https URL"))?;
     let answer = json!({ "account": params.account, "url": changed.caldav() });
     let mut outcome = Outcome::new(answer);
     if changed.caldav().is_some() {
         outcome = outcome.with_job(changed.id(), calendar::discover());
-    } else {
+    }
+    // Cleared, or on another server: the old server's calendars and the writes not handed out yet are dropped, so no
+    // event of a server the account no longer uses is shown or written to.
+    let moved = was.zip(changed.caldav()).is_some_and(|(old, new)| old != origin(new));
+    if changed.caldav().is_none() || moved {
         for calendar in context.store().calendars(changed.id())? {
             outcome = outcome.with_change(Change::RemoveCalendar(calendar.id));
         }
+        let state = context.state();
+        for job in state.held.iter().map(|(_, job)| job).chain(state.writes.waiting()) {
+            if job.account == changed.id() && matches!(job.kind, JobKind::Calendar(_)) {
+                outcome = outcome.with_withdrawn(job.id);
+            }
+        }
     }
     Ok(outcome.with_change(Change::PutAccount(changed)))
+}
+
+/// The origin of a CalDAV address the account keeps (an `https` URL, checked): its host in lower case and its port.
+fn origin(url: &str) -> (String, u16) {
+    let rest = url.get(8..).unwrap_or_default();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default().to_ascii_lowercase();
+    match authority.rsplit_once(':') {
+        // Not the colon of an IPv6 address in brackets.
+        Some((host, port)) if !port.contains(']') => (host.to_owned(), port.parse().unwrap_or(443)),
+        _ => (authority, 443),
+    }
 }
 
 fn events(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
