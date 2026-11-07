@@ -439,8 +439,8 @@ B = blocks the next stage.
 - The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
   it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
 - The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
-  findings and builds anyway. The notification permission is there before the app uses it; the Secret Service
-  one is used for the account passwords since #34, and the Background portal (which needs none) since #137 (#31).
+  findings and builds anyway. The Secret Service permission is used for the account passwords since #34; the
+  Background portal (since #137) and the notification portal (since #138) need none (#31).
 
 - Onboarding (#34):
   - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and

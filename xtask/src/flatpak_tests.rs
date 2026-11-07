@@ -249,6 +249,16 @@ fn the_only_folder_the_manifest_opens_is_downloads_for_save() {
 }
 
 #[test]
+fn the_manifest_does_not_talk_to_the_notification_server() {
+    // In the sandbox, notifications go through the notification portal, which needs no permission; a direct line to
+    // the notification server would let the app bypass it.
+    let manifest = repo_file(MANIFEST);
+    let notifications: Vec<&str> =
+        manifest.lines().map(str::trim_start).filter(|line| line.starts_with("- --talk-name=org.freedesktop.Notifications")).collect();
+    assert_eq!(notifications, Vec::<&str>::new(), "{manifest}");
+}
+
+#[test]
 fn the_manifest_installs_files_that_exist_under_the_app_id() {
     let manifest = repo_file(MANIFEST);
     assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");

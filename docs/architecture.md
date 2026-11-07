@@ -115,7 +115,7 @@ mailbox, and in a folder before its first sync, the acts change the store and qu
 New messages go through the arriving-mail pipeline (`engine::arrive`) after the sync put them in its batch: each
 message passes each stage in order, and a stage adds store changes, kept jobs or an act (a move, say) to the same
 batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; the screener
-is the first, the outbox and calendar slices bring more.
+is the first and the notify stage the second, the outbox and calendar slices bring more.
 
 The screener (`engine::arrive::screener`, commands in `engine::cmd::triage`) keeps the known-sender index in the
 store's senders table, one record per address across the accounts: a sender is known once the owner received mail
@@ -138,7 +138,7 @@ as it was and the mail where it was.
 
 The grouped inbox (`engine::arrive::group`, commands in `engine::cmd::triage`) puts each message of a grouped account
 in People, Updates, Newsletters or Invitations. `net` reads the signs of a message's kind from its header block into
-the envelope (`model::Signs`: a list field, `Precedence`, `Auto-Submitted`, the media type), and the engine adds
+the envelope (`model::Signs`: a list field, `Precedence`, `Auto-Submitted`, a `text/calendar` type), and the engine adds
 whether a kept body holds a `text/calendar` part of its own when the body comes. The group is worked out when a list
 asks and never stored: the owner's choice for the sender first (`group.set`, `owner`, kept in the sender record with
 the screener's knowledge, so it moves the kept and the future mail at once, and `history.undo` takes it back;
@@ -147,6 +147,18 @@ the screener's knowledge, so it moves the kept and the future mail at once, and 
 People for the rest. Grouping is on per account until the owner turns it off (`group.account`, `owner`, kept with the
 account). `mail.list` says each row's `group` (`null` for an account not grouped) and lists one group (`group`, or
 `none` for the mail no group holds); `group.list` (`safe`) counts the inbox's mail and its unread mail per group.
+
+Notifications (`engine::notify`, commands in `engine::cmd::notify`): the engine decides and the front end shows. The
+notify stage, after the screener, tells of a message new in an inbox after the folder's first sync that is unread,
+still in the inbox after the screener (held or blocked mail tells nothing), not from one of the owner's own
+addresses, and not the owner's own move coming back: a moved message a server names no UID for is remembered by its
+Message-ID (or sender, subject and date) when it went to an inbox, so the sync that brings it back, as after
+`screener.accept`, tells nothing. The account's level (`notify.set`, `owner`; `notify.settings`, `safe`) has the last
+word: `all`, `people` (a sender known or accepted and not in another group than People) or `none`; `notify::tells`
+is the decision table. `Session::tick` adds a notice for a returned snooze and a follow-up reminder unless the owner
+turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
+(`Session::take_notices`), more than three new messages of one account as one count. A notice carries the sender's
+name and subject as one clean line of at most 120 characters, never markup.
 
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with
@@ -266,6 +278,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - Autostart (`autostart`): an XDG autostart entry outside the Flatpak; inside it the Background portal
   (`RequestBackground`, over `zbus`), which each start asks again so a desktop that ends background apps lets
   InboxCraft run, with the same entry in the app's own config folder as the record of the choice.
+- Notifications (`notify`, Linux): `Desktop` takes the session's notices after each pump and shows them through the
+  notification portal in the Flatpak or `org.freedesktop.Notifications` elsewhere (`notify::bus`, over `zbus`), with
+  the body escaped where the server reads markup and the buttons (Done, Mark read) only where it shows actions. A
+  thread per connection listens for the clicks on what was shown; each comes to the window as a `Click`: a click
+  opens the message in the full-width reader and brings the window forward (or opens one), the buttons run the same
+  acts as the window. A later notice with the same key (the count of an account) takes the place of the first.
 
 ## Start-up
 

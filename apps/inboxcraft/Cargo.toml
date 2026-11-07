@@ -23,6 +23,7 @@ ksni = { workspace = true }
 zbus = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

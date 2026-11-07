@@ -49,6 +49,10 @@
 //!   Invitations, by the owner's choice for its sender (`group.set`, `owner`, undoable) or our classifier of its
 //!   header and body; `group.account` (`owner`) turns an account's grouping on or off, `group.list` (`safe`) counts
 //!   the inbox per group, and `mail.list` says and filters each row's group.
+//! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
+//!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
+//!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and
+//!   follow-up reminders. The front end takes the notices with [`Session::take_notices`].
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -74,6 +78,7 @@ mod cmd;
 mod draft;
 mod error;
 mod json;
+pub mod notify;
 mod params;
 mod registry;
 pub mod schedule;

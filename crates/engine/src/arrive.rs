@@ -50,7 +50,7 @@ macro_rules! stages {
     };
 }
 
-stages!(screener);
+stages!(screener, notify);
 
 pub(crate) mod group;
 
