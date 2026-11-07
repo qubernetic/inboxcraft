@@ -287,6 +287,13 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 - TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
   checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
   `proto` only on an encrypted connection, and `proto` refuses it before as well.
+- CalDAV in `dav`, sans-I/O over HTTP/1.1: `Discovery` (the well-known path, the principal, the calendar home set),
+  `Sync` (a sync report from the last token, or a listing of entity tags where the server has none, then
+  `calendar-multiget`), and `put` and `delete` with `If-Match` or `If-None-Match: *`, so a change made elsewhere comes
+  back as a conflict and is never overwritten. Each exchange is a state machine: `request()` gives the next request
+  for its origin, `receive()` takes the `Response` that `ResponseReader` read. Basic auth is written into a request to
+  an `https` origin only, and a redirect to another origin is named, never followed. Its XML reader is its own, with no
+  document type declarations; the fake CalDAV server in `testkit` reads requests with readers of its own.
 - The account check (`net::check_account`, behind `account.check`) runs the steps one after the other and reports
   each as it ends, so a failure is named by its cause. A port that times out is told apart by trying port 443 and
   the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).

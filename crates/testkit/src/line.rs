@@ -69,6 +69,17 @@ impl LineReader {
         Ok(Some(self.buf.drain(..len).collect()))
     }
 
+    /// Takes what was read past the last line, or else what one read from `src` gives: as it came, up to 4096 bytes
+    /// at a time; empty when the peer closed the connection.
+    pub(crate) fn read_some(&mut self, src: &mut impl Read) -> io::Result<Vec<u8>> {
+        if self.buf.is_empty() {
+            let mut chunk = [0_u8; 4096];
+            let read = src.read(&mut chunk)?;
+            return Ok(chunk.get(..read).unwrap_or_default().to_vec());
+        }
+        Ok(std::mem::take(&mut self.buf))
+    }
+
     /// Takes what was read past the last line, such as bytes a client sent in clear after STARTTLS, split into lines
     /// without their terminators; a last line without its end comes as it is.
     pub(crate) fn discard(&mut self) -> Vec<Vec<u8>> {
