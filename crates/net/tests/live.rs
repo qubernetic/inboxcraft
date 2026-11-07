@@ -221,23 +221,29 @@ fn live_imap_writes_in_the_run_folder() -> Result {
     assert!(changed(&events).iter().any(|change| change.uid == message.uid() && change.flags.is_flagged()));
     println!("live: flag stored");
 
-    // A folder of its own, and the message moved there with its flag.
-    worker.job(JobKind::CreateFolder { path: moved_path.clone() })?;
-    worker.until(|kind| matches!(kind, EventKind::FolderCreated { .. }))?;
-    worker.job(JobKind::Move { folder: RUN, path: path.clone(), uid_validity, uids, to: MOVED, to_path: moved_path.clone() })?;
-    let events = worker.until(|kind| matches!(kind, EventKind::Moved { .. }))?;
-    println!("live: moved, new UID named: {}", matches!(events.last(), Some(EventKind::Moved { copied: Some(_), .. })));
-    worker.job(JobKind::SyncFolder { folder: MOVED, path: moved_path, known: None })?;
-    let events = worker.synced()?;
-    assert_eq!(subjects(&events), [subject(&config, 1)]);
-    assert!(added(&events).iter().all(|summary| summary.flags().is_flagged()));
-    worker.job(JobKind::SyncFolder { folder: RUN, path, known: Some(state) })?;
-    let events = worker.synced()?;
-    assert!(expunged(&events).contains(&message.uid().get()), "the message is still in the run folder");
+    // A folder of its own, and the message moved there with its flag. The folder goes before anything is checked: a
+    // server may refuse to delete the run folder while it has a child.
+    let moved = || -> Result<(Vec<EventKind>, Vec<EventKind>)> {
+        worker.job(JobKind::CreateFolder { path: moved_path.clone() })?;
+        worker.until(|kind| matches!(kind, EventKind::FolderCreated { .. }))?;
+        worker.job(JobKind::Move { folder: RUN, path: path.clone(), uid_validity, uids, to: MOVED, to_path: moved_path.clone() })?;
+        let events = worker.until(|kind| matches!(kind, EventKind::Moved { .. }))?;
+        println!("live: moved, new UID named: {}", matches!(events.last(), Some(EventKind::Moved { copied: Some(_), .. })));
+        worker.job(JobKind::SyncFolder { folder: MOVED, path: moved_path.clone(), known: None })?;
+        let in_moved = worker.synced()?;
+        worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(state) })?;
+        Ok((in_moved, worker.synced()?))
+    };
+    let outcome = moved();
     worker.worker.stop();
+    let removed = folder.folders().delete(&moved_name);
+    let (in_moved, in_run) = outcome?;
+    removed?;
+    assert_eq!(subjects(&in_moved), [subject(&config, 1)]);
+    assert!(added(&in_moved).iter().all(|summary| summary.flags().is_flagged()));
+    assert!(expunged(&in_run).contains(&message.uid().get()), "the message is still in the run folder");
     println!("live: the message is in the new folder only");
 
-    folder.folders().delete(&moved_name)?;
     folder.remove()?;
     admin.logout();
     println!("live: folders removed");
