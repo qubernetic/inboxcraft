@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use super::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
+use super::{ConnectionState, Copied, ErrorKind, Event, EventKind, FlagChange};
 use crate::{
     AccountId, CheckStep, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, StepStatus, Summary,
     Uid, UidSet, UidValidity,
@@ -60,6 +60,22 @@ fn every_event_kind_round_trips_and_names_its_folder() {
         (EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(folder) }, Some(folder)),
         (EventKind::Failed { kind: ErrorKind::TimedOut, folder: None }, None),
         (EventKind::CheckStep(StepReport::new(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))), None),
+        (EventKind::FlagsStored { folder, uid_validity: validity(), uids: [uid(1)].into_iter().collect::<UidSet>() }, Some(folder)),
+        (
+            EventKind::Moved {
+                folder,
+                uid_validity: validity(),
+                uids: [uid(1), uid(2)].into_iter().collect::<UidSet>(),
+                to: FolderId::new(3),
+                copied: Some(Copied { uid_validity: UidValidity::new(9).unwrap(), uids: vec![(uid(1), uid(50)), (uid(2), uid(51))] }),
+            },
+            Some(folder),
+        ),
+        (EventKind::Moved { folder, uid_validity: validity(), uids: UidSet::default(), to: FolderId::new(3), copied: None }, Some(folder)),
+        (EventKind::Expunged { folder, uid_validity: validity(), uids: [uid(1)].into_iter().collect::<UidSet>() }, Some(folder)),
+        (EventKind::Appended { folder, uid: Some((validity(), uid(5))) }, Some(folder)),
+        (EventKind::Appended { folder, uid: None }, Some(folder)),
+        (EventKind::FolderCreated { path: FolderPath::new("InboxCraft/Screener", Some('/')).unwrap() }, None),
     ];
     for (kind, expected) in kinds {
         assert_eq!(kind.folder(), expected, "{kind:?}");
@@ -101,4 +117,11 @@ fn every_error_kind_reads_as_a_sentence_and_round_trips() {
         let json = serde_json::to_string(&kind).unwrap();
         assert_eq!(serde_json::from_str::<ErrorKind>(&json).unwrap(), kind);
     }
+}
+
+#[test]
+fn copied_uids_map_each_old_uid_to_its_new_one() {
+    let copied = Copied { uid_validity: UidValidity::new(9).unwrap(), uids: vec![(uid(1), uid(50)), (uid(2), uid(51))] };
+    assert_eq!(copied.new_uid(uid(2)), Some(uid(51)));
+    assert_eq!(copied.new_uid(uid(3)), None);
 }

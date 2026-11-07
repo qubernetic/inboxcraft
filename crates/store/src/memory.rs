@@ -293,7 +293,7 @@ impl State {
 /// `message` with its flags replaced.
 pub(crate) fn with_flags(message: &Message, flags: &Flags) -> Message {
     let summary = message.summary().clone().with_flags(flags.clone());
-    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(message.thread())
+    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(message.thread()).with_moving(message.moving().cloned())
 }
 
 impl Storage for Memory {
