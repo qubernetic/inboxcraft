@@ -13,6 +13,10 @@ use inboxcraft_model::{
 use inboxcraft_store::{Batch, Body, Change, Search, Storage, StoreError};
 use inboxcraft_time::Timestamp;
 
+mod local;
+#[allow(unused_imports)]
+pub use local::*;
+
 pub const DAY: i64 = 86_400;
 
 pub fn account(id: u64) -> Account {
@@ -443,6 +447,21 @@ macro_rules! contract_tests {
             search_reads_operators_as_words,
             retention_drops_old_unopened_bodies,
             retention_names_the_bodies_to_fetch,
+            the_local_tables_start_empty,
+            jobs_wait_in_the_order_they_came,
+            a_job_needs_its_account,
+            drafts_read_back_per_account,
+            a_draft_needs_its_account,
+            the_outbox_follows_its_draft,
+            the_schedule_reads_back_by_due_time,
+            a_schedule_entry_needs_what_it_names,
+            a_schedule_entry_leaves_with_what_it_names,
+            a_removed_event_takes_the_entries_of_its_alerts,
+            senders_are_one_per_address_without_case,
+            message_state_is_kept_with_its_message,
+            calendars_hold_events_and_alerts,
+            a_removed_account_takes_its_local_records,
+            a_refused_batch_changes_no_local_record,
         );
     };
     ($make:expr; $($name:ident),+ $(,)?) => {

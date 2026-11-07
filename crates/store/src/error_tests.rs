@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_model::{AccountId, FolderId, MessageId, Uid};
+use inboxcraft_model::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, MessageId, Uid};
 
 use super::StoreError;
 
@@ -11,6 +11,10 @@ fn every_error_says_what_failed() {
         (StoreError::UnknownAccount(AccountId::new(1)), "no account a1 in the store"),
         (StoreError::UnknownFolder(FolderId::new(2)), "no folder f2 in the store"),
         (StoreError::UnknownMessage(MessageId::new(3)), "no message m3 in the store"),
+        (StoreError::UnknownDraft(DraftId::new(4)), "no draft d4 in the store"),
+        (StoreError::UnknownCalendar(CalendarId::new(5)), "no calendar c5 in the store"),
+        (StoreError::UnknownCalendarEvent(CalendarEventId::new(6)), "no calendar event e6 in the store"),
+        (StoreError::UnknownAlert(AlertId::new(7)), "no alert l7 in the store"),
         (StoreError::WrongAccount { folder: FolderId::new(2), account: AccountId::new(1) }, "folder f2 does not belong to account a1"),
         (StoreError::DuplicateUid { folder: FolderId::new(2), uid: Uid::new(5).unwrap() }, "folder f2 already holds UID 5"),
         (StoreError::TooLarge, "the message source is too large to keep"),

@@ -4,8 +4,11 @@
 //! What the window needs to add and run accounts: the OS credential store, the `net` workers and Detect.
 //!
 //! - [`OsKeychain`]: the passwords, in the system's credential store (Secret Service, Keychain, Credential Manager)
-//!   through `keyring`, one entry per account id under [`SERVICE`]. The window only writes and removes them (all of
-//!   them when it closes); the workers read them, each time they sign in. Never a file, never the log.
+//!   through `keyring`, one entry per account under [`SERVICE`], named with the store's id and the account's
+//!   ([`entry_name`]). The window writes an entry when it adds the account and removes it with the account; it stays
+//!   in between, as the account stays in the store. The workers read them, each time they sign in. Never a file,
+//!   never the log. ([`InboxApp::on_exit`](inboxcraft_ui_egui::InboxApp::on_exit) removes them all, for a window over
+//!   a store that is not kept.)
 //! - [`NetWorkers`]: one `net` worker per account, started at the account's first job; their events wake the window.
 //! - [`detect`]: Detect over the system's name servers and HTTPS, as the form's proposal.
 
@@ -33,10 +36,13 @@ pub const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long Detect waits for one web request.
 pub const WEB_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The credential store entry's user name for `account`.
+/// The credential store entry's user name for `account` of the store whose id is `store`
+/// ([`inboxcraft_store::Sqlite::id`]). Every store numbers its accounts from 1, and two stores can share one
+/// credential store (the Flatpak and a build of its own, or another `XDG_DATA_HOME`): bound to its store, an entry is
+/// never read, overwritten or removed for another store's account.
 #[must_use]
-pub fn entry_name(account: u64) -> String {
-    format!("account-{account}")
+pub fn entry_name(store: &str, account: u64) -> String {
+    format!("account-{store}-{account}")
 }
 
 /// Why the credential store refused, in words for the owner. Fixed words: a `keyring` error can carry the bytes it
@@ -53,30 +59,97 @@ pub fn described(error: &keyring::Error) -> String {
     .to_owned()
 }
 
-/// The passwords in the system's credential store.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OsKeychain;
+/// The entries of a credential store under [`SERVICE`], by user name.
+pub trait Entries: Send + Sync {
+    /// Keeps `password` under `name`, replacing what was there.
+    ///
+    /// # Errors
+    ///
+    /// Why the credential store refused, in words for the owner.
+    fn set(&self, name: &str, password: &str) -> Result<(), String>;
 
-fn entry(account: u64) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, &entry_name(account)).map_err(|error| described(&error))
+    /// The password under `name`, if there is one and it can be read.
+    fn get(&self, name: &str) -> Option<String>;
+
+    /// Removes the entry `name`; nothing when there is none.
+    ///
+    /// # Errors
+    ///
+    /// Why the credential store refused, in words for the owner.
+    fn delete(&self, name: &str) -> Result<(), String>;
 }
 
-impl Keychain for OsKeychain {
-    fn store(&self, account: u64, password: &str) -> Result<(), String> {
-        entry(account)?.set_password(password).map_err(|error| described(&error))
+/// The system's credential store, through `keyring`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OsEntries;
+
+fn entry(name: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(SERVICE, name).map_err(|error| described(&error))
+}
+
+impl Entries for OsEntries {
+    fn set(&self, name: &str, password: &str) -> Result<(), String> {
+        entry(name)?.set_password(password).map_err(|error| described(&error))
     }
 
-    fn forget(&self, account: u64) -> Result<(), String> {
-        match entry(account)?.delete_credential() {
+    fn get(&self, name: &str) -> Option<String> {
+        entry(name).ok()?.get_password().ok()
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        match entry(name)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(described(&error)),
         }
     }
 }
 
+/// The passwords of one store's accounts in the system's credential store, each under [`entry_name`].
+#[derive(Clone)]
+pub struct OsKeychain {
+    store: String,
+    entries: Arc<dyn Entries>,
+}
+
+impl std::fmt::Debug for OsKeychain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OsKeychain").field("store", &self.store).finish_non_exhaustive()
+    }
+}
+
+impl OsKeychain {
+    /// The passwords of the accounts of the store whose id is `store`, in the system's credential store.
+    #[must_use]
+    pub fn new(store: &str) -> Self {
+        Self::over(store, Arc::new(OsEntries))
+    }
+
+    /// The passwords of the accounts of the store whose id is `store`, in `entries`.
+    #[must_use]
+    pub fn over(store: &str, entries: Arc<dyn Entries>) -> Self {
+        Self { store: store.to_owned(), entries }
+    }
+
+    /// The entry's user name for `account` of this store.
+    #[must_use]
+    pub fn entry(&self, account: u64) -> String {
+        entry_name(&self.store, account)
+    }
+}
+
+impl Keychain for OsKeychain {
+    fn store(&self, account: u64, password: &str) -> Result<(), String> {
+        self.entries.set(&self.entry(account), password)
+    }
+
+    fn forget(&self, account: u64) -> Result<(), String> {
+        self.entries.delete(&self.entry(account))
+    }
+}
+
 impl Credentials for OsKeychain {
     fn password(&self, account: &Account) -> Option<Password> {
-        entry(account.id().get()).ok()?.get_password().ok().map(Password::new)
+        self.entries.get(&self.entry(account.id().get())).map(Password::new)
     }
 }
 

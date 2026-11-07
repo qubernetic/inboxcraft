@@ -33,9 +33,8 @@ impl eframe::App for Desktop {
         [0.0; 4]
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.0.on_exit();
-    }
+    // No `on_exit`: the store keeps the accounts from one start to the next, so their passwords stay in the
+    // credential store when the window closes (`InboxApp::on_exit` is for a window whose accounts are forgotten).
 }
 
 fn window(source: Source) -> ExitCode {
@@ -47,7 +46,14 @@ fn window(source: Source) -> ExitCode {
             context.request_repaint();
         }
     });
-    let mut app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
+    let mail = match inboxcraft::store::mail(source) {
+        Ok(mail) => mail,
+        Err(error) => {
+            eprintln!("inboxcraft: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut app = match inboxcraft::app(mail, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");

@@ -149,6 +149,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "ui_keymap"
+path = "fuzz_targets/ui_keymap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "mcp_lines"
 path = "fuzz_targets/mcp_lines.rs"
 test = false

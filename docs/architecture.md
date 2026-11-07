@@ -87,9 +87,11 @@ entered or saw (address, names, user name, the IMAP server) and never a password
 no account had in this session and queues the owner's first check. The front end puts the password into the OS
 credential store (`ui_egui::onboard::Keychain`; `keyring` in the desktop app) under the account's id, and the
 worker reads it from there each time it signs in, so a password never passes through a command, an answer, the
-store or the log. Until accounts are kept on disk, the window removes the passwords of the accounts added in it
-when it closes (`InboxApp::on_exit`). A new account's first check that signs in queues its folder list, so the sync starts after the
-password was accepted and not before. `account.remove` removes the account with its mail and drops its state and
+store or the log. In the desktop app the entry is named with the store's own random id as well
+(`account-<store id>-<account id>`, `Sqlite::id`), so two stores on one computer never share an entry. The desktop
+app keeps its accounts in the store on disk, so their passwords stay when the window closes; a front end whose
+accounts are forgotten removes them then (`InboxApp::on_exit`). A new account's first check that signs in queues
+its folder list, so the sync starts after the password was accepted and not before. `account.remove` removes the account with its mail and drops its state and
 queued jobs. Each frame the window hands the queued jobs to the app's workers (`ui_egui::workers::Workers`; one
 `net::Worker` per account, started at its first job, stopped off the window's thread when its account is gone) and
 applies their events; Detect runs on a thread of its own in the window, outside the engine.
@@ -130,8 +132,21 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   `sources/<body id>.eml` beside it. A source is written and synced before the row that names it commits and
   removed only after that row is gone; opening the store removes the files a kill left behind. Removed mail is
   zeroed in the database (`secure_delete`, FTS5 `secure-delete`) and the write-ahead log is emptied after the batch
-  that removed it. The store does no
-  network I/O and parses no mail: the caller hands in each body's text.
+  that removed it. The store does no network I/O and parses no mail: the caller hands in each body's text.
+- Beside the mail the store keeps the local records (`model::local`, schema version 4): the job queue, drafts, the
+  outbox, the schedule, senders (known, the screener's decision, the group), each message's own state (done,
+  parked, pinned, snoozed, follow-up) and the calendars with their sync token, events (ETag and iCalendar text) and
+  alerts. Each row holds its record as JSON, so a new field needs no migration; removing an account, folder,
+  message, draft, alert, calendar or event removes what hangs below it. A schedule entry hangs below the draft,
+  message or alert it names, so it never acts on a later record that got the same id. Senders are kept across
+  accounts. The store has an id of its own, random and kept for good (`Sqlite::id`). The desktop app keeps its
+  store in `inboxcraft/store` in the owner's data folder (`%LOCALAPPDATA%` on Windows, else `XDG_DATA_HOME`,
+  `~/.var/app/<app id>/data` in the Flatpak); the sample stays in memory.
+- Kept jobs: a command that queues a job with `Outcome::with_kept_job` (the acts on mail) writes it into the
+  store's job queue in the same batch as its changes, so a kill keeps both or neither. The job leaves the queue with
+  its last event (the answer, or `Failed`); `Session::start` hands the jobs an earlier run left over again, under
+  their ids, before the start's own. Read jobs are not kept: the start syncs again anyway. Only a job with a last
+  event is kept: a check or a watch runs in its session only, and one found in the queue is removed at the start.
 - Tray/background mode: the window can close while the engine keeps running.
 
 ## Start-up
