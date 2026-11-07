@@ -22,11 +22,11 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use inboxcraft_model::{FolderState, ModSeq, Uid, UidSet, UidValidity};
+use inboxcraft_model::{Flag, Flags, FolderState, ModSeq, Uid, UidSet, UidValidity};
 use inboxcraft_proto::ProtoError;
 use inboxcraft_proto::imap::{
-    Answer, Client, CopyUid, Event, Extension, FetchAttributes, ListEntry, MailboxStatus, Notify, NotifyMailboxes, PreviewFetch, Refusal, Removal,
-    SearchDate, SearchKey, Section, SelectOptions, Transport,
+    Answer, Client, CopyUid, Event, Extension, FetchAttributes, FlagStore, ListEntry, MailboxStatus, Notify, NotifyMailboxes, PreviewFetch, Refusal,
+    Removal, SearchDate, SearchKey, Section, SelectOptions, StoreMode, Transport,
 };
 
 /// A UID set as IMAP writes one: `4,7:9`.
@@ -117,11 +117,37 @@ fn notify(words: VecDeque<&str>) -> Notify {
     notify
 }
 
+/// Flags written `\\Seen,$Work`, or `-` for none.
+fn flags(text: &str) -> Flags {
+    if text == "-" { Flags::default() } else { text.split(',').map(|flag| Flag::parse(flag).unwrap()).collect() }
+}
+
+/// A UID STORE from words: `add|remove|replace <flags> [silent] [unchanged=<modseq>]`.
+fn flag_store(mut words: VecDeque<&str>) -> FlagStore {
+    let mode = match words.pop_front().unwrap() {
+        "add" => StoreMode::Add,
+        "remove" => StoreMode::Remove,
+        "replace" => StoreMode::Replace,
+        other => panic!("unknown store mode {other}"),
+    };
+    let mut store = FlagStore::new(mode, flags(words.pop_front().unwrap()));
+    for word in words {
+        match word.strip_prefix("unchanged=") {
+            Some(modseq) => store.unchanged_since = ModSeq::new(modseq.parse().unwrap()),
+            None if word == "silent" => store.silent = true,
+            None => panic!("unknown store word {word}"),
+        }
+    }
+    store
+}
+
 /// Runs `> <command>`: `capability`, `starttls`, `tls`, `login <user> <password>`, `authenticate <user> <password>`,
 /// `enable condstore|qresync`, `list`, `select <name>`, `examine <name>` (the rest of the line), `select-with <name>
 /// <options>` and `examine-with <name> <options>` (see [`select_options`]), `fetch <set> [flags] [date] [size]
 /// [modseq] [since=<modseq>] [vanished] [preview|lazy-preview] [full|header|text]`, `search <keys>`, `notify <words>` (see [`notify`]),
-/// `notify-none`, `copy <set> <name>`, `move <set> <name>`,
+/// `notify-none`, `copy <set> <name>`, `move <set> <name>`, `store <set> <words>` (see [`flag_store`]), `append <name>
+/// <flags> <text>` (`_` a space, `|` a line end, `~` a NUL, `-` nothing), `create <name>` (`|` a line end), `close`,
+/// `unselect`,
 /// `expunge <set>`, `compress`, `idle`, `done`, `logout`.
 fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -184,6 +210,20 @@ fn call(client: &mut Client, line: &str) -> Result<(), ProtoError> {
             let set = uid_set(words.pop_front().unwrap());
             client.uid_move(&set, &words.into_iter().collect::<Vec<_>>().join(" "))
         }
+        "store" => {
+            let set = uid_set(words.pop_front().unwrap());
+            client.uid_store(&set, &flag_store(words))
+        }
+        "append" => {
+            let mailbox = words.pop_front().unwrap();
+            let flags = flags(words.pop_front().unwrap());
+            let text = words.pop_front().unwrap();
+            let raw = if text == "-" { String::new() } else { text.replace('_', " ").replace('|', "\r\n").replace('~', "\0") };
+            client.append(mailbox, &flags, raw.as_bytes())
+        }
+        "create" => client.create(&rest.replace('|', "\n")),
+        "close" => client.close(),
+        "unselect" => client.unselect(),
         "expunge" => client.uid_expunge(&uid_set(words.pop_front().unwrap())),
         "notify" => client.notify(&notify(words)),
         "notify-none" => client.notify_none(),
@@ -324,7 +364,13 @@ fn render(event: &Event) -> Vec<String> {
             Answer::Searched(set) => vec![format!("{tag} searched {}", if set.is_empty() { "-".to_owned() } else { set_text(set) })],
             Answer::Copied(copied) => vec![format!("{tag} copied{}", copy_uid(copied.as_ref()))],
             Answer::Moved(moved) => vec![format!("{tag} moved{} {}", copy_uid(moved.copy_uid.as_ref()), removal(&moved.removal))],
+            Answer::Stored { modified } if modified.is_empty() => vec![format!("{tag} stored")],
+            Answer::Stored { modified } => vec![format!("{tag} stored modified {}", set_text(modified))],
             Answer::Expunged => vec![format!("{tag} expunged")],
+            Answer::Appended(Some(uid)) => vec![format!("{tag} appended {} {}", uid.uid_validity, uid.uid)],
+            Answer::Appended(None) => vec![format!("{tag} appended")],
+            Answer::Created => vec![format!("{tag} created")],
+            Answer::Unselected => vec![format!("{tag} unselected")],
             Answer::Compressed(pending) => vec![format!("{tag} compressed \"{}\"", pending.escape_ascii())],
             Answer::Idled => vec![format!("{tag} idled")],
             Answer::Notified => vec![format!("{tag} notified")],

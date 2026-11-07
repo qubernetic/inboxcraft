@@ -14,8 +14,10 @@
 //! - [`Worker`]: one thread per account. It takes the engine's [`inboxcraft_model::Job`]s in order on one
 //!   signed-in connection and reports [`inboxcraft_model::Event`]s: the folder list, the first sync of a folder
 //!   (headers with PREVIEW, then the bodies of the messages of the last [`SyncConfig::body_days`] days), and the
-//!   body of a message the owner opens. Folders are opened read-only (EXAMINE): nothing changes on the server.
-//!   Without a connection, jobs wait in an offline queue while the worker reconnects after a [`Backoff`] wait.
+//!   body of a message the owner opens. The read path opens folders read-only (EXAMINE). The write jobs (flags,
+//!   move, delete for good, APPEND, CREATE) open them with SELECT; a message gone meanwhile is told as an event.
+//!   Without a connection, jobs wait in an offline queue while the worker reconnects after a [`Backoff`] wait, and a
+//!   write the connection dropped under runs again after the reconnect.
 //!   A known folder is resynced: changed flags, removed and new messages (QRESYNC where the server offers it). The
 //!   folder of an Idle job is watched between jobs with IDLE ([`WatchConfig`]) and resynced after each change and
 //!   each reconnect; a folder whose UIDVALIDITY changed is reloaded.
@@ -50,6 +52,7 @@ mod tls;
 mod watch;
 pub mod web;
 mod worker;
+pub(crate) mod write;
 
 pub use backoff::Backoff;
 pub use check::{CheckTarget, HTTPS_PORT, MAIL_PORTS, check_account};
@@ -59,7 +62,7 @@ pub use imap::{ImapConnection, Password};
 pub use sync::SyncConfig;
 pub use tls::{TlsSettings, Trust, classify};
 pub use watch::WatchConfig;
-pub use worker::{Credentials, MAX_QUEUED, Worker, WorkerSettings};
+pub use worker::{Credentials, MAX_QUEUED, WRITE_TRIES, Worker, WorkerSettings};
 
 /// The crate's package name.
 ///

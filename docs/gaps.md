@@ -204,13 +204,14 @@ B = blocks the next stage.
 - `net` opens and resyncs the watched folder again after every job, also after a job that opened no other folder:
   one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
   full sync, which reports every message as added again (#26).
-- `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
-  not run again (the engine decides). The worker's offline queue is in memory; a job the engine keeps
-  (`Outcome::with_kept_job`) is also in the store and goes out again at the next start, other jobs are gone. A
-  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
-  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
-  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
-  (#26).
+- `net`'s back-off has no random spread; a read job that was running when its connection ended is reported failed and
+  not run again (the engine decides); a write job runs again after the reconnect, three times at most (#115). The
+  worker's offline queue is in memory; a job the engine keeps (`Outcome::with_kept_job`) is also in the store and
+  goes out again at the next start, other jobs are gone. A certificate fault, a refused sign-in, a sign-in the server
+  never answered (one more try after a dropped or timed-out one) or a server without a sign-in method stops the tries
+  until the engine starts a new worker. A connection that drops during the sign-in twice for an ordinary network
+  reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next
+  job asks again (#26).
 - `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
   traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`

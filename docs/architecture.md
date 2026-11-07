@@ -37,8 +37,14 @@ engine's state.
 | `CreateFolder` | creates a folder (`CREATE`) | `FolderCreated` |
 
 The write jobs (`JobKind::writes`) are the owner's acts: they are kept in the store's queue until their last event.
-The worker runs them from the IMAP write path (M2b); until then it answers each with `Failed`, and the engine takes
-the act back.
+The worker runs them on the IMAP write path (`net::write`): it opens the folder with SELECT and checks its UIDVALIDITY
+against the job's (a changed one is told as `UidValidityReset`, and nothing is written); after a store it reads the
+flags back, so a message gone meanwhile comes as `MessagesExpunged`, not as a failure; a move names no new UID for
+it. It never sends CLOSE or EXPUNGE, which would remove every message marked `\Deleted`; a delete for good needs
+UID EXPUNGE. A write that a dropped or timed-out connection cut off runs again after the reconnect, three times at
+most; each write ends in the state one run leaves, except APPEND, which can add the message twice. A move on a server
+without MOVE is not run again: its fallback may have copied the messages before the cut, and a second run would copy
+them again. Any other failure is `Failed`, and the engine takes the act back.
 
 On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
 and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
@@ -149,11 +155,12 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 ## Decisions worth knowing
 - The engine does no I/O; protocols are sans-I/O (`proto`, `dav`); sockets and TLS live only in `net`.
 - No async runtime; one worker thread per account (`net::Worker`). It opens one connection at its first job, signs
-  in, runs the jobs in order and opens folders read-only (EXAMINE, `BODY.PEEK`), so the read path changes nothing on
-  the server. Answers stream out as events while they come in. Jobs wait in an offline queue while it reconnects
-  after a back-off with a cap. Between jobs it watches one folder with IDLE, reading in short ticks so a job ends the
-  IDLE; every change, and every reconnect, brings a resync of the folder from the state the last sync left (QRESYNC
-  where offered), so a change seen live and one made while offline are reported the same way.
+  in, runs the jobs in order and opens folders read-only for the read path (EXAMINE, `BODY.PEEK`), so reading changes
+  nothing on the server; only the write jobs open a folder with SELECT. Answers stream out as events while they come
+  in. Jobs wait in an offline queue while it reconnects after a back-off with a cap. Between jobs it watches one
+  folder with IDLE, reading in short ticks so a job ends the IDLE; every change, and every reconnect, brings a resync
+  of the folder from the state the last sync left (QRESYNC where offered), so a change seen live and one made while
+  offline are reported the same way.
 - TLS in `net`: `rustls` with `ring`, the operating system's verifier (`rustls-platform-verifier`), certificates
   checked at the time of the injected clock. Implicit TLS, or STARTTLS before anything else; a password goes to
   `proto` only on an encrypted connection, and `proto` refuses it before as well.

@@ -7,8 +7,13 @@
 //! The connection opens at the first job and again after a failure that ended it. Jobs wait in an offline queue
 //! while there is no connection; a failure the network or the server may get over (no route, a refused or dropped
 //! connection, a timeout, a server that broke the protocol) is reported, and the worker tries again after a
-//! [`Backoff`] wait that doubles up to its cap, keeping the queue. A job that was running when its connection ended
-//! is reported failed and not run again: a job that breaks the connection every time cannot hold the queue up.
+//! [`Backoff`] wait that doubles up to its cap, keeping the queue. A read job that was running when its connection
+//! ended is reported failed and not run again. A write job (an act of the owner) that a dropped or timed-out
+//! connection cut off goes back to the head of the queue and runs again after the reconnect, at most
+//! [`WRITE_TRIES`] times in all, so a job that breaks the connection every time cannot hold the queue up; the write
+//! path ends in the same state run once or twice (see `write`). A move on a server without MOVE is the one write that
+//! does not run again, as its fallback may have copied the messages already. Any other failure of a write is
+//! reported, and the engine takes the act back.
 //!
 //! An Idle job names the folder to watch between jobs: the worker resyncs it, then waits in IDLE (or polls a server
 //! without IDLE) until a job comes or the server tells of a change, which brings another resync. A connection that
@@ -43,10 +48,14 @@ use inboxcraft_model::{
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
+use crate::write;
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
+
+/// How often a write job is run when its connection drops or times out under it each time.
+pub const WRITE_TRIES: u32 = 3;
 
 /// Where the worker gets an account's password: the OS credential store in the app, a fixed one in tests.
 pub trait Credentials: Send + Sync {
@@ -172,6 +181,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         stale: false,
         idle_refused: false,
         sign_in_lost: false,
+        tries: HashMap::new(),
     };
     while run.turn(queue) {}
     if let Some(open) = run.connection {
@@ -255,6 +265,8 @@ struct Run<'a> {
     idle_refused: bool,
     /// A sign-in went unanswered since the last one that succeeded: the next one that does halts the tries.
     sign_in_lost: bool,
+    /// The write jobs a dropped connection cut off, with how often that happened.
+    tries: HashMap<JobId, u32>,
 }
 
 impl Run<'_> {
@@ -277,7 +289,7 @@ impl Run<'_> {
             self.watch = None;
         } else if self.connection.is_some() || self.connect(queue) {
             match self.pending.pop_front() {
-                Some(job) => self.run(&job),
+                Some(job) => self.run(job),
                 None => self.watch(queue),
             }
         }
@@ -405,9 +417,9 @@ impl Run<'_> {
         }
     }
 
-    /// Runs `job` on the connection; a failure that ends the connection drops it. An Idle job only names the folder
-    /// to watch.
-    fn run(&mut self, job: &Job) {
+    /// Runs `job` on the connection; a failure that ends the connection drops it, and puts a write job that may run
+    /// again back at the head of the queue. An Idle job only names the folder to watch.
+    fn run(&mut self, job: Job) {
         if let JobKind::Idle { folder, path } = &job.kind {
             self.watch = Some(Watch { job: job.id, folder: *folder, path: path.clone() });
             self.stale = true;
@@ -417,15 +429,25 @@ impl Run<'_> {
         self.out.report(ConnectionState::Online);
         // The job may open another folder: IDLE must open the watched one again.
         self.stale |= self.watch.is_some();
+        let rerun = job.kind.writes() && write::may_run_again(open, &job.kind);
         let now = self.settings.connector.tls().clock().now();
         let out = &mut self.out;
-        match sync::run(open, job, &self.settings.sync, now, &mut |event| out.emit(event)) {
+        let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
+        let tried = self.tries.remove(&job.id).unwrap_or(0).saturating_add(1);
+        match done {
             Ok(()) => self.attempt = 0,
             Err(error) => {
-                out.failed(job, &error);
+                let again = rerun && error.kind().is_retryable() && tried < WRITE_TRIES;
+                if !again {
+                    self.out.failed(&job, &error);
+                }
                 if error.ends_connection() {
                     self.connection = None;
-                    out.report(ConnectionState::Offline);
+                    self.out.report(ConnectionState::Offline);
+                }
+                if again {
+                    self.tries.insert(job.id, tried);
+                    self.pending.push_front(job);
                 }
             }
         }
