@@ -37,6 +37,10 @@
 //! - The scheduler ([`schedule`]): [`Session::tick`] fires the store's schedule entries whose time has come and hands
 //!   them back as [`schedule::Fired`] events, missed ones marked; `schedule.presets` and `schedule.list` (`safe`)
 //!   and `schedule.cancel` (`owner`). The presets are in the computer's wall-clock time ([`Session::set_offsets`]).
+//! - Drafts (`draft`): `compose.new`, `compose.update`, `compose.show`, `compose.list` and `compose.discard`
+//!   (`safe`) keep a draft in the store at every change, from the account that last sent and with its signature
+//!   (`compose.signature`, `owner`), its recipients checked; [`Session::tick`] copies a draft that has been still a
+//!   while to the Drafts folder, each copy replacing the one before.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -59,6 +63,7 @@ pub mod appearance;
 mod arrive;
 mod class;
 mod cmd;
+mod draft;
 mod error;
 mod json;
 mod params;

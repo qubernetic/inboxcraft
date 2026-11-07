@@ -151,7 +151,7 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
 
 /// `mail.thread`: the thread a message is in, oldest first, across folders and accounts (linked by `Message-ID`,
 /// `In-Reply-To` and `References`, never by subject). A message that names no other is a thread of one. A thread of
-/// more than [`MAX_LIST`] messages gives its newest.
+/// more than [`MAX_LIST`] messages gives its newest. The drafts that answer a message of the thread come with it.
 pub(crate) const THREAD: CommandSpec =
     CommandSpec { id: "mail.thread", class: Some(AgentClass::Safe), summary: "List the thread a message is in, oldest first", run: thread };
 
@@ -179,7 +179,15 @@ fn thread(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let thread = group_threads(&messages).into_iter().find(|thread| thread.contains(&id)).unwrap_or_else(|| vec![id]);
     let skip = thread.len().saturating_sub(limit(Some(MAX_LIST)));
     let shown: Vec<Value> = thread.iter().skip(skip).filter_map(|id| entries.get(id)).map(json::message).collect();
-    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown })))
+    let mut drafts = Vec::new();
+    for account in store.accounts()? {
+        for draft in store.drafts(account.id())? {
+            if draft.answers.is_some_and(|answers| thread.contains(&answers)) {
+                drafts.push(crate::draft::json(&draft));
+            }
+        }
+    }
+    Ok(Outcome::new(json!({ "total": thread.len(), "messages": shown, "drafts": drafts })))
 }
 
 /// `mail.attachment`: one attachment of a kept body (by its `index` in `mail.read`'s list) or one inline part (by
