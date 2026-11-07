@@ -73,6 +73,19 @@ fn an_envelope_holds_the_header_fields() {
 }
 
 #[test]
+fn an_envelope_keeps_the_time_a_snooze_ends() {
+    let until = Timestamp::from_unix(1_800_000_000, 0);
+    let envelope = Envelope::new("Later").with_snoozed_until(until);
+    assert_eq!(envelope.snoozed_until(), until);
+    assert_eq!(Envelope::new("Now").snoozed_until(), None);
+    let json = serde_json::to_string(&envelope).unwrap();
+    assert_eq!(serde_json::from_str::<Envelope>(&json).unwrap(), envelope);
+    let older = serde_json::to_string(&Envelope::new("Now")).unwrap().replace(",\"snoozed_until\":null", "");
+    assert!(!older.contains("snoozed_until"), "{older}");
+    assert_eq!(serde_json::from_str::<Envelope>(&older).unwrap().snoozed_until(), None, "an envelope stored before reads back");
+}
+
+#[test]
 fn hostile_envelopes_are_capped() {
     let many: Vec<Address> = (0..MAX_ADDRESSES + 10).map(|n| address(&format!("p{n}@example.org"))).collect();
     let refs: Vec<MessageRef> = (0..MAX_REFERENCES + 10).map(|n| reference(&format!("r{n}@example.org"))).collect();

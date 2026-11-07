@@ -178,7 +178,8 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
         // A copy the builder refuses is not sent; the draft waits for its next change.
         if let Ok(raw) = message(&account, &draft) {
             let flags: Flags = [Flag::Seen, Flag::Draft].into_iter().collect();
-            let kind = JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw, draft: Some(draft.id) };
+            let kind =
+                JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw, draft: Some(draft.id), message: None };
             jobs.push(Pending { account: account.id(), kind, message: None, keep: true });
         }
         batch.push(Change::PutDraft(Draft { synced: Some(draft.saved), ..draft }));

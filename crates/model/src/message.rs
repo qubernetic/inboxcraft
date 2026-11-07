@@ -90,6 +90,10 @@ pub(crate) mod timestamp {
     }
 }
 
+/// InboxCraft's own header field: the time a snooze ends, as an RFC 5322 date, in the copy of a snoozed message
+/// InboxCraft keeps in `InboxCraft/Snoozed`. Read only there: elsewhere it is what is left of an earlier snooze.
+pub const SNOOZED_UNTIL: &str = "InboxCraft-Snoozed-Until";
+
 /// The header fields of a message that lists, threads and the reader's short header use.
 ///
 /// Every text is cleaned on the way in: the subject is one line of at most [`MAX_SUBJECT_CHARS`] characters, each
@@ -110,6 +114,8 @@ pub struct Envelope {
     in_reply_to: Vec<MessageRef>,
     references: Vec<MessageRef>,
     signs: Signs,
+    #[serde(with = "timestamp")]
+    snoozed_until: Option<Timestamp>,
 }
 
 /// An [`Envelope`] as stored, before it is cleaned.
@@ -128,6 +134,8 @@ struct RawEnvelope {
     references: Vec<MessageRef>,
     #[serde(default)]
     signs: Signs,
+    #[serde(default, with = "timestamp")]
+    snoozed_until: Option<Timestamp>,
 }
 
 impl From<RawEnvelope> for Envelope {
@@ -143,6 +151,7 @@ impl From<RawEnvelope> for Envelope {
             .with_in_reply_to(raw.in_reply_to)
             .with_references(raw.references)
             .with_signs(raw.signs)
+            .with_snoozed_until(raw.snoozed_until)
     }
 }
 
@@ -295,6 +304,20 @@ impl Envelope {
     #[must_use]
     pub fn signs(&self) -> &Signs {
         &self.signs
+    }
+
+    /// With the time a snooze ends, as InboxCraft's own `InboxCraft-Snoozed-Until` field gives it.
+    #[must_use]
+    pub fn with_snoozed_until(mut self, until: Option<Timestamp>) -> Self {
+        self.snoozed_until = until;
+        self
+    }
+
+    /// The time a snooze ends, written by InboxCraft into the copy it keeps in `InboxCraft/Snoozed`, so another
+    /// InboxCraft sees it.
+    #[must_use]
+    pub fn snoozed_until(&self) -> Option<Timestamp> {
+        self.snoozed_until
     }
 }
 

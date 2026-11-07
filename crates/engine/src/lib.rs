@@ -54,6 +54,9 @@
 //!   `mail.park` and `mail.pin` (`safe`) put it on the park pile (`park.list`; `mail.list` leaves it out and counts
 //!   it) or in the pins view (`pin.list`). Done takes a pin off unless `pin.set` (`owner`) keeps it
 //!   ([`Session::pins_outlast_done`]). `history.undo` takes each back.
+//! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
+//!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
+//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
 //! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
 //!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
 //!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and

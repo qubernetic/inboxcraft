@@ -47,7 +47,14 @@ fn expunge(set: &[u32]) -> Result<JobKind> {
 }
 
 fn append(raw: &[u8]) -> Result<JobKind> {
-    Ok(JobKind::Append { folder: DRAFTS, path: path("Drafts")?, flags: flags(&[Flag::Seen, Flag::Draft]), raw: raw.to_vec(), draft: None })
+    Ok(JobKind::Append {
+        folder: DRAFTS,
+        path: path("Drafts")?,
+        flags: flags(&[Flag::Seen, Flag::Draft]),
+        raw: raw.to_vec(),
+        draft: None,
+        message: None,
+    })
 }
 
 fn sync_archive() -> Result<JobKind> {
@@ -242,6 +249,19 @@ fn a_delete_for_good_without_uidplus_is_refused_before_anything_is_sent() -> Res
 }
 
 #[test]
+fn after_the_sign_in_the_worker_tells_whether_the_server_removes_one_message() -> Result {
+    for (fake, uid_expunge) in [(FakeImap::sample(), true), (FakeImap::sample().without(Capability::UidPlus), false)] {
+        let mut run = Run::start(fake, Some(inboxcraft_testkit::imap::PASSWORD), Default::default())?;
+        let job = run.job(sync_inbox(None)?)?;
+        let events = run.events_until(|event| event.job == Some(job) && matches!(event.kind, EventKind::FolderSynced { .. }))?;
+        let told: Vec<_> = events.iter().filter(|event| matches!(event.kind, EventKind::Abilities { .. })).map(|event| &event.kind).collect();
+        assert_eq!(told, [&EventKind::Abilities { uid_expunge }]);
+        run.finish()?;
+    }
+    Ok(())
+}
+
+#[test]
 fn append_tells_the_uid_the_message_got() -> Result {
     let mut run = Run::sample()?;
     let job = run.job(append(b"From: ada@example.org\r\nSubject: Plan\r\n\r\nA draft.\r\n")?)?;
@@ -259,8 +279,14 @@ fn append_of_what_no_literal_carries_fails_and_keeps_the_connection() -> Result 
     let mut run = Run::sample()?;
     let job = run.job(append(b"Subject: \0\r\n\r\n")?)?;
     assert_eq!(of_job(&run, job)?, [EventKind::Failed { kind: ErrorKind::CommandRefused, folder: Some(DRAFTS) }]);
-    let job =
-        run.job(JobKind::Append { folder: DRAFTS, path: path("Gone")?, flags: Flags::default(), raw: b"Subject: x\r\n\r\n".to_vec(), draft: None })?;
+    let job = run.job(JobKind::Append {
+        folder: DRAFTS,
+        path: path("Gone")?,
+        flags: Flags::default(),
+        raw: b"Subject: x\r\n\r\n".to_vec(),
+        draft: None,
+        message: None,
+    })?;
     assert_eq!(of_job(&run, job)?, [EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(DRAFTS) }]);
     let lines = run.finish()?;
     assert_eq!(lines.iter().filter(|line| line.contains("AUTHENTICATE")).count(), 1);
