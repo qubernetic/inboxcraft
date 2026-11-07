@@ -10,11 +10,12 @@ use std::sync::atomic::AtomicBool;
 
 use rustls::ServerConfig;
 
+use crate::base64;
 use crate::imap::notify::Notify;
 use crate::imap::reader::{self, Command, MAX_LITERAL, MAX_LITERALS, Refused, Token};
 use crate::imap::update::{Change, Update};
 use crate::imap::write::{clean, line, no, ok};
-use crate::imap::{Action, Capability, FakeImap, When, base64};
+use crate::imap::{Action, Capability, FakeImap, When};
 use crate::line::{Line, LineReader};
 use crate::server::{Ending, Transcript, pause};
 use crate::{Error, Fault};
@@ -164,6 +165,7 @@ impl Session {
             if let Some(end) = self.play(io, &When::Command(name.clone()), stop)? {
                 return Ok(Effect::End(end));
             }
+            self.post(&mut out);
             let next = self.answer(command, &mut out);
             send(io, &out)?;
             let next = match next {

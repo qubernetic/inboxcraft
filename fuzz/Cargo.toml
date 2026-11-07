@@ -101,6 +101,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "testkit_smtp"
+path = "fuzz_targets/testkit_smtp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "net_envelope"
 path = "fuzz_targets/net_envelope.rs"
 test = false
