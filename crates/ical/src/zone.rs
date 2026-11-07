@@ -3,70 +3,74 @@
 
 //! Time zones a calendar carries (`VTIMEZONE`, RFC 5545 section 3.6.5) and how a [`When`] becomes a moment.
 
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
+
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
-use crate::value::{DAY_SECS, civil_from_seconds, civil_seconds};
-use crate::{Component, End, IcalError, Rule, When, read_offset};
+use crate::{Component, End, Frequency, IcalError, Rule, When, read_offset};
 
-/// The most onsets of one observance [`TimeZone`] walks through to find the offset at a moment.
+/// The most onsets a zone lists: its observances' `DTSTART`s and `RDATE`s, and the onsets of its rules with a
+/// `COUNT`.
 pub const MAX_ONSETS: usize = 10_000;
 
-/// How far before a moment the onset that holds it is looked for: more than a year, so a yearly rule's last onset
-/// is found.
-const LOOK_BACK_DAYS: i64 = 400;
+/// The most `RRULE`s without a `COUNT` the observances of a zone have together.
+pub const MAX_ZONE_RULES: usize = 16;
+
+/// The most work (see [`crate::Recurrence::work`]) a rule with a `COUNT` may take to be walked to its end while its
+/// zone is read.
+const COUNT_WORK: usize = 2_000;
 
 /// Zone names that stand for UTC itself, which need no `VTIMEZONE`.
 const UTC_NAMES: [&str; 9] = ["UTC", "Etc/UTC", "GMT", "Etc/GMT", "Z", "Zulu", "Etc/Zulu", "Universal", "Etc/Universal"];
 
-/// One `STANDARD` or `DAYLIGHT` part of a zone: from its onsets on, the wall clock is `to` from UTC.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Observance {
-    /// The first onset, on the wall clock before it (at `from`).
-    start: CivilDateTime,
-    from: Offset,
-    to: Offset,
-    rules: Vec<Rule>,
-    /// More onsets (`RDATE`), on the wall clock before them.
-    dates: Vec<CivilDateTime>,
+/// Whether `tzid` is one of UTC's own names.
+pub(crate) fn is_utc(tzid: &str) -> bool {
+    UTC_NAMES.iter().any(|name| name.eq_ignore_ascii_case(tzid))
 }
 
-impl Observance {
-    fn read(component: &Component) -> Result<Self, IcalError> {
-        let missing = |property| IcalError::Missing { component: "VTIMEZONE", property };
-        let start = component.property("DTSTART").ok_or(missing("DTSTART"))?;
-        let start = wall_clock(&When::from_property(start)?).ok_or_else(|| IcalError::bad_value("DTSTART"))?;
-        let from = read_offset(component.property("TZOFFSETFROM").ok_or(missing("TZOFFSETFROM"))?)?;
-        let to = read_offset(component.property("TZOFFSETTO").ok_or(missing("TZOFFSETTO"))?)?;
-        let rules = component.properties_named("RRULE").map(Rule::from_property).collect::<Result<_, _>>()?;
-        let mut dates = Vec::new();
-        for property in component.properties_named("RDATE") {
-            dates.extend(When::list_from_property(property)?.iter().filter_map(wall_clock));
-        }
-        Ok(Self { start, from, to, rules, dates })
-    }
+/// An onset of a `STANDARD` or `DAYLIGHT` part: from then on, the wall clock is `to` from UTC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Onset {
+    at: Timestamp,
+    /// The part's place in the zone: of two onsets at once, the later part wins.
+    part: usize,
+    to: Offset,
+}
 
-    fn onset(&self, civil: CivilDateTime) -> Option<Timestamp> {
-        civil.to_timestamp(self.from)
+impl Onset {
+    fn key(self) -> (Timestamp, usize) {
+        (self.at, self.part)
     }
+}
 
-    /// The last onset at or before `at`.
-    fn last_onset(&self, at: Timestamp) -> Option<Timestamp> {
-        let mut last = [self.start].iter().chain(&self.dates).filter_map(|civil| self.onset(*civil)).filter(|onset| *onset <= at).max();
-        let look_from = at.to_civil(self.from).map(civil_seconds).and_then(|secs| civil_from_seconds(secs.saturating_sub(LOOK_BACK_DAYS * DAY_SECS)));
-        for rule in &self.rules {
-            let mut onsets = rule.iter(self.start);
-            if let Some(look_from) = look_from {
-                onsets.skip_to(look_from);
-            }
-            for civil in onsets.take(MAX_ONSETS) {
-                let Some(onset) = self.onset(civil) else { break };
-                if onset > at || ends_before(&rule.end, civil, onset) {
-                    break;
-                }
-                last = last.max(Some(onset));
-            }
-        }
-        last
+/// A rule of a `STANDARD` or `DAYLIGHT` part, without a `COUNT`: its onsets are worked out a year at a time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ZoneRule {
+    rule: Rule,
+    /// The part's `DTSTART`, on the wall clock before it.
+    start: CivilDateTime,
+    part: usize,
+    from: Offset,
+    to: Offset,
+}
+
+impl ZoneRule {
+    /// The onsets in `year` (on the wall clock before them), and the work it took.
+    fn onsets_in(&self, year: i32) -> (Vec<Timestamp>, usize) {
+        let (Some(first), Some(last)) = (CivilDateTime::new(year, 1, 1, 0, 0, 0), CivilDateTime::new(year, 12, 31, 23, 59, 59)) else {
+            return (Vec::new(), 1);
+        };
+        let mut walk = self.rule.iter(self.start).stop_after(last);
+        walk.skip_to(first);
+        let onsets = walk
+            .by_ref()
+            .filter_map(|civil| Some((civil, civil.to_timestamp(self.from)?)))
+            .filter(|(civil, onset)| !ends_before(&self.rule.end, *civil, *onset));
+        let onsets = onsets.map(|(_, onset)| onset).collect();
+        (onsets, walk.work().saturating_add(1))
     }
 }
 
@@ -90,10 +94,17 @@ fn wall_clock(when: &When) -> Option<CivilDateTime> {
 }
 
 /// A time zone as a calendar describes it: its `TZID` and the offsets over time, read from the `VTIMEZONE`.
+///
+/// Looking up an offset is cheap whatever the zone says: it takes the last onset of a sorted list, and works out at
+/// most this year and the year before of at most [`MAX_ZONE_RULES`] yearly rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeZone {
     tzid: String,
-    observances: Vec<Observance>,
+    /// The offset before every onset: the one the earliest part changes from.
+    before: Offset,
+    /// The onsets of `DTSTART`s, `RDATE`s and rules with a `COUNT`, in order.
+    onsets: Vec<Onset>,
+    rules: Vec<ZoneRule>,
     component: Component,
 }
 
@@ -103,19 +114,65 @@ impl TimeZone {
     /// # Errors
     ///
     /// [`IcalError::Missing`] without a `TZID`, a `STANDARD` or `DAYLIGHT` part, or one of their `DTSTART`,
-    /// `TZOFFSETFROM` and `TZOFFSETTO`; [`IcalError::BadValue`] when one of them cannot be read.
+    /// `TZOFFSETFROM` and `TZOFFSETTO`; [`IcalError::BadValue`] when one of them cannot be read, for a rule other than
+    /// yearly at one time of day, a rule with a `COUNT` that does not end soon, more than [`MAX_ZONE_RULES`] other
+    /// rules, or more than [`MAX_ONSETS`] onsets.
     pub fn from_component(component: &Component) -> Result<Self, IcalError> {
         let tzid = component.property("TZID").ok_or(IcalError::Missing { component: "VTIMEZONE", property: "TZID" })?;
-        let observances = component
-            .components()
-            .iter()
-            .filter(|part| part.name() == "STANDARD" || part.name() == "DAYLIGHT")
-            .map(Observance::read)
-            .collect::<Result<Vec<_>, _>>()?;
-        if observances.is_empty() {
+        let mut zone =
+            Self { tzid: tzid.value().to_owned(), before: Offset::UTC, onsets: Vec::new(), rules: Vec::new(), component: component.clone() };
+        let mut earliest: Option<CivilDateTime> = None;
+        let parts = component.components().iter().filter(|part| part.name() == "STANDARD" || part.name() == "DAYLIGHT");
+        for (index, part) in parts.enumerate() {
+            let (start, from) = zone.read_part(index, part)?;
+            if earliest.is_none_or(|earliest| start < earliest) {
+                earliest = Some(start);
+                zone.before = from;
+            }
+        }
+        if earliest.is_none() {
             return Err(IcalError::Missing { component: "VTIMEZONE", property: "STANDARD" });
         }
-        Ok(Self { tzid: tzid.value().to_owned(), observances, component: component.clone() })
+        zone.onsets.sort_unstable_by_key(|onset| onset.key());
+        Ok(zone)
+    }
+
+    /// Reads part `index` (a `STANDARD` or `DAYLIGHT`) into the zone: its `DTSTART` on the wall clock and its
+    /// `TZOFFSETFROM`.
+    fn read_part(&mut self, index: usize, component: &Component) -> Result<(CivilDateTime, Offset), IcalError> {
+        let missing = |property| IcalError::Missing { component: "VTIMEZONE", property };
+        let start = component.property("DTSTART").ok_or(missing("DTSTART"))?;
+        let start = wall_clock(&When::from_property(start)?).ok_or_else(|| IcalError::bad_value("DTSTART"))?;
+        let from = read_offset(component.property("TZOFFSETFROM").ok_or(missing("TZOFFSETFROM"))?)?;
+        let to = read_offset(component.property("TZOFFSETTO").ok_or(missing("TZOFFSETTO"))?)?;
+        let mut starts = vec![start];
+        for property in component.properties_named("RDATE") {
+            starts.extend(When::list_from_property(property)?.iter().filter_map(wall_clock));
+            if self.onsets.len().saturating_add(starts.len()) > MAX_ONSETS {
+                return Err(IcalError::bad_value("RDATE"));
+            }
+        }
+        for property in component.properties_named("RRULE") {
+            let rule = Rule::from_property(property)?;
+            let one = |list: &[u8]| list.len() <= 1;
+            if rule.frequency != Frequency::Yearly || !one(&rule.by_hour) || !one(&rule.by_minute) || !one(&rule.by_second) {
+                return Err(IcalError::bad_value("RRULE"));
+            }
+            if matches!(rule.end, End::Count(_)) {
+                let room = MAX_ONSETS.saturating_sub(self.onsets.len()).saturating_sub(starts.len());
+                let mut walk = rule.iter(start).with_budget(COUNT_WORK);
+                starts.extend(walk.by_ref().take(room.saturating_add(1)));
+                if walk.truncated() || self.onsets.len().saturating_add(starts.len()) > MAX_ONSETS {
+                    return Err(IcalError::bad_value("RRULE"));
+                }
+            } else if self.rules.len() < MAX_ZONE_RULES {
+                self.rules.push(ZoneRule { rule, start, part: index, from, to });
+            } else {
+                return Err(IcalError::bad_value("RRULE"));
+            }
+        }
+        self.onsets.extend(starts.iter().filter_map(|civil| Some(Onset { at: civil.to_timestamp(from)?, part: index, to })));
+        Ok((start, from))
     }
 
     /// The `TZID`.
@@ -129,18 +186,71 @@ impl TimeZone {
     pub fn component(&self) -> &Component {
         &self.component
     }
+
+    /// The offset at `at`, the onsets of the rules in a year taken from `onsets_in` (rule, year).
+    fn offset_with(&self, at: Timestamp, mut onsets_in: impl FnMut(usize, i32) -> Option<Timestamp>) -> Offset {
+        let listed = self.onsets.partition_point(|onset| onset.at <= at).checked_sub(1).and_then(|last| self.onsets.get(last)).copied();
+        let mut latest = listed;
+        for (index, rule) in self.rules.iter().enumerate() {
+            let Some(year) = at.to_civil(rule.from).map(|civil| civil.year()) else { continue };
+            for year in [year.saturating_sub(1), year] {
+                if let Some(onset) = onsets_in(index, year) {
+                    let onset = Onset { at: onset, part: rule.part, to: rule.to };
+                    if latest.is_none_or(|latest| onset.key() > latest.key()) {
+                        latest = Some(onset);
+                    }
+                }
+            }
+        }
+        latest.map_or(self.before, |onset| onset.to)
+    }
+}
+
+/// The last of `onsets` (in order) at or before `at`.
+fn last_at_or_before(onsets: &[Timestamp], at: Timestamp) -> Option<Timestamp> {
+    onsets.partition_point(|onset| *onset <= at).checked_sub(1).and_then(|last| onsets.get(last)).copied()
 }
 
 impl Offsets for TimeZone {
-    /// The offset of the observance with the last onset at or before `at`; before every onset, the offset the
-    /// earliest observance changes from.
+    /// The offset of the part with the last onset at or before `at` (of its rules, this year's and last year's
+    /// count); before every onset, the offset the earliest part changes from.
     fn offset_at(&self, at: Timestamp) -> Offset {
-        let latest =
-            self.observances.iter().filter_map(|observance| Some((observance.last_onset(at)?, observance.to))).max_by_key(|(onset, _)| *onset);
-        latest.map_or_else(
-            || self.observances.iter().min_by_key(|observance| observance.start).map_or(Offset::UTC, |first| first.from),
-            |(_, offset)| offset,
-        )
+        self.offset_with(at, |index, year| {
+            let rule = self.rules.get(index)?;
+            last_at_or_before(&rule.onsets_in(year).0, at)
+        })
+    }
+}
+
+/// A [`TimeZone`] that keeps the onsets of its rules a year at a time as it works them out, and adds that work
+/// (see [`crate::Recurrence::work`]) to a count, for one expansion.
+#[derive(Debug)]
+pub(crate) struct ZoneClock<'a> {
+    zone: &'a TimeZone,
+    years: Mutex<BTreeMap<(usize, i32), Vec<Timestamp>>>,
+    work: &'a AtomicUsize,
+}
+
+impl<'a> ZoneClock<'a> {
+    pub(crate) fn new(zone: &'a TimeZone, work: &'a AtomicUsize) -> Self {
+        Self { zone, years: Mutex::new(BTreeMap::new()), work }
+    }
+}
+
+impl Offsets for ZoneClock<'_> {
+    fn offset_at(&self, at: Timestamp) -> Offset {
+        let mut years = self.years.lock().unwrap_or_else(PoisonError::into_inner);
+        self.zone.offset_with(at, |index, year| {
+            let onsets = match years.entry((index, year)) {
+                Entry::Occupied(known) => known.into_mut(),
+                Entry::Vacant(new) => {
+                    let (onsets, work) = self.zone.rules.get(index)?.onsets_in(year);
+                    self.work.fetch_add(work, Ordering::Relaxed);
+                    new.insert(onsets)
+                }
+            };
+            last_at_or_before(onsets, at)
+        })
     }
 }
 
@@ -184,7 +294,7 @@ impl Zones {
             When::Utc(_) => &Offset::UTC,
             When::Zoned(_, tzid) => match self.get(tzid) {
                 Some(zone) => zone,
-                None if UTC_NAMES.iter().any(|name| name.eq_ignore_ascii_case(tzid)) => &Offset::UTC,
+                None if is_utc(tzid) => &Offset::UTC,
                 None => local,
             },
             When::Date(_) | When::Floating(_) => local,

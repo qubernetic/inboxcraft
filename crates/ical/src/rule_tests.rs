@@ -195,6 +195,29 @@ fn a_rule_with_too_many_candidates_in_a_period_says_so() {
 }
 
 #[test]
+fn a_budget_ends_a_recurrence_after_that_much_work_and_says_so() {
+    // Without a budget this rule walks 100 000 empty days before it gives up.
+    let rule = Rule::parse("FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30").unwrap();
+    let mut recurrence = rule.iter(at("20260101T090000")).with_budget(1000);
+    assert_eq!(recurrence.next(), None);
+    assert!(recurrence.truncated());
+    assert!((1000..1010).contains(&recurrence.work()), "{}", recurrence.work());
+    // Each period counts, with the days it looks at and the candidates it makes.
+    let rule = Rule::parse("FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU").unwrap();
+    let mut recurrence = rule.iter(at("20260329T020000"));
+    assert_eq!(recurrence.next().map(show).as_deref(), Some("20260329T020000"));
+    assert_eq!(recurrence.work(), 1 + 31 + 1);
+    let hourly = Rule::parse("FREQ=HOURLY;BYMONTH=2").unwrap();
+    let mut sub_daily = hourly.iter(at("20260101T000000")).with_budget(10);
+    assert_eq!(sub_daily.next(), None);
+    assert!(sub_daily.truncated());
+    let twice = Rule::parse("FREQ=DAILY;COUNT=2").unwrap();
+    let mut enough = twice.iter(at("20260101T090000")).with_budget(100);
+    assert_eq!(enough.by_ref().count(), 2);
+    assert!(!enough.truncated());
+}
+
+#[test]
 fn a_count_is_kept_and_skip_to_does_nothing_with_one() {
     let rule = Rule::parse("FREQ=DAILY;COUNT=3").unwrap();
     let mut recurrence = rule.iter(at("20260101T090000"));

@@ -23,9 +23,10 @@
 //! A calendar is hostile input. Nothing panics on any bytes; what cannot be read is an [`IcalError`]: input over
 //! [`MAX_BYTES`], over [`MAX_ITEMS`] properties and components, nesting deeper than [`MAX_DEPTH`], a rule part out
 //! of range or a list over [`MAX_RULE_VALUES`]. An event or zone that cannot be read is kept as it came, not an
-//! error. Expanding is bounded too: [`MAX_PERIODS`] empty periods in a row, [`MAX_PER_PERIOD`] candidates in a
-//! period, [`MAX_STEPS`] occurrences walked and [`MAX_OCCURRENCES`] given, and [`Expansion::truncated`] says when a
-//! limit left something out.
+//! error. A zone is read only when looking up an offset in it stays cheap: yearly rules at one time of day, at most
+//! [`MAX_ZONE_RULES`] of them and [`MAX_ONSETS`] onsets. Expanding is bounded too: [`MAX_PERIODS`] empty periods in a
+//! row, [`MAX_PER_PERIOD`] candidates in a period, [`MAX_STEPS`] of work for a whole calendar and [`MAX_OCCURRENCES`]
+//! held and given, and [`Expansion::truncated`] says when a limit left something out.
 //!
 //! ```
 //! use inboxcraft_ical::{Calendar, IcalError};
@@ -89,7 +90,7 @@ pub use error::{IcalError, MAX_NAME_IN_ERROR};
 pub use event::{Alarm, Attendee, Class, Event, PartStat, Status, Trigger};
 pub use rule::{End, Frequency, MAX_PER_PERIOD, MAX_PERIODS, MAX_RULE_VALUES, Recurrence, Rule, WeekdayNum};
 pub use value::{Date, Span, When, escape_text, list_to_property, read_offset, unescape_text, unescape_text_list, write_offset};
-pub use zone::{MAX_ONSETS, TimeZone, Zones};
+pub use zone::{MAX_ONSETS, MAX_ZONE_RULES, TimeZone, Zones};
 
 /// The crate's package name.
 ///

@@ -383,9 +383,10 @@ impl Plan {
 
 /// The occurrences of a [`Rule`] on the wall clock, in order (see [`Rule::iter`]).
 ///
-/// It ends with the rule's `COUNT`, after [`Recurrence::stop_after`], past year 9999, or when [`MAX_PERIODS`]
-/// periods in a row bring nothing; [`Recurrence::truncated`] tells the last apart from a rule that has ended, and
-/// also says when a period had more than [`MAX_PER_PERIOD`] candidates.
+/// It ends with the rule's `COUNT`, after [`Recurrence::stop_after`], past year 9999, when [`MAX_PERIODS`] periods
+/// in a row bring nothing, or when its work passes a [`Recurrence::with_budget`]; [`Recurrence::truncated`] tells the
+/// last two apart from a rule that has ended, and also says when a period had more than [`MAX_PER_PERIOD`]
+/// candidates.
 #[derive(Debug, Clone)]
 pub struct Recurrence<'a> {
     rule: &'a Rule,
@@ -398,12 +399,26 @@ pub struct Recurrence<'a> {
     stop: Option<CivilDateTime>,
     done: bool,
     truncated: bool,
+    work: usize,
+    budget: usize,
 }
 
 impl<'a> Recurrence<'a> {
     fn new(rule: &'a Rule, start: CivilDateTime) -> Self {
         let plan = Plan::new(rule, start);
-        Self { rule, plan, start, period: 0, pending: VecDeque::new(), made: 0, stop: None, done: false, truncated: false }
+        Self {
+            rule,
+            plan,
+            start,
+            period: 0,
+            pending: VecDeque::new(),
+            made: 0,
+            stop: None,
+            done: false,
+            truncated: false,
+            work: 0,
+            budget: usize::MAX,
+        }
     }
 
     /// The occurrences up to and including `last` only (a rule's `UNTIL` on this wall clock, or the end of a view).
@@ -411,6 +426,20 @@ impl<'a> Recurrence<'a> {
     pub fn stop_after(mut self, last: CivilDateTime) -> Self {
         self.stop = Some(last);
         self
+    }
+
+    /// Ends it, truncated, before a period once its [`Recurrence::work`] has come to `budget`.
+    #[must_use]
+    pub fn with_budget(mut self, budget: usize) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// The work it has done: one for each period it looked at, and one for each day of a period and each candidate
+    /// it made. A period holds at most 371 days and [`MAX_PER_PERIOD`] candidates.
+    #[must_use]
+    pub fn work(&self) -> usize {
+        self.work
     }
 
     /// Whether it ended early: a limit, not the rule, ended it or left candidates out.
@@ -612,7 +641,11 @@ impl<'a> Recurrence<'a> {
         let prune = self.rule.by_set_pos.is_empty();
         let first_day = self.start_day();
         let last_day = self.stop.map(|stop| civil_seconds(stop).div_euclid(DAY_SECS));
+        if prune && days.first().is_some_and(|first| last_day.is_some_and(|last| *first > last)) {
+            return Some(Vec::new());
+        }
         let times = self.times(period_start);
+        self.work = self.work.saturating_add(days.len());
         let mut found = Vec::new();
         for day in days {
             if prune && (day < first_day || last_day.is_some_and(|last| day > last)) || !self.day_matches(day, year) {
@@ -627,6 +660,7 @@ impl<'a> Recurrence<'a> {
                 found.extend(CivilDateTime::new(date.year(), date.month(), date.day(), *hour, *minute, *second));
             }
         }
+        self.work = self.work.saturating_add(found.len());
         if prune {
             return Some(found);
         }
@@ -649,6 +683,11 @@ impl<'a> Recurrence<'a> {
     /// Fills `pending` from the next periods; false when the recurrence has ended.
     fn refill(&mut self) -> bool {
         for _ in 0..MAX_PERIODS {
+            if self.work >= self.budget {
+                self.truncated = true;
+                return false;
+            }
+            self.work = self.work.saturating_add(1);
             let index = self.period;
             if self.rule.frequency < Frequency::Daily {
                 let secs = self.base_secs().saturating_add(index.saturating_mul(self.step_secs()));

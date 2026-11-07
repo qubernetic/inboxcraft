@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
-use super::{TimeZone, Zones};
+use super::{MAX_ONSETS, MAX_ZONE_RULES, TimeZone, ZoneClock, Zones};
 use crate::{Date, IcalError, When, parse};
 
 pub(crate) const BUDAPEST: &str = "BEGIN:VTIMEZONE\r\n\
@@ -164,6 +166,66 @@ fn refuses_zones_it_cannot_read() {
     assert_eq!(read(&part(&format!("{good}RDATE:x\r\n"))), Err(IcalError::bad_value("RDATE")));
     assert_eq!(read(&part("DTSTART:x\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0100\r\n")), Err(IcalError::bad_value("DTSTART")));
     assert!(read(&part(good)).is_ok());
+}
+
+#[test]
+fn refuses_zone_rules_that_would_make_a_lookup_slow() {
+    let read = |text: &str| TimeZone::from_component(&parse(text.as_bytes()).unwrap());
+    let observance = |rule: &str| {
+        format!("BEGIN:STANDARD\r\nDTSTART:20000101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0100\r\nRRULE:{rule}\r\nEND:STANDARD\r\n")
+    };
+    let zone_of = |parts: &str| format!("BEGIN:VTIMEZONE\r\nTZID:A\r\n{parts}END:VTIMEZONE\r\n");
+    let refused = Err(IcalError::bad_value("RRULE"));
+    // A zone changes its offset at most a few times a year: its rules are yearly, at one time of day.
+    for rule in [
+        "FREQ=SECONDLY",
+        "FREQ=HOURLY",
+        "FREQ=DAILY",
+        "FREQ=MONTHLY",
+        "FREQ=YEARLY;BYHOUR=1,2",
+        "FREQ=YEARLY;BYMINUTE=1,2",
+        "FREQ=YEARLY;BYSECOND=1,2",
+    ] {
+        assert_eq!(read(&zone_of(&observance(rule))), refused, "{rule}");
+    }
+    let most = observance("FREQ=YEARLY").repeat(MAX_ZONE_RULES);
+    assert!(read(&zone_of(&most)).is_ok());
+    assert_eq!(read(&zone_of(&format!("{most}{}", observance("FREQ=YEARLY")))), refused);
+    // A COUNT is walked while the zone is read, so it has to end soon.
+    assert!(read(&zone_of(&observance("FREQ=YEARLY;COUNT=20"))).is_ok());
+    assert_eq!(read(&zone_of(&observance("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30;COUNT=1"))), refused);
+    assert_eq!(read(&zone_of(&observance(&format!("FREQ=YEARLY;BYDAY=MO;COUNT={}", MAX_ONSETS + 1)))), refused);
+    // So are a zone's dates.
+    let dates = (0..=MAX_ONSETS).map(|n| format!("{:04}0101T000000", 1000 + n % 9000)).collect::<Vec<_>>().join(",");
+    let many = format!("BEGIN:STANDARD\r\nDTSTART:20000101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0100\r\nRDATE:{dates}\r\nEND:STANDARD\r\n");
+    assert_eq!(read(&zone_of(&many)), Err(IcalError::bad_value("RDATE")));
+}
+
+#[test]
+fn a_lookup_works_out_two_years_of_each_rule_once() {
+    let budapest = zone(BUDAPEST);
+    let work = AtomicUsize::new(0);
+    let clock = ZoneClock::new(&budapest, &work);
+    assert_eq!(clock.offset_at(utc(2026, 7, 1, 12, 0)), Offset::from_minutes(120).unwrap());
+    let first = work.load(Ordering::Relaxed);
+    // Two rules, this year and the year before: the year's period, its month of days and its onset, a look at the
+    // next period, and one for the year itself.
+    assert_eq!(first, 2 * 2 * (1 + 31 + 1 + 1 + 1));
+    assert_eq!(clock.offset_at(utc(2026, 12, 1, 12, 0)), Offset::from_minutes(60).unwrap());
+    assert_eq!(clock.resolve(civil(2026, 3, 29, 2, 30)), Some(utc(2026, 3, 29, 1, 30)));
+    assert_eq!(work.load(Ordering::Relaxed), first);
+    // The worst zone a lookup can meet: the most rules, each a whole year of days and an onset every day of it.
+    let worst = format!(
+        "BEGIN:VTIMEZONE\r\nTZID:W\r\n{}END:VTIMEZONE\r\n",
+        "BEGIN:DAYLIGHT\r\nDTSTART:20000101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU\r\nEND:DAYLIGHT\r\n"
+            .repeat(MAX_ZONE_RULES)
+    );
+    let worst = zone(&worst);
+    let work = AtomicUsize::new(0);
+    assert_eq!(ZoneClock::new(&worst, &work).offset_at(utc(2026, 7, 1, 12, 0)), Offset::from_minutes(120).unwrap());
+    assert!(work.load(Ordering::Relaxed) <= MAX_ZONE_RULES * 2 * (2 + 2 * 366 + 1), "{}", work.load(Ordering::Relaxed));
+    // The zone itself works out the same without keeping anything.
+    assert_eq!(budapest.offset_at(utc(2026, 7, 1, 12, 0)), Offset::from_minutes(120).unwrap());
 }
 
 #[test]

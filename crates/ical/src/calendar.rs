@@ -3,19 +3,26 @@
 
 //! A calendar object (`VCALENDAR`): its zones and events, and the occurrences of the events in a span of time.
 
-use std::collections::BTreeSet;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::sync::atomic::{self, AtomicUsize};
 use std::time::Duration;
 
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
 use crate::value::{DAY_SECS, civil_from_seconds, civil_seconds};
+use crate::zone::{ZoneClock, is_utc};
 use crate::{Component, Date, End, Event, IcalError, Property, Rule, Span, TimeZone, When, Zones, parse};
 
-/// The most occurrences [`Calendar::occurrences`] gives for one span.
+/// The most occurrences [`Calendar::occurrences`] gives for one span; it holds no more while it looks.
 pub const MAX_OCCURRENCES: usize = 10_000;
 
-/// The most occurrences of one rule [`Calendar::occurrences`] walks through, before the span included.
-pub const MAX_STEPS: usize = 1_000_000;
+/// The most work [`Calendar::occurrences`] does for one span, all events together: the work of their rules and of
+/// their zones' rules (see [`crate::Recurrence::work`]), and ten for each event, date and instance it looks at.
+pub const MAX_STEPS: usize = 2_000_000;
+
+/// What looking at one event, date or instance costs out of [`MAX_STEPS`]: it resolves times in a zone.
+const LOOK_STEPS: usize = 10;
 
 /// A calendar object: what one `.ics` file or one CalDAV resource holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +61,8 @@ pub struct Occurrence {
 pub struct Expansion {
     /// The occurrences.
     pub occurrences: Vec<Occurrence>,
-    /// Whether a limit left some out: more than [`MAX_OCCURRENCES`], a rule that walked more than [`MAX_STEPS`]
-    /// or ran into a limit of its own ([`crate::Recurrence::truncated`]).
+    /// Whether a limit left some out: more than [`MAX_OCCURRENCES`], more than [`MAX_STEPS`] of work, or a rule
+    /// that ran into a limit of its own ([`crate::Recurrence::truncated`]).
     pub truncated: bool,
 }
 
@@ -154,115 +161,189 @@ impl Calendar {
     /// A recurring event's set is its `DTSTART`, its rules' occurrences (`UNTIL` and `COUNT` kept) and its
     /// `RDATE`s, less its `EXDATE`s and the instances a changed instance (same `UID`, a `RECURRENCE-ID`) takes the
     /// place of; changed instances count with their own times.
+    ///
+    /// The work is bounded by [`MAX_STEPS`] for the whole calendar, and at most [`MAX_OCCURRENCES`] are held, the
+    /// earliest; when either limit is reached the expansion says so.
     #[must_use]
     pub fn occurrences(&self, from: Timestamp, to: Timestamp, local: &dyn Offsets) -> Expansion {
-        let mut expansion = Expansion::default();
-        for (index, event) in self.events.iter().enumerate() {
-            if event.recurrence_id.is_some() {
-                self.changed_instance(index, event, (from, to), local, &mut expansion);
-            } else {
-                self.expand(index, event, (from, to), local, &mut expansion);
+        self.occurrences_counted(from, to, local).0
+    }
+
+    /// [`Calendar::occurrences`] and the work it took.
+    fn occurrences_counted(&self, from: Timestamp, to: Timestamp, local: &dyn Offsets) -> (Expansion, usize) {
+        let zone_work = AtomicUsize::new(0);
+        let view = View::new(&self.zones, (from, to), local, &zone_work);
+        let mut found = Found::new(&zone_work);
+        let mut changed: BTreeMap<&str, Vec<&When>> = BTreeMap::new();
+        for event in &self.events {
+            if let Some(id) = &event.recurrence_id {
+                changed.entry(event.uid.as_str()).or_default().push(id);
             }
         }
-        expansion.occurrences.sort_by_key(|occurrence| (occurrence.start, occurrence.event));
-        if expansion.occurrences.len() > MAX_OCCURRENCES {
-            expansion.occurrences.truncate(MAX_OCCURRENCES);
-            expansion.truncated = true;
+        for (index, event) in self.events.iter().enumerate() {
+            if !found.charge(LOOK_STEPS) {
+                break;
+            }
+            if event.recurrence_id.is_some() {
+                view.changed_instance(index, event, &mut found);
+            } else {
+                let gone = changed.get(event.uid.as_str()).map_or(&[][..], Vec::as_slice);
+                view.expand(index, event, gone, &mut found);
+            }
         }
-        expansion
+        let used = found.used();
+        (found.finish(), used)
+    }
+}
+
+/// What an expansion looks through: its span, the calendar's zones (each worked out once) and the person's wall
+/// clock.
+struct View<'a> {
+    span: (Timestamp, Timestamp),
+    local: &'a dyn Offsets,
+    clocks: Vec<ZoneClock<'a>>,
+    by_tzid: BTreeMap<&'a str, usize>,
+}
+
+impl<'a> View<'a> {
+    fn new(zones: &'a Zones, span: (Timestamp, Timestamp), local: &'a dyn Offsets, work: &'a AtomicUsize) -> Self {
+        let mut by_tzid = BTreeMap::new();
+        for (index, zone) in zones.all().iter().enumerate() {
+            by_tzid.entry(zone.tzid()).or_insert(index);
+        }
+        Self { span, local, clocks: zones.all().iter().map(|zone| ZoneClock::new(zone, work)).collect(), by_tzid }
     }
 
-    fn changed_instance(&self, index: usize, event: &Event, span: (Timestamp, Timestamp), local: &dyn Offsets, expansion: &mut Expansion) {
-        let Some(start) = self.zones.resolve(&event.start, local) else { return };
-        let length = self.length(event, local);
-        let end = self.end_of(length, &event.start, start, local);
-        if overlaps(start, end, span) {
-            expansion.occurrences.push(Occurrence { event: index, start, end, recurrence_id: event.recurrence_id.clone() });
+    /// As [`Zones::offsets`].
+    fn offsets(&self, when: &When) -> &dyn Offsets {
+        match when {
+            When::Utc(_) => &Offset::UTC,
+            When::Zoned(_, tzid) => match self.by_tzid.get(tzid.as_str()).and_then(|index| self.clocks.get(*index)) {
+                Some(clock) => clock,
+                None if is_utc(tzid) => &Offset::UTC,
+                None => self.local,
+            },
+            When::Date(_) | When::Floating(_) => self.local,
         }
     }
 
-    fn expand(&self, index: usize, event: &Event, span: (Timestamp, Timestamp), local: &dyn Offsets, expansion: &mut Expansion) {
-        let offsets = self.zones.offsets(&event.start, local);
-        let length = self.length(event, local);
+    /// As [`Zones::resolve`].
+    fn resolve(&self, when: &When) -> Option<Timestamp> {
+        match when {
+            When::Utc(at) => Some(*at),
+            When::Date(date) => self.local.resolve(date.midnight()),
+            When::Floating(civil) | When::Zoned(civil, _) => self.offsets(when).resolve(*civil),
+        }
+    }
+
+    fn changed_instance(&self, index: usize, event: &Event, found: &mut Found<'_>) {
+        let Some(start) = self.resolve(&event.start) else { return };
+        let length = self.length(event);
+        let end = self.end_of(length, &event.start, start);
+        if overlaps(start, end, self.span) {
+            found.push(Occurrence { event: index, start, end, recurrence_id: event.recurrence_id.clone() });
+        }
+    }
+
+    /// Adds the occurrences of the series `event`, less the instances in `gone` (the `RECURRENCE-ID`s of its changed
+    /// instances) and its `EXDATE`s.
+    fn expand(&self, index: usize, event: &Event, gone: &[&When], found: &mut Found<'_>) {
+        let offsets = self.offsets(&event.start);
         let Some(first) = wall_clock(&event.start) else { return };
-        let recurring = !event.rules.is_empty() || !event.dates.is_empty();
-        let mut instances = BTreeSet::from([first]);
-        for date in &event.dates {
-            let civil = match date {
-                When::Date(day) => Some(day.midnight()),
-                other => self.zones.resolve(other, local).and_then(|at| offsets.civil(at)),
-            };
-            instances.extend(civil);
+        let mut series = Series {
+            index,
+            event,
+            length: self.length(event),
+            recurring: !event.rules.is_empty() || !event.dates.is_empty(),
+            gone_days: BTreeSet::new(),
+            gone_at: BTreeSet::new(),
+        };
+        for gone in gone.iter().copied().chain(&event.exceptions) {
+            if !found.charge(LOOK_STEPS) {
+                return;
+            }
+            match gone {
+                When::Date(date) => {
+                    series.gone_days.insert(*date);
+                }
+                other => series.gone_at.extend(self.resolve(other)),
+            }
         }
-        let look_from =
-            span.0.checked_sub(Duration::from_secs(length.most_secs().saturating_add(2 * DAY_SECS).unsigned_abs())).unwrap_or(Timestamp::MIN);
+        let mut dates = BTreeSet::from([first]);
+        for date in &event.dates {
+            if !found.charge(LOOK_STEPS) {
+                return;
+            }
+            dates.extend(match date {
+                When::Date(day) => Some(day.midnight()),
+                other => self.resolve(other).and_then(|at| offsets.civil(at)),
+            });
+        }
+        for civil in dates {
+            if !self.add(&series, civil, found) {
+                return;
+            }
+        }
+        let look_from = self
+            .span
+            .0
+            .checked_sub(Duration::from_secs(series.length.most_secs().saturating_add(2 * DAY_SECS).unsigned_abs()))
+            .unwrap_or(Timestamp::MIN);
         let look_from = offsets.civil(look_from);
         let look_to = offsets
-            .civil(span.1)
+            .civil(self.span.1)
             .and_then(|civil| civil_from_seconds(civil_seconds(civil).saturating_add(DAY_SECS)))
             .or_else(|| CivilDateTime::new(10_000, 12, 31, 23, 59, 59));
         for rule in &event.rules {
-            let mut recurrence = rule.iter(first);
+            let mut recurrence = rule.iter(first).with_budget(MAX_STEPS.saturating_sub(found.used()));
             if let Some(stop) = [until(rule, &event.start, offsets), look_to].into_iter().flatten().min() {
                 recurrence = recurrence.stop_after(stop);
             }
             if let Some(look_from) = look_from {
                 recurrence.skip_to(look_from);
             }
-            let mut steps = 0usize;
-            for civil in recurrence.by_ref() {
-                steps = steps.saturating_add(1);
-                if steps > MAX_STEPS {
-                    expansion.truncated = true;
-                    break;
+            let mut charged = 0;
+            loop {
+                let next = recurrence.next();
+                if !found.charge(recurrence.work().saturating_sub(charged)) {
+                    return;
                 }
-                if look_from.is_none_or(|look_from| civil >= look_from) {
-                    instances.insert(civil);
+                charged = recurrence.work();
+                let Some(civil) = next else { break };
+                if look_from.is_none_or(|look_from| civil >= look_from) && !self.add(&series, civil, found) {
+                    return;
                 }
             }
-            expansion.truncated |= recurrence.truncated();
-        }
-        let replaced: Vec<&When> = self
-            .events
-            .iter()
-            .filter(|other| other.uid == event.uid)
-            .filter_map(|other| other.recurrence_id.as_ref())
-            .chain(&event.exceptions)
-            .collect();
-        for civil in instances {
-            let when = instance(&event.start, civil);
-            let Some(start) = self.zones.resolve(&when, local) else { continue };
-            if replaced.iter().any(|gone| self.same_instance(gone, civil, start, local)) {
-                continue;
-            }
-            let end = self.end_of(length, &when, start, local);
-            if overlaps(start, end, span) {
-                expansion.occurrences.push(Occurrence { event: index, start, end, recurrence_id: recurring.then_some(when) });
-            }
+            found.truncated |= recurrence.truncated();
         }
     }
 
-    /// Whether `gone` (an `EXDATE` or a `RECURRENCE-ID`) names the instance at `civil`, `start`: a date names every
-    /// instance on that day.
-    fn same_instance(&self, gone: &When, civil: CivilDateTime, start: Timestamp, local: &dyn Offsets) -> bool {
-        match gone {
-            When::Date(date) => Date::of(civil) == *date,
-            other => self.zones.resolve(other, local) == Some(start),
+    /// Adds the instance of `series` at the wall-clock time `civil` unless it is gone or outside the span; false
+    /// when the work is spent.
+    fn add(&self, series: &Series<'_>, civil: CivilDateTime, found: &mut Found<'_>) -> bool {
+        if !found.charge(LOOK_STEPS) {
+            return false;
         }
+        let when = instance(&series.event.start, civil);
+        let Some(start) = self.resolve(&when) else { return true };
+        if series.gone_days.contains(&Date::of(civil)) || series.gone_at.contains(&start) {
+            return true;
+        }
+        let end = self.end_of(series.length, &when, start);
+        if overlaps(start, end, self.span) {
+            found.push(Occurrence { event: series.index, start, end, recurrence_id: series.recurring.then_some(when) });
+        }
+        true
     }
 
-    fn length(&self, event: &Event, local: &dyn Offsets) -> Length {
+    fn length(&self, event: &Event) -> Length {
         match (&event.start, &event.end, event.duration) {
             (When::Date(first), Some(When::Date(last)), _) => {
                 let days = (civil_seconds(last.midnight()) - civil_seconds(first.midnight())) / DAY_SECS;
                 Length::Nominal(Span::new(days.max(0), 0).unwrap_or_default())
             }
             (start, Some(end), _) => {
-                let secs = self
-                    .zones
-                    .resolve(end, local)
-                    .zip(self.zones.resolve(start, local))
-                    .map_or(0, |(end, start)| end.unix_seconds() - start.unix_seconds());
+                let secs = self.resolve(end).zip(self.resolve(start)).map_or(0, |(end, start)| end.unix_seconds() - start.unix_seconds());
                 Length::Exact(secs.max(0))
             }
             (_, None, Some(span)) if !span.is_negative() => Length::Nominal(span),
@@ -271,15 +352,102 @@ impl Calendar {
         }
     }
 
-    fn end_of(&self, length: Length, when: &When, start: Timestamp, local: &dyn Offsets) -> Timestamp {
+    fn end_of(&self, length: Length, when: &When, start: Timestamp) -> Timestamp {
         let end = match length {
             Length::Exact(secs) => start.checked_add(Duration::from_secs(secs.unsigned_abs())),
             Length::Nominal(span) => wall_clock(when)
                 .and_then(|civil| civil_from_seconds(civil_seconds(civil).saturating_add(span.days().saturating_mul(DAY_SECS))))
-                .and_then(|civil| self.zones.resolve(&instance(when, civil), local))
+                .and_then(|civil| self.resolve(&instance(when, civil)))
                 .and_then(|moved| moved.checked_add(Duration::from_secs(span.seconds().unsigned_abs()))),
         };
         end.unwrap_or(Timestamp::MAX).max(start)
+    }
+}
+
+/// A recurring event while it is expanded.
+struct Series<'e> {
+    index: usize,
+    event: &'e Event,
+    length: Length,
+    recurring: bool,
+    /// The days of `EXDATE`s and `RECURRENCE-ID`s in the date form: every instance on them is gone.
+    gone_days: BTreeSet<Date>,
+    /// The moments of the other `EXDATE`s and `RECURRENCE-ID`s.
+    gone_at: BTreeSet<Timestamp>,
+}
+
+/// An occurrence held, by start, then event, then the order it was found in.
+struct Held {
+    key: (Timestamp, usize, usize),
+    occurrence: Occurrence,
+}
+
+impl PartialEq for Held {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for Held {}
+
+impl PartialOrd for Held {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Held {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
+/// What an expansion has found so far: the earliest [`MAX_OCCURRENCES`] occurrences, and the work it took.
+struct Found<'a> {
+    held: BinaryHeap<Held>,
+    /// The event and start of each occurrence held, so an instance two sources make counts once.
+    seen: BTreeSet<(usize, Timestamp)>,
+    made: usize,
+    steps: usize,
+    zone_work: &'a AtomicUsize,
+    truncated: bool,
+}
+
+impl<'a> Found<'a> {
+    fn new(zone_work: &'a AtomicUsize) -> Self {
+        Self { held: BinaryHeap::new(), seen: BTreeSet::new(), made: 0, steps: 0, zone_work, truncated: false }
+    }
+
+    fn used(&self) -> usize {
+        self.steps.saturating_add(self.zone_work.load(atomic::Ordering::Relaxed))
+    }
+
+    /// Counts `steps` more work; false, truncated, once the work is over [`MAX_STEPS`].
+    fn charge(&mut self, steps: usize) -> bool {
+        self.steps = self.steps.saturating_add(steps);
+        if self.used() > MAX_STEPS {
+            self.truncated = true;
+            return false;
+        }
+        true
+    }
+
+    fn push(&mut self, occurrence: Occurrence) {
+        if !self.seen.insert((occurrence.event, occurrence.start)) {
+            return;
+        }
+        self.held.push(Held { key: (occurrence.start, occurrence.event, self.made), occurrence });
+        self.made = self.made.saturating_add(1);
+        if self.held.len() > MAX_OCCURRENCES {
+            self.truncated = true;
+            if let Some(latest) = self.held.pop() {
+                self.seen.remove(&(latest.occurrence.event, latest.occurrence.start));
+            }
+        }
+    }
+
+    fn finish(self) -> Expansion {
+        Expansion { occurrences: self.held.into_sorted_vec().into_iter().map(|held| held.occurrence).collect(), truncated: self.truncated }
     }
 }
 

@@ -4,7 +4,7 @@
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 use proptest::prelude::*;
 
-use super::{Calendar, Expansion, MAX_OCCURRENCES, Occurrence};
+use super::{Calendar, Expansion, MAX_OCCURRENCES, MAX_STEPS, Occurrence};
 use crate::zone::tests::BUDAPEST;
 use crate::{Event, IcalError, When};
 
@@ -216,6 +216,54 @@ fn limits_end_an_expansion_and_say_so() {
     // A rule that never matches stops at the end of the span, so nothing is left out.
     let expansion = never.occurrences(utc(2026, 3, 1, 0, 0), utc(2026, 3, 2, 0, 0), &local());
     assert_eq!(expansion, Expansion { occurrences: Vec::new(), truncated: false });
+}
+
+#[test]
+fn one_budget_bounds_the_whole_expansion_and_only_the_earliest_are_kept() {
+    // Each of these events alone would walk a million occurrences.
+    let secondly = "UID:s\r\nDTSTART:20260101T000000Z\r\nRRULE:FREQ=SECONDLY\r\n";
+    let many = calendar(&[secondly; 200]);
+    let (expansion, used) = many.occurrences_counted(utc(2026, 1, 1, 0, 0), utc(2026, 1, 31, 0, 0), &local());
+    assert!(expansion.truncated);
+    assert_eq!(expansion.occurrences.len(), MAX_OCCURRENCES);
+    assert!(used <= MAX_STEPS + 1000, "{used}");
+    assert_eq!(expansion.occurrences.first().map(|occurrence| occurrence.start), Some(utc(2026, 1, 1, 0, 0)));
+    assert!(expansion.occurrences.windows(2).all(|pair| (pair[0].start, pair[0].event) <= (pair[1].start, pair[1].event)));
+    // Rules that find nothing still spend the budget on the periods they walk.
+    let never = "UID:n\r\nDTSTART:20260101T000000Z\r\nRRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30\r\n";
+    let (expansion, used) = calendar(&[never; 500]).occurrences_counted(utc(2026, 1, 1, 0, 0), utc(2126, 1, 1, 0, 0), &local());
+    assert!(expansion.truncated);
+    assert!(used <= MAX_STEPS + 1000, "{used}");
+    // As do the instances changed instances take the place of, however many share a UID.
+    let mut events = vec!["UID:u\r\nDTSTART:20260101T000000Z\r\nRRULE:FREQ=DAILY\r\n".to_owned(); 500];
+    events.extend((0..500).map(|n| format!("UID:u\r\nRECURRENCE-ID:2027{:04}T000000Z\r\nDTSTART:20260101T000000Z\r\n", 101 + n % 28)));
+    let events: Vec<&str> = events.iter().map(String::as_str).collect();
+    let (expansion, used) = calendar(&events).occurrences_counted(utc(2026, 1, 1, 0, 0), utc(2026, 1, 2, 0, 0), &local());
+    assert!(expansion.truncated);
+    assert!(used <= MAX_STEPS + 1000, "{used}");
+}
+
+#[test]
+fn a_zone_whose_rules_would_be_slow_is_kept_unread() {
+    let text = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Test//EN\r\n\
+        BEGIN:VTIMEZONE\r\nTZID:Test/Fast\r\nBEGIN:STANDARD\r\nDTSTART:20000101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n\
+        RRULE:FREQ=SECONDLY\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n\
+        BEGIN:VEVENT\r\nUID:1\r\nDTSTART;TZID=Test/Fast:20261109T090000\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let calendar = Calendar::parse(text.as_bytes()).unwrap();
+    assert!(calendar.zones.get("Test/Fast").is_none());
+    assert_eq!(calendar.components.first().map(|component| component.name()), Some("VTIMEZONE"));
+    // Its times are read on the person's own wall clock, like any zone without a VTIMEZONE.
+    assert_eq!(starts(&calendar, utc(2026, 11, 9, 0, 0), utc(2026, 11, 10, 0, 0)), [utc(2026, 11, 9, 12, 0)]);
+}
+
+#[test]
+fn a_zoned_series_works_out_each_year_of_its_zone_once() {
+    let calendar = calendar(&["UID:1\r\nDTSTART;TZID=Europe/Budapest:20260105T090000\r\nRRULE:FREQ=DAILY\r\n"]);
+    let (expansion, used) = calendar.occurrences_counted(utc(2026, 1, 1, 0, 0), utc(2027, 1, 1, 0, 0), &local());
+    assert_eq!(expansion.occurrences.len(), 361);
+    assert!(!expansion.truncated);
+    // A step and an instance for each day, and a few years of two zone rules.
+    assert!(used < 365 * 20 + 1000, "{used}");
 }
 
 #[test]
