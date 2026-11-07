@@ -6,8 +6,8 @@
 //! attachments.
 
 use inboxcraft_model::{
-    AccountId, Address, EmailAddress, Envelope, FolderId, Host, JobKind, MAX_REFERENCES, Message, MessageId, MessageRef, Security, Server, Summary,
-    Uid,
+    Account, AccountId, Address, EmailAddress, Envelope, FolderId, Host, JobKind, MAX_REFERENCES, Message, MessageId, MessageRef, Security, Server,
+    Summary, Uid,
 };
 use inboxcraft_store::{Batch, Body, Change, Memory, Storage};
 use inboxcraft_time::FakeClock;
@@ -59,7 +59,7 @@ fn kept(id: u64, folder: u64, uid: u32, envelope: Envelope) -> Message {
 
 /// Message 20 in account 1's inbox: from Odile to Anna, Cili and Bob (the owner's other account), Dora and Anna again
 /// on Cc, the third in its thread, its body kept. Message 21: from Odile with a Reply-To and a prefix already, no
-/// body. Message 22: one the owner sent to Cili.
+/// body. Message 22: one the owner sent to Cili, with Hidden on Bcc.
 pub(crate) fn store() -> Memory {
     let mut store = drafts_store();
     let submission = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
@@ -83,7 +83,8 @@ pub(crate) fn store() -> Memory {
     let plans = Envelope::new("Plans")
         .with_date(Some(at(NOW - 600)))
         .with_from(vec![person(Some("Anna Example"), "anna@example.org")])
-        .with_to(vec![person(Some("Cili"), "cili@example.net")]);
+        .with_to(vec![person(Some("Cili"), "cili@example.net")])
+        .with_bcc(vec![person(Some("Hidden"), "hidden@example.org")]);
     let batch = Batch::new()
         .with(Change::PutAccount(anna))
         .with(Change::PutMessage(kept(20, 1, 20, rota)))
@@ -165,6 +166,39 @@ fn reply_all_leaves_out_every_address_of_the_owner() {
     assert_eq!(texts(&answer["cc"]), ["Dora <dora@example.org>"]);
     assert_eq!(answer["subject"], json!("Re: Allotment rota"));
     assert_eq!(answer["in_reply_to"], json!("m20@example.org"));
+}
+
+#[test]
+fn reply_all_leaves_out_the_login_of_an_account_too() {
+    let mut session = session();
+    let imap = Server::new(Host::new("imap.example.org").unwrap(), Security::Tls.imap_port(), Security::Tls);
+    let login = Account::new(AccountId::new(3), "Club", EmailAddress::new("club@example.org").unwrap(), "c.ward@example.org", imap).unwrap();
+    // A login that is no address is no address of the owner.
+    let imap = Server::new(Host::new("imap.example.org").unwrap(), Security::Tls.imap_port(), Security::Tls);
+    let plain = Account::new(AccountId::new(4), "Shop", EmailAddress::new("shop@example.org").unwrap(), "shopkeeper", imap).unwrap();
+    crate::test_support::change(&mut session, Change::PutAccount(login));
+    crate::test_support::change(&mut session, Change::PutAccount(plain));
+    let envelope = Envelope::new("Club night")
+        .with_from(vec![person(Some("Odile Brannock"), "odile@example.org")])
+        .with_to(vec![person(None, "C.Ward@example.org"), person(None, "shopkeeper@example.org")])
+        .with_cc(vec![person(Some("Charlie"), "c.ward@example.org"), person(Some("Dora"), "dora@example.org")]);
+    crate::test_support::change(&mut session, Change::PutMessage(kept(24, 1, 24, envelope)));
+    let answer = session.run("compose.reply_all", &json!({ "id": 24 })).unwrap();
+    let texts = |list: &Value| list.as_array().unwrap().iter().map(|entry| entry["text"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    assert_eq!(texts(&answer["to"]), ["Odile Brannock <odile@example.org>", "shopkeeper@example.org"]);
+    assert_eq!(texts(&answer["cc"]), ["Dora <dora@example.org>"]);
+}
+
+#[test]
+fn bcc_never_leaks_into_a_reply_or_a_forward() {
+    let mut session = session();
+    let source = "From: Anna Example <anna@example.org>\r\nTo: Cili <cili@example.net>\r\nBcc: Hidden <hidden@example.org>\r\n\
+                  Subject: Plans\r\n\r\nSee you.\r\n";
+    crate::test_support::change(&mut session, Change::PutBody(MessageId::new(22), Body::new(source.as_bytes().to_vec(), "See you.").unwrap()));
+    for command in ["compose.reply", "compose.reply_all", "compose.forward"] {
+        let answer = session.run(command, &json!({ "id": 22 })).unwrap();
+        assert!(!answer.to_string().to_lowercase().contains("hidden"), "{command}: {answer}");
+    }
 }
 
 #[test]

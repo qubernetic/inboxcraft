@@ -4,8 +4,8 @@
 //! Replies and forwards (`compose.reply`, `compose.reply_all`, `compose.forward`): a new draft made from a message.
 //!
 //! - A reply goes to the message's `Reply-To`, else its `From`; a reply to the owner's own message goes to its `To`.
-//!   Reply all adds the other `To` and `Cc` recipients, each address once, and none of the owner's own addresses (of
-//!   any account). The draft is from the account that holds the message.
+//!   Reply all adds the other `To` and `Cc` recipients, each address once, and none of the owner's own: the address
+//!   and the login (where it is an address) of each account. Bcc is never read. The draft is from the account that holds the message.
 //! - The subject gets `Re: ` (a reply) or `Fwd: ` (a forward) unless it starts with one already (`Re:`, `Fw:` or
 //!   `Fwd:`, any case).
 //! - A reply carries `In-Reply-To` (the message's `Message-ID`) and `References` (the message's `References`, else
@@ -21,7 +21,7 @@
 use std::collections::BTreeSet;
 
 use inboxcraft_mime::{Attachment, is_media_type, is_message_id};
-use inboxcraft_model::{Account, Address, Draft, Envelope, Message, MessageRef};
+use inboxcraft_model::{Account, Address, Draft, EmailAddress, Envelope, Message, MessageRef};
 use inboxcraft_store::Storage;
 use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
@@ -121,9 +121,16 @@ fn attachments(source: &[u8]) -> Vec<(String, String, Vec<u8>)> {
         .collect()
 }
 
-/// Every address of the owner's accounts, lower case.
+/// The address of each of the owner's accounts and its login where that is an address, lower case.
 fn own_addresses(store: &dyn Storage) -> Result<BTreeSet<String>, EngineError> {
-    Ok(store.accounts()?.iter().map(|account| account.address().as_str().to_lowercase()).collect())
+    let mut own = BTreeSet::new();
+    for account in store.accounts()? {
+        own.insert(account.address().as_str().to_lowercase());
+        if let Ok(login) = EmailAddress::new(account.username()) {
+            own.insert(login.as_str().to_lowercase());
+        }
+    }
+    Ok(own)
 }
 
 /// `To` and `Cc` of a reply to `envelope`, as typed.
