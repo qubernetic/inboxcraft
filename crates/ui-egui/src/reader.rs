@@ -5,7 +5,8 @@
 //! full when asked), its text with the quotes folded or its HTML as safe display blocks, its attachments, and its
 //! pictures.
 //!
-//! Everything comes through the engine's commands (`mail.thread`, `mail.read`, `mail.attachment`, `remote.allow`).
+//! Everything comes through the engine's commands (`mail.thread`, `mail.open` for the message opened, which marks it
+//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`).
 //! The text of a message is data: it is shown and never acted on. Remote pictures stay blocked until the owner
 //! allows them for this message once ([`Reader::allow_once`]) or for the sender always ([`Reader::allow_always`]);
 //! only then does the document name their addresses and only then does the reader ask its [`Fetch`]. Pictures inside
@@ -301,8 +302,8 @@ impl Reader {
         }
     }
 
-    /// Opens message `id` with its thread, or closes the reader (`None`). The message itself is expanded and read;
-    /// the rest of the thread is folded. Leaving a message forgets what was allowed once.
+    /// Opens message `id` with its thread, or closes the reader (`None`). The message itself is expanded, read and
+    /// marked read; the rest of the thread is folded. Leaving a message forgets what was allowed once.
     pub fn open(&mut self, mailbox: &mut Mailbox, id: Option<u64>) {
         self.open = id;
         self.thread.clear();
@@ -371,7 +372,8 @@ impl Reader {
     }
 
     fn read(&self, mailbox: &mut Mailbox, id: u64) -> Result<Opened, UiError> {
-        let answer = mailbox.run("mail.read", &json!({ "id": id }))?;
+        // The open message is read as the owner opens it, which marks it read; the rest of the thread is only shown.
+        let answer = if Some(id) == self.open { mailbox.open_message(id)? } else { mailbox.run("mail.read", &json!({ "id": id }))? };
         let message = answer.get("message").ok_or_else(|| UiError::Answer { command: "mail.read", detail: "no message".to_owned() })?;
         let header = Header {
             from: people(message.get("from").unwrap_or(&Value::Null)),

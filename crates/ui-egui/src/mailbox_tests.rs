@@ -422,39 +422,83 @@ fn listed(mailbox: &Mailbox, id: u64) -> Option<bool> {
     mailbox.messages().iter().find(|row| row.id == id).map(|row| row.seen)
 }
 
+fn flagged(mailbox: &Mailbox, id: u64) -> Option<bool> {
+    mailbox.messages().iter().find(|row| row.id == id).map(|row| row.flagged)
+}
+
 fn inbox_unread(mailbox: &Mailbox) -> u64 {
     mailbox.views().iter().find(|view| view.role == Role::Inbox).map_or(0, |view| view.unread)
 }
 
+fn folder_named(mailbox: &Mailbox, account: u64, leaf: &str) -> u64 {
+    mailbox.folders_of(account).iter().find(|folder| folder.leaf == leaf).map(|folder| folder.id).unwrap()
+}
+
+fn toast(mailbox: &Mailbox) -> Option<(Act, u64, u64, &str, bool)> {
+    mailbox.undoable().map(|undo| (undo.act, undo.id, undo.serial, undo.text.as_str(), undo.undoable))
+}
+
 const ROTA: &str = "Allotment rota for November";
 const PHOTOS: &str = "Photos from the coast walk";
+const LOGO: &str = "Draft logo for the bakery";
 
 #[test]
 fn read_and_unread_change_the_row_and_undo_brings_its_state_back() {
     let mut mailbox = mailbox();
-    assert!(mailbox.can_act());
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
     let unread = inbox_unread(&mailbox);
     mailbox.act(rota, Act::Read);
     assert_eq!(mailbox.last_run(), Some("mail.list"));
     assert_eq!(listed(&mailbox, rota), Some(true));
     assert_eq!(inbox_unread(&mailbox), unread - 1);
-    let undo = mailbox.undoable().unwrap();
-    assert_eq!((undo.act, undo.id, undo.serial), (Act::Read, rota, 1));
+    assert_eq!(toast(&mailbox), Some((Act::Read, rota, 1, "Marked as read", true)));
+    assert!(mailbox.can_undo());
     mailbox.undo();
     assert_eq!(listed(&mailbox, rota), Some(false));
     assert_eq!(inbox_unread(&mailbox), unread);
     assert_eq!(mailbox.undoable(), None);
+    assert!(!mailbox.can_undo(), "the history is empty again");
     mailbox.act(photos, Act::Unread);
     assert_eq!(listed(&mailbox, photos), Some(false));
-    assert_eq!(mailbox.undoable().map(|undo| undo.serial), Some(2));
+    assert_eq!(toast(&mailbox), Some((Act::Unread, photos, 2, "Marked as unread", true)));
     mailbox.undo();
     assert_eq!(listed(&mailbox, photos), Some(true));
     assert_eq!(mailbox.error(), None);
 }
 
 #[test]
-fn done_reads_and_archives_and_undo_brings_the_row_back_selected() {
+fn flag_and_unflag_change_the_row_and_undo_takes_the_flag_back() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    assert_eq!(flagged(&mailbox, rota), Some(false));
+    mailbox.act(rota, Act::Flag);
+    assert_eq!(flagged(&mailbox, rota), Some(true));
+    assert_eq!(toast(&mailbox).map(|toast| toast.3), Some("Flagged"));
+    mailbox.act(rota, Act::Unflag);
+    assert_eq!(flagged(&mailbox, rota), Some(false));
+    assert_eq!(toast(&mailbox).map(|toast| toast.3), Some("Flag taken off"));
+    mailbox.undo();
+    assert_eq!(flagged(&mailbox, rota), Some(true), "the newest act is taken back first");
+    mailbox.undo();
+    assert_eq!(flagged(&mailbox, rota), Some(false), "then the one before it, through the engine's history");
+    assert!(!mailbox.can_undo());
+}
+
+#[test]
+fn an_act_that_changes_nothing_shows_its_toast_without_undo() {
+    let mut mailbox = mailbox();
+    let photos = id_of(&mailbox, PHOTOS);
+    mailbox.act(photos, Act::Read);
+    assert_eq!(toast(&mailbox), Some((Act::Read, photos, 1, "Marked as read", false)), "it was read already");
+    assert!(!mailbox.can_undo());
+    let runs = mailbox.runs();
+    mailbox.undo();
+    assert_eq!(mailbox.runs(), runs, "nothing to take back, no command");
+    assert_eq!(mailbox.undoable(), None);
+}
+
+#[test]
+fn done_reads_and_archives_and_undo_brings_the_row_back_selected_and_unread() {
     let mut mailbox = mailbox();
     let rota = id_of(&mailbox, ROTA);
     let below = mailbox.messages()[1].id;
@@ -463,22 +507,39 @@ fn done_reads_and_archives_and_undo_brings_the_row_back_selected() {
     assert_eq!(listed(&mailbox, rota), None);
     assert_eq!(mailbox.messages().len(), 10);
     assert_eq!(mailbox.selected(), Some(below), "the next-message rule picks the row below");
+    assert_eq!(toast(&mailbox).map(|toast| toast.3), Some("Marked as done"));
     mailbox.open(Place::View(Role::Archive));
     assert_eq!(listed(&mailbox, rota), Some(true), "in the Archive, read");
     mailbox.open(Place::View(Role::Inbox));
     mailbox.undo();
-    assert_eq!(listed(&mailbox, rota), Some(false));
+    assert_eq!(listed(&mailbox, rota), Some(false), "both steps of Done are taken back");
     assert_eq!(mailbox.messages().len(), 11);
     assert_eq!(mailbox.selected(), Some(rota));
+    assert!(!mailbox.can_undo());
     assert_eq!(mailbox.error(), None);
+}
+
+#[test]
+fn archive_moves_the_row_to_the_archive_as_it_is() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    mailbox.act(rota, Act::Archive);
+    assert_eq!(listed(&mailbox, rota), None);
+    assert_eq!(toast(&mailbox).map(|toast| toast.3), Some("Moved to Archive"));
+    mailbox.open(Place::View(Role::Archive));
+    assert_eq!(listed(&mailbox, rota), Some(false), "in the Archive, still unread");
+    mailbox.undo();
+    mailbox.open(Place::View(Role::Inbox));
+    assert_eq!(listed(&mailbox, rota), Some(false));
 }
 
 #[test]
 fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
     let mut mailbox = mailbox();
-    let logo = id_of(&mailbox, "Draft logo for the bakery");
+    let logo = id_of(&mailbox, LOGO);
     mailbox.act(logo, Act::Delete);
     assert_eq!(listed(&mailbox, logo), None);
+    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Moved to Trash", true)));
     mailbox.narrow(Some(2));
     mailbox.open(Place::View(Role::Trash));
     assert_eq!(listed(&mailbox, logo), Some(false), "in the Studio Trash, still unread");
@@ -490,7 +551,59 @@ fn delete_moves_the_row_to_the_trash_and_undo_brings_it_back() {
 }
 
 #[test]
-fn done_and_delete_slide_out_first_and_a_new_act_finishes_the_sliding_one() {
+fn delete_in_the_trash_deletes_for_good_and_cannot_be_undone() {
+    let mut mailbox = mailbox();
+    let logo = id_of(&mailbox, LOGO);
+    mailbox.act(logo, Act::Delete);
+    mailbox.forget_undo();
+    mailbox.narrow(Some(2));
+    mailbox.open(Place::View(Role::Trash));
+    mailbox.act(logo, Act::Delete);
+    assert_eq!(listed(&mailbox, logo), None);
+    assert_eq!(toast(&mailbox).map(|toast| (toast.3, toast.4)), Some(("Deleted for good", false)));
+    assert!(mailbox.can_undo(), "the move to the Trash before it still can be");
+    mailbox.undo();
+    assert_eq!(mailbox.undoable(), None);
+    assert_eq!(listed(&mailbox, logo), None, "gone for good");
+    assert_eq!(mailbox.error(), None, "{:?}", mailbox.error());
+}
+
+#[test]
+fn move_takes_the_row_to_a_folder_of_its_account_and_undo_brings_it_back() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let receipts = folder_named(&mailbox, 1, "Receipts");
+    assert_eq!(
+        mailbox.move_targets(rota).iter().map(|folder| folder.leaf.as_str()).collect::<Vec<_>>(),
+        ["Drafts", "Sent", "Archive", "Junk", "Trash", "Receipts", "Travel", "2026"]
+    );
+    assert!(mailbox.move_targets(999).is_empty());
+    mailbox.act(rota, Act::Move(receipts));
+    assert_eq!(listed(&mailbox, rota), None);
+    assert_eq!(toast(&mailbox).map(|toast| toast.3), Some("Moved to Receipts"));
+    mailbox.open(Place::Folder(receipts));
+    assert_eq!(listed(&mailbox, rota), Some(false));
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), None);
+    mailbox.open(Place::View(Role::Inbox));
+    assert_eq!(listed(&mailbox, rota), Some(false));
+}
+
+#[test]
+fn a_move_to_another_account_s_folder_is_refused_and_shown() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let studio_trash = folder_named(&mailbox, 2, "Trash");
+    mailbox.act(rota, Act::Move(studio_trash));
+    assert!(mailbox.error().is_some_and(|error| error.contains("another account")), "{:?}", mailbox.error());
+    assert_eq!(listed(&mailbox, rota), Some(false));
+    assert_eq!(mailbox.undoable(), None);
+}
+
+#[test]
+fn acts_that_take_the_row_out_slide_first_and_a_new_act_finishes_the_sliding_one() {
+    assert!([Act::Done, Act::Archive, Act::Delete, Act::Move(7)].iter().all(|act| act.slides()));
+    assert!(![Act::Read, Act::Unread, Act::Flag, Act::Unflag].iter().any(|act| act.slides()));
     let mut mailbox = mailbox();
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
     mailbox.start(rota, Act::Done);
@@ -510,33 +623,88 @@ fn done_and_delete_slide_out_first_and_a_new_act_finishes_the_sliding_one() {
     assert_eq!(listed(&mailbox, kasimir), Some(true));
     mailbox.forget_undo();
     assert_eq!(mailbox.undoable(), None);
+    assert!(mailbox.can_undo(), "the toast has gone, the history stays");
     mailbox.undo();
-    assert_eq!(listed(&mailbox, kasimir), Some(true), "a forgotten act is not undone");
+    assert_eq!(listed(&mailbox, kasimir), Some(false), "Ctrl+Z still walks back, one act at a time");
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, photos), Some(true), "the delete before it");
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(true), "Done is two acts in the history: first the archive");
+    assert!(mailbox.can_undo());
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(false), "then the read");
+    assert!(!mailbox.can_undo());
+    assert_eq!(mailbox.messages().len(), 11);
 }
 
 #[test]
-fn a_mailbox_over_a_store_shows_no_action_and_does_nothing() {
+fn a_mailbox_over_a_real_store_acts_and_queues_the_server_s_job() {
+    use inboxcraft_model::{AccountId, Event, EventKind, FolderId, FolderState, JobKind, UidValidity};
     let session = Session::new(Box::new(sample::mailbox(at(NOW)).unwrap()), clock()).unwrap();
     let mut mailbox = Mailbox::new(session, clock());
-    assert!(!mailbox.can_act());
+    let synced = EventKind::FolderSynced { folder: FolderId::new(1), state: FolderState::new(UidValidity::new(1).unwrap()) };
+    mailbox.session.apply(&Event::new(AccountId::new(1), None, synced)).unwrap();
     let rota = id_of(&mailbox, ROTA);
-    let runs = mailbox.runs();
-    mailbox.act(rota, Act::Done);
-    mailbox.start(rota, Act::Delete);
+    mailbox.start(rota, Act::Flag);
+    assert_eq!(flagged(&mailbox, rota), Some(true));
+    mailbox.start(rota, Act::Archive);
     mailbox.left();
+    assert_eq!(listed(&mailbox, rota), None);
+    let jobs: Vec<JobKind> = mailbox.session.take_jobs().into_iter().map(|job| job.kind).collect();
+    assert!(matches!(jobs.as_slice(), [JobKind::StoreFlags { .. }, JobKind::Move { .. }]), "{jobs:?}");
     mailbox.undo();
-    assert_eq!(mailbox.runs(), runs, "no command ran");
-    assert_eq!(mailbox.leaving(), None);
+    assert_eq!(listed(&mailbox, rota), Some(false), "back while its move is on its way");
+    assert_eq!(mailbox.error(), None);
+}
+
+#[test]
+fn opening_marks_read_through_the_history_and_an_undone_message_opens_as_it_was() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    mailbox.select(Some(rota));
+    let answer = mailbox.open_message(rota).unwrap();
+    assert_eq!(answer.get("marked_seen"), Some(&json!(true)));
+    assert_eq!(listed(&mailbox, rota), Some(true), "opening marks read");
+    assert!(mailbox.can_undo());
+    mailbox.act(rota, Act::Unread);
+    mailbox.act(rota, Act::Archive);
+    mailbox.undo();
+    assert_eq!(mailbox.selected(), Some(rota));
     assert_eq!(listed(&mailbox, rota), Some(false));
+    mailbox.open_message(rota).unwrap();
+    assert_eq!(mailbox.last_run(), Some("mail.read"), "the message back from an undo is shown, not marked");
+    assert_eq!(listed(&mailbox, rota), Some(false));
+    mailbox.open_message(rota).unwrap();
+    assert_eq!(listed(&mailbox, rota), Some(true), "opened again later, it is marked read");
+    assert!(mailbox.open_message(999).is_err());
+}
+
+#[test]
+fn a_history_shorter_than_counted_stops_the_undo_without_an_error() {
+    let mut mailbox = mailbox();
+    mailbox.history = 3;
+    assert!(mailbox.can_undo());
+    mailbox.undo();
+    assert!(!mailbox.can_undo(), "the engine had nothing: the count starts again");
+    assert_eq!(mailbox.error(), None);
 }
 
 #[test]
 fn an_act_on_a_row_not_listed_shows_an_error_and_changes_nothing() {
     let mut mailbox = mailbox();
     mailbox.act(999, Act::Done);
-    assert!(mailbox.error().is_some_and(|error| error.contains("no Archive folder")), "{:?}", mailbox.error());
-    mailbox.act(999, Act::Read);
+    assert!(mailbox.error().is_some_and(|error| error.contains("there is no message 999")), "{:?}", mailbox.error());
+    mailbox.act(999, Act::Flag);
     assert!(mailbox.error().is_some_and(|error| error.contains("there is no message 999")), "{:?}", mailbox.error());
     assert_eq!(mailbox.undoable(), None);
+    assert!(!mailbox.can_undo());
     assert_eq!(mailbox.messages().len(), 11);
+}
+
+#[test]
+fn a_failing_undo_shows_its_error() {
+    let mut mailbox = Mailbox::new(session_with(&[("history.undo", failing)]), clock());
+    mailbox.history = 1;
+    mailbox.undo();
+    assert!(mailbox.error().is_some());
 }

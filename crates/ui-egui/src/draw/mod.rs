@@ -9,9 +9,10 @@
 //! opens the settings sheet over the window; Escape, its close button or the rail's Mail button leave it, and an
 //! account being added with it.
 //!
-//! On the sample mailbox the hover actions and their keys (D Done, R read or unread, Delete) act on the hovered or
-//! selected row; a row that leaves the list slides out first. A toast then says what was done, with Undo and its key
-//! (Ctrl+Z) for [`TOAST_SECONDS`]. While a text field has the focus the keys are the field's.
+//! The hover actions, the reader's toolbar and their keys (D Done, A Archive, R read or unread, S flag, Delete) act on
+//! the hovered or selected message, on a real account as on the sample; a row that leaves the list slides out first.
+//! A toast then says what was done, with Undo and its key (Ctrl+Z) for [`TOAST_SECONDS`]; after it Ctrl+Z walks back
+//! through the engine's history one act at a time. While a text field has the focus the keys are the field's.
 //!
 //! Each frame the window hands the engine's jobs to the `net` workers and applies their events
 //! ([`Mailbox::pump`]), so the steps of an account check show as they come.
@@ -95,7 +96,8 @@ struct Keys {
 }
 
 /// The acts on a row, which run on the selected message.
-const ROW_ACTS: [(&str, Act); 3] = [(keymap::DONE, Act::Done), (keymap::READ, Act::Read), (keymap::DELETE, Act::Delete)];
+const ROW_ACTS: [(&str, Act); 5] =
+    [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
 
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
@@ -262,24 +264,25 @@ impl InboxApp {
         &mut self.palette
     }
 
-    /// The act `action` (Done, read or unread, Delete) on the selected row, when the mailbox can act on it.
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
-        if !self.mailbox.can_act() {
-            return None;
-        }
         let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
         let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
-        let act = if act == Act::Read && row.seen { Act::Unread } else { act };
+        let act = match act {
+            Act::Read if row.seen => Act::Unread,
+            Act::Flag if row.flagged => Act::Unflag,
+            act => act,
+        };
         Some((row.id, act))
     }
 
-    /// Whether the action `id` can run now: an act on a row needs a selected message the mailbox can act on, Undo an
-    /// act to undo, the reader's full width an open message; an id the window does not know never runs.
+    /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
+    /// reader's full width an open message; an id the window does not know never runs.
     #[must_use]
     pub fn can_run(&self, id: &str) -> bool {
         match id {
-            keymap::DONE | keymap::READ | keymap::DELETE => self.row_act(id).is_some(),
-            keymap::UNDO => self.mailbox.undoable().is_some(),
+            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
+            keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             _ => keymap::action(id).is_some(),
         }
@@ -392,14 +395,16 @@ impl InboxApp {
         Keys { ran, escape, down, up, typing }
     }
 
-    /// The actions whose key was pressed in this frame, besides the acts on a row and Undo (the list and the toast take
-    /// those). While `quiet` (a field has the focus, or the sheet is open) a key without Command, Ctrl or Alt runs
-    /// nothing, so a letter typed is typed.
+    /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
+    /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
+    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
     fn pressed(&self, ctx: &egui::Context, quiet: bool) -> Vec<&'static str> {
+        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable);
         keymap::actions()
             .into_iter()
             .map(|action| action.id)
-            .filter(|id| ![keymap::DONE, keymap::READ, keymap::DELETE, keymap::UNDO].contains(id))
+            .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
+            .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
             .filter(|id| {
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
                     let held = key.modifiers;
@@ -715,7 +720,7 @@ impl InboxApp {
             self.mailbox.step(down);
             stepped = true;
         }
-        let keyed = if typing || !self.mailbox.can_act() { None } else { self.keyed_act(ui.ctx()) };
+        let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
         let left_settings = escape && self.settings.is_open();
@@ -1018,10 +1023,10 @@ impl InboxApp {
         self.row_act(action)
     }
 
-    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; the act can no longer be
-    /// undone after. Whether Undo was pressed (its key works while no text field has the focus).
+    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
+    /// acts back, one at a time. Whether Undo was pressed (its key works while no text field has the focus).
     fn toast(&mut self, ui: &Ui, theme: &Theme, typing: bool) -> bool {
-        let Some(undo) = self.mailbox.undoable() else {
+        let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
         };
@@ -1044,7 +1049,7 @@ impl InboxApp {
         }
         let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
         let id = egui::Id::unique("act-toast").with(undo.serial);
-        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: undo.act.told(), undo: Some(keymap::UNDO) }, bottom)
+        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO) }, bottom)
     }
 
     /// Applies what was asked for in the palette; the action to run, when one was chosen.

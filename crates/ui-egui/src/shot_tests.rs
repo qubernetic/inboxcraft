@@ -219,9 +219,12 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
     assert_ne!(stepped, toast);
     assert_ne!(toast, sliding);
     assert_ne!(toast, read, "another toast");
+    for act in ["flag", "unflag", "archive", "delete", "unread"] {
+        assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
+    }
     for (more, says) in [
-        (r#", "act": "archive""#, "not read, unread, done or delete"),
-        (r#", "act": "read", "slide": true"#, "only done and delete slide"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive or delete"),
+        (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {
         let error = shoot(&line(more)).unwrap_err().to_string();

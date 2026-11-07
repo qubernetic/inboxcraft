@@ -157,7 +157,6 @@ fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
     use inboxcraft_ui_egui::workers::Scripted;
     let dir = tempfile::tempdir().unwrap();
     let mut window = app(Mail::Sample, clock, None, Box::new(KeepFile::new(dir.path().join(FILE)))).unwrap();
-    assert!(window.mailbox().can_act());
     let mut workers = Scripted::default();
     let ids: Vec<u64> = window.mailbox().messages().iter().map(|row| row.id).collect();
     for (id, act) in ids.into_iter().zip([Act::Read, Act::Unread, Act::Done, Act::Delete]) {

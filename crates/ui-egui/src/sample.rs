@@ -566,7 +566,7 @@ pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
 }
 
 /// A sample session ([`Session::sample`]) over the sample mailbox, its dates counted back from `clock`'s time now:
-/// the hover actions change the mailbox in memory through `sample.mail.set`, and nothing is kept.
+/// the acts on its messages change the mailbox in memory, nothing goes to a server and nothing is kept.
 ///
 /// # Errors
 ///
