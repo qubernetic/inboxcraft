@@ -10,7 +10,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, DraftId, EmailAddress, Flags, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidSet, UidValidity};
+use crate::{AccountId, CalendarJob, DraftId, EmailAddress, Flags, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidSet, UidValidity};
 
 /// What we know of a folder from the last sync: where a resync starts (CONDSTORE and QRESYNC, RFC 7162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,6 +185,9 @@ pub enum JobKind {
         /// The message (RFC 5322 bytes), as it goes.
         raw: Vec<u8>,
     },
+    /// A CalDAV job, run at once on an HTTPS connection of its own; answered with one
+    /// [`crate::EventKind::Calendar`].
+    Calendar(CalendarJob),
 }
 
 impl JobKind {
@@ -192,7 +195,7 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } | Self::Send { .. } => None,
+            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } | Self::Send { .. } | Self::Calendar(_) => None,
             Self::SyncFolder { folder, .. }
             | Self::FetchBody { folder, .. }
             | Self::Idle { folder, .. }
@@ -205,6 +208,7 @@ impl JobKind {
 
     /// Whether the job changes something on the IMAP server: an act of the owner, which must not be lost. A send is
     /// not one: it goes to the submission server, and one cut off may have gone, so it is never run again on its own.
+    /// Nor is a calendar job: it goes to the CalDAV server.
     #[must_use]
     pub fn writes(&self) -> bool {
         matches!(self, Self::StoreFlags { .. } | Self::Move { .. } | Self::Expunge { .. } | Self::Append { .. } | Self::CreateFolder { .. })
@@ -260,6 +264,7 @@ impl fmt::Debug for JobKind {
                 .field("recipients", &recipients.len())
                 .field("message_bytes", &raw.len())
                 .finish_non_exhaustive(),
+            Self::Calendar(job) => f.debug_tuple("Calendar").field(job).finish(),
         }
     }
 }

@@ -38,10 +38,13 @@ impl CheckStep {
     /// Every step, in order.
     pub const ALL: [Self; 7] = [Self::Dns, Self::Tcp, Self::Tls, Self::Certificate, Self::ImapLogin, Self::SmtpLogin, Self::CaldavDiscovery];
 
-    /// Whether this version runs the step; the others report [`StepStatus::NotBuilt`].
+    /// Whether this version runs the step; the others report [`StepStatus::NotBuilt`]. Every step is built now; a new
+    /// one says here whether it is.
     #[must_use]
     pub const fn is_built(self) -> bool {
-        !matches!(self, Self::CaldavDiscovery)
+        match self {
+            Self::Dns | Self::Tcp | Self::Tls | Self::Certificate | Self::ImapLogin | Self::SmtpLogin | Self::CaldavDiscovery => true,
+        }
     }
 
     /// Every step before the check runs: pending, or not built yet.

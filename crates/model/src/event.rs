@@ -12,7 +12,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountId, DraftId, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet, UidValidity,
+    AccountId, CalendarReport, DraftId, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet,
+    UidValidity,
 };
 
 /// New flags for one message.
@@ -117,6 +118,13 @@ pub enum ErrorKind {
     NoSubmissionServer,
     /// The message went to the submission server and the connection ended before its answer: it may have gone.
     SendUnanswered,
+    /// The server's address is not `https`, so no password goes to it.
+    NotEncrypted,
+    /// The server sent the client on to another server, which it does not follow on its own: the password would go
+    /// with it.
+    OtherServer,
+    /// The server has no CalDAV calendars at the address.
+    NoCalendarServer,
 }
 
 impl ErrorKind {
@@ -156,6 +164,9 @@ impl fmt::Display for ErrorKind {
             Self::MessageRefused => "the mail server refused the message, so it was not sent",
             Self::NoSubmissionServer => "the account has no server for sending mail set",
             Self::SendUnanswered => "the connection ended after the message went and before the server answered, so the message may have gone",
+            Self::NotEncrypted => "the server's address is not encrypted (https), so no password goes to it",
+            Self::OtherServer => "the server sent this program on to another server, which it does not follow on its own",
+            Self::NoCalendarServer => "the server has no calendars (CalDAV) at this address",
         })
     }
 }
@@ -291,6 +302,8 @@ pub enum EventKind {
         /// The server's refusal, as it gave it (`550 5.1.1 No such user`), when it refused.
         reply: Option<String>,
     },
+    /// What a [`crate::JobKind::Calendar`] job found or did.
+    Calendar(CalendarReport),
     /// A job or the connection failed.
     Failed {
         /// Why.
@@ -311,7 +324,8 @@ impl EventKind {
             | Self::Abilities { .. }
             | Self::FolderCreated { .. }
             | Self::Sent { .. }
-            | Self::SendFailed { .. } => None,
+            | Self::SendFailed { .. }
+            | Self::Calendar(_) => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
             | Self::MessagesExpunged { folder, .. }

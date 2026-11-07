@@ -40,6 +40,11 @@
 //! reports the SMTP step as [`inboxcraft_model::StepStatus::NeedsOwner`] and sends it nothing, while its IMAP steps
 //! run; a sign-in there that passes, in an owner's check or a send, ends the hold. A send is the owner's own act, so
 //! it signs in.
+//!
+//! A calendar job runs at once too, on an HTTPS connection of its own (see `dav`), and answers with one
+//! [`EventKind::Calendar`]. After the CalDAV server refused the password, or the IMAP server did, calendar jobs fail
+//! with the same kind and send nothing, and a check the owner did not start reports the CalDAV step as needing the
+//! owner; an owner's check that finds the calendars ends the hold.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -49,15 +54,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, ConnectionState, DraftId, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job,
-    JobId, JobKind, StepStatus,
+    Account, AccountId, CalendarJob, CalendarReport, CheckStep, ConnectionState, DraftId, EmailAddress, ErrorKind, Event, EventKind, FolderId,
+    FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
 };
 
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
-use crate::{smtp, write};
+use crate::{dav, smtp, write};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
@@ -183,6 +188,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         connection: None,
         halted: None,
         submission_halted: None,
+        calendar_halted: None,
         pending: VecDeque::new(),
         open: true,
         attempt: 0,
@@ -261,6 +267,8 @@ struct Run<'a> {
     halted: Option<NetError>,
     /// The submission server's last sign-in was refused or went unanswered: only the owner signs in there again.
     submission_halted: Option<ErrorKind>,
+    /// The CalDAV server refused the password: only the owner's check sends it there again.
+    calendar_halted: Option<ErrorKind>,
     /// The offline queue: jobs taken from the channel and not run yet.
     pending: VecDeque<Job>,
     /// The engine can still send jobs.
@@ -333,6 +341,8 @@ impl Run<'_> {
             self.check(job.id, by_owner);
         } else if let JobKind::Send { draft, from, recipients, raw } = &job.kind {
             self.send(job.id, *draft, from, recipients, raw);
+        } else if let JobKind::Calendar(calendar) = &job.kind {
+            self.calendar(job.id, calendar);
         } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
@@ -352,13 +362,17 @@ impl Run<'_> {
         if self.submission_halted.is_some() && !by_owner {
             target = target.held_submission();
         }
+        if self.calendar_halted.is_some() && !by_owner {
+            target = target.held_calendar();
+        }
         let (account, credentials) = (self.account, self.credentials);
-        let (mut signed_in, mut submitted) = (None, None);
+        let (mut signed_in, mut submitted, mut found) = (None, None, None);
         let out = &mut self.out;
         check_account(&target, &self.settings.connector, &mut || credentials.password(account), &mut |report| {
             match report.step() {
                 CheckStep::ImapLogin => signed_in = Some(report.status()),
                 CheckStep::SmtpLogin => submitted = Some(report.status()),
+                CheckStep::CaldavDiscovery => found = Some(report.status()),
                 _ => {}
             }
             out.say(Some(job), EventKind::CheckStep(report));
@@ -375,6 +389,29 @@ impl Run<'_> {
             Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.submission_halted = Some(kind),
             _ => {}
         }
+        match found {
+            Some(StepStatus::Passed) => self.calendar_halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.calendar_halted = Some(kind),
+            _ => {}
+        }
+    }
+
+    /// Runs a calendar job on an HTTPS connection of its own, at once: it needs no IMAP connection. After the
+    /// password was refused, here or by the IMAP server, nothing goes to the CalDAV server until the owner checks the
+    /// account or the engine starts a new worker.
+    fn calendar(&mut self, job: JobId, calendar: &CalendarJob) {
+        let held = self.halted.as_ref().map(NetError::kind).filter(|kind| refuses_the_password(*kind)).or(self.calendar_halted);
+        let done = match held {
+            Some(kind) => Err(NetError::new(kind, "the password was refused; only the owner's check sends it again")),
+            None => dav::run(self.account, &self.settings.connector, self.credentials, calendar),
+        };
+        let report = done.unwrap_or_else(|error| {
+            if held.is_none() && refuses_the_password(error.kind()) {
+                self.calendar_halted = Some(error.kind());
+            }
+            CalendarReport::Failed { calendar: calendar.calendar(), kind: error.kind() }
+        });
+        self.out.say(Some(job), EventKind::Calendar(report));
     }
 
     /// Sends a message on a submission connection of its own, at once: it needs no IMAP connection. After the
