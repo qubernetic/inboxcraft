@@ -54,6 +54,8 @@ fn new_mail_while_idling_is_brought_in_by_a_resync() -> Result {
     let kinds: Vec<_> = events.into_iter().map(|event| event.kind).collect();
     assert_eq!(added(&kinds).iter().map(|summary| summary.envelope().subject().to_owned()).collect::<Vec<_>>(), ["Just in"]);
     assert_eq!(state(&kinds).and_then(|state| state.uid_next()).map(|uid| uid.get()), Some(5));
+    // No event follows the resync: the watch goes on with the second IDLE.
+    run.wait_for_idles(2)?;
     let lines = run.finish()?;
     assert_eq!(idles(&lines), 2, "{lines:?}");
     // Stopping ends the second IDLE and signs out.
@@ -96,6 +98,7 @@ fn a_job_ends_the_idle_and_the_watch_resumes_after_it() -> Result {
     // The list may have opened nothing, yet the watched folder is opened again before IDLE.
     let events = run.events_until(|event| watching(&event.kind))?;
     assert!(events.iter().any(|event| event.job == Some(idle) && matches!(event.kind, EventKind::FolderSynced { .. })), "{events:?}");
+    run.wait_for_idles(2)?;
     let lines = run.finish()?;
     let list_at = lines.iter().position(|line| line.contains(" LIST ")).ok_or("no LIST")?;
     assert_eq!(lines.get(list_at - 1).map(String::as_str), Some("DONE"), "{lines:?}");
@@ -107,7 +110,7 @@ fn a_job_ends_the_idle_and_the_watch_resumes_after_it() -> Result {
 fn idle_is_renewed_before_the_server_ends_it() -> Result {
     let watch = WatchConfig { tick: Duration::from_millis(10), renew: Duration::from_millis(60), ..WatchConfig::default() };
     let (run, _idle) = watch_inbox(FakeImap::sample(), Options { watch, ..Options::default() })?;
-    std::thread::sleep(Duration::from_millis(400));
+    run.wait_for_idles(3)?;
     let lines = run.finish()?;
     assert!(idles(&lines) >= 3, "{lines:?}");
     // A renewal brings no resync: one EXAMINE for the job, one for the watch.

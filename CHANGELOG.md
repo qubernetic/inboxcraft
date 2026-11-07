@@ -489,6 +489,10 @@ All notable changes to InboxCraft are listed here. The format follows
   room above and below them as Close has to the window's edge: a cards' gap, so Close ends where the cards end (#104)
 - `just it-live` makes `target/nextest` before it builds the live test archive; on a fresh checkout
   `nextest archive` exited with 103 because the folder was missing (#57)
+- The IDLE tests of `inboxcraft-net` (`crates/net/tests/watch.rs`) no longer stop the worker or sleep before the
+  IDLE they count has reached the fake server; under coverage instrumentation the resync test saw one IDLE instead
+  of two. `FakeServer::wait_received` in `inboxcraft-testkit` waits, up to a timeout, for the lines a client has
+  sent so far (#164)
 
 ### Security
 - The CI dependency cache is pruned and saved more strictly (#79): the prune is `cargo xtask cache-prune`, an allow

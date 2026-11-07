@@ -118,6 +118,11 @@ impl Session {
         }
     }
 
+    /// Records what the client sends into `transcript`, from the start.
+    pub(crate) fn recording(self, transcript: Transcript) -> Self {
+        Self { transcript, ..self }
+    }
+
     pub(crate) fn transcript(&self) -> Transcript {
         self.transcript.clone()
     }
