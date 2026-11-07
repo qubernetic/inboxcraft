@@ -173,8 +173,8 @@ fn report_ctag(report: &CalendarReport) -> Option<String> {
 fn a_discovery_job_may_name_where_to_start() -> Result {
     let pki = TestPki::new()?;
     let server = serve(&pki, FakeDav::new().without_well_known(), 1)?;
-    let mut calendars = Calendars::start(&pki, server.addr(), None, Some(PASSWORD))?;
-    let report = calendars.run(CalendarJob::Discover { url: Some(dav()) })?;
+    let mut calendars = Calendars::start(&pki, server.addr(), Some(&dav()), Some(PASSWORD))?;
+    let report = calendars.run(CalendarJob::Discover { url: Some(url("/")) })?;
     assert!(matches!(&report, CalendarReport::Found { calendars, .. } if calendars.len() == 1), "{report:?}");
     Ok(())
 }
@@ -186,6 +186,48 @@ fn without_an_address_no_password_is_asked_for() -> Result {
     let mut calendars = Calendars::start(&pki, unused, None, Some(PASSWORD))?;
     assert_eq!(calendars.run(CalendarJob::Discover { url: None })?, CalendarReport::Failed { calendar: None, kind: ErrorKind::NoCalendarServer });
     assert_eq!(calendars.asked(), 0);
+    Ok(())
+}
+
+#[test]
+fn no_password_goes_to_a_server_other_than_the_accounts() -> Result {
+    let pki = TestPki::new()?;
+    let server = serve(&pki, FakeDav::new(), 1)?;
+    let mut calendars = Calendars::start(&pki, server.addr(), Some(&dav()), Some(PASSWORD))?;
+    for other in ["https://other.example.net", &format!("https://{HOST}:8443")] {
+        let elsewhere = |path: &str| format!("{other}{path}");
+        let discover = CalendarJob::Discover { url: Some(elsewhere("/")) };
+        assert_eq!(calendars.run(discover)?, CalendarReport::Failed { calendar: None, kind: ErrorKind::OtherServer }, "{other}");
+        let jobs = [
+            CalendarJob::Sync { calendar: CALENDAR, url: elsewhere(WORK), token: None, known: Vec::new() },
+            CalendarJob::Put { calendar: CALENDAR, event: EVENT_ID, url: elsewhere(&format!("{WORK}lunch.ics")), etag: None, ical: LUNCH.to_owned() },
+            CalendarJob::Delete { calendar: CALENDAR, event: EVENT_ID, url: elsewhere(&format!("{WORK}lunch.ics")), etag: None },
+        ];
+        for job in jobs {
+            assert_eq!(calendars.run(job)?, failed(ErrorKind::OtherServer), "{other}");
+        }
+    }
+    assert_eq!(calendars.asked(), 0);
+    drop(calendars);
+    let (transcript, _no_client) = server.finish_with_transcript();
+    assert!(transcript.received().is_empty(), "{:?}", transcript.received());
+    Ok(())
+}
+
+#[test]
+fn without_an_address_no_calendar_job_asks_for_the_password() -> Result {
+    let pki = TestPki::new()?;
+    let server = serve(&pki, FakeDav::new(), 1)?;
+    let mut calendars = Calendars::start(&pki, server.addr(), None, Some(PASSWORD))?;
+    let discover = CalendarJob::Discover { url: Some(dav()) };
+    assert_eq!(calendars.run(discover)?, CalendarReport::Failed { calendar: None, kind: ErrorKind::NoCalendarServer });
+    assert_eq!(calendars.run(sync(None, Vec::new()))?, failed(ErrorKind::NoCalendarServer));
+    assert_eq!(calendars.run(put("lunch.ics", None, LUNCH))?, failed(ErrorKind::NoCalendarServer));
+    assert_eq!(calendars.run(delete("lunch.ics", None))?, failed(ErrorKind::NoCalendarServer));
+    assert_eq!(calendars.asked(), 0);
+    drop(calendars);
+    let (transcript, _no_client) = server.finish_with_transcript();
+    assert!(transcript.received().is_empty(), "{:?}", transcript.received());
     Ok(())
 }
 
@@ -361,7 +403,7 @@ fn a_refused_password_is_not_sent_again() -> Result {
 fn no_password_goes_to_an_address_that_is_not_https() -> Result {
     let pki = TestPki::new()?;
     let server = Listen::plain().accept_timeout(Duration::from_millis(500)).start_dav(FakeDav::new().auth_in_clear())?;
-    let mut calendars = Calendars::start(&pki, server.addr(), None, Some(PASSWORD))?;
+    let mut calendars = Calendars::start(&pki, server.addr(), Some(&dav()), Some(PASSWORD))?;
     let clear = CalendarJob::Discover { url: Some(format!("http://{HOST}/")) };
     assert_eq!(calendars.run(clear)?, CalendarReport::Failed { calendar: None, kind: ErrorKind::NotEncrypted });
     let clear = CalendarJob::Sync { calendar: CALENDAR, url: format!("http://{HOST}{WORK}"), token: None, known: Vec::new() };

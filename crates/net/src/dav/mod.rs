@@ -9,9 +9,10 @@
 //! `If-None-Match: *`, so that a change made elsewhere comes back as [`CalendarReport::Conflict`] and is never
 //! overwritten.
 //!
-//! The password goes with every request, as Basic auth, and only over TLS whose certificate verified: an address that
-//! is not `https` fails with [`ErrorKind::NotEncrypted`] before anything is sent, and a redirect to another origin
-//! with [`ErrorKind::OtherServer`]. A refused password is [`ErrorKind::LoginRefused`]; the worker then sends it to the
+//! The password goes with every request, as Basic auth, only to the origin of the account's CalDAV address and only
+//! over TLS whose certificate verified: a job URL that is not `https` fails with [`ErrorKind::NotEncrypted`] and one
+//! on another origin with [`ErrorKind::OtherServer`] before the password is asked for, and a redirect to another
+//! origin with [`ErrorKind::OtherServer`]. A refused password is [`ErrorKind::LoginRefused`]; the worker then sends it to the
 //! CalDAV server no more until the owner checks the account.
 
 mod connection;
@@ -28,21 +29,22 @@ use crate::{Connector, Credentials, NetError, Password};
 ///
 /// # Errors
 ///
-/// [`ErrorKind::CredentialMissing`], [`ErrorKind::NoCalendarServer`] for a discovery without an address, and the
-/// errors of [`Session::exchange`] and of `dav` (see [`failure`]).
+/// [`ErrorKind::NoCalendarServer`] without an address, [`ErrorKind::NotEncrypted`] and [`ErrorKind::OtherServer`] for
+/// a job URL that is not `https` or not on the address's origin, [`ErrorKind::CredentialMissing`], and the errors of
+/// [`Session::exchange`] and of `dav` (see [`failure`]).
 pub(crate) fn run(account: &Account, connector: &Connector, credentials: &dyn Credentials, job: &CalendarJob) -> Result<CalendarReport, NetError> {
-    // No address, no password asked for.
+    // No address, or a URL elsewhere: no password asked for.
+    let caldav = account.caldav().ok_or_else(|| NetError::new(ErrorKind::NoCalendarServer, "no CalDAV address set"))?;
     let start = match job {
-        CalendarJob::Discover { url } => {
-            Some(url.as_deref().or_else(|| account.caldav()).ok_or_else(|| NetError::new(ErrorKind::NoCalendarServer, "no CalDAV address set"))?)
-        }
-        _ => None,
+        CalendarJob::Discover { url } => url.as_deref().unwrap_or(caldav),
+        CalendarJob::Sync { url, .. } | CalendarJob::Put { url, .. } | CalendarJob::Delete { url, .. } => url,
     };
+    held_to(caldav, start)?;
     let password = credentials.password(account).ok_or_else(|| NetError::new(ErrorKind::CredentialMissing, "no password stored"))?;
     let mut session = session(connector, account.username(), &password)?;
     drop(password);
     let report = match job {
-        CalendarJob::Discover { .. } => discover(&mut session, start.unwrap_or_default()).map(found),
+        CalendarJob::Discover { .. } => discover(&mut session, start).map(found),
         CalendarJob::Sync { calendar, url, token, known } => {
             sync(&mut session, url, token.as_deref(), known).map(|(origin, changes)| synced(*calendar, &origin, changes))
         }
@@ -57,6 +59,21 @@ pub(crate) fn run(account: &Account, connector: &Connector, credentials: &dyn Cr
     };
     session.close();
     report
+}
+
+/// Holds `url` to the origin of `caldav`, the account's CalDAV address: the password goes nowhere else.
+///
+/// # Errors
+///
+/// [`ErrorKind::NotEncrypted`] for a URL that is not `https`, [`ErrorKind::OtherServer`] for one on another origin,
+/// and the errors of a URL that cannot be used (see [`failure`]).
+fn held_to(caldav: &str, url: &str) -> Result<(), NetError> {
+    let (origin, _) = Origin::parse(url).map_err(|error| failure(&error))?;
+    if !origin.is_encrypted() {
+        return Err(failure(&DavError::NotEncrypted));
+    }
+    let (own, _) = Origin::parse(caldav).map_err(|error| failure(&error))?;
+    if origin == own { Ok(()) } else { Err(failure(&DavError::OtherOrigin { url: origin.to_string() })) }
 }
 
 /// A session signed in as `user` with `password`.

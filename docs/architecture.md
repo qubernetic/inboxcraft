@@ -298,7 +298,8 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   send: at once, on an HTTPS connection of their own, kept alive for the job's requests, never in the IMAP queue. Each
   answers with one `model::CalendarReport` in the shape of the store's calendar tables: the calendars found, or what
   changed with the next sync token, or the new entity tag, or a conflict (412). Every place is an absolute `https`
-  URL; discovery starts at the account's CalDAV address (`Account::caldav`). After the CalDAV server refused the
+  URL on the origin of the account's CalDAV address (`Account::caldav`), where discovery starts; a job URL elsewhere
+  fails with `OtherServer` before the password is asked for. After the CalDAV server refused the
   password, the worker sends it nothing until the owner's check finds the calendars again; after the IMAP server
   refused it, nothing either. The account check finds the calendars as its last step, with the password the IMAP
   sign-in used.
