@@ -14,8 +14,8 @@ credential store.
 What InboxCraft keeps is in one folder, `inboxcraft/store` in your data folder: `%LOCALAPPDATA%` on Windows, else
 `$XDG_DATA_HOME` (in the Flatpak `~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux
 and `~/Library/Application Support` on macOS. Only your own user account can read it. It holds:
-- your accounts' settings, their folders and messages, the message bodies it keeps, and the work it still has to do
-  on the server;
+- your accounts' settings (with your templates), their folders and messages, the message bodies it keeps, and the
+  work it still has to do on the server;
 - your drafts, with everything you typed into them: the recipients (Bcc included), the subject and the text, and
   where each one stands in the outbox, with the server's reply if it refused one;
 - the schedule: what is to happen at a set time (a draft to send later, a snoozed message to bring back, a
@@ -29,6 +29,8 @@ A draft also has a copy on your mail server, in the account's own Drafts folder,
 seconds:
 - the copy carries the From line with your display name, To and Cc as typed, the subject, the text with the
   signature, and the time it was saved as its `Date`; it leaves out Bcc and the recipients that are not addresses;
+- a reply's copy names the message it answers (`In-Reply-To`, `References`), as the reply itself will, and a
+  forward's copy carries the forwarded message's attachments;
 - where the server names the copy (UIDPLUS), each new copy replaces the one before and discarding the draft takes it
   back; where it does not, the draft's first copy stays there, no later one goes up, and you remove it with your
   mail program or the server's web mail.
