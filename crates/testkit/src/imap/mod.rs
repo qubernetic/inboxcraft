@@ -25,7 +25,6 @@
 //! assert!(out.ends_with("* BYE Logging out\r\na1 OK LOGOUT completed\r\n"));
 //! ```
 
-mod base64;
 mod capability;
 mod fetch;
 mod fixture;
@@ -33,6 +32,7 @@ mod happen;
 mod mailbox;
 mod manage;
 mod notify;
+mod postbox;
 mod reader;
 mod search;
 mod session;
@@ -51,6 +51,7 @@ use rustls::ServerConfig;
 pub use capability::Capability;
 pub use fixture::{Mailbox, Message};
 pub use happen::{Action, When};
+pub use postbox::Postbox;
 
 use crate::Error;
 use crate::server::{Ending, FakeServer, Listen};
@@ -75,6 +76,9 @@ pub struct FakeImap {
     mailboxes: Vec<Mailbox>,
     /// The UIDVALIDITY of the mailbox CREATE made last.
     last_created: u32,
+    postbox: Postbox,
+    /// How many of the postbox's messages these mailboxes hold already.
+    posted: usize,
 }
 
 impl Default for FakeImap {
@@ -96,6 +100,8 @@ impl FakeImap {
             rules: Rules::default(),
             mailboxes: vec![Mailbox::new("INBOX")],
             last_created: 0,
+            postbox: Postbox::default(),
+            posted: 0,
         }
     }
 
@@ -157,6 +163,14 @@ impl FakeImap {
     pub fn on(mut self, when: When, actions: impl IntoIterator<Item = Action>) -> Self {
         self.rules.add(when, actions.into_iter().collect());
         self
+    }
+
+    /// Where mail from outside a session arrives, such as the reports of [`crate::smtp::Bounce`]. The handle is
+    /// shared and keeps what it is given: every session of this fake finds it, also one on a socket started after the
+    /// delivery and each [`FakeImap::answer`] call, which plays on a copy of the fake.
+    #[must_use]
+    pub fn postbox(&self) -> Postbox {
+        self.postbox.clone()
     }
 
     /// Plays one session without a socket, as over implicit TLS: reads the client's `input` and returns what the
