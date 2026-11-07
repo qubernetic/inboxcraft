@@ -30,7 +30,7 @@ impl Plan {
     }
 
     fn job(&mut self, account: AccountId, kind: JobKind) {
-        self.jobs.push(Pending { account, kind, message: None });
+        self.jobs.push(Pending { account, kind, message: None, keep: false });
     }
 }
 
