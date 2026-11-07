@@ -11,8 +11,9 @@
 //! ended is reported failed and not run again. A write job (an act of the owner) that a dropped or timed-out
 //! connection cut off goes back to the head of the queue and runs again after the reconnect, at most
 //! [`WRITE_TRIES`] times in all, so a job that breaks the connection every time cannot hold the queue up; the write
-//! path ends in the same state run once or twice (see `write`). Any other failure of a write is reported, and the
-//! engine takes the act back.
+//! path ends in the same state run once or twice (see `write`). A move on a server without MOVE is the one write that
+//! does not run again, as its fallback may have copied the messages already. Any other failure of a write is
+//! reported, and the engine takes the act back.
 //!
 //! An Idle job names the folder to watch between jobs: the worker resyncs it, then waits in IDLE (or polls a server
 //! without IDLE) until a job comes or the server tells of a change, which brings another resync. A connection that
@@ -47,6 +48,7 @@ use inboxcraft_model::{
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
+use crate::write;
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
 
 /// The most jobs the offline queue holds by default.
@@ -427,6 +429,7 @@ impl Run<'_> {
         self.out.report(ConnectionState::Online);
         // The job may open another folder: IDLE must open the watched one again.
         self.stale |= self.watch.is_some();
+        let rerun = job.kind.writes() && write::may_run_again(open, &job.kind);
         let now = self.settings.connector.tls().clock().now();
         let out = &mut self.out;
         let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
@@ -434,7 +437,7 @@ impl Run<'_> {
         match done {
             Ok(()) => self.attempt = 0,
             Err(error) => {
-                let again = job.kind.writes() && error.kind().is_retryable() && tried < WRITE_TRIES;
+                let again = rerun && error.kind().is_retryable() && tried < WRITE_TRIES;
                 if !again {
                     self.out.failed(&job, &error);
                 }

@@ -335,6 +335,21 @@ fn a_write_whose_server_stalls_runs_again_after_the_reconnect() -> Result {
 }
 
 #[test]
+fn a_move_without_move_cut_off_after_the_copy_fails_and_does_not_copy_again() -> Result {
+    let drop = Action::Fault(Fault::Drop);
+    let fake = FakeImap::sample().without(Capability::Move).on(When::command("UID STORE"), [drop]);
+    let mut run = Run::with(fake, Options { connections: 4, ..Options::default() })?;
+    let job = run.job(move_to_archive(&[1])?)?;
+    assert_eq!(of_job(&run, job)?, [EventKind::Failed { kind: ErrorKind::ConnectionDropped, folder: Some(INBOX) }]);
+    // Copied once and still in the inbox: the engine takes the move back, and the syncs show the server's state.
+    assert_eq!(inbox_flags(&mut run)?.iter().map(|(uid, _)| *uid).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(archive_uids(&mut run)?, [12, 13]);
+    let lines = run.finish()?;
+    assert_eq!(lines.iter().filter(|line| line.contains("UID COPY")).count(), 1, "{lines:?}");
+    Ok(())
+}
+
+#[test]
 fn garbage_in_answer_to_a_write_fails_it_and_a_sync_finds_the_server_state() -> Result {
     let garbage = Action::Fault(Fault::Garbage(b"\x00\xff not imap\r\n".to_vec()));
     let fake = FakeImap::sample().on(When::command("UID FETCH"), [garbage]);

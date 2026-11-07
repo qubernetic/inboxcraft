@@ -11,8 +11,11 @@
 //! A message gone from the server meanwhile is no error. After a store the flags are read back, and a UID that does
 //! not come back is told as expunged; a move names no new UID for it; a delete for good of it is done. So a write the
 //! worker runs again after a reconnect ends in the state one run leaves: flags set twice are set, a message moved
-//! already is not found again, and CREATE of a folder that exists counts as made. APPEND is the one exception: one
-//! cut off before the server's answer may have added the message, and runs again (see [`crate::Worker`]).
+//! with UID MOVE already is not found again, and CREATE of a folder that exists counts as made. APPEND is the one
+//! exception: one cut off before the server's answer may have added the message, and runs again (see
+//! [`crate::Worker`]). A move on a server without MOVE is not run again ([`may_run_again`]): its fallback (UID COPY,
+//! `\Deleted`, UID EXPUNGE) cut off after the copy leaves the messages in both folders, and a second run would copy
+//! them once more.
 //!
 //! Nothing here sends CLOSE or EXPUNGE: both remove every message marked `\Deleted` in the folder, not only the job's.
 //! A delete for good therefore needs UID EXPUNGE (UIDPLUS or IMAP4rev2); without it the job fails before anything is
@@ -82,6 +85,12 @@ pub(crate) fn run(connection: &mut ImapConnection, job: &Job, config: &SyncConfi
         _ => return Err(NetError::new(ErrorKind::Protocol, "not a write job")),
     }
     Ok(())
+}
+
+/// Whether `job`, cut off by its connection, may run again on `connection`'s server: not a move on a server without
+/// MOVE, whose fallback may have copied the messages before the cut, so that a second run copies them again.
+pub(crate) fn may_run_again(connection: &ImapConnection, job: &JobKind) -> bool {
+    !matches!(job, JobKind::Move { .. }) || connection.capabilities_known().is_some_and(|caps| caps.has("MOVE") || caps.has("IMAP4rev2"))
 }
 
 /// SELECT of the folder, read-write; whether its UIDVALIDITY is still the job's (when not, the change is told).
