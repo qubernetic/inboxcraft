@@ -124,8 +124,15 @@ Saving an attachment writes it into your Downloads folder, under a new name if a
 never overwrites a file.
 
 ## Scripts and agents
-The control channel listens only on 127.0.0.1 and needs a key from a file only you can read. The MCP server sees what
-you allow; sending mail needs your explicit permission.
+The control channel, through which the command-line client and the MCP server reach the running app, is a socket in
+your runtime folder that only your own account can open, and every request needs a token InboxCraft keeps in your
+system's credential store, never in a file. `inboxcraft --revoke-control` replaces the token, and every client that
+kept the old one is refused. Over the channel only the commands marked `safe` run (`inboxcraft-cli commands` lists
+them): reading; marking read and unread, flags and undo; drafts, including discarding one, which deletes it on the
+server too; checking an account, which connects to its servers; the look of the window; and, once they are there, snooze, park and pin.
+Sending, moving, archiving, deleting, accepting or blocking senders and the other settings are refused. The client
+shows the token only to a socket in a runtime folder that is yours alone. The MCP server sees what you allow; sending mail needs your
+explicit permission.
 
 ## Changes and contact
 Changes to this page are listed below. Questions: open an issue, or write to [info@qubernetic.com](mailto:info@qubernetic.com).

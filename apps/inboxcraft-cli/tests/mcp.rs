@@ -47,10 +47,9 @@ fn mcp_serves_the_tools_on_the_store_until_the_input_ends() {
 }
 
 #[test]
-fn mcp_needs_a_store_and_no_parameters() {
+fn mcp_takes_no_parameters_and_its_store_must_hold_one() {
     let dir = tempfile::tempdir().unwrap();
     for (args, code, says) in [
-        (vec!["mcp"], 2, "give --store <dir>"),
         (vec!["--store", "/nowhere", "mcp", "{}"], 2, "mcp takes no parameters"),
         (vec!["--store", dir.path().to_str().unwrap(), "mcp"], 2, "there is no store in"),
     ] {

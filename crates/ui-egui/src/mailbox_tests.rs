@@ -714,3 +714,68 @@ fn the_sample_has_nothing_to_tell_the_owner() {
     let mut mailbox = mailbox();
     assert_eq!(mailbox.take_notices(), vec![], "no mail arrives in the sample, so nothing notifies");
 }
+
+#[test]
+fn an_agent_runs_safe_commands_only() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let refused = mailbox.run_for_agent("mail.archive", &json!({ "id": rota })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert!(mailbox.messages().iter().any(|row| row.id == rota), "the message stays where it was");
+    let answer = mailbox.run_for_agent("account.list", &json!({})).unwrap();
+    assert!(answer["accounts"].is_array(), "{answer}");
+}
+
+/// What the store holds, as the window's own reads see it.
+fn stored(mailbox: &mut Mailbox) -> Vec<Value> {
+    let mut seen = Vec::new();
+    for id in ["account.list", "folder.list", "mail.list", "compose.list", "schedule.list"] {
+        if mailbox.session.registry().get(id).is_some() {
+            seen.push(mailbox.session.run(id, &json!({})).unwrap_or_else(|error| json!({ "error": error.code() })));
+        }
+    }
+    seen
+}
+
+#[test]
+fn an_agent_is_refused_every_command_that_is_not_safe_and_nothing_changes() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let params = json!({ "id": rota, "ids": [rota], "account": 1, "folder": 1, "to": "someone@example.org" });
+    let refused: Vec<&'static str> =
+        mailbox.session.registry().specs().filter(|spec| spec.class != Some(inboxcraft_engine::AgentClass::Safe)).map(|spec| spec.id).collect();
+    assert!(refused.contains(&"mail.archive") && refused.contains(&"account.remove"), "{refused:?}");
+    drop(mailbox.session.take_jobs());
+    let before = stored(&mut mailbox);
+    for id in refused {
+        let error = mailbox.run_for_agent(id, &params).unwrap_err();
+        assert_eq!(error.code(), "not_allowed", "{id}");
+    }
+    assert_eq!(stored(&mut mailbox), before, "nothing changed");
+    assert!(mailbox.session.take_jobs().is_empty(), "nothing was asked of the servers");
+}
+
+#[test]
+fn an_agents_act_shows_in_the_list_and_ends_the_windows_undo() {
+    let mut mailbox = mailbox();
+    let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    mailbox.act(photos, Act::Unread);
+    assert!(mailbox.can_undo());
+    let answer = mailbox.run_for_agent("mail.seen", &json!({ "id": rota, "seen": true })).unwrap();
+    assert_eq!(answer["changed"], json!(true));
+    assert_eq!(listed(&mailbox, rota), Some(true), "the list is read again");
+    assert_eq!(mailbox.undoable(), None, "the toast would take the agent's act back");
+    assert!(!mailbox.can_undo());
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(true), "the window's undo never takes the agent's act back");
+}
+
+#[test]
+fn an_agents_read_keeps_the_windows_undo() {
+    let mut mailbox = mailbox();
+    let photos = id_of(&mailbox, PHOTOS);
+    mailbox.act(photos, Act::Unread);
+    mailbox.run_for_agent("mail.list", &json!({})).unwrap();
+    assert!(mailbox.undoable().is_some());
+    assert!(mailbox.can_undo());
+}
