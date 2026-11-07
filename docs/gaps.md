@@ -15,7 +15,7 @@ B = blocks the next stage.
 - `cargo xtask ci` runs the tests only in the coverage-instrumented build (`cov` gate); a bug that shows only in
   an uninstrumented build goes unseen in CI (#66).
 - `testkit` serves one client per fake server. A line script speaks implicit TLS only and matches whole lines
-  exactly (#8); the fake IMAP server also speaks STARTTLS (#23).
+  exactly (#8); the fake IMAP and SMTP servers also speak STARTTLS (#23, #118).
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
   OS verifier `net` will use. It knows its clock is far off because the test sets the offset; the real
   `account.check` needs another reference for the clock (#8).
