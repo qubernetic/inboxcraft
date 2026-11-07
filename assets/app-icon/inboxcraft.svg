@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs><linearGradient id="electric" gradientUnits="userSpaceOnUse" x1="48" y1="60" x2="208" y2="200"><stop stop-color="#2f6bff"/><stop offset="0.5" stop-color="#8a3ffc"/><stop offset="1" stop-color="#ff2d95"/></linearGradient></defs>
+  <rect x="7" y="7" width="242" height="242" rx="61" fill="#06060c" fill-opacity="0.161"/>
+  <rect x="9" y="9" width="238" height="238" rx="59" fill="#ffffff"/>
+  <path d="M79 53 H177 A8 8 0 0 1 185 61 V77 H71 V61 A8 8 0 0 1 79 53 Z" fill="url(#electric)"/>
+  <path d="M59 94 H197 A8 8 0 0 1 205 102 V118 H51 V102 A8 8 0 0 1 59 94 Z" fill="url(#electric)"/>
+  <polygon points="41,135 95,135 111.7,159 41,159" fill="url(#electric)"/>
+  <polygon points="161,135 215,135 215,159 144.3,159" fill="url(#electric)"/>
+  <path d="M41 158 H215 V185 A16 16 0 0 1 199 201 H57 A16 16 0 0 1 41 185 V158 Z" fill="url(#electric)"/>
+</svg>

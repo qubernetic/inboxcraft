@@ -9,12 +9,15 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod assets;
+mod cache_prune;
 mod ci;
 mod cli;
 mod config;
 mod cov;
 mod error;
+mod flatpak;
 mod layers;
+mod side_by_side;
 mod spdx;
 mod stats;
 mod test_files;
@@ -27,6 +30,12 @@ mod test_support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ci_workflow_tests;
+
+#[cfg(test)]
+mod codecov_tests;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

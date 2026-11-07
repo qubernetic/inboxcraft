@@ -1,0 +1,95 @@
+# IDLE (RFC 2177): the server tells of changes until the client says DONE.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 IDLE] ready
+= greeted preauth
+> idle
+! WrongState { command: "IDLE", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 3 EXISTS
+S: A0001 OK done
+= A0001 selected exists=3 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> done
+! WrongState { command: "DONE", state: Selected }
+> idle
+C: A0002 IDLE
+S: + idling
+= idling
+S: * 4 EXISTS
+S: * 2 EXPUNGE
+S: * 3 FETCH (FLAGS (\Seen))
+S: * OK Still here
+= exists 4
+= expunged 2
+= fetch seq=3 flags=\Seen
+# One command at a time: IDLE is still waiting for its answer.
+> fetch 1 flags
+! Busy
+> done
+C: DONE
+> done
+! WrongState { command: "DONE", state: Selected }
+S: A0002 OK IDLE terminated
+= A0002 idled
+# DONE before the go-ahead waits for it.
+> idle
+C: A0003 IDLE
+> done
+S: + idling
+= idling
+C: DONE
+S: A0003 OK IDLE terminated
+= A0003 idled
+# A refused IDLE.
+> idle
+C: A0004 IDLE
+S: A0004 NO [LIMIT] Too many idlers
+= A0004 No [LIMIT] Too many idlers
+> done
+! WrongState { command: "DONE", state: Selected }
+# A second go-ahead ends the session.
+> idle
+C: A0005 IDLE
+S: + idling
+= idling
+S: + idling
+! Unexpected("continuation request")
+? Closed
+> done
+! Closed
+
+# An OK to IDLE while DONE still waits for the go-ahead ends the session.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 IDLE] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> idle
+C: A0002 IDLE
+> done
+S: A0002 OK
+! Unexpected("tagged response")
+
+# A server that lacks IDLE, and one that has not listed what it can do.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> idle
+! NotOffered("IDLE")
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> idle
+! CapabilitiesUnknown
+> select-with INBOX condstore
+! CapabilitiesUnknown

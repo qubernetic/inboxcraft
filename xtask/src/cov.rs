@@ -5,8 +5,11 @@
 //! [`CONFIG`].
 //!
 //! The gate runs the tests under `cargo llvm-cov nextest` (profile `ci`) into an lcov report, `lcov.info` in the root,
-//! which stays for the Codecov upload. A line is a `DA` record; it is covered when its count is not 0. A file belongs
-//! to the member whose directory holds it most closely; files outside every member are not counted. Files matching
+//! which stays for the Codecov upload. In `cargo xtask ci` this is the only test run; its JUnit report (profile `ci`)
+//! lands in nextest's store under the root, `target/nextest/ci/junit.xml`, whatever target directory llvm-cov builds
+//! in. A failed run fails the gate before any floor is checked, and the gate says so. A line is a `DA` record; it is
+//! covered when its count is not 0. A file belongs to the member whose directory holds it most closely; files outside
+//! every member are not counted. Files matching
 //! `exclude` count nowhere; files matching `workspace-exclude` count for their crate but not for the workspace total.
 //! With `--check` a crate or the workspace below its floor fails the gate; a crate with no lines has nothing to fall
 //! below.
@@ -185,7 +188,7 @@ pub(crate) fn gate(ctx: &mut Context, check: bool, out: &mut dyn Write) -> Resul
     out.flush()?;
     let args = ["llvm-cov", "nextest", "--workspace", "--profile", "ci", "--lcov", "--output-path", output];
     if !ctx.runner.run(&ctx.cargo, &args, &ctx.root)? {
-        writeln!(out, "cov: cargo llvm-cov failed; see its output above")?;
+        writeln!(out, "cov: the tests failed (a failing test or a build error, see the nextest output above); no coverage floor was checked")?;
         return Ok(false);
     }
     let text = fs::read_to_string(&path).map_err(|source| Error::Io { path: path.clone(), source })?;

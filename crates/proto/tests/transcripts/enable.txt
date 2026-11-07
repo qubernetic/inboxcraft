@@ -1,0 +1,59 @@
+# ENABLE (RFC 5161): CONDSTORE and QRESYNC are switched on after the sign-in, before a mailbox is open.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE CONDSTORE QRESYNC] ready
+= greeted preauth
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED QRESYNC
+S: A0001 OK enabled
+= A0001 enabled QRESYNC
+> enable condstore
+C: A0002 ENABLE CONDSTORE
+# A server may say nothing back: then nothing more is on.
+S: A0002 OK nothing new
+= A0002 enabled -
+> select INBOX
+C: A0003 SELECT "INBOX"
+S: A0003 OK [READ-WRITE] done
+= A0003 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+# Only before a mailbox is open.
+> enable condstore
+! WrongState { command: "ENABLE", state: Selected }
+
+# A refused ENABLE, and an ENABLED that comes without one, switch nothing on.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready
+= greeted preauth
+S: * ENABLED QRESYNC
+> enable qresync
+C: A0001 ENABLE QRESYNC
+S: * ENABLED CONDSTORE
+S: A0001 NO not now
+= A0001 No not now
+> select INBOX
+C: A0002 SELECT "INBOX"
+S: A0002 OK done
+= A0002 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> fetch 1 flags since=5 vanished
+! NotEnabled("QRESYNC")
+
+# A server that lacks ENABLE, or the extension.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 CONDSTORE QRESYNC] ready
+= greeted preauth
+> enable qresync
+! NotOffered("ENABLE")
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 ENABLE] ready
+= greeted preauth
+> enable condstore
+! NotOffered("CONDSTORE")
+> enable qresync
+! NotOffered("QRESYNC")
+
+# Not before the sign-in.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 ENABLE QRESYNC] ready
+= greeted
+> enable qresync
+! WrongState { command: "ENABLE", state: NotAuthenticated }

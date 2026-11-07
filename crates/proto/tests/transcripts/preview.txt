@@ -1,0 +1,59 @@
+# PREVIEW (RFC 8970): a short plain text of each message, made by the server. It is the message's data, made one
+# line, without control characters or invisible marks, at most 256 characters.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 PREVIEW] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * 4 EXISTS
+S: A0001 OK done
+= A0001 selected exists=4 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> fetch 4:7 preview
+C: A0002 UID FETCH 4:7 (UID PREVIEW)
+S: * 1 FETCH (UID 4 PREVIEW "Hi Ada, the minutes of Tuesday are attached.")
+S: * 2 FETCH (UID 5 PREVIEW {10}
+S: two
+S: lines)
+S: * 3 FETCH (UID 6 PREVIEW NIL)
+S: * 4 FETCH (PREVIEW "" UID 7)
+S: * 4 FETCH (UID 7 PREVIEW "pay‮fdp.exe​now")
+S: A0002 OK done
+= fetch seq=1 uid=4 preview="Hi Ada, the minutes of Tuesday are attached."
+= fetch seq=2 uid=5 preview="two lines"
+= fetch seq=3 uid=6
+= fetch seq=4 uid=7 preview=""
+= fetch seq=4 uid=7 preview="payfdp.exenow"
+= A0002 fetched
+# LAZY: only a preview the server has at hand; NIL means ask again later without LAZY.
+> fetch 4 flags lazy-preview
+C: A0003 UID FETCH 4 (UID FLAGS PREVIEW (LAZY))
+S: * 1 FETCH (UID 4 FLAGS () PREVIEW NIL)
+S: A0003 OK done
+= fetch seq=1 uid=4 flags=-
+= A0003 fetched
+
+# A server that lacks PREVIEW, and one that has not listed what it can do.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> fetch 4 preview
+! NotOffered("PREVIEW")
+> fetch 4 lazy-preview
+! NotOffered("PREVIEW")
+> fetch 4 flags
+C: A0002 UID FETCH 4 (UID FLAGS)
+S: A0002 OK done
+= A0002 fetched
+@ tls
+S: * PREAUTH ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> fetch 4 preview
+! CapabilitiesUnknown

@@ -1,0 +1,41 @@
+# A password quotes cannot carry goes as a literal, after the server's go-ahead.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> login ada@example.org jelszó
+C: A0001 LOGIN "ada@example.org" {7}
+S: + Ready for literal data
+C: jelszó
+S: * CAPABILITY IMAP4rev1 IDLE
+S: A0001 OK Logged in
+= A0001 authenticated IMAP4REV1 IDLE
+
+# Refused before the literal: the rest of the command is never sent.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> login ada@example.org jelszó
+C: A0001 LOGIN "ada@example.org" {7}
+S: A0001 NO Literal too long
+= A0001 No Literal too long
+? NotAuthenticated
+
+# A command cannot succeed without the rest of it.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> login ada@example.org jelszó
+C: A0001 LOGIN "ada@example.org" {7}
+S: A0001 OK Logged in without a password
+! Unexpected("tagged response")
+
+# A second go-ahead has nothing to send.
+@ tls
+S: * OK [CAPABILITY IMAP4rev1] ready
+= greeted
+> login ada@example.org jelszó
+C: A0001 LOGIN "ada@example.org" {7}
+S: + go ahead
+C: jelszó
+S: + more
+! Unexpected("continuation request")

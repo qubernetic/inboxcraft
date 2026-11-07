@@ -1,0 +1,106 @@
+# The pictures of the mail list for docs/images and the PR (ui_shot, see crates/ui-egui/src/shot.rs), in the default
+# accent preset (Electric) unless a line names another.
+{"out": "docs/images/list-light.png", "mode": "light", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-dark.png", "mode": "dark", "select": "Photos from the coast walk"}
+{"out": "docs/images/narrowed-light.png", "mode": "light", "narrow": 2}
+{"out": "docs/images/narrowed-dark.png", "mode": "dark", "narrow": 2}
+{"out": "docs/images/search-light.png", "mode": "light", "search": "odile"}
+{"out": "docs/images/search-dark.png", "mode": "dark", "search": "odile"}
+# The reader (E1.12b): a reply with its thread and quote, a newsletter before and after its pictures are allowed, a
+# link that says one place and goes to another, attachments in the full-width reader.
+{"out": "docs/images/reader-thread-light.png", "mode": "light", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-dark.png", "mode": "dark", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-blocked-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-blocked-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-pictures-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
+{"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
+{"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
+# failed at the certificate. The check is scripted; nothing connects.
+{"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-form-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form"}
+{"out": "docs/images/onboard-detected-light.png", "mode": "light", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-detected-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "detected"}
+{"out": "docs/images/onboard-checking-light.png", "mode": "light", "size": [1200, 820], "onboard": "checking"}
+{"out": "docs/images/onboard-checking-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "checking"}
+{"out": "docs/images/onboard-passed-light.png", "mode": "light", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-passed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "passed"}
+{"out": "docs/images/onboard-failed-light.png", "mode": "light", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "failed"}
+# The other accent presets (E1.15a): the list with the reader, a thread with its quote and a failed account check.
+{"out": "docs/images/list-aurora-light.png", "mode": "light", "preset": "aurora", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-aurora-dark.png", "mode": "dark", "preset": "aurora", "select": "Photos from the coast walk"}
+{"out": "docs/images/reader-thread-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/onboard-failed-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/list-citrus-light.png", "mode": "light", "preset": "citrus", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-citrus-dark.png", "mode": "dark", "preset": "citrus", "select": "Photos from the coast walk"}
+{"out": "docs/images/reader-thread-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/reader-thread-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "open": {"folder": 3}, "select": "Re: Allotment rota for November", "quotes": true}
+{"out": "docs/images/onboard-failed-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}
+{"out": "docs/images/onboard-failed-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1200, 820], "onboard": "failed"}
+# The text scale (E1.15c): the list with the reader at the smallest and the largest scale.
+{"out": "docs/images/list-text-90-light.png", "mode": "light", "text_scale": 90, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-90-dark.png", "mode": "dark", "text_scale": 90, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-130-light.png", "mode": "light", "text_scale": 130, "select": "Photos from the coast walk"}
+{"out": "docs/images/list-text-130-dark.png", "mode": "dark", "text_scale": 130, "select": "Photos from the coast walk"}
+# The icon set (E1.15d): every icon in Regular (text colour), Fill and Duotone (accent) and Regular at body size.
+{"out": "docs/images/icons-light.png", "mode": "light", "icons": true, "scale": 2}
+{"out": "docs/images/icons-dark.png", "mode": "dark", "icons": true, "scale": 2}
+{"out": "docs/images/icons-aurora-light.png", "mode": "light", "preset": "aurora", "icons": true, "scale": 2}
+{"out": "docs/images/icons-aurora-dark.png", "mode": "dark", "preset": "aurora", "icons": true, "scale": 2}
+{"out": "docs/images/icons-citrus-light.png", "mode": "light", "preset": "citrus", "icons": true, "scale": 2}
+{"out": "docs/images/icons-citrus-dark.png", "mode": "dark", "preset": "citrus", "icons": true, "scale": 2}
+# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast.
+{"out": "docs/images/components-light.png", "mode": "light", "components": true}
+{"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
+{"out": "docs/images/components-aurora-light.png", "mode": "light", "preset": "aurora", "components": true}
+{"out": "docs/images/components-aurora-dark.png", "mode": "dark", "preset": "aurora", "components": true}
+{"out": "docs/images/components-citrus-light.png", "mode": "light", "preset": "citrus", "components": true}
+{"out": "docs/images/components-citrus-dark.png", "mode": "dark", "preset": "citrus", "components": true}
+# The second typeface and icon set (E1.16a): the list with the reader in Inter, every icon and the components in Lucide.
+{"out": "docs/images/list-inter-light.png", "mode": "light", "font": "inter", "select": "Photos from the coast walk"}
+{"out": "docs/images/list-inter-dark.png", "mode": "dark", "font": "inter", "select": "Photos from the coast walk"}
+{"out": "docs/images/icons-lucide-light.png", "mode": "light", "icon_set": "lucide", "icons": true, "scale": 2}
+{"out": "docs/images/icons-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "icons": true, "scale": 2}
+{"out": "docs/images/components-lucide-light.png", "mode": "light", "icon_set": "lucide", "components": true}
+{"out": "docs/images/components-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "components": true}
+# The appearance settings page (E1.16b) in each preset, in Inter and with Lucide.
+{"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-inter-light.png", "mode": "light", "font": "inter", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-inter-dark.png", "mode": "dark", "font": "inter", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-lucide-light.png", "mode": "light", "icon_set": "lucide", "size": [1200, 820], "settings": true}
+{"out": "docs/images/settings-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "size": [1200, 820], "settings": true}
+# The message list (E1.17a) in each preset: the screener and group cards and the hover actions on the row selected by
+# keyboard, with invented data the app does not show yet.
+{"out": "docs/images/list-showcase-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-showcase-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "showcase": true, "step": 2}
+{"out": "docs/images/list-slide-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-slide-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
+{"out": "docs/images/list-toast-light.png", "mode": "light", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-dark.png", "mode": "dark", "preset": "electric", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}
+{"out": "docs/images/list-toast-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "step": 1, "act": "done"}
+# The reader on the design system (E1.17b) in each preset: the mail-action toolbar, the subject with who wrote, the
+# thread as cards and the open message's attachments with Reply, Reply all and Forward, in the full-width reader.
+{"out": "docs/images/reader-full-aurora-light.png", "mode": "light", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+{"out": "docs/images/reader-full-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}

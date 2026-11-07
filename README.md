@@ -2,7 +2,7 @@
 
 # InboxCraft
 
-<img src="assets/app-icon/hicolor/128x128/apps/com.qubernetic.InboxCraft.png" width="96" alt="The InboxCraft icon: <describe the icon in plain words>">
+<img src="assets/app-icon/inboxcraft.svg" width="96" alt="The InboxCraft icon: a white letter standing in a light teal inbox tray, with an orange unread dot, on a dark teal rounded square">
 
 **A local-first mail and calendar program for IMAP, SMTP and CalDAV, written from scratch in Rust.**
 
@@ -43,10 +43,10 @@ What is missing or rough is listed, ranked, in [docs/gaps.md](docs/gaps.md).
 
 | | |
 |---|---|
-| ![<alt text>](docs/images/<shot-1>.png) | ![<alt text>](docs/images/<shot-2>.png) |
+| ![The unified inbox of the sample mailbox in the light theme](docs/images/list-light.png) | ![The unified inbox of the sample mailbox in the dark theme](docs/images/list-dark.png) |
 
 The pictures show the sample mailbox (`--sample`): invented people and invented mail. They are made with
-`cargo run -p inboxcraft-ui-egui --example ui_shot`.
+`just shot` (`cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`).
 
 ## Platforms
 

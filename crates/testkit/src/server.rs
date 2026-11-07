@@ -1,20 +1,22 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The fake server: one listener on the loopback interface, one client, one script.
+//! The fake server: one listener on the loopback interface, one client, one script; or, for the fake IMAP server,
+//! several clients one after the other.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use rustls::ServerConfig;
 
 use crate::Error;
 use crate::line::{Line, LineReader};
 use crate::script::{Fault, Script, Step};
+use crate::wire::Wire;
 
 /// How often the server looks for a client or for the stop signal.
 const POLL: Duration = Duration::from_millis(5);
@@ -58,31 +60,88 @@ impl Listen {
     ///
     /// [`Error::Io`] when the port cannot be bound or the thread cannot be started.
     pub fn start(self, script: Script) -> Result<FakeServer, Error> {
+        self.spawn(move |wire, stop| {
+            let mut transcript = Transcript::default();
+            let ended = play(wire, &script, stop, &mut transcript);
+            (transcript, ended)
+        })
+    }
+
+    /// Binds a free port on 127.0.0.1 and runs `session` with the first client on a thread of its own; `session`
+    /// gives back what the client sent even when it failed.
+    pub(crate) fn spawn<F>(self, session: F) -> Result<FakeServer, Error>
+    where
+        F: FnOnce(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>) + Send + 'static,
+    {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
-        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || self.serve(&listener, &script, &flag))?;
+        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || self.serve(&listener, session, &flag))?;
         Ok(FakeServer { addr, stop, handle: Some(handle) })
     }
 
-    fn serve(&self, listener: &TcpListener, script: &Script, stop: &AtomicBool) -> Result<Transcript, Error> {
+    /// Binds a free port on 127.0.0.1 and runs `session` with up to `connections` clients, one after the other, on a
+    /// thread of its own. Once one client has been served, a client that does not come ends the server quietly. A
+    /// failed session does not stop the server, as a real one goes on too: its error is the one the end reports.
+    pub(crate) fn spawn_many<F>(self, connections: usize, mut session: F) -> Result<FakeServer, Error>
+    where
+        F: FnMut(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>) + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let addr = listener.local_addr()?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let handle = thread::Builder::new().name("testkit-fake-server".to_owned()).spawn(move || {
+            let mut all = Transcript::default();
+            let mut first_error = None;
+            for served in 0..connections {
+                let (transcript, ended) = self.serve(&listener, &mut session, &flag);
+                all.append(transcript);
+                match ended {
+                    Err(Error::NoClient) if served > 0 => break,
+                    Err(Error::NoClient) => return (all, Err(Error::NoClient)),
+                    Err(err) => {
+                        first_error.get_or_insert(err);
+                    }
+                    Ok(()) => {}
+                }
+            }
+            (all, first_error.map_or(Ok(()), Err))
+        })?;
+        Ok(FakeServer { addr, stop, handle: Some(handle) })
+    }
+
+    fn serve<F>(&self, listener: &TcpListener, session: F, stop: &AtomicBool) -> (Transcript, Result<(), Error>)
+    where
+        F: FnOnce(&mut Wire, &AtomicBool) -> (Transcript, Result<Ending, Error>),
+    {
+        let mut wire = match self.connect(listener, stop) {
+            Ok(wire) => wire,
+            Err(err) => return (Transcript::default(), Err(err)),
+        };
+        let (transcript, ended) = session(&mut wire, stop);
+        let closed = match ended {
+            Ok(Ending::Finished) => wire.close().map_err(Error::from),
+            Ok(Ending::Dropped) => Ok(()),
+            Err(err) => Err(err),
+        };
+        (transcript, closed)
+    }
+
+    /// Accepts the client and sets the connection up.
+    fn connect(&self, listener: &TcpListener, stop: &AtomicBool) -> Result<Wire, Error> {
         let stream = accept(listener, self.accept_timeout, stop)?;
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(self.io_timeout))?;
         stream.set_write_timeout(Some(self.io_timeout))?;
-        let Some(config) = &self.tls else {
-            let mut stream = stream;
-            return play(&mut stream, script, stop).map(|(transcript, _)| transcript);
-        };
-        let mut stream = StreamOwned::new(ServerConnection::new(Arc::clone(config))?, stream);
-        let (transcript, ending) = play(&mut stream, script, stop)?;
-        if ending == Ending::Finished {
-            stream.conn.send_close_notify();
-            stream.flush()?;
+        let mut wire = Wire::plain(stream);
+        if let Some(config) = &self.tls {
+            wire.accept_tls(config)?;
         }
-        Ok(transcript)
+        Ok(wire)
     }
 }
 
@@ -91,7 +150,7 @@ impl Listen {
 pub struct FakeServer {
     addr: SocketAddr,
     stop: Arc<AtomicBool>,
-    handle: Option<JoinHandle<Result<Transcript, Error>>>,
+    handle: Option<JoinHandle<(Transcript, Result<(), Error>)>>,
 }
 
 impl FakeServer {
@@ -107,9 +166,21 @@ impl FakeServer {
     ///
     /// The first thing that went wrong on the server side: no client, a line the script did not expect, a socket or
     /// TLS error (a client that refuses the certificate shows up here as a TLS error).
-    pub fn finish(mut self) -> Result<Transcript, Error> {
-        let handle = self.handle.take().ok_or(Error::Thread)?;
-        handle.join().map_err(|_| Error::Thread)?
+    ///
+    /// A server of several connections ([`Listen::start_imap_many`](crate::Listen::start_imap_many)) waits up to its
+    /// accept timeout for a client that does not come.
+    pub fn finish(self) -> Result<Transcript, Error> {
+        let (transcript, ended) = self.finish_with_transcript();
+        ended.map(|()| transcript)
+    }
+
+    /// Like [`FakeServer::finish`], but keeps what the client sent when the server side failed, such as a password
+    /// that came in clear before a TLS handshake the client then broke off.
+    pub fn finish_with_transcript(mut self) -> (Transcript, Result<(), Error>) {
+        match self.handle.take().map(JoinHandle::join) {
+            Some(Ok(done)) => done,
+            Some(Err(_)) | None => (Transcript::default(), Err(Error::Thread)),
+        }
     }
 }
 
@@ -126,19 +197,49 @@ impl Drop for FakeServer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Transcript {
     received: Vec<String>,
+    clear: usize,
 }
 
 impl Transcript {
-    /// The lines the client sent, without their terminators; bytes that are not UTF-8 are replaced.
+    /// The lines the client sent, without their terminators; bytes that are not UTF-8 are replaced. A line that ended
+    /// the session for its length is kept cut at [`crate::MAX_LINE`] bytes.
     #[must_use]
     pub fn received(&self) -> &[String] {
         &self.received
     }
+
+    /// The first of [`Transcript::received`], those that came before the connection was encrypted: all of them over
+    /// plain TCP, none over implicit TLS, those before the handshake after STARTTLS. With several connections, the
+    /// lines of all of them are kept in order, and this speaks of the first connection only. Lines a client pipelined behind
+    /// STARTTLS or sent after its answer but before the handshake are among them, though the server does not answer
+    /// them, and so is a last one without its end. [`FakeServer::finish_with_transcript`] keeps them when the
+    /// handshake then fails.
+    #[must_use]
+    pub fn in_clear(&self) -> &[String] {
+        self.received.get(..self.clear).unwrap_or_default()
+    }
+
+    /// Adds the lines of the next connection; [`Transcript::in_clear`] keeps speaking of the first one.
+    pub(crate) fn append(&mut self, next: Self) {
+        let first = self.received.is_empty();
+        self.received.extend(next.received);
+        if first {
+            self.clear = next.clear;
+        }
+    }
+
+    /// Adds a line the client sent, over an encrypted connection or not.
+    pub(crate) fn push(&mut self, line: String, encrypted: bool) {
+        self.received.push(line);
+        if !encrypted {
+            self.clear = self.received.len();
+        }
+    }
 }
 
-/// How a script ended.
+/// How a session ended.
 #[derive(Debug, PartialEq, Eq)]
-enum Ending {
+pub(crate) enum Ending {
     /// Every step was played.
     Finished,
     /// A [`Fault::Drop`] or the stop signal cut it short.
@@ -164,7 +265,7 @@ fn accept(listener: &TcpListener, wait: Duration, stop: &AtomicBool) -> Result<T
 }
 
 /// Sleeps for `wait`, in [`POLL`] rounds, or until the stop signal; returns whether the signal came.
-fn pause(wait: Duration, stop: &AtomicBool) -> bool {
+pub(crate) fn pause(wait: Duration, stop: &AtomicBool) -> bool {
     for _ in 0..rounds(wait) {
         if stop.load(Ordering::Relaxed) {
             return true;
@@ -174,9 +275,8 @@ fn pause(wait: Duration, stop: &AtomicBool) -> bool {
     stop.load(Ordering::Relaxed)
 }
 
-fn play(stream: &mut (impl Read + Write), script: &Script, stop: &AtomicBool) -> Result<(Transcript, Ending), Error> {
+fn play(stream: &mut Wire, script: &Script, stop: &AtomicBool, transcript: &mut Transcript) -> Result<Ending, Error> {
     let mut reader = LineReader::default();
-    let mut transcript = Transcript::default();
     for step in script.steps() {
         match step {
             Step::Send(line) => {
@@ -189,17 +289,20 @@ fn play(stream: &mut (impl Read + Write), script: &Script, stop: &AtomicBool) ->
                 let got = match reader.read_line(stream)? {
                     Line::Complete(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
                     Line::Eof => return Err(Error::ClientGone),
-                    Line::TooLong => return Err(Error::LineTooLong),
+                    Line::TooLong(cut) => {
+                        transcript.push(String::from_utf8_lossy(&cut).into_owned(), stream.is_tls());
+                        return Err(Error::LineTooLong);
+                    }
                 };
-                transcript.received.push(got.clone());
+                transcript.push(got.clone(), stream.is_tls());
                 if got != *expected {
                     return Err(Error::Unexpected { expected: expected.clone(), got });
                 }
             }
-            Step::Fault(Fault::Drop) => return Ok((transcript, Ending::Dropped)),
+            Step::Fault(Fault::Drop) => return Ok(Ending::Dropped),
             Step::Fault(Fault::Delay(wait)) => {
                 if pause(*wait, stop) {
-                    return Ok((transcript, Ending::Dropped));
+                    return Ok(Ending::Dropped);
                 }
             }
             Step::Fault(Fault::Garbage(bytes)) => {
@@ -208,5 +311,5 @@ fn play(stream: &mut (impl Read + Write), script: &Script, stop: &AtomicBool) ->
             }
         }
     }
-    Ok((transcript, Ending::Finished))
+    Ok(Ending::Finished)
 }
