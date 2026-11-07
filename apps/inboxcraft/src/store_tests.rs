@@ -22,7 +22,7 @@ fn account() -> inboxcraft_model::Account {
 
 /// A session on the store in `dir` with one account and a command that queues a kept job.
 fn session_in(dir: &Path) -> Session {
-    let mut store = open_store(dir).unwrap();
+    let mut store = open_store(dir).unwrap().store;
     if store.accounts().unwrap().is_empty() {
         store.apply(&Batch::new().with(Change::PutAccount(account()))).unwrap();
     }
@@ -37,7 +37,7 @@ fn session_in(dir: &Path) -> Session {
 fn the_store_is_kept_between_runs() {
     let dir = tempfile::tempdir().unwrap();
     drop(session_in(dir.path()));
-    let store = open_store(dir.path()).unwrap();
+    let store = open_store(dir.path()).unwrap().store;
     assert_eq!(store.accounts().unwrap(), [account()]);
     assert!(dir.path().join(inboxcraft_store::DATABASE_FILE).is_file());
 }
@@ -79,7 +79,7 @@ fn child_opens_the_owner_s_mail() {
     for source in [Source::Sample, Source::Owner] {
         match mail(source) {
             Ok(Mail::Sample) => println!("mail=sample"),
-            Ok(Mail::Store(store)) => println!("mail=store with {} accounts", store.accounts().unwrap().len()),
+            Ok(Mail::Store(owned)) => println!("mail=store with {} accounts", owned.store.accounts().unwrap().len()),
             Err(error) => println!("mail=error {error}"),
         }
     }

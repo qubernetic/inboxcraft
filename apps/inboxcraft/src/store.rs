@@ -16,19 +16,25 @@ use crate::Source;
 pub const STORE_DIR: &str = "inboxcraft/store";
 
 /// The mail a window shows.
+#[derive(Debug)]
 pub enum Mail {
     /// The invented sample mailbox, built in memory each time.
     Sample,
     /// The owner's store.
-    Store(Box<dyn Storage>),
+    Store(Owned),
 }
 
-impl std::fmt::Debug for Mail {
+/// The owner's store, with its id.
+pub struct Owned {
+    /// The store.
+    pub store: Box<dyn Storage>,
+    /// Its own id ([`Sqlite::id`]), which names its accounts' entries in the credential store.
+    pub id: String,
+}
+
+impl std::fmt::Debug for Owned {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Sample => "Mail::Sample",
-            Self::Store(_) => "Mail::Store",
-        })
+        f.debug_struct("Owned").field("id", &self.id).finish_non_exhaustive()
     }
 }
 
@@ -55,12 +61,11 @@ pub fn store_dir() -> Option<PathBuf> {
 ///
 /// # Errors
 ///
-/// What went wrong, naming the folder: a store from a newer build, a damaged one, a folder that cannot be made.
-pub fn open_store(dir: &Path) -> Result<Box<dyn Storage>, String> {
-    match Sqlite::open(dir, StoreConfig::default()) {
-        Ok(store) => Ok(Box::new(store)),
-        Err(error) => Err(format!("the mail store in {} could not be opened: {error}", dir.display())),
-    }
+/// What went wrong, naming the folder: a store from a newer build, a damaged one (also one without its id), a folder
+/// that cannot be made.
+pub fn open_store(dir: &Path) -> Result<Owned, String> {
+    let opened = Sqlite::open(dir, StoreConfig::default()).and_then(|store| Ok(Owned { id: store.id()?, store: Box::new(store) }));
+    opened.map_err(|error| format!("the mail store in {} could not be opened: {error}", dir.display()))
 }
 
 /// The mail the window on `source` shows: the sample, or the owner's store in [`store_dir`].

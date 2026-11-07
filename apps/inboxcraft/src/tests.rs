@@ -9,6 +9,7 @@ use inboxcraft_ui_egui::keep::NoKeep;
 
 use inboxcraft_store::Memory;
 
+use super::store::Owned;
 use super::{Mail, Source, Step, app, owner_keep, run, usage};
 
 fn run_with(args: &[&str]) -> (Step, String, String) {
@@ -92,7 +93,7 @@ fn a_closed_output_is_an_error_code_not_a_panic() {
 
 /// The owner's mail in a store that is gone with the test.
 fn owned() -> Mail {
-    Mail::Store(Box::new(Memory::default()))
+    Mail::Store(Owned { store: Box::new(Memory::default()), id: "0a1b".to_owned() })
 }
 
 fn mail(source: Source) -> Mail {

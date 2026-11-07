@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use inboxcraft_engine::Session;
 use inboxcraft_net::picture::PictureClient;
-use inboxcraft_net::{Connector, TlsSettings, Trust, WorkerSettings};
+use inboxcraft_net::{Connector, Credentials, TlsSettings, Trust, WorkerSettings};
 use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::{Fetch, Get, Threaded, Wake};
 use inboxcraft_ui_egui::keep::{Keep, KeepFile, NoKeep};
@@ -118,26 +118,25 @@ pub fn app(mail: Mail, clock: impl Fn() -> Box<dyn Clock>, wake: Option<Wake>, k
         Some(downloads) => Box::new(downloads),
         None => Box::new(NoSave),
     };
-    let store = match mail {
+    let owned = match mail {
         Mail::Sample => {
             let mailbox = Mailbox::new(sample::session(clock())?, clock());
             return Ok(InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), save).with_keep(keep));
         }
-        Mail::Store(store) => store,
+        Mail::Store(owned) => owned,
     };
+    let keychain = Arc::new(accounts::OsKeychain::new(&owned.id));
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let client = PictureClient::new(tls.clone(), PICTURE_TIMEOUT);
     let get: Get = Arc::new(move |url: &str| client.fetch(url).map(|picture| picture.bytes).map_err(|error| error.to_string()));
     let fetch: Box<dyn Fetch> = Box::new(Threaded::new(get, wake.clone()));
-    let mut session = Session::new(store, clock())?;
+    let mut session = Session::new(owned.store, clock())?;
     session.start();
     let detecting = tls.clone();
     let run: Run = Arc::new(move |address: &str, ispdb: bool| accounts::detect(&detecting, address, ispdb));
     let detect = Box::new(onboard::Threaded::new(run, wake.clone()));
-    let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(accounts::OsKeychain), wake));
-    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save)
-        .with_accounts(Arc::new(accounts::OsKeychain), detect, workers)
-        .with_keep(keep))
+    let workers = Box::new(accounts::NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::clone(&keychain) as Arc<dyn Credentials>, wake));
+    Ok(InboxApp::with_outside(Mailbox::new(session, clock()), fetch, save).with_accounts(keychain, detect, workers).with_keep(keep))
 }
 
 /// Where the owner's appearance choices are kept: the file in their config folder, or nowhere without one.
