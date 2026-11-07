@@ -3,8 +3,8 @@
 
 use super::{ConnectionState, Copied, ErrorKind, Event, EventKind, FlagChange};
 use crate::{
-    AccountId, CheckStep, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, StepStatus, Summary,
-    Uid, UidSet, UidValidity,
+    AccountId, CheckStep, DraftId, Envelope, Flag, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, StepStatus,
+    Summary, Uid, UidSet, UidValidity,
 };
 
 fn uid(n: u32) -> Uid {
@@ -15,7 +15,7 @@ fn validity() -> UidValidity {
     UidValidity::new(7).unwrap()
 }
 
-const EVERY_ERROR: [ErrorKind; 22] = [
+const EVERY_ERROR: [ErrorKind; 25] = [
     ErrorKind::HostNotFound,
     ErrorKind::ConnectionRefused,
     ErrorKind::TimedOut,
@@ -38,6 +38,9 @@ const EVERY_ERROR: [ErrorKind; 22] = [
     ErrorKind::TooLarge,
     ErrorKind::FolderGone,
     ErrorKind::MessageGone,
+    ErrorKind::MessageRefused,
+    ErrorKind::NoSubmissionServer,
+    ErrorKind::SendUnanswered,
 ];
 
 #[test]
@@ -77,6 +80,9 @@ fn every_event_kind_round_trips_and_names_its_folder() {
         (EventKind::Appended { folder, uid: Some((validity(), uid(5))) }, Some(folder)),
         (EventKind::Appended { folder, uid: None }, Some(folder)),
         (EventKind::FolderCreated { path: FolderPath::new("InboxCraft/Screener", Some('/')).unwrap() }, None),
+        (EventKind::Sent { draft: DraftId::new(3) }, None),
+        (EventKind::SendFailed { draft: DraftId::new(3), kind: ErrorKind::MessageRefused, reply: Some("550 5.1.1 No such user".to_owned()) }, None),
+        (EventKind::SendFailed { draft: DraftId::new(3), kind: ErrorKind::TimedOut, reply: None }, None),
     ];
     for (kind, expected) in kinds {
         assert_eq!(kind.folder(), expected, "{kind:?}");

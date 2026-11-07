@@ -250,7 +250,8 @@ fn adding_keeps_the_password_in_the_credential_store_only_and_shows_the_check() 
     let steps = onboarding.steps();
     assert_eq!(steps.len(), 7);
     assert!(steps[..5].iter().all(|step| step.state == StepState::Pending));
-    assert_eq!(steps[5].state, StepState::NotBuilt);
+    assert_eq!(steps[5].state, StepState::Pending);
+    assert_eq!(steps[6].state, StepState::NotBuilt);
     assert_eq!(steps.iter().map(super::StepRow::name).collect::<Vec<_>>()[4], "IMAP sign-in");
 }
 

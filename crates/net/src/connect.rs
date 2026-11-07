@@ -38,6 +38,9 @@ enum Dial {
     To(Vec<SocketAddr>),
 }
 
+/// The most ports [`Connector::with_addresses_on`] keeps addresses for.
+const MAX_PORTS: usize = 16;
+
 /// What opens a TCP connection to an address: the operating system, or a test's stand-in that makes a port time out
 /// or refuse without waiting for a real network.
 pub trait Dialer: fmt::Debug + Send + Sync {
@@ -65,6 +68,8 @@ pub struct Connector {
     tls: TlsSettings,
     timeouts: Timeouts,
     dial: Dial,
+    /// Given addresses for the servers on a port, before `dial`.
+    on_port: Vec<(u16, Vec<SocketAddr>)>,
     dialer: Arc<dyn Dialer>,
 }
 
@@ -72,7 +77,7 @@ impl Connector {
     /// A connector that looks host names up with the system's resolver.
     #[must_use]
     pub fn new(tls: TlsSettings) -> Self {
-        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, dialer: Arc::new(SystemDialer) }
+        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, on_port: Vec::new(), dialer: Arc::new(SystemDialer) }
     }
 
     /// With another [`Dialer`].
@@ -92,6 +97,18 @@ impl Connector {
     #[must_use]
     pub fn with_addresses(self, addresses: Vec<SocketAddr>) -> Self {
         Self { dial: Dial::To(addresses), ..self }
+    }
+
+    /// Connects to `addresses` for a server on `port` (the IMAP and the submission server of an account are told
+    /// apart by it), before [`Connector::with_addresses`] and the lookup. For the fake servers of the tests. A later
+    /// call for the same port replaces the earlier one; past 16 ports the call is ignored.
+    #[must_use]
+    pub fn with_addresses_on(mut self, port: u16, addresses: Vec<SocketAddr>) -> Self {
+        self.on_port.retain(|(held, _)| *held != port);
+        if self.on_port.len() < MAX_PORTS {
+            self.on_port.push((port, addresses));
+        }
+        self
     }
 
     /// The TLS settings.
@@ -120,12 +137,13 @@ impl Connector {
 
     /// The addresses of `server`: given, or looked up by the system; at least one.
     pub(crate) fn resolve(&self, server: &Server) -> Result<Vec<SocketAddr>, NetError> {
-        let addresses: Vec<SocketAddr> = match &self.dial {
-            Dial::To(addresses) => addresses.clone(),
-            Dial::Lookup => (server.host().as_str(), server.port().get())
-                .to_socket_addrs()
-                .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
-                .collect(),
+        let port = server.port().get();
+        let given = self.on_port.iter().find(|(held, _)| *held == port).map(|(_, addresses)| addresses);
+        let addresses: Vec<SocketAddr> = match (given, &self.dial) {
+            (Some(addresses), _) | (None, Dial::To(addresses)) => addresses.clone(),
+            (None, Dial::Lookup) => {
+                (server.host().as_str(), port).to_socket_addrs().map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?.collect()
+            }
         };
         if addresses.is_empty() {
             return Err(NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host())));

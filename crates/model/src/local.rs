@@ -109,12 +109,31 @@ impl fmt::Debug for Draft {
 }
 
 /// A draft on its way out.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Debug` shows the length of the message, never its words.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Outgoing {
     /// The draft that is sent; the outbox item goes with it.
     pub draft: DraftId,
     /// Where it stands.
     pub state: OutboxState,
+    /// The message as it goes, with its own `Message-ID` and `Date`, for the copy in the Sent folder.
+    #[serde(default)]
+    pub message: Vec<u8>,
+}
+
+impl Outgoing {
+    /// `draft` in the outbox at `state`, its message not made yet.
+    #[must_use]
+    pub fn new(draft: DraftId, state: OutboxState) -> Self {
+        Self { draft, state, message: Vec::new() }
+    }
+}
+
+impl fmt::Debug for Outgoing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Outgoing").field("draft", &self.draft).field("state", &self.state).field("message_bytes", &self.message.len()).finish()
+    }
 }
 
 /// Where an outbox item stands.

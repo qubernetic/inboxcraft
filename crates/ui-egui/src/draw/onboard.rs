@@ -203,7 +203,7 @@ fn mark(ui: &mut Ui, theme: &Theme, state: StepState) {
         StepState::Passed => (IconId::Done, Style::Fill, p.accent),
         StepState::Failed => (IconId::Failed, Style::Fill, p.error),
         StepState::Pending => (IconId::Waiting, Style::Regular, p.accent),
-        StepState::Skipped | StepState::Held | StepState::NotBuilt => (IconId::Skipped, Style::Regular, p.muted),
+        StepState::Skipped | StepState::Held | StepState::NotSet | StepState::NotBuilt => (IconId::Skipped, Style::Regular, p.muted),
     };
     theme.icons.paint(ui.painter(), rect, id, style, colour);
 }
@@ -215,6 +215,7 @@ fn state_text(state: StepState) -> &'static str {
         StepState::Failed => tr!("failed"),
         StepState::Skipped => tr!("skipped"),
         StepState::Held => tr!("not run"),
+        StepState::NotSet => tr!("no server set"),
         StepState::NotBuilt => tr!("not built yet"),
     }
 }
@@ -224,13 +225,13 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
     ui.horizontal(|ui| {
         mark(ui, theme, row.state);
         ui.vertical(|ui| {
-            let colour = if matches!(row.state, StepState::Skipped | StepState::NotBuilt) { p.muted } else { p.text };
+            let colour = if matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt) { p.muted } else { p.text };
             ui.label(
                 RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).font(theme.fonts.body.id()).color(colour),
             );
             let mut details = Vec::new();
             // A step that did not run tried no server.
-            if let Some(server) = row.server.as_ref().filter(|_| !matches!(row.state, StepState::Skipped | StepState::NotBuilt)) {
+            if let Some(server) = row.server.as_ref().filter(|_| !matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt)) {
                 details.push(server.clone());
             }
             if let Some(issuer) = &row.issuer {

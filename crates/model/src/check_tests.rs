@@ -22,9 +22,9 @@ fn the_steps_run_in_the_order_of_the_check() {
 }
 
 #[test]
-fn only_the_smtp_and_caldav_steps_are_not_built_yet() {
+fn only_the_caldav_step_is_not_built_yet() {
     let not_built: Vec<CheckStep> = CheckStep::ALL.into_iter().filter(|step| !step.is_built()).collect();
-    assert_eq!(not_built, [CheckStep::SmtpLogin, CheckStep::CaldavDiscovery]);
+    assert_eq!(not_built, [CheckStep::CaldavDiscovery]);
 }
 
 #[test]
@@ -73,6 +73,7 @@ fn reports_round_trip_and_are_cleaned_when_read_back() {
         StepStatus::Skipped,
         StepStatus::NeedsReview,
         StepStatus::NeedsOwner,
+        StepStatus::NotSet,
         StepStatus::NotBuilt,
     ] {
         let report = StepReport::new(CheckStep::Tcp, status).with_server(Host::new("imap.example.org").unwrap(), 993);

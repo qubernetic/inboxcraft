@@ -41,7 +41,7 @@ impl CheckStep {
     /// Whether this version runs the step; the others report [`StepStatus::NotBuilt`].
     #[must_use]
     pub const fn is_built(self) -> bool {
-        !matches!(self, Self::SmtpLogin | Self::CaldavDiscovery)
+        !matches!(self, Self::CaldavDiscovery)
     }
 
     /// Every step before the check runs: pending, or not built yet.
@@ -67,6 +67,8 @@ pub enum StepStatus {
     /// Not run: the last sign-in was refused or went unanswered, and only a check the owner starts sends the
     /// password again.
     NeedsOwner,
+    /// Not run: the account has no server for the step (no submission server for the SMTP sign-in).
+    NotSet,
     /// Not run: this version does not have the step yet.
     NotBuilt,
 }

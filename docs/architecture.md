@@ -219,7 +219,8 @@ one from the account that last sent (the newest message in a Sent folder, else t
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
 the server named it; all
-`safe`. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
+`safe`. A draft on its way (its outbox item waits for the worker's answer) is neither changed nor discarded, so the
+answer finds it as it went. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
 `Name <address>` or a bare address: one that cannot be an address is marked with what is wrong, and it blocks Send
 (`blocks`), like a draft without a recipient. `mail.thread` lists the drafts that answer a message of the thread.
 `Session::tick` hands a draft that changed and has been still for ten seconds to its account's worker as a kept
@@ -229,6 +230,23 @@ before it is then removed for good (`Expunge`), and a copy of a draft discarded 
 goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy can be neither replaced nor taken
 back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
 typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
+
+Sending (`cmd::send`, `engine::send`): `mail.send` (`owner`) makes a draft that nothing blocks into a message with its
+own `Message-ID` and a `Date` in the computer's offset, puts it in the outbox (`Outgoing`, state `Sending`, the
+message kept for the Sent copy) and queues a `Send` job with the envelope: the account's address and the To, Cc and
+Bcc addresses, each once. Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
+send cut off may have gone, so nothing sends it again on its own. The worker sends it at once on a submission
+connection of its own (`net::SmtpConnection`, implicit TLS on 465 or STARTTLS on 587, AUTH PLAIN or LOGIN only after
+TLS, `EHLO [127.0.0.1]`), also while the IMAP connection is down, and answers `Sent` or `SendFailed` with the cause
+and the server's reply. A connection that ends after the message went and before the server answered it is
+`SendUnanswered`: the message may have gone. On `Sent` the draft and its outbox item go, its Drafts copy is removed for good and the
+message is appended to the Sent folder (`\Seen`), both kept jobs; on `SendFailed` the draft stays and its outbox
+item holds the reply (`Refused`), and `mail.send` can send it again. After the IMAP server refused the password, the
+worker sends nothing until it is started anew. After the submission server alone refused it or left it unanswered,
+in a check or a send, a check the owner did not start reports the SMTP step as `NeedsOwner` and sends it nothing; an
+owner's check or a send that signs in there ends the hold. `JobKind`'s `Debug` shows a message's length and a send's
+number of recipients, never the message or an address. `account.add` takes the submission server; the account check signs in
+to it after the IMAP sign-in passed, with the same password, as its `SmtpLogin` step (`NotSet` without one).
 
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id

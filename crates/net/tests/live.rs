@@ -4,8 +4,10 @@
 //! The opt-in live tests of `net` on the owner's two throwaway accounts on the reference provider (`just it-live`,
 //! profile `live`): both `live-imap` and `live-imap2` sign in and list their folders; on `live-imap`, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
 //! IDLE, the resync of a new worker, and the folder removed; the write path in the run folder (APPEND by the worker, a
-//! flag, CREATE of a folder inside it and a move there); and `account.check`, whose every IMAP step passes on the real
-//! chain.
+//! flag, CREATE of a folder inside it and a move there); one invented message sent from `live-imap` to `live-imap2`
+//! through the submission server, found in the inbox of `live-imap2` and removed from it again; and `account.check`,
+//! whose every IMAP step and the SMTP sign-in pass on the real chain. The submission server is taken to be the
+//! account's IMAP host on port 465 (implicit TLS), as on the reference provider.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
 //! agent sandbox and in CI. Agents never run it. The accounts are reached over implicit TLS on port 993, checked by
@@ -21,8 +23,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags, FolderId, FolderPath, FolderState, Host, JobId, JobKind,
-    Security, Server, StepReport, StepStatus, UidSet,
+    Account, AccountId, CheckStep, DraftId, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags, FolderId, FolderPath, FolderState, Host, JobId,
+    JobKind, Security, Server, StepReport, StepStatus, UidSet,
 };
 use inboxcraft_net::{CheckTarget, Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings, check_account};
 use inboxcraft_testkit::live::{self, Folders, LiveConfig, RunFolder};
@@ -54,11 +56,17 @@ struct Live {
     next: u64,
 }
 
+/// The submission server of a live account: its IMAP host on port 465.
+fn submission(imap: &live::Account) -> Result<Server> {
+    Ok(Server::new(Host::new(imap.host())?, Security::Tls.submission_port(), Security::Tls))
+}
+
 impl Live {
     fn start(imap: &live::Account, tls: &TlsSettings) -> Result<Self> {
         let port = NonZeroU16::new(993).ok_or("port")?;
         let server = Server::new(Host::new(imap.host())?, port, Security::Tls);
-        let account = Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?;
+        let account =
+            Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?.with_submission(Some(submission(imap)?));
         let (sender, events) = mpsc::channel();
         let secret = Arc::new(Secret(imap.secret().expose().to_owned()));
         let worker = Worker::spawn(account, WorkerSettings::new(Connector::new(tls.clone())), secret, sender)?;
@@ -258,7 +266,7 @@ fn live_account_check_passes_every_imap_step() -> Result {
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let imap = config.imap();
     let server = Server::new(Host::new(imap.host())?, NonZeroU16::new(993).ok_or("port")?, Security::Tls);
-    let target = CheckTarget::new(server, imap.user());
+    let target = CheckTarget::new(server, imap.user()).with_submission(Some(submission(imap)?));
     let mut reports = Vec::new();
     check_account(&target, &Connector::new(tls), &mut || Some(Password::new(imap.secret().expose().to_owned())), &mut |report| {
         // The step and its status only: no host, no issuer, nothing of the account.
@@ -267,7 +275,76 @@ fn live_account_check_passes_every_imap_step() -> Result {
     });
     let statuses: Vec<StepStatus> = reports.iter().map(StepReport::status).collect();
     let passed = StepStatus::Passed;
-    assert_eq!(statuses, [passed, passed, passed, passed, passed, StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    assert_eq!(statuses, [passed, passed, passed, passed, passed, passed, StepStatus::NotBuilt]);
     assert!(reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer).is_some());
+    Ok(())
+}
+
+#[test]
+fn live_smtp_sends_from_live_imap_to_live_imap2() -> Result {
+    let Some(config) = live::start("live_smtp_sends_from_live_imap_to_live_imap2")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let (from, to) = (config.imap(), config.imap2());
+    // The allow-list: the message goes to the second test account and nowhere else.
+    config.check_recipient(to.address())?;
+    let subject = format!("{} {} sent", config.message_subject_prefix(), config.run_id());
+
+    // The inbox of live-imap2 as it stands, so the resync after the send brings only what came since.
+    let mut inbox = Live::start(to, &tls)?;
+    inbox.job(JobKind::SyncFolderList)?;
+    let events = inbox.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
+    let Some(EventKind::Folders { listings }) = events.last() else { return Err("live-imap2: no folder list".into()) };
+    let path = listings.iter().find(|listing| listing.path().is_inbox()).map(|listing| listing.path().clone()).ok_or("live-imap2: no inbox")?;
+    inbox.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: None })?;
+    let mut known = state(&inbox.synced()?).ok_or("live-imap2: no state")?;
+    println!("live: live-imap2 inbox synced");
+
+    // One invented message, sent by the worker of live-imap.
+    let message = [
+        format!("From: InboxCraft live test <{}>", from.address()),
+        format!("To: <{}>", to.address()),
+        format!("Subject: {subject}"),
+        "Date: Thu, 05 Nov 2026 12:00:00 +0000".to_owned(),
+        format!("Message-ID: <{}.sent@live-test.example.org>", config.run_id()),
+        "MIME-Version: 1.0".to_owned(),
+        "Content-Type: text/plain; charset=utf-8".to_owned(),
+        String::new(),
+        format!("An invented message of the InboxCraft live tests, run {}. It can be deleted.", config.run_id()),
+        String::new(),
+    ]
+    .join("\r\n");
+    let mut sender = Live::start(from, &tls)?;
+    let recipients = vec![EmailAddress::new(to.address())?];
+    let job =
+        sender.job(JobKind::Send { draft: DraftId::new(1), from: EmailAddress::new(from.address())?, recipients, raw: message.into_bytes() })?;
+    let events = sender.until(|kind| matches!(kind, EventKind::Sent { .. } | EventKind::SendFailed { .. }))?;
+    sender.worker.stop();
+    match events.last() {
+        Some(EventKind::Sent { .. }) => println!("live: sent from live-imap (job {job:?})"),
+        Some(EventKind::SendFailed { kind, .. }) => return Err(format!("live-imap: the send failed: {kind}").into()),
+        _ => return Err("live-imap: no answer to the send".into()),
+    }
+
+    // It arrives in the inbox of live-imap2, and is removed from it again.
+    let mut found = None;
+    for _ in 0..24 {
+        std::thread::sleep(Duration::from_secs(5));
+        inbox.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(known) })?;
+        let events = inbox.synced()?;
+        known = state(&events).unwrap_or(known);
+        found = added(&events).into_iter().find(|summary| summary.envelope().subject() == subject);
+        if found.is_some() {
+            break;
+        }
+    }
+    let found = found.ok_or("live-imap2: the message did not arrive within two minutes")?;
+    println!("live: arrived in the live-imap2 inbox");
+    let uids: UidSet = std::iter::once(found.uid()).collect();
+    inbox.job(JobKind::Expunge { folder: RUN, path, uid_validity: known.uid_validity(), uids })?;
+    inbox.until(|kind| matches!(kind, EventKind::Expunged { .. }))?;
+    inbox.worker.stop();
+    println!("live: removed from the live-imap2 inbox");
     Ok(())
 }

@@ -16,8 +16,9 @@ use std::time::Duration;
 use inboxcraft_model::{CheckStep, ErrorKind, Security, StepReport, StepStatus};
 use inboxcraft_net::{CheckTarget, Connector, Dialer, Password, check_account};
 use inboxcraft_testkit::imap::{Capability, FakeImap, PASSWORD, USER};
+use inboxcraft_testkit::smtp::FakeSmtp;
 use inboxcraft_testkit::{CertFault, FakeServer, HOST, Listen, TestPki};
-use support::{Result, connector, far_off, server, wall};
+use support::{Result, connector, far_off, server, submission, wall};
 
 /// A stand-in network: each port of the made-up server address goes to a local listener, refuses, or is silent.
 #[derive(Debug, Default)]
@@ -55,7 +56,10 @@ fn address(port: u16) -> SocketAddr {
 }
 
 fn through(pki: &TestPki, clock: Arc<dyn inboxcraft_time::Clock>, network: Network) -> Connector {
-    connector(pki, clock, address(993)).with_dialer(Arc::new(network))
+    connector(pki, clock, address(993))
+        .with_addresses_on(465, vec![address(465)])
+        .with_addresses_on(587, vec![address(587)])
+        .with_dialer(Arc::new(network))
 }
 
 fn to_fake(fake: &FakeServer) -> Network {
@@ -90,9 +94,23 @@ fn target(security: Security) -> Result<CheckTarget> {
     Ok(CheckTarget::new(server(security)?, USER))
 }
 
+/// A fake submission server for `security`: implicit TLS, or STARTTLS on a plain connection.
+fn submission_fake(pki: &TestPki, security: Security) -> Result<FakeServer> {
+    Ok(match security {
+        Security::Tls => Listen::tls(pki.server_config(None)?).start_smtp(FakeSmtp::new())?,
+        Security::StartTls => Listen::plain().start_smtp(FakeSmtp::new().starttls(pki.server_config(None)?))?,
+    })
+}
+
+/// The IMAP fake on 993 and `smtp` on the submission port of `security`.
+fn both(imap: &FakeServer, smtp: &FakeServer, security: Security) -> Network {
+    to_fake(imap).port(security.submission_port().get(), Port::To(smtp.addr()))
+}
+
 const PASSED: StepStatus = StepStatus::Passed;
 const SKIPPED: StepStatus = StepStatus::Skipped;
 const NOT_BUILT: StepStatus = StepStatus::NotBuilt;
+const NOT_SET: StepStatus = StepStatus::NotSet;
 
 fn signed_in(transcript: &[String]) -> bool {
     transcript.iter().any(|line| line.contains("LOGIN") || line.contains("AUTHENTICATE"))
@@ -106,10 +124,19 @@ fn every_step_passes_and_names_the_server_and_the_issuer() -> Result {
             Security::Tls => Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?,
             Security::StartTls => Listen::plain().start_imap(FakeImap::new().starttls(pki.server_config(None)?))?,
         };
-        let (reports, asked) = run(&target(security)?, &through(&pki, wall(), to_fake(&fake)), Some(PASSWORD));
-        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, PASSED, NOT_BUILT, NOT_BUILT], "{security:?}");
+        let smtp = submission_fake(&pki, security)?;
+        let target = target(security)?.with_submission(Some(submission(security)?));
+        let (reports, asked) =
+            run(&target, &through(&pki, wall(), to_fake(&fake).port(security.submission_port().get(), Port::To(smtp.addr()))), Some(PASSWORD));
+        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, PASSED, PASSED, NOT_BUILT], "{security:?}");
         assert_eq!(reports.iter().map(StepReport::step).collect::<Vec<_>>(), CheckStep::ALL);
-        assert!(reports.iter().all(|report| report.host().map(|host| host.as_str()) == Some(HOST) && report.port() == Some(993)));
+        let (imap, smtp_steps): (Vec<&StepReport>, Vec<&StepReport>) = reports.iter().partition(|report| report.step() != CheckStep::SmtpLogin);
+        assert!(imap.iter().all(|report| report.host().map(|host| host.as_str()) == Some(HOST) && report.port() == Some(993)));
+        assert!(smtp_steps.iter().all(|report| report.port() == Some(security.submission_port().get())), "{smtp_steps:?}");
+        let smtp_transcript = smtp.finish()?;
+        assert!(smtp_transcript.received().iter().any(|line| line.starts_with("AUTH")), "{security:?}");
+        assert!(smtp_transcript.in_clear().iter().all(|line| !line.starts_with("AUTH")), "{security:?}");
+        assert!(smtp_transcript.received().last().is_some_and(|line| line == "QUIT"));
         let issuer = reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer);
         assert_eq!(issuer, Some("CN=InboxCraft test CA"));
         assert_eq!(asked, 1);
@@ -134,7 +161,7 @@ fn each_certificate_fault_fails_the_certificate_step_with_its_own_message() -> R
             CertFault::WrongHost => ErrorKind::CertificateWrongHost,
             CertFault::ClockFarOff => ErrorKind::ClockFarOff,
         };
-        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, StepStatus::Failed(expected), SKIPPED, NOT_BUILT, NOT_BUILT], "{fault:?}");
+        assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, StepStatus::Failed(expected), SKIPPED, NOT_SET, NOT_BUILT], "{fault:?}");
         let issuer = reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer);
         let expected_issuer = if fault == CertFault::UnknownCa { "CN=Stranger test CA" } else { "CN=InboxCraft test CA" };
         assert_eq!(issuer, Some(expected_issuer), "{fault:?}");
@@ -174,7 +201,7 @@ fn each_port_case_has_its_own_kind_and_message() -> Result {
     let mut messages = HashSet::new();
     for (network, expected) in cases {
         let (reports, asked) = run(&target(Security::Tls)?, &through(&pki, wall(), network), Some(PASSWORD));
-        assert_eq!(statuses(&reports), [PASSED, StepStatus::Failed(expected), SKIPPED, SKIPPED, SKIPPED, NOT_BUILT, NOT_BUILT], "{expected:?}");
+        assert_eq!(statuses(&reports), [PASSED, StepStatus::Failed(expected), SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_BUILT], "{expected:?}");
         assert_eq!(asked, 0);
         messages.insert(expected.to_string());
     }
@@ -198,7 +225,7 @@ fn a_name_without_an_address_fails_the_dns_step() -> Result {
     let pki = TestPki::new()?;
     let connector = Connector::new(inboxcraft_net::TlsSettings::new(inboxcraft_net::Trust::Roots(vec![pki.ca()]), wall())).with_addresses(Vec::new());
     let (reports, _asked) = run(&target(Security::Tls)?, &connector, Some(PASSWORD));
-    assert_eq!(statuses(&reports), [StepStatus::Failed(ErrorKind::HostNotFound), SKIPPED, SKIPPED, SKIPPED, SKIPPED, NOT_BUILT, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [StepStatus::Failed(ErrorKind::HostNotFound), SKIPPED, SKIPPED, SKIPPED, SKIPPED, NOT_SET, NOT_BUILT]);
     Ok(())
 }
 
@@ -207,7 +234,7 @@ fn a_server_without_starttls_fails_the_tls_step() -> Result {
     let pki = TestPki::new()?;
     let fake = Listen::plain().start_imap(FakeImap::new().without(Capability::LoginDisabled))?;
     let (reports, asked) = run(&target(Security::StartTls)?, &through(&pki, wall(), to_fake(&fake)), Some(PASSWORD));
-    assert_eq!(statuses(&reports), [PASSED, PASSED, StepStatus::Failed(ErrorKind::StartTlsMissing), SKIPPED, SKIPPED, NOT_BUILT, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [PASSED, PASSED, StepStatus::Failed(ErrorKind::StartTlsMissing), SKIPPED, SKIPPED, NOT_SET, NOT_BUILT]);
     assert_eq!(asked, 0);
     let (transcript, _ended) = fake.finish_with_transcript();
     assert!(transcript.received().is_empty(), "{:?}", transcript.received());
@@ -239,7 +266,7 @@ fn detected_settings_get_no_password_until_the_owner_saw_them() -> Result {
 
     let fake = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
     let (reports, asked) = run(&detected, &through(&pki, wall(), to_fake(&fake)), Some(PASSWORD));
-    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, NOT_BUILT, NOT_BUILT]);
+    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, NOT_SET, NOT_BUILT]);
     assert_eq!(asked, 0);
     let transcript = fake.finish()?;
     assert!(!signed_in(transcript.received()), "{:?}", transcript.received());
@@ -259,5 +286,84 @@ fn detected_settings_get_no_password_until_the_owner_saw_them() -> Result {
     assert_eq!(status(&reports, CheckStep::ImapLogin), Some(PASSED));
     assert_eq!(asked, 1);
     assert!(signed_in(fake.finish()?.received()));
+    Ok(())
+}
+
+#[test]
+fn the_smtp_sign_in_fails_with_its_own_cause() -> Result {
+    let pki = TestPki::new()?;
+    let target = target(Security::Tls)?.with_submission(Some(submission(Security::Tls)?));
+    // The submission server takes another password.
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let smtp = Listen::tls(pki.server_config(None)?).start_smtp(FakeSmtp::new().login(USER, "another-invented-password"))?;
+    let (reports, asked) = run(&target, &through(&pki, wall(), both(&imap, &smtp, Security::Tls)), Some(PASSWORD));
+    assert_eq!(status(&reports, CheckStep::SmtpLogin), Some(StepStatus::Failed(ErrorKind::LoginRefused)));
+    assert_eq!(asked, 1, "the password is asked for once for both sign-ins");
+    drop((imap.finish()?, smtp.finish_with_transcript()));
+    // Its certificate fails: no password goes to it.
+    for fault in CertFault::ALL {
+        let clock = if fault == CertFault::ClockFarOff { far_off()? } else { wall() };
+        let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+        let smtp = Listen::tls(pki.server_config(Some(fault))?).start_smtp(FakeSmtp::new())?;
+        let (reports, _asked) = run(&target, &through(&pki, clock, both(&imap, &smtp, Security::Tls)), Some(PASSWORD));
+        let smtp_status = status(&reports, CheckStep::SmtpLogin);
+        let (_imap, _ended) = imap.finish_with_transcript();
+        let (transcript, _ended) = smtp.finish_with_transcript();
+        assert!(transcript.received().is_empty(), "{fault:?}: {:?}", transcript.received());
+        if fault == CertFault::ClockFarOff {
+            // The IMAP certificate fails first at that clock.
+            assert_eq!(smtp_status, Some(SKIPPED));
+        } else {
+            let expected = match fault {
+                CertFault::UnknownCa => ErrorKind::CertificateUnknownIssuer,
+                CertFault::Expired => ErrorKind::CertificateExpired,
+                CertFault::WrongHost | CertFault::ClockFarOff => ErrorKind::CertificateWrongHost,
+            };
+            assert_eq!(smtp_status, Some(StepStatus::Failed(expected)), "{fault:?}");
+        }
+    }
+    // Nobody answers on the submission port.
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let (reports, _asked) = run(&target, &through(&pki, wall(), to_fake(&imap)), Some(PASSWORD));
+    assert_eq!(status(&reports, CheckStep::SmtpLogin), Some(StepStatus::Failed(ErrorKind::TimedOut)));
+    drop(imap.finish()?);
+    Ok(())
+}
+
+#[test]
+fn the_smtp_sign_in_waits_like_the_imap_one() -> Result {
+    let pki = TestPki::new()?;
+    // Detected and not seen: neither server gets the password.
+    let detected = CheckTarget::detected(server(Security::Tls)?, USER).with_submission(Some(submission(Security::Tls)?));
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let smtp = submission_fake(&pki, Security::Tls)?;
+    let (reports, asked) = run(&detected, &through(&pki, wall(), both(&imap, &smtp, Security::Tls)), Some(PASSWORD));
+    assert_eq!(statuses(&reports), [PASSED, PASSED, PASSED, PASSED, StepStatus::NeedsReview, StepStatus::NeedsReview, NOT_BUILT]);
+    assert_eq!(asked, 0);
+    drop(imap.finish()?);
+    let (transcript, _ended) = smtp.finish_with_transcript();
+    assert!(transcript.received().is_empty(), "{:?}", transcript.received());
+    // Held for the owner: the same.
+    let held = target(Security::Tls)?.with_submission(Some(submission(Security::Tls)?)).held();
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let (reports, asked) = run(&held, &through(&pki, wall(), to_fake(&imap)), Some(PASSWORD));
+    assert_eq!(status(&reports, CheckStep::SmtpLogin), Some(StepStatus::NeedsOwner));
+    assert_eq!(asked, 0);
+    drop(imap.finish()?);
+    // A refused IMAP password is not tried on the submission server.
+    let imap = Listen::tls(pki.server_config(None)?).start_imap(FakeImap::new())?;
+    let target = target(Security::Tls)?.with_submission(Some(submission(Security::Tls)?));
+    let (reports, _asked) = run(&target, &through(&pki, wall(), to_fake(&imap)), Some("wrong"));
+    assert_eq!(status(&reports, CheckStep::SmtpLogin), Some(SKIPPED));
+    drop(imap.finish_with_transcript());
+    Ok(())
+}
+
+#[test]
+fn a_target_names_its_submission_server() -> Result {
+    let target = target(Security::Tls)?;
+    assert_eq!(target.submission(), None);
+    let with = target.with_submission(Some(submission(Security::StartTls)?));
+    assert_eq!(with.submission(), Some(&submission(Security::StartTls)?));
     Ok(())
 }
