@@ -18,11 +18,11 @@ use crate::EngineError;
 use crate::sync::Plan;
 
 /// Where messages arrived.
-#[cfg_attr(not(test), expect(dead_code, reason = "the stages that read it come with the triage, outbox and calendar slices"))]
 pub(crate) struct Arrival<'a> {
     /// The store as it was before the sync's batch.
     pub(crate) store: &'a dyn Storage,
     /// The time the event is applied at.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that read it come with the outbox and calendar slices"))]
     pub(crate) now: Timestamp,
     /// The account.
     pub(crate) account: AccountId,
@@ -40,14 +40,14 @@ pub(crate) type Stage = fn(&Arrival<'_>, &Message, &mut Plan) -> Result<(), Engi
 /// Declares the stage modules and [`STAGES`], in the order they run.
 macro_rules! stages {
     ($($name:ident),* $(,)?) => {
-        $(mod $name;)*
+        $(pub(crate) mod $name;)*
 
         /// Every stage, in order.
         pub(crate) const STAGES: &[Stage] = &[$($name::stage),*];
     };
 }
 
-stages!();
+stages!(screener);
 
 /// Runs every message of `messages`, which arrived as `arrival` says, through `stages` in order.
 pub(crate) fn arrived(stages: &[Stage], arrival: &Arrival<'_>, messages: &[Message], plan: &mut Plan) -> Result<(), EngineError> {

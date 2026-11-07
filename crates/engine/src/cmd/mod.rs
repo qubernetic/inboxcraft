@@ -75,5 +75,8 @@ mod schedule_tests;
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "triage_tests.rs"]
+mod triage_tests;
+#[cfg(test)]
 #[path = "ui_tests.rs"]
 mod ui_tests;
