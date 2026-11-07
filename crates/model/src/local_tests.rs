@@ -5,8 +5,8 @@ use inboxcraft_time::Timestamp;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::{Alert, Calendar, CalendarEvent, Draft, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
-use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid};
+use super::{Alert, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
+use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid, UidValidity};
 
 fn at(seconds: i64) -> Timestamp {
     Timestamp::from_unix(seconds, 0).unwrap()
@@ -25,7 +25,8 @@ fn draft() -> Draft {
         subject: "Budget 2026".to_owned(),
         text: "The draft budget is attached.".to_owned(),
         answers: Some(MessageId::new(4)),
-        uploaded: Uid::new(17),
+        uploaded: Some(DraftCopy { folder: FolderId::new(6), uid_validity: UidValidity::new(9).unwrap(), uid: Uid::new(17).unwrap() }),
+        synced: Some(at(900)),
         ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
     }
 }
@@ -36,7 +37,20 @@ fn a_new_draft_is_empty() {
     assert_eq!((draft.id, draft.account, draft.saved), (DraftId::new(3), AccountId::new(1), at(1_000)));
     assert!(draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty());
     assert!(draft.subject.is_empty() && draft.text.is_empty());
-    assert_eq!((draft.answers, draft.uploaded), (None, None));
+    assert_eq!((draft.answers, draft.uploaded, draft.synced), (None, None, None));
+}
+
+#[test]
+fn a_draft_record_without_the_newer_fields_reads_back() {
+    let draft: Draft = serde_json::from_str(r#"{"id":3,"account":1,"saved":[1000,0]}"#).unwrap();
+    assert_eq!(draft, Draft::new(DraftId::new(3), AccountId::new(1), at(1_000)));
+}
+
+#[test]
+fn a_draft_debug_shows_no_words() {
+    let shown = format!("{:?}", draft());
+    assert!(!shown.contains("bela") && !shown.contains("Budget") && !shown.contains("attached"), "{shown}");
+    assert!(shown.contains("synced"), "{shown}");
 }
 
 #[test]

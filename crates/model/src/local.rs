@@ -13,7 +13,7 @@ use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::message::timestamp as optional;
-use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid};
+use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, ScheduleId, Uid, UidValidity};
 
 /// A message the owner is writing, kept on every change so a kill loses none of it.
 ///
@@ -46,9 +46,24 @@ pub struct Draft {
     /// The message it answers or forwards.
     #[serde(default)]
     pub answers: Option<MessageId>,
-    /// The UID of its copy in the server's Drafts folder, which the next upload replaces.
+    /// Its copy in the server's Drafts folder, which the next upload replaces.
     #[serde(default)]
-    pub uploaded: Option<Uid>,
+    pub uploaded: Option<DraftCopy>,
+    /// The `saved` time of the version last handed to the server; while it differs from `saved`, the draft waits for
+    /// an upload.
+    #[serde(default, with = "optional")]
+    pub synced: Option<Timestamp>,
+}
+
+/// Where the server keeps a copy of a draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftCopy {
+    /// The Drafts folder it went to.
+    pub folder: FolderId,
+    /// The folder's UIDVALIDITY when it went there.
+    pub uid_validity: UidValidity,
+    /// Its UID there.
+    pub uid: Uid,
 }
 
 impl Draft {
@@ -66,6 +81,7 @@ impl Draft {
             text: String::new(),
             answers: None,
             uploaded: None,
+            synced: None,
         }
     }
 }
@@ -81,6 +97,7 @@ impl fmt::Debug for Draft {
             .field("text_bytes", &self.text.len())
             .field("answers", &self.answers)
             .field("uploaded", &self.uploaded)
+            .field("synced", &self.synced)
             .finish()
     }
 }

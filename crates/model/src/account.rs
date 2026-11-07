@@ -206,6 +206,7 @@ pub struct Account {
     username: String,
     imap: Server,
     submission: Option<Server>,
+    signature: Option<String>,
 }
 
 /// An [`Account`] as stored, before it is checked.
@@ -218,6 +219,8 @@ struct RawAccount {
     username: String,
     imap: Server,
     submission: Option<Server>,
+    #[serde(default)]
+    signature: Option<String>,
 }
 
 impl TryFrom<RawAccount> for Account {
@@ -226,13 +229,17 @@ impl TryFrom<RawAccount> for Account {
     fn try_from(raw: RawAccount) -> Result<Self, Self::Error> {
         Ok(Self::new(raw.id, &raw.label, raw.address, &raw.username, raw.imap)?
             .with_display_name(raw.display_name.as_deref())
-            .with_submission(raw.submission))
+            .with_submission(raw.submission)
+            .with_signature(raw.signature.as_deref()))
     }
 }
 
 impl Account {
     /// The longest user name, in bytes.
     pub const MAX_USERNAME_LEN: usize = 320;
+
+    /// The longest signature, in characters; a longer one is cut.
+    pub const MAX_SIGNATURE_CHARS: usize = 2_000;
 
     /// The account `id` for `address`, shown as `label` (cleaned like a display name; empty means the address),
     /// logging in to `imap` as `username`.
@@ -245,13 +252,27 @@ impl Account {
             return Err(AccountError::BadUsername);
         }
         let label = clean_name(label).unwrap_or_else(|| address.as_str().to_owned());
-        Ok(Self { id, label, address, display_name: None, username: username.to_owned(), imap, submission: None })
+        Ok(Self { id, label, address, display_name: None, username: username.to_owned(), imap, submission: None, signature: None })
     }
 
     /// The same account with the owner's name for sent mail, cleaned like any display name.
     #[must_use]
     pub fn with_display_name(mut self, name: Option<&str>) -> Self {
         self.display_name = name.and_then(clean_name);
+        self
+    }
+
+    /// The same account with the signature new drafts get: line breaks become `\n`, other control characters but
+    /// tabs are dropped, white space at the end goes, and it is cut at [`Self::MAX_SIGNATURE_CHARS`]; a blank one is
+    /// none.
+    #[must_use]
+    pub fn with_signature(mut self, signature: Option<&str>) -> Self {
+        self.signature = signature.and_then(|text| {
+            let text = text.replace("\r\n", "\n").replace('\r', "\n");
+            let kept: String = text.chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).take(Self::MAX_SIGNATURE_CHARS).collect();
+            let kept = kept.trim_end();
+            if kept.trim_start().is_empty() { None } else { Some(kept.to_owned()) }
+        });
         self
     }
 
@@ -302,6 +323,12 @@ impl Account {
     #[must_use]
     pub fn submission(&self) -> Option<&Server> {
         self.submission.as_ref()
+    }
+
+    /// The signature new drafts get, if set.
+    #[must_use]
+    pub fn signature(&self) -> Option<&str> {
+        self.signature.as_deref()
     }
 }
 

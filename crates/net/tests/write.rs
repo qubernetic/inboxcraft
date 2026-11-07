@@ -47,7 +47,7 @@ fn expunge(set: &[u32]) -> Result<JobKind> {
 }
 
 fn append(raw: &[u8]) -> Result<JobKind> {
-    Ok(JobKind::Append { folder: DRAFTS, path: path("Drafts")?, flags: flags(&[Flag::Seen, Flag::Draft]), raw: raw.to_vec() })
+    Ok(JobKind::Append { folder: DRAFTS, path: path("Drafts")?, flags: flags(&[Flag::Seen, Flag::Draft]), raw: raw.to_vec(), draft: None })
 }
 
 fn sync_archive() -> Result<JobKind> {
@@ -259,7 +259,8 @@ fn append_of_what_no_literal_carries_fails_and_keeps_the_connection() -> Result 
     let mut run = Run::sample()?;
     let job = run.job(append(b"Subject: \0\r\n\r\n")?)?;
     assert_eq!(of_job(&run, job)?, [EventKind::Failed { kind: ErrorKind::CommandRefused, folder: Some(DRAFTS) }]);
-    let job = run.job(JobKind::Append { folder: DRAFTS, path: path("Gone")?, flags: Flags::default(), raw: b"Subject: x\r\n\r\n".to_vec() })?;
+    let job =
+        run.job(JobKind::Append { folder: DRAFTS, path: path("Gone")?, flags: Flags::default(), raw: b"Subject: x\r\n\r\n".to_vec(), draft: None })?;
     assert_eq!(of_job(&run, job)?, [EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(DRAFTS) }]);
     let lines = run.finish()?;
     assert_eq!(lines.iter().filter(|line| line.contains("AUTHENTICATE")).count(), 1);

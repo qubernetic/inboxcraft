@@ -67,7 +67,7 @@ pub(crate) fn run(connection: &mut ImapConnection, job: &Job, config: &SyncConfi
             }
             say(EventKind::Expunged { folder: *folder, uid_validity: *uid_validity, uids: uids.clone() });
         }
-        JobKind::Append { folder, path, flags, raw } => match connection.ask(|client| client.append(&mailbox(path), flags, raw), &mut |_| {})? {
+        JobKind::Append { folder, path, flags, raw, .. } => match connection.ask(|client| client.append(&mailbox(path), flags, raw), &mut |_| {})? {
             Ok(Answer::Appended(uid)) => say(EventKind::Appended { folder: *folder, uid: uid.map(|uid| (uid.uid_validity, uid.uid)) }),
             Ok(_) => return Err(other_answer()),
             Err(refusal) => return Err(refused(&refusal)),
