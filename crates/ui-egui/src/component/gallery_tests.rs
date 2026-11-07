@@ -30,6 +30,11 @@ fn the_gallery_shows_every_component_in_every_preset_and_mode() {
                 harness.get_by_label(name);
             }
             assert!(harness.query_all_by_label("Done").count() >= 2, "the button and the hover action");
+            for name in ["Snooze until", "Later today, 17:30", "Tomorrow morning, Sat 08:00", "Thursday 12 November, 09:00"] {
+                harness.get_by_label(name);
+            }
+            assert!(harness.query_by_label_contains("This morning").is_none(), "a preset behind is hidden");
+            harness.get_by_role_and_label(Role::Switch, "Notify me when it comes back");
             harness.get_by_label("Ctrl+F");
             harness.get_by_label("Ctrl+Z");
             for (name, _) in sample::people() {
@@ -43,7 +48,7 @@ fn the_gallery_shows_every_component_in_every_preset_and_mode() {
 fn every_control_of_the_gallery_has_a_name_and_fits_the_page() {
     let harness = harness(Theme::new(Mode::Dark, &PRESETS[0]));
     let page = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size());
-    for role in [Role::Button, Role::MenuItem, Role::Image] {
+    for role in [Role::Button, Role::MenuItem, Role::Image, Role::Switch, Role::TextInput] {
         for node in harness.query_all_by_role(role) {
             assert!(node.accesskit_node().label().is_some_and(|label| !label.is_empty()), "{role:?} without a name");
             assert!(page.contains_rect(node.rect()), "{:?} {:?} leaves the page", node.accesskit_node().label(), node.rect());

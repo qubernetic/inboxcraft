@@ -16,13 +16,13 @@ use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
+use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::motion;
 use crate::onboard::Onboarding;
 use crate::settings::{MAX_CHARS, Section, Settings};
 use crate::theme::{Face, Font, Look, PRESETS, Preset, TextScale, Theme, Weight};
@@ -435,32 +435,6 @@ fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
     ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
     ui.label(RichText::new(tr!("{percent} %", percent = now.percent())).font(semibold(theme.fonts.body).id()).color(p.text));
     wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
-}
-
-/// The switch: a track with a knob that slides to the right when it is on, named `name` for a screen reader; its
-/// response is clicked when it was pressed.
-fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    let p = &theme.palette;
-    let height = line_height(ui, theme.fonts.body);
-    let (rect, response) = ui.allocate_exact_size(vec2(height * 1.8, height), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Switch, true, on, name));
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        let round = rect.height() / 2.0;
-        if on {
-            selection(painter, theme, rect, round);
-        } else {
-            painter.rect_filled(rect, round, p.field);
-        }
-        painter.rect_stroke(rect, round, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
-        let at = motion::toggle(ui.ctx(), response.id.with("knob"), on, theme.motion.hover_fade);
-        let x = rect.left() + round + (rect.width() - 2.0 * round) * at;
-        painter.circle_filled(pos2(x, rect.center().y), round - 2.0, if on { p.accent } else { p.muted });
-        if response.has_focus() {
-            painter.rect_stroke(rect.expand(2.0), round + 2.0, Stroke::new(2.0, p.focus), StrokeKind::Outside);
-        }
-    }
-    response
 }
 
 /// The rows of the Appearance page; what was asked for.
