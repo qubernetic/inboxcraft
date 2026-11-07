@@ -8,9 +8,11 @@
 //!   random source ([`fresh`]) when there is none; [`revoke`] (`inboxcraft --revoke-control`) puts a new one in its
 //!   place. The server reads the store for every line, so a revoked token is refused from the next line on, on a
 //!   connection that is already open too; with no token in the store, or no store, every line is refused.
-//! - The server ([`listen`]): the folder (`0700`) and the socket (`0600`) are the owner's alone, whatever the umask. One
-//!   thread a client, at most [`Limits::clients`] at a time; a client that says nothing for [`Limits::idle`] is let go.
-//!   A line with a wrong, missing or revoked token is answered `unauthorized` and the connection closed; a line that is
+//! - The server ([`listen`]): only in a runtime folder nobody else may write ([`start`]); the socket's folder is a real
+//!   folder of the owner's, made `0700`, and the socket `0600`, whatever the umask. One thread a client, at most
+//!   [`Limits::clients`] at a time; a client that does not finish a line within [`Limits::idle`], or does not take its
+//!   answer within [`Limits::patience`], is let go. A line without a token is refused before the credential store is
+//!   read. A line with a wrong, missing or revoked token is answered `unauthorized` and the connection closed; a line that is
 //!   no request is answered `bad_line`; a line over the limit `too_long`, and the connection closed. A request with the
 //!   right token goes to the window as a [`Call`], which runs it for an agent: only a `safe` command runs
 //!   (`Mailbox::run_for_agent`). A window that does not answer within [`Limits::patience`] is answered `busy`.
@@ -140,11 +142,24 @@ pub fn start(
     wake: Wake,
 ) -> Result<(Listening, std::sync::mpsc::Receiver<Call>), String> {
     let runtime = runtime.filter(|runtime| runtime.is_absolute()).ok_or("XDG_RUNTIME_DIR is not set to a folder")?;
+    runtime_folder(runtime)?;
     ensure(entries.as_ref(), fresh)?;
     let socket = inboxcraft_control_key::socket(runtime, sandboxed);
     let (send, calls) = std::sync::mpsc::channel();
     let listening = listen(&socket, entries, send, wake).map_err(|error| format!("{} could not be opened: {error}", socket.display()))?;
     Ok((listening, calls))
+}
+
+/// Whether `runtime` is a folder of the owner's that nobody else may write: in one another account can write, it could
+/// put its own folder in the socket's place.
+#[cfg(unix)]
+fn runtime_folder(runtime: &Path) -> Result<(), String> {
+    inboxcraft_control_key::folder::check(runtime, inboxcraft_control_key::folder::UNSHARED)
+}
+
+#[cfg(not(unix))]
+fn runtime_folder(_runtime: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 /// The server, listening; the socket goes when it is dropped.
@@ -174,8 +189,8 @@ pub fn listen(socket: &Path, entries: std::sync::Arc<dyn Entries>, calls: Sender
 ///
 /// # Errors
 ///
-/// The folder or the socket could not be made, another app serves `socket` already, or (outside Unix) the channel is
-/// not built.
+/// The folder or the socket could not be made, the folder is a link, no folder or another user's, another app serves
+/// `socket` already, or (outside Unix) the channel is not built.
 #[cfg(unix)]
 pub fn listen_with(
     socket: &Path,
@@ -205,16 +220,19 @@ pub fn listen_with(
 
 #[cfg(unix)]
 mod unix {
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Sender};
+    use std::time::Duration;
 
+    use inboxcraft_control_key::folder::{effective_uid, kept, look};
     use inboxcraft_control_key::line::{MAX_LINE, answer_line, read_request};
     use inboxcraft_control_key::{ENTRY, Failure, Token};
+    use inboxcraft_time::{Clock, SystemClock};
     use inboxcraft_ui_egui::fetch::Wake;
     use serde_json::Value;
 
@@ -224,7 +242,13 @@ mod unix {
     pub(super) fn listen(socket: &Path, entries: Arc<dyn Entries>, calls: Sender<Call>, wake: Wake, limits: Limits) -> std::io::Result<Listening> {
         if let Some(folder) = socket.parent() {
             std::fs::DirBuilder::new().recursive(true).mode(0o700).create(folder)?;
-            if std::fs::metadata(folder)?.permissions().mode() & 0o777 != 0o700 {
+            // The owner's own folder, not a link to one, before its mode is narrowed.
+            let seen = look(folder)?;
+            if !effective_uid().is_some_and(|uid| kept(seen, uid, 0)) {
+                let alone = format!("{} is not a folder of this user's alone", folder.display());
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, alone));
+            }
+            if seen.mode & 0o777 != 0o700 {
                 std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700))?;
             }
         }
@@ -240,11 +264,36 @@ mod unix {
         std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
         let served = Arc::new(AtomicUsize::new(0));
         std::thread::Builder::new().name("inboxcraft-control".to_owned()).spawn(move || {
-            for stream in listener.incoming().flatten() {
-                welcome(stream, &served, &entries, &calls, &wake, limits);
-            }
+            accept_all(&mut listener.incoming(), ACCEPT_PAUSE, |stream| welcome(stream, &served, &entries, &calls, &wake, limits));
         })?;
         Ok(listening)
+    }
+
+    /// The most failed accepts in a row before the server gives up.
+    pub(super) const ACCEPT_FAILURES: usize = 100;
+
+    /// The pause after a failed accept (out of files, say), so the server does not spin.
+    const ACCEPT_PAUSE: Duration = Duration::from_millis(50);
+
+    /// Welcomes every client `incoming` brings, pausing `pause` after a failure, until it ends or fails
+    /// [`ACCEPT_FAILURES`] times in a row.
+    pub(super) fn accept_all<T>(incoming: &mut dyn Iterator<Item = std::io::Result<T>>, pause: Duration, mut welcome: impl FnMut(T)) {
+        let mut failures = 0_usize;
+        for accepted in incoming {
+            match accepted {
+                Ok(client) => {
+                    failures = 0;
+                    welcome(client);
+                }
+                Err(_) => {
+                    failures = failures.saturating_add(1);
+                    if failures >= ACCEPT_FAILURES {
+                        return;
+                    }
+                    std::thread::sleep(pause);
+                }
+            }
+        }
     }
 
     /// Holds one of the clients' places while it lives.
@@ -273,10 +322,11 @@ mod unix {
         drop(spawned);
     }
 
-    /// Answers the lines of one client until it leaves, says nothing for too long, or is refused.
+    /// Answers the lines of one client until it leaves, does not finish a line within [`Limits::idle`], does not take
+    /// an answer within [`Limits::patience`], or is refused.
     fn serve(stream: &UnixStream, entries: &dyn Entries, calls: &Sender<Call>, wake: &Wake, limits: Limits) {
         let Ok(reading) = stream.try_clone() else { return };
-        if stream.set_read_timeout(Some(limits.idle)).is_err() {
+        if stream.set_write_timeout(Some(limits.patience)).is_err() {
             return;
         }
         let mut reader = BufReader::new(reading);
@@ -284,14 +334,38 @@ mod unix {
         let mut line = Vec::new();
         loop {
             line.clear();
-            let cap = u64::try_from(MAX_LINE).unwrap_or(u64::MAX).saturating_add(1);
-            match (&mut reader).take(cap).read_until(b'\n', &mut line) {
-                Ok(0) | Err(_) => return,
-                Ok(_) => {}
+            if !read_line(&mut reader, &mut line, limits.idle) {
+                return;
             }
             let (answer, goes_on) = answer(&line, entries, calls, wake, limits);
             if writer.write_all(answer_line(&answer).as_bytes()).is_err() || !goes_on {
                 return;
+            }
+        }
+    }
+
+    /// Reads one line into `line`, at most one byte over [`MAX_LINE`], all of it within `idle`: a client that trickles
+    /// its bytes is let go too. Whether there is a line to answer: false when the client left first or its time is up.
+    fn read_line(reader: &mut BufReader<UnixStream>, line: &mut Vec<u8>, idle: Duration) -> bool {
+        let cap = MAX_LINE.saturating_add(1);
+        let clock = SystemClock::new();
+        loop {
+            let left = idle.saturating_sub(clock.monotonic());
+            if left.is_zero() || reader.get_ref().set_read_timeout(Some(left)).is_err() {
+                return false;
+            }
+            let Ok(buffer) = reader.fill_buf() else { return false };
+            if buffer.is_empty() {
+                // The client left; what it said before is still answered.
+                return !line.is_empty();
+            }
+            let room = cap.saturating_sub(line.len());
+            let end = buffer.iter().position(|byte| *byte == b'\n').map_or(buffer.len(), |at| at.saturating_add(1));
+            let taken = end.min(room);
+            line.extend_from_slice(buffer.get(..taken).unwrap_or_default());
+            reader.consume(taken);
+            if line.last() == Some(&b'\n') || line.len() >= cap {
+                return true;
             }
         }
     }
@@ -305,10 +379,11 @@ mod unix {
                 return (Err(failure), goes_on);
             }
         };
-        let expected = entries.get(ENTRY).as_deref().and_then(Token::parse);
-        match (request.token, expected) {
-            (Some(shown), Some(expected)) if shown == expected => {}
-            _ => return (Err(Failure::new("unauthorized", "the control token is wrong or revoked")), false),
+        let unauthorized = || (Err(Failure::new("unauthorized", "the control token is wrong or revoked")), false);
+        // A line without a token costs no look in the credential store, which could ask the owner to unlock it.
+        let Some(shown) = request.token else { return unauthorized() };
+        if entries.get(ENTRY).as_deref().and_then(Token::parse).is_none_or(|expected| shown != expected) {
+            return unauthorized();
         }
         let (send, answered) = mpsc::channel();
         if calls.send(Call::new(request.command, request.params, send)).is_err() {

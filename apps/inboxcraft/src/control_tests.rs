@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use inboxcraft_control_key::line::{MAX_LINE, read_answer, request_line};
 use inboxcraft_control_key::{ENTRY, Failure, SERVICE, Token};
+use inboxcraft_time::{Clock, SystemClock};
 use inboxcraft_ui_egui::fetch::Wake;
 use serde_json::{Value, json};
 
@@ -216,6 +217,43 @@ fn a_revoked_token_is_refused_from_the_next_line_on() {
     assert_eq!(served.ran.lock().unwrap().len(), 2);
 }
 
+/// A credential store in memory that counts its reads.
+#[derive(Default)]
+struct Counting {
+    kept: Memory,
+    reads: AtomicUsize,
+}
+
+impl Entries for Counting {
+    fn set(&self, name: &str, password: &str) -> Result<(), String> {
+        self.kept.set(name, password)
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.kept.get(name)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.kept.delete(name)
+    }
+}
+
+#[test]
+fn a_line_without_a_token_costs_no_look_in_the_credential_store() {
+    let entries = Arc::new(Counting::default());
+    entries.set(ENTRY, &token(1).text()).unwrap();
+    let served = serve(Arc::clone(&entries) as Arc<dyn Entries>, Limits::default());
+    for line in [r#"{"command":"mail.list"}"#, r#"{"token":"0101","command":"mail.list"}"#, r#"{"token":null,"command":"mail.list"}"#] {
+        let mut client = Client::to(&served.socket);
+        assert_eq!(code(client.send(format!("{line}\n").as_bytes())), "unauthorized", "{line}");
+    }
+    assert_eq!(entries.reads.load(Ordering::SeqCst), 0);
+    let mut client = Client::to(&served.socket);
+    assert!(client.run(&token(1), "mail.list").unwrap().is_ok());
+    assert_eq!(entries.reads.load(Ordering::SeqCst), 1, "a line with a token is checked");
+}
+
 #[test]
 fn without_a_token_in_the_credential_store_everything_is_refused() {
     let served = serve(Arc::new(Memory::default()), Limits::default());
@@ -255,6 +293,60 @@ fn a_connection_that_says_nothing_is_closed() {
     let mut client = Client::to(&served.socket);
     client.stream.write_all(b"{\"tok").unwrap();
     assert!(client.closed());
+}
+
+#[test]
+fn a_client_that_trickles_a_line_is_let_go_when_its_time_is_up() {
+    let limits = Limits { idle: Duration::from_millis(200), ..Limits::default() };
+    let served = serve(keeping(&token(1)), limits);
+    let mut client = Client::to(&served.socket);
+    let mut writer = client.stream.try_clone().unwrap();
+    std::thread::spawn(move || {
+        // One byte every 100 ms, each within `idle` of the last, for three seconds.
+        for _ in 0..30 {
+            if writer.write_all(b"x").is_err() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let clock = SystemClock::new();
+    assert!(client.closed());
+    assert!(clock.monotonic() < Duration::from_millis(1500), "let go after {:?}", clock.monotonic());
+}
+
+#[test]
+fn a_client_that_never_reads_its_answers_frees_its_place() {
+    let limits = Limits { clients: 1, patience: Duration::from_millis(200), ..Limits::default() };
+    let served = serve(keeping(&token(1)), limits);
+    let mut first = Client::to(&served.socket);
+    // An answer far larger than what the socket holds for a client that does not read.
+    let params = json!({ "fill": "x".repeat(MAX_LINE / 2) });
+    first.stream.write_all(request_line(&token(1), "mail.list", &params).as_bytes()).unwrap();
+    let mut ran = false;
+    for _ in 0..100 {
+        std::thread::sleep(Duration::from_millis(50));
+        let mut second = Client::to(&served.socket);
+        if second.run(&token(1), "account.list").is_some_and(|answer| answer.is_ok()) {
+            ran = true;
+            break;
+        }
+    }
+    assert!(ran, "the second client was never served");
+    drop(first);
+}
+
+#[test]
+fn the_server_stops_after_a_run_of_failed_accepts_but_not_after_a_few() {
+    let mut welcomed = 0;
+    let mut failing = std::iter::repeat_with(|| Err::<(), _>(std::io::Error::other("no more files")));
+    super::unix::accept_all(&mut failing, Duration::ZERO, |()| welcomed += 1);
+    assert_eq!(welcomed, 0);
+    // A run of failures shorter than the limit, then a client: the count starts again.
+    let short = super::unix::ACCEPT_FAILURES - 1;
+    let mut mixed = (0..3).flat_map(|_| (0..short).map(|_| Err(std::io::Error::other("again"))).chain([Ok(())]));
+    super::unix::accept_all(&mut mixed, Duration::ZERO, |()| welcomed += 1);
+    assert_eq!(welcomed, 3);
 }
 
 #[test]
@@ -311,6 +403,42 @@ fn a_wider_folder_is_narrowed() {
     let (send, _calls) = mpsc::channel();
     let _listening = listen(&folder.join("control.sock"), keeping(&token(1)), send, Arc::new(|| {})).unwrap();
     assert_eq!(std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+}
+
+#[test]
+fn a_socket_folder_that_is_a_link_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let folder = dir.path().join("inboxcraft");
+    std::os::unix::fs::symlink(&elsewhere, &folder).unwrap();
+    let (send, _calls) = mpsc::channel();
+    let error = listen(&folder.join("control.sock"), keeping(&token(1)), send, Arc::new(|| {})).unwrap_err();
+    assert!(error.to_string().contains("alone"), "{error}");
+    assert!(!elsewhere.join("control.sock").exists());
+}
+
+#[test]
+fn a_socket_folder_that_is_no_folder_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("inboxcraft");
+    std::fs::write(&folder, b"").unwrap();
+    let (send, _calls) = mpsc::channel();
+    assert!(listen(&folder.join("control.sock"), keeping(&token(1)), send, Arc::new(|| {})).is_err());
+}
+
+#[test]
+fn a_runtime_folder_others_can_write_is_refused() {
+    for mode in [0o777, 0o1777, 0o775] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+        let entries = Arc::new(Memory::default());
+        let error = start(Some(dir.path()), false, Arc::clone(&entries) as Arc<dyn Entries>, &|| Ok(token(4)), Arc::new(|| {})).err().unwrap();
+        assert!(error.contains("alone"), "{error}");
+        assert!(!inboxcraft_control_key::socket(dir.path(), false).exists(), "{mode:o}");
+        assert_eq!(entries.get(ENTRY), None, "no token is made for a channel that does not open");
+    }
 }
 
 #[test]
@@ -405,5 +533,9 @@ fn start_says_why_there_is_no_channel() {
     assert!(none(Some(dir.path()), Arc::new(Refusing)).contains("locked"));
     let file = dir.path().join("file");
     std::fs::write(&file, b"").unwrap();
-    assert!(none(Some(&file), Arc::new(Memory::default())).contains("could not be opened"));
+    assert!(none(Some(&file), Arc::new(Memory::default())).contains("alone"));
+    let inside = dir.path().join("inside");
+    std::fs::create_dir(&inside).unwrap();
+    std::fs::write(inside.join("inboxcraft"), b"").unwrap();
+    assert!(none(Some(&inside), Arc::new(Memory::default())).contains("could not be opened"));
 }
