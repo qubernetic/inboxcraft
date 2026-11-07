@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_engine::Session;
+use inboxcraft_engine::{CommandSpec, Context, EngineError, Outcome, Registry, Run, Session};
 use inboxcraft_model::{AccountId, Host, Security, Server};
 use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
@@ -403,6 +403,43 @@ fn the_templates_follow_the_account_the_draft_is_from() {
     assert_eq!(composer.templates(), ["Plot"]);
     composer.set_account(&mut mailbox, 2).unwrap();
     assert!(composer.templates().is_empty(), "account 2 has none");
+}
+
+fn refused(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> {
+    Err(EngineError::NotFound { what: "account", id: 1 })
+}
+
+fn shapeless(_: &Context<'_>, _: &Value) -> Result<Outcome, EngineError> {
+    Ok(Outcome::new(json!({ "unexpected": true })))
+}
+
+/// A mailbox over the sample mail whose `template.list` runs `run` instead.
+fn listing(run: Run) -> Mailbox {
+    let mut registry = Registry::new();
+    for spec in Registry::builtin().unwrap().specs() {
+        let spec = if spec.id == "template.list" { CommandSpec { run, ..*spec } } else { *spec };
+        registry.register(spec).unwrap();
+    }
+    let store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
+    Mailbox::new(Session::with_registry(Box::new(store), clock(), registry).unwrap(), clock())
+}
+
+#[test]
+fn a_template_list_that_fails_leaves_the_menu_empty_and_the_composer_open() {
+    let mut mailbox = listing(refused);
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    assert!(composer.templates().is_empty());
+    assert!(mailbox.error().is_some(), "the refusal is shown");
+    mailbox.dismiss_error();
+    assert!(Composer::answer(&mut mailbox, 1, Answer::Reply).unwrap().templates().is_empty());
+    assert!(Composer::open(&mut mailbox, composer.draft()).unwrap().templates().is_empty());
+    composer.set_account(&mut mailbox, 2).unwrap();
+    assert!(composer.templates().is_empty());
+    let drafts = mailbox.run("compose.list", &json!({})).unwrap();
+    assert_eq!(drafts["drafts"].as_array().unwrap().len(), 2, "the new message and the reply, nothing lost");
+
+    let mut mailbox = listing(shapeless);
+    assert!(Composer::start(&mut mailbox).unwrap().templates().is_empty());
 }
 
 #[test]

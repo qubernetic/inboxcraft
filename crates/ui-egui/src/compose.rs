@@ -16,9 +16,10 @@
 //! - Closing takes what is typed in a recipient line as a chip and keeps the draft; Discard removes it.
 //! - Reply, reply all and forward start from a message (`compose.reply`, `compose.reply_all`, `compose.forward`): the
 //!   engine fills in the recipients, the subject and the quote.
-//! - The templates of the account the draft is from are offered (`template.list`); one taken goes in front of the text
-//!   (`compose.template`). Each blank it leaves is a `[[prompt]]` mark, asked for one at a time: what is typed for it
-//!   takes the mark's place in the subject and the text. While a mark is left, Send is blocked and says which.
+//! - The templates of the account the draft is from are offered (`template.list`, none when it is refused); one taken
+//!   goes in front of the text (`compose.template`). Each blank it leaves is a `[[prompt]]` mark, asked for one at a
+//!   time: what is typed for it takes the mark's place in the subject and the text. While a mark is left, Send is
+//!   blocked and says which.
 
 use std::collections::BTreeSet;
 
@@ -263,19 +264,24 @@ impl Composer {
     }
 
     fn with_templates(mut self, mailbox: &mut Mailbox) -> Result<Self, UiError> {
-        self.load_templates(mailbox)?;
+        self.load_templates(mailbox);
         Ok(self)
     }
 
-    /// Reads the names of the templates of the draft's account.
-    fn load_templates(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
-        let answer = mailbox.run("template.list", &json!({ "account": self.account }))?;
-        self.templates = answer
-            .get("templates")
-            .and_then(Value::as_array)
-            .map(|list| list.iter().filter_map(|template| template.get("name")?.as_str()).map(str::to_owned).collect())
-            .unwrap_or_default();
-        Ok(())
+    /// Reads the names of the templates of the draft's account. A refusal leaves none, shown in the error banner: the
+    /// draft is made by then, and the composer stays open over it without the menu.
+    fn load_templates(&mut self, mailbox: &mut Mailbox) {
+        self.templates = match mailbox.run("template.list", &json!({ "account": self.account })) {
+            Ok(answer) => answer
+                .get("templates")
+                .and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(|template| template.get("name")?.as_str()).map(str::to_owned).collect())
+                .unwrap_or_default(),
+            Err(error) => {
+                mailbox.fail(error);
+                Vec::new()
+            }
+        };
     }
 
     fn over(command: &'static str, answer: &Value) -> Result<Self, UiError> {
@@ -716,7 +722,8 @@ impl Composer {
         self.save(mailbox)?;
         let answer = mailbox.run("compose.update", &json!({ "id": self.draft, "account": id }))?;
         self.take_answer(&answer);
-        self.load_templates(mailbox)
+        self.load_templates(mailbox);
+        Ok(())
     }
 
     /// Before the composer closes: what is typed in a recipient line becomes a chip and the draft is kept.
