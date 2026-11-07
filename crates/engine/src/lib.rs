@@ -49,6 +49,11 @@
 //!   Invitations, by the owner's choice for its sender (`group.set`, `owner`, undoable) or our classifier of its
 //!   header and body; `group.account` (`owner`) turns an account's grouping on or off, `group.list` (`safe`) counts
 //!   the inbox per group, and `mail.list` says and filters each row's group.
+//! - Done, park and pin: the owner's own state of a message, kept in the store only. `mail.done` (`owner`) files a
+//!   message in the archive and keeps where it was, where "show done" (`mail.list` with `done`) lists it;
+//!   `mail.park` and `mail.pin` (`safe`) put it on the park pile (`park.list`; `mail.list` leaves it out and counts
+//!   it) or in the pins view (`pin.list`). Done takes a pin off unless `pin.set` (`owner`) keeps it
+//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back.
 //! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
 //!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
 //!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and

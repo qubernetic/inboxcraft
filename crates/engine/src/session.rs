@@ -42,6 +42,8 @@ pub struct Outcome {
     screener: Option<ScreenerMode>,
     /// The notification choices from now on.
     notify: Option<Settings>,
+    /// Whether a pin outlasts done from now on.
+    pins_outlast_done: Option<bool>,
 }
 
 /// A job before it has an id.
@@ -69,6 +71,7 @@ impl Outcome {
             undo: None,
             screener: None,
             notify: None,
+            pins_outlast_done: None,
         }
     }
 
@@ -138,6 +141,12 @@ impl Outcome {
     /// The outcome changing the notification choices to `settings`.
     pub(crate) fn with_notify(mut self, settings: Settings) -> Self {
         self.notify = Some(settings);
+        self
+    }
+
+    /// The outcome keeping a pin through done (`true`) or taking it off from now on.
+    pub(crate) fn with_pins_outlast_done(mut self, keep: bool) -> Self {
+        self.pins_outlast_done = Some(keep);
         self
     }
 
@@ -228,6 +237,8 @@ pub(crate) struct State {
     pub(crate) screener: ScreenerMode,
     /// The owner's notification choices; the front end keeps them on disk and hands them back at the start.
     pub(crate) notify: Settings,
+    /// Whether done leaves a pin on (`pin.set`); the front end keeps it on disk and hands it back at the start.
+    pub(crate) pins_outlast_done: bool,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
     /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
@@ -464,6 +475,17 @@ impl Session {
         self.state.notify = settings;
     }
 
+    /// Whether done leaves a pin on, as `pin.set` left it.
+    #[must_use]
+    pub fn pins_outlast_done(&self) -> bool {
+        self.state.pins_outlast_done
+    }
+
+    /// Takes the pin setting kept from an earlier run.
+    pub fn set_pins_outlast_done(&mut self, keep: bool) {
+        self.state.pins_outlast_done = keep;
+    }
+
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
@@ -499,7 +521,7 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         if let Some(step) = undo {
             crate::undo::take(&mut self.state.history, step);
@@ -531,6 +553,9 @@ impl Session {
         }
         if let Some(settings) = notify {
             self.state.notify = settings;
+        }
+        if let Some(keep) = pins_outlast_done {
+            self.state.pins_outlast_done = keep;
         }
         for account in removed {
             self.state.accounts.remove(&account);

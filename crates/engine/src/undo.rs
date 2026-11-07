@@ -31,6 +31,8 @@ pub(crate) enum Inverse {
     Move { message: MessageId, to: FolderId },
     /// Take a screener decision or a group chosen for a sender back.
     Screen(Box<Screened>),
+    /// Put `message` in `state` again, and back in `to` when it moved: done, park and pin.
+    State { message: MessageId, to: Option<FolderId>, state: MessageState },
 }
 
 /// What takes a screener decision or a group choice on `address` back: the sender as it was `before` (`None`:
