@@ -7,9 +7,11 @@
 #![cfg(unix)]
 
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Cursor, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use inboxcraft_cli::{Reach, run_in};
@@ -25,13 +27,28 @@ fn token(fill: u8) -> Token {
 /// What the fake app saw: the commands with their params.
 type Seen = Arc<Mutex<Vec<(String, Value)>>>;
 
+/// A new runtime folder, the user's alone (`0700`) as `$XDG_RUNTIME_DIR` is.
+fn runtime_folder() -> TempDir {
+    let runtime = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    runtime
+}
+
+/// The socket in `runtime`, bound in a folder of the user's alone, as the app makes it.
+fn bind(runtime: &Path, sandboxed: bool) -> (PathBuf, UnixListener) {
+    let path = socket(runtime, sandboxed);
+    let folder = path.parent().unwrap();
+    std::fs::create_dir_all(folder).unwrap();
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let listener = UnixListener::bind(&path).unwrap();
+    (path, listener)
+}
+
 /// A fake app in a new runtime folder (in the Flatpak's place when `sandboxed`) that knows `known` and answers every
 /// request with the right token by `answer`.
 fn app(known: Token, sandboxed: bool, answer: fn(&str, &Value) -> Result<Value, Failure>) -> (TempDir, Seen) {
-    let runtime = tempfile::tempdir().unwrap();
-    let path = socket(runtime.path(), sandboxed);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let listener = UnixListener::bind(&path).unwrap();
+    let runtime = runtime_folder();
+    let (_, listener) = bind(runtime.path(), sandboxed);
     let seen = Seen::default();
     let record = Arc::clone(&seen);
     std::thread::spawn(move || {
@@ -113,7 +130,7 @@ fn an_owner_command_refused_by_the_app_says_why() {
 
 #[test]
 fn without_a_running_app_or_a_runtime_folder_the_cli_says_so() {
-    let empty = tempfile::tempdir().unwrap();
+    let empty = runtime_folder();
     for (reach, says) in [(reach(Some(empty.path()), Some(token(1))), "is not running"), (reach(None, Some(token(1))), "XDG_RUNTIME_DIR")] {
         let (code, out, err) = cli_in(&reach, &["--json", "mail.list"], "");
         assert_eq!((code, out.as_str()), (1, ""));
@@ -134,10 +151,8 @@ fn without_a_token_the_cli_says_so_and_sends_nothing() {
 
 #[test]
 fn an_answer_that_is_no_answer_is_an_error_not_a_panic() {
-    let runtime = tempfile::tempdir().unwrap();
-    let path = socket(runtime.path(), false);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let listener = UnixListener::bind(&path).unwrap();
+    let runtime = runtime_folder();
+    let (_, listener) = bind(runtime.path(), false);
     std::thread::spawn(move || {
         let mut asked = 0;
         for stream in listener.incoming().flatten() {
@@ -163,6 +178,68 @@ fn an_answer_that_is_no_answer_is_an_error_not_a_panic() {
     assert!(err.contains("bad_answer") || err.contains("closed"), "{err}");
 }
 
+/// A fake app in `runtime` that counts the connections it takes and the bytes it reads, and answers nothing.
+fn counting(runtime: &Path) -> (Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    let (_, listener) = bind(runtime, false);
+    let (connections, bytes) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (taken, read) = (Arc::clone(&connections), Arc::clone(&bytes));
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            taken.fetch_add(1, Ordering::SeqCst);
+            let mut got = Vec::new();
+            let _ = stream.read_to_end(&mut got);
+            read.fetch_add(got.len(), Ordering::SeqCst);
+        }
+    });
+    (connections, bytes)
+}
+
+/// Gives the fake app a moment, then says what it took and read.
+fn taken_and_read(connections: &AtomicUsize, bytes: &AtomicUsize) -> (usize, usize) {
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    (connections.load(Ordering::SeqCst), bytes.load(Ordering::SeqCst))
+}
+
+#[test]
+fn a_runtime_folder_open_to_others_is_not_trusted_with_the_token() {
+    for mode in [0o777, 0o755] {
+        let runtime = runtime_folder();
+        let (connections, bytes) = counting(runtime.path());
+        std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+        let (code, out, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--json", "mail.list"], "");
+        assert_eq!((code, out.as_str()), (1, ""), "{mode:o}");
+        let error: Value = serde_json::from_str(&err).unwrap();
+        assert_eq!(error["error"]["code"], "not_running", "{err}");
+        assert!(err.contains("alone") && err.contains("--store"), "{err}");
+        assert_eq!(taken_and_read(&connections, &bytes), (0, 0), "{mode:o}");
+    }
+}
+
+#[test]
+fn a_socket_folder_open_to_others_is_not_trusted_with_the_token() {
+    let runtime = runtime_folder();
+    let (connections, bytes) = counting(runtime.path());
+    let folder = socket(runtime.path(), false).parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (code, _, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--json", "mail.list"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("not_running") && err.contains("is not running"), "{err}");
+    assert_eq!(taken_and_read(&connections, &bytes), (0, 0));
+}
+
+#[test]
+fn a_socket_folder_that_is_a_link_is_not_trusted_with_the_token() {
+    let elsewhere = runtime_folder();
+    let (connections, bytes) = counting(elsewhere.path());
+    let runtime = runtime_folder();
+    let folder = socket(runtime.path(), false).parent().unwrap().to_path_buf();
+    std::os::unix::fs::symlink(socket(elsewhere.path(), false).parent().unwrap(), &folder).unwrap();
+    let (code, _, err) = cli_in(&reach(Some(runtime.path()), Some(token(1))), &["--json", "mail.list"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("is not running"), "{err}");
+    assert_eq!(taken_and_read(&connections, &bytes), (0, 0));
+}
+
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#;
 
 #[test]
@@ -182,7 +259,7 @@ fn without_a_store_mcp_runs_its_tools_in_the_running_app() {
 
 #[test]
 fn mcp_without_a_running_app_says_so_before_it_reads_a_line() {
-    let empty = tempfile::tempdir().unwrap();
+    let empty = runtime_folder();
     let (code, out, err) = cli_in(&reach(Some(empty.path()), Some(token(1))), &["mcp"], INITIALIZE);
     assert_eq!((code, out.as_str()), (1, ""));
     assert!(err.contains("is not running"), "{err}");

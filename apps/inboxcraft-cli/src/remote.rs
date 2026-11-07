@@ -66,14 +66,16 @@ pub(crate) struct Remote {
 }
 
 impl Remote {
-    /// The app `reach` finds: the first socket that answers a connection, then the token.
+    /// The app `reach` finds: the first socket that the user alone could have made and that answers a connection, then
+    /// the token. Nothing is written to a socket in a folder another account could write, so it never sees the token.
     pub(crate) fn find(reach: &Reach) -> Result<Self, Failure> {
         let runtime = reach.runtime().filter(|runtime| runtime.is_absolute()).ok_or_else(|| {
             Failure::new("not_running", "XDG_RUNTIME_DIR is not set, so the running InboxCraft cannot be reached; give --store <dir>")
         })?;
+        let uid = user(runtime)?;
         let socket = inboxcraft_control_key::sockets(runtime)
             .into_iter()
-            .find(|socket| connect(socket).is_ok())
+            .find(|socket| trusted(socket, uid) && connect(socket).is_ok())
             .ok_or_else(|| Failure::new("not_running", "InboxCraft is not running (no control socket answers); start it, or give --store <dir>"))?;
         Ok(Self { socket, token: (reach.token)()? })
     }
@@ -88,6 +90,53 @@ impl inboxcraft_mcp::Commands for Remote {
     fn run(&mut self, id: &str, params: &Value) -> Result<Value, Failure> {
         Remote::run(self, id, params)
     }
+}
+
+/// The effective user, when `runtime` is a folder of theirs alone (`0700`).
+///
+/// The app's peer is not checked after connecting: the standard library cannot read it yet, and the channel adds no
+/// crate for it (a gap); the owner and mode of the folders stand in for it.
+#[cfg(unix)]
+fn user(runtime: &Path) -> Result<u32, Failure> {
+    let uid = inboxcraft_control_key::folder::effective_uid().ok_or_else(|| {
+        Failure::new(
+            "not_running",
+            "the user this program runs as is not known on this system, so the running InboxCraft cannot be trusted; give --store <dir>",
+        )
+    })?;
+    if private(runtime, uid) {
+        Ok(uid)
+    } else {
+        Err(Failure::new(
+            "not_running",
+            "XDG_RUNTIME_DIR is not a folder of this user's alone (theirs, mode 0700), so the running InboxCraft is not trusted there; give --store <dir>",
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+fn user(_runtime: &Path) -> Result<u32, Failure> {
+    Ok(0)
+}
+
+/// Whether `folder` is a real folder of `uid`'s that nobody else may enter.
+#[cfg(unix)]
+fn private(folder: &Path, uid: u32) -> bool {
+    use inboxcraft_control_key::folder::{PRIVATE, kept, look};
+    look(folder).is_ok_and(|seen| kept(seen, uid, PRIVATE))
+}
+
+/// Whether `socket` is a socket of `uid`'s in a folder of `uid`'s alone, so no other account could have put it there.
+#[cfg(unix)]
+fn trusted(socket: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    socket.parent().is_some_and(|folder| private(folder, uid))
+        && std::fs::symlink_metadata(socket).is_ok_and(|meta| meta.file_type().is_socket() && meta.uid() == uid)
+}
+
+#[cfg(not(unix))]
+fn trusted(_socket: &Path, _uid: u32) -> bool {
+    false
 }
 
 #[cfg(unix)]
