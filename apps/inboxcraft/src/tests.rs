@@ -53,7 +53,8 @@ fn background_quit_and_autostart_are_steps_of_their_own() {
     assert_eq!(run_with(&["--quit"]).0, Step::Quit);
     assert_eq!(run_with(&["--autostart"]).0, Step::Autostart(true));
     assert_eq!(run_with(&["--no-autostart"]).0, Step::Autostart(false));
-    for flag in ["--background", "--quit", "--autostart", "--no-autostart"] {
+    assert_eq!(run_with(&["--revoke-control"]).0, Step::RevokeControl);
+    for flag in ["--background", "--quit", "--autostart", "--no-autostart", "--revoke-control"] {
         assert!(usage().contains(flag), "{flag}");
     }
     assert_eq!(run_with(&["--background", "--sample"]).0, Step::Exit(2), "the sample has nothing to keep running");

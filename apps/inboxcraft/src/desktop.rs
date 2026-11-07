@@ -11,17 +11,21 @@
 //! frame (eframe's `App::logic`, which also runs when no frame is drawn); without one, `main` calls [`Desktop::wait`].
 //! Both answer the [`Request`]s that came in, hand the engine's jobs to the workers and apply what came back, show the
 //! unread count on the [`Badge`] (the tray) when it changed, and show what the engine has to tell the owner as
-//! notifications ([`crate::notify`]). A click on one opens its message in the full-width reader, with the window
+//! notifications ([`crate::notify`]). They also run the calls that came in over the control channel
+//! ([`crate::control`]) for an agent, so only `safe` commands run; without a window a call waits for the next look,
+//! at most [`WINDOWLESS_TICK`]. A click on one opens its message in the full-width reader, with the window
 //! brought forward or opened again; its buttons mark the message done or read, as the window's own acts do.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use eframe::egui::{self, ViewportCommand};
+use inboxcraft_control_key::Failure;
 use inboxcraft_model::Role;
 use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
 
+use crate::control::Call;
 use crate::instance::Request;
 use crate::notify::{Click, Deliver, shown};
 
@@ -45,6 +49,7 @@ pub struct Desktop {
     shown: Option<u64>,
     deliver: Option<Box<dyn Deliver>>,
     clicks: Option<Receiver<Click>>,
+    calls: Option<Receiver<Call>>,
     /// A notification failed; the next failures are not reported again.
     failed: bool,
 }
@@ -59,7 +64,19 @@ impl Desktop {
     /// `app` in a window, running on when the window is closed, answering the requests that come through `heard`.
     #[must_use]
     pub fn new(app: InboxApp, heard: Receiver<Request>) -> Self {
-        Self { app, heard, stays: true, window: true, quitting: false, badge: None, shown: None, deliver: None, clicks: None, failed: false }
+        Self {
+            app,
+            heard,
+            stays: true,
+            window: true,
+            quitting: false,
+            badge: None,
+            shown: None,
+            deliver: None,
+            clicks: None,
+            calls: None,
+            failed: false,
+        }
     }
 
     /// The same, but closing the window ends InboxCraft: for the sample, which has nothing to keep in step, and for a
@@ -89,6 +106,13 @@ impl Desktop {
     pub fn with_notices(mut self, deliver: Box<dyn Deliver>, clicks: Receiver<Click>) -> Self {
         self.deliver = Some(deliver);
         self.clicks = Some(clicks);
+        self
+    }
+
+    /// The same, running the calls that come in over the control channel through `calls`.
+    #[must_use]
+    pub fn with_control(mut self, calls: Receiver<Call>) -> Self {
+        self.calls = Some(calls);
         self
     }
 
@@ -177,6 +201,11 @@ impl Desktop {
     /// Hands the jobs on, applies the events, shows the unread count when it changed and the notices as
     /// notifications.
     fn keep_in_step(&mut self) {
+        let calls: Vec<Call> = self.calls.as_ref().map(|calls| calls.try_iter().collect()).unwrap_or_default();
+        for call in calls {
+            let answer = self.app.mailbox_mut().run_for_agent(call.command(), call.params());
+            call.answer(answer.map_err(|error| Failure::new(error.code(), error.to_string())));
+        }
         self.app.pump();
         let notices = self.app.mailbox_mut().take_notices();
         if let Some(deliver) = self.deliver.as_mut() {

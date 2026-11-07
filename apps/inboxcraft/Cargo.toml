@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 eframe = { workspace = true }
+inboxcraft-control-key = { workspace = true }
 inboxcraft-engine = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-net = { workspace = true }
@@ -17,6 +18,7 @@ inboxcraft-store = { workspace = true }
 inboxcraft-time = { workspace = true }
 inboxcraft-ui-egui = { workspace = true }
 keyring = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { workspace = true }
