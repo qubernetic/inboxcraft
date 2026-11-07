@@ -9,14 +9,17 @@
 //! - [`Token`]: 32 random bytes the app keeps in the OS credential store under [`SERVICE`] and [`ENTRY`]; a client
 //!   reads it from there and shows it on every line. It compares in constant time and never shows in `Debug` output.
 //! - [`line`]: one JSON object a line each way, with its limits; everything a client writes is hostile.
-//! - [`socket`]: where the socket lives, in the user's runtime folder.
+//! - [`socket`]: where the socket lives, in the user's runtime folder; [`folder`]: whether a folder on the way is the
+//!   user's alone.
 //!
-//! It does no I/O and draws no random bytes itself: the app hands it bytes from the operating system.
+//! Its only I/O is the look at a folder's owner and mode; it draws no random bytes itself: the app hands it bytes from
+//! the operating system.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::path::{Path, PathBuf};
 
+pub mod folder;
 pub mod line;
 mod token;
 
