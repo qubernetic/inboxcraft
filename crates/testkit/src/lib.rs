@@ -4,8 +4,8 @@
 //! The in-process fake server frame for tests.
 //!
 //! Dev-only: a dev-dependency of any crate, a normal dependency of none (`cargo xtask layers` enforces it, and that
-//! `testkit` never depends on `proto`). The [`imap`] module is the fake IMAP server and the [`smtp`] module the fake
-//! SMTP submission server; the fake CalDAV server of a later slice follows.
+//! `testkit` never depends on `proto` or `dav`). The [`imap`] module is the fake IMAP server, the [`smtp`] module the
+//! fake SMTP submission server and the [`dav`] module the fake CalDAV server.
 //!
 //! - [`Script`] is what the server does: lines to send, lines to expect, and the faults of [`Fault`] (drop, delay,
 //!   garbage).
@@ -52,6 +52,7 @@
 
 mod base64;
 mod client;
+pub mod dav;
 mod deflate;
 mod error;
 pub mod imap;
