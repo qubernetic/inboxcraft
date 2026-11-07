@@ -3,7 +3,7 @@
 
 //! The `Session`: the one place commands run and events land.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -18,6 +18,7 @@ use serde_json::Value;
 use crate::ScreenerMode;
 use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
 use crate::{Caller, EngineError, Registry, error};
@@ -38,6 +39,8 @@ pub struct Outcome {
     undo: Option<Step>,
     /// The screener's mode from now on.
     screener: Option<ScreenerMode>,
+    /// The notification choices from now on.
+    notify: Option<Settings>,
 }
 
 /// A job before it has an id.
@@ -55,7 +58,17 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None, screener: None }
+        Self {
+            value,
+            batch: Batch::new(),
+            jobs: Vec::new(),
+            senders: Vec::new(),
+            removed: Vec::new(),
+            appearance: None,
+            undo: None,
+            screener: None,
+            notify: None,
+        }
     }
 
     /// The outcome with `change` to make in the store.
@@ -118,6 +131,12 @@ impl Outcome {
     /// The outcome changing the screener's mode to `mode`.
     pub(crate) fn with_screener(mut self, mode: ScreenerMode) -> Self {
         self.screener = Some(mode);
+        self
+    }
+
+    /// The outcome changing the notification choices to `settings`.
+    pub(crate) fn with_notify(mut self, settings: Settings) -> Self {
+        self.notify = Some(settings);
         self
     }
 
@@ -206,6 +225,12 @@ pub(crate) struct State {
     /// What the screener does with the first mail of an unknown sender; the front end keeps it on disk and hands it
     /// back at the start.
     pub(crate) screener: ScreenerMode,
+    /// The owner's notification choices; the front end keeps them on disk and hands them back at the start.
+    pub(crate) notify: Settings,
+    /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
+    pub(crate) notices: VecDeque<Notice>,
+    /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
+    pub(crate) quiet: VecDeque<String>,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
     /// given again and a late event of its worker cannot land on a new account.
     pub(crate) next_account: u64,
@@ -423,6 +448,23 @@ impl Session {
         self.state.screener = mode;
     }
 
+    /// The notification choices, as `notify.set` left them.
+    #[must_use]
+    pub fn notify_settings(&self) -> &Settings {
+        &self.state.notify
+    }
+
+    /// Takes the notification choices kept from an earlier run, read with [`Settings::from_value`].
+    pub fn set_notify_settings(&mut self, settings: Settings) {
+        self.state.notify = settings;
+    }
+
+    /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
+    /// account as one count.
+    pub fn take_notices(&mut self) -> Vec<Notice> {
+        notify::collapse(std::mem::take(&mut self.state.notices))
+    }
+
     /// Takes the computer's offset from UTC over time; until then the session works in UTC.
     pub fn set_offsets(&mut self, offsets: Box<dyn Offsets>) {
         self.offsets = offsets;
@@ -452,7 +494,7 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         if let Some(step) = undo {
             crate::undo::take(&mut self.state.history, step);
@@ -481,8 +523,13 @@ impl Session {
         if let Some(mode) = screener {
             self.state.screener = mode;
         }
+        if let Some(settings) = notify {
+            self.state.notify = settings;
+        }
         for account in removed {
             self.state.accounts.remove(&account);
+            self.state.notify.forget(account);
+            self.state.notices.retain(|notice| notice.account() != account);
             self.jobs.retain(|job| job.account != account);
         }
         for (sender, allowed) in senders {
@@ -518,7 +565,8 @@ impl Session {
     }
 
     /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
-    /// (see [`crate::schedule`]), in one batch. The front end calls it at [`Session::next_due`] and after
+    /// (see [`crate::schedule`]), in one batch. A returned snooze and a follow-up reminder tell the owner as
+    /// [`Session::take_notices`] hands them over, unless they turned that off. The front end calls it at [`Session::next_due`] and after
     /// [`Session::start`].
     ///
     /// # Errors
@@ -527,8 +575,16 @@ impl Session {
     pub fn tick(&mut self) -> Result<Vec<Fired>, EngineError> {
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let started = self.started;
-        let plan = catch_unwind(AssertUnwindSafe(|| schedule::due(&context, started))).map_err(|_| EngineError::Panicked("schedule"))??;
+        let planned = catch_unwind(AssertUnwindSafe(|| {
+            let plan = schedule::due(&context, started)?;
+            let notices = notify::fired(context.store, &context.state.notify, &plan.fired)?;
+            Ok::<_, EngineError>((plan, notices))
+        }));
+        let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
         self.commit("schedule", None, &plan.batch, Vec::new())?;
+        for notice in notices {
+            notify::push(&mut self.state, notice);
+        }
         Ok(plan.fired)
     }
 
