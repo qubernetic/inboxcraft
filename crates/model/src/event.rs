@@ -11,7 +11,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet, UidValidity};
+use crate::{
+    AccountId, DraftId, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet, UidValidity,
+};
 
 /// New flags for one message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +111,10 @@ pub enum ErrorKind {
     FolderGone,
     /// The message no longer exists on the server.
     MessageGone,
+    /// The submission server refused the message, its sender or one of its recipients; nothing was sent.
+    MessageRefused,
+    /// The account has no submission (SMTP) server, so it cannot send.
+    NoSubmissionServer,
 }
 
 impl ErrorKind {
@@ -145,6 +151,8 @@ impl fmt::Display for ErrorKind {
             Self::TooLarge => "the server sent more than this program accepts at once",
             Self::FolderGone => "the folder no longer exists on the server",
             Self::MessageGone => "the message no longer exists on the server",
+            Self::MessageRefused => "the mail server refused the message, so it was not sent",
+            Self::NoSubmissionServer => "the account has no server for sending mail set",
         })
     }
 }
@@ -260,6 +268,20 @@ pub enum EventKind {
         /// Its path on the server.
         path: FolderPath,
     },
+    /// A [`crate::JobKind::Send`] job is done: the submission server took the message for every recipient.
+    Sent {
+        /// The draft it was made from.
+        draft: DraftId,
+    },
+    /// A [`crate::JobKind::Send`] job failed; the message went to nobody.
+    SendFailed {
+        /// The draft it was made from.
+        draft: DraftId,
+        /// Why.
+        kind: ErrorKind,
+        /// The server's refusal, as it gave it (`550 5.1.1 No such user`), when it refused.
+        reply: Option<String>,
+    },
     /// A job or the connection failed.
     Failed {
         /// Why.
@@ -274,7 +296,12 @@ impl EventKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::Folders { .. } | Self::CheckStep(_) | Self::Connection(_) | Self::FolderCreated { .. } => None,
+            Self::Folders { .. }
+            | Self::CheckStep(_)
+            | Self::Connection(_)
+            | Self::FolderCreated { .. }
+            | Self::Sent { .. }
+            | Self::SendFailed { .. } => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
             | Self::MessagesExpunged { folder, .. }

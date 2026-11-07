@@ -223,7 +223,12 @@ fn a_check_runs_on_the_accounts_worker_and_its_steps_wake_the_window() {
         .collect();
     assert_eq!(steps.first(), Some(&(CheckStep::Dns, StepStatus::Passed)), "{steps:?}");
     assert_eq!(steps.get(1), Some(&(CheckStep::Tcp, StepStatus::Failed(ErrorKind::ConnectionRefused))), "{steps:?}");
-    assert!(steps.iter().all(|(step, status)| *step < CheckStep::Tls || matches!(status, StepStatus::Skipped | StepStatus::NotBuilt)), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .all(|(step, status)| *step < CheckStep::Tls || matches!(status, StepStatus::Skipped | StepStatus::NotSet | StepStatus::NotBuilt)),
+        "{steps:?}"
+    );
     assert!(woken.load(Ordering::SeqCst) >= steps.len());
     // The account is gone: its worker stops, off the window's thread, and the next job starts another.
     workers.keep(&[]);

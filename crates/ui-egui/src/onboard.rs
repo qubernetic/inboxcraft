@@ -405,6 +405,8 @@ pub enum StepState {
     Skipped,
     /// Not run: no password went out ([`StepRow::message`] says why).
     Held,
+    /// Not run: the account has no server for it (no submission server for the SMTP sign-in).
+    NotSet,
     /// Not built yet.
     NotBuilt,
 }
@@ -448,6 +450,7 @@ fn step_row(value: &Value) -> StepRow {
         Some("failed") => StepState::Failed,
         Some("skipped") => StepState::Skipped,
         Some("needs_review" | "needs_owner") => StepState::Held,
+        Some("not_set") => StepState::NotSet,
         Some("not_built") => StepState::NotBuilt,
         _ => StepState::Pending,
     };

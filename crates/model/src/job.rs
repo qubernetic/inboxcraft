@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, DraftId, Flags, FolderId, FolderPath, JobId, ModSeq, Uid, UidSet, UidValidity};
+use crate::{AccountId, DraftId, EmailAddress, Flags, FolderId, FolderPath, JobId, ModSeq, Uid, UidSet, UidValidity};
 
 /// What we know of a folder from the last sync: where a resync starts (CONDSTORE and QRESYNC, RFC 7162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +165,19 @@ pub enum JobKind {
         /// Its path on the server.
         path: FolderPath,
     },
+    /// Send a message through the account's submission (SMTP) server, to the recipients of the envelope alone; Bcc
+    /// recipients are among them and in no header. Answered with [`crate::EventKind::Sent`] or
+    /// [`crate::EventKind::SendFailed`].
+    Send {
+        /// The draft it is made from.
+        draft: DraftId,
+        /// The envelope's sender (MAIL FROM).
+        from: EmailAddress,
+        /// The envelope's recipients (RCPT TO): To, Cc and Bcc.
+        recipients: Vec<EmailAddress>,
+        /// The message (RFC 5322 bytes), as it goes.
+        raw: Vec<u8>,
+    },
 }
 
 impl JobKind {
@@ -172,7 +185,7 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } => None,
+            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } | Self::Send { .. } => None,
             Self::SyncFolder { folder, .. }
             | Self::FetchBody { folder, .. }
             | Self::Idle { folder, .. }
@@ -183,7 +196,8 @@ impl JobKind {
         }
     }
 
-    /// Whether the job changes something on the server: an act of the owner, which must not be lost.
+    /// Whether the job changes something on the IMAP server: an act of the owner, which must not be lost. A send is
+    /// not one: it goes to the submission server, and one cut off may have gone, so it is never run again on its own.
     #[must_use]
     pub fn writes(&self) -> bool {
         matches!(self, Self::StoreFlags { .. } | Self::Move { .. } | Self::Expunge { .. } | Self::Append { .. } | Self::CreateFolder { .. })

@@ -208,6 +208,19 @@ goes too. An answer without a UID marks the draft (`Draft::unnamed`): that copy 
 back, so no further copy of the draft goes up to that account and it leaves at most one there. A draft with nothing
 typed, or of an account without a Drafts folder, stays here; a failed upload waits for the draft's next change.
 
+Sending (`cmd::send`, `engine::send`): `mail.send` (`owner`) makes a draft that nothing blocks into a message with its
+own `Message-ID` and a `Date` in the computer's offset, puts it in the outbox (`Outgoing`, state `Sending`, the
+message kept for the Sent copy) and queues a `Send` job with the envelope: the account's address and the To, Cc and
+Bcc addresses, each once. Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
+send cut off may have gone, so nothing sends it again on its own. The worker sends it at once on a submission
+connection of its own (`net::SmtpConnection`, implicit TLS on 465 or STARTTLS on 587, AUTH PLAIN or LOGIN only after
+TLS, `EHLO [127.0.0.1]`), also while the IMAP connection is down, and answers `Sent` or `SendFailed` with the cause
+and the server's reply. On `Sent` the draft and its outbox item go, its Drafts copy is removed for good and the
+message is appended to the Sent folder (`\Seen`), both kept jobs; on `SendFailed` the draft stays and its outbox
+item holds the reply (`Refused`), and `mail.send` can send it again. After the IMAP server refused the password, the
+worker sends nothing until it is started anew. `account.add` takes the submission server; the account check signs in
+to it after the IMAP sign-in passed, with the same password, as its `SmtpLogin` step (`NotSet` without one).
+
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
 no account had in this session and queues the owner's first check. The front end puts the password into the OS

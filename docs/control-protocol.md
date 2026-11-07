@@ -94,7 +94,7 @@ that is:
 
 - the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`;
 - drafts: `compose.new`, `compose.update`, and `compose.discard`, which deletes a draft here and on the server;
-- `account.check`, which connects to the account's servers;
+- `account.check`, which connects to the account's servers and signs in to them;
 - the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
 - snooze, park and pin, as they land.
 

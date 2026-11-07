@@ -49,6 +49,15 @@ impl Scripted {
     #[must_use]
     pub fn passing() -> Self {
         Self::answering(&CheckStep::ALL.into_iter().filter(|step| step.is_built()).map(|step| (step, StepStatus::Passed)).collect::<Vec<_>>())
+            .without(CheckStep::SmtpLogin)
+    }
+
+    /// The same workers, answering `step` as a worker would on its own: an account without a submission server has no
+    /// SMTP sign-in to pass.
+    #[must_use]
+    pub fn without(mut self, step: CheckStep) -> Self {
+        self.steps.retain(|(scripted, _)| *scripted != step);
+        self
     }
 
     /// The same workers, reporting only the scripted steps: the check stays running.
@@ -70,6 +79,7 @@ impl Workers for Scripted {
             let status = match self.steps.iter().find(|(scripted, _)| *scripted == step) {
                 Some((_, status)) => *status,
                 None if self.unfinished => continue,
+                None if step == CheckStep::SmtpLogin && account.submission().is_none() => StepStatus::NotSet,
                 None if step.is_built() => StepStatus::Skipped,
                 None => StepStatus::NotBuilt,
             };

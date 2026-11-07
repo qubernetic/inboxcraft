@@ -20,7 +20,7 @@ pub fn draft(id: u64, account: u64, subject: &str) -> Draft {
 }
 
 pub fn outgoing(draft: u64, state: OutboxState) -> Outgoing {
-    Outgoing { draft: DraftId::new(draft), state }
+    Outgoing::new(DraftId::new(draft), state)
 }
 
 pub fn scheduled(id: u64, days: i64, what: Due) -> Scheduled {

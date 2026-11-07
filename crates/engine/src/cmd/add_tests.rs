@@ -228,3 +228,20 @@ fn only_the_owner_removes_an_account_that_is_there() {
     }
     assert_eq!(session.run("account.list", &json!({})).unwrap()["accounts"].as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn an_account_takes_a_submission_server_with_its_usual_port() {
+    let mut session = session();
+    let mut with = params();
+    with["submission"] = json!({ "host": "smtp.example.org", "security": "starttls" });
+    let answer = session.run("account.add", &with).unwrap();
+    assert_eq!(answer["account"]["submission"], json!({ "host": "smtp.example.org", "port": 587, "security": "start_tls" }));
+    let mut tls = json!({ "address": "dan@example.org", "imap": { "host": "imap.example.org", "security": "tls" } });
+    tls["submission"] = json!({ "host": "smtp.example.org", "security": "tls" });
+    assert_eq!(session.run("account.add", &tls).unwrap()["account"]["submission"]["port"], json!(465));
+    let mut bad = json!({ "address": "eve@example.org", "imap": { "host": "imap.example.org", "security": "tls" } });
+    bad["submission"] = json!({ "host": "smtp example", "security": "tls" });
+    assert!(session.run("account.add", &bad).is_err());
+    let none = listed(&mut session, 3);
+    assert_eq!(none["submission"]["host"], json!("smtp.example.org"));
+}

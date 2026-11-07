@@ -42,14 +42,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
+    Account, AccountId, CheckStep, ConnectionState, DraftId, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job,
+    JobId, JobKind, StepStatus,
 };
 
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
-use crate::write;
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
+use crate::{smtp, write};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
@@ -284,6 +285,10 @@ impl Run<'_> {
         if !self.open && (self.pending.is_empty() || self.connection.is_none()) {
             return false;
         }
+        // A check or a send ran on a connection of its own: nothing needs this one.
+        if self.pending.is_empty() && self.watch.is_none() {
+            return self.out.listening;
+        }
         if let Some(error) = self.halted.clone() {
             self.fail_pending(&error);
             self.watch = None;
@@ -316,6 +321,8 @@ impl Run<'_> {
     fn take(&mut self, job: Job) {
         if let JobKind::Check { by_owner } = job.kind {
             self.check(job.id, by_owner);
+        } else if let JobKind::Send { draft, from, recipients, raw } = &job.kind {
+            self.send(job.id, *draft, from, recipients, raw);
         } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
@@ -346,6 +353,22 @@ impl Run<'_> {
             }
             _ => {}
         }
+    }
+
+    /// Sends a message on a submission connection of its own, at once: it needs no IMAP connection. After the
+    /// password was refused or went unanswered, nothing is sent until the engine starts a new worker.
+    fn send(&mut self, job: JobId, draft: DraftId, from: &EmailAddress, recipients: &[EmailAddress], raw: &[u8]) {
+        let halted = self.halted.as_ref().filter(|error| refuses_the_password(error.kind()));
+        let sent = match halted {
+            Some(error) => Err(error.clone()),
+            None => smtp::submit(self.account, &self.settings.connector, self.credentials, from, recipients, raw),
+        };
+        let kind = match sent {
+            Ok(Ok(_)) => EventKind::Sent { draft },
+            Ok(Err(refusal)) => EventKind::SendFailed { draft, kind: ErrorKind::MessageRefused, reply: Some(smtp::reply(&refusal)) },
+            Err(error) => EventKind::SendFailed { draft, kind: error.kind(), reply: None },
+        };
+        self.out.say(Some(job), kind);
     }
 
     fn fail_pending(&mut self, error: &NetError) {

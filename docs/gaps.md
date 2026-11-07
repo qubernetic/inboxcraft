@@ -265,7 +265,8 @@ B = blocks the next stage.
 - `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
   first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
   it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
-  cannot run it. The SMTP sign-in and the CalDAV discovery report "not built yet" until E2.2 and E4.2 (#28, #34).
+  cannot run it. The CalDAV discovery reports "not built yet" until E4.2; the SMTP sign-in of an account without a
+  submission server reports "not set" (#28, #34, #119).
 - `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
   stays running until the workers are started again (`Session::start`), which forgets it (#28).
 - After a refused or unanswered sign-in, an agent's `account.check` stops before the sign-in (`needs_owner`) and only
@@ -444,8 +445,9 @@ B = blocks the next stage.
   Background portal (since #137) and the notification portal (since #138) need none (#31).
 
 - Onboarding (#34):
-  - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and
-    E4.2. Detect fills in its first IMAP proposal; the others are not offered to choose from.
+  - The add-account form asks for IMAP only: `account.add` takes a submission server (#119), but the form does not
+    ask for one yet, so an account added in the window cannot send; CalDAV and the sending identity come with E4.2.
+    Detect fills in its first IMAP proposal; the others are not offered to choose from.
   - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
     not yet through the i18n macros.
   - The password field edits a buffer made once for 256 characters, so typing never moves it, and the window

@@ -99,3 +99,22 @@ fn every_write_job_names_its_folder_and_round_trips() {
         assert!(!kind.writes(), "{kind:?}");
     }
 }
+
+#[test]
+fn a_send_job_names_no_folder_is_no_imap_write_and_round_trips() {
+    let address = |text: &str| crate::EmailAddress::new(text).unwrap();
+    let kind = JobKind::Send {
+        draft: DraftId::new(4),
+        from: address("anna@example.org"),
+        recipients: vec![address("bela@example.org"), address("hidden@example.org")],
+        raw: b"Subject: Hi\r\n\r\nHello".to_vec(),
+    };
+    // A send goes to the submission server, not the IMAP one, and is not run again on its own: it may have gone.
+    assert!(!kind.writes());
+    assert_eq!(kind.folder(), None);
+    let job = Job::new(JobId::new(1), AccountId::new(1), kind);
+    let json = serde_json::to_string(&job).unwrap();
+    assert_eq!(serde_json::from_str::<Job>(&json).unwrap(), job);
+    let bad = json.replace("bela@example.org", "bela\\r\\n@example.org");
+    assert!(serde_json::from_str::<Job>(&bad).is_err(), "{bad}");
+}

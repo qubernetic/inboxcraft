@@ -189,11 +189,20 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
 /// The copy of `draft` of `account`: From, Date (its saved time), To and Cc with the addresses that are ones, Subject
 /// and the text.
 fn message(account: &Account, draft: &Draft) -> Result<Vec<u8>, MimeError> {
+    built(account, draft, MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)), None)
+}
+
+/// `draft` of `account` as a message: From, `date`, To and Cc with the addresses that are ones, Subject,
+/// `message_id` and the text. Bcc is never in it.
+pub(crate) fn built(account: &Account, draft: &Draft, date: Option<MailDate>, message_id: Option<&str>) -> Result<Vec<u8>, MimeError> {
     let address = account.address().as_str();
     let from = account.display_name().map_or_else(|| Mailbox::new(address), |name| Mailbox::named(name, address));
     let mut builder = MessageBuilder::new().from(from).subject(&draft.subject).text(&draft.text);
-    if let Some(date) = MailDate::new(draft.saved, Zone::Fixed(Offset::UTC)) {
+    if let Some(date) = date {
         builder = builder.date(date);
+    }
+    if let Some(id) = message_id {
+        builder = builder.message_id(id);
     }
     for (name, address) in draft.to.iter().filter_map(|text| recipient(text).ok()) {
         builder = builder.to(mailbox(name, &address));

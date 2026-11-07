@@ -99,6 +99,8 @@ pub(crate) fn run(
         JobKind::Idle { .. } => Ok(()),
         // The worker checks the account on a connection of its own (see `check`), never on this one.
         JobKind::Check { .. } => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
+        // The worker sends through the submission server (see `send`), never over IMAP.
+        JobKind::Send { .. } => Err(NetError::new(ErrorKind::Protocol, "a message is sent through the submission server")),
         JobKind::StoreFlags { .. } | JobKind::Move { .. } | JobKind::Expunge { .. } | JobKind::Append { .. } | JobKind::CreateFolder { .. } => {
             crate::write::run(connection, job, config, &mut say)
         }

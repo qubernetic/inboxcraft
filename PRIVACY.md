@@ -69,7 +69,14 @@ Credential Manager on Windows.
 - Your own mail and calendar servers, with the settings you gave (IMAP, SMTP, CalDAV).
 - When you use "Try to detect" (see below): your domain's DNS records and autoconfig address, and Mozilla's ISPDB
   only if you switch it on.
-- When you check an account: the account's own IMAP server, as for reading mail (see below).
+- When you check an account: the account's own IMAP server, as for reading mail (see below), and its SMTP server,
+  which gets the same user name and password, only after the IMAP server took them.
+- When you send a message: the account's own SMTP server, over TLS only (from the first byte on port 465, or after
+  STARTTLS on 587, refused when the server does not offer it). The password goes only over the encrypted connection.
+  The server is greeted as `[127.0.0.1]`, which names nothing of your computer. The message goes to every address in
+  To, Cc and Bcc; Bcc is never written into the message, so the other recipients do not see it. The message has a
+  `Message-ID` made of the time and a number at your address's domain, and a `Date` in your computer's time zone. A
+  copy goes to the account's Sent folder.
 - Pictures in a message, only when you ask to show them (see "Remote pictures" below).
 - <Update checks: GitHub Releases, if switched on.>
 
