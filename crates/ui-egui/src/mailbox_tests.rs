@@ -708,3 +708,9 @@ fn a_failing_undo_shows_its_error() {
     mailbox.undo();
     assert!(mailbox.error().is_some());
 }
+
+#[test]
+fn the_sample_has_nothing_to_tell_the_owner() {
+    let mut mailbox = mailbox();
+    assert_eq!(mailbox.take_notices(), vec![], "no mail arrives in the sample, so nothing notifies");
+}

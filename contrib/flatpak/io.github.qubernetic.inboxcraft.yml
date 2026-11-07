@@ -27,8 +27,6 @@ finish-args:
   - --device=dri
   # Secret Service: account passwords and tokens live in the OS credential store, never in files.
   - --talk-name=org.freedesktop.secrets
-  # Notifications: new mail is announced on the desktop.
-  - --talk-name=org.freedesktop.Notifications
   # Tray: the icon with the unread count registers with the panel's StatusNotifierWatcher; in the
   # sandbox it goes by its connection's name, so it owns no bus name.
   - --talk-name=org.kde.StatusNotifierWatcher

@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
+use inboxcraft_engine::notify::Notice;
 use inboxcraft_engine::{Applied, EngineError, MAX_LIST, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
@@ -683,6 +684,11 @@ impl Mailbox {
             self.refresh();
         }
         changed
+    }
+
+    /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.
+    pub fn take_notices(&mut self) -> Vec<Notice> {
+        self.session.take_notices()
     }
 
     fn pump_once(&mut self, workers: &mut dyn Workers) -> bool {

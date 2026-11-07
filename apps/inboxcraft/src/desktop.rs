@@ -9,8 +9,10 @@
 //!
 //! `ui-egui` draws the window and knows nothing of this. While there is a window, [`Desktop::tick`] runs before every
 //! frame (eframe's `App::logic`, which also runs when no frame is drawn); without one, `main` calls [`Desktop::wait`].
-//! Both answer the [`Request`]s that came in, hand the engine's jobs to the workers and apply what came back, and show
-//! the unread count on the [`Badge`] (the tray) when it changed.
+//! Both answer the [`Request`]s that came in, hand the engine's jobs to the workers and apply what came back, show the
+//! unread count on the [`Badge`] (the tray) when it changed, and show what the engine has to tell the owner as
+//! notifications ([`crate::notify`]). A click on one opens its message in the full-width reader, with the window
+//! brought forward or opened again; its buttons mark the message done or read, as the window's own acts do.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
@@ -18,9 +20,10 @@ use std::time::Duration;
 use eframe::egui::{self, ViewportCommand};
 use inboxcraft_model::Role;
 use inboxcraft_ui_egui::InboxApp;
-use inboxcraft_ui_egui::mailbox::Mailbox;
+use inboxcraft_ui_egui::mailbox::{Act, Mailbox};
 
 use crate::instance::Request;
+use crate::notify::{Click, Deliver, shown};
 
 /// How often InboxCraft without a window looks for the workers' events.
 pub const WINDOWLESS_TICK: Duration = Duration::from_millis(500);
@@ -40,6 +43,10 @@ pub struct Desktop {
     quitting: bool,
     badge: Option<Box<dyn Badge>>,
     shown: Option<u64>,
+    deliver: Option<Box<dyn Deliver>>,
+    clicks: Option<Receiver<Click>>,
+    /// A notification failed; the next failures are not reported again.
+    failed: bool,
 }
 
 impl std::fmt::Debug for Desktop {
@@ -52,7 +59,7 @@ impl Desktop {
     /// `app` in a window, running on when the window is closed, answering the requests that come through `heard`.
     #[must_use]
     pub fn new(app: InboxApp, heard: Receiver<Request>) -> Self {
-        Self { app, heard, stays: true, window: true, quitting: false, badge: None, shown: None }
+        Self { app, heard, stays: true, window: true, quitting: false, badge: None, shown: None, deliver: None, clicks: None, failed: false }
     }
 
     /// The same, but closing the window ends InboxCraft: for the sample, which has nothing to keep in step, and for a
@@ -74,6 +81,14 @@ impl Desktop {
     #[must_use]
     pub fn with_badge(mut self, badge: Box<dyn Badge>) -> Self {
         self.badge = Some(badge);
+        self
+    }
+
+    /// The same, showing notifications through `deliver` and answering the clicks on them that come through `clicks`.
+    #[must_use]
+    pub fn with_notices(mut self, deliver: Box<dyn Deliver>, clicks: Receiver<Click>) -> Self {
+        self.deliver = Some(deliver);
+        self.clicks = Some(clicks);
         self
     }
 
@@ -114,6 +129,10 @@ impl Desktop {
                 }
             }
         }
+        if self.answer_clicks() {
+            ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        }
         if ctx.input(|input| input.viewport().close_requested()) {
             self.window = false;
             self.quitting |= !self.stays;
@@ -129,12 +148,48 @@ impl Desktop {
             Ok(Request::Quit) | Err(RecvTimeoutError::Disconnected) => self.quitting = true,
             Err(RecvTimeoutError::Timeout) => {}
         }
+        if self.answer_clicks() {
+            self.window = true;
+        }
         self.keep_in_step();
     }
 
-    /// Hands the jobs on, applies the events, and shows the unread count when it changed.
+    /// Answers the clicks on notifications; whether one asks for the window.
+    fn answer_clicks(&mut self) -> bool {
+        let clicks: Vec<Click> = self.clicks.as_ref().map(|clicks| clicks.try_iter().collect()).unwrap_or_default();
+        let mut show = false;
+        for click in clicks {
+            match click {
+                Click::Open(id) => {
+                    let (reader, mailbox) = self.app.reader_mut();
+                    reader.open(mailbox, Some(id));
+                    reader.set_full_width(true);
+                    show = true;
+                }
+                Click::Show => show = true,
+                Click::Done(id) => self.app.mailbox_mut().act(id, Act::Done),
+                Click::Read(id) => self.app.mailbox_mut().act(id, Act::Read),
+            }
+        }
+        show
+    }
+
+    /// Hands the jobs on, applies the events, shows the unread count when it changed and the notices as
+    /// notifications.
     fn keep_in_step(&mut self) {
         self.app.pump();
+        let notices = self.app.mailbox_mut().take_notices();
+        if let Some(deliver) = self.deliver.as_mut() {
+            for notice in &notices {
+                let account = self.app.mailbox().account(notice.account().get()).map(|row| row.address.clone());
+                if let Err(error) = deliver.deliver(&shown(notice, account.as_deref()))
+                    && !self.failed
+                {
+                    eprintln!("inboxcraft: {error}");
+                    self.failed = true;
+                }
+            }
+        }
         let count = unread(self.app.mailbox());
         if let Some(badge) = self.badge.as_mut()
             && self.shown != Some(count)

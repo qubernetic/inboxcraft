@@ -9,7 +9,7 @@
 //! - A failed write is taken back: flags as they were, a moved message back where the server keeps it, and the folders
 //!   synced again; a failed delete for good syncs the whole folder again, so a message still there comes back.
 
-use inboxcraft_model::{AccountId, Copied, Flags, Folder, FolderId, JobId, JobKind, Message, Moving, UidSet, UidValidity};
+use inboxcraft_model::{AccountId, Copied, Flags, Folder, FolderId, JobId, JobKind, Message, Moving, Role, UidSet, UidValidity};
 use inboxcraft_store::{Change, Storage};
 
 use crate::EngineError;
@@ -56,6 +56,10 @@ pub(crate) fn moved(store: &dyn Storage, plan: &mut Plan, account: AccountId, mo
             Some((uid_validity, uid)) => settle(store, plan, &record, Moving { folder: moved.to, uid_validity, uid, flags: place.flags })?,
             None => {
                 plan.change(Change::RemoveMessage(record.id()));
+                // It comes back through the sync of its inbox as if it were new: it is the owner's own move.
+                if plan.state.accounts.get(&account).and_then(|held| held.roles.role_of(moved.to)) == Some(Role::Inbox) {
+                    crate::notify::quiet(&mut plan.state, &record);
+                }
                 lost = true;
             }
         }

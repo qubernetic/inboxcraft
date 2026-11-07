@@ -39,6 +39,7 @@ pub mod accounts;
 pub mod autostart;
 pub mod desktop;
 pub mod instance;
+pub mod notify;
 pub mod store;
 #[cfg(target_os = "linux")]
 pub mod tray;

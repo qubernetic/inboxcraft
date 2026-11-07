@@ -47,7 +47,7 @@ macro_rules! stages {
     };
 }
 
-stages!(screener);
+stages!(screener, notify);
 
 /// Runs every message of `messages`, which arrived as `arrival` says, through `stages` in order.
 pub(crate) fn arrived(stages: &[Stage], arrival: &Arrival<'_>, messages: &[Message], plan: &mut Plan) -> Result<(), EngineError> {

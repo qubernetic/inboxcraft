@@ -252,9 +252,9 @@ file and the code differ.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
-GPU, the Secret Service for passwords and tokens, desktop notifications, the panel's StatusNotifierWatcher for the
-tray icon, and the Downloads folder, where Save puts attachments (under a new name, never over a file). The
-Background portal needs no permission, nor does the socket a later start reaches the running one through (it is in
+GPU, the Secret Service for passwords and tokens, the panel's StatusNotifierWatcher for the tray icon, and the
+Downloads folder, where Save puts attachments (under a new name, never over a file). The Background and notification
+portals need no permission, nor does the socket a later start reaches the running one through (it is in
 the app's own data folder). No other folder of
 yours is open to the app: everything it keeps lives in `~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails
 when a permission has no comment above it, or when the manifest opens a folder other than Downloads.
