@@ -59,8 +59,8 @@ fn arrival(session: &crate::Session, first_sync: bool) -> Arrival<'_> {
 }
 
 #[test]
-fn the_screener_comes_first_then_snooze_and_the_notify_stage_last() {
-    assert_eq!(STAGES.len(), 3, "a stage is a file of its own in arrive/ and a name in the stages! line");
+fn the_screener_comes_first_then_snooze_then_follow_up_and_the_notify_stage_last() {
+    assert_eq!(STAGES.len(), 4, "a stage is a file of its own in arrive/ and a name in the stages! line");
 }
 
 #[test]

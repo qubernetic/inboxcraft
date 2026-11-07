@@ -117,3 +117,17 @@
 {"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
 {"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "calendar": true}
 {"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "calendar": true}
+# The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
+# half-typed name, the floating panel over the reader, and the Sending page with a signature.
+{"out": "docs/images/compose-new-light.png", "mode": "light", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-new-dark.png", "mode": "dark", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-written-light.png", "mode": "light", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-written-dark.png", "mode": "dark", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-bad-address-light.png", "mode": "light", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-bad-address-dark.png", "mode": "dark", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-suggest-light.png", "mode": "light", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
+{"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}

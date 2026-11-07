@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The navigation rail and the folder pane. The rail runs the preset's gradient at full strength down the window's
-//! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds the account picker,
-//! the unified views and each account's folders with their unread badges.
+//! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds New message,
+//! the account picker, the unified views and each account's folders with their unread badges.
 
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
@@ -170,6 +170,8 @@ pub(super) fn rail(
 pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
+    /// New message.
+    pub(super) compose: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -240,11 +242,18 @@ fn folder_icon(role: Option<FolderRole>) -> IconId {
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. Accounts are added
 /// in the settings, not here: most people have one, and a link here would hold its room for nothing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Asked {
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+        if !mailbox.accounts().is_empty() {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                asked.compose = IconButton::new(IconId::Compose, tr!("New message")).action(keymap::COMPOSE).show(ui, theme, keymap).clicked();
+            });
+        }
+    });
     if !mailbox.accounts().is_empty() {
         ui.add_space(theme.spacing.s);
         ui.scope(|ui| account_picker(ui, theme, mailbox, &mut asked));

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `triage`: the screener (`screener.*`), the grouped inbox (`group.*`), done, park and pin, and snooze; follow-up
-//! reminders come later.
+//! `triage`: the screener (`screener.*`), the grouped inbox (`group.*`), done, park and pin, snooze, and follow-up
+//! reminders.
 //! A new command goes into [`COMMANDS`] and its parameter names into `FIELDS`.
 //!
 //! The screener's mode is the owner's (`screener.mode`); turning it on learns every sender the owner has mail from or
@@ -33,10 +33,18 @@
 //! brings it back to the inbox unread, marked as returned and listed as if it arrived then; `mail.unsnooze` (`safe`)
 //! brings it back at once. A snoozed message the owner moves on from the snoozed folder stays where it was put.
 //! `history.undo` takes a snooze back: the message where it was, its time as it was.
+//!
+//! `mail.follow_up` (`safe`) sets a follow-up reminder on a message the owner sent (in a Sent folder, or from one of
+//! the owner's own addresses): "remind me if no reply by" a time (`until`, or a `preset` of `schedule.presets`). It is
+//! ours alone and nothing goes to the server. A reply that arrives before then cancels it (see
+//! `crate::arrive::followup`); otherwise [`crate::Session::tick`] fires it at the time and the owner is told, the notice
+//! opening the sent message. `mail.cancel_follow_up` (`safe`) takes it off; `history.undo` takes either back.
 
 use std::collections::BTreeMap;
 
-use inboxcraft_model::{AccountId, EmailAddress, Flag, Folder, FolderId, Group, Message, MessageId, MessageState, Role, Screening, Sender};
+use inboxcraft_model::{
+    AccountId, Due, EmailAddress, Flag, Folder, FolderId, Group, Message, MessageId, MessageState, Role, ScheduleId, Screening, Sender,
+};
 use inboxcraft_store::{Change, Storage};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
@@ -44,11 +52,12 @@ use serde_json::{Value, json};
 
 use super::mail::MAX_LIST;
 use crate::act::{self as acts, Effects, Mover, mark_seen};
+use crate::arrive::followup;
 use crate::arrive::group::{self as grouping, Grouping};
 use crate::arrive::screener::{self, ScreenerMode};
 use crate::arrive::snooze as snoozing;
 use crate::params::{NoParams, decode, parse_date};
-use crate::schedule::presets;
+use crate::schedule::{self, presets};
 use crate::session::State;
 use crate::undo::{Act, Inverse, Screened, Step};
 use crate::view;
@@ -56,7 +65,7 @@ use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] =
-    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, SNOOZE, UNSNOOZE];
+    &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET, SNOOZE, UNSNOOZE, FOLLOW_UP, CANCEL_FOLLOW_UP];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -749,8 +758,8 @@ fn pin_set(_: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     Ok(Outcome::new(json!({ "keep_on_done": params.keep_on_done })).with_pins_outlast_done(params.keep_on_done))
 }
 
-/// Takes done, park, pin or snooze back on `message`: back in the folder `to` when it is still there, and in `state`,
-/// with the schedule bringing it back at the time `state` says and no other.
+/// Takes done, park, pin, snooze or a follow-up reminder back on `message`: back in the folder `to` when it is still
+/// there, and in `state`, with the schedule bringing it back and reminding of it at the times `state` says and no other.
 pub(crate) fn restore(context: &Context<'_>, message: &Message, to: Option<FolderId>, state: &MessageState) -> Result<Effects, EngineError> {
     let store = context.store();
     let mut effects = Effects::default();
@@ -761,7 +770,10 @@ pub(crate) fn restore(context: &Context<'_>, message: &Message, to: Option<Folde
         effects.extend(moved);
     }
     effects.change(Change::SetMessageState(message.id(), state.clone()));
-    effects.changes.extend(snoozing::reschedule(store, message.id(), state.snoozed_until, context.next_schedule_id())?);
+    let next = context.next_schedule_id();
+    effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), state.snoozed_until, next)?);
+    let after = ScheduleId::new(next.get().saturating_add(1));
+    effects.changes.extend(schedule::reschedule(store, Due::FollowUp(message.id()), state.follow_up, after)?);
     Ok(effects)
 }
 
@@ -795,29 +807,29 @@ struct UnsnoozeParams {
     id: u64,
 }
 
-/// The time `params` names, ahead of the context's time.
-fn until(context: &Context<'_>, params: &SnoozeParams) -> Result<Timestamp, EngineError> {
+/// The time `command` is given, as `until` or a `preset`, ahead of the context's time.
+fn until(context: &Context<'_>, command: &'static str, until: Option<&str>, preset: Option<&str>) -> Result<Timestamp, EngineError> {
     let now = context.now();
-    let until = match (params.until.as_deref(), params.preset.as_deref()) {
+    let until = match (until, preset) {
         (Some(text), None) => {
-            parse_date(text.trim()).ok_or_else(|| EngineError::bad_params(SNOOZE.id, "until is a time such as 2026-11-05T18:00:00Z"))?
+            parse_date(text.trim()).ok_or_else(|| EngineError::bad_params(command, "until is a time such as 2026-11-05T18:00:00Z"))?
         }
         (None, Some(name)) => presets(now, context.offsets())
             .into_iter()
             .find(|(preset, _)| preset.name() == name)
             .map(|(_, at)| at)
-            .ok_or_else(|| EngineError::bad_params(SNOOZE.id, "the preset is one of schedule.presets still ahead"))?,
-        _ => return Err(EngineError::bad_params(SNOOZE.id, "give until or a preset")),
+            .ok_or_else(|| EngineError::bad_params(command, "the preset is one of schedule.presets still ahead"))?,
+        _ => return Err(EngineError::bad_params(command, "give until or a preset")),
     };
     if until <= now {
-        return Err(EngineError::bad_params(SNOOZE.id, "the time has passed"));
+        return Err(EngineError::bad_params(command, "the time has passed"));
     }
     Ok(until)
 }
 
 fn snooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: SnoozeParams = decode(SNOOZE.id, params)?;
-    let until = until(context, &params)?;
+    let until = until(context, SNOOZE.id, params.until.as_deref(), params.preset.as_deref())?;
     let message = message(context, params.id)?;
     let (store, state) = (context.store(), context.state());
     let account = message.account();
@@ -846,7 +858,7 @@ fn snooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let was = store.message_state(message.id())?;
     let now = MessageState { snoozed_until: Some(until), returned: None, ..was.clone() };
     effects.change(Change::SetMessageState(message.id(), now));
-    effects.changes.extend(snoozing::reschedule(store, message.id(), Some(until), context.next_schedule_id())?);
+    effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), Some(until), context.next_schedule_id())?);
     let answer = json!({
         "id": params.id,
         "until": crate::json::date(until),
@@ -871,6 +883,77 @@ fn unsnooze(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineErro
     let inbox = snoozing::back(store, state, &message, &mut Mover::default(), &mut effects)?;
     let folder = inbox.map_or(message.folder(), |inbox| inbox.id());
     effects.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: None, returned: Some(context.now()), ..was }));
-    effects.changes.extend(snoozing::reschedule(store, message.id(), None, context.next_schedule_id())?);
+    effects.changes.extend(schedule::reschedule(store, Due::Unsnooze(message.id()), None, context.next_schedule_id())?);
     Ok(Outcome::new(json!({ "id": params.id, "folder": folder.get(), "changed": true })).with_effects(effects))
+}
+
+/// `mail.follow_up`: remind the owner if a sent message gets no reply by a time.
+pub(crate) const FOLLOW_UP: CommandSpec = CommandSpec {
+    id: "mail.follow_up",
+    class: Some(AgentClass::Safe),
+    summary: "Remind me if a message I sent gets no reply by a time",
+    run: follow_up,
+};
+
+/// `mail.cancel_follow_up`: take a follow-up reminder off.
+pub(crate) const CANCEL_FOLLOW_UP: CommandSpec = CommandSpec {
+    id: "mail.cancel_follow_up",
+    class: Some(AgentClass::Safe),
+    summary: "Take the follow-up reminder off a message I sent",
+    run: cancel_follow_up,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FollowUpParams {
+    /// The sent message.
+    id: u64,
+    /// The time to remind at: `2026-11-05T18:00:00Z`, with an offset, or a date (midnight UTC).
+    until: Option<String>,
+    /// Or a preset of `schedule.presets`: `later_today`, `this_evening`, `tomorrow_morning`.
+    preset: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelFollowUpParams {
+    /// The sent message.
+    id: u64,
+}
+
+fn follow_up(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: FollowUpParams = decode(FOLLOW_UP.id, params)?;
+    let until = until(context, FOLLOW_UP.id, params.until.as_deref(), params.preset.as_deref())?;
+    let message = message(context, params.id)?;
+    let store = context.store();
+    if !followup::is_sent(store, context.state(), &message)? {
+        return Err(EngineError::bad_params(FOLLOW_UP.id, "a follow-up reminder goes on a message the owner sent"));
+    }
+    let was = store.message_state(message.id())?;
+    let answer = json!({ "id": params.id, "until": crate::json::date(until), "changed": was.follow_up != Some(until) });
+    if was.follow_up == Some(until) {
+        return Ok(Outcome::new(answer));
+    }
+    reminded(context, &FOLLOW_UP, answer, &message, was, Some(until))
+}
+
+fn cancel_follow_up(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: CancelFollowUpParams = decode(CANCEL_FOLLOW_UP.id, params)?;
+    let message = message(context, params.id)?;
+    let was = context.store().message_state(message.id())?;
+    let answer = json!({ "id": params.id, "changed": was.follow_up.is_some() });
+    if was.follow_up.is_none() {
+        return Ok(Outcome::new(answer));
+    }
+    reminded(context, &CANCEL_FOLLOW_UP, answer, &message, was, None)
+}
+
+/// The outcome of `spec` setting `message`'s follow-up reminder to `until`, from `was`: the state, the schedule, and
+/// the undo that puts both back.
+fn reminded(context: &Context<'_>, spec: &CommandSpec, answer: Value, message: &Message, was: MessageState, until: Option<Timestamp>) -> Result<Outcome, EngineError> {
+    let mut effects = Effects::default();
+    effects.change(Change::SetMessageState(message.id(), MessageState { follow_up: until, ..was.clone() }));
+    effects.changes.extend(schedule::reschedule(context.store(), Due::FollowUp(message.id()), until, context.next_schedule_id())?);
+    let act = Act { command: spec.id, class: AgentClass::Safe, inverse: Inverse::State { message: message.id(), to: None, state: was } };
+    Ok(Outcome::new(answer).with_effects(effects).with_undo(Step::Push(act)))
 }

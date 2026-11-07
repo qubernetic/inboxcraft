@@ -58,6 +58,7 @@ pub(crate) fn account(account: &Account, state: Option<&AccountState>) -> Value 
         "label": account.label(),
         "address": account.address().as_str(),
         "display_name": account.display_name(),
+        "signature": account.signature(),
         "username": account.username(),
         "imap": server(account.imap()),
         "submission": account.submission().map(server),

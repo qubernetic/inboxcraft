@@ -3,7 +3,8 @@
 
 //! The settings sheet: whether it is open and on which page, the four colours of the custom accent as the owner types them,
 //! and what the engine said about the last ones it took; on the Shortcuts page, the text that narrows the list, the
-//! action waiting for a key and what giving the last key changed.
+//! action waiting for a key and what giving the last key changed; on the Sending page, the signatures as typed until
+//! they are saved (`compose.signature`).
 //!
 //! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
 //! that shows another place) goes through [`Settings::close`], which forgets everything the open sheet held, so it
@@ -13,6 +14,8 @@
 //! preview shows until "Use these colours" runs `ui.accent.set` with it. The colours come from the keyboard or the
 //! colour picker, so they are read as hostile: only `#rrggbb` (the `#` may be left out, space around it is dropped)
 //! is a colour, and a field holds at most [`MAX_CHARS`] characters.
+
+use std::collections::BTreeMap;
 
 use egui::Color32;
 use inboxcraft_engine::appearance::{Accent, Appearance, Rgb};
@@ -34,6 +37,8 @@ pub enum Section {
     Accounts,
     /// Every action of the window with its key, to give it another.
     Shortcuts,
+    /// The signature of each account's new messages.
+    Sending,
 }
 
 /// The settings sheet.
@@ -49,6 +54,8 @@ pub struct Settings {
     find: String,
     /// What giving the last key changed, on the Shortcuts page.
     keys_note: Option<String>,
+    /// The signatures as typed on the Sending page, by account; an account not in it shows the one it has.
+    signatures: BTreeMap<u64, String>,
 }
 
 /// `colour` as `#rrggbb`.
@@ -88,12 +95,33 @@ impl Settings {
         self.fill(appearance);
     }
 
-    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page and the action waiting for a key.
+    /// Forgets what the open sheet held: the notes, the text on the Shortcuts page, the action waiting for a key and
+    /// the signatures typed and not saved.
     fn forget(&mut self) {
         self.note = None;
         self.capturing = None;
         self.find.clear();
         self.keys_note = None;
+        self.signatures.clear();
+    }
+
+    /// The signature of `account` as typed on the Sending page, to type in: `kept`, the one it has, until it is
+    /// changed. It is cut to what the engine keeps.
+    pub fn signature_mut(&mut self, account: u64, kept: &str) -> &mut String {
+        let typed = self.signatures.entry(account).or_insert_with(|| kept.to_owned());
+        crate::compose::cut(typed, MAX_SIGNATURE_BYTES);
+        typed
+    }
+
+    /// The signature of `account` as typed, if it was typed since the page opened.
+    #[must_use]
+    pub fn signature(&self, account: u64) -> Option<&str> {
+        self.signatures.get(&account).map(String::as_str)
+    }
+
+    /// The signature of `account` was saved: the page shows the one it has from now on.
+    pub fn saved_signature(&mut self, account: u64) {
+        self.signatures.remove(&account);
     }
 
     /// Shows `section` on the open sheet; an action waiting for a key stops waiting.
@@ -203,6 +231,9 @@ impl Settings {
         };
     }
 }
+
+/// The longest signature, in bytes, as the engine keeps it.
+pub const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
 
 #[cfg(test)]
 #[path = "settings_tests.rs"]

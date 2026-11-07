@@ -285,6 +285,15 @@ fn signature_sets_and_clears_an_accounts_signature() {
 }
 
 #[test]
+fn account_list_shows_each_accounts_signature() {
+    let (mut session, _) = session();
+    session.run("compose.signature", &json!({ "account": 2, "signature": "Bob" })).unwrap();
+    let answer = session.run("account.list", &json!({})).unwrap();
+    assert_eq!(answer["accounts"][0]["signature"], json!("Anna\nExample Ltd."));
+    assert_eq!(answer["accounts"][1]["signature"], json!("Bob"));
+}
+
+#[test]
 fn a_draft_answering_a_message_shows_in_its_thread() {
     let (mut session, _) = session();
     let id = draft_id(&session.run("compose.new", &json!({ "answers": 1 })).unwrap());

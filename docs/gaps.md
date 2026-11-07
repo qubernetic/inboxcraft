@@ -394,7 +394,7 @@ B = blocks the next stage.
   close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
 - Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
   from More (#131); Snooze and Pin are not wired to their commands yet (#126, #127), Reply, Reply all and Forward
-  wait for the composer (E2.3). They are drawn disabled with "Not available yet" in their tooltips. More also holds Full width,
+  wait for the composer to fill them in (#133). They are drawn disabled with "Not available yet" in their tooltips. More also holds Full width,
   Close and the next-message rule; Escape leaves full width but does not close the
   reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
   still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
