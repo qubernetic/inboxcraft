@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use super::{MAX_BODY, check, fold, list, quote, read, thread};
+use super::{MAX_BODY, MAX_RESULT, cap, check, fold, hidden, list, quote, read, thread};
 
 #[test]
 fn a_quoted_value_keeps_to_its_line_and_its_quotes() {
@@ -96,4 +96,113 @@ fn a_check_lists_its_steps_and_quotes_the_issuer() {
     assert!(started.contains("\nsmtp | not_built | -\n"), "{started}");
     let running = check(&json!({}), &json!({ "account": 1, "started": false, "steps": [] }));
     assert_eq!(running, "account_check: account 1: a check is already running\nstep | status | detail\n");
+}
+
+/// The characters that turn or hide text and must never be written raw: one of each run the security review found.
+const HIDDEN: [char; 30] = [
+    '\u{61c}',
+    '\u{ad}',
+    '\u{34f}',
+    '\u{115f}',
+    '\u{180e}',
+    '\u{206a}',
+    '\u{206f}',
+    '\u{3164}',
+    '\u{fe00}',
+    '\u{fe0f}',
+    '\u{fff9}',
+    '\u{fffa}',
+    '\u{fffb}',
+    '\u{1d173}',
+    '\u{1d17a}',
+    '\u{e0000}',
+    '\u{e0001}',
+    '\u{e0041}',
+    '\u{e007f}',
+    '\u{e0100}',
+    '\u{e01ef}',
+    '\u{200b}',
+    '\u{200f}',
+    '\u{202a}',
+    '\u{202e}',
+    '\u{2028}',
+    '\u{2029}',
+    '\u{2066}',
+    '\u{2069}',
+    '\u{feff}',
+];
+
+#[test]
+fn a_character_that_turns_or_hides_text_becomes_an_escape() {
+    for c in HIDDEN {
+        let text = format!("a{c}b");
+        let quoted = quote(&text, 10);
+        assert!(!quoted.contains(c), "U+{:04X} written raw: {quoted}", u32::from(c));
+        assert_eq!(serde_json::from_str::<String>(&quoted).unwrap(), text, "U+{:04X}", u32::from(c));
+    }
+}
+
+#[test]
+fn a_character_above_the_basic_plane_is_a_surrogate_pair() {
+    assert_eq!(quote("\u{e0041}", 10), "\"\\udb40\\udc41\"");
+    assert_eq!(quote("\u{1d173}", 10), "\"\\ud834\\udd73\"");
+    // A visible one is written as it is.
+    assert_eq!(quote("\u{1f600}", 10), "\"\u{1f600}\"");
+}
+
+proptest::proptest! {
+    #[test]
+    fn any_text_reads_back_and_hides_nothing(text in proptest::prelude::any::<String>()) {
+        let quoted = quote(&text, usize::MAX);
+        proptest::prop_assert!(!quoted.chars().any(|c| c.is_control() || hidden(c)), "{quoted:?}");
+        proptest::prop_assert_eq!(serde_json::from_str::<String>(&quoted).unwrap(), text);
+    }
+}
+
+fn person(n: usize) -> Value {
+    json!({ "name": format!("Person {n}"), "address": format!("p{n}@example.org") })
+}
+
+#[test]
+fn a_list_row_names_three_senders_and_counts_the_rest() {
+    let from: Vec<Value> = (0..1000).map(person).collect();
+    let messages: Vec<Value> = (0..25).map(|id| json!({ "id": id, "from": from, "subject": "s" })).collect();
+    let text = list(&json!({}), &json!({ "total": 25, "offset": 0, "messages": messages }));
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    assert!(text.contains("\"Person 2 <p2@example.org>\" (and 997 more) | \"s\""), "{text}");
+    assert!(!text.contains("p3@example.org"), "{text}");
+    assert_eq!(text.lines().count(), 28, "{text}");
+}
+
+#[test]
+fn a_read_names_fifty_people_and_fifty_attachments() {
+    let to: Vec<Value> = (0..1000).map(person).collect();
+    let attachments: Vec<Value> = (0..1000).map(|index| json!({ "index": index, "name": "a.pdf", "type": "application/pdf", "size": 1 })).collect();
+    let answer = json!({ "message": { "id": 1, "from": [], "to": to, "cc": to, "subject": "s",
+        "body": { "readable": true, "text": "hi", "attachments": attachments } } });
+    let text = read(&json!({}), &answer);
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    assert!(text.contains("<p49@example.org>\" (and 950 more)\ncc: "), "{text}");
+    assert!(text.contains("<p49@example.org>\" (and 950 more)\nsubject: "), "{text}");
+    assert!(!text.contains("p50@example.org"), "{text}");
+    assert!(text.contains("; 49 \"a.pdf\" \"application/pdf\" 1 bytes (and 950 more)\n"), "{text}");
+}
+
+#[test]
+fn a_result_longer_than_the_cap_is_cut_on_a_line_and_says_so() {
+    let line = "x".repeat(99);
+    let long = format!("{line}\n").repeat(MAX_RESULT / 50);
+    let cut = cap(long.clone());
+    assert!(cut.len() <= MAX_RESULT, "{} bytes", cut.len());
+    assert!(
+        cut.ends_with(&format!("\n[cut: the result was {} bytes, the first {} shown]\n", long.len(), (MAX_RESULT - 100) / 100 * 100)),
+        "{}",
+        &cut[cut.len() - 200..]
+    );
+    // One line longer than the cap is cut on a character.
+    let one = "é".repeat(MAX_RESULT);
+    let cut = cap(one.clone());
+    assert!(cut.len() <= MAX_RESULT && cut.starts_with("éé"), "{} bytes", cut.len());
+    assert!(cut.ends_with(" shown]\n") && cut.contains(&format!("\n[cut: the result was {} bytes, the first ", one.len())), "{cut:.80}");
+    assert_eq!(cap("short\n".to_owned()), "short\n");
 }

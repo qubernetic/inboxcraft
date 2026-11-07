@@ -5,8 +5,10 @@
 //!
 //! Everything a message brings (names, addresses, subjects, bodies, file names, a certificate's issuer) is written
 //! by [`quote`] as one JSON string: its line breaks, quotes, control characters and the characters that turn the
-//! direction of text become escapes, so it stays on its line, inside its quotes, and cannot pose as the server's own
-//! words. [`UNTRUSTED`] says so in every result that holds message text.
+//! direction of text or hide it become escapes, so it stays on its line, inside its quotes, and cannot pose as the
+//! server's own words. [`UNTRUSTED`] says so in every result that holds message text. Long lists of people and
+//! attachments are cut with a count, and a whole result is cut at [`MAX_RESULT`] bytes, so a message cannot push the
+//! untrusted line out of a model's context.
 
 use std::fmt::Write;
 
@@ -20,6 +22,18 @@ const MAX_FIELD: usize = 200;
 
 /// The longest body text written, in characters.
 pub(crate) const MAX_BODY: usize = 8000;
+
+/// The senders a message line names.
+const ROW_PEOPLE: usize = 3;
+
+/// The people of an address field, and the attachments, `mail_read` names.
+const READ_LIST: usize = 50;
+
+/// The longest result, in bytes.
+pub(crate) const MAX_RESULT: usize = 64 * 1024;
+
+/// The room the note of a cut result takes, in bytes.
+const CUT_NOTE: usize = 100;
 
 /// The columns of a message line.
 const HEADER: &str = "id | date (UTC) | from | subject | flags";
@@ -38,8 +52,11 @@ pub(crate) fn quote(text: &str, cap: usize) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if c.is_control() || direction(c) => {
-                let _ = write!(out, "\\u{:04x}", u32::from(c));
+            c if c.is_control() || hidden(c) => {
+                // JSON has no escape beyond U+FFFF: such a character is written as its UTF-16 surrogate pair.
+                for unit in c.encode_utf16(&mut [0; 2]) {
+                    let _ = write!(out, "\\u{unit:04x}");
+                }
             }
             c => out.push(c),
         }
@@ -51,10 +68,61 @@ pub(crate) fn quote(text: &str, cap: usize) -> String {
     out
 }
 
-/// The characters that change the direction text is shown in, or hide it: the marks, embeddings, overrides and
-/// isolates, the line and paragraph separators, and the invisible joiners and byte-order mark.
-fn direction(c: char) -> bool {
-    matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+/// The characters that change the direction text is shown in, or hide it: Unicode's default ignorable code points
+/// (the soft hyphen, the zero-width spaces and joiners, the bidi marks, embeddings, overrides and isolates, the
+/// byte-order mark, fillers, variation selectors and tag characters), the line and paragraph separators and the
+/// interlinear annotation characters.
+pub(crate) fn hidden(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{34f}'
+            | '\u{61c}'
+            | '\u{115f}'..='\u{1160}'
+            | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{fff0}'..='\u{fffb}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e0fff}'
+    )
+}
+
+/// `items` joined by `separator`, the first `shown` of them, then `(and N more)` when there are more.
+fn first(items: impl ExactSizeIterator<Item = String>, shown: usize, separator: &str) -> String {
+    let more = items.len().saturating_sub(shown);
+    let mut out = items.take(shown).collect::<Vec<_>>().join(separator);
+    if more > 0 {
+        let _ = write!(out, " (and {more} more)");
+    }
+    out
+}
+
+/// `out` cut to [`MAX_RESULT`] bytes at a line break (on a character when one line is longer), with a last line
+/// that says so.
+pub(crate) fn cap(mut out: String) -> String {
+    let total = out.len();
+    if total <= MAX_RESULT {
+        return out;
+    }
+    let mut end = MAX_RESULT.saturating_sub(CUT_NOTE);
+    while !out.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    end = out.get(..end).and_then(|kept| kept.rfind('\n')).map_or(end, |line| line.saturating_add(1));
+    out.truncate(end);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    let _ = writeln!(out, "[cut: the result was {total} bytes, the first {end} shown]");
+    out
 }
 
 /// A number field, 0 when it is not one.
@@ -70,23 +138,20 @@ fn date(value: &Value) -> String {
     }
 }
 
-/// Addresses as quoted `Name <address>`, comma-separated; `-` for none.
-fn people(value: &Value) -> String {
-    let shown: Vec<String> = value
-        .as_array()
-        .map(|list| {
-            list.iter()
-                .map(|person| {
-                    let address = person.get("address").and_then(Value::as_str).unwrap_or("");
-                    match person.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()) {
-                        Some(name) => quote(&format!("{name} <{address}>"), MAX_FIELD),
-                        None => quote(address, MAX_FIELD),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if shown.is_empty() { "-".to_owned() } else { shown.join(", ") }
+/// The first `shown` addresses as quoted `Name <address>`, comma-separated, and how many more; `-` for none.
+fn people(value: &Value, shown: usize) -> String {
+    let list = value.as_array().map(Vec::as_slice).unwrap_or_default();
+    if list.is_empty() {
+        return "-".to_owned();
+    }
+    let person = |person: &Value| {
+        let address = person.get("address").and_then(Value::as_str).unwrap_or("");
+        match person.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()) {
+            Some(name) => quote(&format!("{name} <{address}>"), MAX_FIELD),
+            None => quote(address, MAX_FIELD),
+        }
+    };
+    first(list.iter().map(person), shown, ", ")
 }
 
 /// The flags worth a word: `unread`, `flagged`, `answered`, `draft`; `-` for none.
@@ -119,7 +184,7 @@ fn row(message: &Value) -> String {
         "{} | {} | {} | {} | {}",
         number(message, "id"),
         date(message.get("date").unwrap_or(&Value::Null)),
-        people(message.get("from").unwrap_or(&Value::Null)),
+        people(message.get("from").unwrap_or(&Value::Null), ROW_PEOPLE),
         subject(message),
         flags(message)
     )
@@ -135,7 +200,7 @@ fn table(status: &str, answer: &Value) -> String {
             let _ = writeln!(out, "{}", row(message));
         }
     }
-    out
+    cap(out)
 }
 
 /// `mail_list`: what the list shows, the page, the next page, the messages.
@@ -197,7 +262,7 @@ pub(crate) fn read(_arguments: &Value, answer: &Value) -> String {
     for key in ["from", "to", "cc", "reply_to"] {
         let list = message.get(key).unwrap_or(&Value::Null);
         if key == "from" || key == "to" || list.as_array().is_some_and(|list| !list.is_empty()) {
-            let _ = writeln!(out, "{key}: {}", people(list));
+            let _ = writeln!(out, "{key}: {}", people(list, READ_LIST));
         }
     }
     let _ = writeln!(out, "subject: {}", subject(message));
@@ -206,13 +271,12 @@ pub(crate) fn read(_arguments: &Value, answer: &Value) -> String {
         let _ = writeln!(out, "thread: {thread}");
     }
     let body = message.get("body").unwrap_or(&Value::Null);
-    let attachments: Vec<String> =
-        body.get("attachments").and_then(Value::as_array).map(|list| list.iter().map(attachment).collect()).unwrap_or_default();
+    let attachments = body.get("attachments").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     if !attachments.is_empty() {
-        let _ = writeln!(out, "attachments: {}", attachments.join("; "));
+        let _ = writeln!(out, "attachments: {}", first(attachments.iter().map(attachment), READ_LIST, "; "));
     }
     let _ = writeln!(out, "body: {}", text(answer, body));
-    out
+    cap(out)
 }
 
 /// One attachment: its number, quoted name, type and size.
@@ -291,7 +355,7 @@ pub(crate) fn check(_arguments: &Value, answer: &Value) -> String {
         let detail = if detail.is_empty() { "-".to_owned() } else { detail.join("; ") };
         let _ = writeln!(out, "{} | {} | {detail}", word("step"), word("status"));
     }
-    out
+    cap(out)
 }
 
 #[cfg(test)]
