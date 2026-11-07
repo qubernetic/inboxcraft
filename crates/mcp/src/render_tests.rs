@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use super::{MAX_BODY, MAX_RESULT, cap, check, fold, hidden, list, quote, read, thread};
+use super::{MAX_BODY, MAX_RESULT, cap, check, fold, hidden, list, quote, read, search, thread};
 
 #[test]
 fn a_quoted_value_keeps_to_its_line_and_its_quotes() {
@@ -205,4 +205,98 @@ fn a_result_longer_than_the_cap_is_cut_on_a_line_and_says_so() {
     assert!(cut.len() <= MAX_RESULT && cut.starts_with("éé"), "{} bytes", cut.len());
     assert!(cut.ends_with(" shown]\n") && cut.contains(&format!("\n[cut: the result was {} bytes, the first ", one.len())), "{cut:.80}");
     assert_eq!(cap("short\n".to_owned()), "short\n");
+}
+
+/// `n` tag characters: each is written as a 12-byte surrogate pair escape.
+fn tags(n: usize) -> String {
+    "\u{e0041}".repeat(n)
+}
+
+/// A message whose 3 senders and subject are `n` tag characters each.
+fn heavy(id: usize, n: usize) -> Value {
+    let from: Vec<Value> = (0..3).map(|k| json!({ "name": tags(n), "address": format!("p{k}@example.org") })).collect();
+    json!({ "id": id, "from": from, "subject": tags(n) })
+}
+
+fn plain(id: usize) -> Value {
+    json!({ "id": id, "from": [person(id)], "subject": "s" })
+}
+
+/// The rows of a table result: the lines after the header.
+fn rows(text: &str) -> Vec<&str> {
+    text.lines().skip(3).collect()
+}
+
+#[test]
+fn a_quoted_value_stops_at_its_bytes_too() {
+    // 200 characters for a field, but tag characters take 12 bytes each: the value stops at 1200 bytes.
+    let quoted = quote(&tags(200), 200);
+    assert!(quoted.len() <= 1200 + 40, "{} bytes", quoted.len());
+    assert!(quoted.ends_with("\" (cut: 100 of 200 characters)"), "{quoted:.40}");
+    assert_eq!(serde_json::from_str::<String>(quoted.split(" (cut").next().unwrap()).unwrap(), tags(100));
+}
+
+#[test]
+fn heavy_senders_leave_every_row_of_a_page_in_place() {
+    let messages: Vec<Value> = (1..=12).map(|id| heavy(id, 150)).chain((13..=25).map(plain)).collect();
+    let text = list(&json!({}), &json!({ "view": { "role": "inbox" }, "total": 40, "offset": 0, "messages": messages }));
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    assert!(text.starts_with("mail_list: inbox, 1-25 of 40; next page: offset 25\n"), "{text:.80}");
+    assert_eq!(rows(&text).len(), 25);
+    assert!(rows(&text).last().unwrap().starts_with("25 | "), "{text}");
+}
+
+#[test]
+fn a_page_too_big_for_the_cap_says_where_the_rows_shown_end() {
+    let messages: Vec<Value> = (1..=25).map(|id| heavy(id, 200)).collect();
+    let answer = json!({ "view": { "role": "inbox" }, "total": 40, "offset": 10, "messages": messages });
+    let text = list(&json!({}), &answer);
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    let shown = rows(&text).len();
+    assert!(shown > 0 && shown < 25, "{shown} rows");
+    let last = 10 + shown;
+    assert!(text.starts_with(&format!("mail_list: inbox, 11-{last} of 40; next page: offset {last}\n")), "{text:.80}");
+    assert!(rows(&text).last().unwrap().starts_with(&format!("{shown} | ")), "{text:.80}");
+
+    let found = search(&json!({}), &json!({ "total": 25, "messages": answer["messages"] }));
+    assert!(found.len() <= MAX_RESULT, "{} bytes", found.len());
+    let shown = rows(&found).len();
+    assert!(found.starts_with(&format!("mail_search: 25 found, newest first; the first {shown} shown, the rest did not fit\n")), "{found:.120}");
+
+    let threaded = thread(&json!({ "id": 1 }), &json!({ "total": 25, "messages": answer["messages"] }));
+    assert!(threaded.len() <= MAX_RESULT, "{} bytes", threaded.len());
+    let shown = rows(&threaded).len();
+    assert!(
+        threaded.starts_with(&format!("thread_read: message 1, a thread of 25, oldest first; the first {shown} shown, the rest did not fit\n")),
+        "{threaded:.120}"
+    );
+    let long = thread(&json!({ "id": 1 }), &json!({ "total": 1200, "messages": answer["messages"] }));
+    let expected =
+        format!("thread_read: message 1, a thread of 1200, oldest first; of the newest 25, the first {shown} shown, the rest did not fit\n");
+    assert!(long.starts_with(&expected), "{long:.120}");
+}
+
+#[test]
+fn a_body_of_escapes_keeps_its_line_and_says_it_was_cut() {
+    let text = read_text(json!({ "readable": true, "text": tags(MAX_BODY) }), &[]);
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    let body = text.lines().find(|line| line.starts_with("body: \"")).unwrap_or_else(|| panic!("no body line: {text:.200}"));
+    assert!(body.contains(&format!(" of {} characters)", MAX_BODY + 1)), "{:.80}", &body[body.len() - 80..]);
+}
+
+#[test]
+fn heavy_headers_leave_room_for_the_body() {
+    let people: Vec<Value> = (0..50).map(|k| json!({ "name": tags(200), "address": format!("p{k}@example.org") })).collect();
+    let attachments: Vec<Value> = (0..50).map(|index| json!({ "index": index, "name": tags(200), "type": tags(200), "size": 1 })).collect();
+    let answer = json!({ "message": { "id": 1, "from": people, "to": people, "cc": people, "reply_to": people, "subject": tags(200),
+        "body": { "readable": true, "text": tags(MAX_BODY), "attachments": attachments } } });
+    let text = read(&json!({}), &answer);
+    assert!(text.len() <= MAX_RESULT, "{} bytes", text.len());
+    for key in ["from", "to", "cc", "reply_to"] {
+        let line = text.lines().find(|line| line.starts_with(&format!("{key}: "))).unwrap_or_else(|| panic!("no {key}: {text:.200}"));
+        assert!(line.contains(" more)"), "{key}: {:.80}", &line[line.len() - 80..]);
+    }
+    let attached = text.lines().find(|line| line.starts_with("attachments: ")).unwrap();
+    assert!(attached.ends_with(" more)"), "{:.80}", &attached[attached.len() - 80..]);
+    assert!(text.lines().any(|line| line.starts_with("body: \"") && line.contains(" characters)")), "{:.200}", &text[text.len() - 200..]);
 }

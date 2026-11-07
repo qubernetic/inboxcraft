@@ -7,8 +7,10 @@
 //! by [`quote`] as one JSON string: its line breaks, quotes, control characters and the characters that turn the
 //! direction of text or hide it become escapes, so it stays on its line, inside its quotes, and cannot pose as the
 //! server's own words. [`UNTRUSTED`] says so in every result that holds message text. Long lists of people and
-//! attachments are cut with a count, and a whole result is cut at [`MAX_RESULT`] bytes, so a message cannot push the
-//! untrusted line out of a model's context.
+//! attachments are cut with a count, a quoted value stops at a number of bytes as well as characters, a table holds
+//! the rows that fit in [`MAX_RESULT`] bytes and its status line counts only those, and a whole result is cut at
+//! [`MAX_RESULT`] bytes as the last guard, so a message can neither push the untrusted line out of a model's context
+//! nor hide the messages after it.
 
 use std::fmt::Write;
 
@@ -29,6 +31,15 @@ const ROW_PEOPLE: usize = 3;
 /// The people of an address field, and the attachments, `mail_read` names.
 const READ_LIST: usize = 50;
 
+/// The bytes a quoted value may take for each character it may hold: an escape takes up to 12, plain text up to 4.
+const BYTES_PER_CHAR: usize = 6;
+
+/// The bytes `mail_read` gives each address field, and the attachments.
+const READ_FIELD_BYTES: usize = 8 * 1024;
+
+/// The room a table keeps for its status line, in bytes.
+const STATUS_ROOM: usize = 512;
+
 /// The longest result, in bytes.
 pub(crate) const MAX_RESULT: usize = 64 * 1024;
 
@@ -38,32 +49,43 @@ const CUT_NOTE: usize = 100;
 /// The columns of a message line.
 const HEADER: &str = "id | date (UTC) | from | subject | flags";
 
-/// `text` as one JSON string of at most `cap` characters, with every control and direction character escaped; a
-/// cut one says how long it was after the closing quote.
+/// `text` as one JSON string of at most `cap` characters and `cap` times [`BYTES_PER_CHAR`] bytes between its quotes,
+/// with every control and direction character escaped; a cut one says how long it was after the closing quote.
 pub(crate) fn quote(text: &str, cap: usize) -> String {
+    quote_within(text, cap, cap.saturating_mul(BYTES_PER_CHAR))
+}
+
+/// [`quote`] with at most `bytes` bytes between the quotes.
+fn quote_within(text: &str, cap: usize, bytes: usize) -> String {
     let count = text.chars().count();
-    let kept: String = text.chars().take(cap).collect();
-    let mut out = String::with_capacity(kept.len().saturating_add(2));
-    out.push('"');
-    for c in kept.chars() {
+    let mut out = String::from('"');
+    let mut kept = 0_usize;
+    let mut piece = String::new();
+    for c in text.chars() {
+        piece.clear();
         match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
+            '"' => piece.push_str("\\\""),
+            '\\' => piece.push_str("\\\\"),
+            '\n' => piece.push_str("\\n"),
+            '\r' => piece.push_str("\\r"),
+            '\t' => piece.push_str("\\t"),
             c if c.is_control() || hidden(c) => {
                 // JSON has no escape beyond U+FFFF: such a character is written as its UTF-16 surrogate pair.
                 for unit in c.encode_utf16(&mut [0; 2]) {
-                    let _ = write!(out, "\\u{unit:04x}");
+                    let _ = write!(piece, "\\u{unit:04x}");
                 }
             }
-            c => out.push(c),
+            c => piece.push(c),
         }
+        if kept == cap || out.len().saturating_sub(1).saturating_add(piece.len()) > bytes {
+            break;
+        }
+        out.push_str(&piece);
+        kept = kept.saturating_add(1);
     }
     out.push('"');
-    if count > cap {
-        let _ = write!(out, " (cut: {cap} of {count} characters)");
+    if kept < count {
+        let _ = write!(out, " (cut: {kept} of {count} characters)");
     }
     out
 }
@@ -95,10 +117,22 @@ pub(crate) fn hidden(c: char) -> bool {
     )
 }
 
-/// `items` joined by `separator`, the first `shown` of them, then `(and N more)` when there are more.
-fn first(items: impl ExactSizeIterator<Item = String>, shown: usize, separator: &str) -> String {
-    let more = items.len().saturating_sub(shown);
-    let mut out = items.take(shown).collect::<Vec<_>>().join(separator);
+/// `items` joined by `separator`, the first `shown` of them that fit in `bytes`, then `(and N more)` when there are
+/// more.
+fn first(items: impl ExactSizeIterator<Item = String>, shown: usize, bytes: usize, separator: &str) -> String {
+    let total = items.len();
+    let mut out = String::new();
+    let mut taken = 0_usize;
+    for item in items.take(shown) {
+        let gap = if taken == 0 { "" } else { separator };
+        if out.len().saturating_add(gap.len()).saturating_add(item.len()) > bytes {
+            break;
+        }
+        out.push_str(gap);
+        out.push_str(&item);
+        taken = taken.saturating_add(1);
+    }
+    let more = total.saturating_sub(taken);
     if more > 0 {
         let _ = write!(out, " (and {more} more)");
     }
@@ -138,8 +172,9 @@ fn date(value: &Value) -> String {
     }
 }
 
-/// The first `shown` addresses as quoted `Name <address>`, comma-separated, and how many more; `-` for none.
-fn people(value: &Value, shown: usize) -> String {
+/// The first `shown` addresses that fit in `bytes`, as quoted `Name <address>`, comma-separated, and how many more;
+/// `-` for none.
+fn people(value: &Value, shown: usize, bytes: usize) -> String {
     let list = value.as_array().map(Vec::as_slice).unwrap_or_default();
     if list.is_empty() {
         return "-".to_owned();
@@ -151,7 +186,7 @@ fn people(value: &Value, shown: usize) -> String {
             None => quote(address, MAX_FIELD),
         }
     };
-    first(list.iter().map(person), shown, ", ")
+    first(list.iter().map(person), shown, bytes, ", ")
 }
 
 /// The flags worth a word: `unread`, `flagged`, `answered`, `draft`; `-` for none.
@@ -184,23 +219,37 @@ fn row(message: &Value) -> String {
         "{} | {} | {} | {} | {}",
         number(message, "id"),
         date(message.get("date").unwrap_or(&Value::Null)),
-        people(message.get("from").unwrap_or(&Value::Null), ROW_PEOPLE),
+        people(message.get("from").unwrap_or(&Value::Null), ROW_PEOPLE, usize::MAX),
         subject(message),
         flags(message)
     )
 }
 
-/// The status line, then the messages of `answer` one a line.
-fn table(status: &str, answer: &Value) -> String {
+/// The messages of `answer` one a line, as many as fit in [`MAX_RESULT`], under the status line `status` writes from
+/// how many are shown and whether some did not fit.
+fn table(answer: &Value, status: impl Fn(usize, bool) -> String) -> String {
     let messages = answer.get("messages").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-    let mut out = format!("{status}\n");
-    if !messages.is_empty() {
-        let _ = writeln!(out, "{UNTRUSTED}\n{HEADER}");
-        for message in messages {
-            let _ = writeln!(out, "{}", row(message));
+    let budget = MAX_RESULT.saturating_sub(STATUS_ROOM).saturating_sub(UNTRUSTED.len()).saturating_sub(HEADER.len()).saturating_sub(2);
+    let mut rows = String::new();
+    let mut shown = 0_usize;
+    for message in messages {
+        let line = row(message);
+        if rows.len().saturating_add(line.len()).saturating_add(1) > budget {
+            break;
         }
+        let _ = writeln!(rows, "{line}");
+        shown = shown.saturating_add(1);
+    }
+    let mut out = format!("{}\n", status(shown, shown < messages.len()));
+    if !messages.is_empty() {
+        let _ = write!(out, "{UNTRUSTED}\n{HEADER}\n{rows}");
     }
     cap(out)
+}
+
+/// The count of rows a status line names, as a number.
+fn count(shown: usize) -> u64 {
+    u64::try_from(shown).unwrap_or(u64::MAX)
 }
 
 /// `mail_list`: what the list shows, the page, the next page, the messages.
@@ -215,38 +264,57 @@ pub(crate) fn list(_arguments: &Value, answer: &Value) -> String {
         let _ = write!(status, " of account {account}");
     }
     let (total, offset) = (number(answer, "total"), number(answer, "offset"));
-    let shown = answer.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
-    let end = offset.saturating_add(u64::try_from(shown).unwrap_or(u64::MAX));
-    if shown == 0 {
-        let _ = write!(status, ", none of {total} here");
-    } else {
-        let _ = write!(status, ", {}-{end} of {total}", offset.saturating_add(1));
-    }
-    if end < total && shown > 0 {
-        let _ = write!(status, "; next page: offset {end}");
-    }
-    table(&status, answer)
+    table(answer, |shown, _| {
+        let mut status = status.clone();
+        let end = offset.saturating_add(count(shown));
+        if shown == 0 {
+            let _ = write!(status, ", none of {total} here");
+        } else {
+            let _ = write!(status, ", {}-{end} of {total}", offset.saturating_add(1));
+        }
+        if end < total && shown > 0 {
+            let _ = write!(status, "; next page: offset {end}");
+        }
+        status
+    })
 }
 
 /// `mail_search`: how many were found, the messages.
 pub(crate) fn search(arguments: &Value, answer: &Value) -> String {
     let total = number(answer, "total");
-    let mut status = format!("mail_search: {total} found, newest first");
-    if total > 0 && Some(total) == arguments.get("limit").and_then(Value::as_u64) {
-        status.push_str("; the limit was reached, a higher limit may find more");
-    }
-    table(&status, answer)
+    let limited = total > 0 && Some(total) == arguments.get("limit").and_then(Value::as_u64);
+    table(answer, |shown, cut| {
+        let mut status = format!("mail_search: {total} found, newest first");
+        if cut {
+            let _ = write!(status, "; the first {shown} shown, the rest did not fit");
+        } else if limited {
+            status.push_str("; the limit was reached, a higher limit may find more");
+        }
+        status
+    })
 }
 
 /// `thread_read`: how long the thread is, the messages.
 pub(crate) fn thread(arguments: &Value, answer: &Value) -> String {
     let total = number(answer, "total");
-    let shown = answer.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
-    let mut status = format!("thread_read: message {}, a thread of {total}, oldest first", number(arguments, "id"));
-    if u64::try_from(shown).unwrap_or(u64::MAX) < total {
-        let _ = write!(status, "; the newest {shown} shown");
-    }
-    table(&status, answer)
+    let given = answer.get("messages").and_then(Value::as_array).map_or(0, Vec::len);
+    let id = number(arguments, "id");
+    table(answer, |shown, cut| {
+        let mut status = format!("thread_read: message {id}, a thread of {total}, oldest first");
+        match (cut, count(given) < total) {
+            (true, true) => {
+                let _ = write!(status, "; of the newest {given}, the first {shown} shown, the rest did not fit");
+            }
+            (true, false) => {
+                let _ = write!(status, "; the first {shown} shown, the rest did not fit");
+            }
+            (false, true) => {
+                let _ = write!(status, "; the newest {given} shown");
+            }
+            (false, false) => {}
+        }
+        status
+    })
 }
 
 /// `mail_read`: where the message is, its headers one a line, its attachments, its text.
@@ -262,7 +330,7 @@ pub(crate) fn read(_arguments: &Value, answer: &Value) -> String {
     for key in ["from", "to", "cc", "reply_to"] {
         let list = message.get(key).unwrap_or(&Value::Null);
         if key == "from" || key == "to" || list.as_array().is_some_and(|list| !list.is_empty()) {
-            let _ = writeln!(out, "{key}: {}", people(list, READ_LIST));
+            let _ = writeln!(out, "{key}: {}", people(list, READ_LIST, READ_FIELD_BYTES));
         }
     }
     let _ = writeln!(out, "subject: {}", subject(message));
@@ -273,9 +341,11 @@ pub(crate) fn read(_arguments: &Value, answer: &Value) -> String {
     let body = message.get("body").unwrap_or(&Value::Null);
     let attachments = body.get("attachments").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     if !attachments.is_empty() {
-        let _ = writeln!(out, "attachments: {}", first(attachments.iter().map(attachment), READ_LIST, "; "));
+        let _ = writeln!(out, "attachments: {}", first(attachments.iter().map(attachment), READ_LIST, READ_FIELD_BYTES, "; "));
     }
-    let _ = writeln!(out, "body: {}", text(answer, body));
+    // The body takes the room the headers leave, so the cut of the whole result never drops it.
+    let room = MAX_RESULT.saturating_sub(out.len()).saturating_sub(CUT_NOTE);
+    let _ = writeln!(out, "body: {}", text(answer, body, room));
     cap(out)
 }
 
@@ -287,8 +357,8 @@ fn attachment(part: &Value) -> String {
     format!("{} {name} {kind} {size}", number(part, "index"))
 }
 
-/// The body's text, quoted parts folded and cut to [`MAX_BODY`]; or why there is none.
-fn text(answer: &Value, body: &Value) -> String {
+/// The body's text, quoted parts folded and cut to [`MAX_BODY`] characters and `room` bytes; or why there is none.
+fn text(answer: &Value, body: &Value, room: usize) -> String {
     if body.is_null() {
         return if answer.get("body_error").and_then(Value::as_str) == Some("too_large") {
             "none: the message is too large to keep on this computer".to_owned()
@@ -300,7 +370,7 @@ fn text(answer: &Value, body: &Value) -> String {
         return "none: the message cannot be read".to_owned();
     }
     match body.get("text").and_then(Value::as_str) {
-        Some(text) => quote(&fold(text), MAX_BODY),
+        Some(text) => quote_within(&fold(text), MAX_BODY, room.min(MAX_BODY.saturating_mul(BYTES_PER_CHAR))),
         None if body.get("has_html") == Some(&Value::Bool(true)) => "none: the message is HTML only, and its text is not given yet".to_owned(),
         None => "none: the message has no text".to_owned(),
     }

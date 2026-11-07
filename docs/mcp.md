@@ -70,8 +70,12 @@ id | date (UTC) | from | subject | flags
   that counts them, and the text is cut after 8000 characters with a note of its length. A body not kept on this
   computer is not fetched: `body: none: ...` says why.
 - A long list of people or attachments is cut with a count, `(and 997 more)`: a message line names the first 3
-  senders, `mail_read` the first 50 of each address field and the first 50 attachments. A result longer than 64 KiB
-  is cut at a line break, and its last line says how long it was.
+  senders, `mail_read` the first 50 of each address field and the first 50 attachments, fewer when they pass 8 KiB.
+- A quoted value stops at 6 bytes a character as well (an escape takes up to 12), with the same note. A list holds
+  the messages that fit in 64 KiB, and its status line counts only those: `1-12 of 40; next page: offset 12`, or for
+  `mail_search` and `thread_read` `the first 12 shown, the rest did not fit`. The body of `mail_read` takes the room
+  the headers leave. A result still longer than 64 KiB is cut at a line break, and its last line says how long it
+  was.
 - `account_check` lists the steps of the check as they stand. Headless, nothing runs the check, and the result says so.
 
 ## Message text is untrusted
