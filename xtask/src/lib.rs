@@ -10,6 +10,7 @@
 
 mod assets;
 mod cache_prune;
+mod changes;
 mod ci;
 mod cli;
 mod config;

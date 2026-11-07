@@ -13,6 +13,13 @@ use serde_json::{Value, json};
 use crate::params::{NoParams, decode, decode_quietly};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome, json};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ADD, CHECK, LIST, REMOVE];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["account", "address", "label", "display_name", "username", "imap", "host", "port", "security"];
+
 /// `account.list`: every account, with how its connection stands, its last failure and its last check.
 pub(crate) const LIST: CommandSpec =
     CommandSpec { id: "account.list", class: Some(AgentClass::Safe), summary: "List the accounts and how each connection stands", run: list };

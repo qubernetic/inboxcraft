@@ -15,6 +15,13 @@ use crate::params::{decode, parse_date};
 use crate::view::{self, View};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, THREAD];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
+
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
 

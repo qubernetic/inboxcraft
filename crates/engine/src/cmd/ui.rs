@@ -12,6 +12,13 @@ use crate::appearance::{AA, Accent, Appearance, CustomAccent, DARK_SURFACE, Icon
 use crate::params::decode;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ACCENT, FONT, FRAME, ICONS, MOTION, TEXT_SCALE, THEME];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["mode", "preset", "custom", "font", "icons", "percent", "reduce", "frame"];
+
 /// `ui.theme.set`: light, dark or the system's.
 pub(crate) const THEME: CommandSpec =
     CommandSpec { id: "ui.theme.set", class: Some(AgentClass::Safe), summary: "Show light, dark or what the system shows", run: theme };

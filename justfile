@@ -104,7 +104,11 @@ side-by-side *args: _up
 icon: _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example app_icon
 
-# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, spdx, test-files, layers, flatpak-sources-check, cov, wasm, deny)
+# Check the change fragments in changes/; --fold writes them into CHANGELOG.md, ROADMAP.md, docs/gaps.md and the revision tables
+changes *args: _up
+    {{ exec }} cargo xtask changes "$@"
+
+# Every gate CI runs: cargo xtask ci (fmt, clippy, tests, doctests, assets, changes, spdx, test-files, layers, flatpak-sources-check, cov, wasm, deny)
 ci: _up
     {{ exec }} cargo xtask ci
 

@@ -13,6 +13,13 @@ use serde_json::{Value, json};
 use crate::params::decode;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[SET];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["id", "seen", "folder"];
+
 /// `sample.mail.set`: mark a sample message read or unread, move it to another folder of its account, or both at
 /// once. The answer says where it was and whether it was read, so the front end can undo it.
 pub(crate) const SET: CommandSpec = CommandSpec {
