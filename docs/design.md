@@ -292,7 +292,9 @@ window asks for the next frame; once it has landed, nothing does.
   settings at the foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise
   the deep ink (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at
   24 %. Mail (Ctrl+1) and Calendar (Ctrl+2) leave the settings sheet; the settings button (Ctrl+Comma) opens the
-  settings page and closes it again. The rail is one button and 8 points either side wide, and shows on every page.
+  settings page and closes it again. Later (the Pin icon) opens "Later" on the pins, or on the pile shown last, and
+  shows as active there; Mail leaves it for the inbox. The rail is one button and 8 points either side wide, and
+  shows on every page.
 - **Folder pane** (left of the list): the app name with New message (the Compose icon, C) at its right end, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
@@ -354,7 +356,20 @@ window asks for the next frame; once it has landed, nothing does.
   goes to <group>", "<sender> goes where InboxCraft sorts it").
 - `ui_shot` can show invented waiting senders and groups instead of the sample's (`"showcase": true`, and `"step": n`
   to select by keyboard, which also shows the hover actions), `"open": {"role": "senders"}` for New senders and
-  `"view"` for the inbox view.
+  `"view"` for the inbox view; `"put_away": true` snoozes, pins, parks and marks done some of the sample's mail,
+  `"later"` opens a pile, `"show_done": true` turns "Show done" on and `"picker"` opens the time picker over the
+  selected message with that text typed.
+- **Pills under the header** (the design file's Triage page): in a folder or a view, "Show done", which lists the done
+  mail in its old place (`mail.list` with `done`), dimmed to 55 %, with "Not done" in place of Done on its hover
+  actions and on D; with it on, Done leaves the row in place, dimmed, instead of sliding it out. "Parked (n)" follows
+  while mail of the place waits on the park pile and opens it. In **Later** a pill for each pile with its count:
+  Snoozed (the snoozed folders, the one coming back first on top, each row dated by when it comes back), Pins
+  (`pin.list`) and Parked (`park.list`); an empty pile says what it is for. Pills are left out while searching.
+- **Marks on a row**: a pinned row shows the Pin (Fill, in the accent) left of the flag on the subject's line; a row
+  back from a snooze says "Returned" in the accent after the sender while it is unread. A screen reader hears
+  "pinned", "done" and "returned".
+- **Done all** on a group's card marks every message of the group read and done, one toast ("Marked n as done") whose
+  Undo brings them all back.
 - **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
   key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
   deep ink, whichever reads at 4.5:1 on every stop).
@@ -379,13 +394,20 @@ the icon sits among others at the same size.
   room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
   as the list's hover actions do (the toast with Undo follows); Move to a folder opens a menu ("Move to") of the
   folders of the message's account that hold mail but its own, each by its full path, and the one chosen moves it
-  there; with none it is drawn disabled. An action without a command is drawn disabled and its tooltip says "Not
-  available yet": Snooze and Pin wait for theirs.
+  there; with none it is drawn disabled. Snooze (H) opens the time picker under it ("Snooze until", the presets of
+  `schedule.presets` still ahead, a typed time, Snooze); on a message in a sent folder the same button is "Remind me
+  if no reply" and its picker ("Remind me if no reply by", Remind me) sets the follow-up reminder. The picker is a
+  menu that a click outside, Cancel or Escape closes. Pin pins the open message, and shows as active ("Take the pin
+  off") while it is pinned. Each is an act with a toast and Undo ("Snoozed until <time>", "Reminder set for <time>",
+  "Pinned", "Pin taken off").
 - **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
-  unread (R) for the open message, then Full width or Leave full width, Close, and the next-message rule ("When a
+  unread (R) for the open message, Park or Take off the park pile, Bring back now for a snoozed message, Take the
+  reminder off for one with a reminder, then Full width or Leave full width, Close, and the next-message rule ("When a
   message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.
 - **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
   under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
+  Chips beside the group's say until when the message is snoozed ("Snoozed until Sat 08:00"), when its reminder is
+  due ("Reminder Mon 09:00") and "Returned" while it is unread after a snooze; a screen reader hears each in full.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
   colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
   strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
@@ -445,10 +467,11 @@ the icon sits among others at the same size.
   the signature under "-- "; another account in From swaps it while it is still at the end as it was.
 - **Triage page**: the settings sheet's Triage section (the Funnel icon; the design file draws only its place in the
   list of sections). Screener: segmented Before the inbox, Inside, marked, and Off (`screener.mode`), with what each
-  does. Inbox: segmented Cards, Grouped list and Simple list. Then "Grouped inbox" and a row per account (the At icon,
-  its name, a note with its address) with a switch, "Group the inbox of <account>" to a screen reader
-  (`group.account`). The mode and the view are kept in `triage.json` beside `appearance.json`; the sample window
-  takes the kept view but keeps its own mode and never writes it.
+  does. Inbox: segmented Cards, Grouped list and Simple list. "Keep pins on done mail": a switch (`pin.set`). Then
+  "Grouped inbox" and a row per account (the At icon, its name, a note with its address) with a switch, "Group the
+  inbox of <account>" to a screen reader (`group.account`). The mode, the view and the pin switch are kept in
+  `triage.json` beside `appearance.json`; the sample window takes the kept view and pin switch but keeps its own mode
+  and never writes it.
 
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a

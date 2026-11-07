@@ -383,20 +383,21 @@ B = blocks the next stage.
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
 - Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
-  group card does nothing yet (E3.3). In the grouped inbox (cards or grouped list) the arrow keys still step through
+  group card marks the whole group done with one Undo (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
   the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
   one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
   group menu is a right click on a row or the reader's More menu; it has no key. The rail
   holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
-  engine's commands (#131). Done means "read, and into the account's Archive", a stand-in until E3.3 says what Done
-  is; in the Archive it only marks the row read. Flag and Archive have keys (S, A) but no hover button: the design's
-  hover group is Done, read, Delete and Snooze. The leaving row slides out but the rows below jump up rather than
+  engine's commands (#131). Done marks the message read and done (`mail.done`, #135); on a done row under "Show
+  done" it is "Not done". Flag and Archive have keys (S, A) but no hover button: the design's hover group is Done,
+  read, Delete and Snooze, and the hover Snooze stays disabled ("Open the message to snooze it") because the time
+  picker opens from the reader only (#135). The leaving row slides out but the rows below jump up rather than
   close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
 - Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
-  from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze and Pin are not wired to
-  their commands yet (#126, #127): they are drawn disabled with "Not available yet" in their tooltips. More also holds Full width,
+  from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
+  open message (#135). More also holds Full width,
   Close and the next-message rule; Escape leaves full width but does not close the
   reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
   still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the

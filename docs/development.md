@@ -85,8 +85,8 @@ try:
 - the folder pane, the unified views, narrowing to one account, opening a folder, and the search;
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
-- the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and moves it to its
-  account's Archive, R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+- the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
+  in its account's Archive ("Show done" over the list shows it there again, dimmed), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
   toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
   slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
@@ -102,6 +102,9 @@ try:
   open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
   puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
   list, simple list) and each account's grouping. Each act has a toast with Undo.
+- done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
+  same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
+  lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
