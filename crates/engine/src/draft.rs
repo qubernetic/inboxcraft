@@ -208,7 +208,7 @@ pub(crate) fn uploads(context: &Context<'_>) -> Result<(Batch, Vec<Pending>), En
             let flags: Flags = [Flag::Seen, Flag::Draft].into_iter().collect();
             let kind =
                 JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw, draft: Some(draft.id), message: None };
-            jobs.push(Pending { account: account.id(), kind, message: None, keep: true });
+            jobs.push(Pending { account: account.id(), kind, message: None, keep: true, until: None });
         }
         batch.push(Change::PutDraft(Draft { synced: Some(draft.saved), ..draft }));
     }

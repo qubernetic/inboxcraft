@@ -69,7 +69,7 @@ fn run_everything(session: &mut Session, params: &Value) {
 
 #[test]
 fn hostile_params_never_panic() {
-    for mut session in [session(), sample_session()] {
+    for mut session in [session(), sample_session(), super::calendar_tests::session()] {
         for value in junk() {
             run_everything(&mut session, &value);
             for field in fields() {
@@ -105,6 +105,30 @@ proptest! {
     fn random_params_never_panic(params in hostile_value()) {
         for mut session in [session(), sample_session()] {
             run_everything(&mut session, &params);
+        }
+    }
+}
+
+#[test]
+fn calendar_writes_with_one_hostile_field_never_panic() {
+    let bases = [
+        ("event.create", json!({ "calendar": 1, "summary": "A", "start": "2026-11-12T10:00:00Z" })),
+        ("event.update", json!({ "id": 1, "summary": "A" })),
+        ("event.update", json!({ "id": 4, "start": "2026-11-20" })),
+        ("event.list", json!({ "from": "2026-11-05", "to": "2026-11-12" })),
+        ("calendar.server", json!({ "account": 1, "url": "https://dav.example.org/" })),
+    ];
+    let mut session = super::calendar_tests::session();
+    for (id, base) in bases {
+        for field in fields() {
+            for value in junk() {
+                let mut params = base.clone();
+                if let Value::Object(map) = &mut params {
+                    map.insert(field.to_owned(), value.clone());
+                }
+                let result = session.run(id, &params);
+                assert!(!matches!(result, Err(EngineError::Panicked(_))), "{id} panicked on {params}");
+            }
         }
     }
 }

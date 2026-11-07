@@ -5,7 +5,7 @@ use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 use proptest::prelude::*;
 
 use super::{Alarm, Attendee, Class, Event, PartStat, Status, Trigger};
-use crate::{Component, Date, Frequency, IcalError, Property, Rule, Span, When, parse};
+use crate::{Component, Date, Frequency, IcalError, Param, Property, Rule, Span, When, parse};
 
 fn civil(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> CivilDateTime {
     CivilDateTime::new(year, month, day, hour, minute, 0).unwrap()
@@ -94,6 +94,7 @@ fn reads_every_field_it_knows_and_keeps_the_rest() {
             role: Some("REQ-PARTICIPANT".into()),
             status: PartStat::Accepted,
             rsvp: true,
+            params: vec![],
         }
     );
     assert_eq!(event.attendees[1].status, PartStat::Other("X-PONDERING".into()));
@@ -193,6 +194,38 @@ fn writes_an_event() {
     assert!(text.contains("DTEND;VALUE=DATE:20261225") && !text.contains("DURATION"));
 }
 
+#[test]
+fn an_attendee_keeps_the_parameters_it_does_not_read() {
+    let text = "BEGIN:VEVENT\r\nUID:8@example.org\r\nDTSTART:20261109T090000Z\r\n\
+        ORGANIZER;SCHEDULE-AGENT=CLIENT;CN=Anna:mailto:anna@example.org\r\n\
+        ATTENDEE;CUTYPE=INDIVIDUAL;SCHEDULE-AGENT=CLIENT;X-SEEN=\"a,b\",c;CN=Bela;RSVP=TRUE:mailto:bela@example.org\r\nEND:VEVENT\r\n";
+    let event = read(text).unwrap();
+    let bela = &event.attendees[0];
+    assert_eq!((bela.name.as_deref(), bela.rsvp), (Some("Bela"), true));
+    let names: Vec<&str> = bela.params.iter().map(Param::name).collect();
+    assert_eq!(names, ["CUTYPE", "SCHEDULE-AGENT", "X-SEEN"]);
+    assert_eq!(bela.params[2].values(), ["a,b", "c"]);
+    assert_eq!(event.organizer.as_ref().unwrap().params, [Param::new("SCHEDULE-AGENT", vec!["CLIENT".into()])]);
+    // Written back as they came, after the ones it reads.
+    let written = event.to_component().write().unwrap();
+    let unfolded = written.replace("\r\n ", "");
+    assert!(unfolded.contains("ORGANIZER;CN=Anna;SCHEDULE-AGENT=CLIENT:mailto:anna@example.org"), "{written}");
+    assert!(unfolded.contains("ATTENDEE;CN=Bela;RSVP=TRUE;CUTYPE=INDIVIDUAL;SCHEDULE-AGENT=CLIENT;X-SEEN=\"a,b\",c:mailto:"), "{written}");
+    assert_eq!(read(&written).unwrap().attendees, event.attendees);
+}
+
+#[test]
+fn a_parameter_set_on_an_attendee_replaces_the_one_it_had() {
+    let mut bela = Attendee::new("mailto:bela@example.org");
+    bela.set_param("schedule-agent", "SERVER");
+    bela.set_param("SCHEDULE-AGENT", "CLIENT");
+    assert_eq!(bela.params, [Param::new("SCHEDULE-AGENT", vec!["CLIENT".into()])]);
+    assert_eq!(bela.param("Schedule-Agent"), Some("CLIENT"));
+    assert_eq!(bela.param("CUTYPE"), None);
+    // An empty list of values is one empty value.
+    assert_eq!(Param::new("x-empty", vec![]).values(), [""]);
+}
+
 fn when() -> impl Strategy<Value = When> {
     let civil = (1990i32..2040, 1u8..=12, 1u8..=28, 0u8..24, 0u8..60, 0u8..60)
         .prop_map(|(y, mo, d, h, mi, s)| CivilDateTime::new(y, mo, d, h, mi, s).unwrap());
@@ -218,7 +251,7 @@ fn attendee() -> impl Strategy<Value = Attendee> {
         PartStat::Other("X-LATER".into()),
     ]);
     ("mailto:[a-z]{1,8}@example\\.org", prop::option::of("[ -~é]{0,16}"), prop::option::of("[A-Z-]{1,12}"), status, any::<bool>())
-        .prop_map(|(address, name, role, status, rsvp)| Attendee { address, name, role, status, rsvp })
+        .prop_map(|(address, name, role, status, rsvp)| Attendee { address, name, role, status, rsvp, params: vec![] })
 }
 
 fn alarm() -> impl Strategy<Value = Alarm> {
