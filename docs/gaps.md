@@ -378,27 +378,24 @@ B = blocks the next stage.
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
-- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: they
-  wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
+- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: the
+  screener's commands exist (#124) and the card waits for the UI slice, the grouped inbox for E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
   there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
   holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
-- Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
-  they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
-  that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
-  Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
-  be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
-  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) can be changed on
-  the Shortcuts page (#130).
-- Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
-  `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
-  (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
-  for the composer (E2.3). They are drawn disabled with "Not available yet" in their
-  tooltips. More holds Full width, Close and the next-message rule; Escape leaves full width but does not close the
+- Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
+  engine's commands (#131). Done means "read, and into the account's Archive", a stand-in until E3.3 says what Done
+  is; in the Archive it only marks the row read. Flag and Archive have keys (S, A) but no hover button: the design's
+  hover group is Done, read, Delete and Snooze. The leaving row slides out but the rows below jump up rather than
+  close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
+- Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
+  from More (#131); Snooze and Pin wait for their commands (E3.3, E3.5), Reply, Reply all and Forward for the
+  composer (E2.3). They are drawn disabled with "Not available yet" in their tooltips. More also holds Full width,
+  Close and the next-message rule; Escape leaves full width but does not close the
   reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
   still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
-  More menu or hover a link, so neither has a picture; the UI tests cover both. The thread's earlier messages fold
+  More menu or the Move menu or hover a link, so none of them has a picture; the UI tests cover them. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the

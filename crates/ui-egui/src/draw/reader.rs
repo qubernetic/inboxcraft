@@ -5,11 +5,13 @@
 //! largest text of the window, which wraps rather than being cut, and who wrote in the thread. The thread follows as
 //! cards, oldest first: the open message and the ones the owner unfolded in full (each message's header, the
 //! remote-content banner, the body and the attachment tiles; Reply, Reply all and Forward on the open one), the rest
-//! folded to one line. More holds what is not a mail action: full width, closing the reader and the next-message
-//! rule. While the pointer is on a link, a float at the bottom says where it goes.
+//! folded to one line. More holds flag and read or unread for the open message, then what is not a mail action: full
+//! width, closing the reader and the next-message rule. Move to a folder opens a menu of the folders of the message's
+//! account. While the pointer is on a link, a float at the bottom says where it goes.
 //!
-//! Actions without a command are drawn disabled, and their tooltips say so. Done and Delete act on the sample mailbox
-//! as the hover actions of the list do.
+//! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
+//! real account as on the sample. Actions without a command (Snooze, Pin) are drawn disabled, and their tooltips say
+//! so.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -67,7 +69,7 @@ pub(super) enum Asked {
     Copy(String),
     /// Hide the notice.
     Dismiss,
-    /// Do `Act` to a message (the sample mailbox only, for now).
+    /// Do `Act` to a message.
     Act(u64, Act),
 }
 
@@ -108,9 +110,23 @@ fn divider(ui: &mut Ui, theme: &Theme) {
     ui.painter().vline(rect.center().x, rect.shrink2(vec2(0.0, side / 4.0)).y_range(), Stroke::new(1.0, theme.palette.line));
 }
 
-/// The More menu: full width, close, and the next-message rule.
+/// The More menu: flag and read or unread for the open message, full width, close, and the next-message rule.
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
+    let open = reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id));
+    if let Some(row) = open {
+        let (name, act) = if row.flagged { (tr!("Take the flag off"), Act::Unflag) } else { (tr!("Flag"), Act::Flag) };
+        if popup::item(ui, theme, keymap, IconId::Flag, name, Some(keymap::FLAG)).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        let (icon, name, act) =
+            if row.seen { (IconId::Mail, tr!("Mark as unread"), Act::Unread) } else { (IconId::MarkRead, tr!("Mark as read"), Act::Read) };
+        if popup::item(ui, theme, keymap, icon, name, Some(keymap::READ)).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        ui.add_space(theme.spacing.xs);
+        ui.separator();
+    }
     let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
     if popup::entry(ui, theme, keymap, name, None).clicked() {
         drawn.asked.push(Asked::FullWidth(full));
@@ -129,11 +145,33 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     }
 }
 
+/// Move to a folder: a menu of the folders of the open message's account but its own; the one chosen moves it there.
+fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let button = IconButton::new(IconId::Move, tr!("Move to a folder"));
+    let (Some(id), false) = (open, open.is_none_or(|id| mailbox.move_targets(id).is_empty())) else {
+        button.unavailable(tr!("No folder to move it to")).show(ui, theme, keymap);
+        return;
+    };
+    let response = button.show(ui, theme, keymap);
+    let width = theme.fonts.body.size * MENU_WIDTH;
+    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            ui.label(RichText::new(tr!("Move to")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            for folder in mailbox.move_targets(id) {
+                // The full path, so a folder inside another says where it is.
+                if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
+                    drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
+                }
+            }
+        })
+    });
+}
+
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let open = reader.open_id().filter(|_| mailbox.can_act());
+    let open = reader.open_id();
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
     // In the top row the window controls sit at the end of the actions' line.
     super::frame::beside(ui, theme, |ui| {
@@ -155,12 +193,12 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                     button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
                 action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
-                action(ui, IconId::Archive, tr!("Archive"), None);
+                action(ui, IconId::Archive, tr!("Archive"), Some((Act::Archive, keymap::ARCHIVE)));
                 action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
                 divider(ui, theme);
                 action(ui, IconId::Snooze, tr!("Snooze"), None);
                 action(ui, IconId::Pin, tr!("Pin"), None);
-                action(ui, IconId::Move, tr!("Move to a folder"), None);
+                move_to(ui, theme, keymap, mailbox, open, drawn);
                 divider(ui, theme);
                 let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
                 let width = theme.fonts.body.size * MENU_WIDTH;

@@ -40,7 +40,11 @@
 //! - Drafts (`draft`): `compose.new`, `compose.update`, `compose.show`, `compose.list` and `compose.discard`
 //!   (`safe`) keep a draft in the store at every change, from the account that last sent and with its signature
 //!   (`compose.signature`, `owner`), its recipients checked; [`Session::tick`] copies a draft that has been still a
-//!   while to the Drafts folder, each copy replacing the one before.
+//!   while to the Drafts folder, each copy replacing the one before where the server names it.
+//! - The screener (`screener.*`): new mail from a sender the owner neither knows nor decided is held before the
+//!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
+//!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
+//!   decision back. A blocked sender's mail goes to `InboxCraft/Blocked` and is never fetched.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -75,6 +79,7 @@ mod undo;
 mod view;
 mod write;
 
+pub use arrive::screener::ScreenerMode;
 pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};

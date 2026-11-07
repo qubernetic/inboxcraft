@@ -15,6 +15,7 @@ use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
 use serde_json::Value;
 
+use crate::ScreenerMode;
 use crate::act::Effects;
 use crate::appearance::Appearance;
 use crate::draft;
@@ -36,6 +37,8 @@ pub struct Outcome {
     appearance: Option<Appearance>,
     /// What the command does to the undo history.
     undo: Option<Step>,
+    /// The screener's mode from now on.
+    screener: Option<ScreenerMode>,
 }
 
 /// A job before it has an id.
@@ -53,7 +56,7 @@ impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None, screener: None }
     }
 
     /// The outcome with `change` to make in the store.
@@ -110,6 +113,12 @@ impl Outcome {
     /// The outcome changing the appearance choices to `appearance`.
     pub(crate) fn with_appearance(mut self, appearance: Appearance) -> Self {
         self.appearance = Some(appearance);
+        self
+    }
+
+    /// The outcome changing the screener's mode to `mode`.
+    pub(crate) fn with_screener(mut self, mode: ScreenerMode) -> Self {
+        self.screener = Some(mode);
         self
     }
 
@@ -195,6 +204,9 @@ pub(crate) struct State {
     pub(crate) remote_senders: BTreeSet<String>,
     /// The owner's appearance choices; the front end keeps them on disk and hands them back at the start.
     pub(crate) appearance: Appearance,
+    /// What the screener does with the first mail of an unknown sender; the front end keeps it on disk and hands it
+    /// back at the start.
+    pub(crate) screener: ScreenerMode,
     /// The id the next added account gets: past every id this session has held, so a removed account's id is not
     /// given again and a late event of its worker cannot land on a new account.
     pub(crate) next_account: u64,
@@ -405,6 +417,17 @@ impl Session {
         self.state.appearance = appearance;
     }
 
+    /// The screener's mode, as `screener.mode` left it.
+    #[must_use]
+    pub fn screener(&self) -> ScreenerMode {
+        self.state.screener
+    }
+
+    /// Takes the screener's mode kept from an earlier run.
+    pub fn set_screener(&mut self, mode: ScreenerMode) {
+        self.state.screener = mode;
+    }
+
     /// Takes the computer's offset from UTC over time; until then the session works in UTC.
     pub fn set_offsets(&mut self, offsets: Box<dyn Offsets>) {
         self.offsets = offsets;
@@ -434,18 +457,35 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         if let Some(step) = undo {
             crate::undo::take(&mut self.state.history, step);
         }
+        let mut made = BTreeSet::new();
         for change in batch.changes() {
             match change {
                 Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
                 Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
                 Change::PutDraft(draft) => self.state.next_draft = self.state.next_draft.max(draft.id.get().saturating_add(1)),
+                Change::PutFolder(folder) => {
+                    self.state.next_folder = self.state.next_folder.max(folder.id().get().saturating_add(1));
+                    made.insert(folder.account());
+                }
                 _ => {}
             }
+        }
+        // A folder a command made takes its role at once.
+        for account in made {
+            // The batch is made: a store that cannot list the folders now leaves the roles to the next folder list.
+            let Ok(folders) = self.store.folders(account) else { continue };
+            let held = self.state.accounts.entry(account).or_default();
+            let questions = held.roles.detect(&folders);
+            held.ask.extend(questions);
+            held.ask.retain(|role| held.roles.folder(*role).is_none());
+        }
+        if let Some(mode) = screener {
+            self.state.screener = mode;
         }
         for account in removed {
             self.state.accounts.remove(&account);

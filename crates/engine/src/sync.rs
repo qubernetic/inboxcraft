@@ -42,7 +42,6 @@ impl Plan {
     }
 
     /// An act's changes and kept jobs, as a stage of the arriving-mail pipeline adds them.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that act come with the triage slices"))]
     pub(crate) fn effects(&mut self, effects: Effects) {
         for change in effects.changes {
             self.change(change);
@@ -160,6 +159,16 @@ fn same_path(a: &FolderPath, b: &FolderPath) -> bool {
 /// folder that holds mail is synced, the inbox first, and the inbox is watched.
 fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &[FolderListing]) -> Result<bool, EngineError> {
     let held = store.folders(account)?;
+    // Our own folders on their way to the server: kept, and synced once the server lists them.
+    let making: Vec<FolderPath> = store
+        .queued_jobs()?
+        .into_iter()
+        .filter(|job| job.account == account)
+        .filter_map(|job| match job.kind {
+            JobKind::CreateFolder { path } => Some(path),
+            _ => None,
+        })
+        .collect();
     let mut next: Vec<Folder> = Vec::new();
     for listing in listings {
         if next.iter().any(|folder| same_path(folder.listing().path(), listing.path())) {
@@ -173,7 +182,13 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
         }
         next.push(folder);
     }
-    for gone in held.iter().filter(|folder| next.iter().all(|kept| kept.id() != folder.id())) {
+    let listed = next.len();
+    let missing: Vec<&Folder> = held.iter().filter(|folder| next.iter().all(|kept| kept.id() != folder.id())).collect();
+    for gone in missing {
+        if making.iter().any(|path| same_path(path, gone.listing().path())) {
+            next.push(gone.clone());
+            continue;
+        }
         plan.change(Change::RemoveFolder(gone.id()));
         plan.state.validity.remove(&gone.id());
     }
@@ -182,7 +197,7 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
     held_state.ask.extend(questions);
     held_state.ask.retain(|role| held_state.roles.folder(*role).is_none());
     let inbox = held_state.roles.folder(Role::Inbox);
-    let mut order: Vec<&Folder> = next.iter().filter(|folder| folder.listing().is_selectable()).collect();
+    let mut order: Vec<&Folder> = next.iter().take(listed).filter(|folder| folder.listing().is_selectable()).collect();
     order.sort_by_key(|folder| Some(folder.id()) != inbox);
     for folder in order {
         let known = if held.iter().any(|old| old.id() == folder.id()) { store.folder_state(folder.id())? } else { None };
