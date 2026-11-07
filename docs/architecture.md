@@ -30,6 +30,15 @@ engine's state.
 | `FetchBody` | fetches one whole message | `BodyFetched` |
 | `Idle` | watches the folder between jobs (IDLE, or a resync every few minutes without it) until another `Idle` moves the watch | the same change events as `SyncFolder`, after each change and each reconnect |
 | `Check` | the account check, at once and on a connection of its own, also while offline or halted: DNS, TCP, TLS, the certificate, the IMAP sign-in | one `CheckStep` per step of `CheckStep::ALL`, in order |
+| `StoreFlags` | sets and clears flags of messages (`UID STORE`) | `MessagesChanged` with the flags the server now has, `FlagsStored` last |
+| `Move` | moves messages to another folder of the account (`UID MOVE`, or `UID COPY`, `\Deleted` and `UID EXPUNGE`) | `Moved`, with the new UIDs where the server gives them (`COPYUID`) |
+| `Expunge` | removes messages for good: `\Deleted` on them and `UID EXPUNGE` of their UIDs only | `Expunged` |
+| `Append` | adds a message to a folder (`APPEND`) | `Appended`, with its UID where the server gives it (`APPENDUID`) |
+| `CreateFolder` | creates a folder (`CREATE`) | `FolderCreated` |
+
+The write jobs (`JobKind::writes`) are the owner's acts: they are kept in the store's queue until their last event.
+The worker runs them from the IMAP write path (M2b); until then it answers each with `Failed`, and the engine takes
+the act back.
 
 On its own, without a job, the worker reports `Connection` (offline, connecting, online, watching, backing off)
 and `Failed` with one `ErrorKind` per cause (host not found, each certificate fault, STARTTLS missing, login
@@ -54,6 +63,10 @@ with nothing changed. Events go the same way: `Session::apply` plans the changes
 | `FolderSynced` | the folder's state recorded for the next sync |
 | `Connection`, `Failed` | shown by `account.list`; online again clears the failure; a failed `FetchBody` job ends its fetch |
 | `CheckStep` | the step takes its place in the account's running check (from `account.check`), shown by `account.list`; the last step ends the check; a step of another job is dropped |
+| `FlagsStored`, `Expunged`, `Appended` | the write's job ends; `Expunged` removes the messages if a sync has not yet |
+| `Moved` | each moved message takes its server UID in the folder it went to; one the owner moved on or flagged meanwhile gets the jobs for that now; with no new UIDs it goes, and that folder is synced again |
+| `FolderCreated` | the folder list is asked for, which brings the new folder |
+| `Failed` of a write | the act is taken back: flags as they were, a moved message back where the server keeps it (both folders synced again), a whole resync of the folder after a failed delete for good |
 
 An event for an account or folder the store does not hold, or with UIDs of another UIDVALIDITY than the folder's
 current one, is dropped; only a failure of a `FetchBody` job still ends its fetch. The read commands are `account.list`, `folder.list` (with the unified views: one role
@@ -76,6 +89,27 @@ The appearance commands (`ui.theme.set`, `ui.accent.set`, `ui.font.set`, `ui.ico
 answer the whole of it. The engine checks the values and makes a custom accent readable; it keeps nothing on disk.
 The front end installs a changed appearance in the frame it finds it and keeps it in a file of the config folder
 (`ui-egui::keep`), handing it back to the session with `Session::set_appearance` at the next start.
+
+The acts on messages are `mail.flag`, `mail.seen` (read and unread), `mail.open` (`mail.read`, and the message
+marked read), all `safe`, and `mail.move`, `mail.archive` (to the account's Archive folder) and `mail.delete`
+(to the account's Trash; a message in the Trash goes for good), all `owner`. An act changes the store at once and
+queues a kept write job (`engine::act`). A moved message keeps its id: it goes to the new folder under a UID of
+ours, from the top of the UID range down (servers count up from 1), with `Message::moving` noting the folder, UID
+and flags the server has; the `Moved` answer gives it the server's UID there (`engine::write`). An act on a message
+whose move is on its way only changes the store: once the answer names the message's place, the engine sends the
+flags it has and moves it on to the folder it is in by then, so an undo of an archive made offline works. Server
+events never touch a UID of ours, and a server UID that takes one moves ours aside. A message still on its way
+cannot be deleted for good yet (`still_moving`), and its body is fetched once it has arrived.
+
+Each act but a delete for good stores its inverse in the session's undo history (`engine::undo`, at most 100 acts,
+for the session only); `history.undo` (`safe`) takes the newest back and can be run again to walk further. An agent
+undoes only an act an agent may make, and an act whose message or folder is gone is passed over. In the sample
+mailbox, and in a folder before its first sync, the acts change the store and queue no job.
+
+New messages go through the arriving-mail pipeline (`engine::arrive`) after the sync put them in its batch: each
+message passes each stage in order, and a stage adds store changes, kept jobs or an act (a move, say) to the same
+batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; none is built
+in yet, the triage, outbox and calendar slices bring them.
 
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with

@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The jobs of the read path: what the engine asks an account's `net` worker to do.
+//! The jobs: what the engine asks an account's `net` worker to do, to read and to write.
 //!
 //! They live here, not in `engine`, because `net` (layer 3) may not depend on `engine` (layer 4). A job carries
 //! everything the worker needs, so the worker never reads the engine's state.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, FolderId, FolderPath, JobId, ModSeq, Uid, UidValidity};
+use crate::{AccountId, Flags, FolderId, FolderPath, JobId, ModSeq, Uid, UidSet, UidValidity};
 
 /// What we know of a folder from the last sync: where a resync starts (CONDSTORE and QRESYNC, RFC 7162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +101,67 @@ pub enum JobKind {
         /// Its path on the server.
         path: FolderPath,
     },
+    /// Set and clear flags of messages (`UID STORE`); answered with their flags as the server now has them
+    /// ([`crate::EventKind::MessagesChanged`]) and [`crate::EventKind::FlagsStored`] last.
+    StoreFlags {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+        /// The flags to set.
+        add: Flags,
+        /// The flags to clear.
+        remove: Flags,
+    },
+    /// Move messages to another folder of the account (`UID MOVE`, or `UID COPY`, `\Deleted` and `UID EXPUNGE` where
+    /// the server has no MOVE); answered with [`crate::EventKind::Moved`], which carries their new UIDs where the
+    /// server gives them (`COPYUID`).
+    Move {
+        /// Our id of the folder they are in.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+        /// Our id of the folder they go to.
+        to: FolderId,
+        /// Its path on the server.
+        to_path: FolderPath,
+    },
+    /// Remove messages for good: `\Deleted` on them and `UID EXPUNGE` of these UIDs only, so nothing else marked
+    /// deleted goes with them; answered with [`crate::EventKind::Expunged`].
+    Expunge {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+    },
+    /// Add a message to a folder (`APPEND`); answered with [`crate::EventKind::Appended`].
+    Append {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The flags it gets.
+        flags: Flags,
+        /// The message (RFC 5322 bytes).
+        raw: Vec<u8>,
+    },
+    /// Create a folder (`CREATE`); answered with [`crate::EventKind::FolderCreated`].
+    CreateFolder {
+        /// Its path on the server.
+        path: FolderPath,
+    },
 }
 
 impl JobKind {
@@ -108,9 +169,21 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList | Self::Check { .. } => None,
-            Self::SyncFolder { folder, .. } | Self::FetchBody { folder, .. } | Self::Idle { folder, .. } => Some(*folder),
+            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } => None,
+            Self::SyncFolder { folder, .. }
+            | Self::FetchBody { folder, .. }
+            | Self::Idle { folder, .. }
+            | Self::StoreFlags { folder, .. }
+            | Self::Move { folder, .. }
+            | Self::Expunge { folder, .. }
+            | Self::Append { folder, .. } => Some(*folder),
         }
+    }
+
+    /// Whether the job changes something on the server: an act of the owner, which must not be lost.
+    #[must_use]
+    pub fn writes(&self) -> bool {
+        matches!(self, Self::StoreFlags { .. } | Self::Move { .. } | Self::Expunge { .. } | Self::Append { .. } | Self::CreateFolder { .. })
     }
 }
 

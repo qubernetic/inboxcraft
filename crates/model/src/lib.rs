@@ -69,7 +69,7 @@ mod uid_set;
 pub use account::{Account, AccountError, Host, Security, Server};
 pub use address::{Address, AddressError, EmailAddress, MAX_NAME_CHARS, labels};
 pub use check::{CheckStep, MAX_ISSUER_CHARS, StepReport, StepStatus};
-pub use event::{ConnectionState, ErrorKind, Event, EventKind, FlagChange};
+pub use event::{ConnectionState, Copied, ErrorKind, Event, EventKind, FlagChange};
 pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};

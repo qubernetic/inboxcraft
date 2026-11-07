@@ -55,3 +55,43 @@ fn a_job_from_storage_is_checked() {
     let json = r#"{"id":1,"account":1,"kind":{"FetchBody":{"folder":2,"path":{"name":"INBOX","delimiter":"/"},"uid_validity":7,"uid":0}}}"#;
     assert!(serde_json::from_str::<Job>(json).is_err());
 }
+
+#[test]
+fn every_write_job_names_its_folder_and_round_trips() {
+    let account = AccountId::new(1);
+    let folder = FolderId::new(2);
+    let validity = UidValidity::new(7).unwrap();
+    let uids: crate::UidSet = [Uid::new(9).unwrap(), Uid::new(10).unwrap()].into_iter().collect();
+    let seen: crate::Flags = [crate::Flag::Seen].into_iter().collect();
+    let archive = FolderPath::new("Archive", Some('/')).unwrap();
+    let jobs = [
+        (
+            JobKind::StoreFlags {
+                folder,
+                path: inbox(),
+                uid_validity: validity,
+                uids: uids.clone(),
+                add: seen.clone(),
+                remove: crate::Flags::default(),
+            },
+            Some(folder),
+        ),
+        (
+            JobKind::Move { folder, path: inbox(), uid_validity: validity, uids: uids.clone(), to: FolderId::new(3), to_path: archive.clone() },
+            Some(folder),
+        ),
+        (JobKind::Expunge { folder, path: inbox(), uid_validity: validity, uids }, Some(folder)),
+        (JobKind::Append { folder, path: inbox(), flags: seen, raw: b"Subject: Hi\r\n\r\nHello".to_vec() }, Some(folder)),
+        (JobKind::CreateFolder { path: archive }, None),
+    ];
+    for (id, (kind, expected)) in (10..).zip(jobs) {
+        assert!(kind.writes(), "{kind:?}");
+        let job = Job::new(JobId::new(id), account, kind);
+        assert_eq!(job.kind.folder(), expected, "{job:?}");
+        let json = serde_json::to_string(&job).unwrap();
+        assert_eq!(serde_json::from_str::<Job>(&json).unwrap(), job);
+    }
+    for kind in [JobKind::SyncFolderList, JobKind::Check { by_owner: true }, JobKind::Idle { folder, path: inbox() }] {
+        assert!(!kind.writes(), "{kind:?}");
+    }
+}

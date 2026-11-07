@@ -102,14 +102,20 @@ struct ReadParams {
 
 fn read(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: ReadParams = decode(READ.id, params)?;
-    let id = MessageId::new(params.id);
+    read_one(context, params.id)
+}
+
+/// `mail.read` of the message `id`.
+pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, EngineError> {
+    let id = MessageId::new(number);
     let store = context.store();
-    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let entry = store.message(id)?.ok_or(EngineError::NotFound { what: "message", id: number })?;
     let message = entry.message();
     let body = store.body(id)?;
     let too_large = body.is_none() && context.state().too_large.contains(&id);
     let fetch = match (&body, context.state().validity.get(&message.folder())) {
-        (None, Some(uid_validity)) if !too_large => {
+        // A message whose move is on its way has no UID of the server's yet; its body comes once it has.
+        (None, Some(uid_validity)) if !too_large && message.moving().is_none() => {
             store.folders(message.account())?.into_iter().find(|folder| folder.id() == message.folder()).map(|folder| JobKind::FetchBody {
                 folder: folder.id(),
                 path: folder.listing().path().clone(),

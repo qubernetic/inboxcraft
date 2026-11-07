@@ -51,6 +51,9 @@ pub(crate) fn all() -> Vec<CommandSpec> {
 #[path = "account_tests.rs"]
 mod account_tests;
 #[cfg(test)]
+#[path = "act_tests.rs"]
+pub(crate) mod act_tests;
+#[cfg(test)]
 #[path = "add_tests.rs"]
 mod add_tests;
 #[cfg(test)]

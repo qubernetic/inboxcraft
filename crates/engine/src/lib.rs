@@ -47,7 +47,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod act;
 pub mod appearance;
+mod arrive;
 mod class;
 mod cmd;
 mod error;
@@ -56,7 +58,9 @@ mod params;
 mod registry;
 mod session;
 mod sync;
+mod undo;
 mod view;
+mod write;
 
 pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;

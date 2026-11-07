@@ -66,6 +66,11 @@ pub fn mailbox() -> Memory {
     store
 }
 
+/// Makes `change` in the session's store, as an earlier event or another session would have.
+pub fn change(session: &mut Session, change: Change) {
+    session.store_mut().apply(&Batch::new().with(change)).unwrap();
+}
+
 pub fn session_with(store: Memory, registry: Registry) -> Session {
     Session::with_registry(Box::new(store), Box::new(clock()), registry).unwrap()
 }
