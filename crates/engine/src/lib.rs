@@ -34,6 +34,9 @@
 //!   `mail.delete` (`owner`). Each changes the store at once and queues a kept write job; a moved message keeps its
 //!   id and waits under a UID of ours until the server's answer names its new one, and a failed write is taken back.
 //!   Each act but a delete for good goes into the undo history, and `history.undo` takes the newest back.
+//! - The scheduler ([`schedule`]): [`Session::tick`] fires the store's schedule entries whose time has come and hands
+//!   them back as [`schedule::Fired`] events, missed ones marked; `schedule.presets` and `schedule.list` (`safe`)
+//!   and `schedule.cancel` (`owner`). The presets are in the computer's wall-clock time ([`Session::set_offsets`]).
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -60,6 +63,7 @@ mod error;
 mod json;
 mod params;
 mod registry;
+pub mod schedule;
 mod session;
 mod sync;
 mod undo;

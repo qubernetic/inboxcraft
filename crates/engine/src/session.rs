@@ -8,15 +8,16 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use inboxcraft_model::{
-    AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, StepReport,
-    UidValidity,
+    AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, ScheduleId,
+    StepReport, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
-use inboxcraft_time::{Clock, Timestamp};
+use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
 use serde_json::Value;
 
 use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
 use crate::{Caller, EngineError, Registry, error};
 
@@ -131,12 +132,13 @@ impl Outcome {
     }
 }
 
-/// What a command may read: the store, the session's state, the time and who asked.
+/// What a command may read: the store, the session's state, the time, the computer's offsets and who asked.
 #[derive(Clone, Copy)]
 pub struct Context<'a> {
     store: &'a dyn Storage,
     state: &'a State,
     now: Timestamp,
+    offsets: &'a dyn Offsets,
     caller: Caller,
 }
 
@@ -151,6 +153,19 @@ impl<'a> Context<'a> {
     #[must_use]
     pub fn now(&self) -> Timestamp {
         self.now
+    }
+
+    /// The computer's offset from UTC over time, for anything in the owner's wall-clock time.
+    #[must_use]
+    pub fn offsets(&self) -> &'a dyn Offsets {
+        self.offsets
+    }
+
+    /// The id for a new schedule entry: past every entry the session has held. A command that adds two entries
+    /// counts on from it.
+    #[must_use]
+    pub fn next_schedule_id(&self) -> ScheduleId {
+        ScheduleId::new(self.state.next_schedule)
     }
 
     /// Who asked for the command; [`Caller::Agent`] while an event from a worker is applied, which nobody asked for.
@@ -185,6 +200,7 @@ pub(crate) struct State {
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
+    pub(crate) next_schedule: u64,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
     /// The acts to undo, the newest last.
@@ -225,7 +241,7 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, ..Self::default() };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -241,6 +257,9 @@ impl State {
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
+        }
+        for entry in store.schedule()? {
+            state.next_schedule = state.next_schedule.max(entry.id.get().saturating_add(1));
         }
         for job in store.queued_jobs()? {
             state.next_job = state.next_job.max(job.id.get().saturating_add(1));
@@ -291,6 +310,9 @@ pub enum Applied {
 pub struct Session {
     store: Box<dyn Storage>,
     clock: Box<dyn Clock>,
+    offsets: Box<dyn Offsets>,
+    /// When [`Session::start`] ran: a schedule entry due before then was missed.
+    started: Option<Timestamp>,
     registry: Registry,
     state: State,
     jobs: Vec<Job>,
@@ -328,7 +350,7 @@ impl Session {
             store.apply(&batch)?;
         }
         let state = State::load(&*store)?;
-        Ok(Self { store, clock, registry, state, jobs: Vec::new(), replay })
+        Ok(Self { store, clock, offsets: Box::new(Offset::UTC), started: None, registry, state, jobs: Vec::new(), replay })
     }
 
     /// A session over the invented sample mailbox in `store`, with InboxCraft's own commands: the `sample.*` commands
@@ -378,6 +400,11 @@ impl Session {
         self.state.appearance = appearance;
     }
 
+    /// Takes the computer's offset from UTC over time; until then the session works in UTC.
+    pub fn set_offsets(&mut self, offsets: Box<dyn Offsets>) {
+        self.offsets = offsets;
+    }
+
     /// Runs the command `id` with `params` for the owner.
     ///
     /// # Errors
@@ -400,7 +427,7 @@ impl Session {
         if !class.allows(caller) {
             return Err(EngineError::NotAllowed { command: spec.id, class });
         }
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
         let Outcome { value, batch, jobs, senders, removed, appearance, undo } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
@@ -408,8 +435,10 @@ impl Session {
             crate::undo::take(&mut self.state.history, step);
         }
         for change in batch.changes() {
-            if let Change::PutAccount(account) = change {
-                self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1));
+            match change {
+                Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
+                Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
+                _ => {}
             }
         }
         for account in removed {
@@ -432,7 +461,10 @@ impl Session {
     /// Hands the jobs an earlier run left in the store's queue over again, then asks every account's worker for its
     /// folder list; the answers bring the folder syncs. A check still running is over: the worker that ran it is gone,
     /// so its last step never comes, and the account can be checked again.
+    ///
+    /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such.
     pub fn start(&mut self) {
+        self.started = Some(self.clock.now());
         self.jobs.append(&mut self.replay);
         for held in self.state.accounts.values_mut() {
             if let Some(check) = held.check.as_mut() {
@@ -443,6 +475,30 @@ impl Session {
         for account in accounts {
             self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None, keep: false });
         }
+    }
+
+    /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
+    /// (see [`crate::schedule`]), in one batch. The front end calls it at [`Session::next_due`] and after
+    /// [`Session::start`].
+    ///
+    /// # Errors
+    ///
+    /// A store failure, or [`EngineError::Panicked`]; nothing fires then, and the next tick tries again.
+    pub fn tick(&mut self) -> Result<Vec<Fired>, EngineError> {
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
+        let started = self.started;
+        let plan = catch_unwind(AssertUnwindSafe(|| schedule::due(&context, started))).map_err(|_| EngineError::Panicked("schedule"))??;
+        self.commit("schedule", None, &plan.batch, Vec::new())?;
+        Ok(plan.fired)
+    }
+
+    /// When the next schedule entry is due, if any.
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub fn next_due(&self) -> Result<Option<Timestamp>, EngineError> {
+        Ok(self.store.schedule()?.into_iter().map(|entry| entry.due).min())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
@@ -456,7 +512,7 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
     pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller: Caller::Agent };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let ended = event.job.filter(|job| self.state.kept.contains(job) && ends_job(&event.kind));
         let applied = match plan {

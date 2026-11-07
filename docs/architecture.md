@@ -116,6 +116,19 @@ and answers where it was and whether it was read, so the front end can undo it. 
 `Session::sample` over the invented sample mailbox; any other session refuses it (`sample_only`). It queues no job,
 so nothing reaches a server; the sample's hover actions use it until the commands for a real mailbox exist.
 
+The scheduler (`engine::schedule`) works on the store's schedule: each entry is due at a moment and sends a draft,
+brings a snoozed message back, reminds of a reply that did not come or shows a calendar alert. `Session::tick` fires
+every entry whose time has come on the session's clock, in time order: the entry leaves the schedule in the same
+batch as what it changes (a returned snooze or a fired reminder clears its time in the message's state), and comes
+back as a `Fired` event, `missed` when it was due before `Session::start` or is handled more than a minute late (the
+computer was asleep). `Session::next_due` tells the front end when to tick next. Commands add entries with an id from
+`Context::next_schedule_id`. `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
+on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00) and tomorrow
+morning (08:00). They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
+hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
+change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
+(`owner`) takes one off.
+
 Onboarding adds `account.add` and `account.remove`, both `owner`. `account.add` takes the settings the owner
 entered or saw (address, names, user name, the IMAP server) and never a password; it saves the account under an id
 no account had in this session and queues the owner's first check. The front end puts the password into the OS
@@ -157,6 +170,8 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   verified.
 - Code that needs the time takes an `inboxcraft_time::Clock`; tests hand it a `FakeClock`. `Instant::now` and
   `SystemTime::now` are banned in `clippy.toml` (they trap on wasm); `SystemClock` is the one place that reads them.
+  Code that works in the owner's wall-clock time takes an `inboxcraft_time::Offsets` the same way: a fixed `Offset`,
+  or an `OffsetTable` of changes, which the summer-time tests use.
 - Local-first: state that must follow the person between devices lives in the mailbox (hidden folders), because
   the reference server has no IMAP METADATA.
 - The store (`inboxcraft-store`, layer 1, the one crate allowed to depend on `model` inside its layer) is the

@@ -69,6 +69,9 @@ mod reader_tests;
 #[path = "sample_tests.rs"]
 mod sample_tests;
 #[cfg(test)]
+#[path = "schedule_tests.rs"]
+mod schedule_tests;
+#[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]

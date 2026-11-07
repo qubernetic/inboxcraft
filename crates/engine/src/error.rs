@@ -42,7 +42,7 @@ pub enum EngineError {
     },
     /// The command names something the store does not hold.
     NotFound {
-        /// What kind of thing: `account`, `folder` or `message`.
+        /// What kind of thing: `account`, `folder`, `message` or `schedule entry`.
         what: &'static str,
         /// Its id.
         id: u64,
