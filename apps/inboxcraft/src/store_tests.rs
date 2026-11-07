@@ -98,6 +98,17 @@ fn child_with(vars: &[(&str, &Path)]) -> Vec<String> {
     String::from_utf8(output.stdout).unwrap().lines().filter_map(|line| line.rsplit_once("mail=").map(|(_, mail)| mail.to_owned())).collect()
 }
 
+#[cfg(windows)]
+#[test]
+fn on_windows_the_owner_s_mail_is_kept_in_local_app_data_only() {
+    let data = tempfile::tempdir().unwrap();
+    let local = tempfile::tempdir().unwrap();
+    assert_eq!(child_with(&[("XDG_DATA_HOME", data.path()), ("LOCALAPPDATA", local.path())]), ["sample", "store with 0 accounts"]);
+    assert!(local.path().join(STORE_DIR).join(inboxcraft_store::DATABASE_FILE).is_file());
+    assert!(!data.path().join(STORE_DIR).exists(), "an XDG_DATA_HOME a shell set promises no owner-only folder");
+}
+
+#[cfg(not(windows))]
 #[test]
 fn the_owner_s_mail_is_kept_in_the_data_folder() {
     let data = tempfile::tempdir().unwrap();
@@ -105,7 +116,7 @@ fn the_owner_s_mail_is_kept_in_the_data_folder() {
     assert_eq!(child_with(&[("XDG_DATA_HOME", data.path())]), ["sample", "store with 0 accounts"]);
     assert!(data.path().join(STORE_DIR).join(inboxcraft_store::DATABASE_FILE).is_file(), "in XDG_DATA_HOME, where the Flatpak points it");
     assert_eq!(child_with(&[("HOME", home.path()), ("XDG_DATA_HOME", Path::new("relative"))]), ["sample", "store with 0 accounts"]);
-    let fallback = if cfg!(windows) || cfg!(target_os = "macos") { None } else { Some(home.path().join(".local/share").join(STORE_DIR)) };
+    let fallback = if cfg!(target_os = "macos") { None } else { Some(home.path().join(".local/share").join(STORE_DIR)) };
     if let Some(fallback) = fallback {
         assert!(fallback.join(inboxcraft_store::DATABASE_FILE).is_file(), "a relative XDG_DATA_HOME is not taken");
     }

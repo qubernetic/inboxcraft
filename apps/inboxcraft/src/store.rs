@@ -38,17 +38,19 @@ impl std::fmt::Debug for Owned {
     }
 }
 
-/// [`STORE_DIR`] in the owner's data folder: `XDG_DATA_HOME` when it is an absolute path (the Flatpak sets it to the
-/// app's own `~/.var/app/io.github.qubernetic.inboxcraft/data`), `%LOCALAPPDATA%` on Windows, `Library/Application
-/// Support` in the home folder on macOS, else `.local/share` in the home folder; `None` without one.
+/// [`STORE_DIR`] in the owner's data folder: `%LOCALAPPDATA%` on Windows, else `XDG_DATA_HOME` when it is an absolute
+/// path (the Flatpak sets it to the app's own `~/.var/app/io.github.qubernetic.inboxcraft/data`), `Library/Application
+/// Support` in the home folder on macOS, else `.local/share` in the home folder; `None` without one. Windows takes no
+/// `XDG_DATA_HOME` (one a Unix-like shell set): the store's files are narrowed to the owner on Unix only, and on
+/// Windows they inherit the folder's access list, which only `%LOCALAPPDATA%` keeps to the owner.
 #[must_use]
 pub fn store_dir() -> Option<PathBuf> {
     let absolute = |value: std::ffi::OsString| Some(PathBuf::from(value)).filter(|path| path.is_absolute());
     let home = || std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).and_then(absolute);
-    let folder = if let Some(data) = std::env::var_os("XDG_DATA_HOME").and_then(absolute) {
-        data
-    } else if cfg!(windows) {
+    let folder = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").and_then(absolute)?
+    } else if let Some(data) = std::env::var_os("XDG_DATA_HOME").and_then(absolute) {
+        data
     } else if cfg!(target_os = "macos") {
         home()?.join("Library").join("Application Support")
     } else {
