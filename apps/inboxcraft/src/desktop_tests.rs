@@ -234,3 +234,129 @@ fn a_desktop_shows_its_state_and_not_the_mail_in_debug_output() {
     let shown = format!("{desktop:?}");
     assert!(shown.starts_with("Desktop {") && shown.contains("window: true"), "{shown}");
 }
+
+/// Where the notifications went, or an error for each.
+#[derive(Clone, Default)]
+struct Told {
+    shown: Arc<Mutex<Vec<crate::notify::Shown>>>,
+    fails: bool,
+}
+
+impl crate::notify::Deliver for Told {
+    fn deliver(&mut self, shown: &crate::notify::Shown) -> Result<(), String> {
+        if self.fails {
+            return Err("the notification was not shown: no server".to_owned());
+        }
+        self.shown.lock().unwrap().push(shown.clone());
+        Ok(())
+    }
+}
+
+/// Workers that hand back `events` once.
+struct Feeding(Vec<Event>);
+
+impl Workers for Feeding {
+    fn send(&mut self, _account: &Account, _job: Job) {}
+
+    fn keep(&mut self, _accounts: &[AccountId]) {}
+
+    fn events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+/// A desktop over one account whose synced inbox gets a new message from Bob, telling `told`.
+fn arriving(told: &Told) -> (Desktop, Sender<Request>, Sender<crate::notify::Click>) {
+    use inboxcraft_model::{Address, Envelope, EventKind, Folder, FolderId, FolderListing, FolderPath, FolderState, Summary, Uid, UidValidity};
+    let validity = UidValidity::new(7).unwrap();
+    let inbox = Folder::new(FolderId::new(1), AccountId::new(1), FolderListing::new(FolderPath::new("INBOX", Some('/')).unwrap(), vec![], true));
+    let mut store = Memory::default();
+    let batch = Batch::new()
+        .with(Change::PutAccount(account()))
+        .with(Change::PutFolder(inbox))
+        .with(Change::SetFolderState(FolderId::new(1), FolderState::new(validity)));
+    store.apply(&batch).unwrap();
+    let session = Session::new(Box::new(store), clock()).unwrap();
+    let envelope = Envelope::new("Lunch?").with_from(vec![Address::new(Some("Bob"), EmailAddress::new("bob@example.net").unwrap())]);
+    let added =
+        EventKind::MessagesAdded { folder: FolderId::new(1), uid_validity: validity, messages: vec![Summary::new(Uid::new(3).unwrap(), envelope)] };
+    let workers = Box::new(Feeding(vec![Event::new(AccountId::new(1), None, added)]));
+    let app = InboxApp::new(Mailbox::new(session, clock())).with_accounts(Arc::new(NoKeychain), Box::new(NoDetect::default()), workers);
+    let (send, heard) = mpsc::channel();
+    let (click, clicks) = mpsc::channel();
+    (Desktop::new(app, heard).with_notices(Box::new(told.clone()), clicks), send, click)
+}
+
+#[test]
+fn new_mail_shows_as_a_notification_also_without_a_window() {
+    let told = Told::default();
+    let (desktop, _send, _click) = arriving(&told);
+    let mut desktop = desktop.without_window();
+    desktop.wait(SHORT);
+    desktop.wait(SHORT);
+    let shown = told.shown.lock().unwrap();
+    assert_eq!(shown.len(), 1, "told once");
+    assert_eq!((shown[0].title.as_str(), shown[0].body.as_str()), ("Bob", "Lunch?"));
+    assert!(shown[0].key.starts_with("mail-"), "{:?}", shown[0]);
+}
+
+#[test]
+fn a_notification_that_fails_leaves_inboxcraft_running() {
+    let told = Told { fails: true, ..Told::default() };
+    let (mut desktop, _send, _click) = arriving(&told);
+    let ctx = egui::Context::default();
+    tick(&mut desktop, &ctx, false);
+    tick(&mut desktop, &ctx, false);
+    assert!(desktop.has_window() && !desktop.is_quitting());
+}
+
+/// The sample desktop answering clicks, with the sender of its clicks.
+fn clicking() -> (Desktop, Sender<Request>, Sender<crate::notify::Click>) {
+    let (send, heard) = mpsc::channel();
+    let (click, clicks) = mpsc::channel();
+    (Desktop::new(sample_app(), heard).with_notices(Box::new(Told::default()), clicks), send, click)
+}
+
+fn unread_message(desktop: &Desktop) -> u64 {
+    desktop.app().mailbox().messages().iter().find(|row| !row.seen).unwrap().id
+}
+
+#[test]
+fn a_click_on_a_notification_opens_the_message_full_width_and_brings_the_window_forward() {
+    use crate::notify::Click;
+    let (mut desktop, _send, click) = clicking();
+    let ctx = egui::Context::default();
+    let id = unread_message(&desktop);
+    click.send(Click::Open(id)).unwrap();
+    assert_eq!(tick(&mut desktop, &ctx, false), [ViewportCommand::Minimized(false), ViewportCommand::Focus]);
+    assert_eq!(desktop.app().reader().open_id(), Some(id));
+    assert!(desktop.app().reader().full_width());
+    click.send(Click::Show).unwrap();
+    assert_eq!(tick(&mut desktop, &ctx, false), [ViewportCommand::Minimized(false), ViewportCommand::Focus]);
+}
+
+#[test]
+fn without_a_window_a_click_opens_one() {
+    use crate::notify::Click;
+    let (desktop, _send, click) = clicking();
+    let mut desktop = desktop.without_window();
+    let id = unread_message(&desktop);
+    click.send(Click::Open(id)).unwrap();
+    desktop.wait(SHORT);
+    assert!(desktop.has_window());
+    assert_eq!(desktop.app().reader().open_id(), Some(id));
+}
+
+#[test]
+fn the_buttons_mark_the_message_read_or_done() {
+    use crate::notify::Click;
+    let (mut desktop, _send, click) = clicking();
+    let ctx = egui::Context::default();
+    let id = unread_message(&desktop);
+    click.send(Click::Read(id)).unwrap();
+    assert!(tick(&mut desktop, &ctx, false).is_empty(), "the window stays where it is");
+    assert!(desktop.app().mailbox().messages().iter().any(|row| row.id == id && row.seen));
+    click.send(Click::Done(id)).unwrap();
+    tick(&mut desktop, &ctx, false);
+    assert!(desktop.app().mailbox().messages().iter().all(|row| row.id != id), "done leaves the inbox");
+}
