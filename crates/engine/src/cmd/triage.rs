@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `triage`: the screener (`screener.*`) and the grouped inbox (`group.*`); done, park, pin, snooze and follow-up
+//! `triage`: the screener (`screener.*`), the grouped inbox (`group.*`), and done, park and pin; snooze and follow-up
 //! reminders come later.
 //! A new command goes into [`COMMANDS`] and its parameter names into `FIELDS`.
 //!
@@ -16,10 +16,17 @@
 //! future, in a group of the owner's choice or back in the classifier's hands, and `history.undo` takes it back;
 //! `group.account` (`owner`) turns an account's grouping on or off, kept with the account; `group.list` (`safe`)
 //! counts the inbox's mail per group. `mail.list` says each row's group and lists one group.
+//!
+//! Done, park and pin are the owner's own state of a message, kept in the store and never on the server
+//! ([`MessageState`]). `mail.done` (`owner`) files a message in its account's archive and keeps the folder it was in,
+//! where "show done" (`mail.list` with `done`) lists it; done `false` brings it back there. `mail.park` (`safe`) puts
+//! a message on the park pile, which `mail.list` leaves out and counts, and `park.list` lists; `mail.pin` (`safe`) pins
+//! it, and `pin.list` is the pins view across the accounts. Done takes a pin off unless `pin.set` (`owner`, a setting)
+//! keeps it. `history.undo` takes each back: the state as it was and, for done, the message where it was.
 
 use std::collections::BTreeMap;
 
-use inboxcraft_model::{AccountId, EmailAddress, Flag, Folder, FolderId, Group, Message, MessageState, Role, Screening, Sender};
+use inboxcraft_model::{AccountId, EmailAddress, Flag, Folder, FolderId, Group, Message, MessageId, MessageState, Role, Screening, Sender};
 use inboxcraft_store::{Change, Storage};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -35,11 +42,11 @@ use crate::view;
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST];
+pub(crate) const COMMANDS: &[CommandSpec] = &[ACCEPT, BLOCK, LIST, MODE, GROUP_SET, GROUP_ACCOUNT, GROUP_LIST, DONE, PARK, PIN, PARK_LIST, PIN_LIST, PIN_SET];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["address", "group", "then", "mode", "account", "grouped"];
+pub(crate) const FIELDS: &[&str] = &["address", "group", "then", "mode", "account", "grouped", "id", "done", "parked", "pinned", "limit", "offset", "keep_on_done"];
 
 /// `screener.mode`: what the screener does with the first mail of a sender the owner does not know.
 pub(crate) const MODE: CommandSpec = CommandSpec {
@@ -544,4 +551,217 @@ fn group_list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineEr
         .collect();
     let ungrouped = json!({ "total": ungrouped.total, "unread": ungrouped.unread });
     Ok(Outcome::new(json!({ "account": params.account, "groups": groups, "ungrouped": ungrouped })))
+}
+
+/// `mail.done`: file a message as done, or bring it back.
+pub(crate) const DONE: CommandSpec = CommandSpec {
+    id: "mail.done",
+    class: Some(AgentClass::Owner),
+    summary: "File a message as done in its account's archive, or bring it back to where it was",
+    run: done,
+};
+
+/// `mail.park`: put a message on the park pile, or take it off.
+pub(crate) const PARK: CommandSpec =
+    CommandSpec { id: "mail.park", class: Some(AgentClass::Safe), summary: "Put a message on the park pile or take it off", run: park };
+
+/// `mail.pin`: pin a message, or take its pin off.
+pub(crate) const PIN: CommandSpec = CommandSpec { id: "mail.pin", class: Some(AgentClass::Safe), summary: "Pin a message or take its pin off", run: pin };
+
+/// `park.list`: the park pile, newest first.
+pub(crate) const PARK_LIST: CommandSpec =
+    CommandSpec { id: "park.list", class: Some(AgentClass::Safe), summary: "List the park pile across the accounts, newest first", run: park_list };
+
+/// `pin.list`: the pins view, newest first.
+pub(crate) const PIN_LIST: CommandSpec =
+    CommandSpec { id: "pin.list", class: Some(AgentClass::Safe), summary: "List the pinned messages across the accounts, newest first", run: pin_list };
+
+/// `pin.set`: whether done leaves a pin on.
+pub(crate) const PIN_SET: CommandSpec =
+    CommandSpec { id: "pin.set", class: Some(AgentClass::Owner), summary: "Keep a pin when its message is done, or take it off", run: pin_set };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DoneParams {
+    /// The message.
+    id: u64,
+    /// Done (`true`) or back where it was.
+    done: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParkParams {
+    /// The message.
+    id: u64,
+    /// On the park pile (`true`) or off it.
+    parked: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PinParams {
+    /// The message.
+    id: u64,
+    /// Pinned (`true`) or not.
+    pinned: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PileParams {
+    /// Only this account.
+    account: Option<u64>,
+    /// At most this many, 1 to [`MAX_LIST`].
+    limit: Option<u64>,
+    /// Skip this many first.
+    offset: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PinSetParams {
+    /// Done leaves a pin on.
+    keep_on_done: bool,
+}
+
+/// The message `id`.
+fn message(context: &Context<'_>, id: u64) -> Result<Message, EngineError> {
+    let entry = context.store().message(MessageId::new(id))?.ok_or(EngineError::NotFound { what: "message", id })?;
+    Ok(entry.message().clone())
+}
+
+/// The folder `id` of `message`'s account, when it is still there and holds mail.
+fn mail_folder(store: &dyn Storage, message: &Message, id: FolderId) -> Result<Option<Folder>, EngineError> {
+    Ok(acts::folder(store, message.account(), id)?.filter(|folder| folder.listing().is_selectable()))
+}
+
+/// The outcome of `spec` putting `message` in `state`, moved by `moved`; `history.undo` puts it back in `was`, and
+/// in the folder `from` when it moved.
+fn stated(spec: &CommandSpec, answer: Value, message: &Message, was: MessageState, state: MessageState, moved: Option<Effects>) -> Outcome {
+    let from = moved.is_some().then_some(message.folder());
+    let mut effects = moved.unwrap_or_default();
+    effects.change(Change::SetMessageState(message.id(), state));
+    let class = spec.class.unwrap_or(AgentClass::Owner);
+    let act = Act { command: spec.id, class, inverse: Inverse::State { message: message.id(), to: from, state: was } };
+    Outcome::new(answer).with_effects(effects).with_undo(Step::Push(act))
+}
+
+fn done(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: DoneParams = decode(DONE.id, params)?;
+    let message = message(context, params.id)?;
+    let (store, state) = (context.store(), context.state());
+    let was = store.message_state(message.id())?;
+    let here = message.folder().get();
+    if !params.done {
+        let Some(back) = was.done else { return Ok(Outcome::new(json!({ "id": params.id, "done": false, "folder": here, "changed": false }))) };
+        let moved = match mail_folder(store, &message, back)? {
+            Some(to) => acts::relocate(store, state, &message, &to)?,
+            None => None,
+        };
+        let folder = if moved.is_some() { back.get() } else { here };
+        let answer = json!({ "id": params.id, "done": false, "folder": folder, "changed": true });
+        return Ok(stated(&DONE, answer, &message, was.clone(), MessageState { done: None, ..was }, moved));
+    }
+    if let Some(from) = was.done {
+        let answer = json!({ "id": params.id, "done": true, "folder": here, "was": from.get(), "changed": false, "pinned": was.pinned });
+        return Ok(Outcome::new(answer));
+    }
+    let account = message.account();
+    let archive = role_folder(store, state, account, Role::Archive)?
+        .filter(|folder| folder.listing().is_selectable())
+        .ok_or(EngineError::NotFound { what: "archive folder of account", id: account.get() })?;
+    let moved = acts::relocate(store, state, &message, &archive)?;
+    let pinned = was.pinned && state.pins_outlast_done;
+    let answer = json!({ "id": params.id, "done": true, "folder": archive.id().get(), "was": here, "changed": true, "pinned": pinned });
+    let now = MessageState { done: Some(message.folder()), pinned, ..was.clone() };
+    Ok(stated(&DONE, answer, &message, was, now, moved))
+}
+
+/// Sets `field` of `message`'s state to `set` as `spec` does, with `apply` changing the state.
+fn mark_state(context: &Context<'_>, spec: &CommandSpec, id: u64, field: &str, set: bool, apply: fn(&mut MessageState, bool) -> bool) -> Result<Outcome, EngineError> {
+    let message = message(context, id)?;
+    let was = context.store().message_state(message.id())?;
+    let mut now = was.clone();
+    let changed = apply(&mut now, set);
+    let answer = Value::Object(serde_json::Map::from_iter([
+        ("id".to_owned(), json!(id)),
+        (field.to_owned(), json!(set)),
+        ("changed".to_owned(), json!(changed)),
+    ]));
+    if !changed {
+        return Ok(Outcome::new(answer));
+    }
+    Ok(stated(spec, answer, &message, was, now, None))
+}
+
+fn park(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: ParkParams = decode(PARK.id, params)?;
+    mark_state(context, &PARK, params.id, "parked", params.parked, |state, set| std::mem::replace(&mut state.parked, set) != set)
+}
+
+fn pin(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: PinParams = decode(PIN.id, params)?;
+    mark_state(context, &PIN, params.id, "pinned", params.pinned, |state, set| std::mem::replace(&mut state.pinned, set) != set)
+}
+
+/// The messages whose state `keep` takes, of `account` or every account, newest first, as a list answers them.
+fn pile(context: &Context<'_>, params: &PileParams, keep: fn(&MessageState) -> bool) -> Result<Value, EngineError> {
+    let account = params.account.map(AccountId::new);
+    let accounts = view::accounts(context, account)?;
+    let store = context.store();
+    let mut entries = Vec::new();
+    let mut states = BTreeMap::new();
+    for (id, state) in store.message_states()? {
+        if keep(&state)
+            && let Some(entry) = store.message(id)?
+            && accounts.contains(&entry.message().account())
+        {
+            entries.push(entry);
+            states.insert(id, state);
+        }
+    }
+    entries.sort_by_cached_key(|entry| view::order(entry.message()));
+    let limit = super::mail::limit(params.limit);
+    let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
+    let mut grouping = Grouping::new(store)?;
+    let held = store.accounts()?;
+    let mut messages = Vec::new();
+    for entry in entries.iter().skip(offset).take(limit) {
+        messages.push(super::mail::row(context, &mut grouping, &held, entry, states.get(&entry.message().id()))?);
+    }
+    Ok(json!({ "account": params.account, "total": entries.len(), "offset": offset, "limit": limit, "messages": messages }))
+}
+
+fn park_list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: PileParams = decode(PARK_LIST.id, params)?;
+    Ok(Outcome::new(pile(context, &params, |state| state.parked)?))
+}
+
+fn pin_list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: PileParams = decode(PIN_LIST.id, params)?;
+    let mut answer = pile(context, &params, |state| state.pinned)?;
+    if let Value::Object(fields) = &mut answer {
+        fields.insert("keep_on_done".into(), json!(context.state().pins_outlast_done));
+    }
+    Ok(Outcome::new(answer))
+}
+
+fn pin_set(_: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: PinSetParams = decode(PIN_SET.id, params)?;
+    Ok(Outcome::new(json!({ "keep_on_done": params.keep_on_done })).with_pins_outlast_done(params.keep_on_done))
+}
+
+/// Takes done, park or pin back on `message`: back in the folder `to` when it is still there, and in `state`.
+pub(crate) fn restore(context: &Context<'_>, message: &Message, to: Option<FolderId>, state: &MessageState) -> Result<Effects, EngineError> {
+    let store = context.store();
+    let mut effects = Effects::default();
+    if let Some(to) = to
+        && let Some(folder) = mail_folder(store, message, to)?
+        && let Some(moved) = acts::relocate(store, context.state(), message, &folder)?
+    {
+        effects.extend(moved);
+    }
+    effects.change(Change::SetMessageState(message.id(), state.clone()));
+    Ok(effects)
 }

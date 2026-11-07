@@ -3,10 +3,10 @@
 
 //! `mail.*`: lists of messages, one message, the search.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use inboxcraft_model::{AccountId, FolderId, JobKind, Message, MessageId, MessageRef, Role, group_threads};
-use inboxcraft_store::{Change, Search};
+use inboxcraft_model::{Account, AccountId, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, group_threads};
+use inboxcraft_store::{Change, Entry, Search};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -22,7 +22,7 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[ATTACHMENT, LIST, READ, SEARCH, TH
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
+pub(crate) const FIELDS: &[&str] = &["account", "folder", "role", "group", "done", "parked", "limit", "offset", "id", "index", "content_id", "from", "to", "subject", "text", "since", "before"];
 
 /// The most messages one answer lists.
 pub const MAX_LIST: u64 = 1000;
@@ -31,6 +31,8 @@ pub const MAX_LIST: u64 = 1000;
 const DEFAULT_LIST: u64 = 100;
 
 /// `mail.list`: the messages of one folder, or of one role across every account (the unified view), newest first.
+/// The park pile is left out (counted in `parked`) unless asked for; "show done" (`done`) lists the done mail in the
+/// place it was done from, besides the mail there.
 pub(crate) const LIST: CommandSpec = CommandSpec {
     id: "mail.list",
     class: Some(AgentClass::Safe),
@@ -50,6 +52,10 @@ struct ListParams {
     /// Only this group of the grouped inbox (`people`, `updates`, `newsletters`, `invitations`), or `none` for the
     /// mail of the accounts not grouped.
     group: Option<String>,
+    /// "Show done": the done mail is listed where it was done from too.
+    done: Option<bool>,
+    /// The park pile is listed too.
+    parked: Option<bool>,
     /// At most this many, 1 to [`MAX_LIST`].
     limit: Option<u64>,
     /// Skip this many first.
@@ -76,7 +82,21 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         Some(name) => Some(Some(group::named(name).ok_or_else(|| EngineError::bad_params(LIST.id, "the group is people, updates, newsletters, invitations or none"))?)),
     };
     let mut grouping = Grouping::new(context.store())?;
-    let mut entries = view::merged(context, &view::folders(context, view, account)?)?;
+    let states: BTreeMap<MessageId, MessageState> = context.store().message_states()?.into_iter().collect();
+    let folders = view::folders(context, view, account)?;
+    let mut entries = view::merged(context, &folders)?;
+    if params.done == Some(true) {
+        let listed: BTreeSet<MessageId> = entries.iter().map(|entry| entry.message().id()).collect();
+        for (id, state) in &states {
+            if state.done.is_some_and(|from| folders.contains(&from))
+                && !listed.contains(id)
+                && let Some(entry) = context.store().message(*id)?
+            {
+                entries.push(entry);
+            }
+        }
+        entries.sort_by_cached_key(|entry| view::order(entry.message()));
+    }
     if let Some(only) = only {
         let mut kept = Vec::with_capacity(entries.len());
         for entry in entries {
@@ -86,21 +106,17 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         }
         entries = kept;
     }
+    let is_parked = |entry: &Entry| states.get(&entry.message().id()).is_some_and(|state| state.parked);
+    let parked = entries.iter().filter(|entry| is_parked(entry)).count();
+    if params.parked != Some(true) {
+        entries.retain(|entry| !is_parked(entry));
+    }
     let limit = limit(params.limit);
     let offset = usize::try_from(params.offset.unwrap_or(0)).unwrap_or(usize::MAX);
     let accounts = context.store().accounts()?;
     let mut messages = Vec::new();
     for entry in entries.iter().skip(offset).take(limit) {
-        let message = entry.message();
-        let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
-        let new = screener::is_new(context.store(), context.state().screener, role, &accounts, message)?;
-        let in_group = grouping.of(message)?.map(group::name);
-        let mut shown = json::message(entry);
-        if let Value::Object(fields) = &mut shown {
-            fields.insert("new_sender".into(), json!(new));
-            fields.insert("group".into(), json!(in_group));
-        }
-        messages.push(shown);
+        messages.push(row(context, &mut grouping, &accounts, entry, states.get(&entry.message().id()))?);
     }
     let shown = match view {
         View::Folder(folder) => json!({ "folder": folder.get() }),
@@ -111,10 +127,28 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         "account": account.map(AccountId::get),
         "group": params.group,
         "total": entries.len(),
+        "parked": parked,
         "offset": offset,
         "limit": limit,
         "messages": messages,
     })))
+}
+
+/// One message as a list shows it: [`json::message`], whether its sender is new, its group and its own `state`.
+pub(super) fn row(context: &Context<'_>, grouping: &mut Grouping<'_>, accounts: &[Account], entry: &Entry, state: Option<&MessageState>) -> Result<Value, EngineError> {
+    let message = entry.message();
+    let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+    let new = screener::is_new(context.store(), context.state().screener, role, accounts, message)?;
+    let in_group = grouping.of(message)?.map(group::name);
+    let mut shown = json::message(entry);
+    if let Value::Object(fields) = &mut shown {
+        fields.insert("new_sender".into(), json!(new));
+        fields.insert("group".into(), json!(in_group));
+        fields.insert("done".into(), json!(state.is_some_and(|state| state.done.is_some())));
+        fields.insert("parked".into(), json!(state.is_some_and(|state| state.parked)));
+        fields.insert("pinned".into(), json!(state.is_some_and(|state| state.pinned)));
+    }
+    Ok(shown)
 }
 
 /// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the

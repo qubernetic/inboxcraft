@@ -226,6 +226,10 @@ fn undo(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
             let address = screened.address.as_str().to_lowercase();
             return Ok(Outcome::new(json!({ "command": act.command, "address": address, "undone": true })).with_effects(effects).with_undo(Step::Pop));
         }
+        Inverse::State { message: id, to, state: was } => {
+            let Some(entry) = store.message(*id)? else { return Ok(answer(*id, false)) };
+            (*id, Some(super::triage::restore(context, entry.message(), *to, was)?))
+        }
         Inverse::Mark { message: id, flag, set } => {
             let Some(entry) = store.message(*id)? else { return Ok(answer(*id, false)) };
             (*id, acts::mark(store, state, entry.message(), flag, *set)?)
