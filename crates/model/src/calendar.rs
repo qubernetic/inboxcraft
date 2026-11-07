@@ -30,13 +30,16 @@ pub struct KnownEvent {
     pub etag: String,
 }
 
-/// What to do with the account's calendars.
+/// What to do with the account's calendars. Every URL is held to the origin of the account's CalDAV address: one
+/// elsewhere fails with [`ErrorKind::OtherServer`] before the password is asked for.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CalendarJob {
     /// Find the calendars (RFC 6764: the well-known path, the principal, the calendar home set), starting at `url`,
-    /// or at the account's IMAP host over `https` when `None`; answered with [`CalendarReport::Found`].
+    /// or at the account's CalDAV address when `None`; answered with [`CalendarReport::Found`]. Without a CalDAV
+    /// address it fails with [`ErrorKind::NoCalendarServer`] before the password
+    /// is asked for.
     Discover {
-        /// Where to start.
+        /// Where to start: a URL on the origin of the account's CalDAV address, as every calendar job's URL is.
         url: Option<String>,
     },
     /// Bring one calendar in step from `token`, the last sync's; answered with [`CalendarReport::Synced`].
