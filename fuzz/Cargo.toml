@@ -139,3 +139,10 @@ path = "fuzz_targets/ui_reader.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ui_typed_time"
+path = "fuzz_targets/ui_typed_time.rs"
+test = false
+doc = false
+bench = false

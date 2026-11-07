@@ -28,6 +28,7 @@ pub mod pill;
 pub mod popup;
 pub mod toast;
 pub mod tooltip;
+pub mod typed_time;
 
 use std::sync::Arc;
 
