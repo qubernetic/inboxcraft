@@ -31,6 +31,8 @@ pub enum Error {
     LineTooLong,
     /// The server thread ended without a result.
     Thread,
+    /// [`crate::FakeServer::wait_received`] gave up: the client had not sent the lines it waited for.
+    Timeout,
 }
 
 impl fmt::Display for Error {
@@ -44,6 +46,7 @@ impl fmt::Display for Error {
             Self::ClientGone => f.write_str("the client closed the connection while the script expected a line"),
             Self::LineTooLong => f.write_str("the client sent a line or literal longer than the server reads"),
             Self::Thread => f.write_str("the server thread ended without a result"),
+            Self::Timeout => f.write_str("the client did not send the awaited lines before the timeout"),
         }
     }
 }
