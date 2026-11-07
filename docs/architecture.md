@@ -242,8 +242,12 @@ and a restart hands it out at once. Writes to one event go out one at a time (`e
 edit, an undo, a delete whose window is over) waits until the server has taken the first, then goes with the entity
 tag that one got, or, when the server sent none, the tag the next sync of its calendar brings; a sync meanwhile keeps
 the owner's copy. So the owner's changes never conflict with each other. Editing an event with guests counts its
-`SEQUENCE` on only when the owner asks to tell them (`notify`). Clearing an account's CalDAV address, or moving it to
-another origin (scheme, host or port), drops the account's calendars and its calendar writes not handed out yet.
+`SEQUENCE` on only when the owner asks to tell them (`notify`); every organiser and guest InboxCraft writes carries
+`SCHEDULE-AGENT=CLIENT` (RFC 6638) so a server does not mail them on its own, and the attendee parameters `ical` does
+not read go back as they came. Clearing an account's CalDAV address, or moving it to another origin (host or port),
+drops the account's calendars and every calendar write of it in the queue; a discovery carries the address it is for,
+the app starts a worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an
+account without an address and an event URL outside its calendar's collection are dropped.
 
 Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
