@@ -10,7 +10,7 @@
 B = blocks the next stage.
 
 ## Known rough edges (not ranked)
-- `inboxcraft-cli` and `inboxcraft-web` answer `--version` and refuse everything else (#5).
+- `inboxcraft-web` answers `--version` and refuses everything else (#5).
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
 - `cargo xtask ci` runs the tests only in the coverage-instrumented build (`cov` gate); a bug that shows only in
   an uninstrumented build goes unseen in CI (#66).
