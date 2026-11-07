@@ -67,6 +67,14 @@ impl Session {
         }
     }
 
+    /// Delivers what arrived in the fake's [`crate::imap::Postbox`] and adds what the client is told of it at once to
+    /// `out`.
+    pub(super) fn post(&mut self, out: &mut Vec<u8>) {
+        for (mailbox, message) in self.fake.postbox.take() {
+            self.change(&mailbox, Change::Deliver(message), out);
+        }
+    }
+
     /// Tells the client what changed in the open mailbox since it was last told.
     pub(super) fn flush(&mut self, out: &mut Vec<u8>) {
         let (qresync, condstore) = (self.qresync, self.condstore);

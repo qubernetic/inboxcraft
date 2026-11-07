@@ -1973,6 +1973,7 @@ name = "inboxcraft-testkit"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "inboxcraft-mime",
  "inboxcraft-model",
  "inboxcraft-store",
  "inboxcraft-time",

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Base64 (RFC 4648 section 4) for the AUTHENTICATE responses, strict: padded, no white space.
+//! Base64 (RFC 4648 section 4) for the IMAP AUTHENTICATE and SMTP AUTH responses, strict: padded, no white space.
 
 /// Decodes `text`, or `None` when it is not padded base64.
 pub(crate) fn decode(text: &[u8]) -> Option<Vec<u8>> {
