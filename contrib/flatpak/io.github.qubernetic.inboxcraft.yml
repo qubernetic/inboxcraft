@@ -12,7 +12,8 @@ command: inboxcraft
 # the app's own folder under ~/.var/app/io.github.qubernetic.inboxcraft/; the one folder outside
 # it is Downloads, where Save puts attachments.
 # The Background portal (keep syncing with the window closed, start at login) needs no
-# finish-arg: every sandbox reaches the portals.
+# finish-arg: every sandbox reaches the portals. A later start reaches the running one through a
+# socket in the app's own data folder, which needs none either.
 finish-args:
   # Network: InboxCraft talks IMAP, SMTP and CalDAV to the person's own mail servers.
   - --share=network
@@ -28,6 +29,9 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   # Notifications: new mail is announced on the desktop.
   - --talk-name=org.freedesktop.Notifications
+  # Tray: the icon with the unread count registers with the panel's StatusNotifierWatcher; in the
+  # sandbox it goes by its connection's name, so it owns no bus name.
+  - --talk-name=org.kde.StatusNotifierWatcher
   # Downloads: Save writes an attachment there, under a new name, never over a file.
   - --filesystem=xdg-download
 build-options:
