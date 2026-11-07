@@ -6,6 +6,8 @@
 //! They live here, not in `engine`, because `net` (layer 3) may not depend on `engine` (layer 4). A job carries
 //! everything the worker needs, so the worker never reads the engine's state.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, DraftId, EmailAddress, Flags, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidSet, UidValidity};
@@ -58,8 +60,9 @@ impl FolderState {
     }
 }
 
-/// What to do.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What to do. Printed (`Debug`), a message shows only its length and a send only how many it goes to, so neither
+/// what the owner wrote nor a Bcc address lands in a log.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobKind {
     /// List the account's folders; answered with [`crate::EventKind::Folders`].
     SyncFolderList,
@@ -205,6 +208,59 @@ impl JobKind {
     #[must_use]
     pub fn writes(&self) -> bool {
         matches!(self, Self::StoreFlags { .. } | Self::Move { .. } | Self::Expunge { .. } | Self::Append { .. } | Self::CreateFolder { .. })
+    }
+}
+
+impl fmt::Debug for JobKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SyncFolderList => f.write_str("SyncFolderList"),
+            Self::SyncFolder { folder, path, known } => {
+                f.debug_struct("SyncFolder").field("folder", folder).field("path", path).field("known", known).finish()
+            }
+            Self::FetchBody { folder, path, uid_validity, uid } => {
+                f.debug_struct("FetchBody").field("folder", folder).field("path", path).field("uid_validity", uid_validity).field("uid", uid).finish()
+            }
+            Self::Check { by_owner } => f.debug_struct("Check").field("by_owner", by_owner).finish(),
+            Self::Idle { folder, path } => f.debug_struct("Idle").field("folder", folder).field("path", path).finish(),
+            Self::StoreFlags { folder, path, uid_validity, uids, add, remove } => f
+                .debug_struct("StoreFlags")
+                .field("folder", folder)
+                .field("path", path)
+                .field("uid_validity", uid_validity)
+                .field("uids", uids)
+                .field("add", add)
+                .field("remove", remove)
+                .finish(),
+            Self::Move { folder, path, uid_validity, uids, to, to_path } => f
+                .debug_struct("Move")
+                .field("folder", folder)
+                .field("path", path)
+                .field("uid_validity", uid_validity)
+                .field("uids", uids)
+                .field("to", to)
+                .field("to_path", to_path)
+                .finish(),
+            Self::Expunge { folder, path, uid_validity, uids } => {
+                f.debug_struct("Expunge").field("folder", folder).field("path", path).field("uid_validity", uid_validity).field("uids", uids).finish()
+            }
+            Self::Append { folder, path, flags, raw, draft, message } => f
+                .debug_struct("Append")
+                .field("folder", folder)
+                .field("path", path)
+                .field("flags", flags)
+                .field("message_bytes", &raw.len())
+                .field("draft", draft)
+                .field("message", message)
+                .finish(),
+            Self::CreateFolder { path } => f.debug_struct("CreateFolder").field("path", path).finish(),
+            Self::Send { draft, from: _, recipients, raw } => f
+                .debug_struct("Send")
+                .field("draft", draft)
+                .field("recipients", &recipients.len())
+                .field("message_bytes", &raw.len())
+                .finish_non_exhaustive(),
+        }
     }
 }
 
