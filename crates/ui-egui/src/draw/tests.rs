@@ -15,7 +15,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
 use crate::iconset::{IconId, IconSet, Style};
-use crate::mailbox::{Mailbox, Place};
+use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
 use crate::theme::{Mode, ModePreference, PRESETS, Preset, TextScale, Theme};
 
@@ -67,7 +67,9 @@ fn a_flagged_row_shows_the_filled_flag_icon() {
 
 #[test]
 fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
-    let harness = harness();
+    let mut app = sample_app();
+    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    let harness = harness_with(app, egui::Theme::Light);
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread");
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
     harness.get_by_label("Inbox");

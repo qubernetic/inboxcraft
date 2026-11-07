@@ -75,6 +75,7 @@ fn folders_come_by_account_roles_first_then_by_path_with_depth() {
             ("Archive", 0, Some(Role::Archive)),
             ("Junk", 0, Some(Role::Junk)),
             ("Trash", 0, Some(Role::Trash)),
+            ("Screener", 1, Some(Role::Screener)),
             ("Receipts", 0, None),
             ("Travel", 0, None),
             ("2026", 1, None),
@@ -575,7 +576,7 @@ fn move_takes_the_row_to_a_folder_of_its_account_and_undo_brings_it_back() {
     let receipts = folder_named(&mailbox, 1, "Receipts");
     assert_eq!(
         mailbox.move_targets(rota).iter().map(|folder| folder.leaf.as_str()).collect::<Vec<_>>(),
-        ["Drafts", "Sent", "Archive", "Junk", "Trash", "Receipts", "Travel", "2026"]
+        ["Drafts", "Sent", "Archive", "Junk", "Trash", "Screener", "Receipts", "Travel", "2026"]
     );
     assert!(mailbox.move_targets(999).is_empty());
     mailbox.act(rota, Act::Move(receipts));

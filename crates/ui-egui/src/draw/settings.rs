@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Sending and Shortcuts; the
-//! others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Sending holds each
+//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Triage, Sending and
+//! Shortcuts; the others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Triage holds
+//! the screener's mode, how the inbox shows its groups and each account's grouping. Sending holds each
 //! account's signature, saved with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
@@ -13,6 +14,7 @@ use egui::{
     Align, Area, Frame, Id, Key, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
     UiBuilder, WidgetInfo, pos2, vec2,
 };
+use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
@@ -25,7 +27,7 @@ use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{Action, Keymap};
-use crate::mailbox::Mailbox;
+use crate::mailbox::{InboxView, Mailbox};
 use crate::onboard::Onboarding;
 use crate::settings::{MAX_CHARS, Section, Settings};
 use crate::theme::{Face, Font, Look, PRESETS, Preset, TextScale, Theme, Weight};
@@ -76,6 +78,12 @@ pub(super) enum Asked {
     ResetKeys,
     /// Save the signature of the account as typed.
     Signature(u64),
+    /// The screener's mode.
+    Screener(ScreenerMode),
+    /// How the inbox shows its groups.
+    InboxView(InboxView),
+    /// Group the account's inbox, or not.
+    Grouped(u64, bool),
     Close,
 }
 
@@ -141,7 +149,7 @@ fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
         (IconId::Palette, tr!("Appearance"), Some(Section::Appearance)),
         (IconId::At, tr!("Accounts"), Some(Section::Accounts)),
         (IconId::Notify, tr!("Notifications"), None),
-        (IconId::Funnel, tr!("Triage"), None),
+        (IconId::Funnel, tr!("Triage"), Some(Section::Triage)),
         (IconId::Send, tr!("Sending"), Some(Section::Sending)),
         (IconId::Calendar, tr!("Calendar"), None),
         (IconId::Keyboard, tr!("Shortcuts"), Some(Section::Shortcuts)),
@@ -157,6 +165,16 @@ fn section_name(section: Section) -> &'static str {
         Section::Accounts => tr!("Accounts"),
         Section::Shortcuts => tr!("Shortcuts"),
         Section::Sending => tr!("Sending"),
+        Section::Triage => tr!("Triage"),
+    }
+}
+
+/// The name of a screener mode.
+fn screener_name(mode: ScreenerMode) -> &'static str {
+    match mode {
+        ScreenerMode::Before => tr!("Before the inbox"),
+        ScreenerMode::Inside => tr!("Inside, marked"),
+        ScreenerMode::Off => tr!("Off"),
     }
 }
 
@@ -616,6 +634,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
         Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, view.mailbox),
+        Section::Triage => triage(ui, theme, view.mailbox),
     };
     asked.or(on_page)
 }
@@ -766,6 +785,49 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             ui.add_space(s.m);
             ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
             ui.add_space(1.0);
+        }
+    });
+    asked
+}
+
+/// The Triage page under its title: the screener's mode, the inbox view, and a switch for each account's grouping;
+/// scrolling.
+fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
+    let mut asked = None;
+    let f = &theme.fonts;
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width(ui.available_width() - theme.spacing.m);
+        let modes = ScreenerMode::ALL.map(|mode| (mode, screener_name(mode), f.button));
+        let screener_notes = [
+            tr!("The first mail of a sender you have not let in yet waits in New senders, shows in the inbox marked, or comes in as any other."),
+            tr!("Each sender is judged once, across the accounts. Turning it on lets in everyone your mail already names."),
+        ];
+        row(ui, theme, tr!("Screener"), &screener_notes, &mut |ui| {
+            if let Some(mode) = segmented(ui, theme, &modes, mailbox.screener_mode()) {
+                asked = Some(Asked::Screener(mode));
+            }
+        });
+        let views = InboxView::ALL.map(|view| (view, view.text(), f.button));
+        let view_note = tr!("People, Updates, Newsletters and Invitations as cards, as one list under headings, or one list by date.");
+        row(ui, theme, tr!("Inbox"), &[view_note], &mut |ui| {
+            if let Some(view) = segmented(ui, theme, &views, mailbox.inbox_view()) {
+                asked = Some(Asked::InboxView(view));
+            }
+        });
+        if !mailbox.accounts().is_empty() {
+            ui.add_space(theme.spacing.xl);
+            let note =
+                tr!("Each account's inbox in People, Updates, Newsletters and Invitations, sorted by InboxCraft or by your choice for a sender.");
+            texts(ui, theme, tr!("Grouped inbox"), &[note]);
+        }
+        for account in mailbox.accounts() {
+            let name = tr!("Group the inbox of {account}", account = account.label);
+            let note = tr!("Off, the mail of {address} stays out of the groups.", address = account.address);
+            row_with(ui, theme, Some(IconId::At), &account.label, &[&note], &mut |ui| {
+                if switch(ui, theme, &name, account.grouped).clicked() {
+                    asked = Some(Asked::Grouped(account.id, !account.grouped));
+                }
+            });
         }
     });
     asked

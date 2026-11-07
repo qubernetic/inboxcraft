@@ -190,3 +190,31 @@ fn everyone_who_writes_or_is_written_to_has_an_avatar_from_the_avatar_palette() 
         }
     }
 }
+
+#[test]
+fn the_screener_holds_two_new_senders_before_the_inbox() {
+    let answer = run("screener.list", &json!({}));
+    assert_eq!(answer["mode"], "before");
+    let senders: Vec<&str> = answer["senders"].as_array().unwrap().iter().map(|sender| sender["address"].as_str().unwrap()).collect();
+    assert_eq!(senders, ["club@example.org", "plants@example.org"]);
+    let held = run("mail.list", &json!({ "role": "screener" }));
+    assert_eq!(held["total"], 2);
+    let inbox = run("mail.list", &json!({ "role": "inbox" }));
+    assert!(inbox["messages"].as_array().unwrap().iter().all(|row| row["new_sender"] == false), "the inbox holds no new sender");
+}
+
+#[test]
+fn the_inbox_is_grouped_into_people_and_updates() {
+    let inbox = run("mail.list", &json!({ "role": "inbox", "limit": 100 }));
+    let group = |subject: &str| {
+        let rows = inbox["messages"].as_array().unwrap();
+        rows.iter().find(|row| row["subject"] == subject).map(|row| row["group"].clone()).unwrap()
+    };
+    assert_eq!(group("Allotment rota for November"), "people");
+    assert_eq!(group("Draft logo for the bakery"), "people");
+    assert_eq!(group("Your library loan is due on Friday"), "updates");
+    assert_eq!(group("Your bike is due for a service"), "updates");
+    assert_eq!(group("Invoice 2026-031 is paid"), "updates");
+    let newsletters = run("mail.list", &json!({ "role": "trash", "group": "newsletters" }));
+    assert_eq!(newsletters["total"], 2, "both newsletters carry their list's fields");
+}

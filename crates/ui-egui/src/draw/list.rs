@@ -5,9 +5,12 @@
 //! empty states.
 //!
 //! A row shows the sender's avatar, the sender and the date, the subject and the preview; an unread row its dot and
-//! a heavier sender and subject; the selected row the selection gradient. The parts whose data does not exist yet come
-//! from the mailbox's [`Showcase`], which only `ui_shot` fills, so the app draws none of them: the screener card on
-//! top of the unified inbox and the grouped inbox's cards (badge, name, unread count, "Done all", "Show all (n)").
+//! a heavier sender and subject; the selected row the selection gradient; a row from a new sender says so after the
+//! sender. On top of the unified inbox, while senders wait, the screener card with Review, which opens "New senders".
+//! The unified inbox shows its groups as the owner chose ([`InboxView`]): a card for each (badge, name, unread count,
+//! "Done all", the first rows and "Show all (n)"), one list with a heading for each, or the simple list without them;
+//! the rows no group holds come last. A row of a grouped account has a context menu that puts its sender's mail in
+//! another group. `ui_shot` can show invented senders and groups instead ([`crate::mailbox::Showcase`]).
 //!
 //! A hovered row and a row selected by keyboard show the hover actions alike, the row's text fading out before them:
 //! Done, mark read or unread, Delete, on a real account as on the sample. Done and Delete let the row slide out first;
@@ -17,18 +20,18 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use egui::{
-    Align, Color32, Frame, Galley, Id, Key, Layout, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
-    WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Galley, Id, Key, Layout, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
+    UiBuilder, WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{focus_ring, line, line_height, selection};
 use crate::component::hover::{self, Action};
-use crate::component::{avatar, badge, button, field, margin, tooltip};
-use crate::glass;
+use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
+use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, Mailbox, MessageRow, Place, Showcase};
+use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, Place};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
@@ -146,6 +149,28 @@ fn act(message: &MessageRow, index: usize) -> Option<Act> {
     }
 }
 
+/// The width of the group menu, in body text sizes.
+const MENU_WIDTH: f32 = 18.0;
+
+/// The group menu of a sender's mail: a choice for each group, the one it is in chosen, and "Let InboxCraft sort it";
+/// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
+pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str) -> Option<Act> {
+    let mut chosen = None;
+    ui.label(RichText::new(tr!("Group")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+    for kind in GroupKind::ALL {
+        if popup::choice(ui, theme, kind.text(), current == Some(kind)).clicked() {
+            chosen = Some(Act::Group(Some(kind)));
+        }
+    }
+    if popup::choice(ui, theme, tr!("Let InboxCraft sort it"), false).clicked() {
+        chosen = Some(Act::Group(None));
+    }
+    ui.add_space(theme.spacing.xs);
+    let note = tr!("Moves all mail from {address}, kept and future.", address = address);
+    ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+    chosen
+}
+
 /// What a message row did this frame.
 #[derive(Debug, Default)]
 struct Drawn {
@@ -175,8 +200,19 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         face.multiply_opacity(1.0 - gone);
     }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
-    let acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
+    let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
     focus_ring(ui, theme, &response);
+    if message.group.is_some() && !leaving {
+        let width = theme.fonts.body.size * MENU_WIDTH;
+        Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {
+            popup::panel(ui, theme, Under::Sharp, width, |ui| {
+                if let Some(chosen) = group_menu(ui, theme, message.group, &message.address) {
+                    acted = Some(chosen);
+                    ui.close();
+                }
+            });
+        });
+    }
     Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
 }
 
@@ -228,7 +264,12 @@ fn paint_row(
     let date = line(ui, &[(&mailbox.when(message), f.caption, p.muted)], f32::INFINITY);
     let date_left = right - date.size().x;
     put(ui, theme, pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted, until);
-    let sender = line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left);
+    let mark = format!("  {}", tr!("New sender"));
+    let sender = if message.new_sender {
+        line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, p.accent)], date_left - s.m - left)
+    } else {
+        line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left)
+    };
     put(ui, theme, pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text, until);
     let flag_size = second_height.max(1.0);
     let flag_room = if message.flagged { flag_size + s.s } else { 0.0 };
@@ -295,6 +336,8 @@ pub(super) struct Asked {
     pub(super) acted: Option<(u64, Act)>,
     /// The row sliding out is all the way out, or was not drawn: its act can be done.
     pub(super) out: bool,
+    /// Review on the screener card: "New senders" opens.
+    pub(super) review: bool,
 }
 
 /// What the rows of a card share.
@@ -330,15 +373,17 @@ impl Rows<'_> {
     }
 }
 
-/// The screener card: the waiting senders' avatars, how many wait, and Review.
-fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, showcase: &Showcase) {
+/// The screener card: the waiting senders' avatars, how many wait, and Review; whether Review was pressed.
+fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> bool {
     let s = &theme.spacing;
     let p = &theme.palette;
+    let waiting = mailbox.waiting();
+    let mut review = false;
     sheet(ui, theme, true, |ui| {
         Frame::new().inner_margin(margin(s.s, s.xs)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let side = line_height(ui, theme.fonts.strong) + s.xs + line_height(ui, theme.fonts.caption);
-                let shown = showcase.screener.iter().take(3);
+                let shown = waiting.iter().take(3);
                 let count = u16::try_from(shown.len()).unwrap_or(3);
                 let overlap = side * 0.3;
                 let width = f32::from(count) * side - f32::from(count.saturating_sub(1)) * overlap;
@@ -350,19 +395,23 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, showcase: &Showcase) {
                     avatar::paint(ui.painter(), theme, face, &waiting.name, &waiting.address);
                 }
                 ui.add_space(s.s);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let waiting = showcase.screener.len();
-                    let title = if waiting == 1 { tr!("1 new sender").to_owned() } else { tr!("{count} new senders", count = waiting) };
-                    ui.label(RichText::new(title).font(theme.fonts.strong.id()).color(p.text));
-                    ui.label(RichText::new(tr!("Held back until you let them in")).font(theme.fonts.caption.id()).color(p.muted));
-                });
+                // Review first, at the right end; the two lines take what is left, cut rather than running under it.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    button::text(ui, theme, keymap, tr!("Review"), Some("screener.review"), true);
+                    review = button::text(ui, theme, keymap, tr!("Review"), Some("screener.review"), true).clicked();
+                    ui.add_space(s.s);
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let count = waiting.len();
+                        let title = if count == 1 { tr!("1 new sender").to_owned() } else { tr!("{count} new senders", count = count) };
+                        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.strong.id()).color(p.text)).truncate());
+                        let note = RichText::new(tr!("Held back until you let them in")).font(theme.fonts.caption.id()).color(p.muted);
+                        ui.add(egui::Label::new(note).truncate());
+                    });
                 });
             });
         });
     });
+    review
 }
 
 /// A group's card: its badge, name and unread count, "Done all", its first rows and "Show all (n)". The one clicked.
@@ -411,30 +460,95 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
     clicked
 }
 
-/// The unified inbox with the showcase's screener and groups, the rows no group holds on a card of their own.
-fn grouped(ui: &mut Ui, rows: &Rows<'_>, showcase: &Showcase) -> Option<u64> {
+/// The rows of `group`, in the list's order.
+fn members<'m>(mailbox: &'m Mailbox, group: &Group) -> Vec<&'m MessageRow> {
+    mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).collect()
+}
+
+/// The rows no group holds, in the list's order.
+fn rest<'m>(mailbox: &'m Mailbox, groups: &[Group]) -> Vec<&'m MessageRow> {
+    mailbox.messages().iter().filter(|message| !groups.iter().any(|group| group.messages.contains(&message.id))).collect()
+}
+
+/// The unified inbox as cards: the screener card while senders `wait`, a card for each group, and the rows no group
+/// holds on a card of their own. The row clicked, and whether Review was pressed.
+fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option<u64>, bool) {
     let s = &rows.theme.spacing;
     let mailbox = rows.mailbox;
-    let mut clicked = None;
+    let (mut clicked, mut review) = (None, false);
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
         ui.spacing_mut().item_spacing = vec2(0.0, s.s);
-        if !showcase.screener.is_empty() {
-            screener(ui, rows.theme, rows.keymap, showcase);
+        if wait {
+            review = screener(ui, rows.theme, rows.keymap, mailbox);
         }
-        for group in &showcase.groups {
-            let messages: Vec<&MessageRow> = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).collect();
+        for group in groups {
+            let messages = members(mailbox, group);
             if !messages.is_empty() {
                 clicked = clicked.or(group_card(ui, rows, group, &messages));
             }
         }
-        let rest: Vec<&MessageRow> =
-            mailbox.messages().iter().filter(|message| !showcase.groups.iter().any(|group| group.messages.contains(&message.id))).collect();
+        let rest = rest(mailbox, groups);
         if !rest.is_empty() {
             clicked = clicked.or(sheet(ui, rows.theme, false, |ui| rows.show(ui, rest)));
         }
     });
-    clicked
+    (clicked, review)
+}
+
+/// A group's heading in the grouped list: its badge, name and unread count.
+fn heading(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, messages: &[&MessageRow]) {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    Frame::new().inner_margin(margin(s.s, s.xs)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let side = line_height(ui, theme.fonts.strong) * 1.2;
+            badge::group(ui, theme, icon, name, side);
+            ui.add_space(s.xs);
+            let unread = u64::try_from(messages.iter().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
+            let galley = line(ui, &[(name, theme.fonts.strong, p.text)], f32::INFINITY);
+            let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s } else { 0.0 };
+            let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + count, side), Sense::hover());
+            let spoken = if unread > 0 { tr!("{name}, {count} unread", name = name, count = unread) } else { name.to_owned() };
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &spoken));
+            ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, p.text);
+            if unread > 0 {
+                badge::count(ui, theme, unread, rect.right(), rect.center().y);
+            }
+        });
+    });
+}
+
+/// The unified inbox as one grouped list: the screener card while senders `wait`, then one card with each group's
+/// rows under its heading, and the rows no group holds under "Other". The row clicked, and whether Review was pressed.
+fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option<u64>, bool) {
+    let s = &rows.theme.spacing;
+    let mailbox = rows.mailbox;
+    let (mut clicked, mut review) = (None, false);
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
+        ui.spacing_mut().item_spacing = vec2(0.0, s.s);
+        if wait {
+            review = screener(ui, rows.theme, rows.keymap, mailbox);
+        }
+        clicked = sheet(ui, rows.theme, false, |ui| {
+            let mut clicked = None;
+            for group in groups {
+                let messages = members(mailbox, group);
+                if !messages.is_empty() {
+                    heading(ui, rows.theme, group.icon, &group.name, &messages);
+                    clicked = clicked.or(rows.show(ui, messages));
+                }
+            }
+            let rest = rest(mailbox, groups);
+            if !rest.is_empty() {
+                heading(ui, rows.theme, IconId::Inbox, tr!("Other"), &rest);
+                clicked = clicked.or(rows.show(ui, rest));
+            }
+            clicked
+        });
+    });
+    (clicked, review)
 }
 
 /// The rows of the list on one card that fits them, scrolling inside it.
@@ -498,9 +612,11 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         return Asked { out: true, ..Asked::default() };
     }
-    let showcase = mailbox.showcase();
     let inbox = mailbox.place() == Place::View(inboxcraft_model::Role::Inbox) && mailbox.query().is_empty();
-    let grouping = inbox && (!showcase.screener.is_empty() || !showcase.groups.is_empty());
+    let wait = inbox && !mailbox.waiting().is_empty();
+    let groups = mailbox.groups();
+    let view = if groups.is_empty() { InboxView::Simple } else { mailbox.inbox_view() };
+    let grouping = view != InboxView::Simple;
     let rows = Rows {
         theme,
         keymap,
@@ -510,7 +626,17 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
     };
-    let clicked = if grouping { grouped(ui, &rows, showcase) } else { plain(ui, &rows) };
+    let (clicked, review) = match view {
+        InboxView::Cards => grouped(ui, &rows, &groups, wait),
+        InboxView::List => listed(ui, &rows, &groups, wait),
+        InboxView::Simple => {
+            let review = wait && screener(ui, theme, keymap, mailbox);
+            if wait {
+                ui.add_space(theme.spacing.s);
+            }
+            (plain(ui, &rows), review)
+        }
+    };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review }
 }

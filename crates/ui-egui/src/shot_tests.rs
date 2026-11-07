@@ -223,7 +223,7 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
         assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
     }
     for (more, says) in [
-        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive or delete"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters"),
         (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {
@@ -254,6 +254,7 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
         (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
+        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not cards, list or simple"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");
@@ -439,6 +440,30 @@ fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
     assert!(error.contains("the composer did not open"), "{error}");
     for place in [r#""compose": "new""#, r#""sending": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_acts() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let senders = shoot(&line(r#", "open": {"role": "senders"}"#)).unwrap();
+    let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    let listed = shoot(&line(r#", "view": "list""#)).unwrap();
+    let simple = shoot(&line(r#", "view": "simple""#)).unwrap();
+    let cards = shoot(&line(r#", "view": "cards""#)).unwrap();
+    assert_eq!(window, cards, "cards when left out");
+    for (name, picture) in [("senders", &senders), ("triage", &triage), ("list", &listed), ("simple", &simple)] {
+        assert_ne!(&window, picture, "{name}");
+    }
+    let held = |act: &str| shoot(&line(&format!(r#", "open": {{"role": "senders"}}, "select": "Winter swim at the harbour steps"{act}"#))).unwrap();
+    let preview = held("");
+    for act in ["accept", "accept_open", "block", "newsletters"] {
+        assert_ne!(held(&format!(r#", "act": "{act}""#)), preview, "{act}");
+    }
+    for page in [r#""triage": true"#, r#""view": "list""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {page}}}"#))).unwrap_err().to_string();
         assert!(error.contains("has no window"), "{error}");
     }
 }

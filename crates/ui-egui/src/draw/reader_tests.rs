@@ -474,7 +474,7 @@ fn move_to_a_folder_never_offers_a_folder_that_holds_no_mail() {
         batch.push(Change::RemoveFolder(FolderId::new(id)));
     }
     let listing = FolderListing::new(FolderPath::new("Projects", Some('/')).unwrap(), Vec::new(), false);
-    batch.push(Change::PutFolder(Folder::new(FolderId::new(16), AccountId::new(2), listing)));
+    batch.push(Change::PutFolder(Folder::new(FolderId::new(40), AccountId::new(2), listing)));
     store.apply(&batch).unwrap();
     let mut app = InboxApp::with_outside(
         Mailbox::new(inboxcraft_engine::Session::new(Box::new(store), clock()).unwrap(), clock()),
