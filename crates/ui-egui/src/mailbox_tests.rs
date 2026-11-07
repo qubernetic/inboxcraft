@@ -714,3 +714,39 @@ fn the_sample_has_nothing_to_tell_the_owner() {
     let mut mailbox = mailbox();
     assert_eq!(mailbox.take_notices(), vec![], "no mail arrives in the sample, so nothing notifies");
 }
+
+#[test]
+fn an_agent_runs_safe_commands_only() {
+    let mut mailbox = mailbox();
+    let rota = id_of(&mailbox, ROTA);
+    let refused = mailbox.run_for_agent("mail.archive", &json!({ "id": rota })).unwrap_err();
+    assert_eq!(refused.code(), "not_allowed");
+    assert!(mailbox.messages().iter().any(|row| row.id == rota), "the message stays where it was");
+    let answer = mailbox.run_for_agent("account.list", &json!({})).unwrap();
+    assert!(answer["accounts"].is_array(), "{answer}");
+}
+
+#[test]
+fn an_agents_act_shows_in_the_list_and_ends_the_windows_undo() {
+    let mut mailbox = mailbox();
+    let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    mailbox.act(photos, Act::Unread);
+    assert!(mailbox.can_undo());
+    let answer = mailbox.run_for_agent("mail.seen", &json!({ "id": rota, "seen": true })).unwrap();
+    assert_eq!(answer["changed"], json!(true));
+    assert_eq!(listed(&mailbox, rota), Some(true), "the list is read again");
+    assert_eq!(mailbox.undoable(), None, "the toast would take the agent's act back");
+    assert!(!mailbox.can_undo());
+    mailbox.undo();
+    assert_eq!(listed(&mailbox, rota), Some(true), "the window's undo never takes the agent's act back");
+}
+
+#[test]
+fn an_agents_read_keeps_the_windows_undo() {
+    let mut mailbox = mailbox();
+    let photos = id_of(&mailbox, PHOTOS);
+    mailbox.act(photos, Act::Unread);
+    mailbox.run_for_agent("mail.list", &json!({})).unwrap();
+    assert!(mailbox.undoable().is_some());
+    assert!(mailbox.can_undo());
+}
