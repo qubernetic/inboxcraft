@@ -371,8 +371,9 @@ the icon sits among others at the same size.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
   colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
   strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
-  message ends with Reply (primary, on the preset's gradient), Reply all and Forward, disabled with "Not available
-  yet" until the composer fills them in (E2.4).
+  message ends with Reply (primary, on the preset's gradient), Reply all and Forward; each opens the composer in the
+  reader's place over a draft the engine filled in (the recipients, "Re: " or "Fwd: ", the quote), the text with the
+  focus, or To for a forward. A draft being written is closed and kept first.
 - **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
   it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
   To, Copy and the date in full.
@@ -401,7 +402,8 @@ the icon sits among others at the same size.
   muted in a column on the left and a rule under it: From (the sender as "Name <address>" with a chevron, a menu of
   the accounts; the account's name muted at the right end), To (the chips, then the field, "Name or address" while
   it is empty; "Cc Bcc" at the right end shows those two lines), Subject; then the text, scrolling, and at the foot
-  Discard (the Delete icon) on the left and Send (primary, Ctrl+Enter) on the right with why it is blocked before it.
+  Discard (the Delete icon) and Templates (the File icon) on the left and Send (primary, Ctrl+Enter) on the right
+  with why it is blocked before it.
 - **Chips**: a fully rounded chip on the panel colour with the recipient's avatar, the name (or the address) and a
   cross that removes it; one that is no address is on the error colour with a warning instead of the avatar, and
   Send is blocked with "<address> is not an address" (or "Add a recipient to send" without any). Enter, a comma, a
@@ -410,6 +412,12 @@ the icon sits among others at the same size.
 - **Suggestions**: typing shows the people in the mail kept here whose name or address holds the text (at most six,
   not the owner's own addresses or a recipient already there) on a float under the field. The arrows move the
   highlight (the Done mark), Enter or a press takes it instead of what was typed, Escape puts the list away.
+- **Templates**: Templates opens a menu of the templates of the account in From (disabled, "This account has no
+  templates", without any); the one chosen goes in front of the text, its subject where there is none. Each blank it
+  leaves is a `[[prompt]]` mark on the accent's tint in the text, as on the design file's "Template with a blank to
+  fill" screen; a line on the panel colour over the toolbar asks for the first one (a field saying "Fill in "time""
+  and Fill in), Enter or Fill in puts what was typed in every place of that mark, and Send is blocked with "Fill in
+  "time" to send" while one is left.
 - **Drafts**: the draft is kept at once and after every change (`compose.update`), with nothing to press and
   nothing shown. Close keeps it (the toast says "Draft saved"); Discard removes it here and on the server ("Draft
   discarded"); Send hands it to the account's submission server ("Sending your message"). A refusal shows in the
@@ -509,7 +517,8 @@ The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette
 the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
 the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark, and so are the
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
-`compose-suggest-<mode>.png`, and `compose-floating-<mode>.png` with a message opened over it) and the Sending page
+`compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
+and `compose-template-<mode>.png` with a blank left) and the Sending page
 (`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature.
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws

@@ -330,11 +330,11 @@ fn delete_in_the_toolbar_moves_the_open_message_to_trash() {
 }
 
 #[test]
-fn the_open_message_offers_reply_reply_all_and_forward_disabled_for_now() {
+fn the_open_message_offers_reply_reply_all_and_forward() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
     for name in ["Reply", "Reply all", "Forward"] {
-        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name} has no composer yet");
+        assert!(!harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name} opens the composer");
     }
     harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
     harness.run();

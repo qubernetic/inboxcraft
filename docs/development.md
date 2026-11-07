@@ -93,7 +93,9 @@ are the ones the owner asks for: an attachment saved, and the appearance choices
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 - the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
   a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is
-  refused, with the reason in the error banner: the sample's accounts have no submission server.
+  refused, with the reason in the error banner: the sample's accounts have no submission server. Reply, Reply all
+  and Forward under the open message start the composer filled in. Templates at the composer's foot stays disabled:
+  the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `history.undo`); there the change also goes to the server. The sample's own

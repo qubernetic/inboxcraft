@@ -4,7 +4,9 @@
 //! The composer in the reader's place, and the floating panel it shrinks to while the list and the reader have the
 //! window. The title bar says "New message" (or the subject) with Close, which keeps the draft. Under it a line each:
 //! From (the account, a menu of the accounts), To with its chips and the field to type in ("Cc Bcc" shows those two
-//! lines), Subject; then the text, and the toolbar at the foot with Discard, why Send is blocked, and Send.
+//! lines), Subject; then the text, and the toolbar at the foot with Discard, Templates (a menu of the account's
+//! templates), why Send is blocked, and Send. While a template's blank is left, a line over the toolbar asks for it by its
+//! prompt: Enter or Fill in puts what was typed in its place. The marks of the blanks stand out in the text.
 //!
 //! A chip shows the recipient's avatar and name (the address when there is none) with a button that removes it; one
 //! that is no address shows on the error colour with a warning instead of the avatar. Typing in a recipient line shows
@@ -14,6 +16,7 @@
 //! Drawing changes only the text in the fields; everything else it asks for ([`Asked`]) is applied after the frame,
 //! through the [`Composer`]'s methods, which run the engine's commands.
 
+use egui::text::{LayoutJob, TextFormat};
 use egui::{
     Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit, Ui, WidgetInfo, vec2,
 };
@@ -65,6 +68,10 @@ pub(super) enum Asked {
     Copies,
     /// Write from this account.
     From(u64),
+    /// Put the template at this place of the composer's list into the draft.
+    Template(usize),
+    /// Put what is typed for the first blank in its place.
+    Fill,
     Send,
     Discard,
     /// Close, keeping the draft.
@@ -86,6 +93,11 @@ pub(super) fn subject_id() -> Id {
 /// The id of the text's field.
 pub(super) fn text_id() -> Id {
     Id::unique("compose-text")
+}
+
+/// The id of the field of the first blank.
+pub(super) fn blank_id() -> Id {
+    Id::unique("compose-blank")
 }
 
 fn suggestions_id() -> Id {
@@ -275,13 +287,80 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
     });
 }
 
-/// The toolbar at the foot: Discard, then why Send is blocked and Send at the right end.
+/// The Templates button and its menu of the account's templates.
+fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, asked: &mut Vec<Asked>) {
+    let button = IconButton::new(IconId::File, tr!("Templates"));
+    if composer.templates().is_empty() {
+        button.unavailable(tr!("This account has no templates")).show(ui, theme, keymap);
+        return;
+    }
+    let response = button.show(ui, theme, keymap);
+    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, theme.fonts.body.size * MENU, |ui| {
+            ui.label(RichText::new(tr!("Put in a template")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            for (at, name) in composer.templates().iter().enumerate() {
+                if popup::entry(ui, theme, keymap, name, None).clicked() {
+                    asked.push(Asked::Template(at));
+                }
+            }
+        });
+    });
+}
+
+/// The line that asks for the first blank by its prompt: its field, and Fill in.
+fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, asked: &mut Vec<Asked>) {
+    let Some(prompt) = composer.blank() else { return };
+    let p = &theme.palette;
+    Frame::new().fill(p.panel).corner_radius(theme.spacing.corner).inner_margin(super::margin(theme.spacing.s)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let fill = TextButton::new(tr!("Fill in")).secondary();
+            let room = (ui.available_width() - line_width(ui, theme, tr!("Fill in")) - theme.spacing.l).max(1.0);
+            let spoken = tr!("Fill in \"{blank}\"", blank = prompt);
+            let edit = TextEdit::singleline(composer.filling_mut()).id(blank_id()).hint_text(&spoken).desired_width(room);
+            let response = ui.add(edit);
+            ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken.as_str()));
+            if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
+                asked.push(Asked::Fill);
+            }
+            if fill.show(ui, theme, keymap).clicked() {
+                asked.push(Asked::Fill);
+            }
+        });
+    });
+    ui.add_space(theme.spacing.s);
+}
+
+/// The text laid out with the marks of the open blanks on the accent's tint, so they stand out.
+fn marked(ui: &Ui, theme: &Theme, marks: &[String], text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
+    let p = &theme.palette;
+    let plain = TextFormat::simple(theme.fonts.body.id(), p.text);
+    let mark = TextFormat { background: p.accent.gamma_multiply(0.25), color: p.text, ..plain.clone() };
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = width;
+    let mut rest = text;
+    while !rest.is_empty() {
+        let next = marks.iter().filter(|held| !held.is_empty()).filter_map(|held| rest.find(held.as_str()).map(|at| (at, held.len()))).min();
+        let Some((at, len)) = next else {
+            job.append(rest, 0.0, plain.clone());
+            break;
+        };
+        let (before, after) = rest.split_at(at);
+        let (found, after) = after.split_at(len);
+        job.append(before, 0.0, plain.clone());
+        job.append(found, 0.0, mark.clone());
+        rest = after;
+    }
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// The toolbar at the foot: Discard and Templates, then why Send is blocked and Send at the right end.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     ui.horizontal(|ui| {
         if IconButton::new(IconId::Delete, tr!("Discard the draft")).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Discard);
         }
+        templates(ui, theme, keymap, composer, asked);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let send = TextButton::new(tr!("Send")).primary().icon(IconId::Send).action(keymap::SEND);
             let problem = composer.problem();
@@ -340,12 +419,17 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         });
         rule(ui, theme);
-        let foot = crate::component::control_side(ui, theme) + s.m;
+        let side = crate::component::control_side(ui, theme);
+        // The toolbar, and the line asking for a blank while one is left.
+        let foot = side + s.m + if composer.blank().is_some() { side + s.s * 4.0 } else { 0.0 };
         let height = (ui.available_height() - foot).max(line_height(ui, theme.fonts.body) * 3.0);
         let rows = (height / line_height(ui, theme.fonts.body)).floor().max(3.0);
+        let marks = composer.blanks().to_vec();
+        let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
         egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
             // A whole number of rows, fewer than a few hundred: the cast keeps it.
             let edit = TextEdit::multiline(composer.text_mut())
+                .layouter(&mut layouter)
                 .id(text_id())
                 .frame(Frame::NONE)
                 .desired_width(ui.available_width())
@@ -357,6 +441,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         });
         ui.add_space(s.s);
+        blank(ui, theme, keymap, composer, &mut asked);
         toolbar(ui, theme, keymap, composer, &mut asked);
     });
     asked
