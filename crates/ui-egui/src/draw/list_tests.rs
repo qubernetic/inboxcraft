@@ -12,12 +12,12 @@ use inboxcraft_engine::Session;
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::{InboxApp, TOAST_SECONDS};
-use crate::mailbox::{Mailbox, Place};
+use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
 use crate::theme::install_fonts;
 
-/// The parts of the cards that have no data yet.
-const SHOWCASE_ONLY: [&str; 6] = ["Done all", "Review", "Show all (7)", "People", "Updates", "2 new senders"];
+/// The parts of the group cards, which the simple list leaves out.
+const CARDS_ONLY: [&str; 4] = ["Done all", "Show all (7)", "People", "Updates"];
 
 const ODILE: &str = "Odile Brannock, Allotment rota for November, 08:35, unread";
 const ODILE_READ: &str = "Odile Brannock, Allotment rota for November, 08:35";
@@ -28,11 +28,14 @@ fn clock() -> Box<FakeClock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
 }
 
+/// The sample window: the simple list, or with `showcase` the invented cards.
 fn app(showcase: bool) -> InboxApp {
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
     if showcase {
         let invented = sample::showcase(&mailbox);
         mailbox.set_showcase(invented);
+    } else {
+        mailbox.set_inbox_view(InboxView::Simple);
     }
     InboxApp::new(mailbox)
 }
@@ -94,11 +97,12 @@ fn quick_tooltips(harness: &Harness<'static, InboxApp>) {
 }
 
 #[test]
-fn the_app_draws_no_group_or_screener_card() {
+fn the_simple_list_draws_no_group_card_but_the_screener_card() {
     let harness = harness(false);
-    for name in SHOWCASE_ONLY {
-        assert!(harness.query_by_label(name).is_none(), "{name} shows in the app");
+    for name in CARDS_ONLY {
+        assert!(harness.query_by_label(name).is_none(), "{name} shows in the simple list");
     }
+    harness.get_by_label("2 new senders");
     assert_eq!(rows(&harness), 11);
 }
 
@@ -108,6 +112,7 @@ fn on_a_real_account_the_hover_actions_and_their_keys_act_too() {
     let session = Session::new(Box::new(sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap()), clock()).unwrap();
     let mut app = InboxApp::new(Mailbox::new(session, clock()));
     app.set_reduce_motion(true);
+    app.mailbox_mut().set_inbox_view(InboxView::Simple);
     let mut harness = harness_of(app);
     press(&mut harness, ODILE, "Mark as read");
     harness.get_by_label(ODILE_READ);

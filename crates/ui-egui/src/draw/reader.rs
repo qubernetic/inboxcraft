@@ -11,7 +11,11 @@
 //!
 //! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
 //! real account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in.
-//! Actions without a command (Snooze, Pin) are drawn disabled, and their tooltips say so.
+//! More also puts the sender's mail in another group, for a message of a grouped account. Actions without a command
+//! (Snooze, Pin) are drawn disabled, and their tooltips say so.
+//!
+//! A message the screener holds opens as a preview that decides nothing: over it a card asks "Let <sender> in?", with
+//! the groups to let them into, Accept, Accept and open, and Block.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -27,12 +31,13 @@ use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
 use crate::component::button::{IconButton, TextButton};
+use crate::component::pill::pill;
 use crate::component::{badge, popup};
 use crate::compose::Answer;
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, Mailbox};
+use crate::mailbox::{Act, After, GroupKind, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::reader::{Content, File, Header, Opened, Person, PictureState, Reader, ThreadRow, inline_key, link_status, size_text};
@@ -129,6 +134,15 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         }
         ui.add_space(theme.spacing.xs);
         ui.separator();
+        if row.group.is_some()
+            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
+        {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        if row.group.is_some() {
+            ui.add_space(theme.spacing.xs);
+            ui.separator();
+        }
     }
     let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
     if popup::entry(ui, theme, keymap, name, None).clicked() {
@@ -219,14 +233,23 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
     ui.add_space(s.xl);
     ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.text)).wrap());
-    let group = reader.open_id().and_then(|id| mailbox.showcase().groups.iter().find(|group| group.messages.contains(&id)));
+    // Held mail is in no group until its sender is let in.
+    let group = reader.open_id().filter(|id| !mailbox.held(*id)).and_then(|id| {
+        let row = mailbox.messages().iter().find(|row| row.id == id);
+        mailbox
+            .groups()
+            .into_iter()
+            .find(|group| group.messages.contains(&id))
+            .map(|group| group.name)
+            .or_else(|| row.and_then(|row| row.group).map(|kind| kind.text().to_owned()))
+    });
     let count = reader.thread().len();
     if group.is_some() || count > 1 {
         // The message's group as a chip, then who wrote in the thread.
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s;
-            if let Some(group) = group {
-                badge::chip(ui, theme, &group.name, &tr!("In {group}", group = group.name));
+            if let Some(group) = &group {
+                badge::chip(ui, theme, group, &tr!("In {group}", group = group));
             }
             if count > 1 {
                 let writers = reader.writers().join(", ");
@@ -713,6 +736,48 @@ fn message(
     });
 }
 
+/// The card over a message the screener holds: "Let <sender> in?", the groups to let them into (none chosen at first),
+/// Accept, Accept and open, and Block, with what Block does; then a line that says the message is only a preview.
+fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id: u64, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
+    let chosen_id = egui::Id::unique("screen-into").with(id);
+    let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
+    Frame::new().fill(p.surface).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = s.s;
+        let title = tr!("Let {sender} in?", sender = row.sender);
+        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.text)).wrap());
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = s.xs;
+            ui.label(RichText::new(tr!("Into")).font(theme.fonts.caption.id()).color(p.muted));
+            for kind in GroupKind::ALL {
+                if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
+                    into = if into == Some(kind) { None } else { Some(kind) };
+                    ui.data_mut(|data| data.insert_temp(chosen_id, into));
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s;
+            if TextButton::new(tr!("Accept")).primary().icon(IconId::Done).show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false }));
+            }
+            if TextButton::new(tr!("Accept and open")).secondary().show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: true }));
+            }
+            if TextButton::new(tr!("Block")).secondary().icon(IconId::Junk).show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Block));
+            }
+        });
+        let note =
+            tr!("Accept lets their held mail and their future mail in. Blocked mail goes to Blocked, never loads remote content and never notifies.");
+        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(p.muted)).wrap());
+    });
+    ui.label(RichText::new(tr!("Preview · nothing is accepted yet")).font(theme.fonts.caption.id()).color(p.muted));
+}
+
 /// Where the link under the pointer goes, on a float over the bottom left corner of `rect`. It takes no pointer, so
 /// the link under it stays hovered.
 fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
@@ -772,6 +837,9 @@ pub(super) fn show(
                 bottom: margin(theme.spacing.l).bottom,
             })
             .show(ui, |ui| {
+                if let Some(id) = reader.open_id().filter(|id| mailbox.held(*id)) {
+                    screening(ui, theme, keymap, mailbox, id, &mut drawn);
+                }
                 for row in reader.thread() {
                     match (&row.opened, reader.is_expanded(row.id)) {
                         (Some(opened), true) => message(ui, theme, keymap, mailbox, reader, opened, textures, &mut drawn),

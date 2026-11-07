@@ -171,3 +171,38 @@ fn the_keys_are_kept_beside_the_appearance_and_come_back() {
     assert!(KeepFile::new(std::path::PathBuf::new()).store_keys(&keymap).is_err());
     assert_eq!(KeepFile::new(std::path::PathBuf::new()).load_keys(), None);
 }
+
+#[test]
+fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
+    use inboxcraft_engine::ScreenerMode;
+
+    use super::{TRIAGE_FILE, Triage};
+    use crate::mailbox::InboxView;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_triage(), None, "nothing kept yet");
+    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List };
+    keep.store_triage(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
+    let kept = dir.path().join("nested").join(TRIAGE_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\""), "{text}");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\" }").unwrap();
+    assert_eq!(keep.load_triage(), Some(Triage::default()));
+    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards });
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_triage(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_triage(), None);
+    let mut none = NoKeep;
+    none.store_triage(&chosen).unwrap();
+    assert_eq!(none.load_triage(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_triage(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_triage(&chosen).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_triage(), None);
+}

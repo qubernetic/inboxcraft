@@ -99,11 +99,13 @@ pub enum IconId {
     Back,
     /// Caret: a chevron pointing down, after a choice that opens a menu.
     Caret,
+    /// Newspaper: the Newsletters group of the grouped inbox.
+    Newspaper,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -143,6 +145,7 @@ impl IconId {
         Self::Close,
         Self::Back,
         Self::Caret,
+        Self::Newspaper,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -188,6 +191,7 @@ impl IconId {
             Self::Close => 36,
             Self::Back => 37,
             Self::Caret => 38,
+            Self::Newspaper => 39,
         }
     }
 }

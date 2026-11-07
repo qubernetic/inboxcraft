@@ -7,8 +7,10 @@
 //! Every name, address, subject, text and picture here is made up for InboxCraft; the pictures are drawn in code.
 //! The dates count back from the `now` given, so the sample always looks recent. Two replies quote what they answer
 //! and share a thread with it; a newsletter and a junk message carry remote pictures and links on `example.org` and
-//! `example.net`. Nothing in it connects anywhere: the accounts point at `imap.example.org`, the sample session never
-//! starts their workers, and [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
+//! `example.net`. The screener holds mail from two new senders before the inbox, and the inbox is grouped: three
+//! senders' mail says a machine sent it (Updates) and a newsletter comes through a list. Nothing in it connects
+//! anywhere: the accounts point at `imap.example.org`, the sample session never starts their workers, and
+//! [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
 //! unread, Done, Delete) change it in memory only, and it is built afresh at every start.
 
 use std::time::Duration;
@@ -17,7 +19,7 @@ use inboxcraft_engine::Session;
 use inboxcraft_mime::{Attachment, Mailbox as Sender, MessageBuilder};
 use inboxcraft_model::{
     Account, AccountId, Address, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Message, MessageId,
-    MessageRef, Security, Server, SpecialUse, Summary, Uid,
+    MessageRef, Security, Server, Signs, SpecialUse, Summary, Uid,
 };
 use inboxcraft_store::{Batch, Body, Change, Memory, Storage, StoreConfig};
 use inboxcraft_time::{Clock, Timestamp};
@@ -53,10 +55,18 @@ const PETRA: Person = person("Petra Harbour", "petra@example.org");
 const LUMEN: Person = person("Lumen Print accounts", "accounts@example.org");
 const KASIMIR: Person = person("Kasimir Vell", "kasimir@example.org");
 const NEWS: Person = person("Studio Collective news", "news@example.org");
+const SWIM: Person = person("Harbour Swim Club", "club@example.org");
+const NURSERY: Person = person("Fernhill Nursery", "plants@example.org");
 
 /// Everyone in the sample.
-const PEOPLE: [Person; 15] =
-    [MIRA, MIRA_STUDIO, ODILE, TEODOR, ANSEL, LIBRARY, CYCLES, LETTINGS, PAPER_PINE, PRIZE, FERRIES, PETRA, LUMEN, KASIMIR, NEWS];
+const PEOPLE: [Person; 17] =
+    [MIRA, MIRA_STUDIO, ODILE, TEODOR, ANSEL, LIBRARY, CYCLES, LETTINGS, PAPER_PINE, PRIZE, FERRIES, PETRA, LUMEN, KASIMIR, NEWS, SWIM, NURSERY];
+
+/// The senders whose mail says it was sent by a machine (`Auto-Submitted`), so the grouped inbox puts it in Updates.
+const MACHINES: [Person; 3] = [LIBRARY, CYCLES, LUMEN];
+
+/// The senders whose mail comes through a mailing list (`List-Id`), so the grouped inbox puts it in Newsletters.
+const LISTS: [Person; 1] = [NEWS];
 
 /// Everyone in the sample, `(name, address)`: their avatars take their colours from the theme's avatar palette.
 #[must_use]
@@ -84,6 +94,7 @@ const FOLDERS: &[(u64, u64, &str, &[SpecialUse])] = &[
     (13, 2, "Trash", &[SpecialUse::Trash]),
     (14, 2, "Clients", &[]),
     (15, 2, "Clients/Harbour Bakery", &[]),
+    (16, 1, "InboxCraft/Screener", &[]),
 ];
 
 /// One message: where it is, who wrote it to whom, what it says and how long ago it came.
@@ -301,6 +312,26 @@ const MESSAGES: &[Sample] = &[
         true,
         false,
     ),
+    sample(
+        16,
+        SWIM,
+        MIRA,
+        "Winter swim at the harbour steps",
+        "Join us on Sunday morning for the first winter swim. Towels and hot tea on the quay afterwards.",
+        3 * HOUR,
+        false,
+        false,
+    ),
+    sample(
+        16,
+        NURSERY,
+        MIRA,
+        "Bare-root fruit trees are in",
+        "The apple and pear whips you asked about have arrived. We keep them for you until Saturday.",
+        2 * DAY,
+        false,
+        false,
+    ),
 ];
 
 /// The thread links: a subject, its `Message-ID` and the `Message-ID` it answers.
@@ -499,6 +530,14 @@ fn message(id: u64, uid: u32, account: u64, sample: &Sample, now: Timestamp) -> 
     }
     let uid = Uid::new(uid).ok_or_else(|| UiError::Sample("a UID of 0".to_owned()))?;
     let size = u32::try_from(sample.preview.len().saturating_mul(12)).unwrap_or(u32::MAX);
+    let signs = if MACHINES.iter().any(|machine| machine.address == sample.from.address) {
+        Signs::read([("Auto-Submitted", "auto-generated")])
+    } else if LISTS.iter().any(|list| list.address == sample.from.address) {
+        Signs::read([("List-Id", "<news.example.org>")])
+    } else {
+        Signs::default()
+    };
+    let envelope = envelope.with_signs(signs);
     let summary = Summary::new(uid, envelope).with_flags(flags).with_received(received).with_size(size).with_preview(Some(sample.preview));
     Ok(Message::new(MessageId::new(id), AccountId::new(account), FolderId::new(sample.folder), summary))
 }
@@ -553,7 +592,8 @@ const GROUPS: [(IconId, &str, &[Person]); 2] =
 /// the groups.
 #[must_use]
 pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
-    let screener = WAITING.iter().map(|person| Waiting { name: person.name.to_owned(), address: person.address.to_owned() }).collect();
+    let screener =
+        WAITING.iter().map(|person| Waiting { name: person.name.to_owned(), address: person.address.to_owned(), messages: Vec::new() }).collect();
     let groups = GROUPS
         .iter()
         .map(|(icon, name, senders)| Group {
@@ -573,7 +613,10 @@ pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
 /// As [`mailbox`], and [`UiError::Engine`] when the session refuses the store.
 pub fn session(clock: Box<dyn Clock>) -> Result<Session, UiError> {
     let store = mailbox(clock.now())?;
-    Session::sample(Box::new(store), clock).map_err(UiError::Engine)
+    let mut session = Session::sample(Box::new(store), clock).map_err(UiError::Engine)?;
+    // Turning the screener on learns everyone the kept mail names; the two senders in the screener folder wait.
+    session.run("screener.mode", &serde_json::json!({ "mode": "before" })).map_err(UiError::Engine)?;
+    Ok(session)
 }
 
 #[cfg(test)]

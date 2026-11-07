@@ -79,7 +79,8 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 `just run-sample` (or `inboxcraft --sample`, or the Flatpak's "Open the Sample Mailbox") opens two invented
 accounts with a few dozen invented messages on `example.org`. Nothing connects anywhere: the sample lives in memory,
 is built afresh at every start, starts no account worker and asks for no password. The only files its window writes
-are the ones the owner asks for: an attachment saved, and the appearance choices. In it the owner can try:
+are the ones the owner asks for: an attachment saved, the appearance choices and the inbox view. In it the owner can
+try:
 
 - the folder pane, the unified views, narrowing to one account, opening a folder, and the search;
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
@@ -96,9 +97,15 @@ are the ones the owner asks for: an attachment saved, and the appearance choices
   refused, with the reason in the error banner: the sample's accounts have no submission server. Reply, Reply all
   and Forward under the open message start the composer filled in. Templates at the composer's foot stays disabled:
   the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
+- the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
+  Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
+  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
+  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
+  list, simple list) and each account's grouping. Each act has a toast with Undo.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
-`mail.delete`, `mail.move`, `mail.open`, `history.undo`); there the change also goes to the server. The sample's own
+`mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
+change also goes to the server. The sample's own
 command, `sample.mail.set`, is refused in any other session.
 
 ## The gates (`cargo xtask`)

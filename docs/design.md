@@ -331,12 +331,30 @@ window asks for the next frame; once it has landed, nothing does.
   session's acts, newest first, one at a time.
 - **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
   new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
-  card's edge is the preset's gradient, 1.5 points wide.
-- **Group cards** (the grouped unified inbox): a header with the group's badge, its name and unread count, and
-  "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds more. The rows no
-  group holds follow on a card of their own.
-- The screener and the groups have no data yet. The app draws neither; `ui_shot` shows them with invented data
-  (`"showcase": true`, and `"step": n` to select by keyboard, which also shows the hover actions).
+  card's edge is the preset's gradient, 1.5 points wide. Review is placed first; the two lines are cut before it
+  rather than running under it. Review opens **New senders**: the mail held (`screener.list`, `mail.list` of the
+  screener folders and of the inbox rows marked as new), newest first. A row from a new sender says "New sender"
+  in the accent colour after the sender, and a screen reader hears "new sender".
+- **Let in card** (the reader, over a message the screener holds; the design file's Triage page): "Let <sender>
+  in?" in the heading font, "Into" and a pill for each group (none chosen at first; a second press clears it),
+  Accept (primary), Accept and open, Block, and what they do in the caption font; the card's edge is the focus
+  colour. Under it "Preview · nothing is accepted yet": the message is read with `mail.read`, so it stays unread and
+  nothing goes into the history, and it shows no group chip. Accept, Accept and open and Block are acts with a toast
+  and Undo ("Accepted <sender> into <group>", "Accepted <sender>", "Blocked <sender>"); Accept and open shows the
+  message in the inbox.
+- **Grouped inbox**, as the Triage page chooses: **Cards** (the default): a card for each group (People, Updates,
+  Newsletters with the newspaper icon, Invitations with the calendar), its header with the group's badge, its name
+  and unread count, and "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds
+  more. The rows no group holds (an account not grouped) follow on a card of their own. **Grouped list**: one card,
+  each group's rows under a heading with its badge, name and unread count, the rest under "Other". **Simple list**:
+  one list by date, as any folder. The account stripe shows in the simple list only.
+- **Group menu**: a row of a grouped account has a context menu (a right click), and the reader's More menu the same
+  choices: a radio choice for each group, the one the sender is in marked, and "Let InboxCraft sort it", with "Moves
+  all mail from <address>, kept and future." under them. The choice is an act with a toast and Undo ("<sender> now
+  goes to <group>", "<sender> goes where InboxCraft sorts it").
+- `ui_shot` can show invented waiting senders and groups instead of the sample's (`"showcase": true`, and `"step": n`
+  to select by keyboard, which also shows the hover actions), `"open": {"role": "senders"}` for New senders and
+  `"view"` for the inbox view.
 - **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
   key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
   deep ink, whichever reads at 4.5:1 on every stop).
@@ -425,6 +443,12 @@ the icon sits among others at the same size.
 - **Sending page**: the settings sheet's Sending section has each account's signature in a field (its name and
   address over it) with Save, disabled until the text differs; an empty field clears it. A new message starts with
   the signature under "-- "; another account in From swaps it while it is still at the end as it was.
+- **Triage page**: the settings sheet's Triage section (the Funnel icon; the design file draws only its place in the
+  list of sections). Screener: segmented Before the inbox, Inside, marked, and Off (`screener.mode`), with what each
+  does. Inbox: segmented Cards, Grouped list and Simple list. Then "Grouped inbox" and a row per account (the At icon,
+  its name, a note with its address) with a switch, "Group the inbox of <account>" to a screen reader
+  (`group.account`). The mode and the view are kept in `triage.json` beside `appearance.json`; the sample window
+  takes the kept view but keeps its own mode and never writes it.
 
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
@@ -519,7 +543,11 @@ the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
 `compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
 and `compose-template-<mode>.png` with a blank left) and the Sending page
-(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature.
+(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature. The screener
+and the grouped inbox are drawn in light and dark too: New senders with the Let in card
+(`screener-senders-<mode>.png`), the toast after Accept into Updates (`screener-accepted-<mode>.png`), the cards
+after the rota's sender went to Newsletters (`grouped-cards-<mode>.png`), the grouped list (`grouped-list-<mode>.png`)
+and the Triage page (`settings-triage-<mode>.png`).
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points

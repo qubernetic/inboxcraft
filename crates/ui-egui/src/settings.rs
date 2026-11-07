@@ -39,6 +39,8 @@ pub enum Section {
     Shortcuts,
     /// The signature of each account's new messages.
     Sending,
+    /// The screener's mode, how the inbox shows its groups, and each account's grouping.
+    Triage,
 }
 
 /// The settings sheet.

@@ -12,12 +12,19 @@
 //! `mail.delete`, `mail.move`), on a real account as on the sample; opening a message marks it read (`mail.open`). Each
 //! act that changes something goes into the engine's history, and [`Mailbox::undo`] takes acts back through
 //! `history.undo`.
+//!
+//! The screener and the grouped inbox come from the engine too: `screener.list` gives the senders waiting and the
+//! screener's mode, each row of `mail.list` says its group and whether its sender is new. "New senders"
+//! ([`Place::Senders`]) lists the mail held, and reading it there is a preview (`mail.read`) that decides nothing.
+//! Accept (`screener.accept`, with a group and "open"), Block (`screener.block`) and a sender's group (`group.set`)
+//! are acts like the others: a toast with Undo, taken back through `history.undo`. The groups of the unified inbox
+//! show as cards or a grouped list, or not at all in the simple list ([`InboxView`]).
 
 use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::Notice;
-use inboxcraft_engine::{Applied, Caller, EngineError, MAX_LIST, Session};
+use inboxcraft_engine::{Applied, Caller, EngineError, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
@@ -78,13 +85,116 @@ pub fn role_text(role: Role) -> &'static str {
     }
 }
 
-/// What the list shows: a unified view by role, or one folder.
+/// What the list shows: a unified view by role, one folder, or the mail the screener holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     /// The folders with this role across the accounts shown.
     View(Role),
     /// One folder.
     Folder(u64),
+    /// "New senders": the mail held from senders the owner has not let in yet, in the screener folders and, while the
+    /// screener marks them inside the inbox, in the inboxes.
+    Senders,
+}
+
+/// A group of the grouped inbox, as the engine names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum GroupKind {
+    /// Mail from people.
+    People,
+    /// Notices sent by machines: receipts, reminders, reports.
+    Updates,
+    /// Mail through mailing lists.
+    Newsletters,
+    /// Calendar invitations.
+    Invitations,
+}
+
+impl GroupKind {
+    /// Every group, in the order the inbox shows them.
+    pub const ALL: [Self; 4] = [Self::People, Self::Updates, Self::Newsletters, Self::Invitations];
+
+    /// Its name in the engine's commands.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::People => "people",
+            Self::Updates => "updates",
+            Self::Newsletters => "newsletters",
+            Self::Invitations => "invitations",
+        }
+    }
+
+    /// The group the engine calls `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.id() == name)
+    }
+
+    /// Its name as the person reads it.
+    #[must_use]
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::People => tr!("People"),
+            Self::Updates => tr!("Updates"),
+            Self::Newsletters => tr!("Newsletters"),
+            Self::Invitations => tr!("Invitations"),
+        }
+    }
+
+    /// The icon on its badge.
+    #[must_use]
+    pub fn icon(self) -> IconId {
+        match self {
+            Self::People => IconId::People,
+            Self::Updates => IconId::Notify,
+            Self::Newsletters => IconId::Newspaper,
+            Self::Invitations => IconId::Calendar,
+        }
+    }
+}
+
+/// How the unified inbox shows its groups.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InboxView {
+    /// A card for each group, its first rows and "Show all".
+    #[default]
+    Cards,
+    /// One list, each group under a heading.
+    List,
+    /// One list by date, without groups.
+    Simple,
+}
+
+impl InboxView {
+    /// Every view, in the order the Triage page offers them.
+    pub const ALL: [Self; 3] = [Self::Cards, Self::List, Self::Simple];
+
+    /// Its name where it is kept.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Cards => "cards",
+            Self::List => "list",
+            Self::Simple => "simple",
+        }
+    }
+
+    /// The view kept as `name`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|view| view.id() == name)
+    }
+
+    /// Its name as the person reads it.
+    #[must_use]
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Cards => tr!("Cards"),
+            Self::List => tr!("Grouped list"),
+            Self::Simple => tr!("Simple list"),
+        }
+    }
 }
 
 /// What is selected after the open message leaves the list (an act or a sync removed it).
@@ -114,6 +224,8 @@ pub struct AccountRow {
     pub signature: String,
     /// Its place in the account list, which picks its colour.
     pub index: usize,
+    /// Whether its inbox is grouped.
+    pub grouped: bool,
 }
 
 /// A unified view and how many unread messages its folders hold.
@@ -172,15 +284,21 @@ pub struct MessageRow {
     pub seen: bool,
     /// Flagged.
     pub flagged: bool,
+    /// The group of the grouped inbox it is in; `None` in an account that is not grouped.
+    pub group: Option<GroupKind>,
+    /// Its sender is new: the screener holds it, or marks it inside the inbox.
+    pub new_sender: bool,
 }
 
 /// A sender the screener holds back until the owner lets them in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
-    /// Their name.
+    /// Their name, or the address without one.
     pub name: String,
     /// Their address, which picks the avatar's colour.
     pub address: String,
+    /// Their mail held, by id.
+    pub messages: Vec<u64>,
 }
 
 /// A group of the grouped inbox: its badge's icon, its name and its messages, by id.
@@ -194,8 +312,8 @@ pub struct Group {
     pub messages: Vec<u64>,
 }
 
-/// The parts of the list whose data does not exist yet (the screener and the groups come with E3.1 and E3.2), filled
-/// with invented data by `ui_shot` only. In the app it stays empty, so none of them is drawn.
+/// Invented senders and groups `ui_shot` shows in place of the engine's, to picture the cards over any list. In the app
+/// it stays empty, and the screener card and the groups come from the engine.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Showcase {
     /// The senders waiting in the screener; its card shows while there are any.
@@ -231,6 +349,19 @@ pub enum Act {
     Delete,
     /// Move it to the folder with this id, of its account (`mail.move`).
     Move(u64),
+    /// Let its sender in (`screener.accept`): their held mail and their future mail come in, into `group` when one is
+    /// chosen; with `open`, the message opens in the inbox.
+    Accept {
+        /// The group their mail goes to.
+        group: Option<GroupKind>,
+        /// Whether the message opens in the inbox.
+        open: bool,
+    },
+    /// Block its sender (`screener.block`): their held and future mail go to the blocked folder.
+    Block,
+    /// Put its sender's mail, kept and future, in a group, or back in the classifier's hands with `None`
+    /// (`group.set`).
+    Group(Option<GroupKind>),
 }
 
 impl Act {
@@ -277,6 +408,13 @@ pub struct Mailbox {
     /// Whether the selection came from the keyboard.
     keyed: bool,
     showcase: Showcase,
+    /// The senders the screener holds back, from `screener.list`.
+    waiting: Vec<Waiting>,
+    /// The screener's mode, from `screener.list`.
+    screener: ScreenerMode,
+    inbox_view: InboxView,
+    /// The message an accept-and-open opens in the inbox.
+    opening: Option<u64>,
     /// The message sliding out of the list, and what is done to it once it is out.
     leaving: Option<(u64, Act)>,
     /// The act the toast shows.
@@ -362,6 +500,8 @@ fn message_row(value: &Value) -> MessageRow {
         date: value.get("date").and_then(Value::as_str).and_then(parse_date),
         seen: value.get("seen").and_then(Value::as_bool).unwrap_or(false),
         flagged: value.get("flagged").and_then(Value::as_bool).unwrap_or(false),
+        group: value.get("group").and_then(Value::as_str).and_then(GroupKind::named),
+        new_sender: value.get("new_sender").and_then(Value::as_bool).unwrap_or(false),
     }
 }
 
@@ -432,6 +572,10 @@ impl Mailbox {
             selected: None,
             keyed: false,
             showcase: Showcase::default(),
+            waiting: Vec::new(),
+            screener: ScreenerMode::Off,
+            inbox_view: InboxView::default(),
+            opening: None,
             leaving: None,
             undo: None,
             acts: 0,
@@ -450,7 +594,8 @@ impl Mailbox {
     /// next-message rule ([`After`]) picks what is selected instead.
     pub fn refresh(&mut self) {
         let was = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
-        let result = self.load_accounts().and_then(|()| self.load_folders()).and_then(|()| self.load_list(self.place));
+        let result =
+            self.load_accounts().and_then(|()| self.load_folders()).and_then(|()| self.load_screener()).and_then(|()| self.load_list(self.place));
         if let (Some(at), None) = (was, self.selected) {
             let last = self.messages.len().checked_sub(1);
             let pick = match self.after {
@@ -507,6 +652,81 @@ impl Mailbox {
         self.showcase = showcase;
     }
 
+    /// The senders the screener holds back: the showcase's while it has any, else the engine's.
+    #[must_use]
+    pub fn waiting(&self) -> &[Waiting] {
+        if self.showcase.screener.is_empty() { &self.waiting } else { &self.showcase.screener }
+    }
+
+    /// Whether this is the sample mailbox.
+    #[must_use]
+    pub fn is_sample(&self) -> bool {
+        self.session.is_sample()
+    }
+
+    /// The screener's mode.
+    #[must_use]
+    pub fn screener_mode(&self) -> ScreenerMode {
+        self.screener
+    }
+
+    /// Sets the screener's mode (`screener.mode`). Turning it on learns every sender the kept mail names.
+    pub fn set_screener_mode(&mut self, mode: ScreenerMode) {
+        let result = self.run("screener.mode", &json!({ "mode": mode.name() })).map(|_| ());
+        self.refresh();
+        if let Err(error) = result {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the screener's mode kept from an earlier run, without learning anyone.
+    pub(crate) fn restore_screener(&mut self, mode: ScreenerMode) {
+        self.session.set_screener(mode);
+        self.refresh();
+    }
+
+    /// Turns the grouped inbox of `account` on or off (`group.account`).
+    pub fn set_grouped(&mut self, account: u64, grouped: bool) {
+        let result = self.run("group.account", &json!({ "account": account, "grouped": grouped })).map(|_| ());
+        self.refresh();
+        if let Err(error) = result {
+            self.fail(error);
+        }
+    }
+
+    /// How the unified inbox shows its groups.
+    #[must_use]
+    pub fn inbox_view(&self) -> InboxView {
+        self.inbox_view
+    }
+
+    /// Shows the unified inbox's groups as `view` does.
+    pub fn set_inbox_view(&mut self, view: InboxView) {
+        self.inbox_view = view;
+    }
+
+    /// The groups the list shows: in the unified inbox without a search, unless the view is the simple list; the
+    /// showcase's while it has any, else each group of the engine's that holds a row, in the order of
+    /// [`GroupKind::ALL`]. The rows no group holds are left out.
+    #[must_use]
+    pub fn groups(&self) -> Vec<Group> {
+        if self.place != Place::View(Role::Inbox) || !self.query.is_empty() || self.inbox_view == InboxView::Simple {
+            return Vec::new();
+        }
+        if !self.showcase.groups.is_empty() {
+            return self.showcase.groups.clone();
+        }
+        GroupKind::ALL
+            .into_iter()
+            .map(|kind| Group {
+                icon: kind.icon(),
+                name: kind.text().to_owned(),
+                messages: self.messages.iter().filter(|row| row.group == Some(kind)).map(|row| row.id).collect(),
+            })
+            .filter(|group| !group.messages.is_empty())
+            .collect()
+    }
+
     /// Does `act` to the message `id` through the engine's commands, at once, and shows its toast; Undo takes it back
     /// ([`Mailbox::undo`]). An act that takes the message out of the list lets the next-message rule pick what is
     /// selected. The engine changes the store at once and sends the change to the server as a kept job; on the sample
@@ -514,6 +734,11 @@ impl Mailbox {
     pub fn act(&mut self, id: u64, act: Act) {
         let (before, selected) = (self.history, self.selected == Some(id));
         let result = self.acted(id, act);
+        if let Some(open) = self.opening.take().filter(|_| result.is_ok()) {
+            self.query.clear();
+            self.place = Place::View(Role::Inbox);
+            self.selected = Some(open);
+        }
         if result.is_ok() || self.history != before {
             self.refresh();
         }
@@ -556,8 +781,50 @@ impl Mailbox {
                 let leaf = self.folders.iter().find(|row| row.id == folder).map(|row| row.leaf.clone()).unwrap_or_default();
                 return Ok(tr!("Moved to {folder}", folder = leaf));
             }
+            Act::Accept { group, open } => {
+                let (name, address) = self.sender_of(id)?;
+                let mut params = json!({ "address": address, "group": group.map(GroupKind::id) });
+                if let (true, Value::Object(fields)) = (open, &mut params) {
+                    fields.insert("then".to_owned(), json!("open"));
+                }
+                let answer = self.screen("screener.accept", &params)?;
+                self.opening = answer.get("open").and_then(Value::as_u64);
+                return Ok(match group {
+                    Some(group) => tr!("Accepted {sender} into {group}", sender = name, group = group.text()),
+                    None => tr!("Accepted {sender}", sender = name),
+                });
+            }
+            Act::Block => {
+                let (name, address) = self.sender_of(id)?;
+                self.screen("screener.block", &json!({ "address": address }))?;
+                return Ok(tr!("Blocked {sender}", sender = name));
+            }
+            Act::Group(group) => {
+                let (name, address) = self.sender_of(id)?;
+                self.screen("group.set", &json!({ "address": address, "group": group.map_or("auto", GroupKind::id) }))?;
+                return Ok(match group {
+                    Some(group) => tr!("{sender} now goes to {group}", sender = name, group = group.text()),
+                    None => tr!("{sender} goes where InboxCraft sorts it", sender = name),
+                });
+            }
         };
         Ok(text.to_owned())
+    }
+
+    /// The sender of the row `id`: the name the list shows and the address.
+    fn sender_of(&self, id: u64) -> Result<(String, String), UiError> {
+        self.messages
+            .iter()
+            .find(|row| row.id == id && !row.address.is_empty())
+            .map(|row| (row.sender.clone(), row.address.clone()))
+            .ok_or(UiError::Engine(EngineError::NotFound { what: "message", id }))
+    }
+
+    /// Runs the screening act `command` (accept, block, a group), which always goes into the engine's history.
+    fn screen(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
+        let answer = self.run(command, params)?;
+        self.history = self.history.saturating_add(1);
+        Ok(answer)
     }
 
     /// Runs the act `command`: one act more in the engine's history when it changed something.
@@ -576,7 +843,8 @@ impl Mailbox {
     ///
     /// The command's refusal.
     pub(crate) fn open_message(&mut self, id: u64) -> Result<Value, UiError> {
-        if self.restored.take() == Some(id) {
+        let held = self.held(id);
+        if self.restored.take() == Some(id) || held {
             return self.run("mail.read", &json!({ "id": id }));
         }
         let answer = self.run("mail.open", &json!({ "id": id }))?;
@@ -585,6 +853,13 @@ impl Mailbox {
             self.refresh();
         }
         Ok(answer)
+    }
+
+    /// Whether the message `id` is held by the screener: listed in "New senders", or marked as from a new sender. Its
+    /// reader asks whether to let the sender in, and reading it is a preview.
+    #[must_use]
+    pub fn held(&self, id: u64) -> bool {
+        self.messages.iter().any(|row| row.id == id && (row.new_sender || self.place == Place::Senders))
     }
 
     /// The folders the message `id` can be moved to: those of its account that hold mail, but the one it is in.
@@ -789,6 +1064,7 @@ impl Mailbox {
                 name: text(account, "display_name"),
                 signature: account.get("signature").and_then(Value::as_str).unwrap_or_default().to_owned(),
                 index,
+                grouped: account.get("grouped").and_then(Value::as_bool).unwrap_or(false),
             })
             .collect();
         if self.narrowed.is_some_and(|id| self.account(id).is_none()) {
@@ -836,6 +1112,22 @@ impl Mailbox {
         Ok(())
     }
 
+    fn load_screener(&mut self) -> Result<(), UiError> {
+        let answer = self.run("screener.list", &json!({}))?;
+        self.screener = answer.get("mode").and_then(Value::as_str).and_then(ScreenerMode::from_name).unwrap_or(ScreenerMode::Off);
+        self.waiting = array("screener.list", &answer, "senders")?
+            .iter()
+            .map(|sender| {
+                let address = text(sender, "address");
+                let name = sender.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).map_or_else(|| address.clone(), shown);
+                let messages =
+                    sender.get("messages").and_then(Value::as_array).map(|ids| ids.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                Waiting { name, address, messages }
+            })
+            .collect();
+        Ok(())
+    }
+
     fn load_list(&mut self, place: Place) -> Result<(), UiError> {
         let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
         self.place = place;
@@ -847,15 +1139,31 @@ impl Mailbox {
     }
 
     fn list(&mut self, place: Place) -> Result<Vec<MessageRow>, UiError> {
+        if place == Place::Senders {
+            return self.senders();
+        }
         let mut params = json!({ "account": self.narrowed, "limit": MAX_LIST });
         if let Value::Object(fields) = &mut params {
             match place {
                 Place::View(role) => fields.insert("role".to_owned(), Value::String(role.label().to_ascii_lowercase())),
                 Place::Folder(id) => fields.insert("folder".to_owned(), json!(id)),
+                Place::Senders => None,
             };
         }
         let answer = self.run("mail.list", &params)?;
         Ok(array("mail.list", &answer, "messages")?.iter().map(message_row).collect())
+    }
+
+    /// The mail held from new senders: the screener folders', and the inbox rows marked as from a new sender; newest
+    /// first.
+    fn senders(&mut self) -> Result<Vec<MessageRow>, UiError> {
+        let mut rows = Vec::new();
+        for role in ["screener", "inbox"] {
+            let answer = self.run("mail.list", &json!({ "account": self.narrowed, "role": role, "limit": MAX_LIST }))?;
+            rows.extend(array("mail.list", &answer, "messages")?.iter().map(message_row).filter(|row| role == "screener" || row.new_sender));
+        }
+        rows.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| b.id.cmp(&a.id)));
+        Ok(rows)
     }
 
     /// The search: every message whose subject, sender or recipient holds the query, newest first.
@@ -992,6 +1300,7 @@ impl Mailbox {
         match self.place {
             Place::View(role) => role_text(role).to_owned(),
             Place::Folder(id) => self.folders.iter().find(|folder| folder.id == id).map(|folder| folder.leaf.clone()).unwrap_or_default(),
+            Place::Senders => tr!("New senders").to_owned(),
         }
     }
 
@@ -1045,6 +1354,9 @@ impl Mailbox {
         if row.flagged {
             parts.push(tr!("flagged").to_owned());
         }
+        if row.new_sender {
+            parts.push(tr!("new sender").to_owned());
+        }
         parts.join(", ")
     }
 }
@@ -1052,3 +1364,6 @@ impl Mailbox {
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "triage_tests.rs"]
+mod triage_tests;

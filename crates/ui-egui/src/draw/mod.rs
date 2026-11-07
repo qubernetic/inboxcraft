@@ -54,7 +54,7 @@ use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
 use crate::iconset::IconSet;
-use crate::keep::{Keep, NoKeep};
+use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, Mailbox, Place};
 use crate::motion;
@@ -118,6 +118,8 @@ pub struct InboxApp {
     keymap: Keymap,
     /// The keys the keep holds.
     kept_keys: Keymap,
+    /// The triage choices the keep holds.
+    kept_triage: Triage,
     /// The screen shown beside the rail.
     screen: Screen,
     /// The calendar screen.
@@ -206,6 +208,7 @@ impl InboxApp {
             kept: Appearance::default(),
             keymap: Keymap::default(),
             kept_keys: Keymap::default(),
+            kept_triage: Triage::default(),
             screen: Screen::default(),
             calendar: Calendar::default(),
             palette: Palette::default(),
@@ -245,8 +248,42 @@ impl InboxApp {
             self.keymap = keys;
         }
         self.kept_keys = self.keymap.clone();
+        let sample = self.mailbox.is_sample();
+        match keep.load_triage() {
+            Some(kept) => {
+                // The sample window takes the look of the inbox, never the screener's mode of the owner's mail.
+                if !sample {
+                    self.mailbox.restore_screener(kept.screener);
+                }
+                self.mailbox.set_inbox_view(kept.view);
+                self.kept_triage = kept;
+            }
+            None => {
+                let screener = if sample { Triage::default().screener } else { self.mailbox.screener_mode() };
+                self.kept_triage = Triage { screener, view: self.mailbox.inbox_view() };
+            }
+        }
         self.keep = keep;
         self
+    }
+
+    /// The triage choices to keep: the inbox view, and the screener's mode but on the sample, which keeps the one kept.
+    fn triage(&self) -> Triage {
+        let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
+        Triage { screener, view: self.mailbox.inbox_view() }
+    }
+
+    /// Keeps the triage choices when they changed.
+    fn keep_triage(&mut self) {
+        let triage = self.triage();
+        if triage == self.kept_triage {
+            return;
+        }
+        // Tried once per change: the next change tries again.
+        self.kept_triage = triage;
+        if let Err(error) = self.keep.store_triage(&triage) {
+            self.mailbox.fail(UiError::Keep(error));
+        }
     }
 
     /// The screen shown beside the rail.
@@ -984,6 +1021,7 @@ impl InboxApp {
         // The row sliding out is out when the list is not drawn.
         let mut out = true;
         let mut changed = None;
+        let mut review = false;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // The colour fields first, then the place for the glass layers, then everything else.
@@ -1025,10 +1063,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review)
                 })
             };
-            (searched, clicked, acted, out) = if self.reader.open_id().is_some() || docked {
+            (searched, clicked, acted, out, review) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1099,6 +1137,7 @@ impl InboxApp {
             || asked.narrow.is_some()
             || asked.open.is_some()
             || searched.is_some()
+            || review
             || clicked.is_some()
             || add
             || asked.compose
@@ -1115,16 +1154,7 @@ impl InboxApp {
         if dismiss {
             self.mailbox.dismiss_error();
         }
-        if let Some(account) = asked.narrow {
-            self.mailbox.narrow(account);
-        }
-        if let Some(place) = asked.open {
-            self.mailbox.open(place);
-            self.search.clear();
-        }
-        if let Some(query) = searched {
-            self.mailbox.search(&query);
-        }
+        self.go(&asked, searched, review);
         if clicked.is_some() {
             self.mailbox.select(clicked);
         }
@@ -1146,8 +1176,25 @@ impl InboxApp {
             self.apply_settings(changed);
         }
         self.keep_keys();
+        self.keep_triage();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
+    }
+
+    /// Shows what was asked for this frame: an account narrowed, a place opened in the pane, a search, or "New
+    /// senders" from Review on the screener card.
+    fn go(&mut self, asked: &pane::Asked, searched: Option<String>, review: bool) {
+        if let Some(account) = asked.narrow {
+            self.mailbox.narrow(account);
+        }
+        let place = if review { Some(Place::Senders) } else { asked.open };
+        if let Some(place) = place {
+            self.mailbox.open(place);
+            self.search.clear();
+        }
+        if let Some(query) = searched {
+            self.mailbox.search(&query);
+        }
     }
 
     /// The app's own frame before the panes, when it draws one: the strip right of the rail with the title and the
@@ -1351,6 +1398,9 @@ impl InboxApp {
                 self.settings.captured(None);
             }
             settings::Asked::Signature(account) => self.save_signature(account),
+            settings::Asked::Screener(mode) => self.mailbox.set_screener_mode(mode),
+            settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
+            settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::Close => self.close_settings(),
         }
     }
@@ -1451,3 +1501,6 @@ mod settings_tests;
 mod shortcuts_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "triage_tests.rs"]
+mod triage_tests;

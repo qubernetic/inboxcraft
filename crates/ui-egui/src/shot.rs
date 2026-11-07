@@ -20,16 +20,18 @@
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
-//! (`ui.calendar.show`), `sending` set to `true` the Sending page. `palette` opens the command palette with that text
+//! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page. `palette` opens the command palette with that text
 //! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen. `compose` opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
 //! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
-//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
-//! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
+//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts.
+//! `open` takes `{"role": "senders"}` for "New senders", and `view` shows the inbox's groups as `cards` (when left
+//! out), a grouped `list` or the `simple` list. `showcase` set to `true` shows invented waiting senders and groups
+//! instead of the sample's ([`sample::showcase`]) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
-//! does an act to the selected row (`read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`), so the toast
-//! shows; `slide` set to `true` catches a `done`, `archive` or `delete` row sliding out instead, four frames in with
+//! does an act to the selected row (`read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; `accept` into
+//! Updates, `accept_open`, `block`, or `newsletters` for its sender's group), so the toast shows; `slide` set to `true` catches a `done`, `archive` or `delete` row sliding out instead, four frames in with
 //! motion on.
 //! `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
@@ -53,7 +55,7 @@ use serde::Deserialize;
 
 use crate::component::gallery;
 use crate::compose::Line;
-use crate::mailbox::{Act, Mailbox, Place};
+use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Look, Mode, Preset, TextScale, Theme};
@@ -70,7 +72,7 @@ pub const SHOT_TIME: i64 = 1_793_869_200;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum Open {
-    /// A unified view by role name (`inbox`, `sent` ...).
+    /// A unified view by role name (`inbox`, `sent` ...), or `senders` for "New senders".
     Role(String),
     /// A folder by id.
     Folder(u64),
@@ -136,6 +138,12 @@ pub struct Shot {
     /// Whether the settings sheet is open on Sending, the first account signed.
     #[serde(default)]
     pub sending: Option<bool>,
+    /// Whether the settings sheet is open on Triage.
+    #[serde(default)]
+    pub triage: Option<bool>,
+    /// How the unified inbox shows its groups: `cards` when left out, `list` or `simple`.
+    #[serde(default)]
+    pub view: Option<String>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
     /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
     /// could be under it), `floating` (written, then a message opened), `reply` (a reply with a line written) or
@@ -160,7 +168,8 @@ pub struct Shot {
     /// How many rows down the keyboard selects.
     #[serde(default)]
     pub step: Option<u8>,
-    /// A hover action on the selected row: `read`, `unread`, `done` or `delete`; the toast shows after it.
+    /// An act on the selected row: `read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; for its sender
+    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it.
     #[serde(default)]
     pub act: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
@@ -264,7 +273,16 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         "done" => Act::Done,
         "archive" => Act::Archive,
         "delete" => Act::Delete,
-        other => return Err(bad(format!("{}: act {other:?} is not read, unread, flag, unflag, done, archive or delete", shot.out))),
+        "accept" => Act::Accept { group: Some(GroupKind::Updates), open: false },
+        "accept_open" => Act::Accept { group: None, open: true },
+        "block" => Act::Block,
+        "newsletters" => Act::Group(Some(GroupKind::Newsletters)),
+        other => {
+            return Err(bad(format!(
+                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters",
+                shot.out
+            )));
+        }
     };
     let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: an act needs a selected row", shot.out))) };
     if shot.slide == Some(true) {
@@ -287,6 +305,10 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     }
     if shot.calendar == Some(true) {
         app.show_calendar();
+    }
+    if shot.triage == Some(true) {
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Triage, &appearance);
     }
     if shot.sending == Some(true) {
         sign(app);
@@ -392,6 +414,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.accounts.is_some()
         || shot.shortcuts.is_some()
         || shot.sending.is_some()
+        || shot.triage.is_some()
+        || shot.view.is_some()
         || shot.compose.is_some()
         || shot.capture.is_some()
         || shot.palette.is_some()
@@ -806,7 +830,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if let Some(account) = shot.narrow {
         app.mailbox_mut().narrow(Some(account));
     }
+    if let Some(name) = &shot.view {
+        let view = InboxView::named(name).ok_or_else(|| bad(format!("{}: view {name:?} is not cards, list or simple", shot.out)))?;
+        app.mailbox_mut().set_inbox_view(view);
+    }
     match &shot.open {
+        Some(Open::Role(name)) if name == "senders" => app.mailbox_mut().open(Place::Senders),
         Some(Open::Role(name)) => {
             let role = [Role::Inbox, Role::Drafts, Role::Sent, Role::Archive, Role::Junk, Role::Trash]
                 .into_iter()

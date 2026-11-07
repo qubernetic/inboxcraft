@@ -137,3 +137,13 @@
 {"out": "docs/images/compose-template-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template"}
 {"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
 {"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}
+{"out": "docs/images/screener-senders-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/screener-accepted-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
+{"out": "docs/images/grouped-cards-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
+{"out": "docs/images/grouped-list-light.png", "mode": "light", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/settings-triage-light.png", "mode": "light", "size": [1400, 860], "triage": true}
+{"out": "docs/images/screener-senders-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/screener-accepted-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
+{"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
+{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
