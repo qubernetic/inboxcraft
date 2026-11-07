@@ -24,15 +24,18 @@
 //! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor or Lucide) maps it to a
 //!   glyph.
 //! - [`settings`]: the appearance settings page's state: open or not, and the custom accent as the owner types it.
-//! - [`keep`]: where the appearance choices (the `ui.*.set` commands) are kept between runs.
+//! - [`keep`]: where the appearance choices (the `ui.*.set` commands) and the keys are kept between runs.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
-//! - [`keymap`]: which key runs which action; tooltips and chips read their keys from it.
+//! - [`keymap`]: every action of the window and which key runs it; tooltips and chips read their keys from it.
+//! - [`palette`]: the command palette's state and which actions match what is typed into it.
+//! - [`calendar`]: the calendar screen's state, behind the rail's Calendar.
 //! - [`component`]: the design system's components: card, icon button, pill, tooltip, avatar, badge, hover actions,
 //!   toast and popup, and a gallery of them for `ui_shot`.
 //! - [`icons`]: art drawn in code: the app icon, exported as SVG for the desktop and filled as the window icon.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod calendar;
 pub mod component;
 mod draw;
 mod error;
@@ -47,6 +50,7 @@ pub mod keymap;
 pub mod mailbox;
 pub mod motion;
 pub mod onboard;
+pub mod palette;
 pub mod picture;
 pub mod quote;
 pub mod reader;
@@ -57,7 +61,7 @@ pub mod shot;
 pub mod theme;
 pub mod workers;
 
-pub use draw::InboxApp;
+pub use draw::{InboxApp, Screen};
 pub use error::UiError;
 
 /// The crate's package name.

@@ -257,8 +257,12 @@ colours far enough apart, and that everyone in the sample mail gets an avatar co
 sender's avatar in the message header.
 
 **Keys.** The keymap (`keymap::Keymap`) names which key runs which action, by id (the engine's command ids once
-they have a key; `ui.search.focus`, Ctrl+F, until then). One key runs one action: binding a key takes it from the
-action that had it. Everything that shows a key (tooltips, menu rows, a toast's Undo) reads it when it is drawn.
+they have a key; `ui.search.focus`, Ctrl+F, until then). Every action of the window is listed with its name and icon
+(`keymap::actions`): the command palette shows them all and the Shortcuts page gives each one a key. One key runs one
+action: binding a key takes it from the action that had it. Everything that shows a key (tooltips, menu rows, a
+toast's Undo) reads it when it is drawn. A key without Ctrl, Alt or ⌘ runs nothing while a text field has the focus
+or the settings sheet is open, so a letter typed is typed. The keys are kept in `shortcuts.json` beside the
+appearance file, every action with its key or `null`; an action the file does not name keeps its first key.
 
 ## Motion
 Short and snappy, nothing decorative. Every duration is a motion token (`motion::MOTION`), none longer than 0.25 s:
@@ -284,11 +288,11 @@ window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
 - **Navigation rail** (the window's left edge, full height): the preset's three gradient stops at full strength from
-  top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
-  foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
-  (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
-  (Ctrl+1) leaves the settings sheet; the settings button (Ctrl+Comma) opens the settings page and
-  closes it again. The rail is one button and 8 points either side wide, and shows on every page.
+  top to bottom, the one place the palette runs undiluted. Mail and Calendar sit at the top and the appearance
+  settings at the foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise
+  the deep ink (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at
+  24 %. Mail (Ctrl+1) and Calendar (Ctrl+2) leave the settings sheet; the settings button (Ctrl+Comma) opens the
+  settings page and closes it again. The rail is one button and 8 points either side wide, and shows on every page.
 - **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
@@ -400,11 +404,41 @@ the icon sits among others at the same size.
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again and Change settings after a failure; the link above the page leads back while it runs.
 
+## Command palette
+- **Where**: Ctrl+K anywhere opens it; it leaves the settings sheet. A float on a solid surface 640 points wide near the
+  top of the dimmed window, as on the design file's "Command palette · Ctrl+K" screen.
+- **Layout**: the field ("Type a command", with the magnifier), a line, then every action of the window with its icon,
+  its name and its key at the right end, eight rows in view and the rest scrolling; under them "↑↓ to move · Enter to
+  run · Esc to close" in the caption's muted colour.
+- **Behaviour**: typing narrows the list to the actions whose name (or id) holds every word typed, the names that
+  start with the text first; the first row is picked, on the hover fill. The arrows move the pick round the list,
+  Enter or a press runs it and closes the palette; Escape or a press beside the float closes it and runs nothing. An
+  action that cannot run here (Done with no message selected, Undo with nothing to undo) is listed faded and runs
+  nothing. While the palette is open its keys are its own: the arrows step nothing in the list.
+
+## Shortcuts
+- **Where**: the Shortcuts section of the settings sheet, as on the design file's "Settings · shortcuts" screen.
+- **Layout**: a line on the rule (one key runs one action), the field "Find a command" with Reset all keys at the
+  right, then a row per action: its name, and at the right end its key as a chip ("No key" when it has none) with
+  Remove (the Close icon) before it.
+- **Behaviour**: a press on the chip makes it wait: "press a key…" in the accent with the focus ring. The next key
+  pressed, with the modifiers held, becomes the action's; a key another action had moves, and a line over the list
+  says so ("Ctrl+K was the key of Command palette; it has none now."). Escape stops the wait and keeps the old key;
+  the press reaches nothing else. The new key shows at once everywhere it is shown.
+
+## Calendar
+- **Where**: the rail's Calendar button (Ctrl+2) shows the calendar screen in the place of the folders, the list and
+  the reader; Mail brings them back. The strip's title says "Calendar · InboxCraft".
+- **Empty state** (until calendar sync): one card in the middle with the Calendar icon in Duotone, "No calendars
+  yet" and a line on what will show there. The mail's keys (the arrows, D, R, Delete) rest while it shows.
+
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
-  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance and Accounts are built, the
-  rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it.
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts and Shortcuts are
+  built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
+  the rail's places and their keys; every way out forgets what the open sheet held (the text on the Shortcuts page,
+  an action waiting for a key, the notes), so it opens clean the next time.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
   the preview goes above the controls. The page scrolls.
@@ -435,6 +469,9 @@ sample window without a display and writes the PNGs under `docs/images/`: the un
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
 width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-<mode>.png`), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
+The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette-mode-<mode>.png`, `"palette"`),
+the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
+the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark.
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points

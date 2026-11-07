@@ -16,7 +16,7 @@ use super::list::{ListEntry, MAX_MAILBOXES, check_mailbox};
 use super::mailbox::{MailboxStatus, flag_list};
 use super::notify::{MailboxCounts, Notify};
 use super::response::{Response, classify};
-use super::sasl::{check_credentials, plain_response};
+use super::sasl::{base64_forms, check_credentials, plain_response};
 use super::search::{self, SearchKey, set_text};
 use super::sync::{Extension, SelectOptions, vanished};
 use super::text::Secrets;
@@ -505,12 +505,29 @@ impl Client {
         if self.sign_in_capabilities()?.has("LOGINDISABLED") {
             return Err(ProtoError::NotOffered("LOGIN"));
         }
+        self.hide_credentials(user, password)?;
+        let command = Command::new("LOGIN").string(user.as_bytes()).string(password.as_bytes());
+        Ok(self.start(command, Kind::SignIn))
+    }
+
+    /// Checks the credentials and adds the password to what is never shown, in every form a server may write it
+    /// back in, whether it went out with LOGIN or AUTHENTICATE PLAIN.
+    fn hide_credentials(&mut self, user: &str, password: &str) -> Result<(), ProtoError> {
         check_credentials(user, password)?;
         self.secrets.add(password);
         // The form inside the quotes, when it differs: a server may write the argument back as it came.
         self.secrets.add(&String::from_utf8_lossy(&escaped(password.as_bytes())));
-        let command = Command::new("LOGIN").string(user.as_bytes()).string(password.as_bytes());
-        Ok(self.start(command, Kind::SignIn))
+        for form in base64_forms(user, password)? {
+            self.secrets.add(&form);
+        }
+        // And of the password without its edge white space, which a server may trim before it encodes it.
+        let trimmed = password.trim();
+        if !trimmed.is_empty() && trimmed != password {
+            for form in base64_forms(user, trimmed)? {
+                self.secrets.add(&form);
+            }
+        }
+        Ok(())
     }
 
     /// AUTHENTICATE PLAIN (RFC 4616), over an encrypted connection to a server that offers `AUTH=PLAIN`; with
@@ -527,8 +544,7 @@ impl Client {
         }
         let inline = capabilities.has("SASL-IR");
         let response = plain_response(user, password)?;
-        self.secrets.add(password);
-        self.secrets.add(&response);
+        self.hide_credentials(user, password)?;
         let command = Command::new("AUTHENTICATE PLAIN");
         if inline {
             return Ok(self.start(command.arg(&response), Kind::SignIn));

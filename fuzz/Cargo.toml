@@ -146,3 +146,10 @@ path = "fuzz_targets/ui_typed_time.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ui_keymap"
+path = "fuzz_targets/ui_keymap.rs"
+test = false
+doc = false
+bench = false

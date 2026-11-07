@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use super::{MAX_CREDENTIALS, base64, check_credentials, plain_response};
+use super::{MAX_CREDENTIALS, base64, base64_forms, check_credentials, plain_response};
 use crate::ProtoError;
 
 #[test]
@@ -19,6 +19,13 @@ fn the_plain_response() {
     // RFC 4616 section 4, without an authorisation identity.
     assert_eq!(plain_response("tim", "tanstaaftanstaaf"), Ok("AHRpbQB0YW5zdGFhZnRhbnN0YWFm".to_owned()));
     assert_eq!(plain_response("ádá", "jó"), Ok(base64("\0ádá\0jó".as_bytes())));
+}
+
+#[test]
+fn the_base64_forms_of_the_credentials() {
+    let forms = ["AHRpbQBodW50ZXIyMw", "AHRpbQBodW50ZXIyMw==", "aHVudGVyMjM", "aHVudGVyMjM="].map(str::to_owned);
+    assert_eq!(base64_forms("tim", "hunter23"), Ok(forms.to_vec()));
+    assert!(matches!(base64_forms("tim", ""), Err(ProtoError::BadArgument(_))));
 }
 
 #[test]
