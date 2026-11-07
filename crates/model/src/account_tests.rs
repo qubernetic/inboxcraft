@@ -174,7 +174,14 @@ fn a_calendar_server_is_an_https_url_or_none() {
     let address = EmailAddress::new("anna@example.org").unwrap();
     let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
     assert_eq!(account.caldav(), None);
-    for url in ["https://dav.example.org", "HTTPS://dav.example.org/", "https://dav.example.org:8443/dav/"] {
+    for url in [
+        "https://dav.example.org",
+        "HTTPS://dav.example.org/",
+        "https://dav.example.org:8443/dav/",
+        "https://dav_1.example.org?x#y",
+        "https://[2001:db8::1]:8443/",
+        "https://[::1]",
+    ] {
         assert_eq!(account.clone().with_caldav(Some(url)).unwrap().caldav(), Some(url), "{url}");
     }
     assert_eq!(account.clone().with_caldav(Some(" https://dav.example.org/ ")).unwrap().caldav(), Some("https://dav.example.org/"));
@@ -188,6 +195,18 @@ fn a_calendar_server_is_an_https_url_or_none() {
         "https://ada:pw@dav.example.org/",
         "https://dav.example.org/a b",
         "https://dav.example.org/\r\nX: y",
+        "https://dav\\example.org/",
+        "https://dav%2Eexample.org/",
+        "https://däv.example.org/",
+        "https://:443/",
+        "https://dav.example.org:dav/",
+        "https://dav.example.org:0/",
+        "https://dav.example.org:65536/",
+        "https://dav.example.org:+443/",
+        "https://[]/",
+        "https://[::1/",
+        "https://[::1]x/",
+        "https://[zz]/",
         long.as_str(),
     ] {
         assert_eq!(account.clone().with_caldav(Some(url)), Err(AccountError::BadCalendarUrl), "{url}");

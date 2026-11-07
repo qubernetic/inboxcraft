@@ -398,14 +398,32 @@ impl Account {
     }
 }
 
-/// Whether `url` is an `https` URL with a host and no user name, white space or control character, short enough.
+/// Whether `url` is an `https` URL with a host and no user name, white space or control character, short enough. The
+/// host and port follow the rules the CalDAV client parses them by, so an address saved here is one it can use: an
+/// ASCII host name or an IPv6 address in brackets, and a port of digits from 1 to 65535.
 fn is_https_url(url: &str) -> bool {
     let Some(rest) = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).and_then(|_| url.get(8..)) else { return false };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    url.len() <= Account::MAX_CALDAV_LEN
-        && !authority.is_empty()
-        && !authority.contains('@')
-        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+    url.len() <= Account::MAX_CALDAV_LEN && is_authority(authority) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Whether `authority` is a host and an optional port, without a user name.
+fn is_authority(authority: &str) -> bool {
+    const MAX_HOST: usize = 253;
+    let (good_host, port) = if let Some(v6) = authority.strip_prefix('[') {
+        let Some((address, after)) = v6.split_once(']') else { return false };
+        let good = !address.is_empty() && address.chars().all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.'));
+        let port = match after.strip_prefix(':') {
+            Some(port) => Some(port),
+            None if after.is_empty() => None,
+            None => return false,
+        };
+        (good, port)
+    } else {
+        let (host, port) = authority.split_once(':').map_or((authority, None), |(host, port)| (host, Some(port)));
+        (!host.is_empty() && host.len() <= MAX_HOST && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')), port)
+    };
+    good_host && port.is_none_or(|digits| digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.parse::<u16>().is_ok_and(|port| port != 0))
 }
 
 #[cfg(test)]
