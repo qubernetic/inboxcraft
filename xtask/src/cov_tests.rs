@@ -33,8 +33,13 @@ struct FakeLlvmCov {
 }
 
 impl Runner for FakeLlvmCov {
-    fn run(&mut self, _: &OsStr, args: &[&str], _: &Path) -> Result<bool, Error> {
-        self.calls.borrow_mut().push(args.join(" "));
+    fn run(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<bool, Error> {
+        self.run_with_env(program, args, &[], dir)
+    }
+
+    fn run_with_env(&mut self, _: &OsStr, args: &[&str], env: &[(&str, &str)], _: &Path) -> Result<bool, Error> {
+        let vars = env.iter().map(|(key, value)| format!("{key}={value} "));
+        self.calls.borrow_mut().push(vars.collect::<String>() + &args.join(" "));
         let output = args.iter().position(|arg| *arg == "--output-path").and_then(|at| args.get(at + 1));
         if let (Some(path), Some(lcov)) = (output, self.lcov) {
             std::fs::write(path, lcov).unwrap();
@@ -80,7 +85,11 @@ fn cov_runs_llvm_cov_nextest_into_the_lcov_file() {
     let (code, out, err) = run_in(ctx, &["cov", "--check"]);
     assert_eq!(code, OK, "{out}{err}");
     let lcov = dir.path().join("lcov.info");
-    assert_eq!(*calls.borrow(), [format!("llvm-cov nextest --workspace --profile ci --lcov --output-path {}", lcov.display())]);
+    assert_eq!(
+        *calls.borrow(),
+        [format!("CARGO_INCREMENTAL=1 llvm-cov nextest --workspace --profile ci --lcov --output-path {}", lcov.display())],
+        "an incremental build, whatever the caller's environment: see `INCREMENTAL`"
+    );
     assert_eq!(std::fs::read_to_string(lcov).unwrap(), PASS, "the report stays for Codecov");
 }
 
@@ -331,7 +340,8 @@ fn this_workspace_names_every_core_crate_in_its_floors() {
     for name in ["ui-egui", "net"] {
         assert_eq!(floors.crates.get(&format!("inboxcraft-{name}")), Some(&80.0), "{name}");
     }
-    assert_eq!(floors.crates.len(), 13);
+    assert_eq!(floors.crates.get("inboxcraft-mcp"), Some(&95.0));
+    assert_eq!(floors.crates.len(), 14);
     assert_eq!(floors.exclude, ["xtask/src/main.rs"]);
     assert_eq!(floors.workspace_exclude, ["apps/*/src/main.rs", "crates/ui-egui/src/draw/**"]);
 }

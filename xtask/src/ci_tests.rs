@@ -59,14 +59,16 @@ fn ci_runs_every_gate_in_order() {
             .map(|args| format!("cargo {args} @ {}", root.display()))
             .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in ["fmt", "clippy", "spdx", "test-files", "assets", "layers", "flatpak-sources-check", "doctests", "cov", "wasm", "deny", "stats"] {
+    for name in
+        ["fmt", "clippy", "spdx", "test-files", "assets", "changes", "layers", "flatpak-sources-check", "doctests", "cov", "wasm", "deny", "stats"]
+    {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
     assert!(out.contains("layers: ") && out.contains("assets: ") && out.contains("flatpak-sources-check: ") && out.contains("stats: total"), "{out}");
     assert!(!out.contains("ci: nextest"), "the cov gate is the test run: {out}");
-    assert!(out.ends_with("ci: all 12 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 12);
+    assert!(out.ends_with("ci: all 13 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 13);
 }
 
 #[test]
@@ -75,7 +77,7 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert_eq!(calls.borrow().len(), 6, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 12 gates failed: clippy, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 2 of 13 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -86,7 +88,7 @@ fn a_failing_test_fails_ci_as_a_test_not_a_floor() {
     assert_eq!(calls.borrow().iter().filter(|call| call.contains("nextest")).count(), 1, "the tests run once");
     assert!(out.contains(&format!("{TESTS_FAILED}\n")), "{out}");
     assert!(!out.contains("below the floor"), "{out}");
-    assert!(out.ends_with("ci: 1 of 12 gates failed: cov\n"), "{out}");
+    assert!(out.ends_with("ci: 1 of 13 gates failed: cov\n"), "{out}");
 }
 
 #[test]
@@ -95,7 +97,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 6 of 12 gates failed: fmt, clippy, doctests, cov, wasm, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 6 of 13 gates failed: fmt, clippy, doctests, cov, wasm, deny\n"), "{out}");
 }
 
 #[test]
@@ -106,8 +108,20 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 7 of 12 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert!(out.ends_with("ci: 7 of 13 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
     assert_eq!(calls.borrow().len(), 4);
+}
+
+#[test]
+fn a_malformed_change_fragment_fails_ci() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_support::write(dir.path(), "changes/5.md", "## Changelog\n### Added\n- x without a number\n");
+    let (mut ctx, _) = ci_context(vec![]);
+    ctx.root = dir.path().to_path_buf();
+    let (code, out, _) = run_in(ctx, &["ci"]);
+    assert_eq!(code, FAILED);
+    assert!(out.contains("ci: changes\nchanges: changes/5.md:3: the entry does not name #5\n"), "{out}");
+    assert!(out.ends_with("ci: 8 of 13 gates failed: spdx, assets, changes, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
 }
 
 #[test]
@@ -139,6 +153,17 @@ fn the_process_runner_reports_the_exit_status() {
     assert!(!ProcessRunner.run(cargo, &["inboxcraft-no-such-subcommand"], here).unwrap());
     let missing = PathBuf::from(here).join("inboxcraft-no-such-program");
     assert!(matches!(ProcessRunner.run(missing.as_os_str(), &[], here), Err(Error::Spawn { .. })));
+}
+
+#[test]
+fn the_process_runner_sets_the_environment_it_is_given() {
+    let sh = OsStr::new("sh");
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let check = ["-c", "test \"$INBOXCRAFT_XTASK_PROBE\" = set"];
+    assert!(ProcessRunner.run_with_env(sh, &check, &[("INBOXCRAFT_XTASK_PROBE", "set")], here).unwrap());
+    assert!(!ProcessRunner.run_with_env(sh, &check, &[("INBOXCRAFT_XTASK_PROBE", "other")], here).unwrap());
+    let missing = PathBuf::from(here).join("inboxcraft-no-such-program");
+    assert!(matches!(ProcessRunner.run_with_env(missing.as_os_str(), &[], &[], here), Err(Error::Spawn { .. })));
 }
 
 #[test]

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 
 use contract::{account, folder, m, message};
-use inboxcraft_model::{AccountId, FolderId};
+use inboxcraft_model::{AccountId, CalendarEventId, FolderId, MessageState};
 use inboxcraft_store::{Batch, Body, Change, DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Search, Sqlite, Storage, StoreConfig};
 use rusqlite::{Connection, params};
 
@@ -153,4 +153,84 @@ fn a_version_2_store_deletes_index_words_at_once() {
     assert_eq!(store.search(&Search::new().with_text("draft budget")).unwrap(), [m(1)], "the index is kept");
     store.apply(&Batch::new().with(Change::RemoveBody(m(1)))).unwrap();
     assert_eq!(store.search(&Search::new().with_text("draft")).unwrap(), []);
+}
+
+/// Schema version 3 as it was released, applied on top of version 2. Frozen like [`VERSION_1`].
+const VERSION_3: &str = "INSERT INTO body_text (body_text, rank) VALUES ('secure-delete', 1);
+    PRAGMA user_version = 3;";
+
+/// A version 3 store: the mail of [`version_1`], migrated by hand through versions 2 and 3.
+fn version_3(dir: &Path) {
+    version_1(dir);
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    conn.execute_batch(VERSION_2).unwrap();
+    conn.execute_batch(VERSION_3).unwrap();
+}
+
+#[test]
+fn a_version_3_store_gets_the_local_tables_with_its_mail_kept() {
+    let tmp = dir();
+    let dir = tmp.path();
+    version_3(dir);
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.accounts().unwrap(), [account(1)]);
+    assert!(store.message(m(1)).unwrap().unwrap().opened());
+    assert_eq!(store.search(&Search::new().with_text("draft budget")).unwrap(), [m(1)]);
+    assert_eq!(secure_delete(dir), Some(1));
+    let id = store.id().unwrap();
+    assert_eq!(id.len(), 32, "a migrated store gets its own id too: {id}");
+    store
+        .apply(
+            &Batch::new()
+                .with(Change::QueueJob(contract::job(1, 1)))
+                .with(Change::PutDraft(contract::draft(1, 1, "Re: Budget 2026")))
+                .with(Change::SetMessageState(m(1), MessageState { pinned: true, ..MessageState::default() }))
+                .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+                .with(Change::PutCalendarEvent(contract::event(1, 1)))
+                .with(Change::PutAlert(contract::alert(1, 1, 3))),
+        )
+        .unwrap();
+    drop(store);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.queued_jobs().unwrap(), [contract::job(1, 1)]);
+    assert_eq!(store.drafts(AccountId::new(1)).unwrap(), [contract::draft(1, 1, "Re: Budget 2026")]);
+    assert!(store.message_state(m(1)).unwrap().pinned);
+    assert_eq!(store.alerts(CalendarEventId::new(1)).unwrap(), [contract::alert(1, 1, 3)]);
+    assert_eq!(store.id().unwrap(), id);
+}
+
+#[test]
+fn the_local_tables_are_the_ones_the_epic_needs() {
+    let tmp = dir();
+    let dir = tmp.path();
+    version_3(dir);
+    drop(Sqlite::open(dir, StoreConfig::default()).unwrap());
+    let conn = Connection::open(dir.join(DATABASE_FILE)).unwrap();
+    let tables: Vec<String> = conn
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'body_text%' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        tables,
+        [
+            "account",
+            "alert",
+            "body",
+            "calendar",
+            "calendar_event",
+            "draft",
+            "folder",
+            "job",
+            "message",
+            "message_state",
+            "meta",
+            "outbox",
+            "schedule",
+            "sender"
+        ]
+    );
 }

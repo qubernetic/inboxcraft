@@ -26,6 +26,12 @@ fn every_error_has_a_code_and_a_sentence() {
         (EngineError::Store(StoreError::UnknownAccount(AccountId::new(3))), "store", "no account a3 in the store"),
         (EngineError::Panicked("mail.list"), "panicked", "the command mail.list failed inside; nothing was changed"),
         (EngineError::SampleOnly("sample.mail.set"), "sample_only", "the command sample.mail.set runs only on the sample mailbox (--sample)"),
+        (EngineError::NothingToUndo, "nothing_to_undo", "there is nothing to undo"),
+        (
+            EngineError::StillMoving { id: 7 },
+            "still_moving",
+            "the message 7 is still on its way to its folder; it can be deleted for good once the server has it there",
+        ),
     ];
     for (error, code, sentence) in errors {
         assert_eq!(error.code(), code);

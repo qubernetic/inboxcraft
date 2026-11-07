@@ -8,13 +8,17 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use inboxcraft_model::{
-    AccountId, CheckStep, ConnectionState, ErrorKind, Event, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, StepReport, UidValidity,
+    AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, Job, JobId, JobKind, MessageId, Role, RoleMap, ScheduleId,
+    StepReport, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
-use inboxcraft_time::{Clock, Timestamp};
+use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
 use serde_json::Value;
 
+use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::schedule::{self, Fired};
+use crate::undo::{Act, Step};
 use crate::{Caller, EngineError, Registry, error};
 
 /// A command's answer and the changes it asks for. The session makes the changes only after the command returned.
@@ -29,6 +33,8 @@ pub struct Outcome {
     removed: Vec<AccountId>,
     /// The appearance choices from now on.
     appearance: Option<Appearance>,
+    /// What the command does to the undo history.
+    undo: Option<Step>,
 }
 
 /// A job before it has an id.
@@ -38,13 +44,15 @@ pub(crate) struct Pending {
     pub(crate) kind: JobKind,
     /// The message a `FetchBody` job is for, so the same body is not asked for twice while one job is out.
     pub(crate) message: Option<MessageId>,
+    /// Kept in the store's job queue until it ends, so a restart runs it again.
+    pub(crate) keep: bool,
 }
 
 impl Outcome {
     /// The answer `value`, with nothing to change.
     #[must_use]
     pub fn new(value: Value) -> Self {
-        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None }
+        Self { value, batch: Batch::new(), jobs: Vec::new(), senders: Vec::new(), removed: Vec::new(), appearance: None, undo: None }
     }
 
     /// The outcome with `change` to make in the store.
@@ -57,8 +65,39 @@ impl Outcome {
     /// The outcome with a job for the `net` worker of `account`.
     #[must_use]
     pub fn with_job(mut self, account: AccountId, kind: JobKind) -> Self {
-        self.jobs.push(Pending { account, kind, message: None });
+        self.jobs.push(Pending { account, kind, message: None, keep: false });
         self
+    }
+
+    /// The outcome with a job for the `net` worker of `account` that is kept in the store's job queue, in the same
+    /// batch as the outcome's changes, until its last event comes: a restart before then runs it again. Only a job
+    /// with a last event is kept ([`keepable`]); a check or a watch runs in this session only.
+    #[must_use]
+    pub fn with_kept_job(mut self, account: AccountId, kind: JobKind) -> Self {
+        self.jobs.push(Pending { account, kind, message: None, keep: true });
+        self
+    }
+
+    /// The outcome with an act's store changes and its kept jobs.
+    pub(crate) fn with_effects(mut self, effects: Effects) -> Self {
+        for change in effects.changes {
+            self.batch.push(change);
+        }
+        for (account, kind) in effects.jobs {
+            self = self.with_kept_job(account, kind);
+        }
+        self
+    }
+
+    /// The outcome doing `step` to the undo history.
+    pub(crate) fn with_undo(mut self, step: Step) -> Self {
+        self.undo = Some(step);
+        self
+    }
+
+    /// The answer, to add to.
+    pub(crate) fn value_mut(&mut self) -> &mut Value {
+        &mut self.value
     }
 
     /// The outcome letting the remote pictures of `sender` (in lower case) load without asking, or no longer.
@@ -82,7 +121,7 @@ impl Outcome {
 
     /// The outcome with a `FetchBody` job for `message`, unless one is already out.
     pub(crate) fn with_fetch(mut self, account: AccountId, kind: JobKind, message: MessageId) -> Self {
-        self.jobs.push(Pending { account, kind, message: Some(message) });
+        self.jobs.push(Pending { account, kind, message: Some(message), keep: false });
         self
     }
 
@@ -93,12 +132,13 @@ impl Outcome {
     }
 }
 
-/// What a command may read: the store, the session's state, the time and who asked.
+/// What a command may read: the store, the session's state, the time, the computer's offsets and who asked.
 #[derive(Clone, Copy)]
 pub struct Context<'a> {
     store: &'a dyn Storage,
     state: &'a State,
     now: Timestamp,
+    offsets: &'a dyn Offsets,
     caller: Caller,
 }
 
@@ -113,6 +153,19 @@ impl<'a> Context<'a> {
     #[must_use]
     pub fn now(&self) -> Timestamp {
         self.now
+    }
+
+    /// The computer's offset from UTC over time, for anything in the owner's wall-clock time.
+    #[must_use]
+    pub fn offsets(&self) -> &'a dyn Offsets {
+        self.offsets
+    }
+
+    /// The id for a new schedule entry: past every entry the session has held. A command that adds two entries
+    /// counts on from it.
+    #[must_use]
+    pub fn next_schedule_id(&self) -> ScheduleId {
+        ScheduleId::new(self.state.next_schedule)
     }
 
     /// Who asked for the command; [`Caller::Agent`] while an event from a worker is applied, which nobody asked for.
@@ -147,6 +200,11 @@ pub(crate) struct State {
     pub(crate) next_folder: u64,
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
+    pub(crate) next_schedule: u64,
+    /// The jobs in the store's queue: kept until their last event.
+    pub(crate) kept: BTreeSet<JobId>,
+    /// The acts to undo, the newest last.
+    pub(crate) history: Vec<Act>,
     /// Whether the store is the invented sample mailbox ([`Session::sample`]), where the `sample.*` commands run.
     pub(crate) sample: bool,
 }
@@ -183,7 +241,7 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, ..Self::default() };
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, ..Self::default() };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -199,6 +257,13 @@ impl State {
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
+        }
+        for entry in store.schedule()? {
+            state.next_schedule = state.next_schedule.max(entry.id.get().saturating_add(1));
+        }
+        for job in store.queued_jobs()? {
+            state.next_job = state.next_job.max(job.id.get().saturating_add(1));
+            state.kept.insert(job.id);
         }
         Ok(state)
     }
@@ -245,9 +310,14 @@ pub enum Applied {
 pub struct Session {
     store: Box<dyn Storage>,
     clock: Box<dyn Clock>,
+    offsets: Box<dyn Offsets>,
+    /// When [`Session::start`] ran: a schedule entry due before then was missed.
+    started: Option<Timestamp>,
     registry: Registry,
     state: State,
     jobs: Vec<Job>,
+    /// The jobs an earlier run left in the store's queue, for [`Session::start`].
+    replay: Vec<Job>,
 }
 
 impl fmt::Debug for Session {
@@ -272,8 +342,15 @@ impl Session {
     ///
     /// A store that cannot be read.
     pub fn with_registry(store: Box<dyn Storage>, clock: Box<dyn Clock>, registry: Registry) -> Result<Self, EngineError> {
+        let mut store = store;
+        let (replay, stray): (Vec<Job>, Vec<Job>) = store.queued_jobs()?.into_iter().partition(|job| keepable(&job.kind));
+        if !stray.is_empty() {
+            // No last event would take them off the queue, and a check could sign in again without the owner asking.
+            let batch = stray.iter().fold(Batch::new(), |batch, job| batch.with(Change::RemoveJob(job.id)));
+            store.apply(&batch)?;
+        }
         let state = State::load(&*store)?;
-        Ok(Self { store, clock, registry, state, jobs: Vec::new() })
+        Ok(Self { store, clock, offsets: Box::new(Offset::UTC), started: None, registry, state, jobs: Vec::new(), replay })
     }
 
     /// A session over the invented sample mailbox in `store`, with InboxCraft's own commands: the `sample.*` commands
@@ -306,6 +383,12 @@ impl Session {
         &*self.store
     }
 
+    /// The store, to change as a test sets the scene.
+    #[cfg(test)]
+    pub(crate) fn store_mut(&mut self) -> &mut dyn Storage {
+        &mut *self.store
+    }
+
     /// The owner's appearance choices, as the `ui.*.set` commands left them.
     #[must_use]
     pub fn appearance(&self) -> &Appearance {
@@ -315,6 +398,11 @@ impl Session {
     /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`].
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.state.appearance = appearance;
+    }
+
+    /// Takes the computer's offset from UTC over time; until then the session works in UTC.
+    pub fn set_offsets(&mut self, offsets: Box<dyn Offsets>) {
+        self.offsets = offsets;
     }
 
     /// Runs the command `id` with `params` for the owner.
@@ -339,13 +427,18 @@ impl Session {
         if !class.allows(caller) {
             return Err(EngineError::NotAllowed { command: spec.id, class });
         }
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
+        if let Some(step) = undo {
+            crate::undo::take(&mut self.state.history, step);
+        }
         for change in batch.changes() {
-            if let Change::PutAccount(account) = change {
-                self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1));
+            match change {
+                Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
+                Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
+                _ => {}
             }
         }
         for account in removed {
@@ -365,9 +458,14 @@ impl Session {
         Ok(value)
     }
 
-    /// Asks every account's worker for its folder list; the answers bring the folder syncs. A check still running is
-    /// over: the worker that ran it is gone, so its last step never comes, and the account can be checked again.
+    /// Hands the jobs an earlier run left in the store's queue over again, then asks every account's worker for its
+    /// folder list; the answers bring the folder syncs. A check still running is over: the worker that ran it is gone,
+    /// so its last step never comes, and the account can be checked again.
+    ///
+    /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such.
     pub fn start(&mut self) {
+        self.started = Some(self.clock.now());
+        self.jobs.append(&mut self.replay);
         for held in self.state.accounts.values_mut() {
             if let Some(check) = held.check.as_mut() {
                 check.job = None;
@@ -375,8 +473,32 @@ impl Session {
         }
         let accounts: Vec<AccountId> = self.state.accounts.keys().copied().collect();
         for account in accounts {
-            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None });
+            self.queue(Pending { account, kind: JobKind::SyncFolderList, message: None, keep: false });
         }
+    }
+
+    /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
+    /// (see [`crate::schedule`]), in one batch. The front end calls it at [`Session::next_due`] and after
+    /// [`Session::start`].
+    ///
+    /// # Errors
+    ///
+    /// A store failure, or [`EngineError::Panicked`]; nothing fires then, and the next tick tries again.
+    pub fn tick(&mut self) -> Result<Vec<Fired>, EngineError> {
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
+        let started = self.started;
+        let plan = catch_unwind(AssertUnwindSafe(|| schedule::due(&context, started))).map_err(|_| EngineError::Panicked("schedule"))??;
+        self.commit("schedule", None, &plan.batch, Vec::new())?;
+        Ok(plan.fired)
+    }
+
+    /// When the next schedule entry is due, if any.
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub fn next_due(&self) -> Result<Option<Timestamp>, EngineError> {
+        Ok(self.store.schedule()?.into_iter().map(|entry| entry.due).min())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
@@ -390,15 +512,49 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
     pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
-        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), caller: Caller::Agent };
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
-        let Some(plan) = plan else { return Ok(Applied::Dropped) };
-        self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
-        Ok(Applied::Changed)
+        let ended = event.job.filter(|job| self.state.kept.contains(job) && ends_job(&event.kind));
+        let applied = match plan {
+            Some(mut plan) => {
+                if let Some(job) = ended {
+                    plan.batch.push(Change::RemoveJob(job));
+                }
+                self.commit("event", Some(plan.state), &plan.batch, plan.jobs)?;
+                Applied::Changed
+            }
+            None => {
+                if let Some(job) = ended {
+                    self.commit("event", None, &Batch::new().with(Change::RemoveJob(job)), Vec::new())?;
+                }
+                Applied::Dropped
+            }
+        };
+        if let Some(job) = ended {
+            self.state.kept.remove(&job);
+        }
+        Ok(applied)
     }
 
-    /// Makes `batch`, then takes `state` and queues `jobs`; nothing of it when the batch fails.
-    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, jobs: Vec<Pending>) -> Result<(), EngineError> {
+    /// Makes `batch` with the kept jobs among `jobs` added to the store's queue, then takes `state` and queues `jobs`;
+    /// nothing of it when the batch fails.
+    fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, mut jobs: Vec<Pending>) -> Result<(), EngineError> {
+        for pending in &mut jobs {
+            pending.keep &= keepable(&pending.kind);
+        }
+        let mut next_job = self.state.next_job;
+        let mut kept = Vec::new();
+        for pending in jobs.iter().filter(|pending| pending.keep) {
+            kept.push(Job::new(JobId::new(next_job), pending.account, pending.kind.clone()));
+            next_job = next_job.saturating_add(1);
+        }
+        let with_kept;
+        let batch = if kept.is_empty() {
+            batch
+        } else {
+            with_kept = kept.iter().fold(batch.clone(), |batch, job| batch.with(Change::QueueJob(job.clone())));
+            &with_kept
+        };
         if !batch.is_empty() {
             let store = &mut self.store;
             catch_unwind(AssertUnwindSafe(|| store.apply(batch))).map_err(|_| EngineError::Panicked(what))??;
@@ -406,8 +562,17 @@ impl Session {
         if let Some(state) = state {
             self.state = state;
         }
-        for job in jobs {
-            self.queue(job);
+        self.state.next_job = self.state.next_job.max(next_job);
+        let mut kept = kept.into_iter();
+        for pending in jobs {
+            let job = if pending.keep { kept.next() } else { None };
+            match job {
+                Some(job) => {
+                    self.state.kept.insert(job.id);
+                    self.jobs.push(job);
+                }
+                None => self.queue(pending),
+            }
         }
         Ok(())
     }
@@ -429,6 +594,33 @@ impl Session {
     }
 }
 
+/// Whether `kind` is the last event of the job that caused it: the answer of a folder list, folder sync, body fetch
+/// or write, or its failure.
+pub(crate) fn ends_job(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Folders { .. }
+            | EventKind::FolderSynced { .. }
+            | EventKind::BodyFetched { .. }
+            | EventKind::FlagsStored { .. }
+            | EventKind::Moved { .. }
+            | EventKind::Expunged { .. }
+            | EventKind::Appended { .. }
+            | EventKind::FolderCreated { .. }
+            | EventKind::Failed { .. }
+    )
+}
+
+/// Whether a job of `kind` may be kept in the store's queue: one with a last event ([`ends_job`]) to take it off. A
+/// check ends with its steps and a watch never ends, so either would be handed out again at every start.
+pub(crate) fn keepable(kind: &JobKind) -> bool {
+    kind.writes() || matches!(kind, JobKind::SyncFolderList | JobKind::SyncFolder { .. } | JobKind::FetchBody { .. })
+}
+
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "queue_tests.rs"]
+mod queue_tests;

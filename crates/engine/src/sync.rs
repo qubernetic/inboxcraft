@@ -6,7 +6,7 @@
 //! Like a command, planning an event only reads; the session makes the plan afterwards. An event about an account
 //! or a folder the session does not hold, or with UIDs of an older UIDVALIDITY, is dropped.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use inboxcraft_model::{
     AccountId, CheckStep, Event, EventKind, FlagChange, Folder, FolderId, FolderListing, FolderPath, JobId, JobKind, Message, Role, StepReport,
@@ -14,7 +14,10 @@ use inboxcraft_model::{
 };
 use inboxcraft_store::{Batch, Body, Change, Storage};
 
+use crate::act::{self, Effects};
+use crate::arrive::{self, Arrival};
 use crate::session::{Pending, State};
+use crate::write::{self, Moved};
 use crate::{Context, EngineError};
 
 /// What an event changes: the session's new state, the store changes and the jobs that follow.
@@ -25,12 +28,28 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
-    fn change(&mut self, change: Change) {
+    pub(crate) fn change(&mut self, change: Change) {
         self.batch.push(change);
     }
 
-    fn job(&mut self, account: AccountId, kind: JobKind) {
-        self.jobs.push(Pending { account, kind, message: None });
+    pub(crate) fn job(&mut self, account: AccountId, kind: JobKind) {
+        self.jobs.push(Pending { account, kind, message: None, keep: false });
+    }
+
+    /// A job kept in the store's queue until its last event.
+    pub(crate) fn kept_job(&mut self, account: AccountId, kind: JobKind) {
+        self.jobs.push(Pending { account, kind, message: None, keep: true });
+    }
+
+    /// An act's changes and kept jobs, as a stage of the arriving-mail pipeline adds them.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that act come with the triage slices"))]
+    pub(crate) fn effects(&mut self, effects: Effects) {
+        for change in effects.changes {
+            self.change(change);
+        }
+        for (account, kind) in effects.jobs {
+            self.kept_job(account, kind);
+        }
     }
 }
 
@@ -49,10 +68,10 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
     let mut plan = Plan { state: context.state().clone(), batch: Batch::new(), jobs: Vec::new() };
     let kept = match &event.kind {
         EventKind::Folders { listings } => folders(store, &mut plan, account, listings)?,
-        EventKind::MessagesAdded { folder, uid_validity, messages } => added(store, &mut plan, account, *folder, *uid_validity, messages)?,
+        EventKind::MessagesAdded { folder, uid_validity, messages } => added(context, &mut plan, account, *folder, *uid_validity, messages)?,
         EventKind::MessagesChanged { folder, uid_validity, changes } => changed(store, &mut plan, *folder, *uid_validity, changes)?,
         EventKind::MessagesExpunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
-        EventKind::UidValidityReset { folder, new, .. } => reset(store, &mut plan, *folder, *new)?,
+        EventKind::UidValidityReset { folder, new, .. } => reset(store, &mut plan, account, *folder, *new)?,
         EventKind::BodyFetched { folder, uid_validity, uid, raw } => fetched(store, &mut plan, *folder, *uid_validity, *uid, raw)?,
         EventKind::FolderSynced { folder, state } => {
             let kept = current(&mut plan.state, *folder, state.uid_validity());
@@ -60,6 +79,17 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
                 plan.change(Change::SetFolderState(*folder, *state));
             }
             kept
+        }
+        EventKind::FlagsStored { folder, uid_validity, .. } => current(&mut plan.state, *folder, *uid_validity),
+        EventKind::Moved { folder, uid_validity, uids, to, copied } => {
+            let moved = Moved { folder: *folder, uid_validity: *uid_validity, uids, to: *to, copied: copied.as_ref() };
+            write::moved(store, &mut plan, account, &moved)?
+        }
+        EventKind::Expunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
+        EventKind::Appended { .. } => true,
+        EventKind::FolderCreated { .. } => {
+            plan.job(account, JobKind::SyncFolderList);
+            true
         }
         EventKind::CheckStep(report) => {
             let kept = checked(&mut plan.state, account, event.job, report);
@@ -82,6 +112,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
             if let Some(job) = event.job {
                 plan.state.fetching.remove(&job);
             }
+            write::failed(store, &mut plan, account, event.job)?;
             true
         }
     };
@@ -114,7 +145,7 @@ fn checked(state: &mut State, account: AccountId, job: Option<JobId>, report: &S
 }
 
 /// Whether UIDs of `uid_validity` belong to what we hold of `folder`; the first UIDVALIDITY seen is taken.
-fn current(state: &mut State, folder: FolderId, uid_validity: UidValidity) -> bool {
+pub(crate) fn current(state: &mut State, folder: FolderId, uid_validity: UidValidity) -> bool {
     *state.validity.entry(folder).or_insert(uid_validity) == uid_validity
 }
 
@@ -160,13 +191,20 @@ fn folders(store: &dyn Storage, plan: &mut Plan, account: AccountId, listings: &
     Ok(true)
 }
 
-/// The messages of `folder` we hold, by UID.
-fn held(store: &dyn Storage, folder: FolderId) -> Result<BTreeMap<Uid, Message>, EngineError> {
-    Ok(store.messages(folder)?.into_iter().map(|entry| (entry.message().summary().uid(), entry.message().clone())).collect())
+/// The messages of `folder` we hold under the server's UIDs, by UID: not those whose move is on its way, whose UID
+/// is ours.
+pub(crate) fn held(store: &dyn Storage, folder: FolderId) -> Result<BTreeMap<Uid, Message>, EngineError> {
+    Ok(store
+        .messages(folder)?
+        .into_iter()
+        .filter(|entry| entry.message().moving().is_none())
+        .map(|entry| (entry.message().summary().uid(), entry.message().clone()))
+        .collect())
 }
 
+/// Messages new to us or changed: kept under their ids, and the new ones sent through the arriving-mail pipeline.
 fn added(
-    store: &dyn Storage,
+    context: &Context<'_>,
     plan: &mut Plan,
     account: AccountId,
     folder: FolderId,
@@ -176,20 +214,44 @@ fn added(
     if !current(&mut plan.state, folder, uid_validity) {
         return Ok(false);
     }
+    let store = context.store();
+    let entries = store.messages(folder)?;
+    let mut taken: BTreeSet<Uid> = entries.iter().map(|entry| entry.message().summary().uid()).collect();
+    taken.extend(messages.iter().map(Summary::uid));
+    let mut ours: BTreeMap<Uid, Message> = entries
+        .iter()
+        .filter(|entry| entry.message().moving().is_some())
+        .map(|entry| (entry.message().summary().uid(), entry.message().clone()))
+        .collect();
     let held = held(store, folder)?;
     let mut given: BTreeMap<Uid, inboxcraft_model::MessageId> = BTreeMap::new();
+    let mut new = Vec::new();
     for summary in messages {
         let uid = summary.uid();
+        if let Some(waiting) = ours.remove(&uid) {
+            // The server named a UID we gave a message whose move is on its way: ours gives way.
+            let free = act::free_uid(&taken);
+            taken.extend(free);
+            plan.change(free.map_or(Change::RemoveMessage(waiting.id()), |free| {
+                Change::PutMessage(act::placed(&waiting, folder, free, waiting.moving().cloned()))
+            }));
+        }
         let old = held.get(&uid);
         let id = match (old, given.get(&uid)) {
             (_, Some(id)) => *id,
             (Some(old), None) => old.id(),
             (None, None) => plan.state.message_id(),
         };
-        given.insert(uid, id);
         let message = Message::new(id, account, folder, summary.clone()).with_thread(old.and_then(Message::thread));
+        let first = given.insert(uid, id).is_none();
+        if old.is_none() && first {
+            new.push(message.clone());
+        }
         plan.change(Change::PutMessage(message));
     }
+    let role = plan.state.accounts.get(&account).and_then(|held| held.roles.role_of(folder));
+    let arrival = Arrival { store, now: context.now(), account, folder, role, first_sync: store.folder_state(folder)?.is_none() };
+    arrive::arrived(arrive::STAGES, &arrival, &new, plan)?;
     Ok(true)
 }
 
@@ -218,11 +280,13 @@ fn expunged(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity
     Ok(true)
 }
 
-/// Every UID we hold of `folder` is void: its messages go, and the next ones belong to `new`.
-fn reset(store: &dyn Storage, plan: &mut Plan, folder: FolderId, new: UidValidity) -> Result<bool, EngineError> {
+/// Every UID we hold of `folder` is void: its messages go, and so do those whose move from it is on its way; the next
+/// ones belong to `new`.
+fn reset(store: &dyn Storage, plan: &mut Plan, account: AccountId, folder: FolderId, new: UidValidity) -> Result<bool, EngineError> {
     for message in held(store, folder)?.values() {
         plan.change(Change::RemoveMessage(message.id()));
     }
+    write::void(store, plan, account, folder)?;
     plan.state.validity.insert(folder, new);
     Ok(true)
 }

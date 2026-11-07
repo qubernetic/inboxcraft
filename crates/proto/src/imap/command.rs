@@ -45,17 +45,23 @@ impl Command {
     /// An argument as a quoted string, or as a literal when quotes cannot carry it (8-bit, a control character, a
     /// long text). The caller keeps NUL out: no IMAP string carries it.
     pub(crate) fn string(mut self, bytes: &[u8]) -> Self {
-        self.text(b" ");
         if bytes.len() <= MAX_QUOTED && bytes.iter().all(|b| matches!(b, b' '..=b'~')) {
             let mut quoted = Vec::with_capacity(bytes.len().saturating_add(2));
             quoted.push(b'"');
             quoted.extend(escaped(bytes));
             quoted.push(b'"');
+            self.text(b" ");
             self.text(&quoted);
+            self
         } else {
-            self.text(format!("{{{}}}\r\n", bytes.len()).as_bytes());
-            self.chunks.push(bytes.to_vec());
+            self.literal(bytes)
         }
+    }
+
+    /// An argument as a synchronising literal, whatever it holds: the server's go-ahead comes before it.
+    pub(crate) fn literal(mut self, bytes: &[u8]) -> Self {
+        self.text(format!(" {{{}}}\r\n", bytes.len()).as_bytes());
+        self.chunks.push(bytes.to_vec());
         self
     }
 

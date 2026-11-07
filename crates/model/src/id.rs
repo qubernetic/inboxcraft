@@ -65,6 +65,31 @@ own_id!(
     JobId,
     "j"
 );
+own_id!(
+    /// A message the owner is writing.
+    DraftId,
+    "d"
+);
+own_id!(
+    /// An entry of the schedule: something to do at a set time.
+    ScheduleId,
+    "s"
+);
+own_id!(
+    /// A calendar of one account.
+    CalendarId,
+    "c"
+);
+own_id!(
+    /// An event of one calendar.
+    CalendarEventId,
+    "e"
+);
+own_id!(
+    /// An alert of one calendar event.
+    AlertId,
+    "l"
+);
 
 /// A number the server gives, never zero (RFC 9051 `nz-number`).
 macro_rules! server_number {

@@ -3,6 +3,7 @@
 
 //! The native backend: SQLite with a full-text index, the message sources as files next to it.
 
+mod local;
 mod private;
 mod schema;
 mod sources;
@@ -12,7 +13,10 @@ mod tests;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use inboxcraft_model::{Account, AccountId, Folder, FolderId, FolderState, Message, MessageId};
+use inboxcraft_model::{
+    Account, AccountId, Alert, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId, FolderState,
+    Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
+};
 use inboxcraft_time::Timestamp;
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
@@ -20,7 +24,7 @@ pub use schema::SCHEMA_VERSION;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::memory::with_flags;
+use crate::memory::{sender_key, with_flags};
 use crate::search::Fields;
 use crate::{Batch, Body, Change, Entry, Search, Storage, StoreConfig, StoreError};
 
@@ -107,6 +111,18 @@ impl Sqlite {
         Ok(self.conn.pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
+    /// The store's own id: 32 lower-case hex digits, random, made once with the store (schema version 4) and kept for
+    /// good. What lives outside the store and belongs to it, such as its accounts' passwords in the OS credential
+    /// store, is named with it, so two stores on one computer never share it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Corrupt`] when the id is gone; a database failure.
+    pub fn id(&self) -> Result<String, StoreError> {
+        let id: Option<String> = self.conn.query_row("SELECT value FROM meta WHERE key = 'store'", [], |row| row.get(0)).optional()?;
+        id.ok_or(StoreError::Corrupt("the store's id"))
+    }
+
     fn entries(&self, filter: &str, key: i64) -> Result<Vec<Entry>, StoreError> {
         let sql =
             format!("SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE {filter} ORDER BY uid");
@@ -117,6 +133,19 @@ impl Sqlite {
             Ok(Entry::new(serde_json::from_str(&record)?, opened, has_body))
         })
         .collect()
+    }
+
+    /// The records `sql` picks, its first column each.
+    fn records<T: DeserializeOwned>(&self, sql: &str, params: impl rusqlite::Params) -> Result<Vec<T>, StoreError> {
+        let mut statement = self.conn.prepare(sql)?;
+        let rows = statement.query_map(params, record)?;
+        rows.map(|row| parse(&row?)).collect()
+    }
+
+    /// The one record `sql` picks, if any.
+    fn one<T: DeserializeOwned>(&self, sql: &str, params: impl rusqlite::Params) -> Result<Option<T>, StoreError> {
+        let held: Option<String> = self.conn.query_row(sql, params, record).optional()?;
+        held.map(|text| parse(&text)).transpose()
     }
 
     fn ids(&self, sql: &str, params: impl rusqlite::Params) -> Result<Vec<MessageId>, StoreError> {
@@ -172,7 +201,19 @@ fn drop_bodies(tx: &Transaction<'_>, filter: &str, id: i64, files: &mut Files) -
 }
 
 fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Files) -> Result<(), StoreError> {
-    files.removed |= matches!(change, Change::RemoveAccount(_) | Change::RemoveFolder(_) | Change::RemoveMessage(_) | Change::RemoveBody(_));
+    files.removed |= matches!(
+        change,
+        Change::RemoveAccount(_)
+            | Change::RemoveFolder(_)
+            | Change::RemoveMessage(_)
+            | Change::RemoveBody(_)
+            | Change::RemoveDraft(_)
+            | Change::RemoveOutgoing(_)
+            | Change::RemoveSender(_)
+            | Change::RemoveCalendar(_)
+            | Change::SetSyncToken(_, None)
+            | Change::RemoveCalendarEvent(_)
+    );
     match change {
         Change::PutAccount(account) => {
             tx.execute(
@@ -217,6 +258,26 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
         Change::MarkOpened(id) => {
             tx.execute("UPDATE message SET opened = 1 WHERE id = ?1", [exists(tx, *id)?])?;
         }
+        Change::QueueJob(job) => local::queue_job(tx, job)?,
+        Change::RemoveJob(id) => local::remove(tx, "job", "id", id.get())?,
+        Change::PutDraft(draft) => local::put_draft(tx, draft)?,
+        Change::RemoveDraft(id) => local::remove(tx, "draft", "id", id.get())?,
+        Change::PutOutgoing(outgoing) => local::put_outgoing(tx, outgoing)?,
+        Change::RemoveOutgoing(id) => local::remove(tx, "outbox", "draft", id.get())?,
+        Change::PutScheduled(entry) => local::put_scheduled(tx, entry)?,
+        Change::RemoveScheduled(id) => local::remove(tx, "schedule", "id", id.get())?,
+        Change::PutSender(sender) => local::put_sender(tx, sender)?,
+        Change::RemoveSender(address) => {
+            tx.execute("DELETE FROM sender WHERE address = ?1", [sender_key(address)])?;
+        }
+        Change::SetMessageState(id, state) => local::set_message_state(tx, *id, state)?,
+        Change::PutCalendar(calendar) => local::put_calendar(tx, calendar)?,
+        Change::RemoveCalendar(id) => local::remove(tx, "calendar", "id", id.get())?,
+        Change::SetSyncToken(id, token) => local::set_sync_token(tx, *id, token.as_deref())?,
+        Change::PutCalendarEvent(event) => local::put_calendar_event(tx, event)?,
+        Change::RemoveCalendarEvent(id) => local::remove(tx, "calendar_event", "id", id.get())?,
+        Change::PutAlert(alert) => local::put_alert(tx, alert)?,
+        Change::RemoveAlert(id) => local::remove(tx, "alert", "id", id.get())?,
     }
     Ok(())
 }
@@ -370,6 +431,71 @@ impl Storage for Sqlite {
              ORDER BY date IS NULL, date DESC, id DESC LIMIT ?9",
             params![account, folder, search.from(), search.to(), search.subject(), search.since(), search.before(), text, limit],
         )
+    }
+
+    fn queued_jobs(&self) -> Result<Vec<Job>, StoreError> {
+        self.records("SELECT record FROM job ORDER BY seq", [])
+    }
+
+    fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
+        self.records("SELECT record FROM draft WHERE account = ?1 ORDER BY id", [key(account.get())?])
+    }
+
+    fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
+        self.one("SELECT record FROM draft WHERE id = ?1", [key(id.get())?])
+    }
+
+    fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {
+        self.records("SELECT record FROM outbox ORDER BY draft", [])
+    }
+
+    fn schedule(&self) -> Result<Vec<Scheduled>, StoreError> {
+        self.records("SELECT record FROM schedule ORDER BY due, id", [])
+    }
+
+    fn sender(&self, address: &EmailAddress) -> Result<Option<Sender>, StoreError> {
+        self.one("SELECT record FROM sender WHERE address = ?1", [sender_key(address)])
+    }
+
+    fn senders(&self) -> Result<Vec<Sender>, StoreError> {
+        self.records("SELECT record FROM sender ORDER BY address", [])
+    }
+
+    fn message_state(&self, id: MessageId) -> Result<MessageState, StoreError> {
+        Ok(self.one("SELECT record FROM message_state WHERE message = ?1", [key(id.get())?])?.unwrap_or_default())
+    }
+
+    fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, StoreError> {
+        let mut statement = self.conn.prepare("SELECT message, record FROM message_state ORDER BY message")?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+        rows.map(|row| {
+            let (id, state) = row?;
+            let id = u64::try_from(id).map(MessageId::new).map_err(|_| StoreError::Corrupt("a message id"))?;
+            Ok((id, parse(&state)?))
+        })
+        .collect()
+    }
+
+    fn calendars(&self, account: AccountId) -> Result<Vec<Calendar>, StoreError> {
+        self.records("SELECT record FROM calendar WHERE account = ?1 ORDER BY id", [key(account.get())?])
+    }
+
+    fn sync_token(&self, calendar: CalendarId) -> Result<Option<String>, StoreError> {
+        let token: Option<Option<String>> =
+            self.conn.query_row("SELECT sync_token FROM calendar WHERE id = ?1", [key(calendar.get())?], |row| row.get(0)).optional()?;
+        Ok(token.flatten())
+    }
+
+    fn calendar_events(&self, calendar: CalendarId) -> Result<Vec<CalendarEvent>, StoreError> {
+        self.records("SELECT record FROM calendar_event WHERE calendar = ?1 ORDER BY id", [key(calendar.get())?])
+    }
+
+    fn calendar_event(&self, id: CalendarEventId) -> Result<Option<CalendarEvent>, StoreError> {
+        self.one("SELECT record FROM calendar_event WHERE id = ?1", [key(id.get())?])
+    }
+
+    fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError> {
+        self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())?])
     }
 
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {

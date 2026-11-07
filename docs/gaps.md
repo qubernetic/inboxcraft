@@ -10,7 +10,7 @@
 B = blocks the next stage.
 
 ## Known rough edges (not ranked)
-- `inboxcraft-cli` and `inboxcraft-web` answer `--version` and refuse everything else (#5).
+- `inboxcraft-web` answers `--version` and refuses everything else (#5).
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
 - `cargo xtask ci` runs the tests only in the coverage-instrumented build (`cov` gate); a bug that shows only in
   an uninstrumented build goes unseen in CI (#66).
@@ -29,8 +29,9 @@ B = blocks the next stage.
   hide it; a short login name that also occurs in ordinary output fails the run (#10).
 - A server without a hierarchy delimiter (`NIL` in `LIST`) has no run folder under `InboxCraft-Test`;
   `RunFolder` needs a delimiter (#10).
-- `time` knows fixed offsets only: no IANA zones and no lookup of the computer's own zone yet, so a date shows in
-  the sender's offset or UTC. ISO 8601 and iCalendar text come with `ical` (#15).
+- `time` has no IANA zones and no lookup of the computer's own zone yet: `Offsets` takes a fixed offset or an
+  `OffsetTable` someone filled, so a date shows in the sender's offset or UTC and the engine works in UTC until a
+  front end hands it the computer's offsets. ISO 8601 and iCalendar text come with `ical` (#15, #122).
 - RFC 5322 dates are read leniently where RFC 5322 section 4.3 allows it or real mail needs it: the day of the
   week is not checked against the date, second 60 reads as 59, and a missing zone, a military letter or an unknown
   zone name (`CET`) reads as `-0000`. Text after the zone other than a comment (`+0100 CET`) is refused (#15).
@@ -203,12 +204,14 @@ B = blocks the next stage.
 - `net` opens and resyncs the watched folder again after every job, also after a job that opened no other folder:
   one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
   full sync, which reports every message as added again (#26).
-- `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
-  not run again (the engine decides). The offline queue is in memory: what is queued when the app ends is gone. A
-  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
-  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
-  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
-  (#26).
+- `net`'s back-off has no random spread; a read job that was running when its connection ended is reported failed and
+  not run again (the engine decides); a write job runs again after the reconnect, three times at most (#115). The
+  worker's offline queue is in memory; a job the engine keeps (`Outcome::with_kept_job`) is also in the store and
+  goes out again at the next start, other jobs are gone. A certificate fault, a refused sign-in, a sign-in the server
+  never answered (one more try after a dropped or timed-out one) or a server without a sign-in method stops the tries
+  until the engine starts a new worker. A connection that drops during the sign-in twice for an ordinary network
+  reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next
+  job asks again (#26).
 - `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
   traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`
@@ -302,12 +305,11 @@ B = blocks the next stage.
   shown text keeps the joiners, variation selectors and tag characters emoji and flags need (#29).
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
-- The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, and so is its
-  password: when the window closes, it removes the credential store entry (`io.github.qubernetic.inboxcraft`,
-  `account-<id>`) of every account added in it, trying again one the store refused to remove in "Change settings".
-  A crash, a killed process or a store that refuses at exit leaves the entry behind; the next account with that id
-  in a later session overwrites it, and `PRIVACY.md` says how to remove one by hand (#34).
+- `--sample` shows an invented mailbox in memory that is forgotten on exit (#30). `inboxcraft` alone keeps the
+  owner's store on disk with its accounts, so their passwords stay in the credential store
+  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings";
+  a crash or a store that refuses then leaves the entry behind, and `PRIVACY.md` says how to remove one by hand. An
+  entry an older build left (`account-<id>`) is never read again and stays until removed by hand (#34, #113).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
@@ -364,7 +366,7 @@ B = blocks the next stage.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; of the sheet's sections only Appearance and Accounts are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  runs them exist; of the sheet's sections only Appearance, Accounts and Shortcuts (#130) are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
@@ -380,15 +382,15 @@ B = blocks the next stage.
   wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
   there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
-  holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
+  holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
 - Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
   they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
   that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
   Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
   be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
-  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
-  the keymap can be changed in the settings.
+  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) can be changed on
+  the Shortcuts page (#130).
 - Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
   `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
   (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
@@ -400,8 +402,8 @@ B = blocks the next stage.
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
-  settings); the arrow keys and Escape are still read directly, and changing a key is
-  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
+  settings); the arrow keys and Escape are still read directly; the other keys are changed on the Shortcuts page
+  (#130). Reduced motion is set with
   `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
@@ -440,8 +442,8 @@ B = blocks the next stage.
 - The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
   it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
 - The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
-  findings and builds anyway. The notification and Background portal permissions are there before the app uses
-  them; the Secret Service one is used for the account passwords since #34 (#31).
+  findings and builds anyway. The notification permission is there before the app uses it; the Secret Service
+  one is used for the account passwords since #34, and the Background portal (which needs none) since #137 (#31).
 
 - Onboarding (#34):
   - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and
@@ -467,8 +469,8 @@ B = blocks the next stage.
   where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
-- **The rail** (#104) offers Start, Calendar and Pins before those views exist: they are disabled and say "Not
-  available yet". The owner's initials at its foot come from the first account's address, as no account holds a
+- **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
+  yet". Calendar shows the calendar's empty state until calendar sync (#130). The owner's initials at its foot come from the first account's address, as no account holds a
   name of the person yet.
 - **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
   reached through the unified views, narrowed to the account with the picker.

@@ -34,7 +34,11 @@ Podman: `COMPOSE_CMD="podman compose"`. The details, and what only works on the 
 - A crash or data-loss fix comes with a regression test; tests live in files of their own.
 - Every new source file starts with the SPDX lines (`cargo xtask spdx --fix`).
 - Never use a real mailbox in tests: use the fake servers and `example.org` addresses.
-- Add your change to the `## [Unreleased]` section of [CHANGELOG.md](CHANGELOG.md).
+- Record your change in a change fragment, `changes/<issue>.md`: its `CHANGELOG.md` lines, and where it applies the
+  `ROADMAP.md` progress line, new `docs/gaps.md` lines and a revision row for each document you touch. Do not edit
+  those files or the documents' status lines directly; the fragments are folded in when an epic or a release closes.
+  `just changes` checks them (and `just ci` does too); the format is in
+  [docs/development.md](docs/development.md#change-fragments).
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/): one logical change each, imperative,
   lowercase, no period, ≤ 72 characters (`fix(imap): keep UIDVALIDITY across reconnects`).
 - The PR title is a Conventional Commit too, with the issue number: `feat(triage): add screener folder (#42)`.
