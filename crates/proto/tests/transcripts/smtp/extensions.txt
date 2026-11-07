@@ -1,0 +1,142 @@
+# SIZE (RFC 1870): told when the server takes it, and a message over its limit is refused before anything is sent.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 SIZE 10
+= EHLO hello SIZE
+> mail ada@example.org size=11
+! TooLarge { size: 11, limit: 10 }
+> mail ada@example.org size=10
+C: MAIL FROM:<ada@example.org> SIZE=10
+S: 250 OK
+= MAIL sender accepted
+> rcpt bela@example.org
+C: RCPT TO:<bela@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data eleven char
+! TooLarge { size: 11, limit: 10 }
+> data ten chars!
+C: DATA
+S: 354 go ahead
+C: ten chars!
+C: .
+S: 250 queued
+= DATA sent queued
+
+# Without SIZE the size is not told, and nothing is refused for it.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org size=99999
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+
+# 8BITMIME (RFC 6152) and SMTPUTF8 (RFC 6531) only when the server offers them; an address that is not ASCII needs
+# SMTPUTF8.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org 8bit
+! NotOffered("8BITMIME")
+> mail ada@example.org utf8
+! NotOffered("SMTPUTF8")
+> mail \xc3\xa1d\xc3\xa1m@example.org
+! NotOffered("SMTPUTF8")
+? Ready
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250-8BITMIME
+S: 250 SMTPUTF8
+= EHLO hello 8BITMIME SMTPUTF8
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 250 OK
+= MAIL sender accepted
+> rcpt \xc3\xa1d\xc3\xa1m@example.org
+! BadArgument("address with non-ASCII characters, without SMTPUTF8")
+> rset
+C: RSET
+S: 250 OK
+= RSET reset
+> mail \xc3\xa1d\xc3\xa1m@example.org
+C: MAIL FROM:<\xc3\xa1d\xc3\xa1m@example.org> SMTPUTF8
+S: 250 OK
+= MAIL sender accepted
+> rcpt \xc3\xa9va@example.org
+C: RCPT TO:<\xc3\xa9va@example.org>
+S: 250 OK
+= RCPT recipient accepted
+> data Subject: \xc3\xa1rv\xc3\xadz
+C: DATA
+S: 354 go ahead
+C: Subject: \xc3\xa1rv\xc3\xadz
+C: .
+S: 250 queued
+= DATA sent queued
+> mail ada@example.org utf8 8bit size=5
+C: MAIL FROM:<ada@example.org> BODY=8BITMIME SMTPUTF8
+S: 250 OK
+= MAIL sender accepted
+
+# Enhanced status codes (RFC 3463) are read only from a server that offers ENHANCEDSTATUSCODES, and only when their
+# class is the reply's.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 smtp.example.org
+= EHLO hello
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 550 5.7.1 Not allowed
+= MAIL refused 550 5.7.1 Not allowed
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 ENHANCEDSTATUSCODES
+= EHLO hello ENHANCEDSTATUSCODES
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 550 4.7.1 Not allowed
+= MAIL refused 550 4.7.1 Not allowed
+> mail ada@example.org
+C: MAIL FROM:<ada@example.org>
+S: 550-5.7.1 Not allowed
+S: 550-5.7.1 because
+S: 550 of a policy
+= MAIL refused 550 5.7.1 Not allowed because of a policy
+
+# EHLO refused: the session waits for another EHLO.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 502 Command not implemented
+= EHLO refused 502 Command not implemented
+? Connected
+> ehlo [192.0.2.1]
+C: EHLO [192.0.2.1]
+S: 250 smtp.example.org
+= EHLO hello

@@ -85,6 +85,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "smtp_client"
+path = "fuzz_targets/smtp_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "testkit_imap"
 path = "fuzz_targets/testkit_imap.rs"
 test = false

@@ -1,0 +1,32 @@
+# AUTH and MAIL before TLS are refused and nothing is sent, even when the server offers AUTH in the clear.
+@ plain
+S: 220 smtp.example.org ESMTP
+= greeted
+> auth-plain ada@example.org secret
+! NotEncrypted
+> auth-login ada@example.org secret
+! NotEncrypted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250-AUTH PLAIN LOGIN
+S: 250 STARTTLS
+= EHLO hello AUTH STARTTLS
+> auth-plain ada@example.org secret
+! NotEncrypted
+> auth-login ada@example.org secret
+! NotEncrypted
+> mail ada@example.org
+! NotEncrypted
+? Ready
+> quit
+C: QUIT
+S: 221 Bye
+= QUIT bye
+
+# Also before the greeting and before EHLO.
+@ plain
+> auth-plain ada@example.org secret
+! NotEncrypted
+> mail ada@example.org
+! NotEncrypted

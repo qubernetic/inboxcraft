@@ -3,6 +3,7 @@
 
 use super::ProtoError;
 use crate::imap::State;
+use crate::smtp::State as SmtpState;
 
 #[test]
 fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
@@ -17,9 +18,13 @@ fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
         ProtoError::NotEnabled("QRESYNC"),
         ProtoError::BadArgument("mailbox name"),
         ProtoError::ReadOnly,
+        ProtoError::WrongSmtpState { command: "RCPT", state: SmtpState::Ready },
+        ProtoError::AlreadySignedIn,
+        ProtoError::TooLarge { size: 2, limit: 1 },
     ];
     let fatal = [
         ProtoError::LineTooLong { limit: 1 },
+        ProtoError::TooManyLines { limit: 1 },
         ProtoError::LiteralTooLarge { size: 2, limit: 1 },
         ProtoError::TooManyLiterals { limit: 1 },
         ProtoError::TooDeep { limit: 1 },
@@ -49,6 +54,7 @@ fn refusals_before_sending_are_not_fatal_and_server_faults_are() {
         ProtoError::WrongState { command: "LOGIN", state: State::Authenticated }.to_string(),
         "LOGIN cannot be sent in the authenticated state"
     );
+    assert_eq!(ProtoError::WrongSmtpState { command: "RCPT", state: SmtpState::Ready }.to_string(), "RCPT cannot be sent in the ready state");
     assert_eq!(ProtoError::Bye("shutting down".into()).to_string(), "the server ended the session: shutting down");
     let error: &dyn std::error::Error = &ProtoError::Closed;
     assert!(error.source().is_none());

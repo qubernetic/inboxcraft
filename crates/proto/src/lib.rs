@@ -14,6 +14,10 @@
 //!   NOTIFY; each is sent only to a server that offers it. UID MOVE falls back to UID COPY, a `\Deleted` flag
 //!   and UID EXPUNGE, and says how far it got ([`imap::Removal`]); COPYUID ([`imap::CopyUid`]) is kept only when it
 //!   fits what was asked for. COMPRESS=DEFLATE is negotiated here and run by `net`.
+//! - [`smtp::Client`]: an SMTP submission client core, driven the same way. AUTH PLAIN, AUTH LOGIN and MAIL are
+//!   refused until the connection is encrypted, and EHLO is sent again after STARTTLS. MAIL says SIZE,
+//!   `BODY=8BITMIME` and SMTPUTF8 only to a server that offers them, DATA ends every line in CRLF and dot-stuffs the
+//!   message, and a refusal carries its enhanced status code ([`smtp::EnhancedCode`]).
 //!
 //! Everything a server sends is hostile. Lines, literals, nesting and lists are capped; a server that breaks the
 //! protocol or a limit gets a fatal [`ProtoError`], never a panic. No error, event or `Debug` output carries a
@@ -44,6 +48,7 @@
 
 mod error;
 pub mod imap;
+pub mod smtp;
 
 pub use error::ProtoError;
 
