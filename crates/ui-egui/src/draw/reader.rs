@@ -10,8 +10,8 @@
 //! account. While the pointer is on a link, a float at the bottom says where it goes.
 //!
 //! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
-//! real account as on the sample. Actions without a command (Snooze, Pin) are drawn disabled, and their tooltips say
-//! so.
+//! real account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in.
+//! Actions without a command (Snooze, Pin) are drawn disabled, and their tooltips say so.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -28,6 +28,7 @@ use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 use super::margin;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::{badge, popup};
+use crate::compose::Answer;
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
@@ -71,6 +72,8 @@ pub(super) enum Asked {
     Dismiss,
     /// Do `Act` to a message.
     Act(u64, Act),
+    /// Write a draft made from a message.
+    Answer(u64, Answer),
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -695,9 +698,16 @@ fn message(
             ui.add_space(theme.spacing.m);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s;
-                TextButton::new(tr!("Reply")).primary().icon(IconId::Reply).unavailable(not_yet()).show(ui, theme, keymap);
-                TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll).unavailable(not_yet()).show(ui, theme, keymap);
-                TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward).unavailable(not_yet()).show(ui, theme, keymap);
+                let answers = [
+                    (TextButton::new(tr!("Reply")).primary().icon(IconId::Reply), Answer::Reply),
+                    (TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll), Answer::ReplyAll),
+                    (TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward), Answer::Forward),
+                ];
+                for (button, answer) in answers {
+                    if button.show(ui, theme, keymap).clicked() {
+                        drawn.asked.push(Asked::Answer(opened.id, answer));
+                    }
+                }
             });
         }
     });

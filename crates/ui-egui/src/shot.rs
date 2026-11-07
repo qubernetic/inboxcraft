@@ -23,7 +23,8 @@
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page. `palette` opens the command palette with that text
 //! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen. `compose` opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
-//! be) or `floating` (a message opened over it); the first account then has an invented signature.
+//! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
+//! `template` (two people and a template with a blank); the first account then has an invented signature.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
 //! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
@@ -137,7 +138,8 @@ pub struct Shot {
     pub sending: Option<bool>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
     /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
-    /// could be under it) or `floating` (written, then a message opened).
+    /// could be under it), `floating` (written, then a message opened), `reply` (a reply with a line written) or
+    /// `template` (two people and a template whose blank is left).
     #[serde(default)]
     pub compose: Option<String>,
     /// The action waiting for a key on the Shortcuts page.
@@ -317,10 +319,22 @@ fn sign(app: &mut InboxApp) {
 
 /// Opens the composer as `scene` asks.
 fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    if !["new", "written", "bad", "suggest", "floating"].contains(&scene) {
-        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest or floating")));
+    if !["new", "written", "bad", "suggest", "floating", "reply", "template"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, reply or template")));
     }
     sign(app);
+    if scene == "reply" {
+        // Not selected first: a message selected before the first frame counts as pressed and floats the composer.
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id);
+        if id.is_none_or(|id| !app.answer(id, crate::compose::Answer::Reply)) {
+            return Err(bad(format!("{out}: the reply did not open")));
+        }
+        let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+        let text = format!("The second week works for me. I can bring the hose.{}", composer.text());
+        *composer.text_mut() = text;
+        composer.edited();
+        return composer.save(mailbox);
+    }
     app.compose();
     let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
     let mut to = |text: &str| -> Result<(), UiError> {
@@ -330,12 +344,22 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.typed(mailbox, Line::To)
     };
     match scene {
-        "written" | "bad" | "floating" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "written" | "bad" | "floating" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
         "suggest" => to("Odile Brannock <odile@example.org>, te")?,
         _ => {}
     }
     if scene == "bad" {
         to("ansel.example.org,")?;
+    }
+    if scene == "template" {
+        let params = serde_json::json!({
+            "account": composer.account(),
+            "name": "Work party",
+            "subject": "Work party on Saturday",
+            "text": "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
+        });
+        mailbox.run("template.save", &params)?;
+        return composer.use_template(mailbox, "Work party");
     }
     if scene != "new" {
         "Work party on Saturday".clone_into(composer.subject_mut());

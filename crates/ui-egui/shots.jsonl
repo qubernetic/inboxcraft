@@ -129,5 +129,11 @@
 {"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
 {"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
 {"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
+# Reply and templates (E2.4, E2.5): a reply to Odile's rota with a line written over the quote; a template whose
+# blank is still to fill in, Send blocked until it is.
+{"out": "docs/images/compose-reply-light.png", "mode": "light", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-reply-dark.png", "mode": "dark", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-template-light.png", "mode": "light", "size": [1400, 860], "compose": "template"}
+{"out": "docs/images/compose-template-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template"}
 {"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
 {"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}

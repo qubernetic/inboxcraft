@@ -14,6 +14,12 @@
 //!   holds what is typed, the owner's own addresses and the recipients already there left out. Their names are the
 //!   senders' text: data, shown and never run.
 //! - Closing takes what is typed in a recipient line as a chip and keeps the draft; Discard removes it.
+//! - Reply, reply all and forward start from a message (`compose.reply`, `compose.reply_all`, `compose.forward`): the
+//!   engine fills in the recipients, the subject and the quote.
+//! - The templates of the account the draft is from are offered (`template.list`, none when it is refused); one taken
+//!   goes in front of the text (`compose.template`). Each blank it leaves is a `[[prompt]]` mark, asked for one at a
+//!   time: what is typed for it takes the mark's place in the subject and the text. While a mark is left, Send is
+//!   blocked and says which.
 
 use std::collections::BTreeSet;
 
@@ -42,6 +48,29 @@ const SEARCHED: u64 = 200;
 
 /// The characters that end a recipient as it is typed.
 const SEPARATORS: [char; 4] = [',', ';', '\n', '\r'];
+
+/// How a draft is made from a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// To its sender.
+    Reply,
+    /// To its sender and its other recipients.
+    ReplyAll,
+    /// Inline, to whom the owner chooses.
+    Forward,
+}
+
+impl Answer {
+    /// The engine's command that makes the draft.
+    #[must_use]
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Reply => "compose.reply",
+            Self::ReplyAll => "compose.reply_all",
+            Self::Forward => "compose.forward",
+        }
+    }
+}
 
 /// A recipient line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +223,12 @@ pub struct Composer {
     highlighted: Option<usize>,
     /// Whether something changed since the draft was last kept.
     changed: bool,
+    /// The marks of the blanks still in the subject or the text, as the engine kept them.
+    blanks: Vec<String>,
+    /// What is typed for the first blank.
+    filling: String,
+    /// The names of the templates of the draft's account.
+    templates: Vec<String>,
 }
 
 impl Composer {
@@ -204,7 +239,18 @@ impl Composer {
     /// The command's refusal (no account to write from), or an answer the composer does not read.
     pub fn start(mailbox: &mut Mailbox) -> Result<Self, UiError> {
         let answer = mailbox.run("compose.new", &json!({}))?;
-        Self::over("compose.new", &answer)
+        Self::over("compose.new", &answer)?.with_templates(mailbox)
+    }
+
+    /// A composer over a new draft made from the message `id` as `answer` asks, filled in by the engine.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal (no such message), or an answer the composer does not read.
+    pub fn answer(mailbox: &mut Mailbox, id: u64, answer: Answer) -> Result<Self, UiError> {
+        let command = answer.command();
+        let answer = mailbox.run(command, &json!({ "id": id }))?;
+        Self::over(command, &answer)?.with_templates(mailbox)
     }
 
     /// A composer over the kept draft `id` (`compose.show`).
@@ -214,7 +260,28 @@ impl Composer {
     /// The command's refusal (no such draft), or an answer the composer does not read.
     pub fn open(mailbox: &mut Mailbox, id: u64) -> Result<Self, UiError> {
         let answer = mailbox.run("compose.show", &json!({ "id": id }))?;
-        Self::over("compose.show", &answer)
+        Self::over("compose.show", &answer)?.with_templates(mailbox)
+    }
+
+    fn with_templates(mut self, mailbox: &mut Mailbox) -> Result<Self, UiError> {
+        self.load_templates(mailbox);
+        Ok(self)
+    }
+
+    /// Reads the names of the templates of the draft's account. A refusal leaves none, shown in the error banner: the
+    /// draft is made by then, and the composer stays open over it without the menu.
+    fn load_templates(&mut self, mailbox: &mut Mailbox) {
+        self.templates = match mailbox.run("template.list", &json!({ "account": self.account })) {
+            Ok(answer) => answer
+                .get("templates")
+                .and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(|template| template.get("name")?.as_str()).map(str::to_owned).collect())
+                .unwrap_or_default(),
+            Err(error) => {
+                mailbox.fail(error);
+                Vec::new()
+            }
+        };
     }
 
     fn over(command: &'static str, answer: &Value) -> Result<Self, UiError> {
@@ -233,6 +300,9 @@ impl Composer {
             suggesting: None,
             highlighted: None,
             changed: false,
+            blanks: Vec::new(),
+            filling: String::new(),
+            templates: Vec::new(),
         };
         composer.take_answer(answer);
         composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
@@ -266,6 +336,11 @@ impl Composer {
             .get("blocks")
             .and_then(Value::as_array)
             .map(|blocks| blocks.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        self.blanks = answer
+            .get("blanks")
+            .and_then(Value::as_array)
+            .map(|blanks| blanks.iter().filter_map(Value::as_str).map(str::to_owned).collect())
             .unwrap_or_default();
     }
 
@@ -375,7 +450,79 @@ impl Composer {
         if let Some(bad) = Line::ALL.iter().flat_map(|line| self.chips(*line)).find(|chip| !chip.ok) {
             return Some(tr!("{address} is not an address", address = bad.address()));
         }
-        (!self.blocks.is_empty()).then(|| tr!("Add a recipient to send").to_owned())
+        let blocked = |block: &str| self.blocks.iter().any(|held| held == block);
+        if blocked("no_recipient") {
+            return Some(tr!("Add a recipient to send").to_owned());
+        }
+        if let Some(blank) = self.blank().filter(|_| blocked("blank")) {
+            return Some(tr!("Fill in \"{blank}\" to send", blank = blank));
+        }
+        if blocked("forward_body") {
+            return Some(tr!("The forwarded message is no longer here, so this cannot be sent").to_owned());
+        }
+        (!self.blocks.is_empty()).then(|| tr!("This draft cannot be sent yet").to_owned())
+    }
+
+    /// The prompt of the first blank still to fill in, fit for one line.
+    #[must_use]
+    pub fn blank(&self) -> Option<String> {
+        self.blanks.first().map(|mark| shown(mark.strip_prefix("[[").and_then(|mark| mark.strip_suffix("]]")).unwrap_or(mark)))
+    }
+
+    /// The marks of the blanks still to fill in.
+    #[must_use]
+    pub fn blanks(&self) -> &[String] {
+        &self.blanks
+    }
+
+    /// What is typed for the first blank.
+    #[must_use]
+    pub fn filling(&self) -> &str {
+        &self.filling
+    }
+
+    /// What is typed for the first blank, for its field.
+    pub fn filling_mut(&mut self) -> &mut String {
+        &mut self.filling
+    }
+
+    /// Puts what is typed for the first blank in its mark's place, in the subject and the text, and keeps the draft;
+    /// nothing typed fills nothing.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal.
+    pub fn fill(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
+        let typed: String = self.filling.chars().filter(|c| !c.is_control()).collect();
+        let typed = typed.trim();
+        let Some(mark) = self.blanks.first().cloned() else { return Ok(()) };
+        if typed.is_empty() {
+            return Ok(());
+        }
+        self.subject = self.subject.replace(&mark, typed);
+        self.text = self.text.replace(&mark, typed);
+        self.filling.clear();
+        self.edited();
+        self.save(mailbox)
+    }
+
+    /// The names of the templates of the account the draft is from.
+    #[must_use]
+    pub fn templates(&self) -> &[String] {
+        &self.templates
+    }
+
+    /// Puts the template `name` into the draft (`compose.template`), after keeping what is typed: its text in front,
+    /// its subject where there is none, its blanks marked.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal (no such template, or a text that would be too long).
+    pub fn use_template(&mut self, mailbox: &mut Mailbox, name: &str) -> Result<(), UiError> {
+        self.save(mailbox)?;
+        let answer = mailbox.run("compose.template", &json!({ "id": self.draft, "name": name }))?;
+        self.take_answer(&answer);
+        Ok(())
     }
 
     /// The suggestions for what is typed, and the line they are for.
@@ -575,6 +722,7 @@ impl Composer {
         self.save(mailbox)?;
         let answer = mailbox.run("compose.update", &json!({ "id": self.draft, "account": id }))?;
         self.take_answer(&answer);
+        self.load_templates(mailbox);
         Ok(())
     }
 

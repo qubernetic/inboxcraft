@@ -601,6 +601,30 @@ impl InboxApp {
         }
     }
 
+    /// Writes a reply to the message `id`, a reply to all or a forward of it, in the reader's place, the engine having
+    /// filled it in; whether it opened. A draft being written is closed first and kept; one the engine does not take
+    /// stays open, and no reply starts.
+    pub fn answer(&mut self, id: u64, answer: crate::compose::Answer) -> bool {
+        if self.composer.is_some() {
+            self.close_composer();
+            if self.composer.is_some() {
+                return false;
+            }
+        }
+        self.show_mail();
+        self.reader.set_full_width(false);
+        match Composer::answer(&mut self.mailbox, id, answer) {
+            Ok(composer) => {
+                self.composer = Some(composer);
+                true
+            }
+            Err(error) => {
+                self.mailbox.fail(error);
+                false
+            }
+        }
+    }
+
     /// Closes the composer, its draft kept with what was typed in a recipient line as a chip. A draft the engine does
     /// not take leaves the composer open with everything in it.
     pub fn close_composer(&mut self) {
@@ -693,6 +717,14 @@ impl InboxApp {
                 Ok(())
             }
             Asked::From(account) => composer.set_account(mailbox, account),
+            Asked::Template(at) => match composer.templates().get(at).cloned() {
+                Some(name) => composer.use_template(mailbox, &name),
+                None => Ok(()),
+            },
+            Asked::Fill => {
+                ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
+                composer.fill(mailbox)
+            }
             Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
         };
         if let Err(error) = result {
@@ -1351,6 +1383,14 @@ impl InboxApp {
 
     /// Applies what was asked for in the reader.
     fn apply(&mut self, ui: &Ui, asked: reader::Asked) {
+        if let reader::Asked::Answer(id, answer) = asked {
+            if self.answer(id, answer) {
+                // The text has the focus, or To for a forward.
+                let field = if answer == crate::compose::Answer::Forward { compose::field_id(crate::compose::Line::To) } else { compose::text_id() };
+                ui.ctx().memory_mut(|memory| memory.request_focus(field));
+            }
+            return;
+        }
         let (reader, mailbox) = (&mut self.reader, &mut self.mailbox);
         match asked {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
@@ -1368,6 +1408,7 @@ impl InboxApp {
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => mailbox.start(id, act),
+            reader::Asked::Answer(..) => {}
         }
     }
 }
@@ -1399,6 +1440,9 @@ mod pane_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;
+#[cfg(test)]
+#[path = "reply_tests.rs"]
+mod reply_tests;
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod settings_tests;
