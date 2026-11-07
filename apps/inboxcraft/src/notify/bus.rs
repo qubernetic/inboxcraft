@@ -4,12 +4,16 @@
 //! Notifications over the session bus: [`Notifications`] (`org.freedesktop.Notifications`, which every Linux desktop
 //! serves) and [`Portal`] (the notification portal, which the Flatpak goes through). Each listens on a thread of its
 //! own for the clicks on what it showed and hands them on as [`Click`]s; a click on something it did not show, or
-//! one it cannot read, is dropped.
+//! one it cannot read, is dropped, and so is one from another connection than the server's. A notification server
+//! that takes over the name does not inherit the ids of the one before: its clicks on them are dropped, and nothing of
+//! its own is replaced.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+use zbus::blocking::fdo::DBusProxy;
 use zbus::blocking::{Connection, Proxy};
+use zbus::names::BusName;
 use zbus::zvariant::{OwnedValue, Value};
 
 use super::{Click, Deliver, OPEN, Shown, escape};
@@ -36,14 +40,30 @@ pub const MAX_SHOWN: usize = 200;
 /// Where a click goes.
 pub type Clicked = Arc<dyn Fn(Click) + Send + Sync>;
 
-/// The notifications on show, by the server's id and by key.
+/// The notifications on show, by the server's id and by key, and the server (its unique name on the bus) that gave
+/// the ids: they mean nothing to another server that takes over the name.
 #[derive(Debug, Default)]
 struct Ids {
+    owner: Option<String>,
     keys: BTreeMap<u32, String>,
     ids: BTreeMap<String, u32>,
 }
 
 impl Ids {
+    /// From now on the ids are `owner`'s; those of another server are forgotten.
+    fn owned_by(&mut self, owner: &str) {
+        if self.owner.as_deref() != Some(owner) {
+            self.keys.clear();
+            self.ids.clear();
+            self.owner = Some(owner.to_owned());
+        }
+    }
+
+    /// Whether `sender` is the server that gave the ids.
+    fn from_owner(&self, sender: Option<&str>) -> bool {
+        sender.is_some() && sender == self.owner.as_deref()
+    }
+
     fn insert(&mut self, id: u32, key: &str) {
         if let Some(old) = self.ids.insert(key.to_owned(), id) {
             self.keys.remove(&old);
@@ -97,16 +117,19 @@ impl Notifications {
                 for message in signals {
                     let header = message.header();
                     let body = message.body();
+                    let sender = header.sender().map(|sender| sender.as_str());
                     match header.member().map(|member| member.as_str()) {
                         Some("ActionInvoked") => {
                             let Ok((id, action)) = body.deserialize::<(u32, String)>() else { continue };
-                            let key = heard.lock().ok().and_then(|ids| ids.keys.get(&id).cloned());
+                            let key = heard.lock().ok().filter(|ids| ids.from_owner(sender)).and_then(|ids| ids.keys.get(&id).cloned());
                             if let Some(click) = key.and_then(|key| super::clicked(&key, &action)) {
                                 clicked(click);
                             }
                         }
                         Some("NotificationClosed") => {
-                            if let (Ok((id, _reason)), Ok(mut ids)) = (body.deserialize::<(u32, u32)>(), heard.lock()) {
+                            if let (Ok((id, _reason)), Ok(mut ids)) = (body.deserialize::<(u32, u32)>(), heard.lock())
+                                && ids.from_owner(sender)
+                            {
                                 ids.remove(id);
                             }
                         }
@@ -121,7 +144,18 @@ impl Notifications {
 
 impl Deliver for Notifications {
     fn deliver(&mut self, shown: &Shown) -> Result<(), String> {
-        let replaces = self.ids.lock().ok().and_then(|ids| ids.ids.get(&shown.key).copied()).unwrap_or(0);
+        let owner = DBusProxy::new(self.proxy.connection())
+            .and_then(|bus| Ok(bus.get_name_owner(BusName::try_from(NOTIFICATIONS)?)?))
+            .map_err(|error| format!("the notification was not shown: {error}"))?;
+        let replaces = self
+            .ids
+            .lock()
+            .ok()
+            .and_then(|mut ids| {
+                ids.owned_by(owner.as_str());
+                ids.ids.get(&shown.key).copied()
+            })
+            .unwrap_or(0);
         let mut actions: Vec<String> = Vec::new();
         if self.actions {
             actions.extend(["default".to_owned(), inboxcraft_ui_egui::tr!("Open").to_owned()]);

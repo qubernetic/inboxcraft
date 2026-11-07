@@ -55,9 +55,8 @@ fn mail(key: &str, body: &str) -> Shown {
     Shown { key: key.to_owned(), title: "Anna".to_owned(), body: body.to_owned(), buttons: vec![Button::Done, Button::Read], mail: true }
 }
 
-/// A private bus with the fake server on it.
-fn served(capabilities: &[&str]) -> Served<Notified> {
-    let bus = PrivateBus::start()?;
+/// The fake server on `bus`: its connection and the calls it took.
+fn serve(bus: &PrivateBus, capabilities: &[&str]) -> (Connection, Arc<Mutex<Vec<Notified>>>) {
     let notified = Arc::new(Mutex::new(Vec::new()));
     let fake = FakeServer { capabilities: capabilities.iter().map(|name| (*name).to_owned()).collect(), notified: Arc::clone(&notified) };
     let server = zbus::blocking::connection::Builder::address(bus.address())
@@ -68,7 +67,23 @@ fn served(capabilities: &[&str]) -> Served<Notified> {
         .unwrap()
         .build()
         .unwrap();
+    (server, notified)
+}
+
+/// A private bus with the fake server on it.
+fn served(capabilities: &[&str]) -> Served<Notified> {
+    let bus = PrivateBus::start()?;
+    let (server, notified) = serve(&bus, capabilities);
     Some((bus, server, notified))
+}
+
+/// The clicks that came, until none came for half a second.
+fn heard_all(heard: &Receiver<Click>) -> Vec<Click> {
+    let mut got = Vec::new();
+    while let Ok(click) = heard.recv_timeout(Duration::from_millis(500)) {
+        got.push(click);
+    }
+    got
 }
 
 /// Where the clicks go, and what came.
@@ -147,6 +162,46 @@ fn a_click_on_a_notification_it_showed_comes_back_as_what_it_stands_for() {
         got.push(click);
     }
     assert_eq!(got, [Click::Open(7), Click::Done(7), Click::Read(7), Click::Show]);
+}
+
+#[test]
+fn a_new_notification_server_under_the_same_name_does_not_inherit_the_ids_of_the_old() {
+    let Some((bus, old, _notified)) = served(&["actions"]) else { return };
+    let (clicked, heard) = clicks();
+    let mut notifications = Notifications::connect(&bus.connect(), clicked).unwrap();
+    notifications.deliver(&mail("mail-7", "x")).unwrap();
+    drop(old);
+    let (new, notified) = serve(&bus, &["actions"]);
+    let emit = |id: u32, action: &str| new.emit_signal(None::<&str>, NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", &(id, action)).unwrap();
+    // Its id 1 is not the old server's id 1.
+    emit(1, "done");
+    assert_eq!(heard_all(&heard), []);
+    notifications.deliver(&mail("mail-7", "x")).unwrap();
+    assert_eq!(notified.lock().unwrap()[0].0, 0, "nothing of the new server's is replaced");
+    // What it showed itself is ours again.
+    emit(1, "done");
+    assert_eq!(heard_all(&heard), [Click::Done(7)]);
+}
+
+#[test]
+fn a_signal_from_another_connection_is_dropped() {
+    let Some((bus, server, _notified)) = served(&["actions"]) else { return };
+    let (clicked, heard) = clicks();
+    let mut notifications = Notifications::connect(&bus.connect(), clicked).unwrap();
+    notifications.deliver(&mail("mail-7", "x")).unwrap();
+    let stranger = bus.connect();
+    stranger.emit_signal(None::<&str>, NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", &(1_u32, "done")).unwrap();
+    stranger.emit_signal(None::<&str>, NOTIFICATIONS_PATH, NOTIFICATIONS, "NotificationClosed", &(1_u32, 2_u32)).unwrap();
+    server.emit_signal(None::<&str>, NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", &(1_u32, "read")).unwrap();
+    assert_eq!(heard_all(&heard), [Click::Read(7)], "only the server's own click counts, and the stranger closed nothing");
+
+    let Some((bus, server, _added)) = portal_served() else { return };
+    let (clicked, heard) = clicks();
+    let _portal = Portal::connect(&bus.connect(), clicked).unwrap();
+    let stranger = bus.connect();
+    stranger.emit_signal(None::<&str>, PORTAL_PATH, PORTAL_INTERFACE, "ActionInvoked", &("mail-7", "done", Vec::<Value<'_>>::new())).unwrap();
+    server.emit_signal(None::<&str>, PORTAL_PATH, PORTAL_INTERFACE, "ActionInvoked", &("mail-7", "open", Vec::<Value<'_>>::new())).unwrap();
+    assert_eq!(heard_all(&heard), [Click::Open(7)]);
 }
 
 #[test]
