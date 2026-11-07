@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -316,6 +316,15 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   for its origin, `receive()` takes the `Response` that `ResponseReader` read. Basic auth is written into a request to
   an `https` origin only, and a redirect to another origin is named, never followed. Its XML reader is its own, with no
   document type declarations; the fake CalDAV server in `testkit` reads requests with readers of its own.
+- The calendar jobs (`model::CalendarJob`: discover, sync, put, delete) run in `net` (`crates/net/src/dav/`) like a
+  send: at once, on an HTTPS connection of their own, kept alive for the job's requests, never in the IMAP queue. Each
+  answers with one `model::CalendarReport` in the shape of the store's calendar tables: the calendars found, or what
+  changed with the next sync token, or the new entity tag, or a conflict (412). Every place is an absolute `https`
+  URL on the origin of the account's CalDAV address (`Account::caldav`), where discovery starts; a job URL elsewhere
+  fails with `OtherServer` before the password is asked for. After the CalDAV server refused the
+  password, the worker sends it nothing until the owner's check finds the calendars again; after the IMAP server
+  refused it, nothing either. The account check finds the calendars as its last step, with the password the IMAP
+  sign-in used.
 - The account check (`net::check_account`, behind `account.check`) runs the steps one after the other and reports
   each as it ends, so a failure is named by its cause. A port that times out is told apart by trying port 443 and
   the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).

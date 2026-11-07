@@ -22,9 +22,8 @@ fn the_steps_run_in_the_order_of_the_check() {
 }
 
 #[test]
-fn only_the_caldav_step_is_not_built_yet() {
-    let not_built: Vec<CheckStep> = CheckStep::ALL.into_iter().filter(|step| !step.is_built()).collect();
-    assert_eq!(not_built, [CheckStep::CaldavDiscovery]);
+fn every_step_is_built() {
+    assert!(CheckStep::ALL.into_iter().all(CheckStep::is_built));
 }
 
 #[test]

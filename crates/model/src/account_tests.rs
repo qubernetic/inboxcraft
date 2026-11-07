@@ -169,6 +169,60 @@ fn the_grouped_inbox_is_on_until_the_owner_turns_it_off() {
 }
 
 #[test]
+fn a_calendar_server_is_an_https_url_or_none() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert_eq!(account.caldav(), None);
+    for url in [
+        "https://dav.example.org",
+        "HTTPS://dav.example.org/",
+        "https://dav.example.org:8443/dav/",
+        "https://dav_1.example.org?x#y",
+        "https://[2001:db8::1]:8443/",
+        "https://[::1]",
+    ] {
+        assert_eq!(account.clone().with_caldav(Some(url)).unwrap().caldav(), Some(url), "{url}");
+    }
+    assert_eq!(account.clone().with_caldav(Some(" https://dav.example.org/ ")).unwrap().caldav(), Some("https://dav.example.org/"));
+    assert_eq!(account.clone().with_caldav(Some("  ")).unwrap().caldav(), None);
+    let long = format!("https://dav.example.org/{}", "a".repeat(Account::MAX_CALDAV_LEN));
+    for url in [
+        "http://dav.example.org/",
+        "dav.example.org",
+        "https://",
+        "https:///dav",
+        "https://ada:pw@dav.example.org/",
+        "https://dav.example.org/a b",
+        "https://dav.example.org/\r\nX: y",
+        "https://dav\\example.org/",
+        "https://dav%2Eexample.org/",
+        "https://däv.example.org/",
+        "https://:443/",
+        "https://dav.example.org:dav/",
+        "https://dav.example.org:0/",
+        "https://dav.example.org:65536/",
+        "https://dav.example.org:+443/",
+        "https://[]/",
+        "https://[::1/",
+        "https://[::1]x/",
+        "https://[zz]/",
+        long.as_str(),
+    ] {
+        assert_eq!(account.clone().with_caldav(Some(url)), Err(AccountError::BadCalendarUrl), "{url}");
+    }
+    let set = account.clone().with_caldav(Some("https://dav.example.org/")).unwrap();
+    let json = serde_json::to_string(&set).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), set);
+    let clear = json.replace("https://dav.example.org/", "http://dav.example.org/");
+    assert!(serde_json::from_str::<Account>(&clear).is_err());
+    // A record written before calendars reads back without one.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+    assert_eq!(AccountError::BadCalendarUrl.to_string(), "the calendar address is not an https URL");
+}
+
+#[test]
 fn a_template_is_cleaned_like_a_signature_and_needs_a_name() {
     let template = Template::new(" Thanks\t\n", "Thank you,\r\n {first_name}\0", "Hi {first_name},\r\n\u{1b}thanks for {?what}.\n").unwrap();
     assert_eq!(

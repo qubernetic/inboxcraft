@@ -101,6 +101,8 @@ pub(crate) fn run(
         JobKind::Check { .. } => Err(NetError::new(ErrorKind::Protocol, "a check runs on a connection of its own")),
         // The worker sends through the submission server (see `send`), never over IMAP.
         JobKind::Send { .. } => Err(NetError::new(ErrorKind::Protocol, "a message is sent through the submission server")),
+        // The worker runs a calendar job on an HTTPS connection of its own (see `dav`), never over IMAP.
+        JobKind::Calendar(_) => Err(NetError::new(ErrorKind::Protocol, "a calendar job goes to the CalDAV server")),
         JobKind::StoreFlags { .. } | JobKind::Move { .. } | JobKind::Expunge { .. } | JobKind::Append { .. } | JobKind::CreateFolder { .. } => {
             crate::write::run(connection, job, config, &mut say)
         }

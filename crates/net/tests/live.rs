@@ -6,8 +6,10 @@
 //! IDLE, the resync of a new worker, and the folder removed; the write path in the run folder (APPEND by the worker, a
 //! flag, CREATE of a folder inside it and a move there); one invented message sent from `live-imap` to `live-imap2`
 //! through the submission server, found in the inbox of `live-imap2` and removed from it again; and `account.check`,
-//! whose every IMAP step and the SMTP sign-in pass on the real chain. The submission server is taken to be the
-//! account's IMAP host on port 465 (implicit TLS), as on the reference provider.
+//! whose every IMAP step, the SMTP sign-in and the CalDAV discovery pass on the real chain; and the `InboxCraft-Test`
+//! calendar of `live-imap`, found by CalDAV discovery and synced (read only). The submission server is taken to be
+//! the account's IMAP host on port 465 (implicit TLS), and the CalDAV server its IMAP host over `https`, found from
+//! the well-known path, as on the reference provider.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
 //! agent sandbox and in CI. Agents never run it. The accounts are reached over implicit TLS on port 993, checked by
@@ -23,8 +25,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, DraftId, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags, FolderId, FolderPath, FolderState, Host, JobId,
-    JobKind, Security, Server, StepReport, StepStatus, UidSet,
+    Account, AccountId, CalendarId, CalendarJob, CalendarReport, CheckStep, DraftId, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags,
+    FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security, Server, StepReport, StepStatus, UidSet,
 };
 use inboxcraft_net::{CheckTarget, Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings, check_account};
 use inboxcraft_testkit::live::{self, Folders, LiveConfig, RunFolder};
@@ -61,12 +63,18 @@ fn submission(imap: &live::Account) -> Result<Server> {
     Ok(Server::new(Host::new(imap.host())?, Security::Tls.submission_port(), Security::Tls))
 }
 
+/// The CalDAV server of a live account: its IMAP host over `https`, found from its well-known path.
+fn caldav(imap: &live::Account) -> String {
+    format!("https://{}/", imap.host())
+}
+
 impl Live {
     fn start(imap: &live::Account, tls: &TlsSettings) -> Result<Self> {
         let port = NonZeroU16::new(993).ok_or("port")?;
         let server = Server::new(Host::new(imap.host())?, port, Security::Tls);
-        let account =
-            Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?.with_submission(Some(submission(imap)?));
+        let account = Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?
+            .with_submission(Some(submission(imap)?))
+            .with_caldav(Some(&caldav(imap)))?;
         let (sender, events) = mpsc::channel();
         let secret = Arc::new(Secret(imap.secret().expose().to_owned()));
         let worker = Worker::spawn(account, WorkerSettings::new(Connector::new(tls.clone())), secret, sender)?;
@@ -259,14 +267,14 @@ fn live_imap_writes_in_the_run_folder() -> Result {
 }
 
 #[test]
-fn live_account_check_passes_every_imap_step() -> Result {
-    let Some(config) = live::start("live_account_check_passes_every_imap_step")? else {
+fn live_account_check_passes_every_step() -> Result {
+    let Some(config) = live::start("live_account_check_passes_every_step")? else {
         return Ok(());
     };
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let imap = config.imap();
     let server = Server::new(Host::new(imap.host())?, NonZeroU16::new(993).ok_or("port")?, Security::Tls);
-    let target = CheckTarget::new(server, imap.user()).with_submission(Some(submission(imap)?));
+    let target = CheckTarget::new(server, imap.user()).with_submission(Some(submission(imap)?)).with_caldav(Some(&caldav(imap)));
     let mut reports = Vec::new();
     check_account(&target, &Connector::new(tls), &mut || Some(Password::new(imap.secret().expose().to_owned())), &mut |report| {
         // The step and its status only: no host, no issuer, nothing of the account.
@@ -275,7 +283,7 @@ fn live_account_check_passes_every_imap_step() -> Result {
     });
     let statuses: Vec<StepStatus> = reports.iter().map(StepReport::status).collect();
     let passed = StepStatus::Passed;
-    assert_eq!(statuses, [passed, passed, passed, passed, passed, passed, StepStatus::NotBuilt]);
+    assert_eq!(statuses, [passed, passed, passed, passed, passed, passed, passed]);
     assert!(reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer).is_some());
     Ok(())
 }
@@ -347,4 +355,34 @@ fn live_smtp_sends_from_live_imap_to_live_imap2() -> Result {
     inbox.worker.stop();
     println!("live: removed from the live-imap2 inbox");
     Ok(())
+}
+
+#[test]
+fn live_caldav_lists_the_test_calendar() -> Result {
+    let Some(config) = live::start("live_caldav_lists_the_test_calendar")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut worker = Live::start(config.imap(), &tls)?;
+    worker.job(JobKind::Calendar(CalendarJob::Discover { url: None }))?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Calendar(_)))?;
+    let calendars = match events.last() {
+        Some(EventKind::Calendar(CalendarReport::Found { calendars, .. })) => calendars.clone(),
+        Some(EventKind::Calendar(CalendarReport::Failed { kind, .. })) => return Err(format!("live-imap: discovery failed: {kind}").into()),
+        _ => return Err("live-imap: no calendars found".into()),
+    };
+    println!("live: {} calendars found", calendars.len());
+    let test = calendars.iter().find(|calendar| calendar.name.as_deref() == Some(live::RUN_ROOT)).ok_or("live-imap: no InboxCraft-Test calendar")?;
+    worker.job(JobKind::Calendar(CalendarJob::Sync { calendar: CalendarId::new(1), url: test.url.clone(), token: None, known: Vec::new() }))?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Calendar(_)))?;
+    worker.worker.stop();
+    match events.last() {
+        Some(EventKind::Calendar(CalendarReport::Synced { changed, full, .. })) => {
+            assert!(*full, "a first sync compares the whole calendar");
+            println!("live: the InboxCraft-Test calendar holds {} events", changed.len());
+            Ok(())
+        }
+        Some(EventKind::Calendar(CalendarReport::Failed { kind, .. })) => Err(format!("live-imap: the sync failed: {kind}").into()),
+        _ => Err("live-imap: no sync".into()),
+    }
 }

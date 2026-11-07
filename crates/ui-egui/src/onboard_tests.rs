@@ -249,9 +249,7 @@ fn adding_keeps_the_password_in_the_credential_store_only_and_shows_the_check() 
     assert_eq!(onboarding.outcome(), Outcome::Running);
     let steps = onboarding.steps();
     assert_eq!(steps.len(), 7);
-    assert!(steps[..5].iter().all(|step| step.state == StepState::Pending));
-    assert_eq!(steps[5].state, StepState::Pending);
-    assert_eq!(steps[6].state, StepState::NotBuilt);
+    assert!(steps.iter().all(|step| step.state == StepState::Pending));
     assert_eq!(steps.iter().map(super::StepRow::name).collect::<Vec<_>>()[4], "IMAP sign-in");
 }
 
@@ -270,8 +268,7 @@ fn the_steps_show_as_the_worker_reports_them_and_a_passed_sign_in_starts_the_syn
     assert_eq!(steps[0].state, StepState::Passed);
     assert_eq!(steps[0].server.as_deref(), Some("imap.example.org:993"));
     assert_eq!(steps[3].issuer.as_deref(), Some("Example Test CA"));
-    assert_eq!(steps[6].state, StepState::NotBuilt);
-    assert_eq!(steps[6].message.as_deref(), Some("not built yet"));
+    assert_eq!(steps[6].state, StepState::NotSet);
     let account = AccountId::new(1);
     assert_eq!(workers.sent, [(account, JobKind::Check { by_owner: true }), (account, JobKind::SyncFolderList)]);
     assert_eq!(workers.kept, [account]);

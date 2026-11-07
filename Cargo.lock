@@ -1953,6 +1953,7 @@ dependencies = [
  "flate2",
  "hickory-proto",
  "inboxcraft-charset",
+ "inboxcraft-dav",
  "inboxcraft-mime",
  "inboxcraft-model",
  "inboxcraft-proto",
