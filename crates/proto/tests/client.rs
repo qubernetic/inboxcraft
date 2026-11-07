@@ -177,6 +177,24 @@ fn a_password_with_edge_white_space_is_hidden_first_and_last() {
 }
 
 #[test]
+fn the_password_in_base64_is_hidden_whichever_way_it_was_sent() {
+    for plain in [false, true] {
+        let mut client = greeted();
+        if plain { client.authenticate_plain("tim", "hunter23") } else { client.login("tim", "hunter23") }.unwrap();
+        // The PLAIN token with and without its padding, and the password alone in base64.
+        client.receive(b"A0001 NO AHRpbQBodW50ZXIyMw== or AHRpbQBodW50ZXIyMw or aHVudGVyMjM=\r\n").unwrap();
+        let Some(Event::Completed { outcome: Err(refusal), .. }) = client.next_event() else { panic!("no refusal") };
+        assert_eq!(refusal.text, "*** or *** or ***", "plain: {plain}");
+
+        let mut client = greeted();
+        if plain { client.authenticate_plain("tim", "hunter23") } else { client.login("tim", "hunter23") }.unwrap();
+        let error = client.receive(b"* BYE AHRpbQBodW50ZXIyMw aHVudGVyMjM\r\n").unwrap_err();
+        assert_eq!(error, ProtoError::Bye("*** ***".to_owned()), "plain: {plain}");
+        assert!(!format!("{error:?} {client:?}").contains("aHVudGVyMjM"), "plain: {plain}");
+    }
+}
+
+#[test]
 fn a_response_code_is_kept_only_as_a_clean_word() {
     let refused_code = |line: &[u8]| {
         let mut client = greeted();
@@ -371,7 +389,8 @@ proptest! {
             prop_assert!(!text.contains(password) && !text.contains(&quoted), "{}", text);
             // A server line is trimmed, so the password may come back without its edge white space.
             prop_assert!(!text.contains(password.trim()) && !text.contains(quoted.trim()), "{}", text);
-            prop_assert!(!text.contains("AHRpbQBodW50ZXIy"), "{}", text);
+            // The PLAIN token of `tim` and `hunter2`, whichever way the password was sent; a secret of no other one.
+            prop_assert!(password != "hunter2" || !text.contains("AHRpbQBodW50ZXIy"), "{}", text);
         }
     }
 }
