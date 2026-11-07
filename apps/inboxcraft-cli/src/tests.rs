@@ -8,12 +8,17 @@ use std::path::PathBuf;
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
-use super::{MAX_ARGS, Request, parse, run};
+use super::{MAX_ARGS, Reach, Request, parse, run, run_in};
+
+/// No running app: these tests never reach the owner's.
+fn nowhere() -> Reach {
+    Reach::new(None, Box::new(|| Err(inboxcraft_control_key::Failure::new("no_token", "none"))))
+}
 
 fn run_with(args: &[&str]) -> (u8, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let code = run(args.iter().map(OsString::from), &mut out, &mut err);
+    let code = run_in(args.iter().map(OsString::from), &mut io::empty(), &mut out, &mut err, &nowhere());
     (code, String::from_utf8_lossy(&out).into_owned(), String::from_utf8_lossy(&err).into_owned())
 }
 
@@ -37,24 +42,25 @@ fn help_says_how_to_run_a_command() {
     for flag in ["--help", "-h"] {
         let (code, out, err) = run_with(&[flag]);
         assert_eq!((code, err.as_str()), (0, ""));
-        assert!(out.contains("--store <dir> [--json] <command> [<params>]"), "{out}");
+        assert!(out.contains("[--store <dir>] [--json] <command> [<params>]"), "{out}");
     }
 }
 
 #[test]
 fn the_store_and_the_parameters_are_read_in_any_order() {
-    let run = |store: &str, params: Value| Ok(Request::Run { store: PathBuf::from(store), id: "mail.list".to_owned(), params });
+    let run = |store: &str, params: Value| Ok(Request::Run { store: Some(PathBuf::from(store)), id: "mail.list".to_owned(), params });
     assert_eq!(parsed(&["--store", "/tmp/a", "mail.list"]), run("/tmp/a", json!({})));
     assert_eq!(parsed(&["mail.list", "--json", "--store=/tmp/b", r#"{"limit":2}"#]), run("/tmp/b", json!({ "limit": 2 })));
     assert_eq!(parsed(&["--store", "/tmp/c", "--", "mail.list", "{}"]), run("/tmp/c", json!({})));
     assert_eq!(parsed(&["--json", "commands"]), Ok(Request::Commands));
+    assert_eq!(parsed(&["mail.list"]), Ok(Request::Run { store: None, id: "mail.list".to_owned(), params: json!({}) }), "in the running app");
+    assert_eq!(parsed(&["mcp"]), Ok(Request::Mcp { store: None }));
 }
 
 #[test]
 fn wrong_arguments_are_a_usage_error() {
     for (args, says) in [
         (&[][..], "give a command id"),
-        (&["mail.list"][..], "give --store <dir>"),
         (&["--store"][..], "--store needs a directory"),
         (&["--store="][..], "once"),
         (&["--store", "a", "--store", "b", "mail.list"][..], "once"),
@@ -137,7 +143,7 @@ proptest! {
     fn junk_arguments_never_panic(args in proptest::collection::vec(".{0,40}", 0..8)) {
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let code = run(args.iter().map(OsString::from), &mut out, &mut err);
+        let code = run_in(args.iter().map(OsString::from), &mut io::empty(), &mut out, &mut err, &nowhere());
         prop_assert!(code <= 2);
         prop_assert!(code == 0 || out.is_empty());
     }

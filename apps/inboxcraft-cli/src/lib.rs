@@ -1,24 +1,27 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The command-line client: every command by id, headless, on a local store (`docs/cli.md`).
+//! The command-line client: every command by id, in the running app or headless on a local store (`docs/cli.md`).
 //!
-//! `inboxcraft-cli --store <dir> [--json] <command> [<params>]` opens the store in `<dir>`, runs the command through
-//! the engine as an agent ([`Caller::Agent`]) and writes its answer: as text, one field a line, or with `--json` as
+//! `inboxcraft-cli [--json] <command> [<params>]` runs the command in the running app through its control channel
+//! ([`Reach`], `docs/control-protocol.md`): the socket in the user's runtime folder, the token from the OS credential
+//! store. `inboxcraft-cli --store <dir> [--json] <command> [<params>]` instead opens the store in `<dir>` and runs the
+//! command through the engine itself. Either way it runs as an agent ([`Caller::Agent`]) and writes its answer: as text, one field a line, or with `--json` as
 //! one JSON object on one line (snake_case keys, ISO 8601 dates in UTC, fields only ever added). Only `safe` commands
 //! run: an `owner` or `never` command is refused with a plain error, since nobody is there to approve it. A failure
 //! writes one error to stderr (with `--json`, one object `{"error":{"code":..,"message":..}}`) and exits non-zero:
 //! 1 when the command or the store failed, 2 when the arguments were wrong or `<dir>` holds no store.
 //!
-//! `inboxcraft-cli mcp --store <dir>` runs the read-only MCP server ([`inboxcraft_mcp::Server`]) on the store over
-//! stdin and stdout until stdin ends (`docs/mcp.md`).
+//! `inboxcraft-cli mcp` runs the read-only MCP server ([`inboxcraft_mcp::Server`]) over stdin and stdout until stdin
+//! ends (`docs/mcp.md`): bridged to the running app, or with `--store <dir>` on the store.
 //!
-//! The CLI never prompts, and only `mcp` reads stdin. It does no network I/O: a job a command asks for (fetching a
-//! body, checking an account) is not run. It never creates a store, so a mistyped directory is an error, not a new
-//! empty mailbox.
+//! The CLI never prompts, and only `mcp` reads stdin. It does no network I/O itself: on a store, a job a command asks
+//! for (fetching a body, checking an account) is not run; in the app, the app runs it. It never creates a store, so a
+//! mistyped directory is an error, not a new empty mailbox.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod remote;
 mod text;
 
 use std::ffi::OsString;
@@ -26,11 +29,15 @@ use std::fmt::Write as _;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
+use inboxcraft_control_key::Failure as Refused;
 use inboxcraft_engine::{Caller, EngineError, Registry, Session};
 use inboxcraft_mcp::Server;
 use inboxcraft_store::{DATABASE_FILE, Sqlite, StoreConfig};
 use inboxcraft_time::SystemClock;
 use serde_json::{Value, json};
+
+use remote::Remote;
+pub use remote::{PATIENCE, Reach, os_token};
 
 /// The exit code of a command or a store that failed.
 const FAILED: u8 = 1;
@@ -46,30 +53,40 @@ const MAX_ECHO: usize = 160;
 
 const HELP: &str = "\
 Usage:
-  inboxcraft-cli --store <dir> [--json] <command> [<params>]
+  inboxcraft-cli [--store <dir>] [--json] <command> [<params>]
   inboxcraft-cli [--json] commands
-  inboxcraft-cli --store <dir> mcp
+  inboxcraft-cli [--store <dir>] mcp
   inboxcraft-cli --version
   inboxcraft-cli --help
 
-Runs one command by id (`mail.list`) on the store in <dir>, as an agent: only safe commands run.
+Runs one command by id (`mail.list`) as an agent: only safe commands run. Without --store it
+runs in the running InboxCraft, through its control channel; with --store, on the store in <dir>.
 <params> is a JSON object, `{}` when left out. `commands` lists every command with its class.
-`mcp` serves the read-only MCP tools on the store over stdin and stdout until stdin ends.
+`mcp` serves the read-only MCP tools over stdin and stdout until stdin ends.
 --json writes the answer, or the error, as one JSON object on one line.
-Exit codes: 0 done, 1 the command or the store failed, 2 wrong arguments or no store in <dir>.
+Exit codes: 0 done, 1 the command, the store or the app failed, 2 wrong arguments or no store in <dir>.
 ";
 
 /// Why the CLI stops: a stable snake_case code, an English sentence, and the exit code.
 #[derive(Debug)]
 struct Failure {
-    code: &'static str,
+    code: String,
     message: String,
     exit: u8,
 }
 
 impl Failure {
     fn usage(message: impl Into<String>) -> Self {
-        Self { code: "usage", message: message.into(), exit: USAGE }
+        Self { code: "usage".to_owned(), message: message.into(), exit: USAGE }
+    }
+
+    /// The app's refusal, or why it could not be reached.
+    fn remote(refused: Refused) -> Self {
+        let mut message = refused.message;
+        if refused.code == "not_allowed" {
+            message.push_str("; only safe commands run for an agent (the owner runs this one in the app)");
+        }
+        Self { code: refused.code, message, exit: FAILED }
     }
 
     fn engine(error: &EngineError) -> Self {
@@ -77,7 +94,7 @@ impl Failure {
         if matches!(error, EngineError::NotAllowed { .. }) {
             message.push_str("; the CLI runs headless, so only safe commands run (the owner runs this one in the app)");
         }
-        Self { code: error.code(), message, exit: FAILED }
+        Self { code: error.code().to_owned(), message, exit: FAILED }
     }
 }
 
@@ -87,22 +104,28 @@ enum Request {
     Version,
     Help,
     Commands,
-    Run { store: PathBuf, id: String, params: Value },
-    Mcp { store: PathBuf },
+    Run { store: Option<PathBuf>, id: String, params: Value },
+    Mcp { store: Option<PathBuf> },
 }
 
-/// Runs the app with its command-line arguments (without the program name) and returns the process exit code.
+/// Runs the app with its command-line arguments (without the program name) and returns the process exit code; without
+/// `--store`, in the user's running app ([`Reach::of_user`]).
 ///
 /// The answer goes to `out`; a failure writes one error to `err` and nothing to `out`. A failed write is exit code 1.
 /// Only `mcp` reads `input`, its requests, until it ends.
 pub fn run_with_input(args: impl IntoIterator<Item = OsString>, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    run_in(args, input, out, err, &Reach::of_user())
+}
+
+/// [`run_with_input`], reaching the running app through `reach`.
+pub fn run_in(args: impl IntoIterator<Item = OsString>, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write, reach: &Reach) -> u8 {
     let args: Vec<OsString> = args.into_iter().take(MAX_ARGS.saturating_add(1)).collect();
     let json = args.iter().take_while(|arg| *arg != "--").any(|arg| arg == "--json");
-    let answer = parse(&args).and_then(|request| answer(request, json, input, out));
+    let answer = parse(&args).and_then(|request| answer(request, json, input, out, reach));
     let failure = match answer {
         Ok(text) => match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
             Ok(()) => return 0,
-            Err(error) => Failure { code: "output", message: format!("the answer could not be written: {error}"), exit: FAILED },
+            Err(error) => Failure { code: "output".to_owned(), message: format!("the answer could not be written: {error}"), exit: FAILED },
         },
         Err(failure) => failure,
     };
@@ -165,10 +188,9 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
     match words.as_slice() {
         [] => Err(Failure::usage("give a command id, or `commands` for the list (see --help)")),
         ["commands"] => Ok(Request::Commands),
-        ["mcp"] => Ok(Request::Mcp { store: store.ok_or_else(no_store)? }),
+        ["mcp"] => Ok(Request::Mcp { store }),
         ["mcp", ..] => Err(Failure::usage("mcp takes no parameters: the tools take theirs from the client")),
         [id, rest @ ..] if rest.len() <= 1 => {
-            let store = store.ok_or_else(no_store)?;
             let params = match rest.first() {
                 Some(text) => serde_json::from_str::<Value>(text)
                     .map_err(|error| Failure::usage(format!("the parameters are not JSON: {}", echo(&error.to_string()))))?,
@@ -183,31 +205,37 @@ fn parse(args: &[OsString]) -> Result<Request, Failure> {
     }
 }
 
-/// The usage error of a command without `--store`.
-fn no_store() -> Failure {
-    Failure::usage("give --store <dir>: the CLI runs on a local store (talking to the running app is not built yet)")
-}
-
 /// A session on the store in `store`, which must hold one: the CLI never creates a store.
 fn open(store: &Path) -> Result<Session, Failure> {
     if !store.join(DATABASE_FILE).is_file() {
-        return Err(Failure { code: "no_store", message: format!("there is no store in {}", echo(&store.display().to_string())), exit: USAGE });
+        return Err(Failure {
+            code: "no_store".to_owned(),
+            message: format!("there is no store in {}", echo(&store.display().to_string())),
+            exit: USAGE,
+        });
     }
     let opened = Sqlite::open(store, StoreConfig::default()).map_err(|error| Failure::engine(&error.into()))?;
     Session::new(Box::new(opened), Box::new(SystemClock::new())).map_err(|error| Failure::engine(&error))
 }
 
 /// The text to write for `request`. `mcp` writes its answers to `out` itself, one a line, as it reads `input`.
-fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn Write) -> Result<String, Failure> {
+fn answer(request: Request, json: bool, input: &mut dyn BufRead, out: &mut dyn Write, reach: &Reach) -> Result<String, Failure> {
     let value = match request {
         Request::Version => return Ok(format!("{} {}\n", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
         Request::Help => return Ok(HELP.to_owned()),
         Request::Commands if !json => return commands_text(),
         Request::Commands => commands()?,
-        Request::Run { store, id, params } => open(&store)?.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error))?,
+        Request::Run { store: Some(store), id, params } => {
+            open(&store)?.run_as(Caller::Agent, &id, &params).map_err(|error| Failure::engine(&error))?
+        }
+        Request::Run { store: None, id, params } => Remote::find(reach).and_then(|app| app.run(&id, &params)).map_err(Failure::remote)?,
         Request::Mcp { store } => {
-            Server::new(open(&store)?).serve(input, out).map_err(|error| Failure {
-                code: "io",
+            let mut server = match store {
+                Some(store) => Server::new(open(&store)?),
+                None => Server::over(Box::new(Remote::find(reach).map_err(Failure::remote)?)),
+            };
+            server.serve(input, out).map_err(|error| Failure {
+                code: "io".to_owned(),
                 message: format!("the MCP connection failed: {error}"),
                 exit: FAILED,
             })?;
