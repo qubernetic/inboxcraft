@@ -75,7 +75,7 @@ impl fmt::Display for MessageRef {
 }
 
 /// [`Timestamp`]s as `[seconds, nanoseconds]`, checked on the way in.
-mod timestamp {
+pub(crate) mod timestamp {
     use inboxcraft_time::Timestamp;
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
