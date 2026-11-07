@@ -56,9 +56,10 @@ pub(crate) fn recipient(text: &str) -> Result<(Option<&str>, EmailAddress), Addr
     Ok((name, EmailAddress::new(address)?))
 }
 
-/// What keeps the draft from being sent: `no_recipient`, `bad_address`, `blank` (a template's blank not filled in);
-/// none when it can go.
-pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
+/// What keeps the draft from being sent: `no_recipient`, `bad_address`, `blank` (a template's blank not filled in),
+/// `forward_body` (the body of the message it forwards is no longer kept, so neither are its attachments); none when
+/// it can go.
+pub(crate) fn blocks(store: &dyn Storage, draft: &Draft) -> Result<Vec<&'static str>, EngineError> {
     let mut blocks = Vec::new();
     if draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty() {
         blocks.push("no_recipient");
@@ -69,7 +70,12 @@ pub(crate) fn blocks(draft: &Draft) -> Vec<&'static str> {
     if !template::open_blanks(draft).is_empty() {
         blocks.push("blank");
     }
-    blocks
+    if let Some(message) = draft.forwards
+        && store.body(message)?.is_none()
+    {
+        blocks.push("forward_body");
+    }
+    Ok(blocks)
 }
 
 /// Whether `draft` is on its way: its outbox item waits for the worker's answer. Such a draft is neither sent
@@ -79,9 +85,9 @@ pub(crate) fn on_its_way(store: &dyn Storage, draft: DraftId) -> Result<bool, En
 }
 
 /// A draft as the commands answer it, every recipient checked.
-pub(crate) fn json(draft: &Draft) -> Value {
-    let blocks = blocks(draft);
-    json!({
+pub(crate) fn json(store: &dyn Storage, draft: &Draft) -> Result<Value, EngineError> {
+    let blocks = blocks(store, draft)?;
+    Ok(json!({
         "id": draft.id.get(),
         "account": draft.account.get(),
         "saved": json::date(draft.saved),
@@ -98,7 +104,7 @@ pub(crate) fn json(draft: &Draft) -> Value {
         "uploaded": draft.uploaded.is_some(),
         "sendable": blocks.is_empty(),
         "blocks": blocks,
-    })
+    }))
 }
 
 fn recipients(list: &[String]) -> Value {

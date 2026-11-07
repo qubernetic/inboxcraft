@@ -45,7 +45,7 @@ fn send(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: SendParams = decode_quietly(SEND.id, params)?;
     let bad = |reason: &str| EngineError::bad_params(SEND.id, reason);
     let draft = context.store().draft(DraftId::new(params.id))?.ok_or(EngineError::NotFound { what: "draft", id: params.id })?;
-    if let Some(block) = draft::blocks(&draft).first() {
+    if let Some(block) = draft::blocks(context.store(), &draft)?.first() {
         return Err(bad(&format!("the draft cannot be sent: {block}")));
     }
     if draft::on_its_way(context.store(), draft.id)? {

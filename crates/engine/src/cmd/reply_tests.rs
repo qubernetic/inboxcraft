@@ -254,6 +254,9 @@ fn a_forward_needs_the_body_and_its_send_needs_it_still() {
     let draft = session.run("compose.forward", &json!({ "id": 20 })).unwrap()["id"].as_u64().unwrap();
     session.run("compose.update", &json!({ "id": draft, "to": ["erik@example.org"] })).unwrap();
     crate::test_support::change(&mut session, Change::RemoveBody(MessageId::new(20)));
+    // The draft tells the owner before Send.
+    let shown = session.run("compose.show", &json!({ "id": draft })).unwrap();
+    assert_eq!((shown["sendable"].clone(), shown["blocks"].clone()), (json!(false), json!(["forward_body"])));
     assert!(bad(session.run("mail.send", &json!({ "id": draft }))));
     assert!(session.store().outbox().unwrap().is_empty());
 }

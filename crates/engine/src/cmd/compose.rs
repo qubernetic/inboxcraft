@@ -123,7 +123,7 @@ fn new(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         None => None,
     };
     let draft = Draft { text: draft::signed(&account), answers, ..Draft::new(draft::next_id(context.state()), account.id(), context.now()) };
-    Ok(Outcome::new(draft_json(&draft)).with_change(Change::PutDraft(draft)))
+    Ok(Outcome::new(draft_json(context.store(), &draft)?).with_change(Change::PutDraft(draft)))
 }
 
 /// The message a reply or forward is made from.
@@ -152,7 +152,7 @@ fn made(context: &Context<'_>, params: MessageParams, kind: Kind) -> Result<Outc
     let message = entry.message();
     let account = held_account(context, message.account().get())?;
     let (draft, attachments) = crate::reply::make(context, &account, message, kind)?;
-    let mut answer = draft_json(&draft);
+    let mut answer = draft_json(context.store(), &draft)?;
     if kind == Kind::Forward
         && let Some(fields) = answer.as_object_mut()
     {
@@ -183,7 +183,7 @@ fn use_template(context: &Context<'_>, params: &Value) -> Result<Outcome, Engine
         return Err(EngineError::bad_params(TEMPLATE.id, "the text would be too long"));
     }
     draft.saved = context.now();
-    Ok(Outcome::new(draft_json(&draft)).with_change(Change::PutDraft(draft)))
+    Ok(Outcome::new(draft_json(context.store(), &draft)?).with_change(Change::PutDraft(draft)))
 }
 
 #[derive(Deserialize)]
@@ -242,7 +242,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
         draft.account = to.id();
     }
     draft.saved = context.now();
-    *outcome.value_mut() = draft_json(&draft);
+    *outcome.value_mut() = draft_json(context.store(), &draft)?;
     Ok(outcome.with_change(Change::PutDraft(draft)))
 }
 
@@ -255,7 +255,7 @@ struct IdParams {
 
 fn show(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: IdParams = decode_quietly(SHOW.id, params)?;
-    Ok(Outcome::new(draft_json(&held_draft(context, params.id)?)))
+    Ok(Outcome::new(draft_json(context.store(), &held_draft(context, params.id)?)?))
 }
 
 #[derive(Deserialize)]
@@ -273,7 +273,8 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         drafts.extend(context.store().drafts(account)?);
     }
     drafts.sort_by(|a, b| b.saved.cmp(&a.saved).then(b.id.cmp(&a.id)));
-    Ok(Outcome::new(json!({ "drafts": drafts.iter().map(draft_json).collect::<Vec<_>>() })))
+    let drafts = drafts.iter().map(|draft| draft_json(context.store(), draft)).collect::<Result<Vec<_>, _>>()?;
+    Ok(Outcome::new(json!({ "drafts": drafts })))
 }
 
 fn discard(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
