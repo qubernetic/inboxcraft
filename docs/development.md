@@ -458,7 +458,9 @@ envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_a
 server's certificate, an autoconfig file, and DNS answers and resolver configurations, and `html_display` (#29), the
 safe HTML display, `ui_reader`, the reader's picture decoder and quote splitter, and `ui_typed_time` (#129), a time
 typed into the time picker, `ui_keymap` (#130), the keys' file and a key written as text, `mcp_lines` (#141), the MCP
-server's input, and `control_lines` (#142), the control channel's request and answer lines.
+server's input, `control_lines` (#142), the control channel's request and answer lines, and `ical_calendar` and
+`ical_rule` (#143): a calendar object read, written, read again and expanded over a day, and a recurrence rule read,
+written and expanded.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
