@@ -4,8 +4,10 @@
 //! Done, park, pin, snooze and follow-up reminders in the mailbox, through the engine's `mail.done`, `mail.park`,
 //! `mail.pin`, `mail.snooze`, `mail.follow_up` and the lists `park.list`, `pin.list` and `mail.list`, over the sample.
 
-use inboxcraft_model::Role;
-use inboxcraft_time::{FakeClock, Timestamp};
+use inboxcraft_engine::{MAX_HISTORY, Session};
+use inboxcraft_model::{Message, MessageId, Role, Uid};
+use inboxcraft_store::{Batch, Change, Storage};
+use inboxcraft_time::{Clock, FakeClock, Timestamp};
 
 use super::{Act, GroupKind, Mailbox, Pile, Place};
 use crate::sample;
@@ -215,6 +217,44 @@ fn done_all_files_every_message_of_a_group_with_one_undo() {
     assert!(mailbox.messages().iter().all(|row| !ids.contains(&row.id)));
     mailbox.undo();
     assert_eq!(mailbox.messages().iter().filter(|row| ids.contains(&row.id)).count(), 3, "one Undo brings all three back");
+}
+
+/// The sample mailbox with `copies` more messages from the sender of `LOAN`, all in the Updates group.
+fn crowded(copies: u64) -> Mailbox {
+    let loan = id_of(&mailbox(), LOAN);
+    let mut store = sample::mailbox(clock().now()).unwrap();
+    let message = store.message(MessageId::new(loan)).unwrap().unwrap().message().clone();
+    let mut batch = Batch::new();
+    for n in 1..=copies {
+        let summary = message.summary().clone().with_uid(Uid::new(u32::try_from(1_000 + n).unwrap()).unwrap());
+        batch.push(Change::PutMessage(Message::new(MessageId::new(1_000 + n), message.account(), message.folder(), summary)));
+    }
+    store.apply(&batch).unwrap();
+    let mut session = Session::sample(Box::new(store), clock()).unwrap();
+    session.run("screener.mode", &serde_json::json!({ "mode": "before" })).unwrap();
+    Mailbox::new(session, clock())
+}
+
+#[test]
+fn done_all_on_a_group_bigger_than_the_history_says_it_cannot_be_undone() {
+    let mut mailbox = crowded(u64::try_from(MAX_HISTORY).unwrap());
+    let ids: Vec<u64> = mailbox.messages().iter().filter(|row| row.group == Some(GroupKind::Updates)).map(|row| row.id).collect();
+    assert!(ids.len() > MAX_HISTORY, "{}", ids.len());
+    mailbox.done_all(&ids);
+    let text = format!("Marked {} as done, too many to undo", ids.len());
+    assert_eq!(mailbox.undoable().map(|undo| (undo.text.as_str(), undo.undoable)), Some((text.as_str(), false)));
+    assert!(mailbox.messages().iter().all(|row| !ids.contains(&row.id)), "every one of them is done");
+}
+
+#[test]
+fn done_all_within_the_history_keeps_its_undo() {
+    let mut mailbox = crowded(20);
+    let ids: Vec<u64> = mailbox.messages().iter().filter(|row| row.group == Some(GroupKind::Updates)).map(|row| row.id).collect();
+    assert_eq!(ids.len(), 23);
+    mailbox.done_all(&ids);
+    assert_eq!(mailbox.undoable().map(|undo| undo.undoable), Some(true));
+    mailbox.undo();
+    assert_eq!(mailbox.messages().iter().filter(|row| ids.contains(&row.id)).count(), 23, "one Undo brings all of them back");
 }
 
 #[test]

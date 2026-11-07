@@ -118,6 +118,7 @@ pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
 pub use session::{Applied, Context, Outcome, Session};
+pub use undo::MAX_HISTORY;
 
 /// The crate's package name.
 ///

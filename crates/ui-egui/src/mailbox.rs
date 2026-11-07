@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::Notice;
-use inboxcraft_engine::{Applied, Caller, EngineError, MAX_LIST, ScreenerMode, Session};
+use inboxcraft_engine::{Applied, Caller, EngineError, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
@@ -873,7 +873,8 @@ impl Mailbox {
     }
 
     /// Marks every message of `ids` read and done ("Done all" on a group's card), with one toast whose Undo brings them
-    /// all back. The first refusal stops it, and the messages done before it stay done.
+    /// all back, or, when they took more acts than the engine's history holds, a toast that says they cannot be undone.
+    /// The first refusal stops it, and the messages done before it stay done.
     pub fn done_all(&mut self, ids: &[u64]) {
         let Some(first) = ids.first().copied() else { return };
         let (before, selected) = (self.history, self.selected.is_some_and(|id| ids.contains(&id)));
@@ -890,9 +891,16 @@ impl Mailbox {
         match result {
             Ok(()) => {
                 self.acts = self.acts.saturating_add(1);
-                let text = tr!("Marked {count} as done", count = ids.len());
-                self.undo =
-                    Some(Undo { act: Act::Done, id: first, serial: self.acts, text, undoable: self.history > before, depth: before, selected });
+                // The engine's history keeps the newest MAX_HISTORY acts only: past that, Undo could bring back only
+                // some of the group, so the toast offers none.
+                let held = self.history.saturating_sub(before) <= MAX_HISTORY;
+                let text = if held {
+                    tr!("Marked {count} as done", count = ids.len())
+                } else {
+                    tr!("Marked {count} as done, too many to undo", count = ids.len())
+                };
+                let undoable = held && self.history > before;
+                self.undo = Some(Undo { act: Act::Done, id: first, serial: self.acts, text, undoable, depth: before, selected });
             }
             Err(error) => self.fail(error),
         }

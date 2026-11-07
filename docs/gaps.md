@@ -383,7 +383,8 @@ B = blocks the next stage.
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
 - Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
-  group card marks the whole group done with one Undo (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
+  group card marks the whole group done with one Undo, but none for a group that takes more than the 100 acts the
+  undo history holds (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
   the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
   one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
   group menu is a right click on a row or the reader's More menu; it has no key. The rail
