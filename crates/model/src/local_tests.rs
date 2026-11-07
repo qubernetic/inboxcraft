@@ -84,6 +84,7 @@ fn every_record_reads_back() {
         pinned: true,
         snoozed_until: Some(at(3_000)),
         follow_up: Some(at(4_000)),
+        returned: Some(at(2_000)),
     });
     round_trip(&Calendar {
         id: CalendarId::new(2),

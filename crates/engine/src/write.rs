@@ -6,10 +6,14 @@
 //! - A moved message takes the UID the server gave it in the folder it went to (`COPYUID`). If the owner acted on it
 //!   meanwhile, the jobs follow now that its place is known: the flags it got, then a move on to the folder it is in
 //!   by now. A server that names no UID gets the message from the next sync of that folder, under a new id.
-//! - A failed write is taken back: flags as they were, a moved message back where the server keeps it, and the folders
-//!   synced again; a failed delete for good syncs the whole folder again, so a message still there comes back.
+//! - A new copy of a message (`crate::act::rewrite`) that the server took: the old copy goes, and the message takes the
+//!   new copy's UID (`APPENDUID`) as a moved one does; a server that names no UID gets the copy from the next sync of
+//!   the folder, under a new id.
+//! - A failed write is taken back: flags as they were, a moved or copied message back where the server keeps it, and
+//!   the folders synced again; a failed delete for good syncs the whole folder again, so a message still there comes
+//!   back. A copy that failed deletes nothing.
 
-use inboxcraft_model::{AccountId, Copied, Flags, Folder, FolderId, JobId, JobKind, Message, Moving, Role, UidSet, UidValidity};
+use inboxcraft_model::{AccountId, Copied, Flags, Folder, FolderId, JobId, JobKind, Message, MessageId, Moving, Role, Uid, UidSet, UidValidity};
 use inboxcraft_store::{Change, Storage};
 
 use crate::EngineError;
@@ -97,6 +101,46 @@ fn settle(store: &dyn Storage, plan: &mut Plan, record: &Message, place: Moving)
     Ok(())
 }
 
+/// The message a kept `job` of `plan`'s state writes a new copy of, if it is such a job.
+pub(crate) fn copy_of(store: &dyn Storage, plan: &Plan, job: Option<JobId>) -> Result<Option<MessageId>, EngineError> {
+    let Some(job) = job.filter(|job| plan.state.kept.contains(job)) else { return Ok(None) };
+    Ok(store.queued_jobs()?.into_iter().find(|queued| queued.id == job).and_then(|queued| match queued.kind {
+        JobKind::Append { message, .. } => message,
+        _ => None,
+    }))
+}
+
+/// The answer to the new copy of the message `id` in `folder`: the old copy goes, and the message takes the copy's
+/// place, or, with no UID named, leaves for the folder's next sync to bring.
+pub(crate) fn appended(
+    store: &dyn Storage,
+    plan: &mut Plan,
+    id: MessageId,
+    folder: FolderId,
+    uid: Option<(UidValidity, Uid)>,
+) -> Result<(), EngineError> {
+    let Some(entry) = store.message(id)? else { return Ok(()) };
+    let record = entry.message();
+    let Some(old) = record.moving() else { return Ok(()) };
+    let account = record.account();
+    if plan.state.validity.get(&old.folder) == Some(&old.uid_validity)
+        && let Some(from) = act::folder(store, account, old.folder)?
+    {
+        let uids: UidSet = std::iter::once(old.uid).collect();
+        plan.kept_job(account, JobKind::Expunge { folder: old.folder, path: from.listing().path().clone(), uid_validity: old.uid_validity, uids });
+    }
+    match uid.filter(|(uid_validity, _)| current(&mut plan.state, folder, *uid_validity)) {
+        Some((uid_validity, uid)) => settle(store, plan, record, Moving { folder, uid_validity, uid, flags: old.flags.clone() })?,
+        None => {
+            plan.change(Change::RemoveMessage(record.id()));
+            if let Some(to) = act::folder(store, account, folder)? {
+                resync(store, plan, account, &to, false)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A failed kept `job` of `account`: its write is taken back.
 pub(crate) fn failed(store: &dyn Storage, plan: &mut Plan, account: AccountId, job: Option<JobId>) -> Result<(), EngineError> {
     let kind = match job {
@@ -128,6 +172,19 @@ pub(crate) fn failed(store: &dyn Storage, plan: &mut Plan, account: AccountId, j
             for id in [folder, to] {
                 if let Some(folder) = act::folder(store, account, id)? {
                     resync(store, plan, account, &folder, false)?;
+                }
+            }
+        }
+        Some(JobKind::Append { message: Some(id), .. }) => {
+            if let Some(entry) = store.message(id)?
+                && let Some(place) = entry.message().moving()
+            {
+                let record = entry.message();
+                if plan.state.validity.get(&place.folder) == Some(&place.uid_validity) {
+                    let back = act::placed(record, place.folder, record.summary().uid(), Some(place.clone()));
+                    settle(store, plan, &back, place.clone())?;
+                } else {
+                    plan.change(Change::RemoveMessage(record.id()));
                 }
             }
         }

@@ -84,6 +84,9 @@ mod schedule_tests;
 #[path = "send_tests.rs"]
 mod send_tests;
 #[cfg(test)]
+#[path = "snooze_tests.rs"]
+mod snooze_tests;
+#[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
 #[cfg(test)]

@@ -239,6 +239,9 @@ pub struct MessageState {
     /// Remind the owner then if no reply came.
     #[serde(default, with = "optional")]
     pub follow_up: Option<Timestamp>,
+    /// Back from a snooze then: marked as returned, and listed as if it arrived then.
+    #[serde(default, with = "optional")]
+    pub returned: Option<Timestamp>,
 }
 
 impl MessageState {

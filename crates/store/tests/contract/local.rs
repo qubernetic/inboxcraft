@@ -234,7 +234,14 @@ pub fn message_state_is_kept_with_its_message<S: Storage>(mut store: S) {
         ],
     )
     .unwrap();
-    let done = MessageState { done: Some(FolderId::new(1)), snoozed_until: Some(at(3)), follow_up: Some(at(4)), parked: true, pinned: false };
+    let done = MessageState {
+        done: Some(FolderId::new(1)),
+        snoozed_until: Some(at(3)),
+        follow_up: Some(at(4)),
+        parked: true,
+        pinned: false,
+        returned: None,
+    };
     put(&mut store, vec![Change::SetMessageState(m(2), done.clone()), Change::SetMessageState(m(1), pinned.clone())]).unwrap();
     assert_eq!(store.message_state(m(2)).unwrap(), done);
     put(&mut store, vec![Change::PutMessage(message(2, 1, 2, 7, "two, archived", Some(1)))]).unwrap();

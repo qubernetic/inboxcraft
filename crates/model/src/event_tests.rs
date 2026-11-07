@@ -59,6 +59,7 @@ fn every_event_kind_round_trips_and_names_its_folder() {
         (EventKind::BodyFetched { folder, uid_validity: validity(), uid: uid(1), raw: b"Subject: Hi\r\n\r\nHello".to_vec() }, Some(folder)),
         (EventKind::FolderSynced { folder, state: FolderState::new(validity()) }, Some(folder)),
         (EventKind::Connection(ConnectionState::Online), None),
+        (EventKind::Abilities { uid_expunge: true }, None),
         (EventKind::Failed { kind: ErrorKind::FolderGone, folder: Some(folder) }, Some(folder)),
         (EventKind::Failed { kind: ErrorKind::TimedOut, folder: None }, None),
         (EventKind::CheckStep(StepReport::new(CheckStep::Tcp, StepStatus::Failed(ErrorKind::MailPortsBlocked))), None),

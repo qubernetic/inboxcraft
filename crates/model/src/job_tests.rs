@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use super::{FolderState, Job, JobKind};
-use crate::{AccountId, DraftId, FolderId, FolderPath, JobId, ModSeq, Uid, UidValidity};
+use crate::{AccountId, DraftId, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidValidity};
 
 fn inbox() -> FolderPath {
     FolderPath::new("INBOX", Some('/')).unwrap()
@@ -81,9 +81,30 @@ fn every_write_job_names_its_folder_and_round_trips() {
             Some(folder),
         ),
         (JobKind::Expunge { folder, path: inbox(), uid_validity: validity, uids }, Some(folder)),
-        (JobKind::Append { folder, path: inbox(), flags: seen.clone(), raw: b"Subject: Hi\r\n\r\nHello".to_vec(), draft: None }, Some(folder)),
         (
-            JobKind::Append { folder, path: inbox(), flags: seen, raw: b"Subject: Hi\r\n\r\nHello".to_vec(), draft: Some(DraftId::new(4)) },
+            JobKind::Append { folder, path: inbox(), flags: seen.clone(), raw: b"Subject: Hi\r\n\r\nHello".to_vec(), draft: None, message: None },
+            Some(folder),
+        ),
+        (
+            JobKind::Append {
+                folder,
+                path: inbox(),
+                flags: seen.clone(),
+                raw: b"Subject: Hi\r\n\r\nHello".to_vec(),
+                draft: Some(DraftId::new(4)),
+                message: None,
+            },
+            Some(folder),
+        ),
+        (
+            JobKind::Append {
+                folder,
+                path: inbox(),
+                flags: seen,
+                raw: b"Subject: Hi\r\n\r\nHello".to_vec(),
+                draft: None,
+                message: Some(MessageId::new(5)),
+            },
             Some(folder),
         ),
         (JobKind::CreateFolder { path: archive }, None),
@@ -95,6 +116,13 @@ fn every_write_job_names_its_folder_and_round_trips() {
         let json = serde_json::to_string(&job).unwrap();
         assert_eq!(serde_json::from_str::<Job>(&json).unwrap(), job);
     }
+    // An append kept in the queue by an earlier build, before it named a message, reads back.
+    let append = JobKind::Append { folder, path: inbox(), flags: crate::Flags::default(), raw: b"A".to_vec(), draft: None, message: None };
+    let older = serde_json::to_string(&Job::new(JobId::new(3), account, append)).unwrap().replace(",\"message\":null", "");
+    assert!(!older.contains("message"), "{older}");
+    let read = serde_json::from_str::<Job>(&older);
+    let Ok(Job { kind: JobKind::Append { message, .. }, .. }) = read else { panic!("{read:?}") };
+    assert_eq!(message, None);
     for kind in [JobKind::SyncFolderList, JobKind::Check { by_owner: true }, JobKind::Idle { folder, path: inbox() }] {
         assert!(!kind.writes(), "{kind:?}");
     }

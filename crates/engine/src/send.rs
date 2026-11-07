@@ -52,7 +52,7 @@ pub(crate) fn sent(store: &dyn Storage, plan: &mut Plan, account: AccountId, dra
         let flags = std::iter::once(Flag::Seen).collect();
         plan.kept_job(
             account,
-            JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw: outgoing.message, draft: None },
+            JobKind::Append { folder: folder.id(), path: folder.listing().path().clone(), flags, raw: outgoing.message, draft: None, message: None },
         );
     }
     plan.change(Change::RemoveDraft(draft));
