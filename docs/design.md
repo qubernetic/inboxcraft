@@ -311,17 +311,24 @@ window asks for the next frame; once it has landed, nothing does.
   (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
   date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
   their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
-  Their keys work on the selected row: D Done, R read or unread, Delete; while a text field has the focus they are
-  the field's. They act on the sample mailbox only (`sample.mail.set`); anywhere else no action is drawn and no key
-  acts, until the commands for a real mailbox exist. Done marks the message read and moves it to its account's
-  Archive, Delete to its Trash, read and unread change the dot and the weight.
-- **Slide-out**: a row that Done or Delete takes out of the list slides to the right and fades over the
+  Their keys work on the selected row: D Done, R read or unread, Delete, and A Archive and S flag or not, which have
+  no button on the row; while a text field has the focus they are the field's. They act on a real account as on the
+  sample, through the engine's commands (`mail.seen`, `mail.flag`, `mail.archive`, `mail.delete`): the change shows
+  at once and goes to the server after. Done marks the message read and moves it to its account's Archive, Delete to
+  its Trash (in the Trash it deletes for good), read and unread change the dot and the weight.
+- **Opening** a message marks it read (`mail.open`), as an act Ctrl+Z can take back; a message an undo brought back
+  opens as it was.
+- **Slide-out**: a row that Done, Archive, Delete or a move takes out of the list slides to the right and fades over the
   `row_slide` token, clipped to its place; then it goes and the next-message rule picks the selection. With reduced
   motion it goes at once.
 - **Toast**: after an act, a toast rises from the bottom edge over the `toast` token (in place at once with reduced
-  motion) and says what was done ("Marked as read", "Marked as unread", "Marked as done", "Moved to Trash"), with
-  Undo and its key chip (Ctrl+Z, Cmd+Z on macOS). It stays six seconds; Undo puts the row back where it was, read or
-  unread as it was, and selected again when it was. A new act replaces the toast; once it has gone the act stays.
+  motion) and says what was done ("Marked as read", "Marked as unread", "Flagged", "Flag taken off", "Marked as
+  done", "Moved to Archive", "Moved to Trash", "Moved to <folder>", "Deleted for good"), with Undo and its key chip
+  (Ctrl+Z, Cmd+Z on macOS) when the act can be taken back (not a delete for good, not an act that changed nothing).
+  It stays six seconds; Undo takes the act back through the engine's history (`history.undo`) with every act after
+  it (the next message marked read as it opened), so the row is back where it was, read or unread as it was, and
+  selected again when it was. A new act replaces the toast; once it has gone, Ctrl+Z still walks back through the
+  session's acts, newest first, one at a time.
 - **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
   new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
   card's edge is the preset's gradient, 1.5 points wide.
@@ -351,13 +358,13 @@ the icon sits among others at the same size.
   back. More, Close ends the selection. The arrow keys step through the list while no field has the focus.
 - **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
   Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
-  room. Every action has a tooltip with its key. An action without a command is drawn disabled and its tooltip
-  says "Not available yet": on the sample mailbox Done (D) and Delete (Delete) act on the open message as the
-  list's hover actions do (the toast with Undo follows), everywhere else they are disabled too; Archive, Snooze, Pin
-  and Move wait for their commands.
-- **More**: a menu over the reader (the float over text) with Full width or Leave full width, Close, and the
-  next-message rule ("When a message leaves the list": show the next, show the previous, go back to the list), the
-  chosen one marked.
+  room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
+  as the list's hover actions do (the toast with Undo follows); Move to a folder opens a menu ("Move to") of the
+  folders of the message's account but its own, each by its full path, and the one chosen moves it there. An action
+  without a command is drawn disabled and its tooltip says "Not available yet": Snooze and Pin wait for theirs.
+- **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
+  unread (R) for the open message, then Full width or Leave full width, Close, and the next-message rule ("When a
+  message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.
 - **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
   under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
@@ -485,8 +492,9 @@ list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and 
 (`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
 page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
 (`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). `"act"` does a hover action to the
-selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done); with `"slide": true` the row of a Done
-or Delete is caught sliding out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
+selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done; `reader-archive-<mode>.png`, Archive on
+the open message, the next one open); with `"slide": true` the row of a Done, Archive or Delete is caught sliding
+out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
 the keyboard-selected row of `list-showcase-<preset>-<mode>.png`. Every picture but a slide is drawn with reduced
 motion, so it shows where each motion ends. Every UI change shows them in its PR.
 
