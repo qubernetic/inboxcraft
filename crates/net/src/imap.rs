@@ -286,6 +286,23 @@ impl ImapConnection {
         self.wait(&tag, on_event)
     }
 
+    /// As [`run`](Self::run), but a command the client will not start (an argument it cannot send, a folder open
+    /// read-only, an extension the server lacks) is [`ErrorKind::CommandRefused`]: nothing went out, so the connection
+    /// holds.
+    pub(crate) fn ask(
+        &mut self,
+        start: impl FnOnce(&mut Client) -> Result<Tag, ProtoError>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Outcome, NetError> {
+        let tag = start(&mut self.client).map_err(|error| match error {
+            ProtoError::BadArgument(_) | ProtoError::ReadOnly | ProtoError::NotOffered(_) | ProtoError::NotEnabled(_) => {
+                NetError::new(ErrorKind::CommandRefused, error.to_string())
+            }
+            error => NetError::proto(&error),
+        })?;
+        self.wait(&tag, on_event)
+    }
+
     /// The capabilities, asked for when the server has not listed them.
     fn capabilities(&mut self) -> Result<(), NetError> {
         if self.client.capabilities().is_none() {
