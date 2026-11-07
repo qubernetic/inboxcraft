@@ -287,8 +287,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// [`ProtoError::BadArgument`] for a domain that is not letters, digits, `-`, `.` or an address literal, or a
-    /// state error.
+    /// [`ProtoError::BadArgument`] for a domain that is neither labels of letters, digits and inner hyphens joined
+    /// by dots nor a whole IPv4 or `IPv6:` address literal, or a state error.
     pub fn ehlo(&mut self, domain: &str) -> Result<(), ProtoError> {
         self.ready("EHLO", &[State::Connected])?;
         check_domain(domain)?;

@@ -44,12 +44,29 @@ pub(crate) fn dot_stuffed(message: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Whether `domain` can follow EHLO: letters, digits, `-` and `.`, or an address literal in brackets; nothing else.
+/// Whether `domain` can follow EHLO (RFC 5321 section 4.1.3): labels of letters, digits and inner hyphens joined by
+/// single dots, or a whole address literal, `[` IPv4 `]` or `[IPv6:` IPv6 `]`; nothing else.
 pub(crate) fn check_domain(domain: &str) -> Result<(), ProtoError> {
-    let fits = !domain.is_empty()
-        && domain.len() <= MAX_DOMAIN
-        && domain.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'[' | b']' | b':'));
+    let fits = domain.len() <= MAX_DOMAIN
+        && match domain.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            Some(literal) => is_address_literal(literal),
+            None => domain.split('.').all(is_label),
+        };
     if fits { Ok(()) } else { Err(ProtoError::BadArgument("EHLO domain")) }
+}
+
+/// `Let-dig [Ldh-str]`: not empty, letters, digits and hyphens, a hyphen neither first nor last.
+fn is_label(label: &str) -> bool {
+    let edge = |b: Option<u8>| b.is_some_and(|b| b.is_ascii_alphanumeric());
+    edge(label.bytes().next()) && edge(label.bytes().last()) && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// What goes between the brackets of an address literal: an IPv4 address, or `IPv6:` (any case) and an IPv6 one.
+fn is_address_literal(literal: &str) -> bool {
+    match literal.get(..5).filter(|tag| tag.eq_ignore_ascii_case("IPv6:")) {
+        Some(_) => literal.get(5..).is_some_and(|address| address.parse::<std::net::Ipv6Addr>().is_ok()),
+        None => literal.parse::<std::net::Ipv4Addr>().is_ok(),
+    }
 }
 
 /// Whether `address` can go between the angle brackets of MAIL FROM or RCPT TO: not too long, no white space,

@@ -70,8 +70,14 @@ fn a_domain_or_address_literal_fits_and_nothing_else() {
     for domain in ["client.example.org", "[192.0.2.1]", "[IPv6:2001:db8::1]", "a"] {
         assert_eq!(check_domain(domain), Ok(()), "{domain}");
     }
+    for domain in ["[ipv6:2001:db8::1]", "2001", "a-1.example.org"] {
+        assert_eq!(check_domain(domain), Ok(()), "{domain}");
+    }
     let long = "a".repeat(MAX_DOMAIN + 1);
-    for domain in ["", "a b", "a\r\nQUIT", "árvíz.example.org", "a<b", &long] {
+    let bad = ["", "a b", "a\r\nQUIT", "árvíz.example.org", "a<b", &long, "a]b:c[", "[[", ":", "[192.0.2.1", "example.org]"];
+    let more = ["[]", "[192.0.2]", "[192.0.2.256]", "[2001:db8::1]", "[IPv6:192.0.2.1]", "[IPv6:2001:db8::1", "[x:y]"];
+    let labels = [".example.org", "example.org.", "a..b", "-a.example.org", "a-.example.org", "a:b", "a_b"];
+    for domain in bad.into_iter().chain(more).chain(labels) {
         assert_eq!(check_domain(domain), Err(ProtoError::BadArgument("EHLO domain")), "{domain}");
     }
     assert_eq!(check_domain(&long[1..]), Ok(()));
