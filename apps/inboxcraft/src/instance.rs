@@ -7,7 +7,8 @@
 //!
 //! The lock is the operating system's lock on [`LOCK_FILE`]; it goes with the process however that ends, so a crash
 //! never leaves the folder held. The socket ([`SOCKET_FILE`], Unix only) takes one short line ([`Request`]) and answers
-//! `ok`; anything else is closed unanswered. It is the owner's alone (mode `0600`). On systems without Unix sockets the
+//! `ok`; anything else is closed unanswered. The folder (`0700`), the lock (`0600`) and the socket (`0600`) are the
+//! owner's alone, whatever the umask. On systems without Unix sockets the
 //! lock still keeps a second run away, which then says that InboxCraft is already running.
 
 use std::fs::{File, OpenOptions, TryLockError};
@@ -98,8 +99,7 @@ pub struct Instance {
 /// A folder or lock file that cannot be made or locked.
 pub fn claim(dir: &Path) -> Result<Claim, InstanceError> {
     let failed = |error: std::io::Error| InstanceError(format!("{} could not be claimed: {error}", dir.display()));
-    std::fs::create_dir_all(dir).map_err(failed)?;
-    let lock = OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(LOCK_FILE)).map_err(failed)?;
+    let lock = private(dir).map_err(failed)?;
     match lock.try_lock() {
         Ok(()) => Ok(Claim::First(Instance { lock, dir: dir.to_path_buf() })),
         Err(TryLockError::WouldBlock) => Ok(Claim::Running(Running { socket: dir.join(SOCKET_FILE), patience: PATIENCE })),
@@ -177,6 +177,29 @@ impl Running {
             std::thread::sleep(RETRY);
         }
     }
+}
+
+/// Makes `dir` (`0700`, the folders above it that are missing too) and opens its lock file (`0600`), whatever the
+/// umask; a folder or lock file found wider is narrowed. A lock others could open would let them hold the folder.
+#[cfg(unix)]
+fn private(dir: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    if std::fs::metadata(dir)?.permissions().mode() & 0o777 != 0o700 {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let lock = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(dir.join(LOCK_FILE))?;
+    if lock.metadata()?.permissions().mode() & 0o777 != 0o600 {
+        lock.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(lock)
+}
+
+/// Elsewhere the folder and the lock inherit the ACL of the owner's data folder.
+#[cfg(not(unix))]
+fn private(dir: &Path) -> std::io::Result<File> {
+    std::fs::create_dir_all(dir)?;
+    OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(LOCK_FILE))
 }
 
 #[cfg(unix)]

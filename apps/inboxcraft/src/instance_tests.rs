@@ -134,6 +134,40 @@ fn the_socket_goes_with_the_instance() {
 }
 
 #[cfg(unix)]
+fn mode(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+#[test]
+fn a_new_folder_and_its_lock_are_the_owner_s_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("data").join("inboxcraft");
+    let _held = first(&nested);
+    assert_eq!(mode(&nested), 0o700);
+    assert_eq!(mode(&nested.join(LOCK_FILE)), 0o600);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_wider_folder_and_lock_are_narrowed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let folder = dir.path().join("inboxcraft");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let lock = folder.join(LOCK_FILE);
+    std::fs::write(&lock, b"").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o666)).unwrap();
+    let _held = first(&folder);
+    assert_eq!(mode(&folder), 0o700);
+    assert_eq!(mode(&lock), 0o600);
+    assert_eq!(mode(dir.path()), 0o755, "the folder above is left as it was");
+}
+
+#[cfg(unix)]
 #[test]
 fn the_socket_is_the_owner_s_alone() {
     use std::os::unix::fs::PermissionsExt;
