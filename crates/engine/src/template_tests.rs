@@ -11,8 +11,22 @@ use crate::test_support::{NOW, account, at};
 
 /// Text with many braces, question marks, brackets, line breaks and characters outside ASCII.
 fn braced() -> impl Strategy<Value = String> {
-    proptest::collection::vec(prop_oneof![Just("{".to_owned()), Just("}".to_owned()), Just("?".to_owned()), Just("[[".to_owned()), Just("]]".to_owned()), Just("\n".to_owned()), Just("name".to_owned()), Just("first_name".to_owned()), Just("my_name".to_owned()), "\\PC{0,4}"], 0..60)
-        .prop_map(|pieces| pieces.concat())
+    proptest::collection::vec(
+        prop_oneof![
+            Just("{".to_owned()),
+            Just("}".to_owned()),
+            Just("?".to_owned()),
+            Just("[[".to_owned()),
+            Just("]]".to_owned()),
+            Just("\n".to_owned()),
+            Just("name".to_owned()),
+            Just("first_name".to_owned()),
+            Just("my_name".to_owned()),
+            "\\PC{0,4}"
+        ],
+        0..60,
+    )
+    .prop_map(|pieces| pieces.concat())
 }
 
 proptest! {
