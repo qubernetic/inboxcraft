@@ -201,9 +201,13 @@ mod session {
             who: who.to_owned(),
             subject: subject.to_owned(),
         };
+        let sent = session.store().message(MessageId::new(5)).unwrap().unwrap();
+        let envelope = sent.message().summary().envelope();
+        assert_eq!((envelope.from()[0].name(), envelope.to()[0].name()), (Some("Anna Example"), Some("Bob")));
         assert_eq!(
             session.take_notices(),
             vec![
+                // A reminder names the one written to, not the writer.
                 Notice::Reminder { about: about(5, "Bob", "Re: Budget for 2026"), missed: true },
                 Notice::Returned { about: about(1, "Anna Example", "Budget for 2026"), missed: false },
             ]

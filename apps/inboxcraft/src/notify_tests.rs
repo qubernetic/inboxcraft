@@ -100,6 +100,21 @@ fn markup_is_escaped_for_a_desktop_that_reads_it() {
 }
 
 #[test]
+fn privacy_names_what_a_notification_hands_on() {
+    let privacy = include_str!("../../../PRIVACY.md").split_whitespace().collect::<Vec<_>>().join(" ");
+    for point in [
+        "the sender's name, or their address when the mail gives no name, and the subject",
+        "the name or address of the first person you wrote to",
+        "the number of new messages and the account's address",
+        "may keep notifications in its list until you clear it",
+        "its own settings for InboxCraft decide whether they show on the lock screen",
+        "lasts only until InboxCraft restarts",
+    ] {
+        assert!(privacy.contains(point), "PRIVACY.md does not say: {point}");
+    }
+}
+
+#[test]
 fn the_buttons_have_names_on_the_bus_and_text() {
     assert_eq!(Button::Done.action(), "done");
     assert_eq!(Button::Read.label(), "Mark read");
