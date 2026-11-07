@@ -96,11 +96,12 @@ mailbox exist. The sample's own command, `sample.mail.set`, is refused in any ot
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
+| `cargo xtask changes` | every change fragment in `changes/` is well formed (see "Change fragments"); `--fold` writes them into the documents and deletes them, and is not part of `ci` |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
@@ -174,6 +175,54 @@ when the two lists differ, so a file the gate leaves out is left out of Codecov'
 fails when the project coverage drops by more than 1 point against the base branch (`target: auto`,
 `threshold: 1%`); `codecov/patch` fails when less than 80 % of the changed lines are covered. Both are statuses on
 the PR; the in-repo floors stay the gate `just ci` checks.
+
+### Change fragments
+A change does not edit `CHANGELOG.md`, the `ROADMAP.md` progress log, the new lines of `docs/gaps.md` or the
+revision tables of the documents it touches. It records them in `changes/<issue>.md`, so changes that are worked on
+side by side do not conflict in those files. Editing or removing an existing `docs/gaps.md` line, and the text of a
+document, stay direct edits; the status line of a document changed that way is left alone, the fold dates it from
+the fragment's revision row. `cargo xtask changes --fold` (`just changes --fold`) writes every fragment into the
+documents and deletes it; whoever closes an epic or a release runs it.
+
+```markdown
+# 111
+
+## Changelog
+### Added
+- `cargo xtask changes`: the change fragments, checked in `cargo xtask ci`; a long line goes on
+  indented by two spaces (#111)
+
+## Roadmap
+- Change fragments and one command list per engine module (#111)
+
+## Gaps
+- A new rough edge, worded as in `docs/gaps.md` (#111).
+
+## Revisions
+- ROADMAP.md | minor | Progress log: change fragments (#111)
+- docs/gaps.md | minor | The new rough edge (#111)
+- AGENTS.md | minor | Change fragments instead of direct edits (#111)
+```
+
+- The file is named after its issue: `changes/111.md`, no leading zeros. Nothing else lives in `changes/`.
+- An optional `# ` title on the first line. Then the sections `## Changelog`, `## Roadmap`, `## Gaps` and
+  `## Revisions`, each at most once and only when it has an entry.
+- Changelog entries go under a Keep a Changelog kind: `### Added`, `### Changed`, `### Deprecated`, `### Removed`,
+  `### Fixed` or `### Security`, each at most once.
+- An entry starts with `- `; a line indented by two spaces goes on with the entry above it. A revision is one line,
+  `- <doc> | <change> | <summary>`, the change `major`, `minor` or `patch`.
+- Every entry names its issue as `#<issue>`. A Roadmap line and a revision summary contain no `|`. No tabs or other
+  control characters.
+- Roadmap lines need a `ROADMAP.md` revision, Gaps lines a `docs/gaps.md` one. The document of a revision is a
+  Markdown file in the workspace with a `## Revision history` table and a `**Last updated:** ... · **Change:** ...`
+  status line.
+
+`cargo xtask changes` names each problem with its file and line; `ci` fails on any. The fold dates everything today
+in UTC and goes by issue number: each Changelog entry joins the end of its kind in `## [Unreleased]` (a missing kind
+is added in Keep a Changelog order), each Roadmap line becomes a row at the end of the progress log (continuation
+lines joined), each Gaps line joins the end of "Known rough edges", each revision becomes a row at the end of its
+document's revision table, and the status line of that document takes the date and the largest change. A malformed
+fragment, or a document without its section, makes the fold write nothing.
 
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the

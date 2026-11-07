@@ -71,7 +71,8 @@ invented.
 
 - **Everything is a command:** user-visible behaviour is a `CommandSpec` in `crates/engine/src/cmd/*.rs`. Menus,
   shortcuts, the command palette, CLI, control channel and MCP all dispatch by id through `Session::run`.
-  Programmatic calls never open dialogs.
+  Programmatic calls never open dialogs. Each module lists its commands in `COMMANDS` and the parameter names they
+  read in `FIELDS`, so a new command edits only its own module.
 - The engine does no network I/O: it emits jobs and applies events; `net` runs them on worker threads.
 - Layering is enforced by `cargo xtask layers`; register every new crate in `xtask/src/layers.rs`.
 - UI text goes through the i18n macros; command ids, CLI and MCP never see translated text.
@@ -79,7 +80,7 @@ invented.
 
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
-  `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
+  `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, changes, spdx, test-files,
   layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
   (`cargo xtask cov --check`).
 - The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
@@ -112,11 +113,16 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 
 ## Roadmap and docs
 - Specs, plans and decisions are private in `plan/`; never quote them in commits or PRs beyond a task id.
-- When work lands, update `ROADMAP.md` (progress log), `docs/gaps.md` and the `## [Unreleased]` section of
-  `CHANGELOG.md` (Keep a Changelog: Added, Changed, Deprecated, Removed, Fixed, Security; issue numbers).
+- When work lands, record it in a change fragment, `changes/<issue>.md`, never straight in the files it goes to:
+  the `CHANGELOG.md` lines (Keep a Changelog: Added, Changed, Deprecated, Removed, Fixed, Security; issue numbers),
+  the `ROADMAP.md` progress line, new `docs/gaps.md` lines and the revision rows of the docs you touch.
+  `cargo xtask changes` checks the fragments in `just ci`; `cargo xtask changes --fold` writes them in when an epic
+  or a release closes. Editing or removing an existing gaps line stays a direct edit. Format: `docs/development.md`,
+  "Change fragments".
 - Releases: `release/<version>` from `develop` → bump with `cargo xtask version set` → PR to `main` → tag
   `v<version>` → GitHub Release from the CHANGELOG section → back-merge `main` into `develop`.
-- Every doc has a status line at the top and a `## Revision history` table at the bottom; bump both when you touch it.
+- Every doc has a status line at the top and a `## Revision history` table at the bottom; when you touch a doc, its
+  revision row goes into your change fragment and the fold bumps both.
 - British spelling (licence as a noun, colour, behaviour). Plain words, numbers, honest limits, no marketing.
 
 ## Revision history
