@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The [`Envelope`] of a message from its header block (`BODY.PEEK[HEADER]`), read the way RFC 5322 writes it, with the
-//! [`Signs`] of the message's kind.
+//! [`Signs`] of the message's kind and the time a snooze ends ([`SNOOZED_UNTIL`], read only as the first field).
 //!
 //! Headers are hostile: nothing here fails or panics. A field that cannot be read is left out, an address that is no
 //! address is skipped, a list is read up to [`MAX_LIST_CHARS`] characters and [`MAX_ADDRESSES`] addresses, and
@@ -10,7 +10,7 @@
 
 use inboxcraft_charset::decode_text;
 use inboxcraft_mime::Headers;
-use inboxcraft_model::{Address, EmailAddress, Envelope, MAX_ADDRESSES, MAX_REFERENCES, MessageRef, Signs};
+use inboxcraft_model::{Address, EmailAddress, Envelope, MAX_ADDRESSES, MAX_REFERENCES, MessageRef, SNOOZED_UNTIL, Signs};
 use inboxcraft_time::MailDate;
 
 /// Most characters of one address or id field read; the rest is left out.
@@ -33,6 +33,14 @@ pub fn envelope(header: &[u8]) -> Envelope {
         .with_in_reply_to(refs("in-reply-to"))
         .with_references(refs("references"))
         .with_signs(Signs::read(headers.fields().iter().map(|field| (field.name(), field.value()))))
+        .with_snoozed_until(snoozed_until(&headers))
+}
+
+/// The time in [`SNOOZED_UNTIL`] when it is the first field, where InboxCraft writes it; one further down came from
+/// somewhere else (a sender, a server rule, another program) and counts for nothing.
+fn snoozed_until(headers: &Headers) -> Option<inboxcraft_time::Timestamp> {
+    let first = headers.fields().first().filter(|field| field.name().eq_ignore_ascii_case(SNOOZED_UNTIL))?;
+    MailDate::parse(first.value()).ok().map(MailDate::timestamp)
 }
 
 /// The addresses of an address list (RFC 5322 section 3.4): mailboxes and the members of groups, at most

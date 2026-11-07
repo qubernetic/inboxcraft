@@ -32,7 +32,7 @@ const DEFAULT_LIST: u64 = 100;
 
 /// `mail.list`: the messages of one folder, or of one role across every account (the unified view), newest first.
 /// The park pile is left out (counted in `parked`) unless asked for; "show done" (`done`) lists the done mail in the
-/// place it was done from, besides the mail there.
+/// place it was done from, besides the mail there. A message back from a snooze is listed as if it arrived then.
 pub(crate) const LIST: CommandSpec = CommandSpec {
     id: "mail.list",
     class: Some(AgentClass::Safe),
@@ -95,8 +95,8 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
                 entries.push(entry);
             }
         }
-        entries.sort_by_cached_key(|entry| view::order(entry.message()));
     }
+    entries.sort_by_cached_key(|entry| view::order_at(entry.message(), states.get(&entry.message().id()).and_then(|state| state.returned)));
     if let Some(only) = only {
         let mut kept = Vec::with_capacity(entries.len());
         for entry in entries {
@@ -147,6 +147,8 @@ pub(super) fn row(context: &Context<'_>, grouping: &mut Grouping<'_>, accounts: 
         fields.insert("done".into(), json!(state.is_some_and(|state| state.done.is_some())));
         fields.insert("parked".into(), json!(state.is_some_and(|state| state.parked)));
         fields.insert("pinned".into(), json!(state.is_some_and(|state| state.pinned)));
+        fields.insert("snoozed_until".into(), state.and_then(|state| state.snoozed_until).map_or(Value::Null, json::date));
+        fields.insert("returned".into(), state.and_then(|state| state.returned).map_or(Value::Null, json::date));
     }
     Ok(shown)
 }
