@@ -379,7 +379,7 @@ B = blocks the next stage.
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
 - Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: the
-  screener's commands exist (#124) and the card waits for the UI slice, the grouped inbox for E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
+  screener's commands (#124) and the grouped inbox's (#125) exist and both cards wait for the UI slice. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
   there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
   the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
   holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with

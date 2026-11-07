@@ -136,6 +136,18 @@ to `InboxCraft/Blocked`. A blocked sender's message is never fetched: `mail.read
 `not_downloaded`, and its remote content never loads. `history.undo` takes either decision back: the sender record
 as it was and the mail where it was.
 
+The grouped inbox (`engine::arrive::group`, commands in `engine::cmd::triage`) puts each message of a grouped account
+in People, Updates, Newsletters or Invitations. `net` reads the signs of a message's kind from its header block into
+the envelope (`model::Signs`: a list field, `Precedence`, `Auto-Submitted`, the media type), and the engine adds
+whether a kept body holds a `text/calendar` part of its own when the body comes. The group is worked out when a list
+asks and never stored: the owner's choice for the sender first (`group.set`, `owner`, kept in the sender record with
+the screener's knowledge, so it moves the kept and the future mail at once, and `history.undo` takes it back;
+`auto` hands the sender back), then our classifier, first match wins: a calendar part, `Auto-Submitted` other than
+`no`, a list field or `Precedence: list` or `bulk`, `Precedence: junk` or a no-reply or delivery-report sender, and
+People for the rest. Grouping is on per account until the owner turns it off (`group.account`, `owner`, kept with the
+account). `mail.list` says each row's `group` (`null` for an account not grouped) and lists one group (`group`, or
+`none` for the mail no group holds); `group.list` (`safe`) counts the inbox's mail and its unread mail per group.
+
 `sample.mail.set` (`safe`) marks a message read or unread and moves it to another folder of its account, or both,
 and answers where it was and whether it was read, so the front end can undo it. It runs only in a session made with
 `Session::sample` over the invented sample mailbox; any other session refuses it (`sample_only`). It queues no job,
