@@ -203,7 +203,7 @@ fn live_imap_writes_in_the_run_folder() -> Result {
 
     // APPEND by the worker; the first sync finds the message.
     let raw = config.invented_message(1).into_bytes();
-    worker.job(JobKind::Append { folder: RUN, path: path.clone(), flags: Flags::default(), raw })?;
+    worker.job(JobKind::Append { folder: RUN, path: path.clone(), flags: Flags::default(), raw, draft: None })?;
     worker.until(|kind| matches!(kind, EventKind::Appended { .. }))?;
     worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: None })?;
     let events = worker.synced()?;

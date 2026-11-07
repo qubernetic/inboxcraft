@@ -1883,6 +1883,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

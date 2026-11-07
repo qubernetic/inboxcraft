@@ -132,3 +132,23 @@ fn account_errors_read_as_sentences() {
     assert_eq!(AccountError::BadHost.to_string(), "the server name is not a host name or an IP address");
     assert_eq!(AccountError::BadUsername.to_string(), "the user name is empty, too long or holds a control character");
 }
+
+#[test]
+fn a_signature_keeps_its_lines_and_loses_other_control_characters() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert_eq!(account.signature(), None);
+    let signed = account.clone().with_signature(Some("Anna\r\nExample Ltd.\t\u{1b}[2J\0\n"));
+    assert_eq!(signed.signature(), Some("Anna\nExample Ltd.\t[2J"));
+    for blank in ["", " \n\r\n\t", "\0"] {
+        assert_eq!(account.clone().with_signature(Some(blank)).signature(), None, "{blank:?}");
+    }
+    let long = "é".repeat(Account::MAX_SIGNATURE_CHARS + 5);
+    assert_eq!(account.clone().with_signature(Some(&long)).signature().map(|text| text.chars().count()), Some(Account::MAX_SIGNATURE_CHARS));
+    let json = serde_json::to_string(&signed).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), signed);
+    // A record written before signatures reads back without one.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+}

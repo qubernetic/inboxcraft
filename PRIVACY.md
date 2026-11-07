@@ -25,6 +25,14 @@ and `~/Library/Application Support` on macOS. Only your own user account can rea
 - each message's own state: done, parked, pinned, snoozed or waiting for a reply;
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
+A draft also has a copy on your mail server, in the account's own Drafts folder, once it has been still for ten
+seconds:
+- the copy carries the From line with your display name, To and Cc as typed, the subject, the text with the
+  signature, and the time it was saved as its `Date`; it leaves out Bcc and the recipients that are not addresses;
+- where the server names the copy (UIDPLUS), each new copy replaces the one before and discarding the draft takes it
+  back; where it does not, the draft's first copy stays there, no later one goes up, and you remove it with your
+  mail program or the server's web mail.
+
 Beside the store, `inboxcraft/instance.lock` and `inboxcraft/instance.sock` keep a second start of InboxCraft from
 opening the same mail: the first is empty, the second is a socket through which a later start asks the running one to show its window or to quit. Only your user account can open either of them or the `inboxcraft` folder they are
 in. Neither holds anything of yours. Starting at login
@@ -44,8 +52,9 @@ or of nothing (`notify.set`); for now, that choice lasts only until InboxCraft r
 every account told of all new mail.
 
 Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
-work still queued for it. What InboxCraft knows of senders is kept, because it is yours and not an account's: it
-stays until you delete the data folder, which removes everything above.
+work still queued for it; the draft copies already in the account's Drafts folder on the server stay. What
+InboxCraft knows of senders is kept, because it is yours and not an account's: it stays until you delete the data
+folder, which removes everything in the store above.
 
 An account's password is one entry in the credential store: service `io.github.qubernetic.inboxcraft`, user name
 `account-<store id>-<number>`, where the store id is a random number the store got when it was made, so two copies

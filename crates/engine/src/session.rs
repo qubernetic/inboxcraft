@@ -18,6 +18,7 @@ use serde_json::Value;
 use crate::ScreenerMode;
 use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
 use crate::undo::{Act, Step};
@@ -238,6 +239,7 @@ pub(crate) struct State {
     pub(crate) next_message: u64,
     pub(crate) next_job: u64,
     pub(crate) next_schedule: u64,
+    pub(crate) next_draft: u64,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
     /// The acts to undo, the newest last.
@@ -278,7 +280,7 @@ impl Check {
 impl State {
     /// The state of what `store` holds.
     fn load(store: &dyn Storage) -> Result<Self, EngineError> {
-        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, ..Self::default() };
+        let mut state = Self { next_account: 1, next_folder: 1, next_message: 1, next_job: 1, next_schedule: 1, next_draft: 1, ..Self::default() };
         for account in store.accounts()? {
             let folders = store.folders(account.id())?;
             let mut roles = RoleMap::default();
@@ -291,6 +293,9 @@ impl State {
                 for entry in store.messages(folder.id())? {
                     state.next_message = state.next_message.max(entry.message().id().get().saturating_add(1));
                 }
+            }
+            for draft in store.drafts(account.id())? {
+                state.next_draft = state.next_draft.max(draft.id.get().saturating_add(1));
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
             state.accounts.insert(account.id(), AccountState { roles, ask, ..AccountState::default() });
@@ -504,6 +509,7 @@ impl Session {
             match change {
                 Change::PutAccount(account) => self.state.next_account = self.state.next_account.max(account.id().get().saturating_add(1)),
                 Change::PutScheduled(entry) => self.state.next_schedule = self.state.next_schedule.max(entry.id.get().saturating_add(1)),
+                Change::PutDraft(draft) => self.state.next_draft = self.state.next_draft.max(draft.id.get().saturating_add(1)),
                 Change::PutFolder(folder) => {
                     self.state.next_folder = self.state.next_folder.max(folder.id().get().saturating_add(1));
                     made.insert(folder.account());
@@ -566,8 +572,9 @@ impl Session {
 
     /// Fires every schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
     /// (see [`crate::schedule`]), in one batch. A returned snooze and a follow-up reminder tell the owner as
-    /// [`Session::take_notices`] hands them over, unless they turned that off. The front end calls it at [`Session::next_due`] and after
-    /// [`Session::start`].
+    /// [`Session::take_notices`] hands them over, unless they turned that off. Then hands each draft that has been
+    /// still long enough to its account's worker (see `crate::draft`). The front end calls it at
+    /// [`Session::next_due`] and after [`Session::start`].
     ///
     /// # Errors
     ///
@@ -585,16 +592,21 @@ impl Session {
         for notice in notices {
             notify::push(&mut self.state, notice);
         }
+        let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
+        let (batch, jobs) = catch_unwind(AssertUnwindSafe(|| draft::uploads(&context))).map_err(|_| EngineError::Panicked("draft"))??;
+        self.commit("draft", None, &batch, jobs)?;
         Ok(plan.fired)
     }
 
-    /// When the next schedule entry is due, if any.
+    /// When the next schedule entry or draft copy is due, if any.
     ///
     /// # Errors
     ///
     /// A store failure.
     pub fn next_due(&self) -> Result<Option<Timestamp>, EngineError> {
-        Ok(self.store.schedule()?.into_iter().map(|entry| entry.due).min())
+        let entry = self.store.schedule()?.into_iter().map(|entry| entry.due).min();
+        let upload = draft::next_upload(&*self.store, &self.state)?;
+        Ok(entry.into_iter().chain(upload).min())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
