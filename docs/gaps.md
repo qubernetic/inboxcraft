@@ -377,14 +377,16 @@ B = blocks the next stage.
   owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
   the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of
   missing glyphs. The file sits in the config folder and is written in the sample window too: it
-  holds no mail and nothing about an account, so the sample mode writes this one file and nothing else. A custom
+  holds no mail and nothing about an account, so the sample mode writes these files (the look, the keys and the inbox
+  view of `triage.json`, never the screener's mode) and nothing else. A custom
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
-- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: the
-  screener's commands (#124) and the grouped inbox's (#125) exist and both cards wait for the UI slice. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
-  there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
-  the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
+- Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
+  group card does nothing yet (E3.3). In the grouped inbox (cards or grouped list) the arrow keys still step through
+  the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
+  one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
+  group menu is a right click on a row or the reader's More menu; it has no key. The rail
   holds Mail, the calendar's empty state and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
 - Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
