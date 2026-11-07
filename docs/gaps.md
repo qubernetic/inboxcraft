@@ -31,7 +31,8 @@ B = blocks the next stage.
   `RunFolder` needs a delimiter (#10).
 - `time` has no IANA zones and no lookup of the computer's own zone yet: `Offsets` takes a fixed offset or an
   `OffsetTable` someone filled, so a date shows in the sender's offset or UTC and the engine works in UTC until a
-  front end hands it the computer's offsets. ISO 8601 and iCalendar text come with `ical` (#15, #122).
+  front end hands it the computer's offsets. iCalendar text is read by `ical`, whose zones come from the
+  calendar's own `VTIMEZONE`s; ISO 8601 text is not read yet (#15, #122, #143).
 - RFC 5322 dates are read leniently where RFC 5322 section 4.3 allows it or real mail needs it: the day of the
   week is not checked against the date, second 60 reads as 59, and a missing zone, a military letter or an unknown
   zone name (`CET`) reads as `-0000`. Text after the zone other than a comment (`+0100 CET`) is refused (#15).
