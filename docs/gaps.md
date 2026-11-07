@@ -29,8 +29,9 @@ B = blocks the next stage.
   hide it; a short login name that also occurs in ordinary output fails the run (#10).
 - A server without a hierarchy delimiter (`NIL` in `LIST`) has no run folder under `InboxCraft-Test`;
   `RunFolder` needs a delimiter (#10).
-- `time` knows fixed offsets only: no IANA zones and no lookup of the computer's own zone yet, so a date shows in
-  the sender's offset or UTC. ISO 8601 and iCalendar text come with `ical` (#15).
+- `time` has no IANA zones and no lookup of the computer's own zone yet: `Offsets` takes a fixed offset or an
+  `OffsetTable` someone filled, so a date shows in the sender's offset or UTC and the engine works in UTC until a
+  front end hands it the computer's offsets. ISO 8601 and iCalendar text come with `ical` (#15, #122).
 - RFC 5322 dates are read leniently where RFC 5322 section 4.3 allows it or real mail needs it: the day of the
   week is not checked against the date, second 60 reads as 59, and a missing zone, a military letter or an unknown
   zone name (`CET`) reads as `-0000`. Text after the zone other than a comment (`+0100 CET`) is refused (#15).
