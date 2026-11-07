@@ -23,7 +23,9 @@ inboxcraft-cli --help
 - `<params>` is one JSON object, `{}` when it is left out. Unknown fields are refused, as everywhere.
 - `--json` writes the answer as one JSON object on one line. Without it the answer is text, one field a line.
 - Options and words can come in any order; `--` ends the options.
-- `mcp` runs the read-only MCP server on the store over stdin and stdout until stdin ends ([mcp.md](mcp.md)).
+- `mcp` runs the read-only MCP server on the store over stdin and stdout until stdin ends ([mcp.md](mcp.md)). Run
+  it only while the app is closed, or on a copy of the store: the store takes no lock yet, and opening it tidies
+  files away, so a message the running app has not finished writing can be lost.
 
 ```sh
 inboxcraft-cli --store ~/mail-store --json mail.list '{"role":"inbox","limit":20}'
