@@ -224,6 +224,23 @@ hands over with `Session::set_offsets` (UTC until then); a wall-clock time the c
 change, one it shows twice in autumn is the first. `schedule.list` (`safe`) lists the entries and `schedule.cancel`
 (`owner`) takes one off.
 
+The calendars in the engine (`engine::calendar`, `cmd/calendar.rs`) keep each event as the iCalendar text the server
+sent and read it with `ical` whenever it is shown, so nothing of it is lost on the way back. The start, and
+`calendar.sync` (`safe`), ask each account with a CalDAV address (`calendar.server`, `owner`) for its calendars; the
+`CalendarReport`s land in the store's calendar tables: a calendar or an event keeps its id by its URL, a sync token is
+kept beside its calendar, an event without an entity tag is not named as known so the next sync brings its tag, and a
+conflict (412) starts the calendar afresh so the server's copy replaces ours. `event.list` (`safe`) expands every event
+in a span of at most 400 days on the computer's clock: each occurrence with its moments in UTC and on the wall clock,
+its first and last day, its repeat preset, and the event's own zone with its wall-clock times when that clock shows
+another time than the computer's. `event.create`, `event.update` and `event.delete` (`owner`) change the store at once
+and write to the server as kept jobs (`Put` new or over the copy seen, `Delete`); a new single event is written in UTC,
+a repeating one on the computer's wall clock (floating) so it keeps its time of day across a summer-time change, and an
+edit keeps the event's own form (its zone, the wall clock or UTC). A delete is a kept job the session holds back for
+the undo window (`Outcome::with_held_job`, six seconds, as long as the toast with Undo shows): `Session::tick` hands it
+to the worker once the window is over, `history.undo` before then withdraws it from the queue and puts the event back,
+and a restart hands it out at once. Editing an event with guests counts its `SEQUENCE` on only when the owner asks to
+tell them (`notify`).
+
 Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;

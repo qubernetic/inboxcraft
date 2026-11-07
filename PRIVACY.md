@@ -87,11 +87,14 @@ Credential Manager on Windows.
   only if you switch it on.
 - When you check an account: the account's own IMAP server, as for reading mail (see below), its SMTP server and its
   CalDAV server, which get the same user name and password, only after the IMAP server took them.
-- When your calendars are found and synced: the account's own CalDAV server, at the address you gave it, over HTTPS
-  only (an address that is not `https` gets nothing). Every request carries your user name and password (HTTP Basic
-  authentication) over the encrypted connection, after the server's certificate verified. A redirect to another
-  server is not followed, as the password would go with it. The server gets the events you write or remove and is
-  asked for the ones that changed since the last sync.
+- When your calendars are found and synced (each time InboxCraft starts, and when you or an agent ask for it): the
+  account's own CalDAV server, at the address you gave it, over HTTPS only (an address that is not `https` gets
+  nothing). Every request carries your user name and password (HTTP Basic authentication) over the encrypted
+  connection, after the server's certificate verified. A redirect to another server is not followed, as the password
+  would go with it. The server gets the events you write or remove and is asked for the ones that changed since the
+  last sync. An event you delete goes to the server six seconds later, so Undo can still take it back before
+  anything leaves; an event you write with guests carries their addresses and yours (as its organiser) in the text the
+  server keeps, but InboxCraft does not mail them yet.
 - When you send a message: the account's own SMTP server, over TLS only (from the first byte on port 465, or after
   STARTTLS on 587, refused when the server does not offer it). The password goes only over the encrypted connection.
   The server is greeted as `[127.0.0.1]`, which names nothing of your computer. The message goes to every address in
