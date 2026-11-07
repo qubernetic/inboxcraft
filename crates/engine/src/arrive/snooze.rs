@@ -4,8 +4,9 @@
 //! The snooze stage, and a snoozed message's way there and back.
 //!
 //! A snoozed message lives in the account's `InboxCraft/Snoozed`, in a copy that carries the time it comes back in
-//! InboxCraft's own header field ([`SNOOZED_UNTIL`]), so another InboxCraft on the same account sees it. The stage
-//! reads the field of mail that arrives in that folder: a message another InboxCraft snoozed gets its time and its
+//! InboxCraft's own header field ([`SNOOZED_UNTIL`]) as the first field, so another InboxCraft on the same account
+//! sees it; a new snooze replaces the field on top rather than adding one. The stage reads the field (only the first
+//! field of the header counts, see `inboxcraft_net::envelope`) of mail that arrives in that folder: a message another InboxCraft snoozed gets its time and its
 //! schedule entry here too. At the time ([`back`]) the message comes back to the inbox, unread, marked as returned and
 //! listed as if it arrived then.
 
@@ -32,12 +33,35 @@ pub(crate) fn stage(arrival: &Arrival<'_>, message: &Message, plan: &mut Plan) -
     Ok(())
 }
 
-/// `raw` with [`SNOOZED_UNTIL`] on top, saying `until` in UTC; `None` for a time no RFC 5322 date can say.
+/// `raw` with [`SNOOZED_UNTIL`] on top, saying `until` in UTC, in place of the ones an earlier snooze put there;
+/// `None` for a time no RFC 5322 date can say.
 pub(crate) fn with_field(raw: &[u8], until: Timestamp) -> Option<Vec<u8>> {
     let date = MailDate::new(until, Zone::Fixed(Offset::UTC))?;
     let mut copy = format!("{SNOOZED_UNTIL}: {date}\r\n").into_bytes();
-    copy.extend_from_slice(raw);
+    copy.extend_from_slice(without_fields_on_top(raw));
     Some(copy)
+}
+
+/// `raw` past the [`SNOOZED_UNTIL`] fields at its top, each with its folded lines.
+fn without_fields_on_top(raw: &[u8]) -> &[u8] {
+    let mut rest = raw;
+    while rest.get(..SNOOZED_UNTIL.len()).is_some_and(|name| name.eq_ignore_ascii_case(SNOOZED_UNTIL.as_bytes()))
+        && rest.get(SNOOZED_UNTIL.len()) == Some(&b':')
+    {
+        rest = past_line(rest);
+        while rest.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            rest = past_line(rest);
+        }
+    }
+    rest
+}
+
+/// `raw` past its first line and the LF that ends it; empty when no LF does.
+fn past_line(raw: &[u8]) -> &[u8] {
+    match raw.iter().position(|byte| *byte == b'\n') {
+        Some(end) => raw.get(end.saturating_add(1)..).unwrap_or_default(),
+        None => &[],
+    }
 }
 
 /// The changes that make the schedule bring `message` back at `until` and at no other time: its other entries go,
