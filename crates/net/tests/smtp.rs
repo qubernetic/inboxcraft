@@ -139,6 +139,31 @@ fn a_server_that_offers_auth_in_clear_gets_no_password_before_tls() -> Result {
 }
 
 #[test]
+fn a_starttls_that_goes_wrong_gets_no_password() -> Result {
+    let pki = TestPki::new()?;
+    // The EHLO after the handshake is refused: the extensions said in clear are not trusted, so nothing more goes.
+    let fake = FakeSmtp::new()
+        .auth_in_clear()
+        .starttls(pki.server_config(None)?)
+        .on(When::command("EHLO"), [])
+        .refuse(When::command("EHLO"), Reply::new(554, "5.7.0", "Not now"));
+    let server = Listen::plain().start_smtp(fake)?;
+    let opened = SmtpConnection::open(&submission(Security::StartTls)?, &connector(&pki, wall(), server.addr()));
+    assert_eq!(kind(opened), Some(ErrorKind::CommandRefused));
+    let (transcript, _ended) = server.finish_with_transcript();
+    assert_eq!(transcript.received().iter().filter(|line| line.starts_with("EHLO")).count(), 2, "{:?}", transcript.received());
+    assert!(!signed_in(transcript.received()), "{:?}", transcript.received());
+    // The server says go ahead and stays in clear: the handshake fails, and nothing more goes.
+    let fake = FakeSmtp::new().auth_in_clear().starttls(pki.server_config(None)?).refuse(When::command("STARTTLS"), Reply::new(220, "", "Go ahead"));
+    let server = Listen::plain().start_smtp(fake)?;
+    let opened = SmtpConnection::open(&submission(Security::StartTls)?, &connector(&pki, wall(), server.addr()));
+    assert!(opened.is_err(), "{opened:?}");
+    let (transcript, _ended) = server.finish_with_transcript();
+    assert!(!signed_in(transcript.received()), "{:?}", transcript.received());
+    Ok(())
+}
+
+#[test]
 fn a_refused_password_and_a_server_without_a_method_are_told_apart() -> Result {
     let pki = TestPki::new()?;
     let server = Listen::tls(pki.server_config(None)?).start_smtp(FakeSmtp::new().login(USER, "another-invented-password"))?;
