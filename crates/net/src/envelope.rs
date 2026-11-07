@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The [`Envelope`] of a message from its header block (`BODY.PEEK[HEADER]`), read the way RFC 5322 writes it.
+//! The [`Envelope`] of a message from its header block (`BODY.PEEK[HEADER]`), read the way RFC 5322 writes it, with the
+//! [`Signs`] of the message's kind.
 //!
 //! Headers are hostile: nothing here fails or panics. A field that cannot be read is left out, an address that is no
 //! address is skipped, a list is read up to [`MAX_LIST_CHARS`] characters and [`MAX_ADDRESSES`] addresses, and
@@ -9,7 +10,7 @@
 
 use inboxcraft_charset::decode_text;
 use inboxcraft_mime::Headers;
-use inboxcraft_model::{Address, EmailAddress, Envelope, MAX_ADDRESSES, MAX_REFERENCES, MessageRef};
+use inboxcraft_model::{Address, EmailAddress, Envelope, MAX_ADDRESSES, MAX_REFERENCES, MessageRef, Signs};
 use inboxcraft_time::MailDate;
 
 /// Most characters of one address or id field read; the rest is left out.
@@ -31,6 +32,7 @@ pub fn envelope(header: &[u8]) -> Envelope {
         .with_message_id(refs("message-id").into_iter().next())
         .with_in_reply_to(refs("in-reply-to"))
         .with_references(refs("references"))
+        .with_signs(Signs::read(headers.fields().iter().map(|field| (field.name(), field.value()))))
 }
 
 /// The addresses of an address list (RFC 5322 section 3.4): mailboxes and the members of groups, at most
