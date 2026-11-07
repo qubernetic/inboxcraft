@@ -196,7 +196,10 @@ fn change(tx: &Transaction<'_>, sources: &Path, change: &Change, files: &mut Fil
             | Change::RemoveMessage(_)
             | Change::RemoveBody(_)
             | Change::RemoveDraft(_)
+            | Change::RemoveOutgoing(_)
+            | Change::RemoveSender(_)
             | Change::RemoveCalendar(_)
+            | Change::SetSyncToken(_, None)
             | Change::RemoveCalendarEvent(_)
     );
     match change {

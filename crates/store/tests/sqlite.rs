@@ -423,3 +423,32 @@ fn a_removed_draft_leaves_no_words_in_the_files() {
         assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
     }
 }
+
+#[test]
+fn a_forgotten_sender_refusal_or_sync_token_leaves_nothing_in_the_files() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    two_accounts(&mut store);
+    let refused = OutboxState::Refused { reply: "550 5.1.1 no user penguinrecipient".to_owned() };
+    store
+        .apply(
+            &Batch::new()
+                .with(Change::PutSender(contract::sender("walrusperson@example.org")))
+                .with(Change::PutDraft(contract::draft(1, 1, "x")))
+                .with(Change::PutOutgoing(contract::outgoing(1, refused)))
+                .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+                .with(Change::SetSyncToken(CalendarId::new(1), Some("http://example.org/sync/ottertoken".to_owned()))),
+        )
+        .unwrap();
+    let forgotten = [
+        (Change::RemoveSender(EmailAddress::new("walrusperson@example.org").unwrap()), "walrusperson"),
+        (Change::RemoveOutgoing(DraftId::new(1)), "penguinrecipient"),
+        (Change::SetSyncToken(CalendarId::new(1), None), "ottertoken"),
+    ];
+    for (change, marker) in forgotten {
+        assert!(!holding(dir, marker).is_empty(), "{marker}");
+        store.apply(&Batch::new().with(change)).unwrap();
+        assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
+    }
+}
