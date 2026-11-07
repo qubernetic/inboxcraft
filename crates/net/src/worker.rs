@@ -35,7 +35,11 @@
 //! reports each step of the account check (see [`crate::check_account`]) under the job's id. After a refused or
 //! unanswered sign-in (the worker halted for it, or the last check's sign-in ended so), a check the owner did not
 //! start stops before the sign-in with [`inboxcraft_model::StepStatus::NeedsOwner`]: an agent that checks in a loop
-//! cannot send the password again and lock the account at the provider.
+//! cannot send the password again and lock the account at the provider. The submission server is held the same way on
+//! its own: after it refused the password or left it unanswered, in a check or a send, a check the owner did not start
+//! reports the SMTP step as [`inboxcraft_model::StepStatus::NeedsOwner`] and sends it nothing, while its IMAP steps
+//! run; a sign-in there that passes, in an owner's check or a send, ends the hold. A send is the owner's own act, so
+//! it signs in.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -178,6 +182,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new() },
         connection: None,
         halted: None,
+        submission_halted: None,
         pending: VecDeque::new(),
         open: true,
         attempt: 0,
@@ -254,6 +259,8 @@ struct Run<'a> {
     connection: Option<ImapConnection>,
     /// Why the worker stopped trying for good.
     halted: Option<NetError>,
+    /// The submission server's last sign-in was refused or went unanswered: only the owner signs in there again.
+    submission_halted: Option<ErrorKind>,
     /// The offline queue: jobs taken from the channel and not run yet.
     pending: VecDeque<Job>,
     /// The engine can still send jobs.
@@ -334,18 +341,25 @@ impl Run<'_> {
     }
 
     /// Runs a check; it signs in only when the owner started it or the worker has not halted for a refused or
-    /// unanswered sign-in. A check whose sign-in ends so halts the worker like its own would; one that signs in ends
-    /// such a halt, as the password works again.
+    /// unanswered sign-in, and the same for the submission server on its own. A check whose sign-in ends so halts the
+    /// worker like its own would; one that signs in ends such a halt, as the password works again.
     fn check(&mut self, job: JobId, by_owner: bool) {
         let refused = self.halted.as_ref().is_some_and(|error| refuses_the_password(error.kind()));
-        let target = CheckTarget::of(self.account);
-        let target = if refused && !by_owner { target.held() } else { target };
+        let mut target = CheckTarget::of(self.account);
+        if refused && !by_owner {
+            target = target.held();
+        }
+        if self.submission_halted.is_some() && !by_owner {
+            target = target.held_submission();
+        }
         let (account, credentials) = (self.account, self.credentials);
-        let mut signed_in = None;
+        let (mut signed_in, mut submitted) = (None, None);
         let out = &mut self.out;
         check_account(&target, &self.settings.connector, &mut || credentials.password(account), &mut |report| {
-            if report.step() == CheckStep::ImapLogin {
-                signed_in = Some(report.status());
+            match report.step() {
+                CheckStep::ImapLogin => signed_in = Some(report.status()),
+                CheckStep::SmtpLogin => submitted = Some(report.status()),
+                _ => {}
             }
             out.say(Some(job), EventKind::CheckStep(report));
         });
@@ -354,6 +368,11 @@ impl Run<'_> {
             Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => {
                 self.halted = Some(NetError::new(kind, "the check's sign-in was refused or went unanswered"));
             }
+            _ => {}
+        }
+        match submitted {
+            Some(StepStatus::Passed) => self.submission_halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.submission_halted = Some(kind),
             _ => {}
         }
     }
@@ -366,6 +385,11 @@ impl Run<'_> {
             Some(error) => Err(error.clone()),
             None => smtp::submit(self.account, &self.settings.connector, self.credentials, from, recipients, raw),
         };
+        match &sent {
+            Ok(_) => self.submission_halted = None,
+            Err(error) if halted.is_none() && refuses_the_password(error.kind()) => self.submission_halted = Some(error.kind()),
+            Err(_) => {}
+        }
         let kind = match sent {
             Ok(Ok(_)) => EventKind::Sent { draft },
             Ok(Err(refusal)) => EventKind::SendFailed { draft, kind: ErrorKind::MessageRefused, reply: Some(smtp::reply(&refusal)) },

@@ -10,7 +10,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
-use inboxcraft_model::{Account, AccountId, DraftId, EmailAddress, ErrorKind, Event, EventKind, Job, JobId, JobKind, Security};
+use inboxcraft_model::{
+    Account, AccountId, CheckStep, DraftId, EmailAddress, ErrorKind, Event, EventKind, Job, JobId, JobKind, Security, StepStatus,
+};
 use inboxcraft_net::{Backoff, Credentials, Password, Worker, WorkerSettings};
 use inboxcraft_testkit::imap::FakeImap;
 use inboxcraft_testkit::smtp::{Action, FakeSmtp, Outbox, PASSWORD, Reply, USER, When};
@@ -58,6 +60,25 @@ impl Sending {
             Some(Security::StartTls) => Listen::plain().start_smtp(smtp.starttls(pki.server_config(fault)?))?,
             _ => Listen::tls(pki.server_config(fault)?).accept_timeout(Duration::from_secs(2)).start_smtp(smtp)?,
         };
+        Self::on(pki, imap, smtp, password, fault, security)
+    }
+
+    /// As [`Sending::start`], each server serving up to `connections` clients.
+    fn many(pki: &TestPki, smtp: FakeSmtp, password: &'static str, connections: usize) -> Result<Self> {
+        let listen = || -> Result<Listen> { Ok(Listen::tls(pki.server_config(None)?).accept_timeout(Duration::from_secs(2))) };
+        let imap = listen()?.start_imap_many(FakeImap::new(), connections)?;
+        let smtp = listen()?.start_smtp_many(smtp, connections)?;
+        Self::on(pki, imap, smtp, Some(password), None, Some(Security::Tls))
+    }
+
+    fn on(
+        pki: &TestPki,
+        imap: FakeServer,
+        smtp: FakeServer,
+        password: Option<&'static str>,
+        fault: Option<CertFault>,
+        security: Option<Security>,
+    ) -> Result<Self> {
         let submission_server = security.map(submission).transpose()?;
         let account =
             Account::new(ACCOUNT, "Test", EmailAddress::new(USER)?, USER, server(Security::Tls)?)?.with_submission(submission_server.clone());
@@ -93,6 +114,24 @@ impl Sending {
             let event = self.events.recv_timeout(WAIT)?;
             if event.job == Some(job) && matches!(event.kind, EventKind::Sent { .. } | EventKind::SendFailed { .. }) {
                 return Ok(event);
+            }
+        }
+    }
+
+    /// The status of the SMTP step of the check `job`, once all of its steps came.
+    fn smtp_step(&self, job: JobId) -> Result<StepStatus> {
+        let mut smtp = None;
+        loop {
+            let event = self.events.recv_timeout(WAIT)?;
+            if let (Some(id), EventKind::CheckStep(report)) = (event.job, &event.kind)
+                && id == job
+            {
+                if report.step() == CheckStep::SmtpLogin {
+                    smtp = Some(report.status());
+                }
+                if report.step() == CheckStep::CaldavDiscovery {
+                    return smtp.ok_or_else(|| "no SMTP step".into());
+                }
             }
         }
     }
@@ -238,5 +277,57 @@ fn a_message_whose_answer_is_lost_may_have_gone() -> Result {
     let job = run.send(&["bea@example.org"])?;
     assert_eq!(run.sent(job)?.kind, failed(ErrorKind::ConnectionDropped, None));
     drop(run.finish());
+    Ok(())
+}
+
+/// How often the submission server was asked to sign in.
+fn sign_ins(smtp: &[String]) -> usize {
+    smtp.iter().filter(|line| line.starts_with("AUTH")).count()
+}
+
+#[test]
+fn after_a_refused_smtp_password_only_the_owner_signs_in_again() -> Result {
+    let pki = TestPki::new()?;
+    let mut run = Sending::many(&pki, FakeSmtp::new().login(USER, "another-invented-password"), PASSWORD, 4)?;
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::Failed(ErrorKind::LoginRefused));
+    // The IMAP sign-in still runs; the submission server gets no password from a check the owner did not start.
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::NeedsOwner);
+    let check = run.job(JobKind::Check { by_owner: true })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::Failed(ErrorKind::LoginRefused));
+    let (imap, smtp) = run.finish();
+    assert_eq!(imap.iter().filter(|line| line.contains("AUTHENTICATE")).count(), 3, "{imap:?}");
+    assert_eq!(sign_ins(&smtp), 2, "{smtp:?}");
+    Ok(())
+}
+
+#[test]
+fn a_send_refused_its_password_holds_the_next_agent_check() -> Result {
+    let pki = TestPki::new()?;
+    let mut run = Sending::many(&pki, FakeSmtp::new().login(USER, "another-invented-password"), PASSWORD, 3)?;
+    let job = run.send(&["bea@example.org"])?;
+    assert_eq!(run.sent(job)?.kind, failed(ErrorKind::LoginRefused, None));
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::NeedsOwner);
+    let (_imap, smtp) = run.finish();
+    assert_eq!(sign_ins(&smtp), 1, "{smtp:?}");
+    Ok(())
+}
+
+#[test]
+fn a_check_by_the_owner_that_signs_in_ends_the_smtp_halt() -> Result {
+    let pki = TestPki::new()?;
+    // The first sign-in is refused, the next one passes.
+    let smtp = FakeSmtp::new().refuse(When::command("AUTH"), Reply::new(535, "5.7.8", "Not now"));
+    let mut run = Sending::many(&pki, smtp, PASSWORD, 4)?;
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::Failed(ErrorKind::LoginRefused));
+    let check = run.job(JobKind::Check { by_owner: true })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::Passed);
+    let check = run.job(JobKind::Check { by_owner: false })?;
+    assert_eq!(run.smtp_step(check)?, StepStatus::Passed);
+    let (_imap, smtp) = run.finish();
+    assert_eq!(sign_ins(&smtp), 3, "{smtp:?}");
     Ok(())
 }

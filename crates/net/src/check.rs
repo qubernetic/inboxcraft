@@ -21,7 +21,8 @@
 //!   [`StepStatus::NeedsReview`]. A check that may not send the password again, because the last sign-in was refused
 //!   or went unanswered and the owner did not start it, stops there with [`StepStatus::NeedsOwner`]. The SMTP sign-in
 //!   waits the same way, gets the same password, asked for once, and runs only after the IMAP one passed: a password
-//!   the IMAP server refused is not tried on the submission server.
+//!   the IMAP server refused is not tried on the submission server. After the submission server alone refused it or
+//!   left it unanswered, the SMTP sign-in waits for the owner on its own ([`CheckTarget::held_submission`]).
 
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
@@ -49,13 +50,14 @@ pub struct CheckTarget {
     username: String,
     reviewed: bool,
     held: bool,
+    submission_held: bool,
 }
 
 impl CheckTarget {
     /// Settings the owner entered or saved.
     #[must_use]
     pub fn new(imap: Server, username: &str) -> Self {
-        Self { imap, submission: None, username: username.to_owned(), reviewed: true, held: false }
+        Self { imap, submission: None, username: username.to_owned(), reviewed: true, held: false, submission_held: false }
     }
 
     /// Settings Detect proposed: no password goes to them until the owner has seen them ([`CheckTarget::reviewed`]).
@@ -89,6 +91,13 @@ impl CheckTarget {
         Self { held: true, ..self }
     }
 
+    /// The same settings, with no SMTP sign-in: the submission server's last one was refused or went unanswered, and
+    /// the owner did not ask for this check ([`StepStatus::NeedsOwner`]). The IMAP steps run as before.
+    #[must_use]
+    pub fn held_submission(self) -> Self {
+        Self { submission_held: true, ..self }
+    }
+
     /// The IMAP server.
     #[must_use]
     pub fn imap(&self) -> &Server {
@@ -118,6 +127,12 @@ impl CheckTarget {
     pub fn is_held(&self) -> bool {
         self.held
     }
+
+    /// Whether the SMTP sign-in waits for the owner.
+    #[must_use]
+    pub fn is_submission_held(&self) -> bool {
+        self.submission_held
+    }
 }
 
 /// Checks `target` with `connector`, reporting every step of [`CheckStep::ALL`] to `report`, in order, as it ends.
@@ -133,6 +148,9 @@ pub fn check_account(
     let held = steps(target, connector, password, &mut out);
     // Every IMAP step is told when one is held for the SMTP sign-in.
     match (target.submission(), held) {
+        (Some(submission), Some(Held::Password(_))) if target.is_submission_held() => {
+            out.say_at(CheckStep::SmtpLogin, StepStatus::NeedsOwner, submission);
+        }
         (Some(submission), Some(Held::Password(password))) => {
             let status = smtp_login(submission, target.username(), &password, connector);
             out.say_at(CheckStep::SmtpLogin, status, submission);
