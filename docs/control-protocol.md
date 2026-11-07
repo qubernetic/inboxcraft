@@ -17,10 +17,17 @@ The app on the owner's mailbox listens on a Unix socket in the user's runtime fo
 | a build of its own | `$XDG_RUNTIME_DIR/inboxcraft/control.sock` |
 | the Flatpak | `$XDG_RUNTIME_DIR/app/io.github.qubernetic.inboxcraft/control.sock` (the folder Flatpak shares with the host) |
 
-A client tries them in this order and takes the first that answers. The folder is made `0700` (narrowed when it is
-wider) and the socket `0600`, whatever the umask: only the owner's own processes reach it. A socket a run that ended
-left behind is replaced; one another app still answers on is not, and that app goes on without a channel. The socket
-goes when the app ends. `--sample` has no channel. Without `$XDG_RUNTIME_DIR`, or without a credential store, the app
+The app opens the channel only in a runtime folder of the user's that nobody else may write (group or others may not
+have `w`). The socket's folder must be a real folder, not a link, and the user's own; it is made `0700` (narrowed
+when it is wider) and the socket `0600`, whatever the umask: only the owner's own processes reach it. A socket a run
+that ended left behind is replaced; one another app still answers on is not, and that app goes on without a channel. The socket
+goes when the app ends. `--sample` has no channel.
+
+A client tries the sockets in this order and takes the first that answers, but only one it can trust with the token:
+the runtime folder and the socket's folder are real folders, the user's own, mode `0700` (nobody else may enter);
+the socket is a socket and the user's own. Anything else is `not_running`, and the client writes nothing to it, so a
+socket another account put in a shared folder (a hand-set `XDG_RUNTIME_DIR=/tmp/...`, say) never sees the token. The
+user is the owner of `/proc/self`, so the channel needs Linux. Without `$XDG_RUNTIME_DIR`, or without a credential store, the app
 runs without one and says why on stderr.
 
 ## The token
@@ -59,15 +66,18 @@ answer each, in order; the CLI opens one for each command.
 
 | Code | When | Then |
 |---|---|---|
-| `unauthorized` | the token is missing, not 64 hex digits, wrong or revoked, or the credential store holds none | the connection is closed |
+| `unauthorized` | the token is missing, not 64 hex digits, wrong or revoked, or the credential store holds none; a line without a token is refused before the credential store is read | the connection is closed |
 | `bad_line` | the line is not UTF-8, not one JSON object, names no command (or one over 128 bytes), or its `params` are not an object | the connection goes on |
 | `too_long` | the line is over 1 MiB | the connection is closed |
 | `busy` | eight clients are connected already, or the window did not answer within 30 seconds | closed for the ninth client; goes on after a late answer, and the late call may still run, so a client that tries again can run it twice |
 | `closing` | the app is ending | the connection is closed |
 | an engine code | the command was refused or failed: `not_allowed`, `bad_params`, `not_found`, `unknown_command`, ... | the connection goes on |
 
-A client that says nothing for five minutes is let go. A refusal never repeats the line it refuses. The CLI adds its
-own codes: `not_running` (no socket answers, or no `$XDG_RUNTIME_DIR`), `no_token` (none in the credential store),
+A client that does not finish a line within five minutes of the last answer (or of connecting) is let go, however
+slowly it trickles its bytes; one that does not take its answer within 30 seconds is let go too. When accepting a
+connection fails (no file handles left, say), the app waits 50 ms before the next; after 100 failures in a row it
+closes the channel until its next start. A refusal never repeats the line it refuses. The CLI adds its
+own codes: `not_running` (no socket it trusts answers, or no `$XDG_RUNTIME_DIR`), `no_token` (none in the credential store),
 `bad_answer` (a line that is no answer) and `closed` (the connection failed); it waits a minute for an answer.
 
 ## How the app runs a request
@@ -79,12 +89,24 @@ a body, checking an account) go to the workers as the window's own do. The list 
 agent's (marking read, flagging) ends the window's Undo for the acts before it, so the window never takes the agent's
 act back in place of the owner's.
 
+Every `safe` command runs over the channel; `inboxcraft-cli commands` lists them with their class. Besides reading,
+that is:
+
+- the reader's own changes: read and unread (`mail.open`, `mail.seen`), flags, and `history.undo`;
+- drafts: `compose.new`, `compose.update`, and `compose.discard`, which deletes a draft here and on the server;
+- `account.check`, which connects to the account's servers;
+- the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
+- snooze, park and pin, as they land.
+
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.
 
 ## What it does not do
 
-- It is built on Linux and the other Unix systems only. On Windows the app runs without a channel and the CLI finds
-  no app to talk to; `--store` works there.
+- It works on Linux only. On the other Unix systems the user id is not known without a crate the channel does not
+  add, so the app runs without a channel and the CLI trusts no socket; on Windows it is not built. `--store` works
+  everywhere.
+- The client does not check who is listening once it is connected (the standard library cannot read the peer's user
+  id yet); the owner and mode of the folders stand in for that check.
 - It does not check the client's process: any process of the owner's that can read the credential store can use it.
 - It has no approvals: an `owner` command (sending, moving, settings) cannot be asked for over the channel.
 

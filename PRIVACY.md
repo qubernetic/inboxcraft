@@ -127,8 +127,11 @@ never overwrites a file.
 The control channel, through which the command-line client and the MCP server reach the running app, is a socket in
 your runtime folder that only your own account can open, and every request needs a token InboxCraft keeps in your
 system's credential store, never in a file. `inboxcraft --revoke-control` replaces the token, and every client that
-kept the old one is refused. Over the channel only reading and the reader's own changes (read, flags, drafts) run;
-sending, moving, deleting and settings are refused. The MCP server sees what you allow; sending mail needs your
+kept the old one is refused. Over the channel only the commands marked `safe` run (`inboxcraft-cli commands` lists
+them): reading; marking read and unread, flags and undo; drafts, including discarding one, which deletes it on the
+server too; checking an account, which connects to its servers; the look of the window; and, once they are there, snooze, park and pin.
+Sending, moving, archiving, deleting, accepting or blocking senders and the other settings are refused. The client
+shows the token only to a socket in a runtime folder that is yours alone. The MCP server sees what you allow; sending mail needs your
 explicit permission.
 
 ## Changes and contact
