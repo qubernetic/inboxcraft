@@ -59,8 +59,13 @@ pub(crate) const MIGRATIONS: [&str; SCHEMA_VERSION as usize] = [
     // JSON, so a new field of a record needs no migration; the columns beside it are what rows are found and ordered
     // by. A job's place in the queue is its `seq`, which AUTOINCREMENT never hands out twice. A schedule entry names
     // its draft, message or alert in one of three columns and leaves with it: an id can be handed out again once its
-    // record is gone, and an entry left behind would act on the new one.
-    "CREATE TABLE job (
+    // record is gone, and an entry left behind would act on the new one. `meta` holds the store's own random id.
+    "CREATE TABLE meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    INSERT INTO meta (key, value) VALUES ('store', lower(hex(randomblob(16))));
+    CREATE TABLE job (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         id INTEGER NOT NULL UNIQUE,
         account INTEGER NOT NULL REFERENCES account (id) ON DELETE CASCADE,

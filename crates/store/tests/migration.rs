@@ -178,6 +178,8 @@ fn a_version_3_store_gets_the_local_tables_with_its_mail_kept() {
     assert!(store.message(m(1)).unwrap().unwrap().opened());
     assert_eq!(store.search(&Search::new().with_text("draft budget")).unwrap(), [m(1)]);
     assert_eq!(secure_delete(dir), Some(1));
+    let id = store.id().unwrap();
+    assert_eq!(id.len(), 32, "a migrated store gets its own id too: {id}");
     store
         .apply(
             &Batch::new()
@@ -195,6 +197,7 @@ fn a_version_3_store_gets_the_local_tables_with_its_mail_kept() {
     assert_eq!(store.drafts(AccountId::new(1)).unwrap(), [contract::draft(1, 1, "Re: Budget 2026")]);
     assert!(store.message_state(m(1)).unwrap().pinned);
     assert_eq!(store.alerts(CalendarEventId::new(1)).unwrap(), [contract::alert(1, 1, 3)]);
+    assert_eq!(store.id().unwrap(), id);
 }
 
 #[test]
@@ -224,6 +227,7 @@ fn the_local_tables_are_the_ones_the_epic_needs() {
             "job",
             "message",
             "message_state",
+            "meta",
             "outbox",
             "schedule",
             "sender"

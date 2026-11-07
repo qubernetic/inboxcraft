@@ -111,6 +111,18 @@ impl Sqlite {
         Ok(self.conn.pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
+    /// The store's own id: 32 lower-case hex digits, random, made once with the store (schema version 4) and kept for
+    /// good. What lives outside the store and belongs to it, such as its accounts' passwords in the OS credential
+    /// store, is named with it, so two stores on one computer never share it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Corrupt`] when the id is gone; a database failure.
+    pub fn id(&self) -> Result<String, StoreError> {
+        let id: Option<String> = self.conn.query_row("SELECT value FROM meta WHERE key = 'store'", [], |row| row.get(0)).optional()?;
+        id.ok_or(StoreError::Corrupt("the store's id"))
+    }
+
     fn entries(&self, filter: &str, key: i64) -> Result<Vec<Entry>, StoreError> {
         let sql =
             format!("SELECT record, opened, EXISTS (SELECT 1 FROM body WHERE body.message = message.id) FROM message WHERE {filter} ORDER BY uid");

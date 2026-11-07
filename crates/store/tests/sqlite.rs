@@ -375,6 +375,19 @@ fn a_damaged_local_record_is_reported() {
 }
 
 #[test]
+fn every_store_has_an_id_of_its_own_for_good() {
+    let (one, one_dir) = fresh();
+    let (other, _other_dir) = fresh();
+    let id = one.id().unwrap();
+    assert!(id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()), "{id}");
+    assert_ne!(other.id().unwrap(), id, "two stores on one computer never share one");
+    drop(one);
+    assert_eq!(fresh_in(one_dir.path()).id().unwrap(), id, "kept between runs");
+    sql(one_dir.path(), "DELETE FROM meta;");
+    assert_eq!(fresh_in(one_dir.path()).id(), Err(StoreError::Corrupt("the store's id")));
+}
+
+#[test]
 fn a_local_id_sqlite_cannot_hold_is_refused() {
     let (mut store, _tmp) = fresh();
     two_accounts(&mut store);
