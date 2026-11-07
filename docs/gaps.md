@@ -71,7 +71,8 @@ B = blocks the next stage.
   pictures, no `Content-ID` and no `name` parameter on an attachment's `Content-Type`; every attachment is base64,
   so it refuses `message/rfc822` and every other `message` type but `message/global` (RFC 2046 allows those only
   in an identity encoding): forwarding a message as an attachment needs a writer of its own. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
-  server with `SMTPUTF8`; nothing checks that yet (#19).
+  server with `SMTPUTF8`; the SMTP client says `SMTPUTF8` only when `MailOptions::utf8` is set or the sender is not
+  ASCII, and nothing sets it from the message yet (#19, #117).
 - `MessageBuilder` keeps a display name of printable ASCII as a quoted string and writes any other as `B` encoded
   words, which a person reading the raw source cannot read; the text of a long word without spaces becomes encoded
   words throughout so that it can be folded (#19).
