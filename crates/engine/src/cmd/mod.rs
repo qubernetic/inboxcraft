@@ -60,6 +60,9 @@ mod add_tests;
 #[path = "compose_tests.rs"]
 pub(crate) mod compose_tests;
 #[cfg(test)]
+#[path = "group_tests.rs"]
+mod group_tests;
+#[cfg(test)]
 #[path = "hostile_tests.rs"]
 mod hostile_tests;
 #[cfg(test)]

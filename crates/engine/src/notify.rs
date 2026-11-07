@@ -9,7 +9,8 @@
 //!   holds or blocks tells nothing), not from one of the owner's own addresses, and not the owner's own move coming
 //!   back: a server that names no UID for a moved message gives it back through the next sync, as accepting a sender
 //!   does with the mail held, and that is no new mail. Its account's [`Level`] has the last word: `all`, `people`
-//!   (a sender the owner knows or accepted, and not in another group than People) or `none`. [`tells`] is the table.
+//!   (a sender the owner knows or accepted, whose message is in People by the owner's choice or the classifier) or
+//!   `none`. [`tells`] is the table.
 //! - A snoozed message that comes back and a follow-up reminder that fires tell the owner unless they turned that off
 //!   ([`Settings::returns`], [`Settings::reminders`]).
 //! - More than [`MAX_SINGLE`] new messages of one account at once become one notice that counts them, and the queue
@@ -24,8 +25,8 @@ use inboxcraft_store::{Change, Storage};
 use serde_json::{Value, json};
 
 use crate::EngineError;
-use crate::arrive::Arrival;
 use crate::arrive::screener::sender_of;
+use crate::arrive::{Arrival, group};
 use crate::schedule::Fired;
 use crate::session::State;
 use crate::sync::Plan;
@@ -235,7 +236,8 @@ pub(crate) struct Facts {
     pub(crate) seen: bool,
     /// It is from one of the owner's own addresses.
     pub(crate) own: bool,
-    /// It is from a sender the owner knows or accepted, not in another group than People.
+    /// It is from a sender the owner knows or accepted, in People: the owner's group for the sender, or else the
+    /// grouped inbox's classifier.
     pub(crate) person: bool,
     /// It is the owner's own move, back from the server.
     pub(crate) quiet: bool,
@@ -265,7 +267,7 @@ pub(crate) fn arrived(arrival: &Arrival<'_>, message: &Message, plan: &mut Plan)
     };
     let person = record.is_some_and(|record| {
         let met = record.known || record.screening == Some(Screening::Accepted);
-        met && matches!(record.group, None | Some(Group::People))
+        met && record.group.unwrap_or_else(|| group::classify(message.summary().envelope())) == Group::People
     });
     let mark = mark(message);
     let quiet = match plan.state.quiet.iter().position(|held| *held == mark) {

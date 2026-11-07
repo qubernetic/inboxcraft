@@ -45,6 +45,10 @@
 //!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
 //!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
 //!   decision back. A blocked sender's mail goes to `InboxCraft/Blocked` and is never fetched.
+//! - The grouped inbox (`group.*`): each message of a grouped account is in People, Updates, Newsletters or
+//!   Invitations, by the owner's choice for its sender (`group.set`, `owner`, undoable) or our classifier of its
+//!   header and body; `group.account` (`owner`) turns an account's grouping on or off, `group.list` (`safe`) counts
+//!   the inbox per group, and `mail.list` says and filters each row's group.
 //! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
 //!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
 //!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and

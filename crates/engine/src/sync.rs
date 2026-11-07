@@ -318,7 +318,21 @@ fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity:
     let Some(message) = held(store, folder)?.remove(&uid) else { return Ok(false) };
     plan.state.fetching.retain(|_, out| *out != message.id());
     match Body::new(raw.to_vec(), &plain_text(raw)) {
-        Ok(body) => plan.change(Change::PutBody(message.id(), body)),
+        Ok(body) => {
+            plan.change(Change::PutBody(message.id(), body));
+            // A calendar part, known only now, makes the message an invitation in the grouped inbox.
+            let envelope = message.summary().envelope();
+            let calendar = arrive::group::calendar(raw);
+            if calendar != envelope.signs().calendar() {
+                let envelope = envelope.clone().with_signs(envelope.signs().with_calendar(calendar));
+                let summary = message.summary().clone().with_envelope(envelope);
+                let thread = message.thread();
+                let moving = message.moving().cloned();
+                plan.change(Change::PutMessage(
+                    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(thread).with_moving(moving),
+                ));
+            }
+        }
         Err(_) => {
             plan.state.too_large.insert(message.id());
         }

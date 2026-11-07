@@ -152,3 +152,18 @@ fn a_signature_keeps_its_lines_and_loses_other_control_characters() {
     let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
     assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
 }
+
+#[test]
+fn the_grouped_inbox_is_on_until_the_owner_turns_it_off() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert!(account.grouped());
+    let plain = account.clone().with_grouped(false);
+    assert!(!plain.grouped());
+    let json = serde_json::to_string(&plain).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), plain);
+    // A record written before the grouped inbox reads back with it on.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert!(serde_json::from_str::<Account>(old).unwrap().grouped());
+}
