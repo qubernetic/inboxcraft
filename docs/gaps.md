@@ -410,8 +410,8 @@ time from the code as it is, not measured.
   from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
   open message (#135). More also holds Full width,
   Close and the next-message rule; Escape leaves full width but does not close the
-  reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
-  still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
+  reader. The quote toggles inside a message are still egui's own buttons in the theme's style, not the design
+  system's text buttons. `ui_shot` cannot open the
   More menu or the Move menu or hover a link, so none of them has a picture; the UI tests cover them. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
