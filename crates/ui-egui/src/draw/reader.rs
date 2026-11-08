@@ -300,7 +300,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
     // In the top row the window controls sit at the end of the actions' line.
     super::frame::beside(ui, theme, |ui| {
-        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+        Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = s.xs;
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
@@ -375,10 +375,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     }
 }
 
-/// A card's frame: the surface with a line round it.
+/// A card's frame: the translucent card colour with a line round it.
 fn card_frame(theme: &Theme, inner: f32) -> Frame {
     Frame::new()
-        .fill(theme.palette.surface)
+        .fill(theme.palette.card)
         .stroke(Stroke::new(1.0, theme.palette.line))
         .corner_radius(theme.spacing.card)
         .inner_margin(margin(inner))
@@ -399,7 +399,7 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, s.card, p.surface);
+        painter.rect_filled(rect, s.card, p.card);
         if response.hovered() {
             painter.rect_filled(rect, s.card, p.hover);
         }
@@ -880,7 +880,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
     let chosen_id = egui::Id::unique("screen-into").with(id);
     let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    Frame::new().fill(p.surface).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
+    Frame::new().fill(p.card).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = s.s;
         let title = tr!("Let {sender} in?", sender = row.sender);

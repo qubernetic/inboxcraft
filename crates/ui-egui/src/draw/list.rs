@@ -396,7 +396,7 @@ fn sheet<R>(ui: &mut Ui, theme: &Theme, edge: bool, add: impl FnOnce(&mut Ui) ->
         let width = EDGE;
         vec![gradient::filled(ui.painter(), rect, s.card, &ring), Shape::rect_filled(rect.shrink(width), s.card - width, p.surface)]
     } else {
-        vec![Shape::rect_filled(rect, s.card, p.surface), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)]
+        vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)]
     };
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
@@ -763,7 +763,7 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     let room = ui.available_rect_before_wrap();
     let content = height * count as f32 + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
-    ui.painter().rect_filled(card, s.card, p.surface);
+    ui.painter().rect_filled(card, s.card, p.card);
     ui.painter().rect_stroke(card, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
     let mut clicked = None;

@@ -100,7 +100,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = &theme.spacing;
     let height = line_height(ui, theme.fonts.sender) + s.m * 2.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, s.corner, p.surface);
+    ui.painter().rect_filled(rect, s.corner, p.card);
     ui.painter().rect_filled(rect, s.corner, p.hover);
     let actions = [
         Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },

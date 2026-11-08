@@ -53,7 +53,7 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
     }
     let p = &theme.palette;
     let s = &theme.spacing;
-    Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l)).show(ui, |ui| {
+    Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = s.m;
         head(ui, theme, invite);
