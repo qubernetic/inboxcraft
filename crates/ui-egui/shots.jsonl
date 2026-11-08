@@ -115,8 +115,17 @@
 {"out": "docs/images/palette-mode-dark.png", "mode": "dark", "size": [1200, 820], "palette": "mode"}
 {"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
 {"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
-{"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "calendar": true}
-{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "calendar": true}
+{"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "calendar": true}
+{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "calendar": true}
+# The calendar's views over the sample's calendars, an event picked with its details in the side panel (E4.4).
+{"out": "docs/images/calendar-week-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
+{"out": "docs/images/calendar-week-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
+{"out": "docs/images/calendar-month-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
+{"out": "docs/images/calendar-month-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
+{"out": "docs/images/calendar-agenda-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-agenda-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-day-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
+{"out": "docs/images/calendar-day-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
 # The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
 # half-typed name, the floating panel over the reader, and the Sending page with a signature.
 {"out": "docs/images/compose-new-light.png", "mode": "light", "size": [1400, 860], "compose": "new"}

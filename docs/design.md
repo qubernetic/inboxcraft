@@ -522,8 +522,38 @@ the icon sits among others at the same size.
 ## Calendar
 - **Where**: the rail's Calendar button (Ctrl+2) shows the calendar screen in the place of the folders, the list and
   the reader; Mail brings them back. The strip's title says "Calendar · InboxCraft".
-- **Empty state** (until calendar sync): one card in the middle with the Calendar icon in Duotone, "No calendars
-  yet" and a line on what will show there. The mail's keys (the arrows, D, R, Delete) rest while it shows.
+- **Empty state** (while no account has a calendar): one card in the middle with the Calendar icon in Duotone, "No
+  calendars yet" and a line on what will show there. The mail's keys (the arrows, D, R, Delete) rest while it shows.
+- **Layout**: the side panel on a card 260 points wide at the left, the view on a card beside it. Over the view a
+  toolbar: the view's title in the title font ("2 – 8 November 2026", "November 2026", "Thursday 5 November 2026",
+  "From today"), the Previous icon, Today and the Next icon (named after the step: "Previous week", "Next month",
+  "Earlier days"), and at the right a pill per view, Day, Week, Month and Agenda, the one shown selected. The
+  calendar opens on this week, on today; weeks start on Monday.
+- **Events**: an event is a block in a tint of its calendar's colour (the server's, or an account colour by the
+  calendar's place) with a 3-point bar of the colour at its left, its summary in the caption size, strong, and its
+  times under it where there is room; hovered or picked the tint deepens. Each is a button named after its summary,
+  its days and its times; a press picks it and the side panel shows its details, a second press or the details'
+  Close lets it go.
+- **Day and week**: a column per day under its short name and date ("Thu 5"; today on the selection; in the week a
+  press opens the day), a lane of blocks over whole days (all-day events and events over more than one day, in
+  lanes), then the hours, 44 points each with their labels in a 52-point gutter, scrolled to 07:00 (or the
+  earliest event) at first. Timed events sit by their minutes, side by side in equal columns where they overlap;
+  an event without length takes a quarter of an hour. A line in the accent marks the time now across today.
+- **Month**: six weeks from the Monday on or before the month's first day under the weekdays' short names; each
+  day's number is a button that opens the day (today on an accent disc, other months' days muted). Blocks over whole
+  days run across the cells of a week in lanes; under them the day's timed events, one line each with the start,
+  and "+N more" (a button to the day) when they do not all fit.
+- **Agenda**: the 30 days from the focus, each day with events under its name ("Today · Thursday 5 November"), an
+  event a row: its start, "All day" or "Until" the end, the summary and the place, and the event's own zone with its
+  start in a chip at the right when its clock differs from the computer's. "Nothing in these 30 days." when empty.
+- **Side panel**: the mini month (its name, "Month before" and "Month after", a button per day that puts the view
+  there; today on an accent disc, the days shown on the selection), "Calendars" with a box per calendar and its
+  colour dot (unticked hides its events), and the details of the picked event: the colour dot, the summary in the
+  heading font and Close; both dates with the times ("Monday 16 November – Wednesday 18 November", "Sunday 8
+  November, 08:00 – 11:00"); the event's own zone after the Globe icon, labelled, only when its clock differs from
+  the computer's ("Event zone Atlantic/Azores: 07:00 – 10:00", with the dates when they differ too); the place; the
+  description; the calendar, busy or free, private and the repeat ("Personal · busy · private · repeats weekly");
+  and up to eight guests with their answers ("Petra Lindqvist · going").
 
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
@@ -564,7 +594,10 @@ width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
 The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette-mode-<mode>.png`, `"palette"`),
 the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
-the calendar's empty state (`calendar-empty-<mode>.png`, `"calendar"`) are drawn in light and dark, and so are the
+the calendar's empty state (`calendar-empty-<mode>.png`, `"first"` and `"calendar"`) and its views over the
+sample's three calendars (`calendar-week-<mode>.png` with the ferry's zone in the details,
+`calendar-month-<mode>.png` with a trip over three days picked, `calendar-agenda-<mode>.png`, `calendar-day-<mode>.png`;
+`"calendar_view"` and `"event"`) are drawn in light and dark, and so are the
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
 `compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
 and `compose-template-<mode>.png` with a blank left) and the Sending page

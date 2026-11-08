@@ -414,6 +414,31 @@ fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
 }
 
 #[test]
+fn a_shot_shows_each_calendar_view_and_a_picked_event() {
+    let base = r#""out": "x.png", "mode": "light", "size": [900, 600]"#;
+    let mut seen = vec![shoot(&shot(&format!(r#"{{{base}, "calendar": true}}"#))).unwrap()];
+    for place in [
+        r#""calendar_view": "day""#,
+        r#""calendar_view": "month""#,
+        r#""calendar_view": "agenda""#,
+        r#""event": "Ferry to the island""#,
+        r#""first": true, "calendar": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap();
+        assert!(!seen.contains(&picture), "{place}");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(&format!(r#"{{{base}, "calendar_view": "year"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("is not day, week, month or agenda"), "{error}");
+    let error = shoot(&shot(&format!(r#"{{{base}, "event": "Nothing like it"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("no calendar event"), "{error}");
+    for place in [r#""calendar_view": "day""#, r#""event": "Dentist""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
 fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
     let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
     let mut seen = Vec::new();
