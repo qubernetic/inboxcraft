@@ -5,13 +5,13 @@
 //! day that puts the view there; today in the accent, the days shown on the selection), the calendars with a box
 //! each that shows or hides its events, and the details of the picked event: its summary, both dates with the times,
 //! the event's own zone, labelled, when its clock differs from the computer's, the place, the description, the
-//! calendar with busy or free, private and the repeat, and the guests with their answers.
+//! calendar with busy or free, private and the repeat, the guests with their answers, and Edit and Delete.
 
 use egui::{Align, Layout, Rect, RichText, ScrollArea, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use super::{Asked, caption_strong, tint};
 use crate::calendar::{Calendar, Day, EventRow, day};
-use crate::component::button::IconButton;
+use crate::component::button::{IconButton, TextButton};
 use crate::draw::paint::{line, line_height, selection};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
@@ -173,6 +173,15 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     if let Some(more) = event.guests.len().checked_sub(GUESTS).filter(|more| *more > 0) {
         body(ui, &tr!("and {count} more", count = more), true);
     }
+    ui.add_space(s.s);
+    ui.horizontal(|ui| {
+        if TextButton::new(tr!("Edit")).secondary().icon(IconId::Compose).show(ui, theme, keymap).clicked() {
+            asked.push(Asked::Edit);
+        }
+        if TextButton::new(tr!("Delete")).secondary().icon(IconId::Delete).show(ui, theme, keymap).clicked() {
+            asked.push(Asked::Delete);
+        }
+    });
 }
 
 /// The calendar, busy or free, private and the repeat: `Personal · busy · private · repeats weekly`.

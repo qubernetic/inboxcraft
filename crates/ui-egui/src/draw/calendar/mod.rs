@@ -10,9 +10,11 @@
 //! weeks of the month with the blocks across the days (`month`), the agenda the days that hold events (`agenda`).
 //! Every event is a button named after its summary and its days and times; pressing it picks it, pressing it again
 //! lets it go. Drawing only reads the [`Calendar`]; what was pressed comes back as [`Asked`] and is applied after
-//! the frame.
+//! the frame. New event at the toolbar's end, and Edit and Delete under the picked event's details, open the event
+//! editor (`editor`) or delete the event; the editor floats over the screen and changes its form as it is used.
 
 mod agenda;
+mod editor;
 mod hours;
 mod month;
 mod side;
@@ -52,6 +54,16 @@ pub(super) enum Asked {
     Toggle(u64),
     /// An event pressed, or the details closed.
     Pick(Option<Picked>),
+    /// New event: the editor on a new event.
+    New,
+    /// Edit: the editor on the picked event.
+    Edit,
+    /// Delete: the picked event goes.
+    Delete,
+    /// The editor's Save.
+    Save,
+    /// The editor's Cancel.
+    Cancel,
 }
 
 /// The calendar card's content while there is no calendar: what will show here.
@@ -115,6 +127,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
             asked.push(Asked::Step(true));
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if TextButton::new(tr!("New event")).primary().icon(IconId::Add).show(ui, theme, keymap).clicked() {
+                asked.push(Asked::New);
+            }
+            ui.add_space(theme.spacing.s);
             for view in View::ALL.into_iter().rev() {
                 if pill(ui, theme, view.text(), calendar.view() == view).clicked() {
                     asked.push(Asked::View(view));
@@ -122,6 +138,11 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
             }
         });
     });
+}
+
+/// The event editor over `screen`, while it is open; what was pressed in it.
+pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, screen: Rect) -> Vec<Asked> {
+    calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, screen)).unwrap_or_default()
 }
 
 /// The colour of calendar `id`: the server's, or one of the accounts' colours by its place in the list.

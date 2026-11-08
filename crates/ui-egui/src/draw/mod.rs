@@ -26,7 +26,8 @@
 //!
 //! Every action of the window has an id ([`keymap::actions`]) and runs through [`InboxApp::run_action`]: from its
 //! key, from the rail and from the command palette (Ctrl+K), which lists them all. The rail's Calendar shows the
-//! calendar screen ([`Screen::Calendar`]), drawn in `calendar/`, in the place of the mail.
+//! calendar screen ([`Screen::Calendar`]), drawn in `calendar/`, in the place of the mail. A change to an event made
+//! there shows the same toast, and Undo or Ctrl+Z reads the calendar again.
 
 mod accounts;
 mod calendar;
@@ -95,6 +96,8 @@ struct Keys {
     up: bool,
     /// Whether the mail's own keys rest.
     typing: bool,
+    /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
+    quiet: bool,
 }
 
 /// The acts on a row, which run on the selected message.
@@ -374,7 +377,7 @@ impl InboxApp {
                 }
             }
             keymap::SHORTCUTS => self.open_shortcuts(),
-            keymap::UNDO => self.mailbox.undo(),
+            keymap::UNDO => self.undo(),
             keymap::FULL_WIDTH => {
                 self.show_mail();
                 let full = !self.reader.full_width();
@@ -420,6 +423,11 @@ impl InboxApp {
                 calendar::Asked::Open(day) => calendar.open_day(mailbox, day),
                 calendar::Asked::Toggle(id) => calendar.toggle(id),
                 calendar::Asked::Pick(picked) => calendar.pick(picked),
+                calendar::Asked::New => calendar.new_event(),
+                calendar::Asked::Edit => calendar.edit_picked(),
+                calendar::Asked::Delete => calendar.delete_picked(mailbox),
+                calendar::Asked::Save => calendar.save(mailbox),
+                calendar::Asked::Cancel => calendar.close_editor(),
             }
         }
     }
@@ -461,14 +469,15 @@ impl InboxApp {
         self.capture_key(ctx);
         let focused = ctx.memory(|memory| memory.focused().is_some());
         // The composer in the reader's place hides the selected message: the keys that act on it rest.
-        let typing = focused || held || self.settings.is_open() || self.screen == Screen::Calendar || self.docked();
+        let quiet = focused || held || self.settings.is_open() || self.docked();
+        let typing = quiet || self.screen == Screen::Calendar;
         if held {
-            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing };
+            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
         }
         let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
         let (escape, down, up) =
             ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
-        Keys { ran, escape, down, up, typing }
+        Keys { ran, escape, down, up, typing, quiet }
     }
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
@@ -1012,7 +1021,7 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
-        let Keys { mut ran, escape, down, up, typing } = self.keys(ui.ctx());
+        let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
             self.mailbox.step(down);
@@ -1026,6 +1035,10 @@ impl InboxApp {
             self.close_settings();
         }
         let setting = self.settings.is_open();
+        let left_editor = escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some();
+        if left_editor {
+            self.calendar.close_editor();
+        }
         let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
@@ -1128,6 +1141,9 @@ impl InboxApp {
             self.hover = drawn.hover.take();
         }
         layers.finish(ui.painter(), &theme);
+        if self.screen == Screen::Calendar {
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, ui.max_rect()));
+        }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
         }
@@ -1146,7 +1162,7 @@ impl InboxApp {
         );
         // Every gradient of the frame is painted by now: the pictures it left out go.
         gradient::sweep(ui.ctx());
-        let undone = self.toast(ui, &theme, typing);
+        let undone = self.toast(ui, &theme, quiet);
         self.notice_toast(ui, &theme);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
@@ -1156,6 +1172,7 @@ impl InboxApp {
             || undone
             || (out && leaving)
             || left_full
+            || left_editor
             || left_settings
             || !ran.is_empty()
             || palette.is_some()
@@ -1342,7 +1359,15 @@ impl InboxApp {
             self.mailbox.start(id, act);
         }
         if undone {
-            self.mailbox.undo();
+            self.undo();
+        }
+    }
+
+    /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
+    fn undo(&mut self) {
+        self.mailbox.undo();
+        if self.screen == Screen::Calendar {
+            self.calendar.refresh(&mut self.mailbox);
         }
     }
 
@@ -1353,8 +1378,9 @@ impl InboxApp {
     }
 
     /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
-    /// acts back, one at a time. Whether Undo was pressed (its key works while no text field has the focus).
-    fn toast(&mut self, ui: &Ui, theme: &Theme, typing: bool) -> bool {
+    /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
+    /// focus, no sheet or palette is open).
+    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
         let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
@@ -1373,7 +1399,7 @@ impl InboxApp {
         self.toast = Some((undo.serial, since));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
         let mut keys = self.keymap.clone();
-        if typing {
+        if quiet {
             keys.unbind(keymap::UNDO);
         }
         let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);

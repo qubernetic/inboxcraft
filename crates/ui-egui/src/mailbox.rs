@@ -349,6 +349,8 @@ pub enum Act {
     Delete,
     /// Move it to the folder with this id, of its account (`mail.move`).
     Move(u64),
+    /// A change to a calendar event, made on the calendar screen ([`Mailbox::event_act`]); no act on a message.
+    Event,
     /// Let its sender in (`screener.accept`): their held mail and their future mail come in, into `group` when one is
     /// chosen; with `open`, the message opens in the inbox.
     Accept {
@@ -776,6 +778,7 @@ impl Mailbox {
                 let answer = self.write("mail.delete", &one)?;
                 if answer.get("permanent").and_then(Value::as_bool) == Some(true) { tr!("Deleted for good") } else { tr!("Moved to Trash") }
             }
+            Act::Event => return Err(UiError::Answer { command: "event", detail: "an event changes on the calendar screen".to_owned() }),
             Act::Move(folder) => {
                 self.write("mail.move", &json!({ "id": id, "folder": folder }))?;
                 let leaf = self.folders.iter().find(|row| row.id == folder).map(|row| row.leaf.clone()).unwrap_or_default();
@@ -940,6 +943,22 @@ impl Mailbox {
         if let Err(error) = result {
             self.fail(error);
         }
+    }
+
+    /// Runs the event command `command` (`event.create`, `event.update`, `event.delete`), an act of the engine's
+    /// history, and shows `text` in its toast with Undo, which takes it back like a message's act.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal; no toast then.
+    pub(crate) fn event_act(&mut self, command: &'static str, params: &Value, text: &str) -> Result<Value, UiError> {
+        let before = self.history;
+        let answer = self.run(command, params)?;
+        self.history = self.history.saturating_add(1);
+        self.acts = self.acts.saturating_add(1);
+        let id = answer.get("id").and_then(Value::as_u64).unwrap_or(0);
+        self.undo = Some(Undo { act: Act::Event, id, serial: self.acts, text: text.to_owned(), undoable: true, depth: before, selected: false });
+        Ok(answer)
     }
 
     /// Forgets the toast: its Undo has gone. The act stays in the history, where Ctrl+Z still reaches it.

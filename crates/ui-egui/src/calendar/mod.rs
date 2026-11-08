@@ -7,11 +7,16 @@
 //! side panel then shows its details. Without a calendar the screen shows its empty state. The screen is drawn by
 //! `draw/calendar/`.
 //!
+//! New event opens the [`Editor`] on the day the view is on; Edit opens it on the picked event, Delete deletes that.
+//! Each saved change and each delete is an act of the engine's history with a toast whose Undo takes it back
+//! ([`Mailbox::event_act`]); the server is asked to delete only once the undo window is over.
+//!
 //! The times are the computer's wall clock as the engine gives them (`local_start`, `local_end`); the event's own
 //! zone comes along only when its clock shows another time ([`Zone`]). Event text is the organiser's data: it is
 //! shown on one line ([`shown`]) and never acted on.
 
 pub mod day;
+pub mod editor;
 pub mod layout;
 pub mod sample;
 
@@ -20,6 +25,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 pub use self::day::Day;
+pub use self::editor::Editor;
 use crate::mailbox::{Mailbox, shown};
 use crate::tr;
 
@@ -135,6 +141,8 @@ pub struct Zone {
 pub struct Guest {
     /// The name, or the address without one.
     pub name: String,
+    /// The address, or empty when the event gives none.
+    pub address: String,
     /// The answer: `accepted`, `declined`, `tentative`, `needs_action`, `delegated` or `other`.
     pub status: String,
 }
@@ -172,6 +180,8 @@ pub struct EventRow {
     pub zone: Option<Zone>,
     /// The guests.
     pub guests: Vec<Guest>,
+    /// Whether the event has no title of its own (`summary` then says `(No title)`).
+    pub untitled: bool,
 }
 
 impl EventRow {
@@ -249,7 +259,11 @@ impl EventRow {
                     .map(|guest| {
                         let name = guest.get("name").and_then(Value::as_str).filter(|name| !name.trim().is_empty());
                         let name = name.or_else(|| guest.get("address").and_then(Value::as_str)).unwrap_or_default();
-                        Guest { name: shown(name), status: shown(guest.get("status").and_then(Value::as_str).unwrap_or_default()) }
+                        Guest {
+                            name: shown(name),
+                            address: shown(guest.get("address").and_then(Value::as_str).unwrap_or_default()),
+                            status: shown(guest.get("status").and_then(Value::as_str).unwrap_or_default()),
+                        }
                     })
                     .collect()
             })
@@ -257,6 +271,7 @@ impl EventRow {
         Some(Self {
             id: value.get("id").and_then(Value::as_u64)?,
             calendar: value.get("calendar").and_then(Value::as_u64)?,
+            untitled: summary.trim().is_empty(),
             summary: if summary.trim().is_empty() { tr!("(No title)").to_owned() } else { summary },
             location: text("location"),
             description: text("description"),
@@ -318,6 +333,8 @@ pub struct Calendar {
     truncated: bool,
     /// How many events could not be read.
     unreadable: u64,
+    /// The event editor, while it is open.
+    editor: Option<Editor>,
 }
 
 impl Calendar {
@@ -529,6 +546,79 @@ impl Calendar {
     /// Picks an occurrence (`None` lets it go); the side panel shows its details.
     pub fn pick(&mut self, picked: Option<Picked>) {
         self.picked = picked;
+    }
+
+    /// The event editor, while it is open.
+    #[must_use]
+    pub fn editor(&self) -> Option<&Editor> {
+        self.editor.as_ref()
+    }
+
+    /// The event editor, to type into.
+    pub fn editor_mut(&mut self) -> Option<&mut Editor> {
+        self.editor.as_mut()
+    }
+
+    /// Opens the editor on a new event on the day the view is on, in the first calendar shown (the first of all when
+    /// every one is hidden). Without a calendar nothing opens.
+    pub fn new_event(&mut self) {
+        let Some(first) = self.calendars.iter().find(|row| self.is_shown(row.id)).or_else(|| self.calendars.first()) else { return };
+        let choices = self.calendars.iter().map(|row| (row.id, row.name.clone())).collect();
+        self.editor = Some(Editor::new_event(first.id, self.focus(), choices));
+    }
+
+    /// Opens the editor on the picked event; nothing opens without one.
+    pub fn edit_picked(&mut self) {
+        if let Some(event) = self.picked() {
+            self.editor = Some(Editor::edit(event));
+        }
+    }
+
+    /// Closes the editor; what was typed is let go.
+    pub fn close_editor(&mut self) {
+        self.editor = None;
+    }
+
+    /// Saves the editor's event: a new one is made (`event.create`), an edit sends what changed (`event.update`), and
+    /// the toast says so with Undo. An edit that changed nothing closes the editor and runs nothing. What cannot be
+    /// read or is refused keeps the editor open, saying why.
+    pub fn save(&mut self, mailbox: &mut Mailbox) {
+        let Some(editor) = self.editor.as_mut() else { return };
+        let (_, offset) = mailbox.now();
+        let (command, params) = match editor.changes(offset) {
+            Ok(Some(change)) => change,
+            Ok(None) => {
+                self.editor = None;
+                return;
+            }
+            Err(why) => return editor.refused(why),
+        };
+        let text = match command {
+            "event.create" => tr!("Event added"),
+            _ if params.get("notify").is_some() => tr!("Event saved; the guests are told"),
+            _ => tr!("Event saved"),
+        };
+        match mailbox.event_act(command, &params, text) {
+            Ok(_) => {
+                self.editor = None;
+                self.refresh(mailbox);
+            }
+            Err(error) => editor.refused(error.to_string()),
+        }
+    }
+
+    /// Deletes the picked event (`event.delete`), with a toast whose Undo brings it back; the server deletes it once
+    /// the undo window is over. A refusal shows in the window's error banner.
+    pub fn delete_picked(&mut self, mailbox: &mut Mailbox) {
+        let Some(id) = self.picked().map(|event| event.id) else { return };
+        match mailbox.event_act("event.delete", &json!({ "id": id }), tr!("Event deleted")) {
+            Ok(_) => {
+                self.picked = None;
+                self.editor = None;
+                self.refresh(mailbox);
+            }
+            Err(error) => mailbox.fail(error),
+        }
     }
 }
 
