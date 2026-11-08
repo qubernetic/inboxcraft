@@ -22,8 +22,8 @@ use std::time::Duration;
 use inboxcraft_engine::Session;
 use inboxcraft_mime::{Attachment, Mailbox as Sender, MessageBuilder};
 use inboxcraft_model::{
-    Account, AccountId, Address, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Invitation, ItipMethod,
-    Message, MessageId, MessageRef, MessageState, Rsvp, Security, Server, Signs, SpecialUse, Summary, Uid,
+    Account, AccountId, Address, Bounce, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Invitation,
+    ItipMethod, Message, MessageId, MessageRef, MessageState, Rsvp, Security, Server, Signs, SpecialUse, Summary, Uid,
 };
 use inboxcraft_store::{Batch, Body, Change, Memory, Storage, StoreConfig};
 use inboxcraft_time::{Clock, Timestamp};
@@ -791,6 +791,26 @@ pub fn put_away(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
     Ok(())
 }
 
+/// The sample's sent message a delivery report says did not get through.
+const BOUNCED: &str = "Re: Draft logo for the bakery";
+
+/// Why [`BOUNCED`] did not get through, as the report says.
+const BOUNCE_REASON: &str = "petra@example.org: 550 5.1.1 the mailbox does not exist (reported by mx.example.org)";
+
+/// Marks the sample's sent message as bounced in `store`, as an arriving delivery report would, for `ui_shot` to
+/// picture the mark and the reader's banner. The report itself is not in the sample, so none is named.
+///
+/// # Errors
+///
+/// [`UiError::Sample`] when the store refuses the change.
+pub fn bounce(store: &mut Memory) -> Result<(), UiError> {
+    // A message that is no delivery report: the engine shows the reason and names no report.
+    let bounced = Some(Bounce { report: MessageId::new(sample_id("Allotment rota for November")?), reason: BOUNCE_REASON.to_owned() });
+    let mut batch = Batch::new();
+    batch.push(Change::SetMessageState(MessageId::new(sample_id(BOUNCED)?), MessageState { bounced, ..MessageState::default() }));
+    store.apply(&batch).map_err(UiError::sample)
+}
+
 /// A sample session ([`Session::sample`]) over the sample mailbox, its dates counted back from `clock`'s time now:
 /// the acts on its messages change the mailbox in memory, nothing goes to a server and nothing is kept.
 ///
@@ -798,11 +818,30 @@ pub fn put_away(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
 ///
 /// As [`mailbox`], and [`UiError::Engine`] when the session refuses the store.
 pub fn session(clock: Box<dyn Clock>) -> Result<Session, UiError> {
-    let store = mailbox(clock.now())?;
+    session_over(mailbox(clock.now())?, clock)
+}
+
+/// [`session`], but the first account can send through an invented submission server and the sent message bounced
+/// ([`bounce`]): for `ui_shot` to picture the outbox, the countdown and the bounce. Its sends go to the workers the
+/// window is given, which connect nowhere in a picture.
+///
+/// # Errors
+///
+/// As [`session`].
+pub fn sending(clock: Box<dyn Clock>) -> Result<Session, UiError> {
+    let mut store = mailbox(clock.now())?;
+    let [(id, label, owner), _] = ACCOUNTS;
+    let first = account(id, label, owner)?;
+    let server = Server::new(Host::new("smtp.example.org").map_err(UiError::sample)?, Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    batch.push(Change::PutAccount(first.with_submission(Some(server))));
+    store.apply(&batch).map_err(UiError::sample)?;
+    bounce(&mut store)?;
     session_over(store, clock)
 }
 
-/// A sample session as [`session`] makes it, over `store` (the sample [`mailbox`], perhaps with more in it).
+/// A sample session as [`session`] makes it, over `store` (the sample [`mailbox`], perhaps with more in it), the
+/// screener on.
 ///
 /// # Errors
 ///

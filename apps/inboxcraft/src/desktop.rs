@@ -16,6 +16,8 @@
 //! at most [`WINDOWLESS_TICK`]. A click on one opens its message in the full-width reader, with the window
 //! brought forward or opened again; its buttons mark the message done or read, as the window's own acts do.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::Duration;
 
@@ -42,7 +44,8 @@ pub trait Badge: Send {
 pub struct Desktop {
     app: InboxApp,
     heard: Receiver<Request>,
-    stays: bool,
+    /// Closing the window leaves InboxCraft running; shared with the owner's choice ([`crate::desk::OwnerDesk`]).
+    stays: Arc<AtomicBool>,
     window: bool,
     quitting: bool,
     badge: Option<Box<dyn Badge>>,
@@ -56,7 +59,11 @@ pub struct Desktop {
 
 impl std::fmt::Debug for Desktop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Desktop").field("stays", &self.stays).field("window", &self.window).field("quitting", &self.quitting).finish_non_exhaustive()
+        f.debug_struct("Desktop")
+            .field("stays", &self.stays.load(Ordering::SeqCst))
+            .field("window", &self.window)
+            .field("quitting", &self.quitting)
+            .finish_non_exhaustive()
     }
 }
 
@@ -67,7 +74,7 @@ impl Desktop {
         Self {
             app,
             heard,
-            stays: true,
+            stays: Arc::new(AtomicBool::new(true)),
             window: true,
             quitting: false,
             badge: None,
@@ -82,9 +89,16 @@ impl Desktop {
     /// The same, but closing the window ends InboxCraft: for the sample, which has nothing to keep in step, and for a
     /// run nothing could bring a window back to.
     #[must_use]
-    pub fn closing_ends(mut self) -> Self {
-        self.stays = false;
+    pub fn closing_ends(self) -> Self {
+        self.stays.store(false, Ordering::SeqCst);
         self
+    }
+
+    /// Whether closing the window leaves InboxCraft running, as a flag to share: what it says when the window closes
+    /// decides.
+    #[must_use]
+    pub fn stays(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.stays)
     }
 
     /// The same, started without a window (`--background`).
@@ -159,7 +173,7 @@ impl Desktop {
         }
         if ctx.input(|input| input.viewport().close_requested()) {
             self.window = false;
-            self.quitting |= !self.stays;
+            self.quitting |= !self.stays.load(Ordering::SeqCst);
         }
         self.keep_in_step();
         self.app.wake_when_due(ctx);

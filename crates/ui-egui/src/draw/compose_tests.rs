@@ -239,8 +239,8 @@ fn send_sends_and_the_toast_says_so() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     harness.run();
     assert!(harness.state().composer().is_none());
-    assert_eq!(harness.state().notice(), Some("Sending your message"));
-    harness.get_by_label("Sending your message");
+    assert!(harness.state().counting().is_some(), "the countdown shows in place of a notice");
+    harness.get_by_label("Sending “Hello” in 5 s");
 }
 
 #[test]

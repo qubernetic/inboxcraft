@@ -20,12 +20,15 @@
 //!   goes in front of the text (`compose.template`). Each blank it leaves is a `[[prompt]]` mark, asked for one at a
 //!   time: what is typed for it takes the mark's place in the subject and the text. While a mark is left, Send is
 //!   blocked and says which.
+//! - Send goes after the hold, in which it can be taken back (`mail.send`); with a time picked for it, Send becomes
+//!   Schedule and the draft goes then (`mail.send_later`).
 
 use std::collections::BTreeSet;
 
+use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
-use crate::mailbox::{Mailbox, shown};
+use crate::mailbox::{Mailbox, engine_date, parse_date, shown};
 use crate::{UiError, tr};
 
 /// The most suggestions shown under a recipient line.
@@ -229,6 +232,8 @@ pub struct Composer {
     filling: String,
     /// The names of the templates of the draft's account.
     templates: Vec<String>,
+    /// The time picked to send it at; `None` sends it now, after the hold.
+    later: Option<Timestamp>,
 }
 
 impl Composer {
@@ -303,6 +308,7 @@ impl Composer {
             blanks: Vec::new(),
             filling: String::new(),
             templates: Vec::new(),
+            later: None,
         };
         composer.take_answer(answer);
         composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
@@ -740,19 +746,35 @@ impl Composer {
         self.save(mailbox)
     }
 
-    /// Sends the draft (`mail.send`) after keeping it as [`Composer::close`] does. Whether it went: a draft that is
-    /// blocked is kept and not sent.
+    /// The time picked to send the draft at, if one is: Send is Schedule then.
+    #[must_use]
+    pub fn later(&self) -> Option<Timestamp> {
+        self.later
+    }
+
+    /// Sends the draft at `at` instead of now, or now again with `None`.
+    pub fn set_later(&mut self, at: Option<Timestamp>) {
+        self.later = at;
+    }
+
+    /// Sends the draft after keeping it as [`Composer::close`] does: after the hold (`mail.send`), or at the time
+    /// picked (`mail.send_later`). The time it goes, as the engine put it in the outbox; `None` for a draft that is
+    /// blocked, which is kept and not sent. The lists are read again, so the outbox shows it.
     ///
     /// # Errors
     ///
-    /// A command's refusal (an account without a submission server).
-    pub fn send(&mut self, mailbox: &mut Mailbox) -> Result<bool, UiError> {
+    /// A command's refusal (an account without a submission server, a time picked that has passed).
+    pub fn send(&mut self, mailbox: &mut Mailbox) -> Result<Option<Timestamp>, UiError> {
         self.close(mailbox)?;
         if !self.sendable() {
-            return Ok(false);
+            return Ok(None);
         }
-        mailbox.run("mail.send", &json!({ "id": self.draft }))?;
-        Ok(true)
+        let answer = match self.later {
+            Some(at) => mailbox.run("mail.send_later", &json!({ "id": self.draft, "at": engine_date(at) }))?,
+            None => mailbox.run("mail.send", &json!({ "id": self.draft }))?,
+        };
+        mailbox.refresh();
+        Ok(Some(answer.get("at").and_then(Value::as_str).and_then(parse_date).unwrap_or_else(|| mailbox.now())))
     }
 
     /// Removes the draft here and its copy on the server (`compose.discard`).

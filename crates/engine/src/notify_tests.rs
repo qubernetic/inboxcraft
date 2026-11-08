@@ -327,7 +327,12 @@ mod session {
         }
         let mut session = session();
         session.set_notify_settings(expected.clone());
-        assert_eq!(session.notify_settings(), &expected);
+        assert_eq!(session.notify_settings(), &Settings::default(), "account 4 is not held");
+        expected.set_level(AccountId::new(1), Level::None);
+        session.set_notify_settings(expected);
+        let mut held = Settings::default();
+        held.set_level(AccountId::new(1), Level::None);
+        assert_eq!(session.notify_settings(), &held, "only the held account's level is taken");
     }
 
     #[test]

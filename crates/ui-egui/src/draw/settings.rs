@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Triage, Sending and
-//! Shortcuts; the others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Triage holds
-//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds each
-//! account's signature, saved with its Save button. Shortcuts lists every action of
+//! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Notifications, Triage,
+//! Sending and Shortcuts; the others not built yet), the chosen page on the right. Notifications holds each account's
+//! level (all, people only, none), whether returned snoozes and follow-up reminders notify, and the two switches of
+//! the app's [`crate::desk::Desk`]: running in the background and starting with the computer. Accounts is drawn in `accounts.rs`. Triage holds
+//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds
+//! "Undo send", how long every send waits before it goes (5, 10, 30 or 60 seconds), and each account's signature, saved
+//! with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
 //! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
@@ -16,6 +19,7 @@ use egui::{
 };
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::notify::Level;
 
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
@@ -86,6 +90,18 @@ pub(super) enum Asked {
     Grouped(u64, bool),
     /// Whether a pin stays on a message when it is done.
     KeepPins(bool),
+    /// How long every send is held before it goes, in seconds.
+    Hold(u8),
+    /// Which new mail of the account notifies.
+    Level(u64, Level),
+    /// Whether returned snoozes notify.
+    Returns(bool),
+    /// Whether follow-up reminders notify.
+    Reminders(bool),
+    /// Whether closing the window leaves InboxCraft running.
+    Background(bool),
+    /// Whether InboxCraft starts with the computer.
+    Login(bool),
     Close,
 }
 
@@ -99,6 +115,19 @@ pub(super) struct Sheet<'a> {
     pub(super) onboarding: &'a mut Onboarding,
     /// Whether the window can add accounts.
     pub(super) can_add: bool,
+    /// What the app's desk says now.
+    pub(super) desk: DeskView,
+}
+
+/// What the app's [`crate::desk::Desk`] says this frame; all `None` without one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct DeskView {
+    /// Whether closing the window leaves InboxCraft running, where it can.
+    pub(super) background: Option<bool>,
+    /// Whether InboxCraft starts with the computer, where it can.
+    pub(super) login: Option<bool>,
+    /// A change of starting with the computer waits for the desktop's answer.
+    pub(super) asking: bool,
 }
 
 /// The name of a mode.
@@ -150,7 +179,7 @@ fn sections() -> [(IconId, &'static str, Option<Section>); 9] {
     [
         (IconId::Palette, tr!("Appearance"), Some(Section::Appearance)),
         (IconId::At, tr!("Accounts"), Some(Section::Accounts)),
-        (IconId::Notify, tr!("Notifications"), None),
+        (IconId::Notify, tr!("Notifications"), Some(Section::Notifications)),
         (IconId::Funnel, tr!("Triage"), Some(Section::Triage)),
         (IconId::Send, tr!("Sending"), Some(Section::Sending)),
         (IconId::Calendar, tr!("Calendar"), None),
@@ -168,6 +197,16 @@ fn section_name(section: Section) -> &'static str {
         Section::Shortcuts => tr!("Shortcuts"),
         Section::Sending => tr!("Sending"),
         Section::Triage => tr!("Triage"),
+        Section::Notifications => tr!("Notifications"),
+    }
+}
+
+/// The name of a notification level.
+fn level_name(level: Level) -> &'static str {
+    match level {
+        Level::All => tr!("All"),
+        Level::People => tr!("People only"),
+        Level::None => tr!("None"),
     }
 }
 
@@ -267,6 +306,11 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
 /// Segmented choices: the options side by side in a pill, the chosen one on the selection gradient in SemiBold; each
 /// option's name in its `font`. The option pressed.
 fn segmented<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T) -> Option<T> {
+    segmented_for(ui, theme, options, current, None)
+}
+
+/// [`segmented`], each option spoken as "<option> for `about`" where several rows offer the same options.
+fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T, about: Option<&str>) -> Option<T> {
     let p = &theme.palette;
     let s = &theme.spacing;
     let mut chosen = None;
@@ -278,7 +322,11 @@ fn segmented<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &st
                 let font = if on { semibold(*font) } else { *font };
                 let galley = line(ui, &[(name, font, p.text)], f32::INFINITY);
                 let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(s.m * 2.0, s.xs * 2.0), Sense::click());
-                response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, *name));
+                let spoken = match about {
+                    Some(about) => tr!("{option} for {about}", option = name, about = about),
+                    None => (*name).to_owned(),
+                };
+                response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, &spoken));
                 if ui.is_rect_visible(rect) {
                     let round = rect.height() / 2.0;
                     if on {
@@ -637,6 +685,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, view.mailbox),
         Section::Triage => triage(ui, theme, view.mailbox),
+        Section::Notifications => notifications(ui, theme, view.mailbox, view.settings, view.desk),
     };
     asked.or(on_page)
 }
@@ -754,14 +803,31 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     asked
 }
 
-/// The Sending page under its title: each account with its signature in a field, and Save while it differs from the
-/// one the account has; scrolling.
+/// The holds "Undo send" offers, in seconds.
+const HOLDS: [u8; 4] = [5, 10, 30, 60];
+
+/// The Sending page under its title: "Undo send" with the hold's seconds, then each account with its signature in a
+/// field, and Save while it differs from the one the account has; scrolling.
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let s = &theme.spacing;
     let mut asked = None;
-    note(ui, theme, tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."));
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width(ui.available_width() - s.m);
+        let hold = mailbox.hold_seconds();
+        let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
+        let holds: Vec<(u8, &str, Font)> = HOLDS.iter().zip(&labels).map(|(seconds, label)| (*seconds, label.as_str(), theme.fonts.button)).collect();
+        let now = tr!("Every message waits here this long before it goes, so Undo can take it back. Now {seconds} s.", seconds = hold);
+        row(ui, theme, tr!("Undo send"), &[tr!("Hold mail for a few seconds before it goes."), &now], &mut |ui| {
+            if let Some(seconds) = segmented(ui, theme, &holds, hold) {
+                asked = Some(Asked::Hold(seconds));
+            }
+        });
+        ui.add_space(s.l);
+        note(
+            ui,
+            theme,
+            tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."),
+        );
         if mailbox.accounts().is_empty() {
             ui.add_space(s.l);
             note(ui, theme, tr!("Add an account first: a signature belongs to the account it is sent from."));
@@ -837,6 +903,92 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
                     asked = Some(Asked::Grouped(account.id, !account.grouped));
                 }
             });
+        }
+    });
+    asked
+}
+
+/// The Notifications page under its title: each account's level, returned snoozes and reminders, then running in
+/// the background and starting with the computer, each switch unavailable where the app's desk cannot do it;
+/// scrolling.
+fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Settings, desk: DeskView) -> Option<Asked> {
+    let mut asked = None;
+    let f = &theme.fonts;
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width(ui.available_width() - theme.spacing.m);
+        note(
+            ui,
+            theme,
+            tr!("Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."),
+        );
+        note(
+            ui,
+            theme,
+            tr!("A notification shows who the mail is from and its subject; your desktop may keep it in its list and show it on the lock screen."),
+        );
+        if mailbox.accounts().is_empty() {
+            ui.add_space(theme.spacing.l);
+            note(ui, theme, tr!("Add an account first: each account chooses which of its new mail notifies you."));
+        }
+        let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
+        for account in mailbox.accounts() {
+            let title = tr!("{account} · {address}", account = account.label, address = account.address);
+            row(ui, theme, &title, &[], &mut |ui| {
+                if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
+                    asked = Some(Asked::Level(account.id, level));
+                }
+            });
+        }
+        let chosen = mailbox.notify_settings();
+        let (returns, reminders) = (chosen.returns, chosen.reminders);
+        row(ui, theme, tr!("Returned snoozes"), &[tr!("A snoozed message that comes back notifies you.")], &mut |ui| {
+            if switch(ui, theme, tr!("Returned snoozes"), returns).clicked() {
+                asked = Some(Asked::Returns(!returns));
+            }
+        });
+        row(ui, theme, tr!("Follow-up reminders"), &[tr!("A message you asked to be reminded of, when no reply came, notifies you.")], &mut |ui| {
+            if switch(ui, theme, tr!("Follow-up reminders"), reminders).clicked() {
+                asked = Some(Asked::Reminders(!reminders));
+            }
+        });
+        if let Some(pressed) = in_the_background(ui, theme, settings, desk) {
+            asked = Some(pressed);
+        }
+    });
+    asked
+}
+
+/// The rows of running in the background and starting with the computer, as the app's desk allows them.
+fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: DeskView) -> Option<Asked> {
+    let mut asked = None;
+    let elsewhere = tr!("Not available in this window");
+    let mut notes = vec![tr!("Closing the window leaves InboxCraft running, so new mail, send later and snooze keep their times.")];
+    if desk.background.is_none() {
+        notes.push(elsewhere);
+    }
+    let background = desk.background.unwrap_or(false);
+    row(ui, theme, tr!("Run in the background"), &notes, &mut |ui| {
+        let pressed = ui.add_enabled_ui(desk.background.is_some(), |ui| switch(ui, theme, tr!("Run in the background"), background)).inner;
+        if pressed.clicked() {
+            asked = Some(Asked::Background(!background));
+        }
+    });
+    let mut notes = vec![tr!("InboxCraft starts in the background when you log in.")];
+    if desk.login.is_none() {
+        notes.push(elsewhere);
+    } else if desk.asking {
+        notes.push(tr!("Waiting for the desktop's answer…"));
+    } else if desk.background == Some(false) {
+        notes.push(tr!("Turn on Run in the background first: a start at login opens no window."));
+    }
+    if let Some(text) = settings.login_note() {
+        notes.push(text);
+    }
+    let login = desk.login.unwrap_or(false);
+    let open = desk.login.is_some() && desk.background == Some(true) && !desk.asking;
+    row(ui, theme, tr!("Start with the computer"), &notes, &mut |ui| {
+        if ui.add_enabled_ui(open, |ui| switch(ui, theme, tr!("Start with the computer"), login)).inner.clicked() {
+            asked = Some(Asked::Login(!login));
         }
     });
     asked

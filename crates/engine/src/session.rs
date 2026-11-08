@@ -533,8 +533,10 @@ impl Session {
         &self.state.notify
     }
 
-    /// Takes the notification choices kept from an earlier run, read with [`Settings::from_value`].
-    pub fn set_notify_settings(&mut self, settings: Settings) {
+    /// Takes the notification choices kept from an earlier run, read with [`Settings::from_value`]; the level of an
+    /// account the session does not hold is left out, so a later account with its number starts at the default.
+    pub fn set_notify_settings(&mut self, mut settings: Settings) {
+        settings.retain(|account| self.state.accounts.contains_key(&account));
         self.state.notify = settings;
     }
 

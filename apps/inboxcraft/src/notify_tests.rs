@@ -120,7 +120,9 @@ fn privacy_names_what_a_notification_hands_on() {
         "the number of new messages and the account's address",
         "may keep notifications in its list until you clear it",
         "its own settings for InboxCraft decide whether they show on the lock screen",
-        "lasts only until InboxCraft restarts",
+        "keeps these choices in `notify.json`",
+        "names each account by its number only",
+        "the work still queued for it and its notification choice in `notify.json`",
     ] {
         assert!(privacy.contains(point), "PRIVACY.md does not say: {point}");
     }

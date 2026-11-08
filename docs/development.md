@@ -94,7 +94,9 @@ try:
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 - the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
   a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is
-  refused, with the reason in the error banner: the sample's accounts have no submission server. Reply, Reply all
+  refused, with the reason in the error banner: the sample's accounts have no submission server, so the outbox, the
+  countdown toast of Undo send and Schedule show only with an account that can send (`ui_shot`'s `"outbox"` pictures
+  them); "Undo send" on the Sending page sets the hold all the same. Reply, Reply all
   and Forward under the open message start the composer filled in. Templates at the composer's foot stays disabled:
   the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 - the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;

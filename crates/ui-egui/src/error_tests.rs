@@ -21,6 +21,9 @@ fn every_error_reads_as_a_sentence_and_only_an_engine_error_has_a_source() {
     let picture = UiError::Picture("only PNG and JPEG pictures are shown".to_owned());
     assert_eq!(picture.to_string(), "only PNG and JPEG pictures are shown");
     assert!(picture.source().is_none());
+    let desk = UiError::Desk("the choice could not be kept".to_owned());
+    assert_eq!(desk.to_string(), "the choice could not be kept");
+    assert!(desk.source().is_none());
     let engine = UiError::from(EngineError::NotFound { what: "message", id: 7 });
     assert_eq!(engine.to_string(), EngineError::NotFound { what: "message", id: 7 }.to_string());
     assert!(engine.source().is_some());

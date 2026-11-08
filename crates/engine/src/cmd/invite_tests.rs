@@ -533,6 +533,15 @@ fn a_refused_answer_cannot_be_edited() {
     assert!(bad(session.run("compose.update", &json!({ "id": draft, "account": 2 }))));
     assert!(bad(session.run("compose.template", &json!({ "id": draft, "name": "thanks" }))));
     assert_eq!(session.store().draft(sent.draft).unwrap().unwrap().to, ["odile@example.org"]);
+    // The outbox says it is an answer, so the window offers no Edit for it.
+    let listed = session.run("outbox.list", &json!({})).unwrap();
+    assert_eq!((&listed["items"][0]["state"], &listed["items"][0]["invite_answer"]), (&json!("refused"), &json!(true)), "{listed}");
+    // Sent again, it goes at once as the first time did, with no hold to take it back in.
+    let again = session.run("outbox.retry", &json!({ "id": draft })).unwrap();
+    assert_eq!(again["state"], json!("sending"), "{again}");
+    assert_eq!(out(&mut session).recipients, ["odile@example.org"]);
+    assert!(session.store().schedule().unwrap().is_empty());
+    session.apply(&event(EventKind::SendFailed { draft: sent.draft, kind: inboxcraft_model::ErrorKind::MessageRefused, reply: None })).unwrap();
     // Answering again from the invitation still works.
     answer(&mut session, id, "tentative").unwrap();
     assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));

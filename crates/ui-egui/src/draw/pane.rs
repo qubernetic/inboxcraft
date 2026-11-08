@@ -3,7 +3,8 @@
 
 //! The navigation rail and the folder pane. The rail runs the preset's gradient at full strength down the window's
 //! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds New message,
-//! the account picker, the unified views and each account's folders with their unread badges.
+//! the account picker, the unified views, the Outbox while anything is in it (its badge how many), and each account's
+//! folders with their unread badges.
 
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
@@ -287,6 +288,23 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             };
             if nav_row(ui, theme, &row).clicked() {
                 asked.open = Some(Place::View(view.role));
+            }
+        }
+        let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
+        if sends > 0 {
+            let text = tr!("Outbox");
+            let spoken = if sends == 1 { tr!("Outbox, 1 send").to_owned() } else { tr!("Outbox, {count} sends", count = sends) };
+            let row = NavRow {
+                text,
+                spoken,
+                badge: sends,
+                selected: !searching && mailbox.place() == Place::Outbox,
+                depth: 0,
+                icon: Some(IconId::Snooze),
+                enabled: true,
+            };
+            if nav_row(ui, theme, &row).clicked() {
+                asked.open = Some(Place::Outbox);
             }
         }
         for account in mailbox.accounts().iter().filter(|account| mailbox.narrowed().is_none_or(|id| id == account.id)) {

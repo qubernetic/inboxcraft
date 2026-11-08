@@ -183,16 +183,17 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     let path = dir.path().join("nested").join(FILE);
     let mut keep = KeepFile::new(path.clone());
     assert_eq!(keep.load_triage(), None, "nothing kept yet");
-    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: true };
+    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: true, hold: Some(30) };
     keep.store_triage(&chosen).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
     let kept = dir.path().join("nested").join(TRIAGE_FILE);
     let text = std::fs::read_to_string(&kept).unwrap();
     assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\"") && text.contains("\"keep_pins\": true"), "{text}");
+    assert!(text.contains("\"hold_seconds\": 30"), "{text}");
     // Damaged, huge and wrong: the defaults or nothing.
-    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\" }").unwrap();
+    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600 }").unwrap();
     assert_eq!(keep.load_triage(), Some(Triage::default()));
-    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards, keep_pins: false });
+    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards, keep_pins: false, hold: None });
     std::fs::write(&kept, b"\xff not json").unwrap();
     assert_eq!(keep.load_triage(), None);
     std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
@@ -205,4 +206,41 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     assert!(KeepFile::new(blocker.join(FILE)).store_triage(&chosen).is_err());
     assert!(KeepFile::new(std::path::PathBuf::from("/")).store_triage(&chosen).is_err());
     assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_triage(), None);
+}
+
+#[test]
+fn the_notification_choices_are_kept_beside_the_appearance_and_come_back() {
+    use inboxcraft_engine::notify::{Level, Settings};
+    use inboxcraft_model::AccountId;
+
+    use super::NOTIFY_FILE;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_notify(), None, "nothing kept yet");
+    let mut chosen = Settings::default();
+    chosen.set_level(AccountId::new(2), Level::People);
+    chosen.returns = false;
+    keep.store_notify(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_notify(), Some(chosen.clone()));
+    let kept = dir.path().join("nested").join(NOTIFY_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"level\": \"people\"") && text.contains("\"returns\": false"), "{text}");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"accounts\": [{ \"account\": 0, \"level\": \"none\" }, { \"account\": 3, \"level\": \"loud\" }], \"returns\": 1 }")
+        .unwrap();
+    assert_eq!(keep.load_notify(), Some(Settings::default()));
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_notify(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_notify(), None);
+    let mut none = NoKeep;
+    none.store_notify(&chosen).unwrap();
+    assert_eq!(none.load_notify(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_notify(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_notify(&chosen).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_notify(), None);
 }

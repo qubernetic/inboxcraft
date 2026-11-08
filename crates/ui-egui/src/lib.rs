@@ -25,6 +25,7 @@
 //!   glyph.
 //! - [`settings`]: the appearance settings page's state: open or not, and the custom accent as the owner types it.
 //! - [`keep`]: where the appearance choices (the `ui.*.set` commands) and the keys are kept between runs.
+//! - [`desk`]: the app's side of running without a window: in the background, and starting with the computer.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.
 //! - [`keymap`]: every action of the window and which key runs it; tooltips and chips read their keys from it.
 //! - [`palette`]: the command palette's state and which actions match what is typed into it.
@@ -38,6 +39,7 @@
 pub mod calendar;
 pub mod component;
 pub mod compose;
+pub mod desk;
 mod draw;
 mod error;
 pub mod fetch;

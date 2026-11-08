@@ -8,14 +8,17 @@
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
-//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
-//! without a config folder gets [`NoKeep`].
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, and how long a send is held) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
+//! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
+//! ([`NotifySettings::from_value`]); that file names accounts by their number only. A window without a config folder
+//! gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::Appearance;
+use inboxcraft_engine::notify::Settings as NotifySettings;
+use inboxcraft_engine::{Hold, ScreenerMode};
 use serde_json::{Value, json};
 
 use crate::keymap::Keymap;
@@ -30,8 +33,12 @@ pub const KEYS_FILE: &str = "shortcuts.json";
 /// The name of the triage choices' file, beside [`FILE`].
 pub const TRIAGE_FILE: &str = "triage.json";
 
+/// The name of the notification choices' file, beside [`FILE`].
+pub const NOTIFY_FILE: &str = "notify.json";
+
 /// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
-/// inbox shows its groups, and whether a pin stays on a message when it is done.
+/// inbox shows its groups, whether a pin stays on a message when it is done, and how long a send is held before it
+/// goes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Triage {
     /// The screener's mode.
@@ -40,6 +47,8 @@ pub struct Triage {
     pub view: InboxView,
     /// A pin stays on a message when it is done.
     pub keep_pins: bool,
+    /// How long a send is held, in seconds ([`Hold::MIN`] to [`Hold::MAX`]); `None` until it was kept.
+    pub hold: Option<u8>,
 }
 
 impl Triage {
@@ -51,13 +60,14 @@ impl Triage {
             screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
             view: named("view").and_then(InboxView::named).unwrap_or_default(),
             keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
+            hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
         }
     }
 
     /// The choices as they are written.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins })
+        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins, "hold_seconds": self.hold })
     }
 }
 
@@ -101,6 +111,20 @@ pub trait Keep: Send {
     ///
     /// Why nothing was kept, as the owner reads it.
     fn store_triage(&mut self, _triage: &Triage) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The notification choices kept, if any could be read; none by default.
+    fn load_notify(&self) -> Option<NotifySettings> {
+        None
+    }
+
+    /// Keeps `settings` in place of the notification choices kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_notify(&mut self, _settings: &NotifySettings) -> Result<(), String> {
         Ok(())
     }
 }
@@ -224,6 +248,15 @@ impl Keep for KeepFile {
     fn store_triage(&mut self, triage: &Triage) -> Result<(), String> {
         let path = self.beside(TRIAGE_FILE).ok_or_else(|| format!("{}: no file to keep the triage choices beside", self.path.display()))?;
         write_json(&path, &triage.to_value())
+    }
+
+    fn load_notify(&self) -> Option<NotifySettings> {
+        read_json(&self.beside(NOTIFY_FILE)?).map(|value| NotifySettings::from_value(&value))
+    }
+
+    fn store_notify(&mut self, settings: &NotifySettings) -> Result<(), String> {
+        let path = self.beside(NOTIFY_FILE).ok_or_else(|| format!("{}: no file to keep the notification choices beside", self.path.display()))?;
+        write_json(&path, &settings.to_value())
     }
 }
 
