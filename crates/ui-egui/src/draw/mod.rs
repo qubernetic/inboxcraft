@@ -1786,6 +1786,7 @@ impl InboxApp {
                 self.settings.show(section);
             }
             settings::Asked::Add => self.onboarding.open(),
+            settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
             settings::Asked::Back => self.onboarding.close(),
             settings::Asked::Page(asked) => self.apply_page(asked),
             settings::Asked::Capture(action) => self.settings.capture(action),
@@ -1827,6 +1828,7 @@ impl InboxApp {
         match asked {
             onboard::Asked::Detect => onboarding.detect(),
             onboard::Asked::Add => onboarding.add(mailbox),
+            onboard::Asked::Save => onboarding.save(mailbox),
             onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),

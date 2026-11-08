@@ -145,6 +145,9 @@ pub struct Shot {
     /// Whether the settings sheet is open on Accounts.
     #[serde(default)]
     pub accounts: Option<bool>,
+    /// With `accounts`: the account whose settings form is open.
+    #[serde(default)]
+    pub edit_account: Option<u64>,
     /// Whether the settings sheet is open on Shortcuts.
     #[serde(default)]
     pub shortcuts: Option<bool>,
@@ -266,6 +269,7 @@ fn pictured_proposal() -> Proposal {
     };
     Proposal {
         imap: vec![suggestion("imap.example.org", 993, Security::Tls), suggestion("imap.example.org", 143, Security::StartTls)],
+        submission: vec![suggestion("smtp.example.org", 465, Security::Tls)],
         asked: vec!["dns MX example.org".to_owned(), "https://autoconfig.example.org/mail/config-v1.1.xml".to_owned()],
         failed: Vec::new(),
     }
@@ -1102,6 +1106,10 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.accounts == Some(true) {
         app.open_accounts();
+    }
+    if let Some(account) = shot.edit_account {
+        let (onboarding, mailbox) = app.onboarding_mut();
+        onboarding.edit(mailbox, account);
     }
     places(&mut app, shot)?;
     if let Some(scene) = &shot.outbox {

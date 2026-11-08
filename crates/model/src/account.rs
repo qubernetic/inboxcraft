@@ -276,9 +276,7 @@ impl Account {
     ///
     /// [`AccountError::BadUsername`].
     pub fn new(id: AccountId, label: &str, address: EmailAddress, username: &str, imap: Server) -> Result<Self, AccountError> {
-        if username.is_empty() || username.len() > Self::MAX_USERNAME_LEN || username.chars().any(char::is_control) {
-            return Err(AccountError::BadUsername);
-        }
+        Self::check_username(username)?;
         let label = clean_name(label).unwrap_or_else(|| address.as_str().to_owned());
         Ok(Self {
             id,
@@ -293,6 +291,34 @@ impl Account {
             caldav: None,
             templates: Vec::new(),
         })
+    }
+
+    fn check_username(username: &str) -> Result<(), AccountError> {
+        if username.is_empty() || username.len() > Self::MAX_USERNAME_LEN || username.chars().any(char::is_control) {
+            return Err(AccountError::BadUsername);
+        }
+        Ok(())
+    }
+
+    /// The same account shown as `label` (cleaned like a display name; empty means the address), logging in to `imap`
+    /// as `username`, checked as [`Self::new`] checks them. Everything else stays.
+    ///
+    /// # Errors
+    ///
+    /// [`AccountError::BadUsername`].
+    pub fn with_sign_in(mut self, label: &str, username: &str, imap: Server) -> Result<Self, AccountError> {
+        Self::check_username(username)?;
+        self.label = clean_name(label).unwrap_or_else(|| self.address.as_str().to_owned());
+        username.clone_into(&mut self.username);
+        self.imap = imap;
+        Ok(self)
+    }
+
+    /// Whether [`Self::with_caldav`] takes `url`: blank (none), or an `https` address without a user name.
+    #[must_use]
+    pub fn takes_caldav(url: &str) -> bool {
+        let url = url.trim();
+        url.is_empty() || is_https_url(url)
     }
 
     /// The same account with the owner's name for sent mail, cleaned like any display name.

@@ -195,3 +195,5 @@
 {"out": "docs/images/send-later-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "schedule"}
 {"out": "docs/images/bounce-light.png", "mode": "light", "size": [1400, 860], "outbox": "bounce"}
 {"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
+{"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
+{"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}

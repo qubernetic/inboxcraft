@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw.
+//! The add-account page: the form with Detect, then the check's steps with the host, port and issuer each saw. An
+//! account already there gets the same fields, with a new password instead of the password.
 
 use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
@@ -11,7 +12,7 @@ use crate::component::{field as field_style, margin, pill};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Found, MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
+use crate::onboard::{Form, Found, MAX_PASSWORD_CHARS, Onboarding, Outcome, Secret, Security, Stage, StepRow, StepState};
 use crate::theme::Theme;
 use crate::tr;
 
@@ -23,6 +24,7 @@ const FORM_WIDTH: f32 = 480.0;
 pub(super) enum Asked {
     Detect,
     Add,
+    Save,
     CheckAgain,
     Change,
     Close,
@@ -49,13 +51,14 @@ fn line_edit<'t>(theme: &Theme, text: &'t mut String, hint: &str, width: f32) ->
     TextEdit::singleline(text).hint_text(hint).margin(field_style::margin(theme)).desired_width(width)
 }
 
-/// The password field. egui's undo history keeps plain copies of what was typed, so it is emptied after every frame:
-/// undo never brings back a password that was cleared, nor an earlier account's. The field takes no more than its
-/// [`Secret`]'s buffer holds, so typing never moves the text.
-fn password(ui: &mut Ui, theme: &Theme, secret: &mut Secret, width: f32) {
-    labelled(ui, theme, tr!("Password"), width, |ui| {
+/// The password field, `caption` over it and `hint` in it while it is empty. egui's undo history keeps plain copies of
+/// what was typed, so it is emptied after every frame: undo never brings back a password that was cleared, nor an
+/// earlier account's. The field takes no more than its [`Secret`]'s buffer holds, so typing never moves the text.
+fn password(ui: &mut Ui, theme: &Theme, caption: &str, hint: &str, secret: &mut Secret, width: f32) {
+    labelled(ui, theme, caption, width, |ui| {
         let edit = TextEdit::singleline(secret.expose_mut())
             .id_salt("account-password")
+            .hint_text(hint)
             .password(true)
             .char_limit(MAX_PASSWORD_CHARS)
             .margin(field_style::margin(theme))
@@ -83,6 +86,9 @@ fn found_box(ui: &mut Ui, theme: &Theme, found: &Found) {
         match found.source {
             Some(source) => note(ui, theme, source.text(), if source.doubtful() { p.flag } else { p.muted }),
             None => note(ui, theme, tr!("Detect found no server: type the settings in."), p.flag),
+        }
+        if let Some((host, _)) = found.outgoing.as_ref().filter(|(_, source)| source.doubtful()) {
+            note(ui, theme, &tr!("{host} was a guess from common names: check it.", host = host), p.flag);
         }
         CollapsingHeader::new(
             RichText::new(tr!("What Detect asked ({count})", count = found.asked.len())).font(theme.fonts.caption.id()).color(p.accent),
@@ -131,12 +137,118 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     detect
 }
 
+/// The names of the account and the user name.
+fn names(ui: &mut Ui, theme: &Theme, form: &mut Form, width: f32) {
+    let gap = between(theme);
+    let half = (width - gap) / 2.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        labelled(ui, theme, tr!("Name for the account"), half, |ui| ui.add(line_edit(theme, &mut form.label, tr!("the address"), half)));
+        labelled(ui, theme, tr!("Name on sent mail"), half, |ui| ui.add(line_edit(theme, &mut form.display_name, tr!("optional"), half)));
+    });
+    labelled(ui, theme, tr!("User name"), width, |ui| ui.add(line_edit(theme, &mut form.username, tr!("the address"), width)));
+}
+
+/// One server's row: its host, its port (`usual` as the hint) and the choice of encryption. There is no unencrypted choice.
+fn server_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    (caption, placeholder): (&str, &str),
+    (host, port_text, security): (&mut String, &mut String, &mut Option<Security>),
+    usual: fn(Security) -> u16,
+    width: f32,
+) {
+    let s = theme.spacing;
+    let gap = between(theme);
+    let chosen = security.unwrap_or(Security::Tls);
+    let port = s.xl * 3.0;
+    let choices = s.xl * 6.0;
+    let room = (width - port - choices - 2.0 * gap).max(120.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        labelled(ui, theme, caption, room, |ui| ui.add(line_edit(theme, host, placeholder, room)));
+        labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, port_text, &usual(chosen).to_string(), port)));
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = s.xs;
+            ui.label(RichText::new(tr!("Security")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            ui.horizontal(|ui| {
+                for choice in [Security::Tls, Security::StartTls] {
+                    if pill::pill(ui, theme, choice.text(), chosen == choice).clicked() {
+                        *security = Some(choice);
+                    }
+                }
+            });
+        });
+    });
+}
+
+/// The incoming server, and the outgoing server and the CalDAV address, which are optional.
+fn servers(ui: &mut Ui, theme: &Theme, form: &mut Form, width: f32) {
+    server_row(ui, theme, (tr!("IMAP server"), "imap.example.org"), (&mut form.host, &mut form.port, &mut form.security), Security::imap_port, width);
+    server_row(
+        ui,
+        theme,
+        (tr!("Outgoing server (SMTP), to send"), "smtp.example.org"),
+        (&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security),
+        Security::submission_port,
+        width,
+    );
+    labelled(ui, theme, tr!("CalDAV address, for calendars"), width, |ui| {
+        ui.add(line_edit(theme, &mut form.caldav, tr!("optional, https://dav.example.org"), width))
+    });
+}
+
+/// A note with the padlock before it.
+fn lock_note(ui: &mut Ui, theme: &Theme, text: &str) {
+    ui.horizontal(|ui| {
+        let side = theme.fonts.caption.size * 1.2;
+        let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        theme.icons.paint(ui.painter(), at, IconId::Lock, Style::Regular, theme.palette.muted);
+        note(ui, theme, text, theme.palette.muted);
+    });
+}
+
+/// The form of an account already there: the add form's fields, the address fixed, a new password instead of the
+/// password, and where the sign-in will go when it would go anywhere new.
+fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding) -> Option<Asked> {
+    let p = theme.palette;
+    let s = theme.spacing;
+    let mut asked = None;
+    let width = ui.available_width().min(FORM_WIDTH);
+    ui.spacing_mut().item_spacing.y = s.s;
+    ui.label(RichText::new(tr!("Account settings")).font(theme.fonts.title.id()).color(p.text));
+    ui.add_space(s.s);
+    let address = onboarding.form().address.clone();
+    let caption = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
+    ui.add(egui::Label::new(RichText::new(address).font(theme.fonts.body.id()).color(p.text)).wrap()).labelled_by(caption.id);
+    ui.add_space(s.xs);
+    let form = onboarding.form_mut();
+    names(ui, theme, form, width);
+    password(ui, theme, tr!("New password"), tr!("empty keeps the stored one"), &mut form.password, width);
+    servers(ui, theme, form, width);
+    ui.add_space(s.xs);
+    lock_note(ui, theme, tr!("A new password goes into your system's credential store. The stored one is never shown."));
+    if let Some(text) = onboarding.sign_in_note() {
+        note(ui, theme, &text, p.flag);
+    }
+    ui.add_space(s.s);
+    let label = if onboarding.save_checks() { tr!("Save and check") } else { tr!("Save") };
+    ui.horizontal(|ui| {
+        if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
+            asked = Some(Asked::Save);
+        }
+        if button::link(ui, theme, keymap, tr!("Cancel")).clicked() {
+            asked = Some(Asked::Close);
+        }
+    });
+    asked
+}
+
 fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let s = theme.spacing;
     let mut asked = None;
     let width = ui.available_width().min(FORM_WIDTH);
-    let gap = between(theme);
     ui.spacing_mut().item_spacing.y = s.s;
     ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
     ui.add_space(s.s);
@@ -145,41 +257,11 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     }
     ui.add_space(s.s);
     let form = onboarding.form_mut();
-    let half = (width - gap) / 2.0;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        labelled(ui, theme, tr!("Name for the account"), half, |ui| ui.add(line_edit(theme, &mut form.label, tr!("the address"), half)));
-        labelled(ui, theme, tr!("Name on sent mail"), half, |ui| ui.add(line_edit(theme, &mut form.display_name, tr!("optional"), half)));
-    });
-    labelled(ui, theme, tr!("User name"), width, |ui| ui.add(line_edit(theme, &mut form.username, tr!("the address"), width)));
-    password(ui, theme, &mut form.password, width);
-    let security = form.security.unwrap_or(Security::Tls);
-    let port = s.xl * 3.0;
-    let choices = s.xl * 6.0;
-    let server = (width - port - choices - 2.0 * gap).max(120.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        labelled(ui, theme, tr!("IMAP server"), server, |ui| ui.add(line_edit(theme, &mut form.host, "imap.example.org", server)));
-        labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, &mut form.port, &security.imap_port().to_string(), port)));
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = s.xs;
-            ui.label(RichText::new(tr!("Security")).font(theme.fonts.caption.id()).color(p.muted));
-            ui.horizontal(|ui| {
-                for choice in [Security::Tls, Security::StartTls] {
-                    if pill::pill(ui, theme, choice.text(), security == choice).clicked() {
-                        form.security = Some(choice);
-                    }
-                }
-            });
-        });
-    });
+    names(ui, theme, form, width);
+    password(ui, theme, tr!("Password"), "", &mut form.password, width);
+    servers(ui, theme, form, width);
     ui.add_space(s.xs);
-    ui.horizontal(|ui| {
-        let side = theme.fonts.caption.size * 1.2;
-        let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), at, IconId::Lock, Style::Regular, p.muted);
-        note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."), p.muted);
-    });
+    lock_note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."));
     note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
     ui.add_space(s.s);
     ui.horizontal(|ui| {
@@ -317,6 +399,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         asked = match onboarding.stage() {
             Stage::Form => form(ui, theme, keymap, onboarding),
+            Stage::Edit(_) => edit_form(ui, theme, keymap, onboarding),
             Stage::Checking(account) => checking(ui, theme, keymap, mailbox, onboarding, account),
             Stage::Closed => None,
         };

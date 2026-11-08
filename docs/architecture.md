@@ -377,7 +377,11 @@ store or the log. In the desktop app the entry is named with the store's own ran
 (`account-<store id>-<account id>`, `Sqlite::id`), so two stores on one computer never share an entry. The desktop
 app keeps its accounts in the store on disk, so their passwords stay when the window closes; a front end whose
 accounts are forgotten removes them then (`InboxApp::on_exit`). A new account's first check that signs in queues
-its folder list, so the sync starts after the password was accepted and not before. `account.remove` removes the account with its mail and drops its state and
+its folder list, so the sync starts after the password was accepted and not before. `account.update` (`owner`) changes
+an account's names, user name and servers; a change of the user name or of a server's host, port or security starts
+the owner's check, and its sign-in that passes starts the sync again, as a new password does (`recheck`). The worker
+that held the old settings is replaced at the next job. A new password never passes through a command either: the front
+end replaces the entry in the credential store, and the worker reads it at its next sign-in. `account.remove` removes the account with its mail and drops its state and
 queued jobs. Each frame the window hands the queued jobs to the app's workers (`ui_egui::workers::Workers`; one
 `net::Worker` per account, started at its first job, stopped off the window's thread when its account is gone) and
 applies their events; Detect runs on a thread of its own in the window, outside the engine.

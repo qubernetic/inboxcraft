@@ -19,7 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use inboxcraft_model::{Account, AccountId, EmailAddress, Event, EventKind, Job, Security};
-use inboxcraft_net::detect::{self, DetectConfig, Proposal as Found, Source as Where};
+use inboxcraft_net::detect::{self, Candidate, DetectConfig, Proposal as Found, Source as Where};
 use inboxcraft_net::dns::Resolver;
 use inboxcraft_net::web::Https;
 use inboxcraft_net::{Credentials, Password, TlsSettings, Worker, WorkerSettings};
@@ -262,28 +262,29 @@ fn same_servers(a: &Account, b: &Account) -> bool {
 /// `found` as the form shows it.
 #[must_use]
 pub fn proposal(found: &Found) -> Proposal {
-    let imap = found
-        .imap
-        .iter()
-        .map(|candidate| Suggestion {
-            host: candidate.server.host().as_str().to_owned(),
-            port: candidate.server.port().get(),
-            security: match candidate.server.security() {
-                Security::Tls => onboard::Security::Tls,
-                Security::StartTls => onboard::Security::StartTls,
-            },
-            username: candidate.username.clone(),
-            source: match candidate.source {
-                Where::Autoconfig => onboard::Source::Autoconfig,
-                Where::AutoconfigRedirect => onboard::Source::AutoconfigRedirect,
-                Where::Ispdb => onboard::Source::Ispdb,
-                Where::Srv => onboard::Source::Srv,
-                Where::Guess => onboard::Source::Guess,
-            },
-        })
-        .collect();
+    let suggestions = |candidates: &[Candidate]| -> Vec<Suggestion> {
+        candidates
+            .iter()
+            .map(|candidate| Suggestion {
+                host: candidate.server.host().as_str().to_owned(),
+                port: candidate.server.port().get(),
+                security: match candidate.server.security() {
+                    Security::Tls => onboard::Security::Tls,
+                    Security::StartTls => onboard::Security::StartTls,
+                },
+                username: candidate.username.clone(),
+                source: match candidate.source {
+                    Where::Autoconfig => onboard::Source::Autoconfig,
+                    Where::AutoconfigRedirect => onboard::Source::AutoconfigRedirect,
+                    Where::Ispdb => onboard::Source::Ispdb,
+                    Where::Srv => onboard::Source::Srv,
+                    Where::Guess => onboard::Source::Guess,
+                },
+            })
+            .collect()
+    };
     let failed = found.failed.iter().map(|(what, kind)| format!("{what}: {kind}")).collect();
-    Proposal { imap, asked: found.asked.clone(), failed }
+    Proposal { imap: suggestions(&found.imap), submission: suggestions(&found.submission), asked: found.asked.clone(), failed }
 }
 
 /// Detect for `address` over the system's name servers and HTTPS with `tls`; the ISPDB only when `ispdb`.

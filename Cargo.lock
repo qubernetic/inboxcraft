@@ -1833,6 +1833,7 @@ dependencies = [
  "inboxcraft-model",
  "inboxcraft-net",
  "inboxcraft-store",
+ "inboxcraft-testkit",
  "inboxcraft-time",
  "inboxcraft-ui-egui",
  "keyring",

@@ -37,6 +37,8 @@ pub struct Outcome {
     senders: Vec<(String, bool)>,
     /// Accounts removed: the session forgets what it knows of them and drops their queued jobs.
     removed: Vec<AccountId>,
+    /// Accounts whose next check that signs in starts the sync again.
+    resync: Vec<AccountId>,
     /// The appearance choices from now on.
     appearance: Option<Appearance>,
     /// What the command does to the undo history.
@@ -77,6 +79,7 @@ impl Outcome {
             jobs: Vec::new(),
             senders: Vec::new(),
             removed: Vec::new(),
+            resync: Vec::new(),
             appearance: None,
             undo: None,
             screener: None,
@@ -186,6 +189,12 @@ impl Outcome {
     pub(crate) fn with_removed(mut self, account: AccountId) -> Self {
         self.batch.push(Change::RemoveAccount(account));
         self.removed.push(account);
+        self
+    }
+
+    /// The outcome after which the next check of `account` that signs in starts the sync again.
+    pub(crate) fn with_resync(mut self, account: AccountId) -> Self {
+        self.resync.push(account);
         self
     }
 
@@ -316,6 +325,9 @@ pub(crate) struct AccountState {
     pub(crate) failure: Option<(ErrorKind, Option<FolderId>)>,
     /// The last account check, running or done.
     pub(crate) check: Option<Check>,
+    /// The account's settings or password changed: the next check that signs in starts the sync again, as the
+    /// worker before it is gone or had given up.
+    pub(crate) resync: bool,
 }
 
 /// An account check: every step as it stands.
@@ -605,7 +617,8 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done, hold, withdrawn } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, resync, appearance, undo, screener, notify, pins_outlast_done, hold, withdrawn } =
+            outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
             self.state.held.retain(|(_, held)| held.id != job);
@@ -657,6 +670,9 @@ impl Session {
             self.jobs.retain(|job| job.account != account);
             self.state.held.retain(|(_, job)| job.account != account);
             self.state.writes.forget(account);
+        }
+        for account in resync {
+            self.state.accounts.entry(account).or_default().resync = true;
         }
         for (sender, allowed) in senders {
             if allowed {

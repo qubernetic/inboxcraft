@@ -66,6 +66,7 @@ impl Keychain for Kept {
 
 pub(crate) fn proposal(source: Source) -> Proposal {
     Proposal {
+        submission: vec![],
         imap: vec![
             Suggestion { host: "imap.example.org".to_owned(), port: 993, security: Security::Tls, username: "carol@example.org".to_owned(), source },
             Suggestion { host: "mail.example.org".to_owned(), port: 143, security: Security::StartTls, username: "carol".to_owned(), source },
@@ -76,6 +77,253 @@ pub(crate) fn proposal(source: Source) -> Proposal {
 }
 
 pub(crate) type FakeWorkers = Scripted;
+
+/// Account 1 added over `kept`, its check done, and onboarding over `kept` closed.
+fn added(kept: &Kept) -> (Mailbox, Onboarding) {
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(kept);
+    filled(onboarding.form_mut());
+    onboarding.form_mut().username = "carol".to_owned();
+    onboarding.form_mut().smtp_host = "smtp.example.org".to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    let mut workers = Scripted::passing();
+    mailbox.pump(&mut workers);
+    onboarding.close();
+    (mailbox, onboarding)
+}
+
+fn listed(mailbox: &mut Mailbox) -> serde_json::Value {
+    mailbox.run("account.list", &json!({})).unwrap()["accounts"][0].clone()
+}
+
+#[test]
+fn the_form_sends_the_outgoing_server_and_refuses_a_bad_caldav_address() {
+    let mut form = Form::default();
+    filled(&mut form);
+    assert_eq!(form.params().unwrap()["submission"], serde_json::Value::Null);
+    form.smtp_host = " smtp.example.org ".to_owned();
+    form.smtp_security = Some(Security::StartTls);
+    assert_eq!(form.params().unwrap()["submission"], json!({ "host": "smtp.example.org", "port": 587, "security": "start_tls" }));
+    form.smtp_security = None;
+    assert_eq!(form.params().unwrap()["submission"]["port"], json!(465));
+    form.smtp_port = "x".to_owned();
+    assert_eq!(form.params().unwrap_err(), "The port is a number from 1 to 65535.");
+    form.smtp_port.clear();
+    for bad in ["http://dav.example.org", "https://carol:secret@dav.example.org", "dav.example.org"] {
+        form.caldav = bad.to_owned();
+        let refused = form.params().unwrap_err();
+        assert_eq!(refused, "The CalDAV address starts with https:// and holds no user name.", "{bad}");
+        assert!(!refused.contains("secret"));
+    }
+}
+
+#[test]
+fn detect_fills_the_outgoing_server_and_flags_a_guess() {
+    let guess =
+        Suggestion { host: "smtp.example.org".to_owned(), port: 465, security: Security::Tls, username: String::new(), source: Source::Guess };
+    let found = Proposal { submission: vec![guess], ..proposal(Source::Autoconfig) };
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(Proposed::new(found)));
+    onboarding.open();
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.detect();
+    assert!(onboarding.poll());
+    assert_eq!(onboarding.form().smtp_host, "smtp.example.org");
+    assert_eq!(onboarding.form().smtp_port, "465");
+    assert_eq!(onboarding.form().smtp_security, Some(Security::Tls));
+    assert_eq!(onboarding.found().unwrap().outgoing, Some(("smtp.example.org".to_owned(), Source::Guess)));
+}
+
+#[test]
+fn adding_with_a_caldav_address_sets_it_and_a_store_refusal_keeps_nothing() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&kept);
+    filled(onboarding.form_mut());
+    onboarding.form_mut().caldav = "https://dav.example.org/".to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Checking(1));
+    assert_eq!(listed(&mut mailbox)["caldav"], json!("https://dav.example.org/"));
+}
+
+#[test]
+fn an_account_opens_with_all_but_its_password_and_cancel_changes_nothing() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    let form = onboarding.form();
+    assert_eq!(form.address, "carol@example.org");
+    assert_eq!(form.username, "carol");
+    assert_eq!(form.host, "imap.example.org");
+    assert_eq!(form.port, "993");
+    assert_eq!(form.smtp_host, "smtp.example.org");
+    assert_eq!(form.smtp_port, "465");
+    assert!(form.password.is_empty(), "never the stored password");
+    assert!(!onboarding.save_checks());
+    onboarding.form_mut().host = "other.example.org".to_owned();
+    onboarding.close();
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    assert_eq!(listed(&mut mailbox)["imap"]["host"], json!("imap.example.org"));
+    onboarding.edit(&mut mailbox, 99);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    assert!(onboarding.error().is_some());
+}
+
+#[test]
+fn saving_only_a_name_closes_and_sends_no_password_anywhere() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().label = "Allotment".to_owned();
+    assert!(!onboarding.save_checks());
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+    assert_eq!(listed(&mut mailbox)["label"], json!("Allotment"));
+    let mut workers = Scripted::passing();
+    mailbox.pump(&mut workers);
+    assert!(workers.sent.is_empty(), "{:?}", workers.sent);
+}
+
+#[test]
+fn saving_with_nothing_changed_just_closes() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+}
+
+#[test]
+fn a_changed_server_says_where_the_sign_in_goes_and_checks_it_as_the_owners() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    assert_eq!(onboarding.sign_in_note(), None);
+    onboarding.form_mut().host = "moved.example.org".to_owned();
+    onboarding.form_mut().smtp_host = "out.example.org".to_owned();
+    onboarding.form_mut().caldav = "https://dav.example.org/".to_owned();
+    assert!(onboarding.save_checks());
+    let note = onboarding.sign_in_note().unwrap();
+    for server in ["moved.example.org:993", "out.example.org:465", "https://dav.example.org/"] {
+        assert!(note.contains(server), "{note}");
+    }
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(onboarding.stage(), Stage::Checking(1));
+    let account = listed(&mut mailbox);
+    assert_eq!(account["imap"]["host"], json!("moved.example.org"));
+    assert_eq!(account["submission"]["host"], json!("out.example.org"));
+    assert_eq!(account["caldav"], json!("https://dav.example.org/"));
+    let mut workers = Scripted::passing();
+    mailbox.pump(&mut workers);
+    assert!(workers.sent.iter().any(|(_, kind)| *kind == JobKind::Check { by_owner: true }), "{:?}", workers.sent);
+}
+
+#[test]
+fn a_new_password_replaces_the_stored_one_and_is_checked() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    assert!(onboarding.save_checks());
+    assert!(onboarding.sign_in_note().unwrap().contains("imap.example.org:993"));
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(onboarding.stage(), Stage::Checking(1));
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some("new-Lantern-9"));
+    assert!(onboarding.form().password.is_empty(), "forgotten in the window");
+    assert!(!listed(&mut mailbox).to_string().contains("new-Lantern-9"));
+    let mut workers = Scripted::passing();
+    mailbox.pump(&mut workers);
+    let id = AccountId::new(1);
+    assert_eq!(workers.sent, [(id, JobKind::Check { by_owner: true }), (id, JobKind::SyncFolderList)], "the sync starts again once it signed in");
+}
+
+#[test]
+fn an_empty_password_field_keeps_the_stored_password() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().host = "moved.example.org".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
+}
+
+#[test]
+fn a_refused_form_replaces_no_password() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    onboarding.form_mut().host = "bad host\r\n".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    assert!(onboarding.error().is_some());
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD), "the stored one stays");
+    assert!(!onboarding.form().password.is_empty(), "kept to be corrected and sent again");
+    onboarding.form_mut().host.clear();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), Some("Enter the IMAP server, or use Detect."));
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
+}
+
+#[test]
+fn when_the_credential_store_refuses_nothing_changes() {
+    let mut kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    kept.refuse = true;
+    let mut onboarding_over = Onboarding::new(Arc::new(kept.clone()), Box::new(NoDetect::default()));
+    onboarding.close();
+    onboarding_over.edit(&mut mailbox, 1);
+    onboarding_over.form_mut().host = "moved.example.org".to_owned();
+    onboarding_over.form_mut().password = Secret::new("new-Lantern-9");
+    onboarding_over.save(&mut mailbox);
+    assert_eq!(onboarding_over.stage(), Stage::Edit(1));
+    let error = onboarding_over.error().unwrap();
+    assert!(error.contains("nothing was changed"), "{error}");
+    assert!(!error.contains("new-Lantern-9"), "{error}");
+    assert!(onboarding_over.form().password.is_empty());
+    assert_eq!(listed(&mut mailbox)["imap"]["host"], json!("imap.example.org"));
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
+}
+
+#[test]
+fn a_check_still_running_holds_a_save_back_and_a_new_name_is_not() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&kept);
+    filled(onboarding.form_mut());
+    onboarding.add(&mut mailbox);
+    onboarding.close();
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().password = Secret::new("new-Lantern-9");
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    assert!(onboarding.error().unwrap().contains("still running"));
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some(PASSWORD));
+    onboarding.form_mut().password.clear();
+    onboarding.form_mut().label = "Allotment".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(onboarding.stage(), Stage::Closed);
+}
+
+#[test]
+fn changing_the_settings_of_an_edited_account_removes_nothing() {
+    let kept = Kept::default();
+    let (mut mailbox, mut onboarding) = added(&kept);
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().host = "moved.example.org".to_owned();
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Checking(1));
+    onboarding.change(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Edit(1));
+    assert_eq!(onboarding.form().host, "moved.example.org");
+    assert_eq!(mailbox.accounts().len(), 1);
+    assert!(kept.forgotten.lock().unwrap().is_empty());
+}
 
 pub(crate) fn filled(form: &mut Form) {
     form.address = "carol@example.org".to_owned();
@@ -108,6 +356,7 @@ fn the_form_asks_for_what_is_missing_and_never_puts_the_password_in_the_paramete
             "display_name": null,
             "username": null,
             "imap": { "host": "imap.example.org", "port": 993, "security": "tls" },
+            "submission": null,
         })
     );
     assert!(!params.to_string().contains(PASSWORD));
