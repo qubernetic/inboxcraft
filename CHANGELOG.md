@@ -802,6 +802,14 @@ All notable changes to InboxCraft are listed here. The format follows
 - A click on an alert's notification opens the calendar on the occurrence's day with the event picked
   (`InboxApp::open_event`); the notification says when, on the computer's clock, and where (#150)
 - `Storage::alert`, one alert by its id; the fuzz target `engine_alerts` (#150)
+- The add-account form asks for the outgoing server and the CalDAV address; Detect fills the outgoing server (#214)
+- Settings, Accounts: an account opens its settings, with everything but the password, and `account.update` (`owner`)
+  changes them; a changed server or user name runs the owner's check again, and the form first says where the
+  sign-in goes (#214)
+- A new password can be typed in an account's settings: it replaces the stored one in the OS credential store for the
+  worker's next sign-in, empty keeps it, and the password is never shown (#214)
+- The design file draws the outgoing server and CalDAV address of the add form, an account's settings and the check
+  after a change, in light and dark (#216)
 
 ### Changed
 - The README follows the brand of the design file and claims only what the code backs: the current mark, the
@@ -951,6 +959,30 @@ All notable changes to InboxCraft are listed here. The format follows
 - `Session::next_due` and `Session::tick` also cover a held delete (#146)
 - `ical`: an organiser or attendee keeps the parameters it does not read (`Attendee::params`), so they go back to the
   server as they came (#146)
+- The design file: translucent cards, one even selection, white on custom colours, segmented and
+  select controls, solid floats, event tints, a custom colour example, and the Planned and Later
+  pages (#203)
+- The look follows the newest design file: translucent cards, one even selection with a gradient
+  edge on selected pills and segments, the rail's own stops, and white on more custom colours
+  (#205)
+- Everything that pops up over content is on one solid float with an edge and a shadow (#205)
+- The calendar follows the design file's controls: the view switch, Show as and the calendar of a
+  new event are segmented controls, Repeat a select with a popup, the calendars and the event
+  editor's boxes filled check boxes, and the event blocks paint with the event tokens with an
+  edge at full strength (#206)
+- The reader follows the design: a thread's header is the avatar, the name, "to ..." and the date, with Details
+  fading in when the pointer comes near and in More; a message alone in its thread names its sender, address and
+  date under the subject (#207)
+- The invitation card follows the design: a gradient edge while an answer is wanted, the change in the error colour,
+  and the card alone when the text only says what it says (#207)
+- The screener's review follows the design: the sender in place of the toolbar and subject, a red Block, and the
+  mode pills under the list of new senders (#207)
+- The list follows the design file: the view switch over the wide unified inbox, the unread count
+  in a grouped inbox's subtitle, the account stripe and the row's spacing as drawn, cards that
+  run the pane's full width while nothing overflows (#208)
+- The toast's Undo and the time picker's Cancel are accent words without a field; the toast
+  stands centred on what is right of the rail (#208)
+- The time picker's spacing follows the design file (#208)
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)
@@ -984,6 +1016,9 @@ All notable changes to InboxCraft are listed here. The format follows
   counts: a test binary that links a crate without calling a small function of it no longer makes the function's
   lines read as uncovered (#140)
 - The toast's Ctrl+Z works while the calendar screen shows (#148)
+- A message laid out with a table keeps its columns readable: each column is sized from what it
+  holds, where words used to break letter by letter in a column 40 points wide (#213)
+- A row with an empty preview shows no dot after its subject (#213)
 
 ### Security
 - The CI dependency cache is pruned and saved more strictly (#79): the prune is `cargo xtask cache-prune`, an allow

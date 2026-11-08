@@ -876,3 +876,5 @@ time from the code as it is, not measured.
 | 2026-11-08 | minor | Invitations: read from kept bodies, occurrences, methods without an answer (#149) |
 | 2026-11-08 | minor | Event reminders: no switch on the Notifications page, left-out alarms (#150) |
 | 2026-11-08 | minor | The ranked table filled for the daily-use epic; stale lines on the scheduler, alerts and the composer edited (#151) |
+| 2026-11-08 | minor | The solid float: the old float and selection lines are gone (#205) |
+| 2026-11-08 | minor | The add-account form asks for the SMTP server and the CalDAV address (#214) |

@@ -799,3 +799,7 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-08 | minor | The calendar's views, side panel and details; the calendar pictures (#147) |
 | 2026-11-08 | minor | The event editor, Edit and Delete in the details, New event in the toolbar, the toast with Undo (#148) |
 | 2026-11-08 | minor | The invitation card in the reader and its pictures (#149) |
+| 2026-11-08 | minor | Translucent cards, one even selection, the rail's stops, event tints and one solid float (#205) |
+| 2026-11-08 | minor | Segmented controls, the select, the filled check boxes and the event tokens in the calendar (#206) |
+| 2026-11-08 | minor | The list's header, stripe and row spacing, the view switch, the toast and the time picker (#208) |
+| 2026-11-08 | minor | The add form's outgoing server and CalDAV address; an account's settings (#214) |
