@@ -83,14 +83,14 @@ fn delivered(imap: &FakeImap) -> Vec<u8> {
     out[close + 3..close + 3 + length].to_vec()
 }
 
-/// The summary of `raw` with UID `n`, as the sync reads its header.
-fn summary(n: u32, raw: &[u8]) -> Summary {
+/// The summary of `raw` with UID `n` from `from` to `to`, as the sync reads its header.
+fn summary(n: u32, raw: &[u8], from: &str, to: &str) -> Summary {
     let end = raw.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
     let headers = Headers::parse(&raw[..end]).unwrap();
     let fields = headers.fields().iter().map(|field| (field.name(), field.value()));
     let envelope = Envelope::new(&headers.text("subject").unwrap_or_default())
-        .with_from(vec![address("Mail Delivery System", "MAILER-DAEMON@smtp.example.org")])
-        .with_to(vec![address("Anna", "anna@example.org")])
+        .with_from(vec![address("From", from)])
+        .with_to(vec![address("To", to)])
         .with_message_id(headers.get("message-id").and_then(MessageRef::new))
         .with_signs(Signs::read(fields));
     Summary::new(Uid::new(n).unwrap(), envelope)
@@ -151,12 +151,12 @@ fn the_fakes_delivery_report_marks_the_sent_message_as_failed() {
         JobKind::Append { raw, .. } => Some(raw),
         _ => None,
     });
-    let sent = summary(5, &appended.unwrap());
+    let sent = summary(5, &appended.unwrap(), "anna@example.org", NOBODY);
     assert_eq!(sent.envelope().message_id(), MessageRef::new(&message_id).as_ref());
     arrive(&mut session, 2, sent);
     // The report lands in the inbox, from the fake's MAILER-DAEMON, and its body is asked for.
     let report = delivered(&imap);
-    arrive(&mut session, 1, summary(9, &report));
+    arrive(&mut session, 1, summary(9, &report, "MAILER-DAEMON@smtp.example.org", "anna@example.org"));
     let jobs = session.take_jobs();
     assert!(jobs.iter().any(|job| matches!(job.kind, JobKind::FetchBody { uid, .. } if uid.get() == 9)), "{jobs:?}");
     session

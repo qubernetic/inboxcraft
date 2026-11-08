@@ -304,14 +304,18 @@ where it stands (`waiting`, `sending`, `refused`), a refusal with the server's r
 sends a refused draft again as `mail.send` does, and refuses an item that is not refused.
 
 Bounces (`engine::arrive::bounce`): a message whose header is a delivery report (`Signs::report`: `multipart/report`
-with `report-type=delivery-status` or `global-delivery-status`) passes the screener, which comes after the bounce
-stage and lets every report it found in without learning its sender. Its body is fetched at once unless it came with
-a folder's first sync or into a folder whose mail teaches the screener nothing or the Sent folder. Once the body is
+with `report-type=delivery-status` or `global-delivery-status`) from a sender of reports (local part `MAILER-DAEMON`
+or `postmaster`, the screener's own rule) passes the screener, which comes after the bounce stage and lets every
+report it found in without learning its sender; a report header from anyone else is screened like any mail. Its
+body is fetched at once unless it came with a folder's first sync or into a folder whose mail teaches the screener
+nothing or the Sent folder. Once the body is
 kept, the report's returned header (`Part::reported_message_id`: `text/rfc822-headers`, `message/rfc822` and their
 RFC 6533 forms) names the message by `Message-ID`; a message with that id in the Sent folder of the account the
 report came to gets `MessageState::bounced`: the report and the reason, each recipient the report says failed with
-the remote server's reply or the status code, at most 1000 characters. Delayed, delivered and relayed recipients
-mark nothing. `mail.list` and `mail.read` show it as `bounced`. After the IMAP server refused the password, the
+the remote server's reply or the status code, at most 1000 characters. Only failed recipients the Sent copy names in
+To or Cc count (by `Final-Recipient` or `Original-Recipient`); delayed, delivered and relayed recipients mark
+nothing, and a report held by the screener or blocked links nothing. `mail.list` and `mail.read` show it as
+`bounced`, naming the report only while that id is still a report of the same account (ids are given again). After the IMAP server refused the password, the
 worker sends nothing until it is started anew. After the submission server alone refused it or left it unanswered,
 in a check or a send, a check the owner did not start reports the SMTP step as `NeedsOwner` and sends it nothing; an
 owner's check or a send that signs in there ends the hold. `JobKind`'s `Debug` shows a message's length and a send's
