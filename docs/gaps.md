@@ -5,16 +5,15 @@
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
 |---|---|---|---|---|---|---|
-| 1 | The add-account form asks for no SMTP server and no CalDAV address, and nothing else the owner can reach sets them | ✓ | `onboard.rs` sends `account.add` with the IMAP fields only; `account.add` and `calendar.server` are `owner`, which the CLI refuses | An account added today cannot send and has no calendar | 4 | [Onboarding](#known-rough-edges-not-ranked) |
-| 2 | No front end hands the engine the computer's time zone: presets, send later, snooze, reminders and the calendar run in UTC | ✓ | `Session::set_offsets` has no caller | "Tomorrow 8:00" and every event are off by the UTC offset, an hour or two in Europe | 4 | |
-| 3 | The composer cannot open a draft closed earlier or left from an earlier run, and has no attachments | ✓ | `ui-egui` has no drafts list and no attach field (#132) | A reply started yesterday or a mail with a file must go through another program | 6 | |
-| 4 | Only the inbox is watched (IMAP IDLE, no NOTIFY); other folders change when the engine syncs them | | `net` watches one folder per account (#26) | Mail filed by a server rule or another device shows late | 6 | |
-| 5 | Sign-in with a password only: no OAuth (XOAUTH2, OAUTHBEARER) for IMAP, SMTP or CalDAV | | `proto` and `dav` have no OAuth (#20, #144) | Providers that require OAuth cannot be added | 12 | |
-| 6 | One message at a time: no selection of several messages | | `ui-egui` acts on the open message or the hovered row (#131) | Clearing a full inbox takes one act per message | 6 | |
-| 7 | A flag changed here overwrites one changed on another device meanwhile | | `net` sends no `UNCHANGEDSINCE` (#115) | Rarely loses a flag change made elsewhere | 3 | |
-| 8 | Repeating events change and delete as a whole series only | | no `RECURRENCE-ID` writes (#146, #148) | Moving one meeting of a series moves them all | 8 | |
-| 9 | Search looks at subject, sender and recipients only, not the body text | | the search field runs `mail.search` per field (#27) | A message is found only by its header | 6 | |
-| 10 | Tray, notifications, single instance and the control channel exist on Linux only | | no Windows or macOS code (#137, #138, #142) | InboxCraft is for Linux desktops for now | 30 | |
+| 1 | No front end hands the engine the computer's time zone: presets, send later, snooze, reminders and the calendar run in UTC | ✓ | `Session::set_offsets` has no caller | "Tomorrow 8:00" and every event are off by the UTC offset, an hour or two in Europe | 4 | |
+| 2 | The composer cannot open a draft closed earlier or left from an earlier run, and has no attachments | ✓ | `ui-egui` has no drafts list and no attach field (#132) | A reply started yesterday or a mail with a file must go through another program | 6 | |
+| 3 | Only the inbox is watched (IMAP IDLE, no NOTIFY); other folders change when the engine syncs them | | `net` watches one folder per account (#26) | Mail filed by a server rule or another device shows late | 6 | |
+| 4 | Sign-in with a password only: no OAuth (XOAUTH2, OAUTHBEARER) for IMAP, SMTP or CalDAV | | `proto` and `dav` have no OAuth (#20, #144) | Providers that require OAuth cannot be added | 12 | |
+| 5 | One message at a time: no selection of several messages | | `ui-egui` acts on the open message or the hovered row (#131) | Clearing a full inbox takes one act per message | 6 | |
+| 6 | A flag changed here overwrites one changed on another device meanwhile | | `net` sends no `UNCHANGEDSINCE` (#115) | Rarely loses a flag change made elsewhere | 3 | |
+| 7 | Repeating events change and delete as a whole series only | | no `RECURRENCE-ID` writes (#146, #148) | Moving one meeting of a series moves them all | 8 | |
+| 8 | Search looks at subject, sender and recipients only, not the body text | | the search field runs `mail.search` per field (#27) | A message is found only by its header | 6 | |
+| 9 | Tray, notifications, single instance and the control channel exist on Linux only | | no Windows or macOS code (#137, #138, #142) | InboxCraft is for Linux desktops for now | 30 | |
 
 B = blocks the next stage (beta: the owner uses InboxCraft daily on both mailboxes). Hours are estimates of agent
 time from the code as it is, not measured.
@@ -456,11 +455,9 @@ time from the code as it is, not measured.
   Background portal (since #137) and the notification portal (since #138) need none (#31).
 
 - Onboarding (#34):
-  - The add-account form asks for IMAP only: `account.add` takes a submission server (#119), but the form does not
-    ask for one yet, so an account added in the window cannot send; nor does it ask for a CalDAV address (#145).
-    Both `account.add` and `calendar.server` are `owner` commands, which the CLI and the control channel refuse,
-    so nothing the owner can reach sets them for an account yet.
-    Detect fills in its first IMAP proposal; the others are not offered to choose from.
+  - Detect fills in its first IMAP and its first outgoing proposal; the others are not offered to choose from, and
+    the form does not propose a CalDAV address. `account.update` and `calendar.server` are `owner` commands, which the
+    CLI and the control channel refuse: an account's settings change in the window only (#214).
   - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
     not yet through the i18n macros.
   - The password field edits a buffer made once for 256 characters, so typing never moves it, and the window
@@ -710,9 +707,9 @@ time from the code as it is, not measured.
   characters and a colour 32 (#144).
 - The fake CalDAV server knows one principal and one home set, applies no `calendar-query` filter, has no access
   control, and records the head lines of each request in its transcript, not the bodies (#144).
-- `account.add` and the add-account form do not ask for a CalDAV address: an account gets one through
-  `calendar.server` (`owner`), and until then its calendar jobs and the CalDAV step of the check do not run (#145,
-  #146).
+- An account without a CalDAV address has no calendar: the address comes from the add-account form or the account's
+  settings (`calendar.server`, `owner`), and until then its calendar jobs and the CalDAV step of the check do not run
+  (#145, #146, #214).
 - A calendar job runs once, failing on a dropped connection, and the engine does not retry it: a write that failed
   leaves the event as edited here until a sync brings the server's copy or the owner changes it again. Calendars sync
   at the start, on `calendar.sync` and after a conflict, not periodically (#145, #146).

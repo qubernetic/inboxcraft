@@ -537,8 +537,8 @@ the icon sits among others at the same size.
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
   note), with Add account at its right end: secondary, or primary while there is no account; then a row per account
-  with its colour's dot, its avatar, its name in SemiBold and its address, muted. Without an account a framed box
-  says the accounts show up there. The folder pane has no Add account: most people have one account.
+  with its colour's dot, its avatar, its name in SemiBold and its address, muted; a row is a button that opens the
+  account's settings there, under the same link back. Without an account a framed box says the accounts show up there. The folder pane has no Add account: most people have one account.
 - **First start**: the window with no account shows no folder pane, only one glass card in the middle, at most 640
   points wide: the Inbox icon (Duotone), "No accounts yet", a line on what to do, Add account (primary) and "Opens
   Settings · Accounts" under it. The button opens the sheet on Accounts.
@@ -547,8 +547,15 @@ the icon sits among others at the same size.
 - **Form**: one column of labelled fields at most 560 points wide: the address with Detect beside it, the box for
   Mozilla's list of providers (off), what Detect found in small type (a redirect over plain HTTP or a guessed name in
   the flag colour, so it gets a second look) with "What Detect asked (n)" folded, then the name for the account,
-  the name on sent mail, the user name, the password (dots), the IMAP server, the port and TLS or STARTTLS. A line
-  says the password goes into the system's credential store. Errors show above the form in the error colour.
+  the name on sent mail, the user name, the password (dots), the IMAP server, the port and TLS or STARTTLS, the
+  outgoing (SMTP) server, port and TLS or STARTTLS, and the CalDAV address, the last two optional. Detect fills the
+  outgoing server when it found one, and a guessed name there is flagged. A line says the password goes into the
+  system's credential store. Errors show above the form in the error colour.
+- **Account settings**: an account's row opens the same fields without Detect: the address, fixed, then the names, a
+  "New password" field that starts empty ("empty keeps the stored one"; the stored one is never shown), the servers
+  and the CalDAV address. When the servers or the password changed, a line in the flag colour says which server the
+  sign-in goes to, and the button reads "Save and check"; otherwise "Save". Saving runs the check as the add flow
+  does; a failed check offers Change settings, which comes back here. There is no FigCraft frame for this form yet.
 - **Check**: "Checking <address>", a one-line summary (muted while it runs, the accent colour when signed in, the
   error colour when a step failed), then one line per step with an icon one body line high: Waiting (Regular) in
   the accent colour while waiting, Done (Fill) in the accent colour when passed, Failed (Fill) in the error colour
