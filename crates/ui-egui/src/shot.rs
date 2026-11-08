@@ -45,7 +45,10 @@
 //! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
 //! or `parked`), `show_done` set to `true` lists the done mail in its old place, and `picker` opens the time picker
-//! over the selected message with that text typed (`""` for none);
+//! over the selected message with that text typed (`""` for none). `outbox` shows the sample with its first account
+//! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
+//! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
+//! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -225,6 +228,10 @@ pub struct Shot {
     /// The time picker open over the selected message, with this text typed (`""` for none).
     #[serde(default)]
     pub picker: Option<String>,
+    /// The sending sample: `waiting` (the outbox), `countdown` (a send's toast), `schedule` (the composer with a time
+    /// picked) or `bounce` (the bounced message open).
+    #[serde(default)]
+    pub outbox: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -468,6 +475,66 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
     Ok(())
 }
 
+/// The reply the server refuses the outbox's picture send with.
+const REFUSAL: &str = "550 5.1.1 hollis@example.org: no such mailbox here";
+
+/// Writes a message to `to` with `subject` and a line of text in the composer, and sends it: at `later`, or after the
+/// hold.
+fn send(app: &mut InboxApp, out: &str, to: &str, subject: &str, later: Option<Timestamp>) -> Result<(), UiError> {
+    app.compose();
+    let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+    if let Some(field) = composer.typing_mut(Line::To) {
+        to.clone_into(field);
+    }
+    composer.typed(mailbox, Line::To)?;
+    subject.clone_into(composer.subject_mut());
+    composer.edited();
+    composer.set_later(later);
+    app.send_composer();
+    if app.composer().is_some() {
+        return Err(bad(format!("{out}: {subject:?} was not sent: {}", app.mailbox().error().unwrap_or("no reason"))));
+    }
+    Ok(())
+}
+
+/// Tomorrow morning, 08:00 in UTC, from the picture's time.
+fn tomorrow_morning() -> Result<Timestamp, UiError> {
+    Timestamp::from_unix(SHOT_TIME + 23 * 3_600, 0).ok_or_else(|| bad("no time"))
+}
+
+/// Puts the sending sample in `scene`, on `clock`.
+fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Result<(), UiError> {
+    match scene {
+        "waiting" => {
+            send(app, out, "Hollis Fenwick <hollis@example.org>,", "Plot 14 handover", None)?;
+            clock.advance(std::time::Duration::from_secs(6));
+            app.mailbox_mut().pump(&mut Scripted::default().refusing(REFUSAL));
+            send(app, out, "Petra Harbour <petra@example.org>,", "Re: Draft logo for the bakery", Some(tomorrow_morning()?))?;
+            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            clock.advance(std::time::Duration::from_secs(1));
+            app.mailbox_mut().open(Place::Outbox);
+        }
+        "countdown" => {
+            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            clock.advance(std::time::Duration::from_secs(1));
+        }
+        "schedule" => {
+            compose(app, out, "written")?;
+            let (Some(composer), _) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+            composer.set_later(Some(tomorrow_morning()?));
+            app.open_send_later();
+        }
+        "bounce" => {
+            app.mailbox_mut().open(Place::View(Role::Sent));
+            let id = app.mailbox().messages().iter().find(|row| row.bounced.is_some()).map(|row| row.id);
+            let Some(id) = id else { return Err(bad(format!("{out}: no bounced message in Sent"))) };
+            app.mailbox_mut().select(Some(id));
+        }
+        other => return Err(bad(format!("{out}: outbox {other:?} is not waiting, countdown, schedule or bounce"))),
+    }
+    Ok(())
+}
+
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
@@ -501,6 +568,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.later.is_some()
         || shot.show_done.is_some()
         || shot.picker.is_some()
+        || shot.outbox.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -873,13 +941,17 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return icon_sheet(shot, mode, &look);
     }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
+    // One clock for the session and the list, so a scene can let time pass.
+    let clock = FakeClock::new(time);
     let session = if shot.first == Some(true) {
         let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
-        inboxcraft_engine::Session::new(Box::new(store), Box::new(FakeClock::new(time))).map_err(UiError::Engine)?
+        inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
+    } else if shot.outbox.is_some() {
+        sample::sending(Box::new(clock.clone()))?
     } else {
-        sample::session(Box::new(FakeClock::new(time)))?
+        sample::session(Box::new(clock.clone()))?
     };
-    let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
+    let mailbox = Mailbox::new(session, Box::new(clock.clone()));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     if shot.first == Some(true) {
         app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
@@ -983,6 +1055,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         app.open_accounts();
     }
     places(&mut app, shot)?;
+    if let Some(scene) = &shot.outbox {
+        outbox(&mut app, &clock, &shot.out, scene)?;
+    }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
     render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer)

@@ -445,7 +445,7 @@ the icon sits among others at the same size.
   the accounts; the account's name muted at the right end), To (the chips, then the field, "Name or address" while
   it is empty; "Cc Bcc" at the right end shows those two lines), Subject; then the text, scrolling, and at the foot
   Discard (the Delete icon) and Templates (the File icon) on the left and Send (primary, Ctrl+Enter) on the right
-  with why it is blocked before it.
+  with why it is blocked before it and the caret of Send later after it.
 - **Chips**: a fully rounded chip on the panel colour with the recipient's avatar, the name (or the address) and a
   cross that removes it; one that is no address is on the error colour with a warning instead of the avatar, and
   Send is blocked with "<address> is not an address" (or "Add a recipient to send" without any). Enter, a comma, a
@@ -462,9 +462,37 @@ the icon sits among others at the same size.
   "time" to send" while one is left.
 - **Drafts**: the draft is kept at once and after every change (`compose.update`), with nothing to press and
   nothing shown. Close keeps it (the toast says "Draft saved"); Discard removes it here and on the server ("Draft
-  discarded"); Send hands it to the account's submission server ("Sending your message"). A refusal shows in the
-  error banner and leaves the composer open with everything in it.
-- **Sending page**: the settings sheet's Sending section has each account's signature in a field (its name and
+  discarded"); Send puts it in the outbox for the hold (`mail.send`) and the composer closes. A refusal (an account
+  without a submission server) shows in the error banner and leaves the composer open with everything in it.
+- **Undo send**: while a send waits for its hold, a toast counts it down ("Sending "Work party on Saturday" in 4 s",
+  a new frame as each second ends) with Undo and Ctrl+Z, which take it back (`mail.unsend`) and open its draft again
+  in the reader's place as it was; a draft being written is closed and kept first. The countdown toast stands in for
+  the act's toast while it shows, and Ctrl+Z is its own. Once the hold is over the send is on its way and the toast
+  goes.
+- **Send later**: the caret beside Send ("Send later") opens the time picker ("Send later", the presets of
+  `schedule.presets` still ahead, a typed time, Schedule) with "Send now instead" while a time is picked, and the
+  note that it goes while InboxCraft or its tray runs and that a time missed sends at the next start and says so, as
+  on the design file's "Send later" screen. A time picked makes Send "Schedule · Fri 08:00"; pressed, it sends at
+  that time (`mail.send_later`) and the toast says "Scheduled for Friday 6 November, 08:00". A time picked that has
+  passed blocks it with "The time picked has passed: pick another". A send that went late, its time passed while
+  InboxCraft was not running, says so in a toast once ("Sent late, InboxCraft was not running at its time: <subject>"),
+  besides the desktop's notification.
+- **Outbox**: while anything is in it, "Outbox" (the Snooze clock) shows under the views in the folder pane with how
+  many; it opens the outbox in the list's place, as on the design file's "Undo send and the outbox" screen, and gives
+  way to the inbox once it is empty. The header says "2 waiting · 1 not sent". One card holds each send: the first
+  recipient's avatar, "To <names>", the subject, then on the right where it stands on the panel colour ("Sending in
+  4 s" or "Scheduled · Fri 08:00" with the clock, "Sending…" with the Send icon, "Not sent" with the Failed icon in
+  the error colour) and its buttons: Undo for a send in its hold and Edit for one scheduled, which take it back and
+  open its draft; Edit (open the draft) and Send again (primary, `outbox.retry`, the countdown toast again) for a
+  refused one, whose server reply follows under the subject in the error colour. A screen reader hears "To <names>,
+  <subject>, <where it stands>", the reply for a refused one, and each button with its subject ("Undo the send of
+  "<subject>"").
+- **Bounce**: a sent message a delivery report says did not get through says "Not delivered" in the error colour
+  after the sender in its row ("not delivered" to a screen reader), and opens under a banner ringed in the error
+  colour with the Failed icon: "Not delivered: <the reason the report gave>".
+- **Sending page**: the settings sheet's Sending section starts with "Undo send", how long every send is held before
+  it goes: segmented 5 s, 10 s, 30 s and 60 s (`send.set`), with the seconds now in its note, kept in `triage.json`.
+  Then each account's signature in a field (its name and
   address over it) with Save, disabled until the text differs; an empty field clears it. A new message starts with
   the signature under "-- "; another account in From swaps it while it is still at the end as it was.
 - **Triage page**: the settings sheet's Triage section (the Funnel icon; the design file draws only its place in the
@@ -617,7 +645,11 @@ light and dark, and so are the
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
 `compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
 and `compose-template-<mode>.png` with a blank left) and the Sending page
-(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature. The screener
+(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature. `"outbox"` draws
+the sample with its first account able to send and its sent message bounced: the outbox with a send counting down,
+one scheduled and one refused (`outbox-<mode>.png`, `"waiting"`), the countdown toast of a message just sent
+(`undo-send-<mode>.png`, `"countdown"`), the composer with a time picked and its picker open
+(`send-later-<mode>.png`, `"schedule"`) and the bounced message open (`bounce-<mode>.png`, `"bounce"`). The screener
 and the grouped inbox are drawn in light and dark too: New senders with the Let in card
 (`screener-senders-<mode>.png`), the toast after Accept into Updates (`screener-accepted-<mode>.png`), the cards
 after the rota's sender went to Newsletters (`grouped-cards-<mode>.png`), the grouped list (`grouped-list-<mode>.png`)

@@ -8,14 +8,14 @@
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
-//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, and how long a send is held) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
 //! without a config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::Appearance;
+use inboxcraft_engine::{Hold, ScreenerMode};
 use serde_json::{Value, json};
 
 use crate::keymap::Keymap;
@@ -31,7 +31,8 @@ pub const KEYS_FILE: &str = "shortcuts.json";
 pub const TRIAGE_FILE: &str = "triage.json";
 
 /// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
-/// inbox shows its groups, and whether a pin stays on a message when it is done.
+/// inbox shows its groups, whether a pin stays on a message when it is done, and how long a send is held before it
+/// goes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Triage {
     /// The screener's mode.
@@ -40,6 +41,8 @@ pub struct Triage {
     pub view: InboxView,
     /// A pin stays on a message when it is done.
     pub keep_pins: bool,
+    /// How long a send is held, in seconds ([`Hold::MIN`] to [`Hold::MAX`]); `None` until it was kept.
+    pub hold: Option<u8>,
 }
 
 impl Triage {
@@ -51,13 +54,14 @@ impl Triage {
             screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
             view: named("view").and_then(InboxView::named).unwrap_or_default(),
             keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
+            hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
         }
     }
 
     /// The choices as they are written.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins })
+        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins, "hold_seconds": self.hold })
     }
 }
 

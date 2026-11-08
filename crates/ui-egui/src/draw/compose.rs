@@ -5,8 +5,10 @@
 //! window. The title bar says "New message" (or the subject) with Close, which keeps the draft. Under it a line each:
 //! From (the account, a menu of the accounts), To with its chips and the field to type in ("Cc Bcc" shows those two
 //! lines), Subject; then the text, and the toolbar at the foot with Discard, Templates (a menu of the account's
-//! templates), why Send is blocked, and Send. While a template's blank is left, a line over the toolbar asks for it by its
-//! prompt: Enter or Fill in puts what was typed in its place. The marks of the blanks stand out in the text.
+//! templates), why Send is blocked, Send and the caret beside it that opens the time picker ("Send later"): with a
+//! time picked, Send becomes "Schedule · Sat 08:00", and the picker offers "Send now instead". While a template's blank
+//! is left, a line over the toolbar asks for it by its prompt: Enter or Fill in puts what was typed in its place. The
+//! marks of the blanks stand out in the text.
 //!
 //! A chip shows the recipient's avatar and name (the address when there is none) with a button that removes it; one
 //! that is no address shows on the error colour with a warning instead of the avatar. Typing in a recipient line shows
@@ -18,13 +20,17 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit, Ui, WidgetInfo, vec2,
+    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit,
+    Ui, WidgetInfo, vec2,
 };
+use inboxcraft_time::Timestamp;
 
 use super::paint::{line, line_height};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::popup;
+use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
+use crate::component::typed_time;
 use crate::compose::{Chip, Composer, Line};
 use crate::glass::Under;
 use crate::iconset::{IconId, Style};
@@ -72,6 +78,10 @@ pub(super) enum Asked {
     Template(usize),
     /// Put what is typed for the first blank in its place.
     Fill,
+    /// Send it at this time, or now again with `None`.
+    Later(Option<Timestamp>),
+    /// The time picker opened: read the time presets still ahead.
+    Presets,
     Send,
     Discard,
     /// Close, keeping the draft.
@@ -102,6 +112,55 @@ pub(super) fn blank_id() -> Id {
 
 fn suggestions_id() -> Id {
     Id::unique("compose-suggestions")
+}
+
+/// The id the send-later picker's state is kept under between frames and openings.
+fn later_id() -> Id {
+    Id::unique("compose-later")
+}
+
+/// The id of the send-later picker's popup.
+pub(super) fn later_popup() -> Id {
+    Id::unique("compose-later-popup")
+}
+
+/// The width of the send-later picker, in body-size units.
+const PICKER: f32 = 22.0;
+
+/// The caret beside Send: it opens the time picker, whose time makes Send a Schedule, and "Send now instead" while a
+/// time is picked; with it, the note that nothing goes while InboxCraft is closed.
+fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
+    let response = IconButton::new(IconId::Caret, tr!("Send later")).show(ui, theme, keymap);
+    if response.clicked() {
+        // A new opening: the presets read again, the text typed before gone.
+        asked.push(Asked::Presets);
+        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(later_id()).open());
+    }
+    let width = theme.fonts.body.size * PICKER;
+    Popup::menu(&response).id(later_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+            let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets };
+            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
+            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+            ui.data_mut(|data| data.insert_temp(later_id(), state));
+            match picked {
+                Picked::At { at, .. } => {
+                    asked.push(Asked::Later(Some(at)));
+                    ui.close();
+                }
+                Picked::Cancelled => ui.close(),
+                Picked::Open => {}
+            }
+            if composer.later().is_some() && popup::entry(ui, theme, keymap, tr!("Send now instead"), None).clicked() {
+                asked.push(Asked::Later(None));
+                ui.close();
+            }
+            ui.add_space(theme.spacing.xs);
+            let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
+            ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+        });
+    });
 }
 
 /// A line's name on the left, in the muted colour, `width` points wide and in the middle of the first `height` points.
@@ -353,8 +412,22 @@ fn marked(ui: &Ui, theme: &Theme, marks: &[String], text: &str, width: f32) -> s
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// The toolbar at the foot: Discard and Templates, then why Send is blocked and Send at the right end.
-fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, asked: &mut Vec<Asked>) {
+/// What Send says: "Send", or "Schedule · Sat 08:00" with a time picked; and why it cannot go yet, a time picked that
+/// has passed among the reasons.
+fn send_label(mailbox: &Mailbox, composer: &Composer) -> (String, Option<String>) {
+    let now = mailbox.now();
+    match composer.later() {
+        Some(at) if at > now => (tr!("Schedule · {when}", when = typed_time::short(at, now, mailbox.offset())), composer.problem()),
+        Some(_) => {
+            (tr!("Schedule").to_owned(), Some(composer.problem().unwrap_or_else(|| tr!("The time picked has passed: pick another").to_owned())))
+        }
+        None => (tr!("Send").to_owned(), composer.problem()),
+    }
+}
+
+/// The toolbar at the foot: Discard and Templates, then why Send is blocked, Send and the caret of send later at the
+/// right end.
+fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     ui.horizontal(|ui| {
         if IconButton::new(IconId::Delete, tr!("Discard the draft")).show(ui, theme, keymap).clicked() {
@@ -362,8 +435,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, ask
         }
         templates(ui, theme, keymap, composer, asked);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let send = TextButton::new(tr!("Send")).primary().icon(IconId::Send).action(keymap::SEND);
-            let problem = composer.problem();
+            later(ui, theme, keymap, mailbox, composer, asked);
+            let (label, problem) = send_label(mailbox, composer);
+            let send = TextButton::new(&label).primary().icon(IconId::Send).action(keymap::SEND);
             match &problem {
                 Some(problem) => {
                     send.unavailable(problem).show(ui, theme, keymap);
@@ -442,7 +516,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         });
         ui.add_space(s.s);
         blank(ui, theme, keymap, composer, &mut asked);
-        toolbar(ui, theme, keymap, composer, &mut asked);
+        toolbar(ui, theme, keymap, mailbox, composer, &mut asked);
     });
     asked
 }

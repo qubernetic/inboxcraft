@@ -20,6 +20,11 @@
 //! "Parked (n)" while mail of the place waits on the park pile; in "Later" a pill for each pile (snoozed, pins,
 //! parked), the snoozed rows dated by when they come back. A pinned row shows the pin; a row back from a snooze says
 //! "Returned" while it is unread. "Done all" on a group's card marks the whole group done, with one Undo.
+//!
+//! The outbox lists each send on a card: whom it goes to and its subject, where it stands ("Sending in 4 s",
+//! "Scheduled · Sat 08:00", "Sending…", or "Not sent" with the server's reply under the subject), and its buttons: Undo
+//! for a send in its hold and Edit for one scheduled, which take it back and open its draft, Edit and Send again for a
+//! refused one. A sent message a delivery report says did not get through is marked "Not delivered" in its row.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -37,7 +42,7 @@ use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, Pile, Place};
+use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
@@ -73,7 +78,7 @@ pub(super) struct Header {
 
 /// The pills under the header: the piles in "Later"; "Show done" and the park pile elsewhere. Not while searching.
 fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
-    if !mailbox.query().is_empty() || mailbox.place() == Place::Senders {
+    if !mailbox.query().is_empty() || matches!(mailbox.place(), Place::Senders | Place::Outbox) {
         return;
     }
     ui.add_space(theme.spacing.s);
@@ -107,9 +112,11 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.text));
             let count = mailbox.messages().len();
             let shown = if count == 1 { tr!("1 message").to_owned() } else { tr!("{count} messages", count = count) };
-            ui.label(
-                RichText::new(tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = shown)).font(theme.fonts.caption.id()).color(p.muted),
-            );
+            let line = match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
+                Some(summary) => summary,
+                None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = shown),
+            };
+            ui.label(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted));
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if !search.is_empty() && button::text(ui, theme, keymap, tr!("Clear"), None, false).clicked() {
@@ -319,17 +326,19 @@ fn paint_row(
     let date = line(ui, &[(&mailbox.row_date(message), f.caption, p.muted)], f32::INFINITY);
     let date_left = right - date.size().x;
     put(ui, theme, pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted, until);
-    let mark = if message.new_sender {
-        Some(tr!("New sender"))
+    let mark = if message.bounced.is_some() {
+        Some((tr!("Not delivered"), p.error))
+    } else if message.new_sender {
+        Some((tr!("New sender"), p.accent))
     } else if mailbox.returned(message) {
-        Some(tr!("Returned"))
+        Some((tr!("Returned"), p.accent))
     } else {
         None
     };
     let sender = match mark {
-        Some(mark) => {
+        Some((mark, ink)) => {
             let mark = format!("  {mark}");
-            line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, p.accent)], date_left - s.m - left)
+            line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, ink)], date_left - s.m - left)
         }
         None => line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left),
     };
@@ -409,6 +418,121 @@ pub(super) struct Asked {
     pub(super) review: bool,
     /// "Done all" on a group's card: the group's messages.
     pub(super) done_all: Option<Vec<u64>>,
+    /// A button of a send in the outbox, and its draft.
+    pub(super) outbox: Option<(u64, Outbox)>,
+}
+
+/// What a button of a send in the outbox asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Outbox {
+    /// Undo or Edit on a send that waits: it is taken back, and its draft opens.
+    Unsend,
+    /// Edit on a refused send: its draft opens.
+    Edit,
+    /// Send again, a refused send.
+    Retry,
+}
+
+/// The state of a send as its row shows it: the icon and the colour of its words.
+fn standing_look(theme: &Theme, state: &SendState) -> (IconId, Color32) {
+    match state {
+        SendState::Waiting(_) => (IconId::Snooze, theme.palette.muted),
+        SendState::Sending => (IconId::Send, theme.palette.muted),
+        SendState::Refused { .. } => (IconId::Failed, theme.palette.error),
+    }
+}
+
+/// One send of the outbox across `ui`'s width: the first recipient's avatar, whom it goes to and the subject (with the
+/// server's reply for a refused one), where it stands, and its buttons; the button pressed.
+fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow) -> Option<Outbox> {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let mut asked = None;
+    let (first, second) = row_lines(ui, theme);
+    let height = row_height(ui, theme);
+    let refused = match &row.state {
+        SendState::Refused { reply, .. } => Some(reply.as_str()),
+        _ => None,
+    };
+    let tall = height + if refused.is_some() { line_height(ui, f.caption) + s.xs } else { 0.0 };
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::hover());
+    let spoken = mailbox.spoken_outbox(row);
+    response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, &spoken));
+    let side = first + s.xs + second;
+    let face = Rect::from_min_size(pos2(rect.left() + s.m + s.xs, rect.top() + s.s), vec2(side, side));
+    let whom = mailbox.recipients(row);
+    avatar::paint(ui.painter(), theme, face, row.to.first().map_or(whom.as_str(), String::as_str), &row.address);
+    let left = rect.left() + text_indent(ui, theme);
+    let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
+    let subject_label = row.subject.clone();
+    // The buttons and where it stands, from the right; the text takes what is left.
+    let mut right = rect.right() - s.m;
+    let mut controls = ui.new_child(
+        UiBuilder::new()
+            .max_rect(Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.top() + height)))
+            .layout(Layout::right_to_left(Align::Center)),
+    );
+    controls.spacing_mut().item_spacing.x = s.xs;
+    let mut press = |ui: &mut Ui, name: &str, spoken: String, primary: bool, pressed: Outbox| {
+        let button = if primary { button::TextButton::new(name).primary() } else { button::TextButton::new(name).secondary() };
+        let response = button.show(ui, theme, keymap);
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken.as_str()));
+        if response.clicked() {
+            asked = Some(pressed);
+        }
+    };
+    match (&row.state, mailbox.seconds_left(row.draft)) {
+        (SendState::Waiting(_), Some(_)) => {
+            press(&mut controls, tr!("Undo"), tr!("Undo the send of “{subject}”", subject = subject_label), false, Outbox::Unsend);
+        }
+        (SendState::Waiting(_), None) => {
+            press(&mut controls, tr!("Edit"), tr!("Take “{subject}” back and edit it", subject = subject_label), false, Outbox::Unsend);
+        }
+        (SendState::Refused { .. }, _) => {
+            press(&mut controls, tr!("Send again"), tr!("Send “{subject}” again", subject = subject_label), true, Outbox::Retry);
+            press(&mut controls, tr!("Edit"), tr!("Edit “{subject}”", subject = subject_label), false, Outbox::Edit);
+        }
+        (SendState::Sending, _) => {}
+    }
+    let (icon, ink) = standing_look(theme, &row.state);
+    let standing = line(&controls, &[(&mailbox.standing(row), f.caption, ink)], f32::INFINITY);
+    let mark = line_height(&controls, f.caption);
+    let (chip, _) = controls.allocate_exact_size(vec2(standing.size().x + mark + s.xs + s.s * 2.0, mark + s.xs * 2.0), Sense::hover());
+    controls.painter().rect_filled(chip, s.corner, p.panel);
+    let at = Rect::from_min_size(pos2(chip.left() + s.s, chip.center().y - mark / 2.0), vec2(mark, mark));
+    theme.icons.paint(controls.painter(), at, icon, Style::Regular, ink);
+    controls.painter().galley(pos2(at.right() + s.xs, chip.center().y - standing.size().y / 2.0), standing, ink);
+    right = right.min(controls.min_rect().left() - s.m);
+    let top = rect.top() + s.s;
+    let to = tr!("To {whom}", whom = whom);
+    let to = line(ui, &[(&to, f.sender, p.text)], (right - left).max(1.0));
+    ui.painter().galley(pos2(left, top + (first - to.size().y) / 2.0), to, p.text);
+    let second_top = top + first + s.xs;
+    let subject = line(ui, &[(subject, f.subject, p.text)], (right - left).max(1.0));
+    ui.painter().galley(pos2(left, second_top + (second - subject.size().y) / 2.0), subject, p.text);
+    if let Some(reply) = refused {
+        let reply = line(ui, &[(reply, f.caption, p.error)], (rect.right() - s.m - left).max(1.0));
+        ui.painter().galley(pos2(left, second_top + second + s.xs), reply, p.error);
+    }
+    asked
+}
+
+/// The outbox on one card: each send in it, newest last; what a button asked for.
+fn outbox(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Option<(u64, Outbox)> {
+    let mut asked = None;
+    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
+        sheet(ui, theme, false, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            for row in mailbox.outbox() {
+                if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row) {
+                    asked = Some((row.draft, pressed));
+                }
+            }
+        });
+    });
+    asked
 }
 
 /// What the rows of a card share.
@@ -679,6 +803,9 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
 
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
+    if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
+        return Asked { out: true, outbox: outbox(ui, theme, keymap, mailbox), ..Asked::default() };
+    }
     if mailbox.messages().is_empty() {
         if let (true, Place::Later(pile)) = (mailbox.query().is_empty(), mailbox.place()) {
             let detail = match pile {
@@ -721,5 +848,5 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take() }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None }
 }
