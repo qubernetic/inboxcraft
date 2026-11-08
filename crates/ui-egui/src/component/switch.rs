@@ -17,7 +17,7 @@ pub fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     let p = &theme.palette;
     let height = line_height(ui, theme.fonts.body);
     let (rect, response) = ui.allocate_exact_size(vec2(height * 1.8, height), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Switch, true, on, name));
+    response.widget_info(|| WidgetInfo::selected(Role::Switch, ui.is_enabled(), on, name));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let round = rect.height() / 2.0;

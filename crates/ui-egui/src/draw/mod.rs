@@ -50,12 +50,14 @@ use std::sync::Arc;
 
 use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb, WindowFrame};
+use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
+use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
@@ -128,6 +130,11 @@ pub struct InboxApp {
     kept_keys: Keymap,
     /// The triage choices the keep holds.
     kept_triage: Triage,
+    /// The notification choices the keep holds; `None` for the sample, which keeps none: its accounts are not the
+    /// owner's.
+    kept_notify: Option<NotifySettings>,
+    /// The app's side of running without a window, when it has one.
+    desk: Option<Box<dyn Desk>>,
     /// The screen shown beside the rail.
     screen: Screen,
     /// The calendar screen.
@@ -223,6 +230,8 @@ impl InboxApp {
             keymap: Keymap::default(),
             kept_keys: Keymap::default(),
             kept_triage: Triage::default(),
+            kept_notify: None,
+            desk: None,
             screen: Screen::default(),
             calendar: Calendar::default(),
             palette: Palette::default(),
@@ -289,8 +298,88 @@ impl InboxApp {
                 };
             }
         }
+        if !sample {
+            // What was kept stands as kept, so a level the session left out is dropped from the file at the next frame.
+            self.kept_notify = Some(match keep.load_notify() {
+                Some(kept) => {
+                    self.mailbox.restore_notify(kept.clone());
+                    kept
+                }
+                None => self.mailbox.notify_settings().clone(),
+            });
+        }
         self.keep = keep;
         self
+    }
+
+    /// The same window, showing and changing on the Notifications page what `desk` lets the owner choose: running in
+    /// the background and starting with the computer.
+    #[must_use]
+    pub fn with_desk(mut self, desk: Box<dyn Desk>) -> Self {
+        self.set_desk(desk);
+        self
+    }
+
+    /// Shows and changes what `desk` lets the owner choose from now on, as [`InboxApp::with_desk`].
+    pub fn set_desk(&mut self, desk: Box<dyn Desk>) {
+        self.desk = Some(desk);
+    }
+
+    /// Keeps the notification choices when they changed; the sample keeps none.
+    fn keep_notify(&mut self) {
+        let Some(kept) = self.kept_notify.as_ref() else { return };
+        let now = self.mailbox.notify_settings();
+        if now == kept {
+            return;
+        }
+        // Tried once per change: the next change tries again.
+        let now = now.clone();
+        let stored = self.keep.store_notify(&now);
+        self.kept_notify = Some(now);
+        if let Err(error) = stored {
+            self.mailbox.fail(UiError::Keep(error));
+        }
+    }
+
+    /// What the desk says this frame.
+    fn desk_view(&self) -> settings::DeskView {
+        self.desk.as_ref().map_or_else(settings::DeskView::default, |desk| settings::DeskView {
+            background: desk.background(),
+            login: desk.login(),
+            asking: desk.asking(),
+        })
+    }
+
+    /// Takes the desk's answer on starting with the computer, when it came: a refusal is a note on the open sheet, or
+    /// in the error banner once the sheet is closed.
+    fn hear_desk(&mut self) {
+        let Some(answer) = self.desk.as_mut().and_then(|desk| desk.answer()) else { return };
+        match answer {
+            Ok(()) => self.settings.set_login_note(None),
+            Err(why) if self.settings.is_open() => self.settings.set_login_note(Some(tr!("Not changed: {why}.", why = why))),
+            Err(why) => self.mailbox.fail(UiError::Desk(why)),
+        }
+    }
+
+    /// Runs in the background from now on, or not: turning it off also stops starting with the computer, whose start
+    /// opens no window.
+    fn set_background(&mut self, on: bool) {
+        let Some(desk) = self.desk.as_mut() else { return };
+        if let Err(why) = desk.set_background(on) {
+            self.mailbox.fail(UiError::Desk(why));
+            return;
+        }
+        if !on && desk.login() == Some(true) {
+            desk.set_login(false);
+        }
+    }
+
+    /// Asks to start with the computer, or no longer.
+    fn set_login(&mut self, on: bool) {
+        if let Some(desk) = self.desk.as_mut() {
+            self.settings.set_login_note(None);
+            desk.set_login(on);
+        }
     }
 
     /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
@@ -1384,6 +1473,8 @@ impl InboxApp {
         }
         self.keep_keys();
         self.keep_triage();
+        self.keep_notify();
+        self.hear_desk();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
     }
@@ -1480,7 +1571,9 @@ impl InboxApp {
     /// The settings sheet over the window; what was asked on it.
     fn settings_sheet(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<settings::Asked> {
         let reduce = self.reduce_motion();
+        let desk = self.desk_view();
         let view = settings::Sheet {
+            desk,
             keymap: &self.keymap,
             settings: &mut self.settings,
             current: self.mailbox.appearance(),
@@ -1673,6 +1766,11 @@ impl InboxApp {
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
             settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
+            settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
+            settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
+            settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
+            settings::Asked::Background(on) => self.set_background(on),
+            settings::Asked::Login(on) => self.set_login(on),
             settings::Asked::Close => self.close_settings(),
         }
     }
@@ -1754,6 +1852,9 @@ mod later_tests;
 #[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;
+#[cfg(test)]
+#[path = "notify_tests.rs"]
+mod notify_tests;
 #[cfg(test)]
 #[path = "onboard_tests.rs"]
 mod onboard_tests;

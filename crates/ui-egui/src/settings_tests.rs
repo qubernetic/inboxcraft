@@ -108,3 +108,18 @@ fn a_signature_typed_shows_until_it_is_saved_or_the_sheet_closes() {
     let long = "ő".repeat(super::MAX_SIGNATURE_BYTES);
     assert!(settings.signature_mut(3, &long).len() <= super::MAX_SIGNATURE_BYTES, "cut to what the engine keeps");
 }
+
+#[test]
+fn the_note_on_starting_with_the_computer_lasts_until_the_sheet_opens_again() {
+    let mut settings = Settings::default();
+    settings.open_at(Section::Notifications, &Appearance::default());
+    assert_eq!(settings.login_note(), None);
+    settings.set_login_note(Some("Not changed: the portal refused.".to_owned()));
+    settings.show(Section::Triage);
+    assert_eq!(settings.login_note(), Some("Not changed: the portal refused."), "kept while the sheet is open");
+    settings.close();
+    assert_eq!(settings.login_note(), None);
+    settings.set_login_note(Some("again".to_owned()));
+    settings.open_at(Section::Notifications, &Appearance::default());
+    assert_eq!(settings.login_note(), None);
+}

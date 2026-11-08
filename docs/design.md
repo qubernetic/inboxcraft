@@ -502,6 +502,19 @@ the icon sits among others at the same size.
   inbox of <account>" to a screen reader (`group.account`). The mode, the view and the pin switch are kept in
   `triage.json` beside `appearance.json`; the sample window takes the kept view and pin switch but keeps its own mode
   and never writes it.
+- **Notifications page**: the settings sheet's Notifications section (the Notify bell), after the design file's
+  "Settings · notifications and triage" screen. Two notes first: what the levels mean, and that a notification shows
+  who the mail is from and its subject, which the desktop may keep in its list and on the lock screen. Then a row per
+  account, "<account> · <address>", with segmented All, People only and None (`notify.set`); a screen reader hears
+  "People only for <account>". Without an account a note says to add one first. "Returned snoozes" and "Follow-up
+  reminders" are switches (`notify.set`). "Run in the background" (closing the window leaves InboxCraft running in the
+  tray) and "Start with the computer" (as the design file names it: InboxCraft starts in the background at login)
+  are switches of the app's desk (`ui_egui::desk::Desk`); where the window has none (the sample) both are faded and
+  say "Not available in this window". Starting with the computer is faded while running in the background is off
+  ("Turn on Run in the background first: a start at login opens no window"), and while the desktop is asked
+  ("Waiting for the desktop's answer…"); a refusal shows under it ("Not changed: <why>.") until the sheet closes.
+  Turning running in the background off also stops starting with the computer. The levels and the two notification
+  switches are kept in `notify.json` beside `appearance.json`; the sample window neither takes nor keeps them.
 
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
@@ -600,8 +613,8 @@ the icon sits among others at the same size.
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
-  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts, Sending and
-  Shortcuts are built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts, Notifications,
+  Triage, Sending and Shortcuts are built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
   the rail's places and their keys; every way out forgets what the open sheet held (the text on the Shortcuts page,
   an action waiting for a key, the notes), so it opens clean the next time.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440

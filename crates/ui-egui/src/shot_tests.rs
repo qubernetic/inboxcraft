@@ -517,6 +517,32 @@ fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_ac
 }
 
 #[test]
+fn a_shot_shows_the_notifications_page_with_the_background_switches() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let page = shoot(&line(r#", "notifications": true"#)).unwrap();
+    let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    assert_ne!(window, page);
+    assert_ne!(triage, page);
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "notifications": true}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
+fn the_pictured_desk_runs_in_the_background_starts_with_the_computer_and_changes_nothing() {
+    use crate::desk::Desk;
+
+    let mut desk = super::PicturedDesk;
+    assert_eq!(desk.background(), Some(true));
+    assert_eq!(desk.login(), Some(true));
+    assert!(!desk.asking());
+    assert!(desk.set_background(false).is_ok());
+    desk.set_login(false);
+    assert_eq!(desk.answer(), None);
+    assert_eq!(desk.background(), Some(true));
+}
+
+#[test]
 fn a_shot_shows_later_show_done_and_the_time_picker() {
     let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
     let window = shoot(&line("")).unwrap();
