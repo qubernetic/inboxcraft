@@ -17,7 +17,7 @@ use super::InboxApp;
 use super::tests::drew_icon;
 use crate::iconset::{IconId, Style};
 use crate::mailbox::Mailbox;
-use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, mailbox, proposal};
+use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, filled, mailbox, proposal};
 use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
 use crate::sample;
 use crate::settings::Section;
@@ -32,7 +32,7 @@ fn app(kept: &Kept, workers: FakeWorkers) -> InboxApp {
 }
 
 fn harness(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 760.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).with_theme(theme).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
 }
@@ -203,6 +203,39 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
 }
 
 #[test]
+fn an_accounts_row_opens_its_settings_and_a_new_password_is_saved_and_checked() {
+    let kept = Kept::default();
+    let mut harness = harness(app(&kept, FakeWorkers::passing()), egui::Theme::Light);
+    {
+        let (onboarding, mailbox) = harness.state_mut().onboarding_mut();
+        onboarding.open();
+        filled(onboarding.form_mut());
+        onboarding.add(mailbox);
+        onboarding.close();
+    }
+    harness.state_mut().pump();
+    harness.state_mut().open_accounts();
+    harness.run();
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
+    harness.get_by_label("Account settings");
+    harness.get_by_label("New password");
+    harness.get_by_label("CalDAV address, for calendars");
+    harness.get_by_label("Save");
+    harness.check_accessibility();
+    harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new("new-Lantern-9");
+    harness.run();
+    harness.get_by_label("Save and check").click();
+    harness.run();
+    harness.run();
+    assert_eq!(kept.passwords.lock().unwrap().get(&1).map(String::as_str), Some("new-Lantern-9"));
+    assert_eq!(harness.state().onboarding().stage(), Stage::Checking(1));
+    harness.get_by_label("Signed in. InboxCraft now fetches the folders and the mail.");
+    harness.check_accessibility();
+}
+
+#[test]
 fn every_control_of_the_form_has_a_name_in_both_modes() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
@@ -210,9 +243,11 @@ fn every_control_of_the_form_has_a_name_in_both_modes() {
         harness.state_mut().onboarding_mut().0.open();
         harness.run();
         harness.check_accessibility();
-        harness.get_by_label("STARTTLS").click();
+        // The IMAP server's row comes first; the outgoing server's has its own pair.
+        harness.get_all_by_label("STARTTLS").next().unwrap().click();
         harness.run();
         assert_eq!(harness.state().onboarding().form().security, Some(crate::onboard::Security::StartTls));
+        assert_eq!(harness.state().onboarding().form().smtp_security, None);
         // An error shows above the form.
         harness.get_by_label("Check and add").click();
         harness.run();

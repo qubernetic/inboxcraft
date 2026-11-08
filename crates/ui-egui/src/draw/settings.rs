@@ -71,6 +71,8 @@ pub(super) enum Asked {
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
     Add,
+    /// An account on the Accounts page: its form opens there.
+    Edit(u64),
     /// Back from the form or the check to the list of accounts.
     Back,
     /// Something on the form or the check.

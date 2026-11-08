@@ -4,9 +4,10 @@
 //! The Accounts page of the settings sheet. "Your accounts" heads it, with Add account at its right end where the
 //! window can add one, then a row for each account: its colour, its avatar, its name and its address. With no account
 //! the page says so, and Add account is the primary button. Adding happens on the same page: "Accounts" at the top
-//! leads back to the list, and the form, Detect and the check follow under it.
+//! leads back to the list, and the form, Detect and the check follow under it. An account's row opens its settings the
+//! same way: the add form's fields, without Detect.
 
-use egui::{Align, Frame, Layout, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, CursorIcon, Frame, Layout, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use super::onboard;
 use super::paint::{focus_ring, line, line_height};
@@ -20,19 +21,26 @@ use crate::onboard::{Onboarding, Stage};
 use crate::theme::Theme;
 use crate::tr;
 
-/// One account: the dot of its colour, its avatar, its name and its address, as one line a screen reader reads.
-fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) {
+/// One account: the dot of its colour, its avatar, its name and its address, as one button a screen reader reads, which
+/// opens the account's settings. Whether it was pressed.
+fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
     let p = &theme.palette;
     let s = &theme.spacing;
     let f = &theme.fonts;
     let tall = line_height(ui, f.strong).max(line_height(ui, f.body));
     let face = tall * 1.4;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), face + s.s * 1.5), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), face + s.s * 1.5), Sense::click());
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
     let spoken = tr!("{name}, {address}", name = row.label, address = row.address);
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &spoken));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &spoken));
+    let pressed = response.clicked();
     if !ui.is_rect_visible(rect) {
-        return;
+        return pressed;
     }
+    if response.hovered() {
+        ui.painter().rect_filled(rect, s.corner, p.hover);
+    }
+    focus_ring(ui, theme, &response);
     let painter = ui.painter();
     let mid = rect.center().y;
     painter.circle_filled(pos2(rect.left() + s.s, mid), 4.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
@@ -45,6 +53,7 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) {
     let address = line(ui, &[(row.address.as_str(), f.body, p.muted)], (rect.right() - after).max(1.0));
     painter.galley(pos2(left, mid - name.size().y / 2.0), name, p.text);
     painter.galley(pos2(after, mid - address.size().y / 2.0), address, p.muted);
+    pressed
 }
 
 /// What the page says where the accounts would be when there are none.
@@ -122,7 +131,9 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     ui.with_layout(Layout::top_down(Align::Min), |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for row in accounts {
-            account(ui, theme, row);
+            if account(ui, theme, row) {
+                asked = Some(Asked::Edit(row.id));
+            }
         }
     });
     asked
