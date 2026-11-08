@@ -25,9 +25,10 @@ use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
+use crate::component::segmented::{segmented, segmented_for};
 use crate::component::switch::switch;
 use crate::component::tooltip;
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{Action, Keymap};
@@ -70,6 +71,8 @@ pub(super) enum Asked {
     Section(Section),
     /// Add account on the Accounts page: the form opens on it.
     Add,
+    /// An account on the Accounts page: its form opens there.
+    Edit(u64),
     /// Back from the form or the check to the list of accounts.
     Back,
     /// Something on the form or the check.
@@ -211,7 +214,7 @@ fn level_name(level: Level) -> &'static str {
 }
 
 /// The name of a screener mode.
-fn screener_name(mode: ScreenerMode) -> &'static str {
+pub(super) fn screener_name(mode: ScreenerMode) -> &'static str {
     match mode {
         ScreenerMode::Before => tr!("Before the inbox"),
         ScreenerMode::Inside => tr!("Inside, marked"),
@@ -301,49 +304,6 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
     let y = ui.cursor().top();
     ui.painter().hline(ui.max_rect().x_range(), y, Stroke::new(1.0, theme.palette.line));
     ui.add_space(1.0);
-}
-
-/// Segmented choices: the options side by side in a pill, the chosen one on the selection gradient in SemiBold; each
-/// option's name in its `font`. The option pressed.
-fn segmented<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T) -> Option<T> {
-    segmented_for(ui, theme, options, current, None)
-}
-
-/// [`segmented`], each option spoken as "<option> for `about`" where several rows offer the same options.
-fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T, about: Option<&str>) -> Option<T> {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let mut chosen = None;
-    Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.field_border)).corner_radius(255).inner_margin(3).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        ui.horizontal(|ui| {
-            for (option, name, font) in options {
-                let on = *option == current;
-                let font = if on { semibold(*font) } else { *font };
-                let galley = line(ui, &[(name, font, p.text)], f32::INFINITY);
-                let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(s.m * 2.0, s.xs * 2.0), Sense::click());
-                let spoken = match about {
-                    Some(about) => tr!("{option} for {about}", option = name, about = about),
-                    None => (*name).to_owned(),
-                };
-                response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, &spoken));
-                if ui.is_rect_visible(rect) {
-                    let round = rect.height() / 2.0;
-                    if on {
-                        selection(ui.painter(), theme, rect, round);
-                    } else if response.hovered() {
-                        ui.painter().rect_filled(rect, round, p.hover);
-                    }
-                    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.text);
-                    focus_ring(ui, theme, &response);
-                }
-                if response.clicked() {
-                    chosen = Some(*option);
-                }
-            }
-        });
-    });
-    chosen
 }
 
 /// A card: a picture `swatch` big drawn by `paint`, its `name` under it; framed in the focus colour while `on`.
@@ -1024,7 +984,7 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
         // The float's shadow and edge, then solid surfaces: nothing of the window shows through the text.
-        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole, Under::Fading));
+        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole));
         ui.painter().rect_filled(whole.shrink(1.0), s.card, p.surface);
         let nav_width = NAV.min(whole.width() * 0.3);
         let left = Rect::from_min_size(whole.min, vec2(nav_width, whole.height())).shrink(1.0);

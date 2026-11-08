@@ -24,6 +24,7 @@ fn account_list_shows_every_account_without_a_secret() {
             "username": "anna@example.org",
             "imap": { "host": "imap.example.org", "port": 993, "security": "tls" },
             "submission": null,
+            "caldav": null,
             "connection": null,
             "failure": null,
             "check": null,

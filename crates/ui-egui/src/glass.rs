@@ -6,15 +6,12 @@
 //! translucent layers over them with a light top edge and a soft shadow ([`Layers`]).
 //!
 //! Readability beats glass. The layers go under everything else the window draws, so translucency is never laid
-//! over text. What floats over content ([`float`]) is about 80 % opaque where the content under it fades before it
-//! ([`faded`]), and more opaque over sharp text that cannot fade ([`Under::Sharp`]). Nothing here asks for a
-//! repaint: the fields and shadows are pictures kept by [`crate::gradient`] and only drawn again when the window
-//! is.
-
-use std::sync::Arc;
+//! over text. Everything that pops up over content ([`float`]) is on one solid surface with an edge and a shadow, so
+//! text under it never shows through. Nothing here asks for a repaint: the fields and shadows are pictures kept by
+//! [`crate::gradient`] and only drawn again when the window is.
 
 use egui::layers::ShapeIdx;
-use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Color32, Frame, Margin, Painter, Rect, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::gradient::{self, Field, Gradient, Stop};
 use crate::theme::Theme;
@@ -111,50 +108,16 @@ impl Layers {
     }
 }
 
-/// What lies under a float.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Under {
-    /// Content that fades out before the float (row text before the hover actions), or the colour fields.
-    Fading,
-    /// Sharp text that cannot fade (the reader under a menu).
-    Sharp,
-}
-
-/// Paints a float over `rect`: its shadow, the frosted surface, its edge and its light top edge. Over sharp text the
-/// float casts no shadow, which would lay translucency over the text around it.
-pub fn float(painter: &Painter, theme: &Theme, rect: Rect, under: Under) {
-    painter.extend(float_shapes(painter, theme, rect, under));
+/// Paints a float over `rect`: its shadow, the solid surface, its edge and its light top edge.
+pub fn float(painter: &Painter, theme: &Theme, rect: Rect) {
+    painter.extend(float_shapes(painter, theme, rect));
 }
 
 /// The shapes of [`float`], for a place kept before the float's content was drawn.
 #[must_use]
-pub fn float_shapes(painter: &Painter, theme: &Theme, rect: Rect, under: Under) -> Vec<Shape> {
-    let mut shapes = Vec::with_capacity(4);
-    let [fill, edge] = match under {
-        Under::Fading => {
-            shapes.push(shadow(painter, theme, rect));
-            pane(theme, rect, theme.palette.float)
-        }
-        Under::Sharp => pane(theme, rect, theme.palette.float_over_text),
-    };
-    shapes.extend([fill, edge, highlight(painter, theme, rect)]);
-    shapes
-}
-
-/// Paints `galley` at `pos` in `colour`, fading out over the `over` points before `until` (a float's left edge) and
-/// cut there, so no letter shows through the float or touches its edge.
-pub fn faded(painter: &Painter, pos: Pos2, galley: &Arc<Galley>, colour: Color32, until: f32, over: f32) {
-    let mut before = painter.clip_rect();
-    before.max.x = before.max.x.min(until);
-    let painter = painter.with_clip_rect(before);
-    let width = galley.size().x.max(1.0);
-    let over = over.max(1.0);
-    let gradient = Gradient::Linear {
-        from: pos2((until - over - pos.x) / width, 0.5),
-        to: pos2((until - pos.x) / width, 0.5),
-        stops: vec![Stop::new(0.0, colour), Stop::new(1.0, Color32::TRANSPARENT)],
-    };
-    gradient::text(&painter, pos, galley, &gradient);
+pub fn float_shapes(painter: &Painter, theme: &Theme, rect: Rect) -> Vec<Shape> {
+    let [fill, edge] = pane(theme, rect, theme.palette.float);
+    vec![shadow(painter, theme, rect), fill, edge, highlight(painter, theme, rect)]
 }
 
 #[cfg(test)]

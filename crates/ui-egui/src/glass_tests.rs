@@ -3,10 +3,10 @@
 
 use egui::{Color32, FontId, Rect, pos2, vec2};
 
-use super::{Layers, Under, backdrop, faded, fields, float};
+use super::{Layers, backdrop, fields, float};
 use crate::gradient::Gradient;
 use crate::shot::{Picture, paint};
-use crate::theme::{GHOST, Mode, PRESETS, Theme, contrast, over};
+use crate::theme::{Mode, PRESETS, Theme, contrast, over};
 
 /// Every preset in both modes.
 fn all() -> Vec<Theme> {
@@ -34,7 +34,7 @@ const WINDOW: [f32; 2] = [600.0, 300.0];
 const CARD: Rect = Rect { min: pos2(20.0, 20.0), max: pos2(580.0, 280.0) };
 /// A menu over the reader's sharp text.
 const MENU: Rect = Rect { min: pos2(300.0, 40.0), max: pos2(560.0, 150.0) };
-/// Hover actions over a row whose text fades before them.
+/// Hover actions over a row's text.
 const ACTIONS: Rect = Rect { min: pos2(400.0, 185.0), max: pos2(560.0, 230.0) };
 
 /// What a scene shows.
@@ -46,13 +46,11 @@ struct Scene {
     row: bool,
     /// The text on the menu.
     on_float: bool,
-    /// What the menu is drawn as.
-    menu: Under,
 }
 
-const FULL: Scene = Scene { sharp: true, row: true, on_float: true, menu: Under::Sharp };
+const FULL: Scene = Scene { sharp: true, row: true, on_float: true };
 
-/// The fields, a glass card, the reader's text with a menu over it and a row whose text fades before hover actions.
+/// The fields, a glass card, the reader's text with a menu over it and a row's text with hover actions over it.
 fn scene(theme: &Theme, shown: Scene) -> Picture {
     let theme = *theme;
     paint(vec2(WINDOW[0], WINDOW[1]), 1.0, theme.mode, move |ui| {
@@ -72,10 +70,10 @@ fn scene(theme: &Theme, shown: Scene) -> Picture {
         }
         if shown.row {
             let galley = painter.layout_no_wrap(words.to_owned(), FontId::proportional(16.0), p.text);
-            faded(&painter, pos2(36.0, 198.0), &galley, p.text, ACTIONS.left() - theme.spacing.xs, theme.spacing.xl);
+            painter.galley(pos2(36.0, 198.0), galley, p.text);
         }
-        float(&painter, &theme, MENU, shown.menu);
-        float(&painter, &theme, ACTIONS, Under::Fading);
+        float(&painter, &theme, MENU);
+        float(&painter, &theme, ACTIONS);
         if shown.on_float {
             let galley = painter.layout_no_wrap("Reply all".to_owned(), FontId::proportional(22.0), p.text);
             painter.galley(pos2(316.0, 56.0), galley, p.text);
@@ -85,7 +83,7 @@ fn scene(theme: &Theme, shown: Scene) -> Picture {
 }
 
 #[test]
-fn a_float_keeps_its_text_readable_and_the_content_under_it_quiet_for_every_preset_in_both_modes() {
+fn a_float_keeps_its_text_readable_and_nothing_under_it_shows_through_for_every_preset_in_both_modes() {
     for theme in all() {
         let name = format!("{} {:?}", theme.preset.id, theme.mode);
         let full = scene(&theme, FULL);
@@ -93,32 +91,33 @@ fn a_float_keeps_its_text_readable_and_the_content_under_it_quiet_for_every_pres
         let bare = scene(&theme, Scene { on_float: false, ..FULL });
         let text = largest_change(&full, &bare, Rect::from_min_max(pos2(316.0, 56.0), pos2(420.0, 84.0)));
         assert!(text >= 4.5, "{name}: the menu's text reads at {text:.2}");
-        // The sharp text under the menu: barely there.
+        // The sharp text under the menu: gone.
         let unread = scene(&theme, Scene { sharp: false, ..FULL });
         let under_menu = Rect::from_min_max(pos2(430.0, MENU.top() + 2.0), pos2(MENU.right() - 2.0, MENU.bottom() - 2.0));
         let ghost = largest_change(&full, &unread, under_menu);
-        assert!(ghost <= GHOST + 0.02, "{name}: the reader's text shows through the menu at {ghost:.2}");
-        // The row under the hover actions: faded out before them, so nothing shows through.
+        assert!(ghost <= 1.0, "{name}: the reader's text shows through the menu at {ghost:.2}");
+        // The row under the hover actions: gone, and sharp beside them.
         let no_row = scene(&theme, Scene { row: false, ..FULL });
         let under_actions = largest_change(&full, &no_row, ACTIONS.shrink(1.0));
-        assert!(under_actions <= 1.02, "{name}: the row shows through the hover actions at {under_actions:.2}");
+        assert!(under_actions <= 1.0, "{name}: the row shows through the hover actions at {under_actions:.2}");
         let before = largest_change(&full, &no_row, Rect::from_min_max(pos2(36.0, 196.0), pos2(300.0, 220.0)));
-        assert!(before >= 4.5, "{name}: the row reads before it fades: {before:.2}");
+        assert!(before >= 4.5, "{name}: the row reads beside the float: {before:.2}");
     }
 }
 
 #[test]
-fn the_plain_float_over_sharp_text_would_let_it_show() {
-    // Why a float over sharp text goes more opaque: the 80 % float leaves the text under it plainly visible.
-    let shown = all()
-        .iter()
-        .map(|theme| {
-            let plain = scene(theme, Scene { menu: Under::Fading, ..FULL });
-            let unread = scene(theme, Scene { sharp: false, menu: Under::Fading, ..FULL });
-            largest_change(&plain, &unread, Rect::from_min_max(pos2(430.0, MENU.top() + 2.0), pos2(MENU.right() - 2.0, MENU.bottom() - 2.0)))
-        })
-        .fold(1.0, f32::max);
-    assert!(shown > GHOST + 0.1, "the plain float shows the text at {shown:.2}");
+fn a_float_is_the_same_solid_colour_over_the_text_and_the_colour_fields() {
+    for theme in all() {
+        let name = format!("{} {:?}", theme.preset.id, theme.mode);
+        let picture = scene(&theme, Scene { on_float: false, ..FULL });
+        // Inside the rounded corners, under the light top edge.
+        let inside = MENU.shrink(theme.spacing.card + 2.0);
+        for y in inside.top() as usize..inside.bottom() as usize {
+            for x in inside.left() as usize..inside.right() as usize {
+                assert_eq!(picture.pixel(x, y), Some(theme.palette.float), "{name}: at {x}, {y}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -179,25 +178,22 @@ fn a_layer_is_glass_with_a_light_top_edge_and_a_shadow_under_it() {
 }
 
 #[test]
-fn a_float_over_sharp_text_casts_no_shadow_onto_it_and_one_over_fading_content_does() {
+fn a_float_casts_a_shadow_around_it() {
     for theme in all() {
         let name = format!("{} {:?}", theme.preset.id, theme.mode);
-        let draw = |under: Option<Under>| {
+        let draw = |floats: bool| {
             paint(vec2(WINDOW[0], WINDOW[1]), 1.0, theme.mode, move |ui| {
                 let painter = ui.painter().clone();
                 backdrop(&painter, &theme, Rect::from_min_size(pos2(0.0, 0.0), vec2(WINDOW[0], WINDOW[1])));
-                if let Some(under) = under {
-                    float(&painter, &theme, MENU, under);
+                if floats {
+                    float(&painter, &theme, MENU);
                 }
             })
             .unwrap()
         };
-        let bare = draw(None);
         // Just outside the menu, where its shadow falls.
         let beside = Rect::from_min_max(pos2(MENU.left() + 20.0, MENU.bottom() + 1.0), pos2(MENU.right() - 20.0, MENU.bottom() + 8.0));
-        let sharp = largest_change(&draw(Some(Under::Sharp)), &bare, beside);
-        assert!(sharp <= 1.0, "{name}: the menu darkens the text beside it at {sharp:.3}");
-        let fading = largest_change(&draw(Some(Under::Fading)), &bare, beside);
-        assert!(fading > 1.0, "{name}: a float over fading content has a shadow");
+        let change = largest_change(&draw(true), &draw(false), beside);
+        assert!(change > 1.0, "{name}: a float has a shadow");
     }
 }

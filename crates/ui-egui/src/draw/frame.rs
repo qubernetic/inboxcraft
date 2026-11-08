@@ -358,7 +358,7 @@ struct Frame;
 impl Frame {
     fn float(theme: &Theme) -> egui::Frame {
         egui::Frame::new()
-            .fill(theme.palette.float_over_text)
+            .fill(theme.palette.float)
             .stroke(Stroke::new(1.0, theme.palette.glass_edge))
             // A few points; the clamp keeps the cast inside u8.
             .corner_radius(theme.spacing.corner.clamp(0.0, 255.0) as u8)

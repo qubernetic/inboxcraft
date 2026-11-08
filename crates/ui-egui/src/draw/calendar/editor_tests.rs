@@ -41,6 +41,18 @@ fn shows(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
 }
 
+/// Opens Repeat's list and takes `name` in it.
+fn choose_repeat(harness: &mut Harness<'static, InboxApp>, name: &str) {
+    press_field(harness, "Repeat");
+    harness.get_by_role_and_label(Role::MenuItemRadio, name).click();
+    harness.run();
+}
+
+fn press_field(harness: &mut Harness<'static, InboxApp>, name: &str) {
+    harness.get_by_role_and_label(Role::ComboBox, name).click();
+    harness.run();
+}
+
 fn editing(harness: &Harness<'static, InboxApp>) -> bool {
     harness.state().calendar().editor().is_some()
 }
@@ -115,14 +127,13 @@ fn an_edit_with_its_guests_told_says_so_in_the_toast() {
 }
 
 #[test]
-fn the_form_s_pills_and_boxes_change_the_event() {
+fn the_form_s_controls_change_the_event() {
     let mut harness = on_calendar(egui::Theme::Light);
     press(&mut harness, "New event");
     harness.get_by_role_and_label(Role::Button, "Studio").click();
     harness.run();
-    for name in ["Weekly", "Free"] {
-        press(&mut harness, name);
-    }
+    press(&mut harness, "Free");
+    choose_repeat(&mut harness, "Weekly");
     for name in ["All day", "Private"] {
         harness.get_by_role_and_label(Role::CheckBox, name).click();
         harness.run();
@@ -134,7 +145,7 @@ fn the_form_s_pills_and_boxes_change_the_event() {
     harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().start, "2026-11-05 09:00");
     press(&mut harness, "Busy");
-    press(&mut harness, "Never");
+    choose_repeat(&mut harness, "Never");
     let form = harness.state().calendar().editor().unwrap().form().clone();
     assert_eq!((form.repeat.as_str(), form.busy), ("none", true));
 }
@@ -144,10 +155,15 @@ fn a_custom_repeat_shows_as_custom_and_cannot_be_picked() {
     let mut harness = on_calendar(egui::Theme::Light);
     pick(&mut harness, "Dentist");
     press(&mut harness, "Edit");
-    assert!(harness.query_by_label("Custom").is_none(), "only a repeat the presets do not name shows Custom");
+    let shown = |harness: &Harness<'static, InboxApp>| harness.get_by_role_and_label(Role::ComboBox, "Repeat").accesskit_node().value();
+    assert_eq!(shown(&harness).as_deref(), Some("Never"), "only a repeat the presets do not name shows Custom");
     harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().repeat = "custom".to_owned();
     harness.run();
-    press(&mut harness, "Custom");
+    assert_eq!(shown(&harness).as_deref(), Some("Custom"));
+    press_field(&mut harness, "Repeat");
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "Custom").is_none(), "Custom is no choice to pick");
+    harness.key_press(Key::Escape);
+    harness.run();
     assert_eq!(harness.state().calendar().editor().unwrap().form().repeat, "custom");
     assert!(harness.query_by_label("Studio").is_some_and(|node| node.accesskit_node().role() == Role::CheckBox), "an edit picks no calendar");
 }
@@ -162,6 +178,62 @@ fn what_cannot_be_saved_is_said_in_the_editor() {
     assert!(editing(&harness));
     harness.get_by_label("Starts is no date and time like 2026-11-06 13:00");
     harness.check_accessibility();
+}
+
+#[test]
+fn escape_closes_the_open_list_first_and_only_then_the_editor() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "New event");
+    press_field(&mut harness, "Repeat");
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "Daily").is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(editing(&harness), "the form stays");
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "Daily").is_none());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!editing(&harness), "the second Escape closes the editor");
+}
+
+#[test]
+fn a_new_event_opens_with_the_list_closed_after_an_escape_left_one_open() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "New event");
+    press_field(&mut harness, "Repeat");
+    // Leaving the screen closes the editor while its list is open.
+    harness.state_mut().calendar_mut().0.close_editor();
+    harness.run();
+    press(&mut harness, "New event");
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "Daily").is_none(), "a fresh editor keeps its lists closed");
+}
+
+#[test]
+fn a_new_event_in_a_narrow_window_still_offers_every_control() {
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut harness = Harness::builder().with_size(vec2(760.0, 620.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    press(&mut harness, "Calendar");
+    press(&mut harness, "New event");
+    for name in ["Busy", "Free"] {
+        harness.get_by_role_and_label(Role::Button, name);
+    }
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat");
+}
+
+#[test]
+fn calendars_that_do_not_fit_side_by_side_are_a_select_instead() {
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "New event");
+    let many: Vec<(u64, String)> = (1..=12).map(|id| (id, format!("A calendar with a long name {id}"))).collect();
+    let day = crate::calendar::Day::new(2026, 11, 5).unwrap();
+    *harness.state_mut().calendar_mut().0.editor_mut().unwrap() = crate::calendar::Editor::new_event(3, day, many);
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "A calendar with a long name 3").is_none());
+    press_field(&mut harness, "Calendar");
+    harness.get_by_role_and_label(Role::MenuItemRadio, "A calendar with a long name 7").click();
+    harness.run();
+    assert_eq!(harness.state().calendar().editor().unwrap().form().calendar, 7);
+    assert_eq!(harness.get_by_role_and_label(Role::ComboBox, "Calendar").accesskit_node().value().as_deref(), Some("A calendar with a long name 7"));
 }
 
 #[test]

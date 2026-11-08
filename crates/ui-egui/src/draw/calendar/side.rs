@@ -9,9 +9,10 @@
 
 use egui::{Align, Layout, Rect, RichText, ScrollArea, Sense, Ui, WidgetInfo, pos2, vec2};
 
-use super::{Asked, caption_strong, tint};
-use crate::calendar::{Calendar, Day, EventRow, day};
+use super::{Asked, caption_bold, caption_strong, tint};
+use crate::calendar::{Calendar, Day, EventRow, View, day};
 use crate::component::button::{IconButton, TextButton};
+use crate::component::checkbox::checkbox;
 use crate::draw::paint::{line, line_height, selection};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
@@ -20,6 +21,24 @@ use crate::tr;
 
 /// The most guests the details list by name.
 const GUESTS: usize = 8;
+
+/// The height of the weekday letters over the mini month, in points.
+const MINI_HEAD: f32 = 24.0;
+
+/// From the weekday letters to the first week, in points.
+const UNDER_HEAD: f32 = 5.0;
+
+/// The height of a week of the mini month, in points.
+const MINI_WEEK: f32 = 40.0;
+
+/// The diameter of a day's disc in the mini month, in points.
+const MINI_DAY: f32 = 26.0;
+
+/// From one calendar's row to the next, in points.
+const CALENDAR_GAP: f32 = 10.0;
+
+/// The diameter of a calendar's dot, in points.
+const DOT: f32 = 8.0;
 
 /// The side panel.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
@@ -34,11 +53,10 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
 
 fn mini_month(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let s = &theme.spacing;
     let month = calendar.month();
     ui.horizontal(|ui| {
         let name = tr!("{month} {year}", month = day::month_name(month.month()), year = month.year());
-        ui.label(RichText::new(name).font(theme.fonts.strong.id()).color(p.text));
+        ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.text));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if IconButton::new(IconId::Next, tr!("Month after")).show(ui, theme, keymap).clicked() {
                 asked.push(Asked::Month(true));
@@ -48,35 +66,40 @@ fn mini_month(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, 
             }
         });
     });
-    ui.add_space(s.xs);
+    let spacing = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 0.0;
     let width = ui.available_width();
     let cell = (width / 7.0).max(1.0);
-    let high = (line_height(ui, theme.fonts.caption) + s.s * 1.5).min(cell);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, MINI_HEAD), Sense::hover());
     for index in 0..7_i64 {
-        let galley = line(ui, &[(day::weekday_letter(index), theme.fonts.caption, p.muted)], cell);
+        let galley = line(ui, &[(day::weekday_letter(index), caption_strong(theme), p.muted)], cell);
         let centre = pos2(rect.left() + cell * (index as f32 + 0.5), rect.center().y);
         ui.painter().galley(centre - galley.size() / 2.0, galley, p.muted);
     }
+    ui.add_space(UNDER_HEAD);
     let (shown_first, shown_last) = calendar.span();
+    // The week and day views mark the days they show; a month or an agenda would mark nearly the whole mini month.
+    let marks = matches!(calendar.view(), View::Week | View::Day);
     let first = month.monday();
     for week in 0..6_i64 {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(width, MINI_WEEK), Sense::hover());
+        let side = MINI_DAY.min(cell);
         for index in 0..7_i64 {
             let day = first.plus(week * 7 + index);
-            let spot = Rect::from_center_size(pos2(rect.left() + cell * (index as f32 + 0.5), rect.center().y), vec2(high - 2.0, high - 2.0));
+            let spot = Rect::from_center_size(pos2(rect.left() + cell * (index as f32 + 0.5), rect.center().y), vec2(side, side));
             mini_day(
                 ui,
                 theme,
                 day,
                 month.month(),
                 spot,
-                (shown_first..=shown_last).contains(&day) && day != calendar.today(),
+                marks && (shown_first..=shown_last).contains(&day) && day != calendar.today(),
                 calendar.today(),
                 asked,
             );
         }
     }
+    ui.spacing_mut().item_spacing.y = spacing;
 }
 
 /// One day of the mini month over `spot`: a button that puts the view on it.
@@ -99,7 +122,7 @@ fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: 
     } else if response.hovered() {
         ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.hover);
     }
-    let font = if day == today { caption_strong(theme) } else { theme.fonts.caption };
+    let font = if day == today { caption_bold(theme) } else { theme.fonts.caption };
     let galley = line(ui, &[(&day.date().to_string(), font, colour)], spot.width() + 8.0);
     ui.painter().galley(spot.center() - galley.size() / 2.0, galley, colour);
     if response.clicked() {
@@ -110,18 +133,21 @@ fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: 
 fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    ui.add_space(s.l);
-    ui.label(RichText::new(tr!("Calendars").to_uppercase()).font(theme.fonts.caption.id()).color(p.muted).extra_letter_spacing(0.6));
-    ui.add_space(s.xs);
+    ui.add_space(s.m);
+    ui.label(RichText::new(tr!("Calendars").to_uppercase()).font(caption_strong(theme).id()).color(p.muted).extra_letter_spacing(0.6));
+    ui.add_space(s.s);
     for row in calendar.calendars() {
         ui.horizontal(|ui| {
-            let mut shown = calendar.is_shown(row.id);
-            if ui.checkbox(&mut shown, RichText::new(&row.name).font(theme.fonts.body.id()).color(p.text)).changed() {
+            ui.spacing_mut().item_spacing.x = s.s;
+            // The dot's room stays beside even a name that fills the panel.
+            ui.set_max_width(ui.available_width() - DOT - s.s);
+            if checkbox(ui, theme, &row.name, calendar.is_shown(row.id)).clicked() {
                 asked.push(Asked::Toggle(row.id));
             }
-            let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-            ui.painter().circle_filled(dot.center(), 4.0, tint(theme, calendar, row.id));
+            let (dot, _) = ui.allocate_exact_size(vec2(DOT, DOT), Sense::hover());
+            ui.painter().circle_filled(dot.center(), DOT / 2.0, tint(theme, calendar, row.id));
         });
+        ui.add_space(CALENDAR_GAP - ui.spacing().item_spacing.y);
     }
 }
 

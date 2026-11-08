@@ -8,19 +8,90 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+use inboxcraft_engine::Session;
 use inboxcraft_model::{
     Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
     Server, StepStatus,
 };
 use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
+use inboxcraft_store::{Memory, StoreConfig};
+use inboxcraft_testkit::imap::{FakeImap, PASSWORD, USER};
+use inboxcraft_testkit::{HOST, Listen, TestPki};
 use inboxcraft_time::SystemClock;
+use inboxcraft_ui_egui::mailbox::Mailbox;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
 use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
+
+/// Pumps `mailbox` through `workers` until the check of account 1 ended; the IMAP sign-in's state.
+fn checked(mailbox: &mut Mailbox, workers: &mut NetWorkers, onboarding: &mut onboard::Onboarding) -> Option<onboard::StepState> {
+    let sign_in = |onboarding: &onboard::Onboarding| onboarding.steps().iter().find(|step| step.id == "imap_login").map(|step| step.state);
+    for _ in 0..1000 {
+        mailbox.pump(workers);
+        onboarding.load(mailbox);
+        let state = sign_in(onboarding);
+        if matches!(state, Some(onboard::StepState::Passed | onboard::StepState::Failed)) && onboarding.outcome() != onboard::Outcome::Running {
+            return state;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    sign_in(onboarding)
+}
+
+#[test]
+fn a_new_password_from_the_form_is_what_the_next_sign_in_sends() {
+    let pki = TestPki::new().unwrap();
+    let fake = Listen::tls(pki.server_config(None).unwrap()).accept_timeout(Duration::from_secs(2)).start_imap_many(FakeImap::new(), 6).unwrap();
+    let entries = Arc::new(Recording::default());
+    let keychain = OsKeychain::over("store-a", Arc::clone(&entries) as Arc<dyn Entries>);
+    let clock = Arc::new(SystemClock::new());
+    let tls = TlsSettings::new(Trust::Roots(vec![pki.ca()]), clock.clone());
+    let connector = Connector::new(tls).with_addresses(vec![fake.addr()]);
+    let mut workers = NetWorkers::new(WorkerSettings::new(connector), Arc::new(keychain.clone()), None);
+    let session = Session::new(Box::new(Memory::new(StoreConfig::default())), Box::new(SystemClock::new())).unwrap();
+    let mut mailbox = Mailbox::new(session, Box::new(SystemClock::new()));
+
+    // Added with a password the server refuses.
+    let mut onboarding = onboard::Onboarding::new(Arc::new(keychain.clone()), Box::new(onboard::NoDetect::default()));
+    onboarding.open();
+    let form = onboarding.form_mut();
+    form.address = "carol@example.org".to_owned();
+    form.username = USER.to_owned();
+    form.password = onboard::Secret::new("the-old-password");
+    form.host = HOST.to_owned();
+    onboarding.add(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(checked(&mut mailbox, &mut workers, &mut onboarding), Some(onboard::StepState::Failed));
+    assert_eq!(entries.get(&keychain.entry(1)).as_deref(), Some("the-old-password"));
+    onboarding.close();
+
+    // The owner types the new one: the next sign-in on the same worker sends it, and the server takes it.
+    onboarding.edit(&mut mailbox, 1);
+    onboarding.form_mut().password = onboard::Secret::new(PASSWORD);
+    onboarding.save(&mut mailbox);
+    assert_eq!(onboarding.error(), None);
+    assert_eq!(entries.get(&keychain.entry(1)).as_deref(), Some(PASSWORD), "stored through the same path");
+    assert_eq!(onboarding.stage(), onboard::Stage::Checking(1));
+    assert_eq!(checked(&mut mailbox, &mut workers, &mut onboarding), Some(onboard::StepState::Passed));
+    assert_eq!(onboarding.outcome(), onboard::Outcome::Passed);
+    assert!(onboarding.form().password.is_empty(), "the password is forgotten in the window");
+
+    drop(workers);
+    let (transcript, _) = fake.finish_with_transcript();
+    let received = transcript.received().join("\n");
+    assert!(!received.contains(PASSWORD) && !received.contains("the-old-password"), "both went encoded only: {received}");
+    // AUTHENTICATE PLAIN of the fake's user: the old password once, then only the new one (the check, then the sync).
+    const OLD: &str = "AGFkYUBleGFtcGxlLm9yZwB0aGUtb2xkLXBhc3N3b3Jk";
+    const NEW: &str = "AGFkYUBleGFtcGxlLm9yZwBub3QtYS1yZWFsLXBhc3N3b3Jk";
+    let signs: Vec<&String> = transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).collect();
+    assert!(signs.len() >= 2, "{received}");
+    assert!(signs[0].contains(OLD), "{received}");
+    assert!(signs[1..].iter().all(|line| line.contains(NEW)), "{received}");
+}
 
 #[test]
 fn every_password_sits_under_the_app_id_by_store_and_account() {

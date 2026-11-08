@@ -1,24 +1,24 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `account.*`: the accounts.
+//! `account.*`: the accounts. No command takes a password: the front end keeps it in the OS credential store.
 
 use std::num::NonZeroU16;
 
 use inboxcraft_model::{Account, AccountId, CheckStep, EmailAddress, Host, JobKind, Security, Server};
 use inboxcraft_store::Change;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
 use crate::params::{NoParams, decode, decode_quietly};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome, json};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[ADD, CHECK, LIST, REMOVE];
+pub(crate) const COMMANDS: &[CommandSpec] = &[ADD, CHECK, LIST, REMOVE, UPDATE];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "address", "label", "display_name", "username", "imap", "submission", "host", "port", "security"];
+pub(crate) const FIELDS: &[&str] = &["account", "address", "label", "display_name", "username", "imap", "submission", "host", "port", "security", "dry_run", "recheck"];
 
 /// `account.list`: every account, with how its connection stands, its last failure and its last check.
 pub(crate) const LIST: CommandSpec =
@@ -115,20 +115,22 @@ enum SecurityParam {
     StartTls,
 }
 
+/// The server `given` describes, on the usual port of its security when it names none.
+fn server(given: &ServerParams, port: fn(Security) -> NonZeroU16, bad: &dyn Fn(&str) -> EngineError) -> Result<Server, EngineError> {
+    let host = Host::new(&given.host).map_err(|error| bad(&error.to_string()))?;
+    let security = match given.security {
+        SecurityParam::Tls => Security::Tls,
+        SecurityParam::StartTls => Security::StartTls,
+    };
+    Ok(Server::new(host, given.port.unwrap_or_else(|| port(security)), security))
+}
+
 fn add(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: AddParams = decode_quietly(ADD.id, params)?;
     let bad = |reason: &str| EngineError::bad_params(ADD.id, reason);
     let address = EmailAddress::new(params.address.trim()).map_err(|error| bad(&error.to_string()))?;
-    let server = |given: &ServerParams, port: fn(Security) -> NonZeroU16| {
-        let host = Host::new(&given.host).map_err(|error| bad(&error.to_string()))?;
-        let security = match given.security {
-            SecurityParam::Tls => Security::Tls,
-            SecurityParam::StartTls => Security::StartTls,
-        };
-        Ok::<_, EngineError>(Server::new(host, given.port.unwrap_or_else(|| port(security)), security))
-    };
-    let imap = server(&params.imap, Security::imap_port)?;
-    let submission = params.submission.as_ref().map(|given| server(given, Security::submission_port)).transpose()?;
+    let imap = server(&params.imap, Security::imap_port, &bad)?;
+    let submission = params.submission.as_ref().map(|given| server(given, Security::submission_port, &bad)).transpose()?;
     let username = params.username.unwrap_or_else(|| address.as_str().to_owned());
     let accounts = context.store().accounts()?;
     let account = Account::new(context.state().next_account(&accounts), params.label.as_deref().unwrap_or(""), address, &username, imap)
@@ -141,6 +143,94 @@ fn add(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let answer = json!({ "account": json::account(&account, None), "started": true, "steps": json::steps(&CheckStep::plan()) });
     let id = account.id();
     Ok(Outcome::new(answer).with_change(Change::PutAccount(account)).with_job(id, JobKind::Check { by_owner: true }))
+}
+
+/// `account.update`: changes the name, the name on sent mail, the user name and the IMAP and submission servers of an
+/// account, validated as `account.add` validates them; what is left out stays, and `null` clears the name on sent mail
+/// or the submission server. A change of the user name, or of a server's host, port or security, means the stored
+/// password would go somewhere new, so it starts the account's check, as the owner's, and the next job reaches a worker
+/// that holds the new settings; when its sign-in passes, the sync starts again. The password is no parameter, and a
+/// complaint repeats nothing that was sent. `recheck` starts that check with no such change: the front end has just
+/// stored a new password, or moved the CalDAV address. With `dry_run` nothing changes and no check starts: the front
+/// end asks first, before it replaces a password.
+pub(crate) const UPDATE: CommandSpec = CommandSpec {
+    id: "account.update",
+    class: Some(AgentClass::Owner),
+    summary: "Change a mail account's settings, and check it again when where it signs in changes",
+    run: update,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateParams {
+    /// The account.
+    account: u64,
+    /// The owner's name for the account; empty is the address.
+    #[serde(default)]
+    label: Option<String>,
+    /// The owner's name on sent mail; `null` clears it.
+    #[serde(default, deserialize_with = "given")]
+    display_name: Option<Option<String>>,
+    /// The login name.
+    #[serde(default)]
+    username: Option<String>,
+    /// The IMAP server.
+    #[serde(default)]
+    imap: Option<ServerParams>,
+    /// The submission (SMTP) server; `null` clears it.
+    #[serde(default, deserialize_with = "given")]
+    submission: Option<Option<ServerParams>>,
+    /// Validate only.
+    #[serde(default)]
+    dry_run: bool,
+    /// Start the check even when nothing here moved the sign-in.
+    #[serde(default)]
+    recheck: bool,
+}
+
+/// A field that can be left out (the outer `None`) or set to `null` (the inner one).
+fn given<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: UpdateParams = decode_quietly(UPDATE.id, params)?;
+    let bad = |reason: &str| EngineError::bad_params(UPDATE.id, reason);
+    let id = AccountId::new(params.account);
+    let accounts = context.store().accounts()?;
+    let held = accounts.iter().find(|account| account.id() == id).ok_or(EngineError::NotFound { what: "account", id: params.account })?;
+    let imap = params.imap.as_ref().map(|given| server(given, Security::imap_port, &bad)).transpose()?;
+    let submission = match &params.submission {
+        Some(Some(given)) => Some(server(given, Security::submission_port, &bad)?),
+        Some(None) => None,
+        None => held.submission().cloned(),
+    };
+    let display_name = params.display_name.as_ref().map_or_else(|| held.display_name(), Option::as_deref);
+    let changed = held
+        .clone()
+        .with_sign_in(
+            params.label.as_deref().unwrap_or_else(|| held.label()),
+            params.username.as_deref().unwrap_or_else(|| held.username()),
+            imap.unwrap_or_else(|| held.imap().clone()),
+        )
+        .map_err(|error| bad(&error.to_string()))?
+        .with_display_name(display_name)
+        .with_submission(submission);
+    if accounts.iter().any(|other| other.id() != id && other.imap().host() == changed.imap().host() && other.username() == changed.username()) {
+        return Err(bad("an account with this user name on this server is already there"));
+    }
+    let moved = held.username() != changed.username() || held.imap() != changed.imap() || held.submission() != changed.submission();
+    let check = moved || params.recheck;
+    let answer = json!({
+        "account": json::account(&changed, context.state().accounts.get(&id)),
+        "started": check && !params.dry_run,
+        "steps": json::steps(&CheckStep::plan()),
+    });
+    if params.dry_run {
+        return Ok(Outcome::new(answer));
+    }
+    let outcome = Outcome::new(answer).with_change(Change::PutAccount(changed));
+    Ok(if check { outcome.with_job(id, JobKind::Check { by_owner: true }).with_resync(id) } else { outcome })
 }
 
 /// `account.remove`: removes an account with its folders, messages and kept bodies, and forgets its connection, its

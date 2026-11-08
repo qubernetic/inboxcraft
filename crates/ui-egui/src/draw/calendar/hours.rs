@@ -7,17 +7,20 @@
 
 use egui::{Id, Rect, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
-use super::{Asked, Text, block, caption_strong};
+use super::{Asked, Shape, Text, block, caption_strong};
 use crate::calendar::{Calendar, DAY_MINUTES, EventRow, day, layout};
 use crate::draw::paint::{line, line_height, selection};
 use crate::mailbox::weekday_text;
 use crate::theme::Theme;
 
 /// The height of an hour, in points.
-const HOUR: f32 = 44.0;
+const HOUR: f32 = 47.0;
 
 /// The width of the hours' labels at the left, in points.
 const GUTTER: f32 = 52.0;
+
+/// From the days' names to the bands over whole days, in points.
+const UNDER_HEAD: f32 = 14.0;
 
 /// The hour the view is scrolled to at first.
 const MORNING: f32 = 7.5;
@@ -33,17 +36,20 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
     let count = days.max(1) as f32;
     let column = ((width - GUTTER) / count).max(1.0);
     let x = |left: f32, index: i64| left + GUTTER + column * index as f32;
+    ui.spacing_mut().item_spacing.y = 0.0;
 
-    let head = line_height(ui, theme.fonts.caption) + s.s * 2.0;
+    let head = line_height(ui, theme.fonts.caption) + s.m;
     let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
     for index in 0..days {
         let day = first.plus(index);
         let cell = Rect::from_min_size(pos2(x(rect.left(), index), rect.top()), vec2(column, head));
         let text = if days == 1 { weekday_text(day.weekday()).to_owned() } else { format!("{} {}", day::weekday_short(day.weekday()), day.date()) };
-        let galley = line(ui, &[(&text, theme.fonts.caption, p.text)], column);
+        let today = day == calendar.today();
+        let font = if today { caption_strong(theme) } else { theme.fonts.caption };
+        let galley = line(ui, &[(&text, font, p.text)], column);
         let at = cell.center() - galley.size() / 2.0;
-        if day == calendar.today() {
-            let pill = Rect::from_center_size(cell.center(), galley.size() + vec2(s.m * 2.0, s.xs * 2.0));
+        if today {
+            let pill = Rect::from_center_size(cell.center(), galley.size() + vec2(20.0, 6.0));
             selection(ui.painter(), theme, pill, pill.height() / 2.0);
         }
         ui.painter().galley(at, galley, p.text);
@@ -57,21 +63,21 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
         }
     }
 
+    ui.add_space(UNDER_HEAD);
     let bars = layout::bars(&events, first, usize::try_from(days).unwrap_or(1));
     let lanes = layout::lanes(&bars);
     if lanes > 0 {
-        let lane = line_height(ui, caption_strong(theme)) + s.xs * 2.0;
-        let (rect, _) = ui.allocate_exact_size(vec2(width, lane * lanes as f32 + s.xs), Sense::hover());
+        let lane = line_height(ui, caption_strong(theme)) + s.xs * 2.0 - 2.0;
+        let (rect, _) = ui.allocate_exact_size(vec2(width, lane * lanes as f32), Sense::hover());
         for bar in &bars {
             let Some(event) = events.get(bar.event) else { continue };
             let left = x(rect.left(), i64::try_from(bar.from).unwrap_or(0)) + 1.0;
             let right = x(rect.left(), i64::try_from(bar.to).unwrap_or(0).saturating_add(1)) - 1.0;
             let top = rect.top() + lane * bar.lane as f32;
             let area = Rect::from_min_max(pos2(left, top), pos2(right, top + lane - 2.0));
-            asked.extend(block(ui, theme, calendar, event, area, &Text { title: &event.summary, detail: None }, -1));
+            asked.extend(block(ui, theme, calendar, event, area, &Text { title: &event.summary, detail: None, shape: Shape::Band }, -1));
         }
     }
-    ui.add_space(s.xs);
 
     let scrolled = Id::unique("inboxcraft-calendar-hours-scrolled");
     let mut area = ScrollArea::vertical().id_salt("calendar-hours").auto_shrink([false, false]);
@@ -91,8 +97,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
             let y = at(hour * 60);
             painter.hline(rect.left() + GUTTER..=rect.right(), y, Stroke::new(1.0, p.line));
             if hour > 0 {
-                let label = line(ui, &[(&format!("{hour:02}:00"), theme.fonts.caption, p.muted)], GUTTER);
-                painter.galley(pos2(rect.left(), y - label.size().y / 2.0), label, p.muted);
+                let label = line(ui, &[(&format!("{hour:02}:00"), theme.fonts.caption, p.text)], GUTTER);
+                painter.galley(pos2(rect.left() + s.xs, y - label.size().y / 2.0), label, p.text);
             }
         }
         for index in 0..=days {
@@ -104,8 +110,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
             let left = rect.left() + GUTTER + column * index as f32;
             if let Some(now) = calendar.now().filter(|now| now.day == day) {
                 let y = at(now.minute);
-                painter.hline(left..=left + column, y, Stroke::new(2.0, p.accent));
-                painter.circle_filled(pos2(left, y), 4.0, p.accent);
+                painter.hline(left..=left + column, y, Stroke::new(2.0, p.text));
+                painter.circle_filled(pos2(left, y), 4.0, p.text);
             }
             for piece in layout::pieces(&events, day) {
                 let Some(event) = events.get(piece.event) else { continue };
@@ -117,7 +123,15 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
                     pos2(left + share * (piece.column + 1) as f32 - 2.0, bottom - 1.0),
                 );
                 let times = event.times();
-                asked.extend(block(ui, theme, calendar, event, area, &Text { title: &event.summary, detail: Some(&times) }, index));
+                asked.extend(block(
+                    ui,
+                    theme,
+                    calendar,
+                    event,
+                    area,
+                    &Text { title: &event.summary, detail: Some(&times), shape: Shape::Timed },
+                    index,
+                ));
             }
         }
     });

@@ -63,6 +63,7 @@ pub(crate) fn account(account: &Account, state: Option<&AccountState>) -> Value 
         "username": account.username(),
         "imap": server(account.imap()),
         "submission": account.submission().map(server),
+        "caldav": account.caldav(),
         "connection": state.and_then(|state| state.connection).map(connection),
         "failure": state.and_then(|state| state.failure).map(|(kind, folder)| failure(kind, folder)),
         "check": state.and_then(|state| state.check.as_ref()).map(|check| json!({ "running": check.is_running(), "steps": steps(&check.steps) })),

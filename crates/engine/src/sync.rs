@@ -105,9 +105,13 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         }
         EventKind::CheckStep(report) => {
             let kept = checked(&mut plan.state, account, event.job, report);
-            // A new account: its first sign-in that passes starts the sync, so the password goes out no sooner.
-            if kept && report.step() == CheckStep::ImapLogin && report.status().passed() && store.folders(account)?.is_empty() {
-                plan.job(account, JobKind::SyncFolderList);
+            // A new account's first sign-in that passes starts the sync, so the password goes out no sooner; so does
+            // the first one after `account.update` moved the sign-in or a new password was stored.
+            if kept && report.step() == CheckStep::ImapLogin && report.status().passed() {
+                let resync = plan.state.accounts.get_mut(&account).is_some_and(|held| std::mem::take(&mut held.resync));
+                if resync || store.folders(account)?.is_empty() {
+                    plan.job(account, JobKind::SyncFolderList);
+                }
             }
             kept
         }

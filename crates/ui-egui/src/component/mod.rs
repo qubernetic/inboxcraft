@@ -8,6 +8,9 @@
 //! - [`button`]: an icon button with its tooltip, active or disabled.
 //! - [`field`]: the search pill and the margin of a form field.
 //! - [`pill`]: a round, selectable chip (filters).
+//! - [`segmented`]: a few choices side by side in one track, one of them on the selection.
+//! - [`select`]: a closed field with the choice in it and a popup of the choices.
+//! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`avatar`]: a person's initials on a colour picked from their address.
 //! - [`badge`]: an unread count, or a group's icon on the preset's gradient.
@@ -23,11 +26,14 @@ pub mod avatar;
 pub mod badge;
 pub mod button;
 pub mod card;
+pub mod checkbox;
 pub mod field;
 pub mod gallery;
 pub mod hover;
 pub mod pill;
 pub mod popup;
+pub mod segmented;
+pub mod select;
 pub mod switch;
 pub mod time_picker;
 pub mod toast;
@@ -68,6 +74,12 @@ pub(crate) fn margin(x: f32, y: f32) -> Margin {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let points = |value: f32| value.clamp(0.0, 100.0) as i8;
     Margin::symmetric(points(x), points(y))
+}
+
+/// A plain tick in `colour` over `rect`, drawn in code: the mark of a ticked box and of a select's current choice.
+pub(crate) fn tick(painter: &egui::Painter, rect: egui::Rect, colour: egui::Color32) {
+    let at = |x: f32, y: f32| rect.lerp_inside(egui::vec2(x, y));
+    painter.line(vec![at(0.15, 0.55), at(0.4, 0.8), at(0.85, 0.2)], egui::Stroke::new(1.5, colour));
 }
 
 /// A corner radius of `points`.
