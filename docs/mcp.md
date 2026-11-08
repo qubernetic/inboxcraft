@@ -1,6 +1,6 @@
 # The MCP server
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
 
 An agent (Claude Desktop or Code, Codex, any MCP client) reads InboxCraft's mail through the Model Context Protocol.
 The server is the crate `inboxcraft-mcp` (layer 5); `inboxcraft-cli mcp` runs it in the running app, through the
@@ -104,3 +104,5 @@ a message asks for it, and every tool is `safe`.
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | major | First version: the read-only MCP server, its tools, results and untrusted text (#141) |
+| 2026-11-08 | minor | Without `--store` the MCP server runs its tools in the running app (#142) |

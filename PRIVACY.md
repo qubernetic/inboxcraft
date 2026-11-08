@@ -1,6 +1,6 @@
 # Privacy
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 ## What the InboxCraft project collects
 Nothing. InboxCraft has no telemetry, no analytics and no crash reporting, and there is no InboxCraft server.
@@ -212,3 +212,17 @@ Changes to this page are listed below. Questions: open an issue, or write to [in
 | 2026-11-05 | minor | The name lookups behind each URL, the redirect mark, which ports the check tries (#28) |
 | 2026-11-05 | minor | Remote pictures: when they are asked for, what a request carries, "always" for a sender, Save (#33) |
 | 2026-11-05 | minor | Where a password is kept, when it goes, and how to remove one by hand (#34) |
+| 2026-11-08 | minor | What the store keeps and what removing an account removes; passwords stay until the account is removed, under the store's id (#113) |
+| 2026-11-08 | minor | The draft copy in the account's Drafts folder (#116) |
+| 2026-11-08 | minor | What the SMTP server gets when you send and when you check an account (#119) |
+| 2026-11-08 | minor | Templates in the store; a reply's and a forward's draft copy (#120) |
+| 2026-11-08 | minor | A delivery report's body is kept, and the bounce mark on a sent message (#121) |
+| 2026-11-08 | minor | A snoozed message's copy on the server, the line that says when it comes back and how long it stays, its arrival time, servers without UIDPLUS (#127) |
+| 2026-11-08 | minor | The instance lock and socket, and the autostart entry (#137) |
+| 2026-11-08 | minor | What each notification hands to the desktop, its list and lock screen, the choice not kept (#138) |
+| 2026-11-08 | minor | The notification choices and running in the background are kept on disk; the page writes the autostart entry; removing an account drops its choice (#139) |
+| 2026-11-08 | minor | The control channel: a socket only the owner opens, a token in the credential store, the safe commands that run over it (#142) |
+| 2026-11-08 | minor | What the CalDAV server gets when calendars are found, synced and checked (#145) |
+| 2026-11-08 | minor | Calendars synced at each start; a deleted event goes six seconds later; guests named, not mailed, `SCHEDULE-AGENT=CLIENT`; no query in the address; a new server forgets the old one's calendars and answers (#146) |
+| 2026-11-08 | minor | What an invitation's mark keeps and what an answer sends (#149) |
+| 2026-11-08 | minor | What a calendar alert's notification hands on, which events alert, no switch on the page yet (#150) |
