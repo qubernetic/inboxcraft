@@ -108,7 +108,9 @@ try:
 - the calendar (the rail's Calendar, Ctrl+2): three invented calendars (Personal, Studio, Choir) with events around
   the current week: overlapping ones on today, repeating ones, all-day blocks over several days and a ferry in the
   Azores' zone, whose details label the event's own time. Day, Week, Month and Agenda, the steps and the mini month
-  move through them; a calendar's box hides its events.
+  move through them; a calendar's box hides its events. New event, and Edit and Delete under a picked event's
+  details, make, change and delete events with a toast whose Undo takes it back; editing the allotment work party,
+  which has a guest, asks whether to tell them.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the

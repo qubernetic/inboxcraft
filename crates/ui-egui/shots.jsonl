@@ -126,6 +126,13 @@
 {"out": "docs/images/calendar-agenda-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "agenda"}
 {"out": "docs/images/calendar-day-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
 {"out": "docs/images/calendar-day-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
+# The event editor: a new event, an edit of an event with guests (the notify prompt), a deleted event's toast (E4.5).
+{"out": "docs/images/event-new-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-new-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-edit-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
+{"out": "docs/images/event-edit-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
+{"out": "docs/images/event-deleted-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
+{"out": "docs/images/event-deleted-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
 # The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
 # half-typed name, the floating panel over the reader, and the Sending page with a signature.
 {"out": "docs/images/compose-new-light.png", "mode": "light", "size": [1400, 860], "compose": "new"}

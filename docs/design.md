@@ -527,8 +527,8 @@ the icon sits among others at the same size.
 - **Layout**: the side panel on a card 260 points wide at the left, the view on a card beside it. Over the view a
   toolbar: the view's title in the title font ("2 – 8 November 2026", "November 2026", "Thursday 5 November 2026",
   "From today"), the Previous icon, Today and the Next icon (named after the step: "Previous week", "Next month",
-  "Earlier days"), and at the right a pill per view, Day, Week, Month and Agenda, the one shown selected. The
-  calendar opens on this week, on today; weeks start on Monday.
+  "Earlier days"), and at the right a pill per view, Day, Week, Month and Agenda, the one shown selected, and the
+  primary New event button with the Add icon. The calendar opens on this week, on today; weeks start on Monday.
 - **Events**: an event is a block in a tint of its calendar's colour (the server's, or an account colour by the
   calendar's place) with a 3-point bar of the colour at its left, its summary in the caption size, strong, and its
   times under it where there is room; hovered or picked the tint deepens. Each is a button named after its summary,
@@ -553,7 +553,21 @@ the icon sits among others at the same size.
   November, 08:00 – 11:00"); the event's own zone after the Globe icon, labelled, only when its clock differs from
   the computer's ("Event zone Atlantic/Azores: 07:00 – 10:00", with the dates when they differ too); the place; the
   description; the calendar, busy or free, private and the repeat ("Personal · busy · private · repeats weekly");
-  and up to eight guests with their answers ("Petra Lindqvist · going").
+  and up to eight guests with their answers ("Petra Lindqvist · going"); then Edit (the Compose icon) and Delete
+  (the Delete icon), secondary buttons.
+- **Event editor**: New event and Edit open it as a float 440 points wide over the view's top right, as the design
+  file's Calendar page shows it: "New event" or "Edit event" in the heading font; Title; Starts and Ends side by
+  side, typed as "2026-11-06 13:00" (a day alone, "2026-11-06", for an all-day event); the boxes All day (which
+  turns the times into their days and back) and Private; Repeat with a pill per preset (Never, Daily, Weekdays,
+  Weekly, Monthly, Yearly; Custom, selected, for a repeat the presets do not name, kept until a preset is picked);
+  Show as with Busy and Free; for a new event Calendar with a pill per calendar; Guests, addresses with commas. Only
+  an edit of an event with guests adds, on a tinted box, "Tell the 2 guests about this change?" with the radio
+  buttons Don't tell them (the default) and Send them the update. Why the last Save was refused shows over the
+  buttons in the flag colour; Cancel (secondary) and Save (primary) end it, Escape is Cancel. Each field is named by
+  its label.
+- **Undo**: a saved event, a saved edit and a delete show the act's toast at the window's foot ("Event added",
+  "Event saved", "Event saved; the guests are told", "Event deleted") with Undo and Ctrl+Z, which take the change
+  back and read the calendar again; a deleted event reaches the server only once the toast's six seconds are over.
 
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
@@ -597,7 +611,9 @@ the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"
 the calendar's empty state (`calendar-empty-<mode>.png`, `"first"` and `"calendar"`) and its views over the
 sample's three calendars (`calendar-week-<mode>.png` with the ferry's zone in the details,
 `calendar-month-<mode>.png` with a trip over three days picked, `calendar-agenda-<mode>.png`, `calendar-day-<mode>.png`;
-`"calendar_view"` and `"event"`) are drawn in light and dark, and so are the
+`"calendar_view"` and `"event"`) and the event editor (`event-new-<mode>.png`, `event-edit-<mode>.png` with the
+question to the guests, `"edit_event"`; `event-deleted-<mode>.png` with the toast, `"delete_event"`) are drawn in
+light and dark, and so are the
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
 `compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
 and `compose-template-<mode>.png` with a blank left) and the Sending page

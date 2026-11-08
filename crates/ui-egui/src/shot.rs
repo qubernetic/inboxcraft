@@ -23,7 +23,9 @@
 //! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page. `palette` opens the command palette with that text
 //! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
 //! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
-//! that summary, whose details show in the side panel. `compose` opens the
+//! that summary, whose details show in the side panel; `edit_event` opens the event editor on a `new` event or, with
+//! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
+//! opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
 //! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
@@ -171,6 +173,12 @@ pub struct Shot {
     /// The summary of the calendar event picked, which shows the calendar screen and the event's details.
     #[serde(default)]
     pub event: Option<String>,
+    /// The event editor on a `new` event or, with `edit`, on the picked one; shows the calendar screen.
+    #[serde(default)]
+    pub edit_event: Option<String>,
+    /// Whether the picked event is deleted, so its toast shows.
+    #[serde(default)]
+    pub delete_event: Option<bool>,
     /// Whether the window has no account yet (and can add one) instead of the sample's.
     #[serde(default)]
     pub first: Option<bool>,
@@ -333,6 +341,22 @@ fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         let Some(key) = key else { return Err(bad(format!("{}: no calendar event {summary:?} in the view", shot.out))) };
         calendar.pick(Some(key));
     }
+    let picked = |calendar: &crate::calendar::Calendar, what: &str| {
+        calendar.picked().map(|_| ()).ok_or_else(|| bad(format!("{}: {what} needs an event picked with \"event\"", shot.out)))
+    };
+    match shot.edit_event.as_deref() {
+        None => {}
+        Some("new") => calendar.new_event(),
+        Some("edit") => {
+            picked(calendar, "edit_event")?;
+            calendar.edit_picked();
+        }
+        Some(other) => return Err(bad(format!("{}: edit_event {other:?} is not new or edit", shot.out))),
+    }
+    if shot.delete_event == Some(true) {
+        picked(calendar, "delete_event")?;
+        calendar.delete_picked(mailbox);
+    }
     Ok(())
 }
 
@@ -342,7 +366,8 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     if let Some(scene) = &shot.compose {
         compose(app, &shot.out, scene)?;
     }
-    if shot.calendar == Some(true) || shot.calendar_view.is_some() || shot.event.is_some() {
+    if shot.calendar == Some(true) || shot.calendar_view.is_some() || shot.event.is_some() || shot.edit_event.is_some() || shot.delete_event.is_some()
+    {
         app.show_calendar();
         calendar(app, shot)?;
     }
@@ -462,6 +487,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.calendar.is_some()
         || shot.calendar_view.is_some()
         || shot.event.is_some()
+        || shot.edit_event.is_some()
+        || shot.delete_event.is_some()
         || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()

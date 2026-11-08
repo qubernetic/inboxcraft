@@ -432,9 +432,32 @@ fn a_shot_shows_each_calendar_view_and_a_picked_event() {
     assert!(error.contains("is not day, week, month or agenda"), "{error}");
     let error = shoot(&shot(&format!(r#"{{{base}, "event": "Nothing like it"}}"#))).unwrap_err().to_string();
     assert!(error.contains("no calendar event"), "{error}");
-    for place in [r#""calendar_view": "day""#, r#""event": "Dentist""#] {
+    for place in [r#""calendar_view": "day""#, r#""event": "Dentist""#, r#""edit_event": "new""#, r#""delete_event": true"#] {
         let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
         assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_the_event_editor_and_the_toast_of_a_deleted_event() {
+    let base = r#""out": "x.png", "mode": "light", "size": [1200, 820], "calendar_view": "week""#;
+    let week = shoot(&shot(&format!("{{{base}}}"))).unwrap();
+    let mut seen = vec![week];
+    for place in [
+        r#""edit_event": "new""#,
+        r#""event": "Allotment work party", "edit_event": "edit""#,
+        r#""event": "Dentist", "edit_event": "edit""#,
+        r#""event": "Dentist", "delete_event": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap();
+        assert!(!seen.contains(&picture), "{place}");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(&format!(r#"{{{base}, "edit_event": "later"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("is not new or edit"), "{error}");
+    for place in [r#""edit_event": "edit""#, r#""delete_event": true"#] {
+        let error = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("needs an event"), "{error}");
     }
 }
 
