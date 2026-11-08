@@ -1312,6 +1312,7 @@ impl InboxApp {
         let mut changed = None;
         let mut review = false;
         let mut outboxed = None;
+        let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // The colour fields first, then the place for the glass layers, then everything else.
@@ -1354,10 +1355,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1422,6 +1423,7 @@ impl InboxApp {
             || undone
             || unsent
             || outboxed.is_some()
+            || screener_mode.is_some()
             || (out && leaving)
             || left_full
             || left_editor
@@ -1447,7 +1449,7 @@ impl InboxApp {
             // What changed shows in the next frame.
             ui.ctx().request_repaint();
         }
-        self.act(out, acted, undone, outboxed);
+        self.act(out, acted, undone, outboxed, screener_mode);
         if let Some(ids) = done_all {
             self.mailbox.done_all(&ids);
         }
@@ -1616,7 +1618,17 @@ impl InboxApp {
 
     /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its
     /// key), Undo when `undone`, and what a button of the outbox asked of a send.
-    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool, outboxed: Option<(u64, list::Outbox)>) {
+    fn act(
+        &mut self,
+        out: bool,
+        acted: Option<(u64, Act)>,
+        undone: bool,
+        outboxed: Option<(u64, list::Outbox)>,
+        mode: Option<inboxcraft_engine::ScreenerMode>,
+    ) {
+        if let Some(mode) = mode {
+            self.mailbox.set_screener_mode(mode);
+        }
         if let Some((draft, asked)) = outboxed {
             self.outbox(draft, asked);
         }

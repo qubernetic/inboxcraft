@@ -34,6 +34,8 @@ use egui::{
 };
 
 use super::paint::{focus_ring, line, line_height, selection};
+use inboxcraft_engine::ScreenerMode;
+
 use crate::component::hover::{self, Action};
 use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
@@ -393,6 +395,8 @@ pub(super) struct Asked {
     pub(super) done_all: Option<Vec<u64>>,
     /// A button of a send in the outbox, and its draft.
     pub(super) outbox: Option<(u64, Outbox)>,
+    /// A pill of the screener's mode under "New senders".
+    pub(super) screener: Option<ScreenerMode>,
 }
 
 /// What a button of a send in the outbox asks for.
@@ -777,6 +781,29 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
     add
 }
 
+/// "New senders": the list, then under it the screener's mode as pills, the choice the Triage settings page offers.
+fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) {
+    let theme = rows.theme;
+    let s = &theme.spacing;
+    let room = ui.available_rect_before_wrap();
+    let lines = if room.width() < 360.0 { 2.0 } else { 1.0 };
+    let bar = (line_height(ui, theme.fonts.button) + s.s) * lines + s.s * 2.0;
+    let list = Rect::from_min_max(room.min, pos2(room.right(), (room.bottom() - bar).max(room.top())));
+    let clicked = ui.scope_builder(UiBuilder::new().max_rect(list), |ui| plain(ui, rows)).inner;
+    ui.add_space(s.s);
+    let mut mode = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(s.xs, s.xs);
+        ui.label(RichText::new(tr!("Screener")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+        for choice in ScreenerMode::ALL {
+            if pill(ui, theme, super::settings::screener_name(choice), rows.mailbox.screener_mode() == choice).clicked() {
+                mode = Some(choice);
+            }
+        }
+    });
+    (clicked, mode)
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
@@ -812,9 +839,15 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
     };
+    let mut screener_mode = None;
     let (clicked, review) = match view {
         InboxView::Cards => grouped(ui, &rows, &groups, wait),
         InboxView::List => listed(ui, &rows, &groups, wait),
+        InboxView::Simple if mailbox.place() == Place::Senders && mailbox.query().is_empty() => {
+            let (clicked, mode) = senders(ui, &rows);
+            screener_mode = mode;
+            (clicked, false)
+        }
         InboxView::Simple => {
             let review = wait && screener(ui, theme, keymap, mailbox);
             if wait {
@@ -824,5 +857,5 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None, screener: screener_mode }
 }

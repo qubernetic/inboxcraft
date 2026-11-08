@@ -212,7 +212,7 @@ fn level_name(level: Level) -> &'static str {
 }
 
 /// The name of a screener mode.
-fn screener_name(mode: ScreenerMode) -> &'static str {
+pub(super) fn screener_name(mode: ScreenerMode) -> &'static str {
     match mode {
         ScreenerMode::Before => tr!("Before the inbox"),
         ScreenerMode::Inside => tr!("Inside, marked"),
