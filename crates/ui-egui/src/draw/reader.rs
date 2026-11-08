@@ -209,7 +209,7 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
 }
 
 /// The width of the time picker, in body text sizes.
-const PICKER_WIDTH: f32 = 22.0;
+const PICKER_WIDTH: f32 = 22.75;
 
 /// The id the time picker's state is kept under between frames and openings.
 pub(super) fn picker_id() -> Id {
@@ -242,23 +242,25 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
         ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
     }
     let width = theme.fonts.body.size * PICKER_WIDTH;
-    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
-            let ask = Ask { title, confirm, alert: None, presets: &presets };
-            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
-            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-            ui.data_mut(|data| data.insert_temp(picker_id(), state));
-            match picked {
-                Picked::At { at, .. } => {
-                    drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
-                    ui.close();
+    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).gap(theme.spacing.m).frame(Frame::NONE).show(
+        |ui| {
+            popup::panel(ui, theme, width, |ui| {
+                let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+                let ask = Ask { title, confirm, alert: None, presets: &presets };
+                let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+                let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+                ui.data_mut(|data| data.insert_temp(picker_id(), state));
+                match picked {
+                    Picked::At { at, .. } => {
+                        drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
+                        ui.close();
+                    }
+                    Picked::Cancelled => ui.close(),
+                    Picked::Open => {}
                 }
-                Picked::Cancelled => ui.close(),
-                Picked::Open => {}
-            }
-        })
-    });
+            })
+        },
+    );
 }
 
 /// Pin, or "Take the pin off" (shown active) for a pinned message.

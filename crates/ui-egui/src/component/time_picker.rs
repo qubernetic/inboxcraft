@@ -20,7 +20,7 @@ use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
-use super::button::TextButton;
+use super::button::{self, TextButton};
 use super::switch::switch;
 use super::typed_time::{self, long, short};
 use super::{control_side, cut, galley, line_height, margin};
@@ -121,7 +121,7 @@ impl TimePicker {
 fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme);
+    let height = control_side(ui, theme) + s.xs;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, tr!("{name}, {time}", name = name, time = time)));
     let lit = response.hovered() || response.has_focus();
@@ -154,7 +154,7 @@ fn reading(ui: &mut Ui, theme: &Theme, chosen: Option<Timestamp>, now: Timestamp
             Some(at) => {
                 let side = line_height(ui, theme.fonts.caption);
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Done, Style::Regular, p.accent);
+                theme.icons.paint(ui.painter(), rect, IconId::Done, Style::Fill, p.accent);
                 ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.accent));
             }
             None => {
@@ -174,6 +174,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
     Frame::new().inner_margin(margin(s.s, s.s)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = s.xs;
         ui.label(galley(ui, ask.title, theme.fonts.strong, p.text));
+        ui.add_space(s.xs);
         for preset in ask.presets.iter().filter(|preset| preset.at > now) {
             if preset_row(ui, theme, preset.name, &short(preset.at, now, offset)).clicked() {
                 picked = Picked::At { at: preset.at, alert: false };
@@ -183,7 +184,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         ui.painter().rect_filled(line, 0.0, p.line);
         let caption = ui.label(galley(ui, tr!("Or type a time"), theme.fonts.caption, p.muted));
         let id = ui.make_persistent_id("time-picker-typed");
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(ui, theme) + s.xs), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(ui, theme) + s.s), Sense::hover());
         let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
         ui.painter().rect_filled(rect, s.corner, p.field);
         ui.painter().rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
@@ -226,7 +227,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
             {
                 picked = Picked::At { at, alert: false };
             }
-            if TextButton::new(tr!("Cancel")).secondary().show(ui, theme, &keys).clicked() {
+            if button::link(ui, theme, &keys, tr!("Cancel")).clicked() {
                 picked = Picked::Cancelled;
             }
         });
