@@ -56,8 +56,7 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
         ui.allocate_exact_size(vec2(width, body_height), Sense::hover());
     }
     let rect = Rect::from_min_max(header_rect.min, Pos2::new(header_rect.right(), header_rect.bottom() + body_height));
-    let mut shapes =
-        vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)];
+    let mut shapes = vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)];
     if hover > 0.0 {
         let round = egui::CornerRadius { nw: super::corner(s.card).nw, ne: super::corner(s.card).ne, sw: 0, se: 0 };
         let round = if openness > 0.0 { round } else { super::corner(s.card) };

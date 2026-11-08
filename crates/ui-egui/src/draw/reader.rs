@@ -377,11 +377,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
 
 /// A card's frame: the translucent card colour with a line round it.
 fn card_frame(theme: &Theme, inner: f32) -> Frame {
-    Frame::new()
-        .fill(theme.palette.card)
-        .stroke(Stroke::new(1.0, theme.palette.line))
-        .corner_radius(theme.spacing.card)
-        .inner_margin(margin(inner))
+    Frame::new().fill(theme.palette.card).stroke(Stroke::new(1.0, theme.palette.line)).corner_radius(theme.spacing.card).inner_margin(margin(inner))
 }
 
 /// One folded message of the thread, a card of one line: the avatar, the sender, the first words and the date; a

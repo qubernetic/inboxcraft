@@ -5,7 +5,7 @@
 //! empty states.
 //!
 //! A row shows the sender's avatar, the sender and the date, the subject and the preview; an unread row its dot and
-//! a heavier sender and subject; the selected row the selection gradient; a row from a new sender says so after the
+//! a heavier sender and subject; the selected row the selection; a row from a new sender says so after the
 //! sender. On top of the unified inbox, while senders wait, the screener card with Review, which opens "New senders".
 //! The unified inbox shows its groups as the owner chose ([`InboxView`]): a card for each (badge, name, unread count,
 //! "Done all", the first rows and "Show all (n)"), one list with a heading for each, or the simple list without them;
@@ -29,8 +29,8 @@
 use std::cell::Cell;
 
 use egui::{
-    Align, Color32, Frame, Id, Key, Layout, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Id, Key, Layout, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{focus_ring, line, line_height, selection};

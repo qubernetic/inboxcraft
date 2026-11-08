@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, BLACK, DARK, Face, Font, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
-    contrast, font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
+    AVATARS, BLACK, DARK, Face, Font, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight, contrast,
+    font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
 };
 use crate::iconset::IconSet;
 use crate::motion::MOTION;

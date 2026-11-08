@@ -662,8 +662,11 @@ impl Palette {
         backdrops.extend(colour_fields.map(|colour| over(colour, background)));
         let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
         let mut surfaces = vec![background, panel, surface, field, selection, float];
+        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind)]));
+        // The focus ring needs only 3:1 and is not text: a hovered card or selection does not darken it.
+        let ringed = surfaces.clone();
         surfaces.push(over(hover, selection));
-        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind), over(hover, over(card, *behind))]));
+        surfaces.extend(glassy.iter().map(|behind| over(hover, over(card, *behind))));
         let text = readable(mix(n.text, middle, 0.06), &surfaces, 4.5, mode);
         let muted = readable(mix(n.muted, middle, 0.08), &surfaces, 4.5, mode);
         let accent = match mode {
@@ -698,7 +701,7 @@ impl Palette {
             on_accent: ink_on(accent),
             unread: readable(middle, &marked, 3.0, mode),
             flag: readable(last, &marked, 4.5, mode),
-            focus: readable(first, &surfaces, 3.0, mode),
+            focus: readable(first, &ringed, 3.0, mode),
             badge,
             on_badge: readable(accent, &[badge], 4.5, mode),
             error,
