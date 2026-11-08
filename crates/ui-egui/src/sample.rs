@@ -609,6 +609,58 @@ pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
     Showcase { screener, groups }
 }
 
+/// The sample's mail `put_away` snoozes: subject and how long from now it comes back, in hours.
+const SNOOZED: [(&str, i64); 3] =
+    [("Your ferry booking is confirmed", 47), ("A question about the font licence", 95), ("Tenancy renewal", 26 * 24 - 1)];
+
+/// The sample's mail `put_away` pins, parks, marks done, and snoozes and brings back at once.
+const PINNED: [&str; 2] = ["Draft logo for the bakery", "Allotment rota for November"];
+const PARKED: [&str; 2] = ["Board game night?", "Your bike is due for a service"];
+const DONE: &str = "Re: Soup recipe";
+const RETURNED: &str = "Choir practice moves to Thursday";
+
+/// The sample message with `subject`, by its id.
+fn sample_id(subject: &str) -> Result<u64, UiError> {
+    let index = MESSAGES.iter().position(|sample| sample.subject == subject).ok_or_else(|| UiError::sample(format!("no sample {subject:?}")))?;
+    Ok(u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1))
+}
+
+/// Puts some of the sample's mail away, for `ui_shot` to picture "Later" and "Show done": three messages snoozed,
+/// two pinned, two parked, one done and one back from a snooze, unread. The toast of the last act goes.
+///
+/// # Errors
+///
+/// The first act the engine refuses, as [`UiError::Sample`].
+pub fn put_away(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    use crate::mailbox::Act;
+
+    let now = mailbox.now();
+    let mut acts = Vec::new();
+    for (subject, hours) in SNOOZED {
+        let until = Timestamp::from_unix(now.unix_seconds().saturating_add(hours.saturating_mul(3_600)), 0)
+            .ok_or_else(|| UiError::sample("a snooze time out of range"))?;
+        acts.push((sample_id(subject)?, Act::Snooze(until)));
+    }
+    for subject in PINNED {
+        acts.push((sample_id(subject)?, Act::Pin(true)));
+    }
+    for subject in PARKED {
+        acts.push((sample_id(subject)?, Act::Park(true)));
+    }
+    acts.push((sample_id(DONE)?, Act::Done));
+    let returned = sample_id(RETURNED)?;
+    let soon = Timestamp::from_unix(now.unix_seconds().saturating_add(3_600), 0).ok_or_else(|| UiError::sample("a snooze time out of range"))?;
+    acts.extend([(returned, Act::Snooze(soon)), (returned, Act::Unsnooze), (returned, Act::Unread)]);
+    for (id, act) in acts {
+        mailbox.act(id, act);
+        if let Some(error) = mailbox.error() {
+            return Err(UiError::sample(error));
+        }
+    }
+    mailbox.forget_undo();
+    Ok(())
+}
+
 /// A sample session ([`Session::sample`]) over the sample mailbox, its dates counted back from `clock`'s time now:
 /// the acts on its messages change the mailbox in memory, nothing goes to a server and nothing is kept.
 ///

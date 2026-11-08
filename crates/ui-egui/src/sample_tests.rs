@@ -218,3 +218,29 @@ fn the_inbox_is_grouped_into_people_and_updates() {
     let newsletters = run("mail.list", &json!({ "role": "trash", "group": "newsletters" }));
     assert_eq!(newsletters["total"], 2, "both newsletters carry their list's fields");
 }
+
+#[test]
+fn put_away_fills_every_pile_of_later_and_leaves_a_done_and_a_returned_message() {
+    use crate::mailbox::{Mailbox, Pile, Place};
+
+    let mut mailbox = Mailbox::new(session(Box::new(FakeClock::new(now()))).unwrap(), Box::new(FakeClock::new(now())));
+    super::put_away(&mut mailbox).unwrap();
+    assert!(mailbox.undoable().is_none(), "no toast left over");
+    let subjects = |mailbox: &Mailbox| mailbox.messages().iter().map(|row| row.subject.clone()).collect::<Vec<_>>();
+    mailbox.open(Place::Later(Pile::Snoozed));
+    assert_eq!(
+        subjects(&mailbox),
+        ["Your ferry booking is confirmed", "A question about the font licence", "Tenancy renewal"],
+        "the first back on top"
+    );
+    mailbox.open(Place::Later(Pile::Pins));
+    assert_eq!(mailbox.messages().len(), 2);
+    mailbox.open(Place::Later(Pile::Parked));
+    assert_eq!(mailbox.messages().len(), 2);
+    mailbox.open(Place::View(inboxcraft_model::Role::Inbox));
+    let choir = mailbox.messages().iter().find(|row| row.subject == "Choir practice moves to Thursday").unwrap();
+    assert!(mailbox.returned(choir));
+    assert!(mailbox.messages().iter().all(|row| row.subject != "Re: Soup recipe"), "done");
+    mailbox.set_show_done(true);
+    assert!(mailbox.messages().iter().any(|row| row.subject == "Re: Soup recipe" && row.done));
+}

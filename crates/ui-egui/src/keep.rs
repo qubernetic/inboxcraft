@@ -8,7 +8,7 @@
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
 //! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
-//! triage choices (the screener's mode, the inbox view) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done) into [`TRIAGE_FILE`] ([`Triage::from_value`]). A window
 //! without a config folder gets [`NoKeep`].
 
 use std::io::{Read, Write};
@@ -30,14 +30,16 @@ pub const KEYS_FILE: &str = "shortcuts.json";
 /// The name of the triage choices' file, beside [`FILE`].
 pub const TRIAGE_FILE: &str = "triage.json";
 
-/// The triage choices kept between runs: what the screener does with a new sender's first mail, and how the unified
-/// inbox shows its groups.
+/// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
+/// inbox shows its groups, and whether a pin stays on a message when it is done.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Triage {
     /// The screener's mode.
     pub screener: ScreenerMode,
     /// How the unified inbox shows its groups.
     pub view: InboxView,
+    /// A pin stays on a message when it is done.
+    pub keep_pins: bool,
 }
 
 impl Triage {
@@ -48,13 +50,14 @@ impl Triage {
         Self {
             screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
             view: named("view").and_then(InboxView::named).unwrap_or_default(),
+            keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
         }
     }
 
     /// The choices as they are written.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({ "screener": self.screener.name(), "view": self.view.id() })
+        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins })
     }
 }
 

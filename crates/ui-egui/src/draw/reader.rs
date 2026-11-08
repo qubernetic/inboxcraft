@@ -11,8 +11,12 @@
 //!
 //! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
 //! real account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in.
-//! More also puts the sender's mail in another group, for a message of a grouped account. Actions without a command
-//! (Snooze, Pin) are drawn disabled, and their tooltips say so.
+//! More also puts the sender's mail in another group, for a message of a grouped account.
+//!
+//! Snooze opens the time picker ("Snooze until"); on a message the owner sent the same button is "Remind me if no
+//! reply" and its picker sets the follow-up reminder. Pin pins the message or takes its pin off. More parks it or
+//! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Under the subject, chips
+//! say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
 //!
 //! A message the screener holds opens as a preview that decides nothing: over it a card asks "Let <sender> in?", with
 //! the groups to let them into, Accept, Accept and open, and Block.
@@ -24,14 +28,16 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Layout, Margin, Order, Popup, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
-    Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::pill::pill;
+use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
+use crate::component::typed_time;
 use crate::component::{badge, popup};
 use crate::compose::Answer;
 use crate::glass::{self, Under};
@@ -79,6 +85,8 @@ pub(super) enum Asked {
     Act(u64, Act),
     /// Write a draft made from a message.
     Answer(u64, Answer),
+    /// A time picker opened: read the time presets still ahead.
+    Presets,
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -132,6 +140,16 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         if popup::item(ui, theme, keymap, icon, name, Some(keymap::READ)).clicked() {
             drawn.asked.push(Asked::Act(row.id, act));
         }
+        let (name, act) = if row.parked { (tr!("Take off the park pile"), Act::Park(false)) } else { (tr!("Park"), Act::Park(true)) };
+        if popup::entry(ui, theme, keymap, name, None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        if mailbox.is_snoozed(row.id) && popup::entry(ui, theme, keymap, tr!("Bring back now"), None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, Act::Unsnooze));
+        }
+        if row.follow_up.is_some() && popup::entry(ui, theme, keymap, tr!("Take the reminder off"), None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, Act::CancelFollowUp));
+        }
         ui.add_space(theme.spacing.xs);
         ui.separator();
         if row.group.is_some()
@@ -184,6 +202,90 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     });
 }
 
+/// The width of the time picker, in body text sizes.
+const PICKER_WIDTH: f32 = 22.0;
+
+/// The id the time picker's state is kept under between frames and openings.
+pub(super) fn picker_id() -> Id {
+    Id::unique("reader-time-picker")
+}
+
+/// The id of the time picker's popup, so a key can open it.
+pub(super) fn picker_popup() -> Id {
+    Id::unique("reader-time-picker-popup")
+}
+
+/// Snooze, or "Remind me if no reply" on a message the owner sent: a button opening the time picker over the presets
+/// still ahead; the time picked snoozes the message `id` or sets its reminder. Without a message it is disabled.
+fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let sent = open.is_some_and(|id| mailbox.is_sent(id));
+    let (name, title, confirm) = if sent {
+        (tr!("Remind me if no reply"), tr!("Remind me if no reply by"), tr!("Remind me"))
+    } else {
+        (tr!("Snooze"), tr!("Snooze until"), tr!("Snooze"))
+    };
+    let button = IconButton::new(IconId::Snooze, name).action(keymap::SNOOZE);
+    let Some(id) = open else {
+        button.unavailable(tr!("Open a message first")).show(ui, theme, keymap);
+        return;
+    };
+    let response = button.show(ui, theme, keymap);
+    if response.clicked() {
+        // A new opening: the presets read again, the text typed before gone.
+        drawn.asked.push(Asked::Presets);
+        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+    }
+    let width = theme.fonts.body.size * PICKER_WIDTH;
+    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+            let ask = Ask { title, confirm, alert: None, presets: &presets };
+            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+            ui.data_mut(|data| data.insert_temp(picker_id(), state));
+            match picked {
+                Picked::At { at, .. } => {
+                    drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
+                    ui.close();
+                }
+                Picked::Cancelled => ui.close(),
+                Picked::Open => {}
+            }
+        })
+    });
+}
+
+/// Pin, or "Take the pin off" (shown active) for a pinned message.
+fn pin(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let Some(row) = open.and_then(|id| mailbox.messages().iter().find(|row| row.id == id)) else {
+        IconButton::new(IconId::Pin, tr!("Pin")).unavailable(tr!("Open a message first")).show(ui, theme, keymap);
+        return;
+    };
+    let name = if row.pinned { tr!("Take the pin off") } else { tr!("Pin") };
+    if IconButton::new(IconId::Pin, name).active(row.pinned).show(ui, theme, keymap).clicked() {
+        drawn.asked.push(Asked::Act(row.id, Act::Pin(!row.pinned)));
+    }
+}
+
+/// The chips of the open message's state: until when it is snoozed, when its reminder is due, that it came back.
+fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return Vec::new() };
+    let (now, offset) = (mailbox.now(), mailbox.offset());
+    let mut chips = Vec::new();
+    if let Some(until) = row.snoozed_until {
+        let short = typed_time::short(until, now, offset);
+        chips.push((tr!("Snoozed until {when}", when = short), tr!("Snoozed until {when}", when = typed_time::long(until, now, offset))));
+    }
+    if let Some(due) = row.follow_up {
+        let short = typed_time::short(due, now, offset);
+        chips.push((tr!("Reminder {when}", when = short), tr!("Reminder if no reply by {when}", when = typed_time::long(due, now, offset))));
+    }
+    if mailbox.returned(row) {
+        chips.push((tr!("Returned").to_owned(), tr!("Back from a snooze").to_owned()));
+    }
+    chips
+}
+
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
@@ -209,12 +311,15 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                     };
                     button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
-                action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
+                // A done message, open under "Show done", is brought back by the same button.
+                let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+                let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
+                action(ui, IconId::Done, name, Some((act, keymap::DONE)));
                 action(ui, IconId::Archive, tr!("Archive"), Some((Act::Archive, keymap::ARCHIVE)));
                 action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
                 divider(ui, theme);
-                action(ui, IconId::Snooze, tr!("Snooze"), None);
-                action(ui, IconId::Pin, tr!("Pin"), None);
+                picker(ui, theme, keymap, mailbox, open, drawn);
+                pin(ui, theme, keymap, mailbox, open, drawn);
                 move_to(ui, theme, keymap, mailbox, open, drawn);
                 divider(ui, theme);
                 let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
@@ -244,12 +349,16 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
             .or_else(|| row.and_then(|row| row.group).map(|kind| kind.text().to_owned()))
     });
     let count = reader.thread().len();
-    if group.is_some() || count > 1 {
-        // The message's group as a chip, then who wrote in the thread.
-        ui.horizontal(|ui| {
+    let chips = reader.open_id().map(|id| states(mailbox, id)).unwrap_or_default();
+    if group.is_some() || count > 1 || !chips.is_empty() {
+        // The message's group and its state as chips, then who wrote in the thread.
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s;
             if let Some(group) = &group {
                 badge::chip(ui, theme, group, &tr!("In {group}", group = group));
+            }
+            for (name, spoken) in &chips {
+                badge::chip(ui, theme, name, spoken);
             }
             if count > 1 {
                 let writers = reader.writers().join(", ");

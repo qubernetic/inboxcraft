@@ -515,3 +515,26 @@ fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_ac
         assert!(error.contains("has no window"), "{error}");
     }
 }
+
+#[test]
+fn a_shot_shows_later_show_done_and_the_time_picker() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let put = shoot(&line(r#", "put_away": true"#)).unwrap();
+    assert_ne!(window, put, "mail put away leaves the inbox");
+    let done = shoot(&line(r#", "put_away": true, "show_done": true"#)).unwrap();
+    assert_ne!(put, done, "the done mail shows dimmed");
+    let piles: Vec<_> =
+        ["snoozed", "pins", "parked"].iter().map(|pile| shoot(&line(&format!(r#", "put_away": true, "later": "{pile}""#))).unwrap()).collect();
+    assert_ne!(piles[0], piles[1]);
+    assert_ne!(piles[1], piles[2]);
+    let open = line(r#", "select": "Allotment rota for November""#);
+    let picker = shoot(&line(r#", "select": "Allotment rota for November", "picker": "sat 9""#)).unwrap();
+    assert_ne!(shoot(&open).unwrap(), picker, "the picker shows over the reader");
+    let error = shoot(&line(r#", "later": "someday""#)).unwrap_err().to_string();
+    assert!(error.contains("is not snoozed, pins or parked"), "{error}");
+    let error = shoot(&line(r#", "picker": "sat 9""#)).unwrap_err().to_string();
+    assert!(error.contains("needs a selected row"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "later": "pins"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}

@@ -451,7 +451,7 @@ impl Calendar {
     /// Reads the calendars and the events of the days shown again; today comes from the list's clock. The first read
     /// puts the view on today. A refused command shows in the window's error banner.
     pub fn refresh(&mut self, mailbox: &mut Mailbox) {
-        let (now, offset) = mailbox.now();
+        let (now, offset) = (mailbox.now(), mailbox.offset());
         self.today = Day::of(now, offset).or(self.today);
         self.now = now.to_civil(offset).and_then(|civil| {
             Some(Moment {
@@ -517,7 +517,7 @@ impl Calendar {
 
     /// Puts the view on today.
     pub fn go_today(&mut self, mailbox: &mut Mailbox) {
-        let (now, offset) = mailbox.now();
+        let (now, offset) = (mailbox.now(), mailbox.offset());
         let today = Day::of(now, offset).unwrap_or_else(|| self.today());
         self.go_to(mailbox, today);
     }
@@ -584,7 +584,7 @@ impl Calendar {
     /// read or is refused keeps the editor open, saying why.
     pub fn save(&mut self, mailbox: &mut Mailbox) {
         let Some(editor) = self.editor.as_mut() else { return };
-        let (_, offset) = mailbox.now();
+        let offset = mailbox.offset();
         let (command, params) = match editor.changes(offset) {
             Ok(Some(change)) => change,
             Ok(None) => {

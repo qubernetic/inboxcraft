@@ -57,7 +57,7 @@ use crate::gradient;
 use crate::iconset::IconSet;
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
-use crate::mailbox::{Act, Mailbox, Place};
+use crate::mailbox::{Act, Mailbox, Pile, Place};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::palette::Palette;
@@ -145,6 +145,8 @@ pub struct InboxApp {
     composer: Option<Composer>,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
     notice: Option<(String, Option<f64>)>,
+    /// The time picker opens over the open message in the next frame, with this text typed.
+    picker: Option<String>,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -224,6 +226,7 @@ impl InboxApp {
             frame_applied: None,
             composer: None,
             notice: None,
+            picker: None,
         }
     }
 
@@ -259,21 +262,23 @@ impl InboxApp {
                     self.mailbox.restore_screener(kept.screener);
                 }
                 self.mailbox.set_inbox_view(kept.view);
+                self.mailbox.restore_pins(kept.keep_pins);
                 self.kept_triage = kept;
             }
             None => {
                 let screener = if sample { Triage::default().screener } else { self.mailbox.screener_mode() };
-                self.kept_triage = Triage { screener, view: self.mailbox.inbox_view() };
+                self.kept_triage = Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done() };
             }
         }
         self.keep = keep;
         self
     }
 
-    /// The triage choices to keep: the inbox view, and the screener's mode but on the sample, which keeps the one kept.
+    /// The triage choices to keep: the inbox view, whether a pin outlasts done, and the screener's mode but on the
+    /// sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
-        Triage { screener, view: self.mailbox.inbox_view() }
+        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done() }
     }
 
     /// Keeps the triage choices when they changed.
@@ -319,6 +324,7 @@ impl InboxApp {
         let act = match act {
             Act::Read if row.seen => Act::Unread,
             Act::Flag if row.flagged => Act::Unflag,
+            Act::Done if row.done => Act::Undone,
             act => act,
         };
         Some((row.id, act))
@@ -332,6 +338,7 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
             _ => keymap::action(id).is_some(),
@@ -356,7 +363,7 @@ impl InboxApp {
             }
             keymap::MAIL => {
                 self.show_mail();
-                if self.mailbox.place() == Place::View(Role::Sent) {
+                if matches!(self.mailbox.place(), Place::View(Role::Sent) | Place::Later(_)) {
                     self.mailbox.open(Place::View(Role::Inbox));
                 }
             }
@@ -365,6 +372,14 @@ impl InboxApp {
                 self.mailbox.open(Place::View(Role::Sent));
                 self.search.clear();
             }
+            keymap::LATER => {
+                self.show_mail();
+                if !matches!(self.mailbox.place(), Place::Later(_)) {
+                    self.mailbox.open(Place::Later(Pile::Pins));
+                }
+                self.search.clear();
+            }
+            keymap::SNOOZE => self.open_picker(""),
             keymap::CALENDAR => self.show_calendar(),
             keymap::COMPOSE => {
                 self.compose();
@@ -396,6 +411,22 @@ impl InboxApp {
                 }
             }
         }
+    }
+
+    /// Opens the time picker over the open message in the next frame, `typed` in its field: Snooze, or "Remind me if no
+    /// reply" for a message the owner sent. The presets still ahead are read now.
+    pub fn open_picker(&mut self, typed: &str) {
+        self.mailbox.load_presets();
+        self.picker = Some(typed.to_owned());
+    }
+
+    /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn.
+    fn show_picker(&mut self, ctx: &egui::Context) {
+        let Some(typed) = self.picker.take() else { return };
+        let mut state = crate::component::time_picker::TimePicker::default();
+        state.set_typed(&typed);
+        ctx.data_mut(|data| data.insert_temp(reader::picker_id(), state));
+        egui::Popup::open_id(ctx, reader::picker_popup());
     }
 
     /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
@@ -1021,6 +1052,7 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
+        self.show_picker(ui.ctx());
         let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
@@ -1054,7 +1086,8 @@ impl InboxApp {
         }
         let mut asked = pane::Asked::default();
         let mut add = false;
-        let mut searched = None;
+        let mut header = list::Header::default();
+        let mut done_all = None;
         let mut clicked = None;
         let mut acted = None;
         // The row sliding out is out when the list is not drawn.
@@ -1103,10 +1136,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all)
                 })
             };
-            (searched, clicked, acted, out, review) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1180,7 +1213,10 @@ impl InboxApp {
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
-            || searched.is_some()
+            || header.searched.is_some()
+            || header.open.is_some()
+            || header.show_done.is_some()
+            || done_all.is_some()
             || review
             || clicked.is_some()
             || add
@@ -1193,6 +1229,9 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone);
+        if let Some(ids) = done_all {
+            self.mailbox.done_all(&ids);
+        }
         self.apply_calendar(on_calendar);
         for asked in drawn.asked {
             self.apply(ui, asked);
@@ -1200,7 +1239,7 @@ impl InboxApp {
         if dismiss {
             self.mailbox.dismiss_error();
         }
-        self.go(&asked, searched, review);
+        self.go(&asked, header, review);
         if clicked.is_some() {
             self.mailbox.select(clicked);
         }
@@ -1227,18 +1266,21 @@ impl InboxApp {
         self.sync();
     }
 
-    /// Shows what was asked for this frame: an account narrowed, a place opened in the pane, a search, or "New
-    /// senders" from Review on the screener card.
-    fn go(&mut self, asked: &pane::Asked, searched: Option<String>, review: bool) {
+    /// Shows what was asked for this frame: an account narrowed, a place opened in the pane or by a pill of the
+    /// header, "show done", a search, or "New senders" from Review on the screener card.
+    fn go(&mut self, asked: &pane::Asked, header: list::Header, review: bool) {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
         }
-        let place = if review { Some(Place::Senders) } else { asked.open };
+        if let Some(show) = header.show_done {
+            self.mailbox.set_show_done(show);
+        }
+        let place = if review { Some(Place::Senders) } else { asked.open.or(header.open) };
         if let Some(place) = place {
             self.mailbox.open(place);
             self.search.clear();
         }
-        if let Some(query) = searched {
+        if let Some(query) = header.searched {
             self.mailbox.search(&query);
         }
     }
@@ -1458,6 +1500,7 @@ impl InboxApp {
             settings::Asked::Screener(mode) => self.mailbox.set_screener_mode(mode),
             settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
+            settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
             settings::Asked::Close => self.close_settings(),
         }
     }
@@ -1515,6 +1558,7 @@ impl InboxApp {
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => mailbox.start(id, act),
+            reader::Asked::Presets => mailbox.load_presets(),
             reader::Asked::Answer(..) => {}
         }
     }
@@ -1532,6 +1576,9 @@ mod fit_tests;
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod frame_tests;
+#[cfg(test)]
+#[path = "later_tests.rs"]
+mod later_tests;
 #[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;
