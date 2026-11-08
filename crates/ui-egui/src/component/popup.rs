@@ -12,7 +12,7 @@ use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{control_side, cut, galley, margin};
+use super::{control_side, cut, galley, margin, tick};
 
 /// Draws a float of `width` points into `ui` with `add` drawing its content.
 pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -62,6 +62,12 @@ pub fn choice(ui: &mut Ui, theme: &Theme, name: &str, chosen: bool) -> Response 
     row(ui, theme, &Keymap::empty(), chosen.then_some(IconId::Done), name, None, Some(chosen))
 }
 
+/// A choice row with an `icon` in the muted colour, which a plain tick takes the place of when it is the one
+/// `chosen`: the rows of a select.
+pub fn option(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, chosen: bool) -> Response {
+    row(ui, theme, &Keymap::empty(), (!chosen).then_some(icon), name, None, Some(chosen))
+}
+
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: &str, action: Option<&str>, chosen: Option<bool>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
@@ -80,9 +86,12 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
         }
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s + side / 2.0, rect.center().y), vec2(side, side));
-        if let Some(icon) = icon {
-            let colour = if chosen.is_some() { p.accent } else { p.text };
-            theme.icons.paint(painter, icon_rect, icon, Style::Regular, colour);
+        match (icon, chosen) {
+            (Some(icon), Some(false)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.muted),
+            (Some(icon), Some(true)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.accent),
+            (Some(icon), None) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.text),
+            (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
+            (None, _) => {}
         }
         let mut right = rect.right() - s.s;
         if let Some(chip) = action.and_then(|action| keymap.chip(ui.ctx(), action)) {

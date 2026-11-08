@@ -25,7 +25,7 @@ use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
-use crate::component::pill;
+use crate::component::segmented::{segmented, segmented_for};
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::glass;
@@ -302,49 +302,6 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
     let y = ui.cursor().top();
     ui.painter().hline(ui.max_rect().x_range(), y, Stroke::new(1.0, theme.palette.line));
     ui.add_space(1.0);
-}
-
-/// Segmented choices: the options side by side in a pill with a quiet edge, the chosen one on the selection with an
-/// edge in the full gradient and in SemiBold; each option's name in its `font`. The option pressed.
-fn segmented<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T) -> Option<T> {
-    segmented_for(ui, theme, options, current, None)
-}
-
-/// [`segmented`], each option spoken as "<option> for `about`" where several rows offer the same options.
-fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T, about: Option<&str>) -> Option<T> {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let mut chosen = None;
-    Frame::new().stroke(Stroke::new(1.0, p.control_edge)).corner_radius(255).inner_margin(3).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        ui.horizontal(|ui| {
-            for (option, name, font) in options {
-                let on = *option == current;
-                let font = if on { semibold(*font) } else { *font };
-                let galley = line(ui, &[(name, font, p.text)], f32::INFINITY);
-                let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(s.m * 2.0, s.xs * 2.0), Sense::click());
-                let spoken = match about {
-                    Some(about) => tr!("{option} for {about}", option = name, about = about),
-                    None => (*name).to_owned(),
-                };
-                response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, &spoken));
-                if ui.is_rect_visible(rect) {
-                    let round = rect.height() / 2.0;
-                    if on {
-                        pill::selected_fill(ui.painter(), theme, rect, round);
-                    } else if response.hovered() {
-                        ui.painter().rect_filled(rect, round, p.hover);
-                    }
-                    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.text);
-                    focus_ring(ui, theme, &response);
-                }
-                if response.clicked() {
-                    chosen = Some(*option);
-                }
-            }
-        });
-    });
-    chosen
 }
 
 /// A card: a picture `swatch` big drawn by `paint`, its `name` under it; framed in the focus colour while `on`.
