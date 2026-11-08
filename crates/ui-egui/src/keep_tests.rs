@@ -183,16 +183,16 @@ fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
     let path = dir.path().join("nested").join(FILE);
     let mut keep = KeepFile::new(path.clone());
     assert_eq!(keep.load_triage(), None, "nothing kept yet");
-    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List };
+    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: true };
     keep.store_triage(&chosen).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
     let kept = dir.path().join("nested").join(TRIAGE_FILE);
     let text = std::fs::read_to_string(&kept).unwrap();
-    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\""), "{text}");
+    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\"") && text.contains("\"keep_pins\": true"), "{text}");
     // Damaged, huge and wrong: the defaults or nothing.
-    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\" }").unwrap();
+    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\" }").unwrap();
     assert_eq!(keep.load_triage(), Some(Triage::default()));
-    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards });
+    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards, keep_pins: false });
     std::fs::write(&kept, b"\xff not json").unwrap();
     assert_eq!(keep.load_triage(), None);
     std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();

@@ -15,6 +15,11 @@
 //! A hovered row and a row selected by keyboard show the hover actions alike, the row's text fading out before them:
 //! Done, mark read or unread, Delete, on a real account as on the sample. Done and Delete let the row slide out first;
 //! the window does the act once it is out and shows the toast with Undo.
+//!
+//! Under the header, pills: in a folder or a view "Show done", which lists the done mail in its old place, dimmed, and
+//! "Parked (n)" while mail of the place waits on the park pile; in "Later" a pill for each pile (snoozed, pins,
+//! parked), the snoozed rows dated by when they come back. A pinned row shows the pin; a row back from a snooze says
+//! "Returned" while it is unread. "Done all" on a group's card marks the whole group done, with one Undo.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -26,12 +31,13 @@ use egui::{
 
 use super::paint::{focus_ring, line, line_height, selection};
 use crate::component::hover::{self, Action};
+use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
 use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, Place};
+use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, Pile, Place};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
@@ -54,8 +60,46 @@ pub(super) fn search_id() -> egui::Id {
     egui::Id::unique("mail-search")
 }
 
-/// The header above the list. Returns the search text when it changed this frame.
-pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, search: &mut String) -> Option<String> {
+/// What the header asked for this frame.
+#[derive(Debug, Default)]
+pub(super) struct Header {
+    /// The search text, when it changed.
+    pub(super) searched: Option<String>,
+    /// A place a pill opens: a pile of "Later", or the park pile.
+    pub(super) open: Option<Place>,
+    /// "Show done" turned on or off.
+    pub(super) show_done: Option<bool>,
+}
+
+/// The pills under the header: the piles in "Later"; "Show done" and the park pile elsewhere. Not while searching.
+fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
+    if !mailbox.query().is_empty() || mailbox.place() == Place::Senders {
+        return;
+    }
+    ui.add_space(theme.spacing.s);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(theme.spacing.xs, theme.spacing.xs);
+        if let Place::Later(shown) = mailbox.place() {
+            for pile in Pile::ALL {
+                let text = tr!("{pile} ({count})", pile = pile.text(), count = mailbox.pile_count(pile));
+                if pill(ui, theme, &text, pile == shown).clicked() {
+                    asked.open = Some(Place::Later(pile));
+                }
+            }
+            return;
+        }
+        if pill(ui, theme, tr!("Show done"), mailbox.show_done()).clicked() {
+            asked.show_done = Some(!mailbox.show_done());
+        }
+        let parked = mailbox.parked();
+        if parked > 0 && pill(ui, theme, &tr!("Parked ({count})", count = parked), false).clicked() {
+            asked.open = Some(Place::Later(Pile::Parked));
+        }
+    });
+}
+
+/// The header above the list: the title, whose mail and how many, the search field, and the pills under them.
+pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, search: &mut String) -> Header {
     let p = &theme.palette;
     let mut changed = None;
     ui.horizontal(|ui| {
@@ -83,7 +127,9 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             }
         });
     });
-    changed
+    let mut asked = Header { searched: changed, ..Header::default() };
+    pills(ui, theme, mailbox, &mut asked);
+    asked
 }
 
 fn empty(ui: &mut Ui, theme: &Theme, title: &str, detail: &str) {
@@ -126,21 +172,23 @@ fn put(ui: &Ui, theme: &Theme, at: egui::Pos2, galley: Arc<Galley>, colour: Colo
     }
 }
 
-/// The hover actions of `message`: Done, mark read or unread, Delete.
+/// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     // An open envelope opens an unread message; a closed one closes a read one again.
     let (read_icon, read) = if message.seen { (IconId::Mail, tr!("Mark as unread")) } else { (IconId::MarkRead, tr!("Mark as read")) };
+    let done = if message.done { tr!("Not done") } else { tr!("Done") };
     [
-        Action { icon: IconId::Done, name: tr!("Done"), action: Some(keymap::DONE), unavailable: None },
+        Action { icon: IconId::Done, name: done, action: Some(keymap::DONE), unavailable: None },
         Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
-        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: None, unavailable: Some(tr!("Not available yet")) },
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: None, unavailable: Some(tr!("Open the message to snooze it")) },
     ]
 }
 
 /// What the hover action at `index` of [`actions`] does to `message`.
 fn act(message: &MessageRow, index: usize) -> Option<Act> {
     match index {
+        0 if message.done => Some(Act::Undone),
         0 => Some(Act::Done),
         1 if message.seen => Some(Act::Unread),
         1 => Some(Act::Read),
@@ -199,6 +247,10 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         face.shrink_clip_rect(rect);
         face.multiply_opacity(1.0 - gone);
     }
+    if message.done {
+        // "Show done": a done message in its old place, dimmed.
+        face.multiply_opacity(DONE_OPACITY);
+    }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
     let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
     focus_ring(ui, theme, &response);
@@ -215,6 +267,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
 }
+
+/// How strongly a done row shows under "Show done".
+const DONE_OPACITY: f32 = 0.55;
 
 /// Paints a message row into `rect`; the hover action pressed. A leaving row shows no actions.
 #[expect(clippy::too_many_arguments, reason = "the parts of one row")]
@@ -261,27 +316,41 @@ fn paint_row(
     let right = rect.right() - s.m;
     let (sender_font, subject_font) = if message.seen { (f.sender, f.subject) } else { (f.sender_unread, f.subject_unread) };
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
-    let date = line(ui, &[(&mailbox.when(message), f.caption, p.muted)], f32::INFINITY);
+    let date = line(ui, &[(&mailbox.row_date(message), f.caption, p.muted)], f32::INFINITY);
     let date_left = right - date.size().x;
     put(ui, theme, pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted, until);
-    let mark = format!("  {}", tr!("New sender"));
-    let sender = if message.new_sender {
-        line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, p.accent)], date_left - s.m - left)
+    let mark = if message.new_sender {
+        Some(tr!("New sender"))
+    } else if mailbox.returned(message) {
+        Some(tr!("Returned"))
     } else {
-        line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left)
+        None
+    };
+    let sender = match mark {
+        Some(mark) => {
+            let mark = format!("  {mark}");
+            line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, p.accent)], date_left - s.m - left)
+        }
+        None => line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left),
     };
     put(ui, theme, pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text, until);
     let flag_size = second_height.max(1.0);
-    let flag_room = if message.flagged { flag_size + s.s } else { 0.0 };
+    let marks = usize::from(message.flagged) + usize::from(message.pinned);
+    let flag_room = marks as f32 * (flag_size + s.s);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let preview = format!("   {}", message.preview);
     match until {
         None => {
             let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - flag_room - left);
             ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
-            if message.flagged {
-                let at = Rect::from_min_size(pos2(right - flag_size, second + (second_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-                theme.icons.paint(ui.painter(), at, IconId::Flag, Style::Fill, p.flag);
+            // The flag at the right end, the pin left of it.
+            let mut end = right;
+            for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.flag), (message.pinned, IconId::Pin, p.accent)] {
+                if shown {
+                    let at = Rect::from_min_size(pos2(end - flag_size, second + (second_height - flag_size) / 2.0), vec2(flag_size, flag_size));
+                    theme.icons.paint(ui.painter(), at, icon, Style::Fill, colour);
+                    end -= flag_size + s.s;
+                }
             }
         }
         // The subject and the preview fade each in their own colour.
@@ -338,6 +407,8 @@ pub(super) struct Asked {
     pub(super) out: bool,
     /// Review on the screener card: "New senders" opens.
     pub(super) review: bool,
+    /// "Done all" on a group's card: the group's messages.
+    pub(super) done_all: Option<Vec<u64>>,
 }
 
 /// What the rows of a card share.
@@ -350,6 +421,8 @@ struct Rows<'a> {
     acted: Cell<Option<(u64, Act)>>,
     /// Whether the row sliding out was drawn, and whether it is out.
     leaving: Cell<(bool, bool)>,
+    /// "Done all" pressed this frame: the group's messages.
+    done_all: Cell<Option<Vec<u64>>>,
 }
 
 impl Rows<'_> {
@@ -440,7 +513,9 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
                     badge::count(ui, theme, unread, rect.right(), rect.center().y);
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    button::text(ui, theme, rows.keymap, tr!("Done all"), Some("mail.done.all"), false);
+                    if button::text(ui, theme, rows.keymap, tr!("Done all"), None, false).clicked() {
+                        rows.done_all.set(Some(messages.iter().map(|message| message.id).collect()));
+                    }
                 });
             });
         });
@@ -605,7 +680,14 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.messages().is_empty() {
-        if mailbox.query().is_empty() {
+        if let (true, Place::Later(pile)) = (mailbox.query().is_empty(), mailbox.place()) {
+            let detail = match pile {
+                Pile::Snoozed => tr!("Snoozed mail waits here until its time comes."),
+                Pile::Pins => tr!("Pinned mail stays here, wherever it is filed."),
+                Pile::Parked => tr!("Parked mail waits here, out of the inbox, without a time."),
+            };
+            empty(ui, theme, tr!("Nothing here"), detail);
+        } else if mailbox.query().is_empty() {
             empty(ui, theme, tr!("Nothing here"), tr!("This folder holds no messages."));
         } else {
             empty(ui, theme, tr!("No messages match"), &tr!("No subject, sender or recipient holds “{query}”.", query = mailbox.query()));
@@ -625,6 +707,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
+        done_all: Cell::new(None),
     };
     let (clicked, review) = match view {
         InboxView::Cards => grouped(ui, &rows, &groups, wait),
@@ -638,5 +721,5 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     };
     let (drawn, out) = rows.leaving.get();
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review }
+    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take() }
 }

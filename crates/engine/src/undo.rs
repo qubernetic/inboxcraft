@@ -9,7 +9,7 @@ use inboxcraft_model::{CalendarEvent, CalendarEventId, EmailAddress, Flag, Folde
 use crate::AgentClass;
 
 /// The most acts the history holds; the oldest goes first.
-pub(crate) const MAX_HISTORY: usize = 100;
+pub const MAX_HISTORY: usize = 100;
 
 /// One act in the history.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -13,7 +13,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use super::InboxApp;
 use inboxcraft_model::Role as FolderRole;
 
-use crate::mailbox::{Mailbox, Place};
+use crate::mailbox::{Mailbox, Pile, Place};
 use crate::sample;
 use crate::shot::render;
 use crate::theme::{Mode, PRESETS, Theme, contrast, install_fonts};
@@ -74,15 +74,20 @@ fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_gradient() {
 }
 
 #[test]
-fn the_rail_opens_sent_and_says_which_views_are_not_built_yet() {
+fn the_rail_opens_sent_and_later_and_says_which_views_are_not_built_yet() {
     let mut harness = Harness::builder()
         .with_size(vec2(1100.0, 700.0))
         .with_context_setup(install_fonts)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app());
     harness.run();
-    for name in ["Start", "Pins"] {
-        assert!(harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled(), "{name}");
-    }
+    assert!(harness.get_by_role_and_label(Role::Button, "Start").accesskit_node().is_disabled());
+    harness.get_by_role_and_label(Role::Button, "Later").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Pins), "Later opens on the pins");
+    assert_eq!(harness.get_by_role_and_label(Role::Button, "Later").accesskit_node().toggled(), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::Button, "Mail").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().place(), Place::View(FolderRole::Inbox), "Mail leaves Later for the inbox");
     harness.get_by_role_and_label(Role::Button, "Sent mail").click();
     harness.run();
     assert_eq!(harness.state().mailbox().place(), Place::View(FolderRole::Sent));

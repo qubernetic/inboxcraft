@@ -3,7 +3,7 @@
 
 //! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Triage, Sending and
 //! Shortcuts; the others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Triage holds
-//! the screener's mode, how the inbox shows its groups and each account's grouping. Sending holds each
+//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds each
 //! account's signature, saved with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
@@ -84,6 +84,8 @@ pub(super) enum Asked {
     InboxView(InboxView),
     /// Group the account's inbox, or not.
     Grouped(u64, bool),
+    /// Whether a pin stays on a message when it is done.
+    KeepPins(bool),
     Close,
 }
 
@@ -812,6 +814,13 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
         row(ui, theme, tr!("Inbox"), &[view_note], &mut |ui| {
             if let Some(view) = segmented(ui, theme, &views, mailbox.inbox_view()) {
                 asked = Some(Asked::InboxView(view));
+            }
+        });
+        let keep = mailbox.pins_outlast_done();
+        let pins_note = tr!("Off, Done takes the pin off; on, a pinned message stays in Pins after it is done.");
+        row(ui, theme, tr!("Keep pins on done mail"), &[pins_note], &mut |ui| {
+            if switch(ui, theme, tr!("Keep pins on done mail"), keep).clicked() {
+                asked = Some(Asked::KeepPins(!keep));
             }
         });
         if !mailbox.accounts().is_empty() {
