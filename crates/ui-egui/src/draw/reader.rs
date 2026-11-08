@@ -18,12 +18,19 @@
 //! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Under the subject, chips
 //! say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
 //!
-//! A message with an invitation shows its card over the text (see `super::invite`): the event, what changed, and
-//! Going, Maybe and No, or the answer given with a way to change it.
+//! A message of a longer thread has a header: the avatar, the name, "to ..." under it and the date at the right. The
+//! open message of a thread of one has none: who wrote, their address and the date stand under the subject. Details
+//! fades in beside them when the pointer comes near (it is there for the keyboard and a screen reader all the time,
+//! and in More), and opens the full header with every address.
 //!
-//! A message the screener holds opens as a preview that decides nothing: over it a card asks "Let <sender> in?", with
-//! the groups to let them into, Accept, Accept and open, and Block. A sent message a delivery report says did not get
-//! through opens under a banner that says so, with the reason the report gave.
+//! A message with an invitation shows its card over the text (see `super::invite`): the event, what changed, and
+//! Going, Maybe and No, or the answer given with a way to change it. When the text only says what the card says, the
+//! card alone stands for the message, without the text or Reply.
+//!
+//! A message the screener holds opens as a preview that decides nothing: its sender stands where the toolbar and the
+//! subject are (avatar, name, address, first mail, messages waiting), then a card asks "Let <sender> in?", with the
+//! groups to let them into, Accept, Accept and open, and Block; the message follows without Reply. A sent message a
+//! delivery report says did not get through opens under a banner that says so, with the reason the report gave.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -38,7 +45,7 @@ use egui::{
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
-use crate::component::button::{IconButton, TextButton};
+use crate::component::button::{self, IconButton, TextButton};
 use crate::component::pill::pill;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
@@ -155,6 +162,10 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         }
         if row.follow_up.is_some() && popup::entry(ui, theme, keymap, tr!("Take the reminder off"), None).clicked() {
             drawn.asked.push(Asked::Act(row.id, Act::CancelFollowUp));
+        }
+        let name = if reader.shows_details(row.id) { tr!("Hide the full header") } else { tr!("Show the full header") };
+        if popup::entry(ui, theme, keymap, name, None).clicked() {
+            drawn.asked.push(Asked::Details(row.id));
         }
         ui.add_space(theme.spacing.xs);
         ui.separator();
@@ -358,8 +369,14 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     });
     let count = reader.thread().len();
     let chips = reader.open_id().map(|id| states(mailbox, id)).unwrap_or_default();
-    if group.is_some() || count > 1 || !chips.is_empty() {
-        // The message's group and its state as chips, then who wrote in the thread.
+    // A message without a header: who wrote it stands here. Otherwise who wrote in the thread.
+    let bare_id = reader.open_id().and_then(|id| reader.opened(id)).filter(|opened| bare(mailbox, reader, opened));
+    let line = bare_id
+        .and_then(|opened| from_line(mailbox, opened))
+        .or_else(|| (count > 1).then(|| tr!("{writers} · {count} messages", writers = reader.writers().join(", "), count = count)));
+    if group.is_some() || line.is_some() || !chips.is_empty() {
+        // The message's group and its state as chips, then the line.
+        let near = pointer_near(ui, super::paint::line_height(ui, theme.fonts.button) + s.s);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s;
             if let Some(group) = &group {
@@ -368,13 +385,86 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
             for (name, spoken) in &chips {
                 badge::chip(ui, theme, name, spoken);
             }
-            if count > 1 {
-                let writers = reader.writers().join(", ");
-                let line = tr!("{writers} · {count} messages", writers = writers, count = count);
+            if let Some(line) = line {
                 ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
+            }
+            if let Some(opened) = bare_id
+                && quiet(ui, theme, keymap, tr!("Details"), ("details", opened.id), near).clicked()
+            {
+                drawn.asked.push(Asked::Details(opened.id));
             }
         });
     }
+}
+
+/// The sender's name, their address and the date, for a message without a header of its own.
+fn from_line(mailbox: &Mailbox, opened: &Opened) -> Option<String> {
+    let person = opened.header.from.first()?;
+    let mut parts = vec![person.shown().to_owned()];
+    if !person.name.is_empty() {
+        parts.push(person.address.clone());
+    }
+    if let Some(date) = opened.header.date {
+        parts.push(mailbox.short_date(date));
+    }
+    Some(parts.join(" · "))
+}
+
+/// Whether the text of `opened` only says what its invitation card says.
+fn restated(opened: &Opened) -> bool {
+    let Some(invite) = opened.invite.as_ref().filter(|_| !opened.cut && opened.files.is_empty()) else { return false };
+    let mut said = String::new();
+    let plain = match &opened.content {
+        Content::Text(segments) => segments.iter().all(|segment| match segment {
+            Segment::Text(text) => {
+                said.push_str(text);
+                said.push(' ');
+                true
+            }
+            Segment::Quote { .. } => false,
+        }),
+        Content::Html(document) => document.blocks.iter().all(|block| match block {
+            Block::Text { quote: 0, spans, .. } => {
+                for span in spans {
+                    said.push_str(&span.text);
+                    said.push(' ');
+                }
+                true
+            }
+            _ => false,
+        }),
+        Content::Loading | Content::NotKept | Content::TooLarge | Content::Unreadable => false,
+    };
+    plain && invite.restates(&said)
+}
+
+/// Whether `opened` is the open message drawn without a header of its own: the only message of its thread, one the
+/// screener holds, or one whose invitation card says all it says. The full header brings its header back.
+fn bare(mailbox: &Mailbox, reader: &Reader, opened: &Opened) -> bool {
+    Some(opened.id) == reader.open_id()
+        && !reader.shows_details(opened.id)
+        && (reader.thread().len() == 1 || mailbox.held(opened.id) || restated(opened))
+}
+
+/// Whether the pointer is over the `height` of `ui` to come.
+fn pointer_near(ui: &Ui, height: f32) -> bool {
+    ui.rect_contains_pointer(Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height)))
+}
+
+/// A link that is there for the keyboard and a screen reader all the time and shows when the pointer is `near` or it
+/// has the focus.
+fn quiet(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, salt: (&str, u64), near: bool) -> egui::Response {
+    let focus = Id::unique("reader-quiet").with(salt);
+    let focused = ui.data(|data| data.get_temp::<bool>(focus)).unwrap_or(false);
+    let inner = ui.scope(|ui| {
+        if !near && !focused {
+            ui.multiply_opacity(0.0);
+        }
+        button::link(ui, theme, keymap, name)
+    });
+    let has_focus = inner.inner.has_focus();
+    ui.data_mut(|data| data.insert_temp(focus, has_focus));
+    inner.inner
 }
 
 /// A card's frame: the translucent card colour with a line round it.
@@ -409,7 +499,7 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
         let date_left = rect.right() - s.l - date_galley.size().x;
         ui.painter().galley(pos2(date_left, rect.center().y - date_galley.size().y / 2.0), date_galley, p.muted);
         let preview = format!("   {}", row.preview);
-        let text = super::paint::line(ui, &[(&row.sender, f.sender_unread, p.text), (&preview, f.preview, p.muted)], date_left - s.m - left);
+        let text = super::paint::line(ui, &[(&row.sender, f.sender, p.text), (&preview, f.preview, p.muted)], date_left - s.m - left);
         ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
         super::paint::focus_ring(ui, theme, &response);
     }
@@ -418,64 +508,85 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     }
 }
 
-/// The header: the sender and the date, whom it went to, and the full header when asked.
-fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
+/// The side of the header's avatar: as tall as the two lines beside it, with a little room.
+fn header_side(ui: &Ui, theme: &Theme) -> f32 {
+    super::paint::line_height(ui, theme.fonts.heading) + super::paint::line_height(ui, theme.fonts.caption) + theme.spacing.s
+}
+
+/// The header: the avatar, the sender with whom it went to under them, and the date at the right; Details and Fold,
+/// quiet until the pointer is near. With the details open, the date goes into the full header, the addresses too.
+fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
     let p = &theme.palette;
     let f = &theme.fonts;
+    let s = &theme.spacing;
     let Header { from, reply_to, to, cc, date, .. } = &opened.header;
-    // The date and the buttons first, at the right; the avatar, the sender and the address then share what is left,
-    // cut with an ellipsis rather than running into the date.
+    let details = reader.shows_details(opened.id);
+    let side = header_side(ui, theme);
+    let near = pointer_near(ui, side);
     ui.horizontal(|ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let text = if reader.shows_details(opened.id) { tr!("Hide details") } else { tr!("Details") };
-            if ui.button(text).clicked() {
-                drawn.asked.push(Asked::Details(opened.id));
+        ui.spacing_mut().item_spacing.x = s.gap;
+        if let Some(person) = from.first() {
+            crate::component::avatar::avatar(ui, theme, &person.name, &person.address, side);
+        }
+        // The date and the links first, at the right; the two lines then share what is left, cut with an ellipsis.
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            if details {
+                if TextButton::new(tr!("Hide details")).secondary().show(ui, theme, keymap).clicked() {
+                    drawn.asked.push(Asked::Details(opened.id));
+                }
+            } else {
+                if let Some(date) = date {
+                    ui.label(RichText::new(mailbox.short_date(*date)).font(f.caption.id()).color(p.muted));
+                }
+                if quiet(ui, theme, keymap, tr!("Details"), ("details", opened.id), near).clicked() {
+                    drawn.asked.push(Asked::Details(opened.id));
+                }
             }
-            if Some(opened.id) != reader.open_id() && ui.button(tr!("Fold")).clicked() {
+            if Some(opened.id) != reader.open_id() && quiet(ui, theme, keymap, tr!("Fold"), ("fold", opened.id), near).clicked() {
                 drawn.asked.push(Asked::Expand(opened.id));
             }
-            if let Some(date) = date {
-                ui.label(RichText::new(mailbox.short_date(*date)).font(f.caption.id()).color(p.muted));
-            }
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                if let Some(person) = from.first() {
-                    let side = super::paint::line_height(ui, f.heading) * 1.5;
-                    crate::component::avatar::avatar(ui, theme, &person.name, &person.address, side);
-                }
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 let sender = from.first().map_or_else(|| tr!("(no sender)").to_owned(), |person| person.shown().to_owned());
-                ui.add(egui::Label::new(RichText::new(sender).font(f.heading.id()).color(p.text)).truncate());
-                if let Some(address) = from.first().filter(|person| !person.name.is_empty()).map(|person| person.address.clone()) {
-                    ui.add(egui::Label::new(RichText::new(address).font(f.caption.id()).color(p.muted)).truncate());
+                let name = ui.add(egui::Label::new(RichText::new(sender).font(f.heading.id()).color(p.text)).truncate());
+                // The address, one hover away, for whoever wonders who this really is.
+                if let Some(person) = from.first().filter(|person| !person.name.is_empty()) {
+                    name.on_hover_text(&person.address);
+                }
+                if !details {
+                    let mut whom = names(to);
+                    if !cc.is_empty() {
+                        whom = tr!("{to}, copy to {cc}", to = whom, cc = names(cc));
+                    }
+                    ui.add(egui::Label::new(RichText::new(tr!("to {whom}", whom = whom)).font(f.caption.id()).color(p.muted)).truncate());
                 }
             });
         });
     });
-    if !reader.shows_details(opened.id) {
-        let mut whom = names(to);
-        if !cc.is_empty() {
-            whom = tr!("{to}, copy to {cc}", to = whom, cc = names(cc));
-        }
-        ui.label(RichText::new(tr!("to {whom}", whom = whom)).font(f.caption.id()).color(p.muted));
+    if !details {
         return;
     }
-    Grid::new(("details", opened.id)).num_columns(2).spacing(vec2(theme.spacing.m, theme.spacing.xs)).show(ui, |ui| {
-        let row = |ui: &mut Ui, name: &str, value: String| {
-            ui.label(RichText::new(name).font(f.caption.id()).color(p.muted));
-            ui.label(RichText::new(value).font(f.caption.id()).color(p.text));
-            ui.end_row();
-        };
-        let full = |people: &[Person]| people.iter().map(Person::full).collect::<Vec<_>>().join(", ");
-        row(ui, tr!("From"), full(from));
-        if !reply_to.is_empty() {
-            row(ui, tr!("Reply to"), full(reply_to));
-        }
-        row(ui, tr!("To"), full(to));
-        if !cc.is_empty() {
-            row(ui, tr!("Copy"), full(cc));
-        }
-        if let Some(date) = date {
-            row(ui, tr!("Date"), mailbox.full_date(*date));
-        }
+    Frame::new().fill(p.panel).corner_radius(s.corner).inner_margin(margin(s.m)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        Grid::new(("details", opened.id)).num_columns(2).spacing(vec2(s.xl, s.xs)).show(ui, |ui| {
+            let row = |ui: &mut Ui, name: &str, value: String| {
+                ui.label(RichText::new(name).font(f.caption.id()).color(p.muted));
+                ui.add(egui::Label::new(RichText::new(value).font(f.caption.id()).color(p.text)).wrap());
+                ui.end_row();
+            };
+            let full = |people: &[Person]| people.iter().map(Person::full).collect::<Vec<_>>().join(", ");
+            row(ui, tr!("From"), full(from));
+            row(ui, tr!("To"), full(to));
+            if !cc.is_empty() {
+                row(ui, tr!("Copy"), full(cc));
+            }
+            if !reply_to.is_empty() {
+                row(ui, tr!("Reply to"), full(reply_to));
+            }
+            if let Some(date) = date {
+                row(ui, tr!("Date"), mailbox.full_date(*date));
+            }
+        });
     });
 }
 
@@ -498,13 +609,15 @@ fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {
 }
 
 /// The remote-content banner, while remote pictures of the message are blocked.
-fn banner(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
+fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
     let Content::Html(document) = &opened.content else { return };
     if document.remote_blocked == 0 || reader.remote_allowed(opened.id) {
         return;
     }
     let p = &theme.palette;
-    Frame::new().fill(p.panel).inner_margin(margin(theme.spacing.m)).corner_radius(theme.spacing.corner).show(ui, |ui| {
+    let s = &theme.spacing;
+    let f = &theme.fonts;
+    Frame::new().fill(p.panel).inner_margin(egui::Margin::symmetric(margin(s.m).left, margin(s.s).top)).corner_radius(s.card).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let count = document.remote_blocked;
         let text = if count == 1 {
@@ -512,17 +625,39 @@ fn banner(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, drawn: &
         } else {
             tr!("{count} remote pictures are not shown. Loading them tells the sender that you opened this message.", count = count)
         };
-        ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(p.text));
-        ui.horizontal(|ui| {
-            if ui.button(tr!("Load once")).clicked() {
-                drawn.asked.push(Asked::Once(opened.id));
+        let always = opened.header.from.first().map(|sender| tr!("Always for {address}", address = sender.address));
+        let mut links: Vec<(&str, Asked)> = vec![(tr!("Load once"), Asked::Once(opened.id))];
+        links.extend(always.as_deref().map(|always| (always, Asked::Always(opened.id))));
+        let side = super::paint::line_height(ui, f.body);
+        let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.text)], f32::INFINITY).size().x;
+        let wanted = side + width(ui, &text, f.body) + links.iter().map(|(name, _)| width(ui, name, f.button) + s.l).sum::<f32>();
+        let beside = wanted + s.l * 2.0 <= ui.available_width();
+        let mut link = |ui: &mut Ui, name: &str, asked: &Asked| {
+            if button::link(ui, theme, keymap, name).clicked() {
+                drawn.asked.push(asked.clone());
             }
-            if let Some(sender) = opened.header.from.first()
-                && ui.button(tr!("Always for {address}", address = sender.address)).clicked()
-            {
-                drawn.asked.push(Asked::Always(opened.id));
+        };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s;
+            let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+            theme.icons.paint(ui.painter(), rect, IconId::Shield, Style::Regular, p.accent);
+            ui.add(egui::Label::new(RichText::new(text).font(f.body.id()).color(p.text)).wrap());
+            if beside {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    for (name, asked) in links.iter().rev() {
+                        link(ui, name, asked);
+                    }
+                });
             }
         });
+        if !beside {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = s.s;
+                for (name, asked) in &links {
+                    link(ui, name, asked);
+                }
+            });
+        }
     });
 }
 
@@ -773,7 +908,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
 
 /// The attachment tiles, side by side as far as they fit: a file mark, the name (cut to fit) and the size, and a Save
 /// button. Each tile is measured first, so the row wraps before a tile rather than cutting it at the side.
-fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn) {
+fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files: &[File], drawn: &mut Drawn) {
     if files.is_empty() {
         return;
     }
@@ -784,7 +919,7 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
     let gap = ui.spacing().item_spacing.x;
     let side = super::paint::line_height(ui, f.body) * 1.5;
     let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.text)], f32::INFINITY).size().x;
-    let save = width(ui, tr!("Save"), f.button) + ui.spacing().button_padding.x * 2.0;
+    let save = width(ui, tr!("Save"), f.button) + button::LINK_PAD * 2.0;
     let row = ui.available_width();
     ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
         for file in files {
@@ -792,7 +927,7 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
             let text = width(ui, &file.name, f.body).max(width(ui, &size, f.caption));
             let tile = (side + text + save + gap * 2.0 + s.s * 2.0 + 2.0).min(row);
             ui.allocate_ui(vec2(tile, side), |ui| {
-                Frame::new().stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s)).corner_radius(s.corner).show(ui, |ui| {
+                Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s)).corner_radius(s.card).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
                         theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.accent);
@@ -801,7 +936,7 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
                             ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.text)).truncate());
                             ui.label(RichText::new(&size).font(f.caption.id()).color(p.muted));
                         });
-                        let response = ui.button(tr!("Save"));
+                        let response = button::link(ui, theme, keymap, tr!("Save"));
                         let spoken = tr!("Save {name}", name = file.name);
                         response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
                         if response.clicked() {
@@ -814,7 +949,44 @@ fn files(ui: &mut Ui, theme: &Theme, id: u64, files: &[File], drawn: &mut Drawn)
     });
 }
 
-/// One unfolded message, on a card; the open one ends with Reply, Reply all and Forward.
+/// The text of a message, and what stands for its text when it is not here.
+fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, textures: &mut Textures, drawn: &mut Drawn) {
+    let say = |ui: &mut Ui, text: &str| {
+        ui.label(RichText::new(text).font(theme.fonts.body.id()).color(theme.palette.muted));
+    };
+    match &opened.content {
+        Content::Loading => say(ui, tr!("Loading the message…")),
+        Content::NotKept => say(ui, tr!("The text of this message is not here yet. It comes with the next connection.")),
+        Content::TooLarge => say(ui, tr!("This message is too large to keep, so it cannot be shown.")),
+        Content::Unreadable => say(ui, tr!("This message cannot be read.")),
+        Content::Text(segments) => text(ui, theme, reader, opened.id, segments, drawn),
+        Content::Html(document) => blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn),
+    }
+    if opened.cut {
+        say(ui, tr!("The text is cut here: the rest is longer than the reader shows."));
+    }
+}
+
+/// Reply, Reply all and Forward, under the open message.
+fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, drawn: &mut Drawn) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = theme.spacing.s;
+        let answers = [
+            (TextButton::new(tr!("Reply")).primary().icon(IconId::Reply), Answer::Reply),
+            (TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll), Answer::ReplyAll),
+            (TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward), Answer::Forward),
+        ];
+        for (button, answer) in answers {
+            if button.show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Answer(id, answer));
+            }
+        }
+    });
+}
+
+/// One unfolded message. With a header it is one card, the text under the sender's name; without one (see [`bare`])
+/// the remote-content banner stands over the card and the attachments under it, and the invitation's card alone stands
+/// for a message it says all of. The open one ends with Reply, Reply all and Forward, but for a preview of held mail.
 #[expect(clippy::too_many_arguments, reason = "the drawing context of one message")]
 fn message(
     ui: &mut Ui,
@@ -826,47 +998,86 @@ fn message(
     textures: &mut Textures,
     drawn: &mut Drawn,
 ) {
-    let p = &theme.palette;
-    card_frame(theme, theme.spacing.m).show(ui, |ui| {
+    let s = &theme.spacing;
+    let open = Some(opened.id) == reader.open_id();
+    let held = open && mailbox.held(opened.id);
+    let bare = bare(mailbox, reader, opened);
+    if let (true, false, true, Some(invite)) = (bare, held, restated(opened), &opened.invite) {
+        super::invite::card(ui, theme, keymap, reader, invite, drawn);
+        return;
+    }
+    if bare {
+        banner(ui, theme, keymap, reader, opened, drawn);
+    }
+    card_frame(theme, s.l).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        header(ui, theme, mailbox, reader, opened, drawn);
-        ui.add_space(theme.spacing.m);
-        banner(ui, theme, reader, opened, drawn);
+        if !bare {
+            header(ui, theme, keymap, mailbox, reader, opened, drawn);
+            ui.add_space(s.s);
+            banner(ui, theme, keymap, reader, opened, drawn);
+        }
+        if held && bare {
+            let subject = if opened.header.subject.is_empty() { tr!("(no subject)") } else { opened.header.subject.as_str() };
+            ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.heading.id()).color(theme.palette.text)).wrap());
+        }
         if let Some(invite) = &opened.invite {
             super::invite::card(ui, theme, keymap, reader, invite, drawn);
+            ui.add_space(s.s);
         }
-        ui.add_space(theme.spacing.s);
-        let say = |ui: &mut Ui, text: &str| {
-            ui.label(RichText::new(text).font(theme.fonts.body.id()).color(p.muted));
-        };
-        match &opened.content {
-            Content::Loading => say(ui, tr!("Loading the message…")),
-            Content::NotKept => say(ui, tr!("The text of this message is not here yet. It comes with the next connection.")),
-            Content::TooLarge => say(ui, tr!("This message is too large to keep, so it cannot be shown.")),
-            Content::Unreadable => say(ui, tr!("This message cannot be read.")),
-            Content::Text(segments) => text(ui, theme, reader, opened.id, segments, drawn),
-            Content::Html(document) => blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn),
-        }
-        if opened.cut {
-            say(ui, tr!("The text is cut here: the rest is longer than the reader shows."));
-        }
-        files(ui, theme, opened.id, &opened.files, drawn);
-        if Some(opened.id) == reader.open_id() {
-            ui.add_space(theme.spacing.m);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = theme.spacing.s;
-                let answers = [
-                    (TextButton::new(tr!("Reply")).primary().icon(IconId::Reply), Answer::Reply),
-                    (TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll), Answer::ReplyAll),
-                    (TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward), Answer::Forward),
-                ];
-                for (button, answer) in answers {
-                    if button.show(ui, theme, keymap).clicked() {
-                        drawn.asked.push(Asked::Answer(opened.id, answer));
-                    }
+        let indent = if bare || reader.shows_details(opened.id) { 0 } else { margin(header_side(ui, theme) + s.gap).left };
+        Frame::new().inner_margin(Margin { left: indent, ..Margin::ZERO }).show(ui, |ui| {
+            body(ui, theme, reader, opened, textures, drawn);
+            if !bare {
+                files(ui, theme, keymap, opened.id, &opened.files, drawn);
+            }
+            if open && !held {
+                ui.add_space(s.s);
+                answers(ui, theme, keymap, opened.id, drawn);
+            }
+        });
+    });
+    if bare {
+        files(ui, theme, keymap, opened.id, &opened.files, drawn);
+    }
+}
+
+/// What stands in place of the toolbar and the subject over a message the screener holds: the sender, their address,
+/// when their first mail came and how many wait. Details is quiet until the pointer is near.
+fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, id: u64, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let s = &theme.spacing;
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
+    let theirs = || mailbox.messages().iter().filter(|other| other.address == row.address);
+    let first = theirs().filter_map(|other| other.date).min();
+    let waiting = mailbox.waiting().iter().find(|waiting| waiting.address == row.address).map_or(0, |waiting| waiting.messages.len());
+    let count = waiting.max(theirs().count());
+    let mut parts = vec![row.address.clone()];
+    if let Some(first) = first {
+        parts.push(tr!("first mail {when}", when = mailbox.short_date(first)));
+    }
+    parts.push(if count == 1 { tr!("1 message waiting").to_owned() } else { tr!("{count} messages waiting", count = count) });
+    let side = super::paint::line_height(ui, f.title) + super::paint::line_height(ui, f.caption);
+    let near = pointer_near(ui, side);
+    super::frame::beside(ui, theme, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.m;
+            crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // A reader that fills the window has no list beside it to go back to.
+                if reader.full_width() && IconButton::new(IconId::Close, tr!("Leave full width")).show(ui, theme, keymap).clicked() {
+                    drawn.asked.push(Asked::FullWidth(false));
                 }
+                if quiet(ui, theme, keymap, tr!("Details"), ("details", id), near).clicked() {
+                    drawn.asked.push(Asked::Details(id));
+                }
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.title.id()).color(p.text)).truncate());
+                    ui.add(egui::Label::new(RichText::new(parts.join(" · ")).font(f.caption.id()).color(p.muted)).truncate());
+                });
             });
-        }
+        });
     });
 }
 
@@ -878,9 +1089,8 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
     let chosen_id = egui::Id::unique("screen-into").with(id);
     let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    Frame::new().fill(p.card).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = s.s;
+    super::invite::edged(ui, theme, super::invite::Edge::Gradient, |ui| {
+        ui.spacing_mut().item_spacing.y = s.m;
         let title = tr!("Let {sender} in?", sender = row.sender);
         ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.text)).wrap());
         ui.horizontal_wrapped(|ui| {
@@ -901,12 +1111,11 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
             if TextButton::new(tr!("Accept and open")).secondary().show(ui, theme, keymap).clicked() {
                 drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: true }));
             }
-            if TextButton::new(tr!("Block")).secondary().icon(IconId::Junk).show(ui, theme, keymap).clicked() {
+            if TextButton::new(tr!("Block")).danger().icon(IconId::Failed).show(ui, theme, keymap).clicked() {
                 drawn.asked.push(Asked::Act(id, Act::Block));
             }
         });
-        let note =
-            tr!("Accept lets their held mail and their future mail in. Blocked mail goes to Blocked, never loads remote content and never notifies.");
+        let note = tr!("Blocked mail never loads remote content and never notifies.");
         ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(p.muted)).wrap());
     });
     ui.label(RichText::new(tr!("Preview · nothing is accepted yet")).font(theme.fonts.caption.id()).color(p.muted));
@@ -958,9 +1167,14 @@ pub(super) fn show(
             });
         });
     }
-    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(ui, |ui| {
-        toolbar(ui, theme, keymap, mailbox, reader, &mut drawn);
-    });
+    let held = reader.open_id().filter(|id| mailbox.held(*id));
+    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(
+        ui,
+        |ui| match held {
+            Some(id) => sender_header(ui, theme, keymap, mailbox, reader, id, &mut drawn),
+            None => toolbar(ui, theme, keymap, mailbox, reader, &mut drawn),
+        },
+    );
     ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s;
         Frame::new()
@@ -971,7 +1185,7 @@ pub(super) fn show(
                 bottom: margin(theme.spacing.l).bottom,
             })
             .show(ui, |ui| {
-                if let Some(id) = reader.open_id().filter(|id| mailbox.held(*id)) {
+                if let Some(id) = held {
                     screening(ui, theme, keymap, mailbox, id, &mut drawn);
                 }
                 if let Some(reason) =

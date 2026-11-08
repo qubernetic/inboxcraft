@@ -342,11 +342,15 @@ window asks for the next frame; once it has landed, nothing does.
   rather than running under it. Review opens **New senders**: the mail held (`screener.list`, `mail.list` of the
   screener folders and of the inbox rows marked as new), newest first. A row from a new sender says "New sender"
   in the accent colour after the sender, and a screen reader hears "new sender".
-- **Let in card** (the reader, over a message the screener holds; the design file's Triage page): "Let <sender>
-  in?" in the heading font, "Into" and a pill for each group (none chosen at first; a second press clears it),
-  Accept (primary), Accept and open, Block, and what they do in the caption font; the card's edge is the focus
-  colour. Under it "Preview · nothing is accepted yet": the message is read with `mail.read`, so it stays unread and
-  nothing goes into the history, and it shows no group chip. Accept, Accept and open and Block are acts with a toast
+- **Let in card** (the reader, over a message the screener holds; the design file's Triage page): the sender stands
+  where the toolbar and the subject are (avatar, name in the title font, address, first mail, how many wait, a quiet
+  Details link). Then "Let <sender> in?" in the heading font, "Into" and a pill for each group (none chosen at
+  first; a second press clears it), Accept (primary), Accept and open, Block (filled with the error colour, the
+  Failed icon) and "Blocked mail never loads remote content and never notifies." in the caption font; the card's
+  edge is the preset's gradient. Under it "Preview · nothing is accepted yet", then the message with its subject in
+  the heading font and no Reply: it is read with `mail.read`, so it stays unread and nothing goes into the history,
+  and it shows no group chip. Under the list of "New senders" the screener's mode as pills (`screener.mode`, as on
+  the Triage page). Accept, Accept and open and Block are acts with a toast
   and Undo ("Accepted <sender> into <group>", "Accepted <sender>", "Blocked <sender>"); Accept and open shows the
   message in the inbox.
 - **Grouped inbox**, as the Triage page chooses: **Cards** (the default): a card for each group (People, Updates,
@@ -419,22 +423,29 @@ the icon sits among others at the same size.
   due ("Reminder Mon 09:00") and "Returned" while it is unread after a snooze; a screen reader hears each in full.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
   colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
-  strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
+  in the sender font, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
   message ends with Reply (primary, on the preset's gradient), Reply all and Forward; each opens the composer in the
   reader's place over a draft the engine filled in (the recipients, "Re: " or "Fwd: ", the quote), the text with the
   focus, or To for a forward. A draft being written is closed and kept first.
-- **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
-  it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
-  To, Copy and the date in full.
+- **Header**: in a thread of more than one message, the sender's avatar as tall as the two lines beside it, the
+  name in the heading font, "to ..." under it, the date on the right; the two lines are cut with an ellipsis before
+  they reach the date. The message's text starts under the name. A message alone in its thread has no header: who
+  wrote, the address and the date stand under the subject beside the group chip. In both a quiet Details link fades
+  in when the pointer comes near (for the keyboard and a screen reader it is there all the time, and More has "Show
+  the full header"); it opens the full header, From, To, Copy, Reply to and the date on a panel-tinted box, the date
+  and the "to" line gone from above it, with Hide details (secondary). The address is on the name's hover too, and
+  any warning stays where the reader shows it (the link status below).
 - **Remote content**: while remote pictures are blocked, a banner on the panel colour says how many and that loading
-  them tells the sender the message was opened, with "Load once" and "Always for <address>". A blocked picture is a
+  them tells the sender the message was opened, with the links "Load once" and "Always for <address>" at its right
+  end, or under the text when they do not fit; over the card of a message without a header. A blocked picture is a
   muted box with its alternative text, so the layout shows where it was.
 - **Body**: plain text in the body size; a quote is a "Show quoted text (n lines)" button, and once shown it is
   muted text beside a bar, its attribution line small above it. HTML blocks: headings in the title or heading size,
   list items with their bullet or number, links in the accent colour and underlined, quoted blocks folded the same
   way.
 - **Attachments**: tiles side by side, wrapping, each with the File icon (Regular, in the accent colour, one and a
-  half body lines high), the name (cut to fit), the size and Save.
+  half body lines high), the name (cut to fit), the size and the link Save; under the card of a message without a
+  header.
 - **Link status**: only while the pointer is on a link, a float over the reader's bottom left corner says where it
   goes; a link whose text names another place shows "Careful: ..." in the error colour. The float takes no
   pointer, so the link under it stays hovered. A notice (a save, a copied link, an error) shows in a line at the
@@ -630,18 +641,23 @@ the icon sits among others at the same size.
 
 ## Invitation card
 A message that carries an invitation (iMIP) shows a card between its header and its text, as the design file's
-"Invitation in a message" draws it, and its calendar part is no file tile:
+"Invitation in a message" draws it, and its calendar part is no file tile. When the message's text only says what
+the card says (its words are the card's, or the small words of a generated line), the card alone stands for the
+message, without the text or Reply; a body with anything more stays under the card:
 - **Head**: a date tile on the accent's text gradient (the month in three capitals in the caption size, the day of
-  the month in the title size, named by the event's time for a screen reader), the event's title in the heading
-  font and under it, muted, when and where ("Saturday 7 November · 12:30 – 13:30 · The Gull café").
-- **Changed**: on a panel-tinted chip with the Changed icon (arrows in a circle), strong, what a newer version changed
+  the month in the title size, named by the event's time for a screen reader), the event's title in the title
+  font and under it when and where ("Saturday 7 November · 12:30 – 13:30 · The Gull café").
+- **Edge**: the preset's gradient (1.5 points) while an answer is wanted, the error colour on a cancellation, the
+  hairline otherwise.
+- **Changed**: on a panel-tinted chip with the Changed icon (arrows in a circle), both in the error colour, the
+  caption semi-bold, what a newer version changed
   since the one before: "Changed: time 11:00 → 12:30", "place The Gull café → Harbour Kitchen", "title", "repeat".
 - **Answers**: Going (primary, the Done icon), Maybe and No (secondary), and in the caption, muted, "Your answer goes
   to odile@example.org at once." A press sends the answer at once and the reader's notice says "Your answer is on its
   way."; the card then says "You answered Going." with Change answer (secondary), which offers the three again with
   Keep my answer. An invitation that cannot be answered says why in the caption ("This invitation cannot be
   answered: you organise it.").
-- **Cancelled**: "Odile Brannock cancelled this event." and Remove from calendar (secondary, the Delete icon) while
+- **Cancelled**: "Odile Brannock cancelled this event." on the same chip, with the Failed icon, and Remove from calendar (secondary, the Delete icon) while
   the event is in the calendar, with the toast "Removed from your calendar" and Undo; else "It is not in your
   calendar."
 - **A guest's answer**: a line per guest ("Béla is not going."). Any other calendar message: "This calendar message

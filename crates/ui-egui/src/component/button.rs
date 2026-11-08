@@ -144,6 +144,8 @@ pub enum Tone {
     Secondary,
     /// On the preset's text gradient, in white or the deep ink ([`text_gradient`]): the one thing to do.
     Primary,
+    /// On the error colour: a hard step, such as blocking a sender.
+    Danger,
 }
 
 /// A text button: its name, an optional icon before it, and its tone.
@@ -177,6 +179,13 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// The red button of a hard step: filled with the error colour.
+    #[must_use]
+    pub fn danger(mut self) -> Self {
+        self.tone = Tone::Danger;
+        self
+    }
+
     /// `icon` before the name, in the Regular style.
     #[must_use]
     pub fn icon(mut self, icon: IconId) -> Self {
@@ -206,6 +215,7 @@ impl<'a> TextButton<'a> {
         let (stops, on_gradient) = text_gradient(p.gradient);
         let ink = match self.tone {
             Tone::Primary => on_gradient,
+            Tone::Danger => p.on_error,
             Tone::Quiet | Tone::Secondary => p.text,
         };
         let galley = super::galley(ui, self.name, theme.fonts.button, ink);
@@ -231,6 +241,9 @@ impl<'a> TextButton<'a> {
                         stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
                     };
                     gradient::fill(painter, rect, round, &fill);
+                }
+                Tone::Danger => {
+                    painter.rect_filled(rect, round, p.error);
                 }
                 Tone::Secondary => {
                     painter.rect_stroke(rect.shrink(0.5), round, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
