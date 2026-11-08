@@ -239,3 +239,39 @@ fn a_daily_alert_follows_the_wall_clock_across_the_change_to_winter_time() {
     // 08:50 on the wall clock: 06:50 UTC on Saturday 24th, 07:50 UTC from Sunday 25th.
     assert_eq!(fired, [utc(2026, 10, 24, 6, 50), utc(2026, 10, 25, 7, 50), utc(2026, 10, 26, 7, 50)]);
 }
+
+/// Puts `ical` into the work calendar as a sync would, at `name`.
+fn synced(session: &mut Session, name: &str, ical: String) {
+    let fetched = FetchedEvent { url: format!("{WORK}{name}.ics"), etag: Some("\"s1\"".to_owned()), ical };
+    let synced = CalendarReport::Synced { calendar: CalendarId::new(1), changed: vec![fetched], removed: vec![], token: None, full: false };
+    session.apply(&Event::new(AccountId::new(1), None, EventKind::Calendar(synced))).unwrap();
+}
+
+#[test]
+fn an_invitation_the_owner_has_not_answered_alerts_at_the_default() {
+    let (mut session, _) = fresh();
+    let ical = lunch()
+        .replace("ORGANIZER:mailto:anna@example.org", "ORGANIZER:mailto:dora@example.com")
+        .replace("ATTENDEE;CN=Dora:mailto:dora@example.com", "ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:anna@example.org");
+    synced(&mut session, "unanswered", ical);
+    assert_eq!(alerts(&session, 5), [utc(2026, 11, 6, 10, 50)], "ten minutes before, as an event without alarms");
+}
+
+#[test]
+fn an_alert_tells_the_organiser_s_title_and_place_as_one_short_clean_line_each() {
+    let (mut session, clock) = fresh();
+    let long = "Lunch ".repeat(40);
+    let ical = lunch()
+        .replace("SUMMARY:Lunch", &format!("SUMMARY:Team\\nlunch \u{202e}today {long}"))
+        .replace("LOCATION:Corner café", "LOCATION:Corner\\ncafé\rupstairs\\N");
+    synced(&mut session, "hostile", ical);
+    at_time(&mut session, &clock, utc(2026, 11, 6, 10, 50));
+    let Ok([Notice::Alert { about, .. }]) = <[Notice; 1]>::try_from(told(&mut session)) else { panic!("one alert") };
+    for text in [&about.summary, &about.location] {
+        assert!(!text.chars().any(|c| c.is_control() || c == '\u{202e}'), "{text:?}");
+        assert!(text.chars().count() <= crate::notify::MAX_TEXT, "{text:?}");
+    }
+    assert!(about.summary.starts_with("Team lunch today Lunch Lunch"), "{:?}", about.summary);
+    assert_eq!(about.summary.chars().count(), crate::notify::MAX_TEXT, "cut at the most it may be");
+    assert_eq!(about.location, "Corner café upstairs");
+}

@@ -186,3 +186,10 @@ fn the_buttons_have_names_on_the_bus_and_text() {
     assert_eq!(Button::Done.action(), "done");
     assert_eq!(Button::Read.label(), "Mark read");
 }
+
+#[test]
+fn an_alert_s_body_breaks_its_line_once_between_the_time_and_the_place() {
+    let alert = shown(&Notice::Alert { about: dentist("Dentist", "Main Street 1, second floor"), missed: false }, None, Offset::UTC);
+    assert_eq!(alert.body.matches('\n').count(), 1);
+    assert_eq!(alert.body.split_once('\n'), Some(("Thursday 5 November, 12:00 – 13:00", "Main Street 1, second floor")));
+}
