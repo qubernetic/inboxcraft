@@ -27,7 +27,7 @@ icons show as empty boxes.
 | Screens · Triage | screener review, moving a sender to another group, the time picker (snooze), snoozed, pins and parked, follow-up reminder | [screens-triage.png](screens-triage.png) |
 | Screens · Writing | the composer in place of the reader (the default) and in a window of its own, an impossible address, send later, undo send and the outbox, a bounce, a template with a blank | [screens-writing.png](screens-writing.png) |
 | Screens · Calendar | week, month, agenda, day with the event editor, an invitation in a message | [screens-calendar.png](screens-calendar.png) |
-| Screens · Setup and settings | first start, the settings sheet on Accounts (none yet, adding, the check under way, failed and passed, the list), appearance, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
+| Screens · Setup and settings | first start, the settings sheet on Accounts (none yet, adding with the outgoing server and the CalDAV address, the check under way, failed and passed, the list, one account open, the check after a change), appearance, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
 | Planned · Mail and triage | what is on the way: a folder asked about once, one account narrowed, the full header, the screener inside the inbox, the grouped list, the parked pile, blocked mail, a refused send, a missed send time, one name for two people, smart folders, keyboard use, the Hungarian interface; why a message is where it is, trackers shown and kept out, a last look before sending, subscriptions, what waits for a reply | [planned-mail.png](planned-mail.png) |
 | Planned · Calendar and settings | an invitation answered, cancelled or clashing with your day, deleting with guests, reminders, the calendar, privacy and about settings | [planned-calendar.png](planned-calendar.png) |
 | Planned · Your own AI | the panel beside the list (briefing, emptying the inbox, new senders, newsletters, a free hour), a reply into Drafts, the approval card, a message that gives orders, a request above the level, the settings, a key of your own, what goes to the cloud, tokens, the journal | [planned-ai.png](planned-ai.png) |
@@ -64,6 +64,8 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
   way, "Later · Ideas" what is only an idea and may never be built. Google and Microsoft 365 accounts are left out on
   purpose. The picture of the phone code is decorative and decodes to nothing. The composer's place is still being designed: the file shows it in place of the
   reader and in a window of its own.
+- The add form leaves out the app's line that accounts are not kept yet, because it goes when accounts are. The older
+  account-check frames name the steps shorter than the app does; "Account check · after a change" uses the app's words.
 - Each flow is also a prototype flow on the full-size screens (a click goes to the next step). Steps on different
   pages may not play through in every viewer; the storyboards on the Scenarios page always show the whole flow.
 
