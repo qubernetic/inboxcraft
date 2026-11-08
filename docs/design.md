@@ -555,7 +555,7 @@ the icon sits among others at the same size.
   "New password" field that starts empty ("empty keeps the stored one"; the stored one is never shown), the servers
   and the CalDAV address. When the servers or the password changed, a line in the flag colour says which server the
   sign-in goes to, and the button reads "Save and check"; otherwise "Save". Saving runs the check as the add flow
-  does; a failed check offers Change settings, which comes back here. There is no FigCraft frame for this form yet.
+  does; a failed check offers Change settings, which comes back here.
 - **Check**: "Checking <address>", a one-line summary (muted while it runs, the accent colour when signed in, the
   error colour when a step failed), then one line per step with an icon one body line high: Waiting (Regular) in
   the accent colour while waiting, Done (Fill) in the accent colour when passed, Failed (Fill) in the error colour
