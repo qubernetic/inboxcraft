@@ -244,6 +244,28 @@ fn send_sends_and_the_toast_says_so() {
 }
 
 #[test]
+fn the_window_asks_for_a_frame_when_a_held_send_is_due() {
+    let mut harness = sending();
+    harness.state_mut().mailbox_mut().run("send.set", &json!({ "hold_seconds": 30 })).unwrap();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    type_into(&mut harness, "To", "odile@example.org");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    assert!(harness.state().composer().is_none(), "sent");
+    // Nothing else draws a frame in an idle window: it asks for one when the hold is over.
+    let ctx = egui::Context::default();
+    let delay = |wake: &mut dyn FnMut(&egui::Context)| {
+        let mut output = ctx.run_pass(egui::RawInput::default(), |ctx| wake(ctx));
+        output.textures_delta.clear();
+        output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+    };
+    // A new context asks for frames of its own at first.
+    while delay(&mut |_| {}).is_zero() {}
+    assert_eq!(delay(&mut |ctx| harness.state_mut().wake_when_due(ctx)), std::time::Duration::from_secs(30));
+}
+
+#[test]
 fn a_send_the_sample_refuses_keeps_the_composer_and_says_why() {
     let mut harness = composing(egui::Theme::Light);
     type_into(&mut harness, "To", "odile@example.org,");

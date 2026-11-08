@@ -4,19 +4,20 @@
 //! `outbox`: what waits to be sent, refused sends and bounces. A new command goes into [`COMMANDS`] and its parameter
 //! names into `FIELDS`.
 //!
-//! `outbox.list` (`safe`) shows each outbox item with where it stands: `waiting`, `sending`, or `refused` with the
-//! server's reply, its enhanced status code (RFC 3463) where the reply has one, and whether it is permanent. A refused
-//! draft is kept as it was; `outbox.retry` (`owner`: mail leaves the computer) sends it again as `mail.send` does. A
-//! message that went but bounced later is marked on its Sent copy (`crate::arrive::bounce`), not here.
+//! `outbox.list` (`safe`) shows each outbox item with where it stands: `waiting` with the time it goes (the end of
+//! its hold, or the time of a send later), `sending`, or `refused` with the server's reply, its enhanced status code
+//! (RFC 3463) where the reply has one, and whether it is permanent. A refused draft is kept as it was; `outbox.retry`
+//! (`owner`: mail leaves the computer) sends it again as `mail.send` does, held as every send is. A message that went
+//! but bounced later is marked on its Sent copy (`crate::arrive::bounce`), not here.
 
 use inboxcraft_mime::Status;
-use inboxcraft_model::{DraftId, OutboxState};
+use inboxcraft_model::{DraftId, Due, OutboxState};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::send::SEND;
 use crate::params::{NoParams, decode, decode_quietly};
-use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
+use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, json};
 
 /// The commands of this module, in the registry.
 pub(crate) const COMMANDS: &[CommandSpec] = &[LIST, RETRY];
@@ -40,8 +41,10 @@ pub(crate) const RETRY: CommandSpec =
 fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let NoParams {} = decode(LIST.id, params)?;
     let store = context.store();
+    let schedule = store.schedule()?;
     let mut items = Vec::new();
     for item in store.outbox()? {
+        let at = schedule.iter().find(|entry| entry.what == Due::Send(item.draft)).map(|entry| json::date(entry.due));
         let draft = store.draft(item.draft)?;
         let (state, reply) = match &item.state {
             OutboxState::Waiting => ("waiting", None),
@@ -55,6 +58,7 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
             "subject": draft.as_ref().map(|draft| draft.subject.as_str()),
             "to": draft.as_ref().map(|draft| draft.to.as_slice()),
             "state": state,
+            "at": at,
             "reply": reply,
             "code": code.map(|code| code.to_string()),
             "permanent": reply.is_some_and(|reply| permanent(reply, code)),

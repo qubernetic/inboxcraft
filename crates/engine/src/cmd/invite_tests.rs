@@ -537,3 +537,19 @@ fn a_refused_answer_cannot_be_edited() {
     answer(&mut session, id, "tentative").unwrap();
     assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));
 }
+
+/// An answer goes at once, whatever hold the owner chose for other sends: it is taken back by changing the answer.
+#[test]
+fn an_answer_goes_at_once_without_the_hold() {
+    let mut session = session();
+    session.run("send.set", &json!({ "hold_seconds": 60 })).unwrap();
+    let id = arrive(&mut session, 40, "i1@example.org", &object("REQUEST", "lunch@example.org", 0, REQUEST_AT, ""));
+    let answered = answer(&mut session, id, "accepted").unwrap();
+    assert_eq!(answered["state"], json!("sending"));
+    let sent = out(&mut session);
+    assert_eq!(sent.recipients, ["odile@example.org"]);
+    let outbox = session.store().outbox().unwrap();
+    assert!(matches!(outbox.as_slice(), [item] if item.draft == sent.draft && item.state == inboxcraft_model::OutboxState::Sending), "{outbox:?}");
+    assert!(session.store().schedule().unwrap().is_empty(), "no send waits on the schedule");
+    assert!(bad(session.run("mail.unsend", &json!({ "id": sent.draft.get() }))));
+}

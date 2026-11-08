@@ -63,6 +63,11 @@
 //! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
 //!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
 //!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
+//! - Sending (`send`): `mail.send` (`owner`) holds a draft in the outbox for the owner's [`Hold`] (`send.set`,
+//!   `owner`; `send.settings`, `safe`) and `mail.send_later` (`owner`) until a time; `mail.unsend` (`owner`) takes it
+//!   back until then, the draft as it was. [`Session::tick`] sends it at its time; nothing goes while InboxCraft is
+//!   not running, and a time missed then goes at the next start with a notice. `outbox.list` (`safe`) shows what
+//!   waits, goes and was refused; `outbox.retry` (`owner`) sends a refused draft again.
 //! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
 //!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
 //!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and
@@ -117,6 +122,7 @@ pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
+pub use send::Hold;
 pub use session::{Applied, Context, Outcome, Session};
 pub use undo::MAX_HISTORY;
 

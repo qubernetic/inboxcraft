@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use inboxcraft_engine::{CommandSpec, Context, EngineError, Outcome, Registry, Run, Session};
-use inboxcraft_model::{AccountId, Host, Security, Server};
+use inboxcraft_model::{AccountId, Host, JobKind, Security, Server};
 use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
@@ -24,13 +24,18 @@ fn mailbox() -> Mailbox {
 
 /// A mailbox over the sample mail whose first account can send: a real session, not the sample's.
 fn sending() -> Mailbox {
+    sending_on(&clock())
+}
+
+/// [`sending`] on `clock`.
+fn sending_on(clock: &FakeClock) -> Mailbox {
     let mut store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
     let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
     let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
     let mut batch = Batch::new();
     batch.push(Change::PutAccount(account.with_submission(Some(server))));
     store.apply(&batch).unwrap();
-    Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock())
+    Mailbox::new(Session::new(Box::new(store), Box::new(clock.clone())).unwrap(), Box::new(clock.clone()))
 }
 
 fn shown(mailbox: &mut Mailbox, id: u64) -> Value {
@@ -226,6 +231,60 @@ fn another_account_brings_its_signature() {
     assert_eq!(composer.account(), 2);
     assert_eq!(composer.text(), "Hello\n\n-- \nMira\nStudio");
     assert!(composer.set_account(&mut mailbox, 9).is_err());
+}
+
+#[test]
+fn a_sent_draft_goes_to_its_worker_once_the_hold_is_over_as_the_window_pumps() {
+    let clock = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = sending_on(&clock);
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
+    composer.edited();
+    assert!(composer.send(&mut mailbox).unwrap());
+    let mut workers = crate::workers::Scripted::passing();
+    let sends = |workers: &crate::workers::Scripted| workers.sent.iter().filter(|(_, kind)| matches!(kind, JobKind::Send { .. })).count();
+    mailbox.pump(&mut workers);
+    assert_eq!(sends(&workers), 0, "held");
+    clock.advance(std::time::Duration::from_secs(5));
+    mailbox.pump(&mut workers);
+    assert_eq!(sends(&workers), 1);
+}
+
+#[test]
+fn the_window_knows_how_long_until_a_held_send_is_due() {
+    let clock = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = sending_on(&clock);
+    let mut workers = crate::workers::Scripted::passing();
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), None, "nothing waits");
+    mailbox.run("send.set", &json!({ "hold_seconds": 30 })).unwrap();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
+    composer.edited();
+    assert!(composer.send(&mut mailbox).unwrap());
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), Some(std::time::Duration::from_secs(30)));
+    clock.advance(std::time::Duration::from_secs(12));
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), Some(std::time::Duration::from_secs(18)));
+    clock.advance(std::time::Duration::from_secs(18));
+    mailbox.pump(&mut workers);
+    assert!(workers.sent.iter().any(|(_, kind)| matches!(kind, JobKind::Send { .. })), "sent once the hold is over");
+    assert_eq!(mailbox.due_in(), None, "nothing waits any more");
+}
+
+#[test]
+fn a_time_that_has_passed_without_firing_asks_again_soon_not_at_once() {
+    let clock = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = sending_on(&clock);
+    mailbox.run("send.set", &json!({ "hold_seconds": 5 })).unwrap();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
+    composer.edited();
+    assert!(composer.send(&mut mailbox).unwrap());
+    // No pump: the hold is over but nothing has fired yet.
+    clock.advance(std::time::Duration::from_secs(9));
+    assert_eq!(mailbox.due_in(), Some(crate::mailbox::OVERDUE_WAKE));
 }
 
 #[test]

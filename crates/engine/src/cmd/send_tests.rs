@@ -13,7 +13,7 @@ use inboxcraft_time::{FakeClock, Offset};
 use serde_json::{Value, json};
 
 use super::compose_tests::{store as drafts_store, validity};
-use crate::test_support::{NOW, account, at};
+use crate::test_support::{NOW, account, at, send_now};
 use crate::{AgentClass, Caller, EngineError, Session};
 
 /// The compose test mailbox, account 1 with a submission server on 465.
@@ -25,8 +25,9 @@ pub(crate) fn store() -> Memory {
     store
 }
 
-fn session() -> Session {
-    Session::new(Box::new(store()), Box::new(FakeClock::new(at(NOW)))).unwrap()
+fn session() -> (Session, FakeClock) {
+    let clock = FakeClock::new(at(NOW));
+    (Session::new(Box::new(store()), Box::new(clock.clone())).unwrap(), clock)
 }
 
 /// A draft of account 1 to Béla, Cili on Cc and Dóra on Bcc; its id.
@@ -57,13 +58,19 @@ fn sent_job(session: &mut Session) -> (DraftId, EmailAddress, Vec<EmailAddress>,
     (*draft, from.clone(), recipients.clone(), raw.clone())
 }
 
+/// The `Message-ID` of the message `raw`.
+pub(crate) fn message_id(raw: &[u8]) -> String {
+    let text = String::from_utf8_lossy(raw);
+    text.lines().find_map(|line| line.strip_prefix("Message-ID: ")).unwrap().to_owned()
+}
+
 fn event(kind: EventKind) -> Event {
     Event::new(AccountId::new(1), None, kind)
 }
 
 #[test]
 fn sending_is_for_the_owner() {
-    let mut session = session();
+    let (mut session, _) = session();
     assert_eq!(session.registry().get("mail.send").map(|spec| spec.class), Some(Some(AgentClass::Owner)));
     let id = draft(&mut session);
     assert!(matches!(session.run_as(Caller::Agent, "mail.send", &json!({ "id": id })), Err(EngineError::NotAllowed { .. })));
@@ -72,23 +79,22 @@ fn sending_is_for_the_owner() {
 
 #[test]
 fn a_draft_goes_out_with_its_own_message_id_and_date_and_bcc_only_in_the_envelope() {
-    let mut session = session();
+    let (mut session, clock) = session();
     session.set_offsets(Box::new(Offset::from_minutes(60).unwrap()));
     let id = draft(&mut session);
-    let answer = session.run("mail.send", &json!({ "id": id })).unwrap();
-    assert_eq!(answer["id"], json!(id));
-    assert_eq!(answer["state"], json!("sending"));
-    assert_eq!(answer["recipients"], json!(3));
-    let message_id = answer["message_id"].as_str().unwrap().to_owned();
-    assert!(message_id.starts_with('<') && message_id.ends_with("@example.org>"), "{message_id}");
+    let answer = send_now(&mut session, &clock, "mail.send", id);
+    assert_eq!((&answer["id"], &answer["state"]), (&json!(id), &json!("waiting")));
     let (draft, from, recipients, raw) = sent_job(&mut session);
+    let message_id = message_id(&raw);
+    assert!(message_id.starts_with('<') && message_id.ends_with("@example.org>"), "{message_id}");
     assert_eq!(draft, DraftId::new(id));
     assert_eq!(from.as_str(), "anna@example.org");
     // To, Cc and Bcc, each address once.
     let to: Vec<&str> = recipients.iter().map(EmailAddress::as_str).collect();
     assert_eq!(to, ["bela@example.org", "cili@example.net", "dora@example.org"]);
     let text = String::from_utf8_lossy(&raw);
-    assert!(text.contains("Date: Thu, 5 Nov 2026 10:00:00 +0100\r\n"), "{text}");
+    // The date is when the hold ended.
+    assert!(text.contains("Date: Thu, 5 Nov 2026 10:00:05 +0100\r\n"), "{text}");
     assert!(text.contains(&format!("Message-ID: {message_id}\r\n")), "{text}");
     assert!(text.contains("From: \"Anna Example\" <anna@example.org>\r\n"), "{text}");
     assert!(text.contains("Cc: cili@example.net\r\n"), "{text}");
@@ -105,17 +111,19 @@ fn a_draft_goes_out_with_its_own_message_id_and_date_and_bcc_only_in_the_envelop
 
 #[test]
 fn two_sends_get_two_message_ids() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let first = draft(&mut session);
     let second = draft(&mut session);
-    let a = session.run("mail.send", &json!({ "id": first })).unwrap()["message_id"].clone();
-    let b = session.run("mail.send", &json!({ "id": second })).unwrap()["message_id"].clone();
+    send_now(&mut session, &clock, "mail.send", first);
+    let a = message_id(&sent_job(&mut session).3);
+    send_now(&mut session, &clock, "mail.send", second);
+    let b = message_id(&sent_job(&mut session).3);
     assert_ne!(a, b);
 }
 
 #[test]
 fn a_draft_that_cannot_go_is_refused() {
-    let mut session = session();
+    let (mut session, _) = session();
     // No recipient.
     let empty = session.run("compose.new", &json!({ "account": 1 })).unwrap()["id"].as_u64().unwrap();
     assert!(bad(session.run("mail.send", &json!({ "id": empty }))));
@@ -136,13 +144,13 @@ fn a_draft_that_cannot_go_is_refused() {
 
 #[test]
 fn a_sent_draft_goes_and_its_copy_lands_in_sent() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
     // The draft has a copy in the Drafts folder.
     let copy = DraftCopy { folder: FolderId::new(6), uid_validity: validity(), uid: Uid::new(40).unwrap() };
     let held = session.store().draft(DraftId::new(id)).unwrap().unwrap();
     crate::test_support::change(&mut session, Change::PutDraft(inboxcraft_model::Draft { uploaded: Some(copy), ..held }));
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     let (_, _, _, raw) = sent_job(&mut session);
     session.apply(&event(EventKind::Sent { draft: DraftId::new(id) })).unwrap();
     assert_eq!(session.store().draft(DraftId::new(id)).unwrap(), None);
@@ -165,9 +173,9 @@ fn a_sent_draft_goes_and_its_copy_lands_in_sent() {
 
 #[test]
 fn a_draft_on_its_way_is_neither_changed_nor_discarded() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     let (_, _, _, raw) = sent_job(&mut session);
     let held = session.store().draft(DraftId::new(id)).unwrap();
     for caller in [Caller::Owner, Caller::Agent] {
@@ -188,9 +196,9 @@ fn a_draft_on_its_way_is_neither_changed_nor_discarded() {
 
 #[test]
 fn a_refused_draft_can_be_changed_and_discarded() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     session.take_jobs();
     session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::MessageRefused, reply: None })).unwrap();
     session.run("compose.update", &json!({ "id": id, "text": "Changed." })).unwrap();
@@ -200,9 +208,9 @@ fn a_refused_draft_can_be_changed_and_discarded() {
 
 #[test]
 fn a_failed_send_keeps_the_draft_with_the_reason() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     session.take_jobs();
     let refused =
         EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::MessageRefused, reply: Some("550 5.1.1 No such user".to_owned()) };
@@ -212,14 +220,14 @@ fn a_failed_send_keeps_the_draft_with_the_reason() {
     assert_eq!(outbox[0].state, OutboxState::Refused { reply: "550 5.1.1 No such user".to_owned() });
     assert!(session.take_jobs().is_empty());
     // It can be sent again.
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     assert_eq!(sent_job(&mut session).0, DraftId::new(id));
     // A failure without a reply says its cause.
     session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::TimedOut, reply: None })).unwrap();
     let outbox = session.store().outbox().unwrap();
     assert_eq!(outbox[0].state, OutboxState::Refused { reply: ErrorKind::TimedOut.to_string() });
     // A message whose answer was lost says it may have gone.
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     session.take_jobs();
     session.apply(&event(EventKind::SendFailed { draft: DraftId::new(id), kind: ErrorKind::SendUnanswered, reply: None })).unwrap();
     let outbox = session.store().outbox().unwrap();
@@ -228,7 +236,7 @@ fn a_failed_send_keeps_the_draft_with_the_reason() {
 
 #[test]
 fn an_answer_for_a_draft_not_on_its_way_is_dropped() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
     for kind in [
         EventKind::Sent { draft: DraftId::new(id) },
@@ -239,7 +247,7 @@ fn an_answer_for_a_draft_not_on_its_way_is_dropped() {
     }
     assert!(session.store().draft(DraftId::new(id)).unwrap().is_some());
     // From another account's worker.
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     let other = Event::new(AccountId::new(2), None, EventKind::Sent { draft: DraftId::new(id) });
     assert_eq!(session.apply(&other).unwrap(), crate::Applied::Dropped);
     assert!(session.store().draft(DraftId::new(id)).unwrap().is_some());
@@ -249,9 +257,10 @@ fn an_answer_for_a_draft_not_on_its_way_is_dropped() {
 fn an_account_without_a_sent_folder_sends_without_a_copy() {
     let mut store = store();
     store.apply(&Batch::new().with(Change::RemoveFolder(FolderId::new(2)))).unwrap();
-    let mut session = Session::new(Box::new(store), Box::new(FakeClock::new(at(NOW)))).unwrap();
+    let clock = FakeClock::new(at(NOW));
+    let mut session = Session::new(Box::new(store), Box::new(clock.clone())).unwrap();
     let id = draft(&mut session);
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     session.take_jobs();
     session.apply(&event(EventKind::Sent { draft: DraftId::new(id) })).unwrap();
     assert_eq!(session.store().draft(DraftId::new(id)).unwrap(), None);
@@ -260,19 +269,19 @@ fn an_account_without_a_sent_folder_sends_without_a_copy() {
 
 #[test]
 fn a_send_cut_off_by_a_restart_can_be_sent_again() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let id = draft(&mut session);
-    session.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut session, &clock, "mail.send", id);
     session.take_jobs();
     // The program stops before the worker answers; the store is all that is left.
     let outbox = session.store().outbox().unwrap();
     let mut store = store();
     let held = session.store().draft(DraftId::new(id)).unwrap().unwrap();
     store.apply(&Batch::new().with(Change::PutDraft(held)).with(Change::PutOutgoing(outbox[0].clone()))).unwrap();
-    let mut again = Session::new(Box::new(store), Box::new(FakeClock::new(at(NOW)))).unwrap();
+    let mut again = Session::new(Box::new(store), Box::new(clock.clone())).unwrap();
     let outbox = again.store().outbox().unwrap();
     assert_eq!(outbox[0].state, OutboxState::Refused { reply: crate::send::CUT_OFF.to_owned() });
     assert!(!outbox[0].message.is_empty());
-    again.run("mail.send", &json!({ "id": id })).unwrap();
+    send_now(&mut again, &clock, "mail.send", id);
     assert_eq!(sent_job(&mut again).0, DraftId::new(id));
 }

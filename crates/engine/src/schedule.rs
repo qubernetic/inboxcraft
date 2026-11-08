@@ -9,20 +9,21 @@
 //! time has come, on the session's clock: the entry leaves the schedule, a returned snooze or a fired reminder
 //! clears its time in the message's state, and the session hands the entry back as a [`Fired`] event, `missed` when
 //! its time passed while InboxCraft was off or asleep. A snoozed message still in the snoozed folder comes back to the
-//! inbox then, unread and marked as returned (`crate::arrive::snooze`). Firing an entry twice cannot happen: it leaves
+//! inbox then, unread and marked as returned (`crate::arrive::snooze`). A send's draft is made into its message then
+//! and handed to its account's worker (`crate::send`). Firing an entry twice cannot happen: it leaves
 //! the schedule in the same batch.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use inboxcraft_model::{Due, MessageId, MessageState, ScheduleId, Scheduled};
+use inboxcraft_model::{DraftId, Due, MessageId, MessageState, ScheduleId, Scheduled};
 use inboxcraft_store::{Batch, Change, Storage};
 use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
 
 use crate::act::{Effects, Mover};
 use crate::arrive::snooze;
 use crate::session::Pending;
-use crate::{Context, EngineError};
+use crate::{Context, EngineError, send};
 
 /// An entry fired later than this after its time was missed: InboxCraft was off, or the computer was asleep.
 pub const LATE: Duration = Duration::from_secs(60);
@@ -108,11 +109,12 @@ pub struct Fired {
     pub missed: bool,
 }
 
-/// What a tick does: the store changes, the kept jobs, and the entries it fires.
+/// What a tick does: the store changes, the jobs, the entries it fires and the drafts it sends.
 pub(crate) struct Plan {
     pub(crate) batch: Batch,
     pub(crate) jobs: Vec<Pending>,
     pub(crate) fired: Vec<Fired>,
+    pub(crate) sent: Vec<DraftId>,
 }
 
 /// Fires every entry due at the context's time, in time order; `started` is when the session started.
@@ -123,6 +125,8 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     let mut states: BTreeMap<MessageId, MessageState> = BTreeMap::new();
     let mut returning = Vec::new();
     let mut fired = Vec::new();
+    let mut sent = Vec::new();
+    let mut sends = Vec::new();
     for entry in store.schedule()?.into_iter().filter(|entry| entry.due <= now) {
         batch.push(Change::RemoveScheduled(entry.id));
         if let Due::Unsnooze(message) | Due::FollowUp(message) = entry.what {
@@ -136,6 +140,15 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
                     returning.push(message);
                 }
                 states.insert(message, state);
+            }
+        }
+        if let Due::Send(draft) = entry.what
+            && let Some((change, job)) = send::go(context, draft)?
+        {
+            batch.push(change);
+            if let Some((account, kind)) = job {
+                sends.push(Pending { account, kind, message: None, keep: false, until: None });
+                sent.push(draft);
             }
         }
         let late = now.duration_since(entry.due).is_some_and(|late| late > LATE);
@@ -159,8 +172,10 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     for (message, state) in states {
         batch.push(Change::SetMessageState(message, state));
     }
-    let jobs = effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true, until: None }).collect();
-    Ok(Plan { batch, jobs, fired })
+    let mut jobs: Vec<Pending> =
+        effects.jobs.into_iter().map(|(account, kind)| Pending { account, kind, message: None, keep: true, until: None }).collect();
+    jobs.extend(sends);
+    Ok(Plan { batch, jobs, fired, sent })
 }
 
 /// The changes that make the schedule do `what` at `due` and at no other time: its other entries for `what` go, and

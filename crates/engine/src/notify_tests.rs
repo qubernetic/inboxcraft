@@ -241,7 +241,7 @@ mod session {
             fired(Due::Alert(AlertId::new(1))),
             fired(Due::Send(DraftId::new(1))),
         ];
-        assert_eq!(notify::fired(session.store(), &Settings::default(), &entries).unwrap(), vec![]);
+        assert_eq!(notify::fired(session.store(), &Settings::default(), &entries, &[]).unwrap(), vec![]);
     }
 
     #[test]
