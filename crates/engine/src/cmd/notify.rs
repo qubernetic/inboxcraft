@@ -4,8 +4,8 @@
 //! `notify`: which arriving mail and reminders notify the owner (see [`crate::notify`]). A new command goes into
 //! [`COMMANDS`] and its parameter names into `FIELDS`.
 //!
-//! `notify.settings` (`safe`) shows every account's level and whether returned snoozes and follow-up reminders tell
-//! the owner; `notify.set` (`owner`, a setting) changes any of them.
+//! `notify.settings` (`safe`) shows every account's level and whether returned snoozes, follow-up reminders and
+//! calendar alerts tell the owner; `notify.set` (`owner`, a setting) changes any of them.
 
 use inboxcraft_model::AccountId;
 use serde::Deserialize;
@@ -20,13 +20,13 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[SETTINGS, SET];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
-pub(crate) const FIELDS: &[&str] = &["account", "level", "returns", "reminders"];
+pub(crate) const FIELDS: &[&str] = &["account", "level", "returns", "reminders", "alerts"];
 
 /// `notify.settings`: what tells the owner.
 pub(crate) const SETTINGS: CommandSpec = CommandSpec {
     id: "notify.settings",
     class: Some(AgentClass::Safe),
-    summary: "Show which new mail, returned snoozes and reminders notify the owner",
+    summary: "Show which new mail, returned snoozes, reminders and calendar alerts notify the owner",
     run: settings,
 };
 
@@ -34,7 +34,7 @@ pub(crate) const SETTINGS: CommandSpec = CommandSpec {
 pub(crate) const SET: CommandSpec = CommandSpec {
     id: "notify.set",
     class: Some(AgentClass::Owner),
-    summary: "Notify of all new mail of an account, of people only, or of none; returned snoozes and reminders on or off",
+    summary: "Notify of all new mail of an account, of people only, or of none; returned snoozes, reminders and calendar alerts on or off",
     run: set,
 };
 
@@ -49,6 +49,8 @@ struct SetParams {
     returns: Option<bool>,
     /// Follow-up reminders tell the owner.
     reminders: Option<bool>,
+    /// Calendar alerts tell the owner.
+    alerts: Option<bool>,
 }
 
 fn settings(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
@@ -69,14 +71,15 @@ fn set(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
             settings.set_level(account, level);
         }
         (None, None) => {
-            if params.returns.is_none() && params.reminders.is_none() {
-                return Err(EngineError::bad_params(SET.id, "nothing to change: give account and level, returns or reminders"));
+            if params.returns.is_none() && params.reminders.is_none() && params.alerts.is_none() {
+                return Err(EngineError::bad_params(SET.id, "nothing to change: give account and level, returns, reminders or alerts"));
             }
         }
         _ => return Err(EngineError::bad_params(SET.id, "account and level go together")),
     }
     settings.returns = params.returns.unwrap_or(settings.returns);
     settings.reminders = params.reminders.unwrap_or(settings.reminders);
+    settings.alerts = params.alerts.unwrap_or(settings.alerts);
     Ok(Outcome::new(answer(context, &settings)?).with_notify(settings))
 }
 
@@ -89,5 +92,5 @@ fn answer(context: &Context<'_>, settings: &Settings) -> Result<Value, EngineErr
         .map(|account| json!({ "account": account.id().get(), "address": account.address().as_str(), "level": settings.level(account.id()).name() }))
         .collect();
     let levels: Vec<&str> = Level::ALL.iter().map(|level| level.name()).collect();
-    Ok(json!({ "accounts": accounts, "levels": levels, "returns": settings.returns, "reminders": settings.reminders }))
+    Ok(json!({ "accounts": accounts, "levels": levels, "returns": settings.returns, "reminders": settings.reminders, "alerts": settings.alerts }))
 }

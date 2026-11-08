@@ -18,6 +18,7 @@ use serde_json::Value;
 use crate::ScreenerMode;
 use crate::act::Effects;
 use crate::appearance::Appearance;
+use crate::calendar::alert;
 use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
@@ -286,6 +287,9 @@ pub(crate) struct State {
     pub(crate) next_draft: u64,
     pub(crate) next_calendar: u64,
     pub(crate) next_event: u64,
+    pub(crate) next_alert: u64,
+    /// When every event's alerts are worked out again (see `crate::calendar::alert`); `None` before the start.
+    pub(crate) sweep_at: Option<Timestamp>,
     /// The jobs in the store's queue: kept until their last event.
     pub(crate) kept: BTreeSet<JobId>,
     /// Kept jobs held back from the workers until a time, in the order they came (see [`Outcome::with_held_job`]).
@@ -341,6 +345,7 @@ impl State {
             next_draft: 1,
             next_calendar: 1,
             next_event: 1,
+            next_alert: 1,
             ..Self::default()
         };
         for account in store.accounts()? {
@@ -363,6 +368,9 @@ impl State {
                 state.next_calendar = state.next_calendar.max(calendar.id.get().saturating_add(1));
                 for event in store.calendar_events(calendar.id)? {
                     state.next_event = state.next_event.max(event.id.get().saturating_add(1));
+                    for alert in store.alerts(event.id)? {
+                        state.next_alert = state.next_alert.max(alert.id.get().saturating_add(1));
+                    }
                 }
             }
             state.next_account = state.next_account.max(account.id().get().saturating_add(1));
@@ -668,9 +676,13 @@ impl Session {
     /// calendar syncs. A check still running is over: the worker that ran it is gone,
     /// so its last step never comes, and the account can be checked again.
     ///
-    /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such.
+    /// A schedule entry due before the start was missed: the next [`Session::tick`] fires it as such. The alerts of
+    /// every event held are worked out again, and every day after while the session runs.
     pub fn start(&mut self) {
         self.started = Some(self.clock.now());
+        // A store that cannot be read now leaves the alerts to the next tick, which tries again.
+        self.state.sweep_at = Some(self.clock.now());
+        let _unswept = self.sweep();
         for job in std::mem::take(&mut self.replay) {
             self.hand_out(job);
         }
@@ -694,8 +706,9 @@ impl Session {
     /// Hands the held jobs whose time has come to the workers (a delete whose undo window is over), then fires every
     /// schedule entry whose time has come, in time order: each leaves the schedule, with what it changes
     /// (see [`crate::schedule`]: a snoozed message comes back to the inbox), in one batch, and the jobs that make it on
-    /// the server. A returned snooze and a follow-up reminder tell the owner as
-    /// [`Session::take_notices`] hands them over, unless they turned that off. Then hands each draft that has been
+    /// the server. A returned snooze, a follow-up reminder and a calendar alert tell the owner as
+    /// [`Session::take_notices`] hands them over, unless they turned that off. Once a day the alerts of every event
+    /// held are worked out again (see `crate::calendar::alert`). Then hands each draft that has been
     /// still long enough to its account's worker (see `crate::draft`). The front end calls it at
     /// [`Session::next_due`] and after [`Session::start`].
     ///
@@ -709,11 +722,14 @@ impl Session {
         for (_, job) in due {
             self.hand_out(job);
         }
+        if self.state.sweep_at.is_some_and(|at| at <= now) {
+            self.sweep()?;
+        }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
             let plan = schedule::due(&context, started)?;
-            let notices = notify::fired(context.store, &context.state.notify, &plan.fired, &plan.sent)?;
+            let notices = notify::fired(context.store, &context.state.notify, &plan.fired, &plan.sent, context.offsets, context.now)?;
             Ok::<_, EngineError>((plan, notices))
         }));
         let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
@@ -766,7 +782,35 @@ impl Session {
         let entry = self.store.schedule()?.into_iter().map(|entry| entry.due).min();
         let upload = draft::next_upload(&*self.store, &self.state)?;
         let held = self.state.held.iter().map(|(until, _)| *until).min();
-        Ok(entry.into_iter().chain(upload).chain(held).min())
+        // The sweep, only while there are events to sweep: a calendar that comes later brings its alerts with it.
+        let sweep = match self.state.sweep_at {
+            Some(at) if self.holds_calendars()? => Some(at),
+            _ => None,
+        };
+        Ok(entry.into_iter().chain(upload).chain(held).chain(sweep).min())
+    }
+
+    /// Whether any account holds a calendar.
+    fn holds_calendars(&self) -> Result<bool, EngineError> {
+        for account in self.store.accounts()? {
+            if !self.store.calendars(account.id())?.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Works out the alerts of every event held again, and when to do it next.
+    fn sweep(&mut self) -> Result<(), EngineError> {
+        let now = self.clock.now();
+        let (store, offsets) = (&*self.store, &*self.offsets);
+        let mut ids = alert::Ids { alert: self.state.next_alert, schedule: self.state.next_schedule };
+        let changes =
+            catch_unwind(AssertUnwindSafe(|| alert::sweep(store, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked("alerts"))??;
+        let batch = changes.into_iter().fold(Batch::new(), Batch::with);
+        self.commit("alerts", None, &batch, Vec::new())?;
+        self.state.sweep_at = now.checked_add(alert::SWEEP);
+        Ok(())
     }
 
     /// The jobs queued since the last call, in order, for the `net` workers.
@@ -831,10 +875,17 @@ impl Session {
             next_job = next_job.saturating_add(1);
         }
         let with_kept;
-        let batch = if kept.is_empty() {
+        // The alerts of the events the batch puts come in the same batch.
+        let ids = state.as_ref().unwrap_or(&self.state);
+        let mut ids = alert::Ids::past(ids.next_alert, ids.next_schedule, batch);
+        let (store, offsets, now) = (&*self.store, &*self.offsets, self.clock.now());
+        let alerts =
+            catch_unwind(AssertUnwindSafe(|| alert::follow(store, batch, now, offsets, &mut ids))).map_err(|_| EngineError::Panicked(what))??;
+        let batch = if kept.is_empty() && alerts.is_empty() {
             batch
         } else {
-            with_kept = kept.iter().fold(batch.clone(), |batch, job| batch.with(Change::QueueJob(job.clone())));
+            let more = alerts.into_iter().chain(kept.iter().map(|job| Change::QueueJob(job.clone())));
+            with_kept = more.fold(batch.clone(), Batch::with);
             &with_kept
         };
         if !batch.is_empty() {
@@ -845,6 +896,8 @@ impl Session {
             self.state = state;
         }
         self.state.next_job = self.state.next_job.max(next_job);
+        self.state.next_alert = self.state.next_alert.max(ids.alert);
+        self.state.next_schedule = self.state.next_schedule.max(ids.schedule);
         let mut kept = kept.into_iter();
         for pending in jobs {
             let job = if pending.keep { kept.next() } else { None };

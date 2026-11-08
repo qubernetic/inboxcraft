@@ -425,3 +425,23 @@ fn a_control_call_runs_for_an_agent_with_or_without_a_window() {
     assert!(listed.try_recv().unwrap().is_ok(), "answered without a window");
     drop(send);
 }
+
+#[test]
+fn a_click_on_an_alert_opens_its_event_on_the_calendar_and_brings_the_window_forward() {
+    use crate::notify::Click;
+    let (mut desktop, _send, click) = clicking();
+    let ctx = egui::Context::default();
+    let id = {
+        let (calendar, mailbox) = desktop.app_mut().calendar_mut();
+        calendar.refresh(mailbox);
+        calendar.events().find(|event| event.summary == "Studio stand-up").unwrap().id
+    };
+    // Next Monday's stand-up, 09:00 UTC.
+    click.send(Click::Event(id, 1_793_869_200 + 4 * 86_400)).unwrap();
+    assert_eq!(tick(&mut desktop, &ctx, false), [ViewportCommand::Minimized(false), ViewportCommand::Focus]);
+    assert_eq!(desktop.app().screen(), inboxcraft_ui_egui::Screen::Calendar);
+    assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(id));
+    click.send(Click::Event(id, i64::MAX)).unwrap();
+    tick(&mut desktop, &ctx, false);
+    assert_eq!(desktop.app().calendar().picked().map(|event| event.id), Some(id), "a time out of range moves nothing");
+}

@@ -241,7 +241,7 @@ mod session {
             fired(Due::Alert(AlertId::new(1))),
             fired(Due::Send(DraftId::new(1))),
         ];
-        assert_eq!(notify::fired(session.store(), &Settings::default(), &entries, &[]).unwrap(), vec![]);
+        assert_eq!(notify::fired(session.store(), &Settings::default(), &entries, &[], &inboxcraft_time::Offset::UTC, at(NOW)).unwrap(), vec![]);
     }
 
     #[test]
@@ -269,6 +269,7 @@ mod session {
                 "levels": ["all", "people", "none"],
                 "returns": true,
                 "reminders": true,
+                "alerts": true,
             })
         );
         let answer = session.run("notify.set", &json!({ "account": 2, "level": "people", "returns": false })).unwrap();
@@ -277,6 +278,15 @@ mod session {
         assert_eq!(answer["reminders"], json!(true));
         assert_eq!(session.run("notify.settings", &json!({})).unwrap(), answer);
         assert_eq!(session.notify_settings().level(AccountId::new(2)), Level::People);
+    }
+
+    #[test]
+    fn calendar_alerts_turn_off_alone_and_stay_off_when_kept() {
+        let mut session = session();
+        let answer = session.run("notify.set", &json!({ "alerts": false })).unwrap();
+        assert_eq!((answer["alerts"].clone(), answer["returns"].clone()), (json!(false), json!(true)));
+        assert!(!session.notify_settings().alerts);
+        assert!(!Settings::from_value(&session.notify_settings().to_value()).alerts);
     }
 
     #[test]
@@ -313,7 +323,7 @@ mod session {
         settings.set_level(AccountId::new(3), Level::All);
         settings.reminders = false;
         let kept = settings.to_value();
-        assert_eq!(kept, json!({ "accounts": [{ "account": 1, "level": "none" }], "returns": true, "reminders": false }));
+        assert_eq!(kept, json!({ "accounts": [{ "account": 1, "level": "none" }], "returns": true, "reminders": false, "alerts": true }));
         assert_eq!(Settings::from_value(&kept), settings);
         let junk = json!({
             "accounts": [{ "account": 0, "level": "none" }, { "account": 2, "level": "loud" }, { "account": "2" }, 7, { "account": 4, "level": "people" }],

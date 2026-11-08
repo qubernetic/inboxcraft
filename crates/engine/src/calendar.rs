@@ -25,6 +25,8 @@ use serde_json::{Value, json};
 use crate::EngineError;
 use crate::sync::Plan;
 
+pub(crate) mod alert;
+
 /// A repeat the owner can pick with one click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Repeat {

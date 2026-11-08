@@ -555,6 +555,12 @@ impl InboxApp {
         self.calendar.refresh(&mut self.mailbox);
     }
 
+    /// Shows the calendar screen on the occurrence of event `id` at `start`, picked, as a click on its alert asks.
+    pub fn open_event(&mut self, id: u64, start: inboxcraft_time::Timestamp) {
+        self.show_calendar();
+        self.calendar.open_event(&mut self.mailbox, id, start);
+    }
+
     /// The calendar screen, to pick a view or a day from outside (the `ui_shot` scripts).
     pub fn calendar_mut(&mut self) -> (&mut Calendar, &mut Mailbox) {
         (&mut self.calendar, &mut self.mailbox)
