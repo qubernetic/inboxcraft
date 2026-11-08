@@ -88,7 +88,7 @@ fn an_impossible_address_is_marked_at_once_and_blocks_send() {
     assert_eq!(composer.chips(Line::To)[1].spoken(), "ansel.example.org, not an address");
     assert!(!composer.sendable());
     assert_eq!(composer.problem().as_deref(), Some("ansel.example.org is not an address"));
-    assert!(!composer.send(&mut mailbox).unwrap(), "a blocked draft is not sent");
+    assert_eq!(composer.send(&mut mailbox).unwrap(), None, "a blocked draft is not sent");
     assert_ne!(mailbox.last_run(), Some("mail.send"));
     composer.remove(&mut mailbox, Line::To, 1).unwrap();
     assert!(composer.sendable());
@@ -240,7 +240,7 @@ fn a_sent_draft_goes_to_its_worker_once_the_hold_is_over_as_the_window_pumps() {
     let mut composer = Composer::start(&mut mailbox).unwrap();
     "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
     composer.edited();
-    assert!(composer.send(&mut mailbox).unwrap());
+    assert!(composer.send(&mut mailbox).unwrap().is_some());
     let mut workers = crate::workers::Scripted::passing();
     let sends = |workers: &crate::workers::Scripted| workers.sent.iter().filter(|(_, kind)| matches!(kind, JobKind::Send { .. })).count();
     mailbox.pump(&mut workers);
@@ -261,7 +261,7 @@ fn the_window_knows_how_long_until_a_held_send_is_due() {
     let mut composer = Composer::start(&mut mailbox).unwrap();
     "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
     composer.edited();
-    assert!(composer.send(&mut mailbox).unwrap());
+    assert!(composer.send(&mut mailbox).unwrap().is_some());
     mailbox.pump(&mut workers);
     assert_eq!(mailbox.due_in(), Some(std::time::Duration::from_secs(30)));
     clock.advance(std::time::Duration::from_secs(12));
@@ -281,7 +281,7 @@ fn a_time_that_has_passed_without_firing_asks_again_soon_not_at_once() {
     let mut composer = Composer::start(&mut mailbox).unwrap();
     "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
     composer.edited();
-    assert!(composer.send(&mut mailbox).unwrap());
+    assert!(composer.send(&mut mailbox).unwrap().is_some());
     // No pump: the hold is over but nothing has fired yet.
     clock.advance(std::time::Duration::from_secs(9));
     assert_eq!(mailbox.due_in(), Some(crate::mailbox::OVERDUE_WAKE));
@@ -294,8 +294,8 @@ fn send_keeps_the_draft_first_and_sends_it() {
     "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
     "Hi".clone_into(composer.subject_mut());
     composer.edited();
-    assert!(composer.send(&mut mailbox).unwrap());
-    assert_eq!(mailbox.last_run(), Some("mail.send"));
+    assert!(composer.send(&mut mailbox).unwrap().is_some());
+    assert_eq!(mailbox.outbox().len(), 1, "in the outbox, read again after the send");
     assert!(composer.send(&mut mailbox).is_err(), "a draft on its way is not changed");
 }
 

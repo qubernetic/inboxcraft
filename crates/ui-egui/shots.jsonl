@@ -176,3 +176,14 @@
 {"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
 {"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
 {"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+# The outbox (E2.6, E3.6): a send counting down its hold with its toast, one scheduled and one the server refused;
+# the toast of a message just sent; the composer with a time picked, Send become Schedule, and its send-later picker;
+# a sent message a delivery report says did not get through.
+{"out": "docs/images/outbox-light.png", "mode": "light", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/outbox-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/undo-send-light.png", "mode": "light", "size": [1400, 860], "outbox": "countdown"}
+{"out": "docs/images/undo-send-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "countdown"}
+{"out": "docs/images/send-later-light.png", "mode": "light", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/send-later-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/bounce-light.png", "mode": "light", "size": [1400, 860], "outbox": "bounce"}
+{"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}

@@ -28,6 +28,11 @@
 //! key, from the rail and from the command palette (Ctrl+K), which lists them all. The rail's Calendar shows the
 //! calendar screen ([`Screen::Calendar`]), drawn in `calendar/`, in the place of the mail. A change to an event made
 //! there shows the same toast, and Undo or Ctrl+Z reads the calendar again.
+//!
+//! A message sent from the composer waits in the outbox for the hold: a toast counts the seconds down, and its Undo
+//! (or Ctrl+Z) takes the send back and opens the draft again as it was. The outbox's rows take a send back the same
+//! way, open a refused draft or send it again. A send whose time passed while InboxCraft was not running says so in a
+//! toast once it went.
 
 mod accounts;
 mod calendar;
@@ -147,6 +152,10 @@ pub struct InboxApp {
     notice: Option<(String, Option<f64>)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
     picker: Option<String>,
+    /// The draft whose send the countdown toast shows, while it waits for its hold.
+    sending: Option<u64>,
+    /// The composer's send-later picker opens in the next frame.
+    later_picker: bool,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -227,6 +236,8 @@ impl InboxApp {
             composer: None,
             notice: None,
             picker: None,
+            sending: None,
+            later_picker: false,
         }
     }
 
@@ -263,22 +274,30 @@ impl InboxApp {
                 }
                 self.mailbox.set_inbox_view(kept.view);
                 self.mailbox.restore_pins(kept.keep_pins);
-                self.kept_triage = kept;
+                if let Some(hold) = kept.hold {
+                    self.mailbox.restore_hold(hold);
+                }
+                self.kept_triage = Triage { hold: Some(self.mailbox.hold_seconds()), ..kept };
             }
             None => {
                 let screener = if sample { Triage::default().screener } else { self.mailbox.screener_mode() };
-                self.kept_triage = Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done() };
+                self.kept_triage = Triage {
+                    screener,
+                    view: self.mailbox.inbox_view(),
+                    keep_pins: self.mailbox.pins_outlast_done(),
+                    hold: Some(self.mailbox.hold_seconds()),
+                };
             }
         }
         self.keep = keep;
         self
     }
 
-    /// The triage choices to keep: the inbox view, whether a pin outlasts done, and the screener's mode but on the
-    /// sample, which keeps the one kept.
+    /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
+    /// goes, and the screener's mode but on the sample, which keeps the one kept.
     fn triage(&self) -> Triage {
         let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
-        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done() }
+        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done(), hold: Some(self.mailbox.hold_seconds()) }
     }
 
     /// Keeps the triage choices when they changed.
@@ -420,8 +439,18 @@ impl InboxApp {
         self.picker = Some(typed.to_owned());
     }
 
-    /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn.
+    /// Opens the composer's send-later picker in the next frame, its presets read now (the `ui_shot` scripts).
+    pub fn open_send_later(&mut self) {
+        self.mailbox.load_presets();
+        self.later_picker = true;
+    }
+
+    /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn, and the composer's
+    /// send-later picker asked for by [`InboxApp::open_send_later`].
     fn show_picker(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.later_picker) {
+            egui::Popup::open_id(ctx, compose::later_popup());
+        }
         let Some(typed) = self.picker.take() else { return };
         let mut state = crate::component::time_picker::TimePicker::default();
         state.set_typed(&typed);
@@ -515,7 +544,7 @@ impl InboxApp {
     /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
     /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
     fn pressed(&self, ctx: &egui::Context, quiet: bool) -> Vec<&'static str> {
-        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable);
+        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
         keymap::actions()
             .into_iter()
             .map(|action| action.id)
@@ -614,6 +643,15 @@ impl InboxApp {
     /// anything changed. Whether anything changed.
     pub fn pump(&mut self) -> bool {
         let changed = self.mailbox.pump(&mut *self.workers);
+        let late = self.mailbox.take_late();
+        match late.as_slice() {
+            [] => {}
+            [subject] => {
+                let subject = if subject.is_empty() { tr!("(no subject)") } else { subject.as_str() };
+                self.say(&tr!("Sent late, InboxCraft was not running at its time: {subject}", subject = subject));
+            }
+            more => self.say(&tr!("Sent {count} messages late: InboxCraft was not running at their time", count = more.len())),
+        }
         if changed {
             self.onboarding.load(&mut self.mailbox);
             if self.screen == Screen::Calendar {
@@ -750,19 +788,83 @@ impl InboxApp {
         }
     }
 
-    /// Sends the message being written (`mail.send`); a blocked one stays, saying why, and so does one the engine
+    /// Sends the message being written: after the hold, the countdown toast showing (`mail.send`), or at the time
+    /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
     /// refuses.
-    fn send_composer(&mut self) {
+    pub fn send_composer(&mut self) {
         let Some(composer) = &mut self.composer else { return };
+        let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
-            Ok(true) => {
+            Ok(Some(at)) => {
                 self.composer = None;
-                self.say(tr!("Sending your message"));
+                if later.is_some() {
+                    let when = crate::component::typed_time::long(at, self.mailbox.now(), self.mailbox.offset());
+                    self.say(&tr!("Scheduled for {when}", when = when));
+                } else {
+                    self.sending = Some(draft);
+                }
                 // The engine holds the message now; it goes to the worker once the hold is over.
                 self.pump();
             }
-            Ok(false) => {}
+            Ok(None) => {}
             Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// The draft whose send the countdown toast shows and the whole seconds left, while it waits for its hold.
+    #[must_use]
+    pub fn counting(&self) -> Option<(u64, u64)> {
+        let draft = self.sending?;
+        self.mailbox.seconds_left(draft).map(|seconds| (draft, seconds))
+    }
+
+    /// Takes the waiting send of `draft` back (`mail.unsend`) and opens its draft again as it was, in the reader's place;
+    /// the draft being written is closed first and kept. One the engine does not take back stays, saying why.
+    pub fn unsend(&mut self, draft: u64) {
+        if self.sending == Some(draft) {
+            self.sending = None;
+        }
+        if let Err(error) = self.mailbox.unsend(draft) {
+            self.mailbox.fail(error);
+            return;
+        }
+        self.reopen(draft);
+    }
+
+    /// Opens the kept draft `draft` in the reader's place (a refused one, to change it); the draft being written is
+    /// closed first and kept, and one the engine does not take stays open instead.
+    pub fn reopen(&mut self, draft: u64) {
+        if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+            return self.compose();
+        }
+        if self.composer.is_some() {
+            self.close_composer();
+            if self.composer.is_some() {
+                return;
+            }
+        }
+        self.show_mail();
+        self.reader.set_full_width(false);
+        match Composer::open(&mut self.mailbox, draft) {
+            Ok(composer) => self.composer = Some(composer),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
+    pub fn retry(&mut self, draft: u64) {
+        match self.mailbox.retry(draft) {
+            Ok(_) => self.sending = Some(draft),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Applies what was asked of a send in the outbox.
+    fn outbox(&mut self, draft: u64, asked: list::Outbox) {
+        match asked {
+            list::Outbox::Unsend => self.unsend(draft),
+            list::Outbox::Edit => self.reopen(draft),
+            list::Outbox::Retry => self.retry(draft),
         }
     }
 
@@ -837,6 +939,14 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
                 composer.fill(mailbox)
             }
+            Asked::Later(at) => {
+                composer.set_later(at);
+                Ok(())
+            }
+            Asked::Presets => {
+                mailbox.load_presets();
+                Ok(())
+            }
             Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
         };
         if let Err(error) = result {
@@ -875,10 +985,10 @@ impl InboxApp {
         }
     }
 
-    /// The toast of the composer's last step, while no act's toast shows.
+    /// The toast of the composer's last step, while no act's toast and no countdown shows.
     fn notice_toast(&mut self, ui: &Ui, theme: &Theme) {
         let Some((text, since)) = self.notice.clone() else { return };
-        if self.mailbox.undoable().is_some() {
+        if self.mailbox.undoable().is_some() || self.counting().is_some() {
             return;
         }
         let now = ui.input(|input| input.time);
@@ -1104,6 +1214,7 @@ impl InboxApp {
         let mut out = true;
         let mut changed = None;
         let mut review = false;
+        let mut outboxed = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // The colour fields first, then the place for the glass layers, then everything else.
@@ -1146,10 +1257,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox)
                 })
             };
-            (header, clicked, acted, out, review, done_all) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1205,14 +1316,15 @@ impl InboxApp {
         );
         // Every gradient of the frame is painted by now: the pictures it left out go.
         gradient::sweep(ui.ctx());
-        let undone = self.toast(ui, &theme, quiet);
-        self.notice_toast(ui, &theme);
+        let (undone, unsent) = self.toasts(ui, &theme, quiet);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
             || stepped
             || acted.is_some()
             || undone
+            || unsent
+            || outboxed.is_some()
             || (out && leaving)
             || left_full
             || left_editor
@@ -1238,7 +1350,7 @@ impl InboxApp {
             // What changed shows in the next frame.
             ui.ctx().request_repaint();
         }
-        self.act(out, acted, undone);
+        self.act(out, acted, undone, outboxed);
         if let Some(ids) = done_all {
             self.mailbox.done_all(&ids);
         }
@@ -1402,8 +1514,11 @@ impl InboxApp {
     }
 
     /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its
-    /// key), and Undo when `undone`.
-    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool) {
+    /// key), Undo when `undone`, and what a button of the outbox asked of a send.
+    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool, outboxed: Option<(u64, list::Outbox)>) {
+        if let Some((draft, asked)) = outboxed {
+            self.outbox(draft, asked);
+        }
         if out {
             self.mailbox.left();
         }
@@ -1427,6 +1542,52 @@ impl InboxApp {
     fn keyed_act(&self, ctx: &egui::Context) -> Option<(u64, Act)> {
         let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action))?;
         self.row_act(action)
+    }
+
+    /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
+    /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back.
+    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> (bool, bool) {
+        let unsent = self.send_toast(ui, theme, quiet);
+        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet) };
+        self.notice_toast(ui, theme);
+        (undone, unsent)
+    }
+
+    /// The countdown toast while the message sent last waits for its hold: "Sending “subject” in 4 s", with Undo and its
+    /// key, which take the send back. It asks for a frame as each second ends. Whether Undo was pressed (its key works
+    /// while nothing is `quiet`).
+    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
+        let Some((draft, seconds)) = self.counting() else {
+            self.sending = None;
+            return false;
+        };
+        let subject = self.mailbox.outbox().iter().find(|row| row.draft == draft).map(|row| row.subject.clone()).unwrap_or_default();
+        let text = if subject.is_empty() {
+            tr!("Sending in {seconds} s", seconds = seconds)
+        } else {
+            tr!("Sending “{subject}” in {seconds} s", subject = subject, seconds = seconds)
+        };
+        // The next whole second, when the count changes.
+        let left = self.mailbox.outbox().iter().find(|row| row.draft == draft).and_then(|row| match row.state {
+            crate::mailbox::SendState::Waiting(Some(at)) => at.duration_since(self.mailbox.now()),
+            _ => None,
+        });
+        let tick = left.map_or(std::time::Duration::from_secs(1), |left| {
+            let part = std::time::Duration::from_nanos(u64::from(left.subsec_nanos()));
+            if part.is_zero() { std::time::Duration::from_secs(1) } else { part }
+        });
+        ui.ctx().request_repaint_after(tick);
+        let mut keys = self.keymap.clone();
+        if quiet {
+            keys.unbind(keymap::UNDO);
+        }
+        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let id = egui::Id::unique("send-toast").with(draft);
+        let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO) }, bottom);
+        if undone {
+            self.unsend(draft);
+        }
+        undone
     }
 
     /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
@@ -1511,6 +1672,7 @@ impl InboxApp {
             settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
             settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
             settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
+            settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
             settings::Asked::Close => self.close_settings(),
         }
     }
@@ -1595,6 +1757,9 @@ mod list_tests;
 #[cfg(test)]
 #[path = "onboard_tests.rs"]
 mod onboard_tests;
+#[cfg(test)]
+#[path = "outbox_tests.rs"]
+mod outbox_tests;
 #[cfg(test)]
 #[path = "palette_tests.rs"]
 mod palette_tests;

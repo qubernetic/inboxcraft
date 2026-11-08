@@ -3,8 +3,9 @@
 
 //! The settings sheet over the dimmed window: the sections on the left (Appearance, Accounts, Triage, Sending and
 //! Shortcuts; the others not built yet), the chosen page on the right. Accounts is drawn in `accounts.rs`. Triage holds
-//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds each
-//! account's signature, saved with its Save button. Shortcuts lists every action of
+//! the screener's mode, how the inbox shows its groups, whether a pin outlasts done and each account's grouping. Sending holds
+//! "Undo send", how long every send waits before it goes (5, 10, 30 or 60 seconds), and each account's signature, saved
+//! with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
 //! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
@@ -86,6 +87,8 @@ pub(super) enum Asked {
     Grouped(u64, bool),
     /// Whether a pin stays on a message when it is done.
     KeepPins(bool),
+    /// How long every send is held before it goes, in seconds.
+    Hold(u8),
     Close,
 }
 
@@ -754,14 +757,31 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     asked
 }
 
-/// The Sending page under its title: each account with its signature in a field, and Save while it differs from the
-/// one the account has; scrolling.
+/// The holds "Undo send" offers, in seconds.
+const HOLDS: [u8; 4] = [5, 10, 30, 60];
+
+/// The Sending page under its title: "Undo send" with the hold's seconds, then each account with its signature in a
+/// field, and Save while it differs from the one the account has; scrolling.
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let s = &theme.spacing;
     let mut asked = None;
-    note(ui, theme, tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."));
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width(ui.available_width() - s.m);
+        let hold = mailbox.hold_seconds();
+        let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
+        let holds: Vec<(u8, &str, Font)> = HOLDS.iter().zip(&labels).map(|(seconds, label)| (*seconds, label.as_str(), theme.fonts.button)).collect();
+        let now = tr!("Every message waits here this long before it goes, so Undo can take it back. Now {seconds} s.", seconds = hold);
+        row(ui, theme, tr!("Undo send"), &[tr!("Hold mail for a few seconds before it goes."), &now], &mut |ui| {
+            if let Some(seconds) = segmented(ui, theme, &holds, hold) {
+                asked = Some(Asked::Hold(seconds));
+            }
+        });
+        ui.add_space(s.l);
+        note(
+            ui,
+            theme,
+            tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."),
+        );
         if mailbox.accounts().is_empty() {
             ui.add_space(s.l);
             note(ui, theme, tr!("Add an account first: a signature belongs to the account it is sent from."));

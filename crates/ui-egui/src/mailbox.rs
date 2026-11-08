@@ -23,12 +23,19 @@
 //! Done (`mail.done`), park (`mail.park`), pin (`mail.pin`), snooze (`mail.snooze`) and follow-up reminders
 //! (`mail.follow_up`) are acts too. "Show done" lists the done mail in its old place; [`Place::Later`] shows a pile
 //! of "Later": the snoozed folders, `pin.list` or `park.list`. The time picker's presets come from `schedule.presets`.
+//!
+//! The outbox comes from `outbox.list`, read with the rest: each send waiting for its hold to end or for the time the
+//! owner picked, on its way, or refused with the server's reply. [`Place::Outbox`] lists it while anything is in it;
+//! `mail.unsend` takes a waiting send back, `outbox.retry` sends a refused one again, and the hold is `send.set`. A
+//! sent message a delivery report says did not get through is marked in its row (`bounced` in `mail.list`). A send
+//! whose time passed while InboxCraft was not running is told once ([`Mailbox::take_late`]), besides the desktop's
+//! notice.
 
 use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_engine::notify::Notice;
-use inboxcraft_engine::{Applied, Caller, EngineError, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
+use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
 use inboxcraft_model::{Account, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
@@ -49,6 +56,9 @@ pub const MAX_QUERY: usize = 256;
 
 /// The most characters of a name, subject or preview the list keeps.
 pub const MAX_SHOWN: usize = 300;
+
+/// The most notices the mailbox keeps for the desktop between two [`Mailbox::take_notices`]; older ones go.
+pub const MAX_NOTICES: usize = 64;
 
 /// The roles in the order the folder pane lists them.
 const ROLES: [Role; 11] = [
@@ -105,6 +115,9 @@ pub enum Place {
     Senders,
     /// "Later": the snoozed mail, the pins or the park pile, across the accounts shown.
     Later(Pile),
+    /// The outbox: what waits to be sent, what is on its way and what the server refused. It opens only while anything
+    /// is in it.
+    Outbox,
 }
 
 /// A pile of "Later": mail put away for now, reachable from the rail.
@@ -360,6 +373,42 @@ pub struct MessageRow {
     pub returned: Option<Timestamp>,
     /// The time its follow-up reminder is due, when it has one.
     pub follow_up: Option<Timestamp>,
+    /// Why it did not get through, when a delivery report says so of a message the owner sent.
+    pub bounced: Option<String>,
+}
+
+/// Where a send in the outbox stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendState {
+    /// Waiting for its hold to end or for the time the owner picked; it can be taken back until then. The time it
+    /// goes, when the engine gave one.
+    Waiting(Option<Timestamp>),
+    /// Handed to the server, which has not answered yet.
+    Sending,
+    /// Not sent: the server's reply, or why it could not go; the draft is kept.
+    Refused {
+        /// The server's reply, fit for one line.
+        reply: String,
+        /// Whether the server would refuse it again as it is.
+        permanent: bool,
+    },
+}
+
+/// A send in the outbox. Its subject and recipients are the owner's own text, shown and never run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRow {
+    /// Its draft.
+    pub draft: u64,
+    /// The account it goes from.
+    pub account: u64,
+    /// The subject.
+    pub subject: String,
+    /// Whom it goes to: each recipient's name, or the address without one.
+    pub to: Vec<String>,
+    /// The first recipient's address, which picks the avatar's colour.
+    pub address: String,
+    /// Where it stands.
+    pub state: SendState,
 }
 
 /// A sender the screener holds back until the owner lets them in.
@@ -522,6 +571,12 @@ pub struct Mailbox {
     piles: [u64; 3],
     /// The time presets still ahead, as the time picker names them, from `schedule.presets`.
     presets: Vec<(String, Timestamp)>,
+    /// The outbox, from `outbox.list`.
+    outbox: Vec<OutboxRow>,
+    /// The subjects of the sends that went late since [`Mailbox::take_late`] was last called.
+    late: Vec<String>,
+    /// The engine's notices since [`Mailbox::take_notices`] was last called.
+    notices: Vec<Notice>,
     after: After,
     error: Option<String>,
     runs: u64,
@@ -605,11 +660,47 @@ fn message_row(value: &Value) -> MessageRow {
         snoozed_until: value.get("snoozed_until").and_then(Value::as_str).and_then(parse_date),
         returned: value.get("returned").and_then(Value::as_str).and_then(parse_date),
         follow_up: value.get("follow_up").and_then(Value::as_str).and_then(parse_date),
+        bounced: value.get("bounced").and_then(|bounce| bounce.get("reason")).and_then(Value::as_str).map(shown),
+    }
+}
+
+/// The recipient `text` (`Name <address>`, or an address) as the outbox shows it: the name, or the address without one;
+/// and the address.
+fn recipient(text: &str) -> (String, String) {
+    let text = text.trim();
+    let named =
+        text.strip_suffix('>').and_then(|rest| rest.rfind('<').map(|at| (rest.get(..at).unwrap_or_default(), rest.get(at.saturating_add(1)..))));
+    match named {
+        Some((name, Some(address))) => {
+            let name = name.trim().trim_matches('"').trim();
+            (shown(if name.is_empty() { address } else { name }), shown(address.trim()))
+        }
+        _ => (shown(text), shown(text)),
+    }
+}
+
+fn outbox_row(value: &Value) -> OutboxRow {
+    let to: Vec<(String, String)> =
+        value.get("to").and_then(Value::as_array).map(|to| to.iter().filter_map(Value::as_str).map(recipient).collect()).unwrap_or_default();
+    let state = match value.get("state").and_then(Value::as_str) {
+        Some("sending") => SendState::Sending,
+        Some("refused") => {
+            SendState::Refused { reply: text(value, "reply"), permanent: value.get("permanent").and_then(Value::as_bool).unwrap_or(false) }
+        }
+        _ => SendState::Waiting(value.get("at").and_then(Value::as_str).and_then(parse_date)),
+    };
+    OutboxRow {
+        draft: number(value, "draft"),
+        account: number(value, "account"),
+        subject: text(value, "subject"),
+        address: to.first().map(|(_, address)| address.clone()).unwrap_or_default(),
+        to: to.into_iter().map(|(name, _)| name).collect(),
+        state,
     }
 }
 
 /// `at` as the engine reads a time (`2026-11-05T09:30:00Z`).
-fn engine_date(at: Timestamp) -> String {
+pub(crate) fn engine_date(at: Timestamp) -> String {
     match at.to_civil(Offset::UTC) {
         Some(civil) => {
             format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", civil.year(), civil.month(), civil.day(), civil.hour(), civil.minute(), civil.second())
@@ -708,6 +799,9 @@ impl Mailbox {
             parked: 0,
             piles: [0; 3],
             presets: Vec::new(),
+            outbox: Vec::new(),
+            late: Vec::new(),
+            notices: Vec::new(),
             after: After::Next,
             error: None,
             runs: 0,
@@ -721,8 +815,12 @@ impl Mailbox {
     /// next-message rule ([`After`]) picks what is selected instead.
     pub fn refresh(&mut self) {
         let was = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
-        let result =
-            self.load_accounts().and_then(|()| self.load_folders()).and_then(|()| self.load_screener()).and_then(|()| self.load_list(self.place));
+        let result = self
+            .load_accounts()
+            .and_then(|()| self.load_folders())
+            .and_then(|()| self.load_screener())
+            .and_then(|()| self.load_outbox())
+            .and_then(|()| self.load_list(self.place));
         if let (Some(at), None) = (was, self.selected) {
             let last = self.messages.len().checked_sub(1);
             let pick = match self.after {
@@ -1174,10 +1272,33 @@ impl Mailbox {
             }
             changed = true;
         }
+        self.hear();
         if changed {
             self.refresh();
         }
         changed
+    }
+
+    /// Takes the engine's notices into the mailbox, for the desktop, and the subjects of the sends that went late, for
+    /// the window; at most [`MAX_NOTICES`] of each wait.
+    fn hear(&mut self) {
+        for notice in self.session.take_notices() {
+            if let Notice::SentLate { subject, .. } = &notice {
+                self.late.push(shown(subject));
+            }
+            self.notices.push(notice);
+        }
+        let over = self.notices.len().saturating_sub(MAX_NOTICES);
+        self.notices.drain(..over);
+        let over = self.late.len().saturating_sub(MAX_NOTICES);
+        self.late.drain(..over);
+    }
+
+    /// The subjects of the sends that went late, their time passed while InboxCraft was not running, since the last
+    /// call: the window says so once.
+    pub fn take_late(&mut self) -> Vec<String> {
+        self.hear();
+        std::mem::take(&mut self.late)
     }
 
     /// How long until the engine next has something to do ([`Session::due_at`]): a send whose hold ends, a send later,
@@ -1191,7 +1312,8 @@ impl Mailbox {
 
     /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.
     pub fn take_notices(&mut self) -> Vec<Notice> {
-        self.session.take_notices()
+        self.hear();
+        std::mem::take(&mut self.notices)
     }
 
     fn pump_once(&mut self, workers: &mut dyn Workers) -> bool {
@@ -1352,7 +1474,16 @@ impl Mailbox {
         Ok(())
     }
 
+    /// Reads the outbox (`outbox.list`).
+    fn load_outbox(&mut self) -> Result<(), UiError> {
+        let answer = self.run("outbox.list", &json!({}))?;
+        self.outbox = array("outbox.list", &answer, "items")?.iter().map(outbox_row).collect();
+        Ok(())
+    }
+
     fn load_list(&mut self, place: Place) -> Result<(), UiError> {
+        // The outbox shows while anything is in it, and gives way to the inbox after.
+        let place = if place == Place::Outbox && self.outbox.is_empty() { Place::View(Role::Inbox) } else { place };
         let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
         self.place = place;
         self.messages = rows;
@@ -1370,6 +1501,8 @@ impl Mailbox {
                 Place::Folder(id) => fields.insert("folder".to_owned(), json!(id)),
                 Place::Senders => return self.senders(),
                 Place::Later(pile) => return self.later(pile),
+                // The outbox lists sends, not messages.
+                Place::Outbox => return Ok(Vec::new()),
             };
             if self.show_done {
                 fields.insert("done".to_owned(), Value::Bool(true));
@@ -1553,6 +1686,7 @@ impl Mailbox {
             Place::Folder(id) => self.folders.iter().find(|folder| folder.id == id).map(|folder| folder.leaf.clone()).unwrap_or_default(),
             Place::Senders => tr!("New senders").to_owned(),
             Place::Later(_) => tr!("Later").to_owned(),
+            Place::Outbox => tr!("Outbox").to_owned(),
         }
     }
 
@@ -1739,13 +1873,129 @@ impl Mailbox {
         if self.returned(row) {
             parts.push(tr!("returned").to_owned());
         }
+        if row.bounced.is_some() {
+            parts.push(tr!("not delivered").to_owned());
+        }
         parts.join(", ")
+    }
+
+    /// The outbox: each send waiting, on its way or refused.
+    #[must_use]
+    pub fn outbox(&self) -> &[OutboxRow] {
+        &self.outbox
+    }
+
+    /// What the outbox's header says under its title: how many wait, and how many were not sent; `None` when it is
+    /// empty.
+    #[must_use]
+    pub fn outbox_summary(&self) -> Option<String> {
+        let refused = self.outbox.iter().filter(|row| matches!(row.state, SendState::Refused { .. })).count();
+        let waiting = self.outbox.len().saturating_sub(refused);
+        match (waiting, refused) {
+            (0, 0) => None,
+            (waiting, 0) => Some(tr!("{count} waiting", count = waiting)),
+            (0, refused) => Some(tr!("{count} not sent", count = refused)),
+            (waiting, refused) => Some(tr!("{waiting} waiting · {refused} not sent", waiting = waiting, refused = refused)),
+        }
+    }
+
+    /// The whole seconds left before the send of `draft` goes, a second begun counting as one, while it waits for a
+    /// hold of at most [`Hold::MAX`] seconds; `None` for a send later, a send no longer waiting, or a time behind.
+    #[must_use]
+    pub fn seconds_left(&self, draft: u64) -> Option<u64> {
+        let row = self.outbox.iter().find(|row| row.draft == draft)?;
+        let SendState::Waiting(Some(at)) = row.state else { return None };
+        let left = at.duration_since(self.clock.now()).filter(|left| !left.is_zero())?;
+        let seconds = left.as_secs().saturating_add(u64::from(left.subsec_nanos() > 0));
+        (seconds <= u64::from(Hold::MAX)).then_some(seconds)
+    }
+
+    /// Where the send `row` stands, as its row says it: "Sending in 4 s", "Scheduled · Sat 08:00", "Sending…" or
+    /// "Not sent".
+    #[must_use]
+    pub fn standing(&self, row: &OutboxRow) -> String {
+        match &row.state {
+            SendState::Waiting(at) => match (self.seconds_left(row.draft), at) {
+                (Some(seconds), _) => tr!("Sending in {seconds} s", seconds = seconds),
+                (None, Some(at)) if *at > self.clock.now() => {
+                    tr!("Scheduled · {when}", when = crate::component::typed_time::short(*at, self.clock.now(), self.offset))
+                }
+                _ => tr!("Sending…").to_owned(),
+            },
+            SendState::Sending => tr!("Sending…").to_owned(),
+            SendState::Refused { .. } => tr!("Not sent").to_owned(),
+        }
+    }
+
+    /// The send `row` as a screen reader says it: whom it goes to, the subject, and where it stands, with the server's
+    /// reply when it was refused.
+    #[must_use]
+    pub fn spoken_outbox(&self, row: &OutboxRow) -> String {
+        let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
+        let standing = match &row.state {
+            SendState::Refused { reply, .. } => tr!("Not sent: {reply}", reply = reply),
+            _ => self.standing(row),
+        };
+        tr!("To {whom}, {subject}, {standing}", whom = self.recipients(row), subject = subject, standing = standing)
+    }
+
+    /// Whom the send `row` goes to, as its row says it.
+    #[must_use]
+    pub fn recipients(&self, row: &OutboxRow) -> String {
+        if row.to.is_empty() { tr!("(no recipient)").to_owned() } else { row.to.join(", ") }
+    }
+
+    /// Takes the waiting send of `draft` back (`mail.unsend`): out of the outbox, its draft as it was, to be opened
+    /// again. The lists are read again.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal: the send went, or there is none.
+    pub fn unsend(&mut self, draft: u64) -> Result<(), UiError> {
+        let result = self.run("mail.unsend", &json!({ "id": draft })).map(|_| ());
+        self.refresh();
+        result
+    }
+
+    /// Sends the refused draft `draft` again (`outbox.retry`), held as every send is; the time it goes. The lists are
+    /// read again.
+    ///
+    /// # Errors
+    ///
+    /// The command's refusal: the draft cannot be sent as it is, or it was not refused.
+    pub fn retry(&mut self, draft: u64) -> Result<Option<Timestamp>, UiError> {
+        let answer = self.run("outbox.retry", &json!({ "id": draft }));
+        self.refresh();
+        Ok(answer?.get("at").and_then(Value::as_str).and_then(parse_date))
+    }
+
+    /// How long every send is held before it goes, in seconds.
+    #[must_use]
+    pub fn hold_seconds(&self) -> u8 {
+        self.session.send_hold().seconds()
+    }
+
+    /// Holds every send `seconds` from now on (`send.set`); a value out of range is refused, in the error banner.
+    pub fn set_hold(&mut self, seconds: u8) {
+        if let Err(error) = self.run("send.set", &json!({ "hold_seconds": seconds })) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the hold kept from an earlier run; one out of range is left out.
+    pub(crate) fn restore_hold(&mut self, seconds: u8) {
+        if let Some(hold) = Hold::new(u64::from(seconds)) {
+            self.session.set_send_hold(hold);
+        }
     }
 }
 
 #[cfg(test)]
 #[path = "later_tests.rs"]
 mod later_tests;
+#[cfg(test)]
+#[path = "outbox_tests.rs"]
+mod outbox_tests;
 #[cfg(test)]
 #[path = "mailbox_tests.rs"]
 mod tests;

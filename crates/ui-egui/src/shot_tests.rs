@@ -538,3 +538,20 @@ fn a_shot_shows_later_show_done_and_the_time_picker() {
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "later": "pins"}"#)).unwrap_err().to_string();
     assert!(error.contains("has no window"), "{error}");
 }
+
+#[test]
+fn a_shot_shows_the_outbox_the_countdown_send_later_and_a_bounce() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let scenes: Vec<_> =
+        ["waiting", "countdown", "schedule", "bounce"].iter().map(|scene| shoot(&line(&format!(r#", "outbox": "{scene}""#))).unwrap()).collect();
+    for (at, scene) in scenes.iter().enumerate() {
+        assert_ne!(*scene, window, "scene {at} differs from the plain window");
+    }
+    assert_ne!(scenes[0], scenes[1]);
+    assert_ne!(scenes[2], scenes[3]);
+    let error = shoot(&line(r#", "outbox": "lost""#)).unwrap_err().to_string();
+    assert!(error.contains("is not waiting, countdown, schedule or bounce"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "outbox": "waiting"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
