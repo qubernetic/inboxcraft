@@ -69,6 +69,9 @@ pub(crate) mod compose_tests;
 #[path = "done_tests.rs"]
 mod done_tests;
 #[cfg(test)]
+#[path = "dsn_tests.rs"]
+mod dsn_tests;
+#[cfg(test)]
 #[path = "event_chain_tests.rs"]
 mod event_chain_tests;
 #[cfg(test)]
@@ -87,6 +90,9 @@ mod hostile_tests;
 #[path = "modules_tests.rs"]
 mod modules_tests;
 #[cfg(test)]
+#[path = "outbox_tests.rs"]
+mod outbox_tests;
+#[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;
 #[cfg(test)]
@@ -100,7 +106,7 @@ mod sample_tests;
 mod schedule_tests;
 #[cfg(test)]
 #[path = "send_tests.rs"]
-mod send_tests;
+pub(crate) mod send_tests;
 #[cfg(test)]
 #[path = "snooze_tests.rs"]
 mod snooze_tests;

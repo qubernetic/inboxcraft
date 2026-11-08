@@ -59,6 +59,31 @@ fn a_calendar_message_is_told_by_its_media_type() {
 }
 
 #[test]
+fn a_delivery_report_is_told_by_its_media_type_and_report_type() {
+    for value in [
+        "multipart/report; report-type=delivery-status; boundary=\"r\"",
+        "Multipart/Report; boundary=r; REPORT-TYPE = \"Delivery-Status\"",
+        "multipart/report; report-type=global-delivery-status",
+    ] {
+        let signs = read(&[("Content-Type", value)]);
+        assert!(signs.report(), "{value}");
+        assert!(!signs.is_empty());
+    }
+    for value in [
+        "multipart/report; report-type=disposition-notification",
+        "multipart/report",
+        "multipart/mixed; report-type=delivery-status",
+        "multipart/report; report-type",
+        "multipart/report; delivery-status",
+        "text/plain",
+    ] {
+        assert!(!read(&[("Content-Type", value)]).report(), "{value}");
+    }
+    // The first Content-Type counts here too.
+    assert!(!read(&[("Content-Type", "text/plain"), ("Content-Type", "multipart/report; report-type=delivery-status")]).report());
+}
+
+#[test]
 fn the_first_of_a_repeated_field_counts() {
     let signs = read(&[
         ("Precedence", "list"),

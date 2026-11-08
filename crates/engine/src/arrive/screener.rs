@@ -6,8 +6,9 @@
 //! A sender is known, across the accounts, once the owner received mail from it, wrote to it or accepted it:
 //! the first sync of a folder learns the senders of the mail it holds (not of the junk, the trash, the drafts, the
 //! virtual folders or our own), every message in the sent folder learns its recipients, and mail that comes into the
-//! inbox while the screener is off learns its sender. The owner's own addresses and delivery reports
-//! (`MAILER-DAEMON`, `postmaster`) are never screened and teach nothing.
+//! inbox while the screener is off learns its sender. The owner's own addresses and the senders of delivery reports
+//! (`MAILER-DAEMON`, `postmaster`, whose reports the bounce stage before this one names in the plan) are never
+//! screened and teach nothing.
 //!
 //! Later mail into the inbox from a sender neither known nor decided is, by [`ScreenerMode`]: held in our own
 //! `InboxCraft/Screener` folder (made on the server the first time), left in the inbox and marked, or let in. Mail
@@ -72,6 +73,10 @@ const REPORTERS: [&str; 2] = ["mailer-daemon", "postmaster"];
 
 /// The stage: learns the senders the owner knows and screens the inbox's new mail.
 pub(crate) fn stage(arrival: &Arrival<'_>, message: &Message, plan: &mut Plan) -> Result<(), EngineError> {
+    // A delivery report, as the bounce stage found: let in, and its sender teaches nothing.
+    if plan.reports.contains(&message.id()) {
+        return Ok(());
+    }
     let store = arrival.store;
     let accounts = store.accounts()?;
     match arrival.role {
@@ -219,8 +224,12 @@ pub(crate) fn recipients(envelope: &Envelope) -> impl Iterator<Item = &EmailAddr
 /// not the sender of delivery reports.
 pub(crate) fn teaches(accounts: &[Account], address: &EmailAddress) -> bool {
     let own = accounts.iter().any(|account| account.address().as_str().eq_ignore_ascii_case(address.as_str()));
-    let reporter = REPORTERS.iter().any(|name| address.local_part().eq_ignore_ascii_case(name));
-    !own && !reporter
+    !own && !reporter(address)
+}
+
+/// Whether `address` is that of a sender of delivery reports (`MAILER-DAEMON`, `postmaster`).
+pub(crate) fn reporter(address: &EmailAddress) -> bool {
+    REPORTERS.iter().any(|name| address.local_part().eq_ignore_ascii_case(name))
 }
 
 /// Whether the owner has decided nothing about `address` and does not know it.

@@ -15,14 +15,22 @@ What InboxCraft keeps is in one folder, `inboxcraft/store` in your data folder: 
 `$XDG_DATA_HOME` (in the Flatpak `~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux
 and `~/Library/Application Support` on macOS. Only your own user account can read it. It holds:
 - your accounts' settings (with your templates), their folders and messages, the message bodies it keeps, and the
-  work it still has to do on the server;
+  work it still has to do on the server. A body is kept once you open the message, and the body of a delivery
+  report from a mail system (`MAILER-DAEMON` or `postmaster`) as soon as it arrives in a folder other than the
+  trash, junk or sent mail, to see which message it is about; a report from any other sender waits for the screener
+  and for you to open it. A report may return your whole message (`message/rfc822` or `message/global`): then the
+  kept body holds a full copy of what you sent, attachments included. The search reads only the report's own text,
+  not the message it returns;
 - your drafts, with everything you typed into them: the recipients (Bcc included), the subject and the text, and
   where each one stands in the outbox, with the server's reply if it refused one;
 - the schedule: what is to happen at a set time (a draft to send later, a snoozed message to bring back, a
   follow-up reminder, a calendar alert);
 - what InboxCraft knows of each sender address, across your accounts: that you know it, the screener's decision
   (accepted or blocked) and its group;
-- each message's own state: done, parked, pinned, snoozed or waiting for a reply;
+- each message's own state: done, parked, pinned, snoozed or waiting for a reply, and for a message you sent that
+  came back, which delivery report said so and why (the To and Cc addresses it failed for and the remote server's
+  reply). That mark stays with the Sent copy after the report is deleted and cannot be cleared on its own; it goes
+  when the Sent message or its account is removed from InboxCraft;
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
 A draft also has a copy on your mail server, in the account's own Drafts folder, once it has been still for ten

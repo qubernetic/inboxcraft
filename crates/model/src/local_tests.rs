@@ -5,7 +5,9 @@ use inboxcraft_time::Timestamp;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::{Alert, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
+use super::{
+    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender,
+};
 use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, MessageRef, ScheduleId, Uid, UidValidity};
 
 fn at(seconds: i64) -> Timestamp {
@@ -91,6 +93,7 @@ fn every_record_reads_back() {
         snoozed_until: Some(at(3_000)),
         follow_up: Some(at(4_000)),
         returned: Some(at(2_000)),
+        bounced: Some(Bounce { report: MessageId::new(9), reason: "bela@example.org: 550 5.1.1 The mailbox does not exist".to_owned() }),
     });
     round_trip(&Calendar {
         id: CalendarId::new(2),

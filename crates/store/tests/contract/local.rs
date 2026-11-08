@@ -241,6 +241,7 @@ pub fn message_state_is_kept_with_its_message<S: Storage>(mut store: S) {
         parked: true,
         pinned: false,
         returned: None,
+        bounced: Some(inboxcraft_model::Bounce { report: m(3), reason: "bela@example.org: 5.1.1".to_owned() }),
     };
     put(&mut store, vec![Change::SetMessageState(m(2), done.clone()), Change::SetMessageState(m(1), pinned.clone())]).unwrap();
     assert_eq!(store.message_state(m(2)).unwrap(), done);

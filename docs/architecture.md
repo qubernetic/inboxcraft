@@ -115,8 +115,8 @@ mailbox, and in a folder before its first sync, the acts change the store and qu
 
 New messages go through the arriving-mail pipeline (`engine::arrive`) after the sync put them in its batch: each
 message passes each stage in order, and a stage adds store changes, kept jobs or an act (a move, say) to the same
-batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line; the screener
-is the first and the notify stage the second, the outbox and calendar slices bring more.
+batch. A stage is a file of its own in `crates/engine/src/arrive/` and one name in the `stages!` line: the bounce
+stage is the first, then the screener, snooze, follow-up and the notify stage last; the calendar slices bring more.
 
 The screener (`engine::arrive::screener`, commands in `engine::cmd::triage`) keeps the known-sender index in the
 store's senders table, one record per address across the accounts: a sender is known once the owner received mail
@@ -298,7 +298,24 @@ TLS, `EHLO [127.0.0.1]`), also while the IMAP connection is down, and answers `S
 and the server's reply. A connection that ends after the message went and before the server answered it is
 `SendUnanswered`: the message may have gone. On `Sent` the draft and its outbox item go, its Drafts copy is removed for good and the
 message is appended to the Sent folder (`\Seen`), both kept jobs; on `SendFailed` the draft stays and its outbox
-item holds the reply (`Refused`), and `mail.send` can send it again. After the IMAP server refused the password, the
+item holds the reply (`Refused`), and `mail.send` can send it again. `outbox.list` (`safe`) shows each outbox item with
+where it stands (`waiting`, `sending`, `refused`), a refusal with the server's reply, its enhanced status code
+(RFC 3463) and whether it is permanent (a `5.x.x` code, or a `5xx` reply without one); `outbox.retry` (`owner`)
+sends a refused draft again as `mail.send` does, and refuses an item that is not refused.
+
+Bounces (`engine::arrive::bounce`): a message whose header is a delivery report (`Signs::report`: `multipart/report`
+with `report-type=delivery-status` or `global-delivery-status`) from a sender of reports (local part `MAILER-DAEMON`
+or `postmaster`, the screener's own rule) passes the screener, which comes after the bounce stage and lets every
+report it found in without learning its sender; a report header from anyone else is screened like any mail. Its
+body is fetched at once unless it came with a folder's first sync or into a folder whose mail teaches the screener
+nothing or the Sent folder. Once the body is
+kept, the report's returned header (`Part::reported_message_id`: `text/rfc822-headers`, `message/rfc822` and their
+RFC 6533 forms) names the message by `Message-ID`; a message with that id in the Sent folder of the account the
+report came to gets `MessageState::bounced`: the report and the reason, each recipient the report says failed with
+the remote server's reply or the status code, at most 1000 characters. Only failed recipients the Sent copy names in
+To or Cc count (by `Final-Recipient` or `Original-Recipient`); delayed, delivered and relayed recipients mark
+nothing, and a report held by the screener or blocked links nothing. `mail.list` and `mail.read` show it as
+`bounced`, naming the report only while that id is still a report of the same account (ids are given again). After the IMAP server refused the password, the
 worker sends nothing until it is started anew. After the submission server alone refused it or left it unanswered,
 in a check or a send, a check the owner did not start reports the SMTP step as `NeedsOwner` and sends it nothing; an
 owner's check or a send that signs in there ends the hold. `JobKind`'s `Debug` shows a message's length and a send's

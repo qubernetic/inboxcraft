@@ -262,6 +262,18 @@ pub struct MessageState {
     /// Back from a snooze then: marked as returned, and listed as if it arrived then.
     #[serde(default, with = "optional")]
     pub returned: Option<Timestamp>,
+    /// A message the owner sent that a delivery report says did not get through.
+    #[serde(default)]
+    pub bounced: Option<Bounce>,
+}
+
+/// What a delivery report says of a message the owner sent: it failed, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bounce {
+    /// The delivery report.
+    pub report: MessageId,
+    /// Why: each recipient it failed for, with the remote server's reply or the status code.
+    pub reason: String,
 }
 
 impl MessageState {

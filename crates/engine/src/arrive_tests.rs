@@ -16,7 +16,7 @@ use crate::test_support::at;
 fn plan() -> Plan {
     let mut state = crate::session::State::default();
     state.validity.insert(FolderId::new(1), crate::cmd::act_tests::validity());
-    Plan { state, batch: Batch::new(), jobs: Vec::new() }
+    Plan { state, batch: Batch::new(), jobs: Vec::new(), reports: std::collections::BTreeSet::new() }
 }
 
 /// Notes that it saw the message, by marking it opened.
@@ -59,8 +59,12 @@ fn arrival(session: &crate::Session, first_sync: bool) -> Arrival<'_> {
 }
 
 #[test]
-fn the_screener_comes_first_then_snooze_then_follow_up_and_the_notify_stage_last() {
-    assert_eq!(STAGES.len(), 4, "a stage is a file of its own in arrive/ and a name in the stages! line");
+fn the_bounce_stage_comes_before_the_screener_and_the_notify_stage_last() {
+    assert_eq!(STAGES.len(), 5, "a stage is a file of its own in arrive/ and a name in the stages! line");
+    let order: [Stage; 5] = [super::bounce::stage, super::screener::stage, super::snooze::stage, super::followup::stage, super::notify::stage];
+    for (n, (stage, expected)) in STAGES.iter().zip(order).enumerate() {
+        assert!(std::ptr::fn_addr_eq(*stage, expected), "stage {n}");
+    }
 }
 
 #[test]

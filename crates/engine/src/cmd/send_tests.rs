@@ -17,7 +17,7 @@ use crate::test_support::{NOW, account, at};
 use crate::{AgentClass, Caller, EngineError, Session};
 
 /// The compose test mailbox, account 1 with a submission server on 465.
-fn store() -> Memory {
+pub(crate) fn store() -> Memory {
     let mut store = drafts_store();
     let submission = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
     let sending = account(1, "anna@example.org").with_display_name(Some("Anna Example")).with_submission(Some(submission));

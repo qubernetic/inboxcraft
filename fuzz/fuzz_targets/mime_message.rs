@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
         let _ = part.text();
         let _ = part.delivery_status();
         let _ = part.is_attachment();
-        for text in [part.file_name(), part.content_id(), part.headers().text("subject")].into_iter().flatten() {
+        for text in [part.file_name(), part.content_id(), part.headers().text("subject"), part.reported_message_id()].into_iter().flatten() {
             assert!(!text.chars().any(is_hidden), "{text:?}");
         }
     }

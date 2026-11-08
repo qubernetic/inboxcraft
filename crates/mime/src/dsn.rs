@@ -184,7 +184,34 @@ impl Part<'_> {
         let part = multipart.parts().iter().find(is_status).ok_or(MimeError::NotAReport)?;
         DeliveryStatus::parse(&part.decoded()?)
     }
+
+    /// The `Message-ID` of the message a report is about, as its returned header writes it (`<id@example.org>`,
+    /// unfolded, control characters as spaces): from the first direct part of this `multipart/report` that returns the
+    /// message's header (`text/rfc822-headers`, `message/rfc822-headers`, `message/global-headers`, RFC 6522 and
+    /// RFC 6533) or the whole message (`message/rfc822`, `message/global`). `None` when there is no such part, it
+    /// cannot be read, or its header has no `Message-ID`.
+    #[must_use]
+    pub fn reported_message_id(&self) -> Option<String> {
+        let Body::Multipart(multipart) = self.body() else { return None };
+        if !self.content_type().is("multipart", "report") {
+            return None;
+        }
+        let returned = |part: &&Self| {
+            let kind = part.content_type();
+            RETURNED.iter().any(|(kind_type, subtype)| kind.is(kind_type, subtype))
+        };
+        let part = multipart.parts().iter().find(returned)?;
+        let id = match part.body() {
+            Body::Message(message) => message.headers().get("Message-ID").map(clean),
+            _ => split(&part.decoded().ok()?, false).ok()?.0.get("Message-ID").map(clean),
+        };
+        id.map(|id| id.trim().to_owned()).filter(|id| !id.is_empty())
+    }
 }
+
+/// The media types of a report's part that returns the message's header or the whole message.
+const RETURNED: [(&str, &str); 5] =
+    [("text", "rfc822-headers"), ("message", "rfc822-headers"), ("message", "global-headers"), ("message", "rfc822"), ("message", "global")];
 
 fn recipient(fields: &Headers) -> Result<RecipientStatus, MimeError> {
     let action = text(fields, "Action").ok_or(MimeError::MissingField("Action"))?;

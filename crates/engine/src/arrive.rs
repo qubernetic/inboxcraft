@@ -25,7 +25,7 @@ pub(crate) struct Arrival<'a> {
     /// The store as it was before the sync's batch.
     pub(crate) store: &'a dyn Storage,
     /// The time the event is applied at.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that read it come with the outbox and calendar slices"))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "the stages that read it come with the calendar slices"))]
     pub(crate) now: Timestamp,
     /// The account.
     pub(crate) account: AccountId,
@@ -50,7 +50,7 @@ macro_rules! stages {
     };
 }
 
-stages!(screener, snooze, followup, notify);
+stages!(bounce, screener, snooze, followup, notify);
 
 pub(crate) mod group;
 
