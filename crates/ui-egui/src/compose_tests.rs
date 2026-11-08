@@ -251,6 +251,43 @@ fn a_sent_draft_goes_to_its_worker_once_the_hold_is_over_as_the_window_pumps() {
 }
 
 #[test]
+fn the_window_knows_how_long_until_a_held_send_is_due() {
+    let clock = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = sending_on(&clock);
+    let mut workers = crate::workers::Scripted::passing();
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), None, "nothing waits");
+    mailbox.run("send.set", &json!({ "hold_seconds": 30 })).unwrap();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
+    composer.edited();
+    assert!(composer.send(&mut mailbox).unwrap());
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), Some(std::time::Duration::from_secs(30)));
+    clock.advance(std::time::Duration::from_secs(12));
+    mailbox.pump(&mut workers);
+    assert_eq!(mailbox.due_in(), Some(std::time::Duration::from_secs(18)));
+    clock.advance(std::time::Duration::from_secs(18));
+    mailbox.pump(&mut workers);
+    assert!(workers.sent.iter().any(|(_, kind)| matches!(kind, JobKind::Send { .. })), "sent once the hold is over");
+    assert_eq!(mailbox.due_in(), None, "nothing waits any more");
+}
+
+#[test]
+fn a_time_that_has_passed_without_firing_asks_again_soon_not_at_once() {
+    let clock = FakeClock::new(Timestamp::from_unix(NOW, 0).unwrap());
+    let mut mailbox = sending_on(&clock);
+    mailbox.run("send.set", &json!({ "hold_seconds": 5 })).unwrap();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    "odile@example.org".clone_into(composer.typing_mut(Line::To).unwrap());
+    composer.edited();
+    assert!(composer.send(&mut mailbox).unwrap());
+    // No pump: the hold is over but nothing has fired yet.
+    clock.advance(std::time::Duration::from_secs(9));
+    assert_eq!(mailbox.due_in(), Some(crate::mailbox::OVERDUE_WAKE));
+}
+
+#[test]
 fn send_keeps_the_draft_first_and_sends_it() {
     let mut mailbox = sending();
     let mut composer = Composer::start(&mut mailbox).unwrap();

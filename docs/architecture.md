@@ -301,7 +301,8 @@ and the To, Cc and Bcc addresses, each once; a draft that can no longer go then 
 body gone) is `Refused` with why. Nothing is sent while InboxCraft is not running: a send waiting at a stop stays in
 the store, its time missed fires at the next start's first tick (late, `Fired::missed`), and the owner is told
 (`Notice::SentLate`). The window ticks from its pump (`Session::tick_if_due`, which keeps the next due time until
-something changes). Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
+something changes) and asks egui for a frame at that time (`Session::due_at`, `InboxApp::wake_when_due`), from its
+drawing and from the logic eframe runs for a hidden window, since an idle window draws no frame of its own. Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
 send cut off may have gone, so nothing sends it again on its own. The worker sends it at once on a submission
 connection of its own (`net::SmtpConnection`, implicit TLS on 465 or STARTTLS on 587, AUTH PLAIN or LOGIN only after
 TLS, `EHLO [127.0.0.1]`), also while the IMAP connection is down, and answers `Sent` or `SendFailed` with the cause

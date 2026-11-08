@@ -162,6 +162,7 @@ impl Desktop {
             self.quitting |= !self.stays;
         }
         self.keep_in_step();
+        self.app.wake_when_due(ctx);
     }
 
     /// Without a window: waits up to `patience` for a request and answers it, then keeps the mail in step. With nobody

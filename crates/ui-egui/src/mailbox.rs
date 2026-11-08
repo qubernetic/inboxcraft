@@ -40,6 +40,10 @@ use crate::{UiError, tr};
 /// The most rounds of jobs out and events in [`Mailbox::pump`] makes in one frame.
 pub const MAX_PUMP_ROUNDS: usize = 8;
 
+/// How soon [`Mailbox::due_in`] asks again for a time that has passed without firing (a tick that failed): soon, but
+/// not every frame.
+pub const OVERDUE_WAKE: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The longest search, in characters; the rest is cut off.
 pub const MAX_QUERY: usize = 256;
 
@@ -1174,6 +1178,15 @@ impl Mailbox {
             self.refresh();
         }
         changed
+    }
+
+    /// How long until the engine next has something to do ([`Session::due_at`]): a send whose hold ends, a send later,
+    /// a snooze that ends, a reminder, a draft's copy. The window asks for a frame then, since nothing else draws one
+    /// while it is idle. [`OVERDUE_WAKE`] for a time that has passed; `None` when nothing waits, or when the store
+    /// cannot say (the pump shows that error).
+    pub fn due_in(&mut self) -> Option<std::time::Duration> {
+        let due = self.session.due_at().ok().flatten()?;
+        Some(due.duration_since(self.clock.now()).filter(|left| !left.is_zero()).unwrap_or(OVERDUE_WAKE))
     }
 
     /// What the engine has to tell the owner since the last call ([`Session::take_notices`]), for the desktop to show.

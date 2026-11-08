@@ -601,6 +601,15 @@ impl InboxApp {
         }
     }
 
+    /// Asks `ctx` for a frame when the engine next has something to do ([`Mailbox::due_in`]): an idle window draws
+    /// none of its own, and the engine only ticks as the window pumps. eframe runs [`InboxApp::ui`] for a shown window
+    /// and only its logic for a hidden one, so both call this.
+    pub fn wake_when_due(&mut self, ctx: &egui::Context) {
+        if let Some(left) = self.mailbox.due_in() {
+            ctx.request_repaint_after(left);
+        }
+    }
+
     /// Hands the engine's jobs to the workers and applies their events; the check's steps are read again when
     /// anything changed. Whether anything changed.
     pub fn pump(&mut self) -> bool {
@@ -749,7 +758,7 @@ impl InboxApp {
             Ok(true) => {
                 self.composer = None;
                 self.say(tr!("Sending your message"));
-                // The message goes to the worker in this frame.
+                // The engine holds the message now; it goes to the worker once the hold is over.
                 self.pump();
             }
             Ok(false) => {}
@@ -1052,6 +1061,7 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
+        self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
         let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;

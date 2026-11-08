@@ -185,6 +185,23 @@ fn every_tick_hands_the_jobs_on_also_when_no_frame_is_drawn() {
     assert_eq!(*sent.lock().unwrap(), [JobKind::SyncFolderList]);
 }
 
+#[test]
+fn a_tick_of_a_hidden_window_asks_to_tick_again_when_a_snooze_ends() {
+    let (mut desktop, _send) = desktop();
+    let ctx = egui::Context::default();
+    // A new context asks for frames of its own at first.
+    for _ in 0..4 {
+        tick(&mut desktop, &ctx, false);
+    }
+    assert!(!ctx.has_requested_repaint(), "nothing waits in the sample");
+    let first = desktop.app().mailbox().messages().first().unwrap().id;
+    let until = Timestamp::from_unix(1_793_869_200 + 3600, 0).unwrap();
+    desktop.app_mut().mailbox_mut().act(first, inboxcraft_ui_egui::mailbox::Act::Snooze(until));
+    // eframe runs only the logic of a hidden window, so the tick asks for the next one itself.
+    tick(&mut desktop, &ctx, false);
+    assert!(ctx.has_requested_repaint(), "the window wakes when the snooze ends");
+}
+
 /// A badge that writes down every count it was shown.
 #[derive(Clone, Default)]
 struct Shown(Arc<Mutex<Vec<u64>>>);

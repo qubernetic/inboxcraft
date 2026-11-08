@@ -732,19 +732,27 @@ impl Session {
     ///
     /// As [`Session::tick`].
     pub fn tick_if_due(&mut self) -> Result<Option<Vec<Fired>>, EngineError> {
-        let due = match self.due {
-            Some(due) => due,
-            None => {
-                let due = self.next_due()?;
-                self.due = Some(due);
-                due
-            }
-        };
+        let due = self.due_at()?;
         if !due.is_some_and(|due| due <= self.clock.now()) {
             return Ok(None);
         }
         self.due = None;
         self.tick().map(Some)
+    }
+
+    /// [`Session::next_due`], kept until a command or an event changes something, for a front end that asks every
+    /// frame when to wake next.
+    ///
+    /// # Errors
+    ///
+    /// A store failure.
+    pub fn due_at(&mut self) -> Result<Option<Timestamp>, EngineError> {
+        if let Some(due) = self.due {
+            return Ok(due);
+        }
+        let due = self.next_due()?;
+        self.due = Some(due);
+        Ok(due)
     }
 
     /// When the next schedule entry, draft copy or held job is due, if any.

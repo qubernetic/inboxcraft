@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use inboxcraft_model::{AccountId, DraftId, Due, JobKind, OutboxState};
 use inboxcraft_store::{Batch, Change, Memory, Storage};
-use inboxcraft_time::FakeClock;
+use inboxcraft_time::{Clock as _, FakeClock};
 use serde_json::{Value, json};
 
 use super::send_tests::store;
@@ -393,4 +393,17 @@ fn a_front_end_asking_every_frame_ticks_only_when_something_is_due() {
     assert!(matches!(fired.as_slice(), [fired] if fired.entry.what == Due::Send(DraftId::new(id))), "{fired:?}");
     assert_eq!(sends(&mut session), [DraftId::new(id)]);
     assert_eq!(session.tick_if_due().unwrap(), None);
+}
+
+#[test]
+fn a_front_end_learns_when_to_wake_and_the_answer_follows_each_change() {
+    let (mut session, clock) = session();
+    assert_eq!(session.due_at().unwrap(), None, "nothing waits");
+    let id = draft(&mut session, "Budget");
+    session.run("mail.send", &json!({ "id": id })).unwrap();
+    let start = clock.now();
+    assert_eq!(session.due_at().unwrap(), start.checked_add(Duration::from_secs(5)), "the hold's end");
+    assert_eq!(session.due_at().unwrap(), session.next_due().unwrap(), "kept, and the same as asking the store");
+    session.run("mail.unsend", &json!({ "id": id })).unwrap();
+    assert_eq!(session.due_at().unwrap(), session.next_due().unwrap(), "a command asks again");
 }
