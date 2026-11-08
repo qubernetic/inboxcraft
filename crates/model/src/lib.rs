@@ -77,7 +77,9 @@ pub use flags::{Flag, FlagError, Flags, Keyword};
 pub use folder::{Folder, FolderError, FolderListing, FolderPath, SpecialUse};
 pub use id::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, FolderId, JobId, MessageId, ModSeq, ScheduleId, ThreadId, Uid, UidValidity};
 pub use job::{FolderState, Job, JobKind};
-pub use local::{Alert, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender};
+pub use local::{
+    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender,
+};
 pub use message::{
     Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Moving, SNOOZED_UNTIL, Summary,
 };

@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The signs in a message's header that say what kind of mail it is, for the grouped inbox: list fields (RFC 2369,
-//! RFC 2919), `Precedence`, `Auto-Submitted` (RFC 3834), a `text/calendar` media type, and whether the body holds a
-//! `text/calendar` part. What they mean for the message's group is the engine's to decide; this only reads them.
+//! RFC 2919), `Precedence`, `Auto-Submitted` (RFC 3834), a `text/calendar` media type, a delivery report (a
+//! `multipart/report` of RFC 6522 whose `report-type` is `delivery-status`, RFC 3464, or `global-delivery-status`,
+//! RFC 6533), and whether the body holds a `text/calendar` part. What they mean for the message's group is the engine's to decide; this only reads them.
 
 use serde::{Deserialize, Serialize};
+
+/// The `report-type` values of a delivery report, in lower case.
+const DELIVERY_REPORTS: [&str; 2] = ["delivery-status", "global-delivery-status"];
 
 /// The fields of a mailing list (RFC 2369 and RFC 2919), in lower case.
 const LIST_FIELDS: [&str; 7] = ["list-id", "list-unsubscribe", "list-post", "list-help", "list-subscribe", "list-owner", "list-archive"];
@@ -41,6 +45,9 @@ pub struct Signs {
     /// The kept body holds a `text/calendar` part.
     #[serde(default)]
     calendar: bool,
+    /// The message is a delivery report.
+    #[serde(default)]
+    report: bool,
 }
 
 impl Signs {
@@ -65,13 +72,14 @@ impl Signs {
             } else if name.eq_ignore_ascii_case("auto-submitted") {
                 automatic = automatic.or_else(|| word(value).map(|word| !word.eq_ignore_ascii_case("no")));
             } else if name.eq_ignore_ascii_case("content-type") {
-                media_type = media_type.or_else(|| word(value).map(|word| word.eq_ignore_ascii_case("text/calendar")));
+                media_type = media_type.or_else(|| word(value).map(|word| (word, value)));
             } else {
                 signs.list |= LIST_FIELDS.iter().any(|list| name.eq_ignore_ascii_case(list));
             }
         }
         signs.automatic = automatic.unwrap_or(false);
-        signs.calendar_type = media_type.unwrap_or(false);
+        signs.calendar_type = media_type.is_some_and(|(word, _)| word.eq_ignore_ascii_case("text/calendar"));
+        signs.report = media_type.is_some_and(|(word, value)| word.eq_ignore_ascii_case("multipart/report") && delivery_report(value));
         signs
     }
 
@@ -106,6 +114,20 @@ impl Signs {
         self.calendar_type
     }
 
+    /// Whether the message is a delivery report: `multipart/report` with a `report-type` of `delivery-status` or
+    /// `global-delivery-status`.
+    ///
+    /// ```
+    /// use inboxcraft_model::Signs;
+    ///
+    /// assert!(Signs::read([("Content-Type", "multipart/report; report-type=delivery-status")]).report());
+    /// assert!(!Signs::read([("Content-Type", "multipart/report; report-type=disposition-notification")]).report());
+    /// ```
+    #[must_use]
+    pub fn report(&self) -> bool {
+        self.report
+    }
+
     /// Whether the body holds a `text/calendar` part; known once the body is kept.
     #[must_use]
     pub fn calendar(&self) -> bool {
@@ -124,6 +146,14 @@ fn precedence(value: &str) -> Option<Precedence> {
     let word = word(value)?;
     let known = [("bulk", Precedence::Bulk), ("list", Precedence::List), ("junk", Precedence::Junk)];
     Some(known.into_iter().find(|(name, _)| word.eq_ignore_ascii_case(name)).map_or(Precedence::Other, |(_, precedence)| precedence))
+}
+
+/// Whether the `Content-Type` value `value` has a `report-type` parameter of a delivery report.
+fn delivery_report(value: &str) -> bool {
+    value.split(';').skip(1).filter_map(|parameter| parameter.split_once('=')).any(|(name, kind)| {
+        name.trim().eq_ignore_ascii_case("report-type")
+            && DELIVERY_REPORTS.iter().any(|report| kind.trim().trim_matches('"').eq_ignore_ascii_case(report))
+    })
 }
 
 /// The first word of a field value: up to a `;` or a comment, white space around it gone; `None` when nothing is
