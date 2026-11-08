@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inboxcraft_model::{Account, AccountId, FolderId, JobKind, Message, MessageId, MessageRef, MessageState, Role, group_threads};
-use inboxcraft_store::{Change, Entry, Search};
+use inboxcraft_store::{Change, Entry, Search, Storage};
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -150,14 +150,20 @@ pub(super) fn row(context: &Context<'_>, grouping: &mut Grouping<'_>, accounts: 
         fields.insert("snoozed_until".into(), state.and_then(|state| state.snoozed_until).map_or(Value::Null, json::date));
         fields.insert("returned".into(), state.and_then(|state| state.returned).map_or(Value::Null, json::date));
         fields.insert("follow_up".into(), state.and_then(|state| state.follow_up).map_or(Value::Null, json::date));
-        fields.insert("bounced".into(), bounced(state));
+        fields.insert("bounced".into(), bounced(context.store(), message, state)?);
     }
     Ok(shown)
 }
 
-/// What a delivery report said of a message the owner sent: the report and the reason, or `null`.
-fn bounced(state: Option<&MessageState>) -> Value {
-    state.and_then(|state| state.bounced.as_ref()).map_or(Value::Null, |bounce| json!({ "report": bounce.report.get(), "reason": bounce.reason }))
+/// What a delivery report said of `message`, which the owner sent: the reason, and the report while it is still the
+/// report of the same account (message ids are given again once a message is gone), or `null`.
+fn bounced(store: &dyn Storage, message: &Message, state: Option<&MessageState>) -> Result<Value, EngineError> {
+    let Some(bounce) = state.and_then(|state| state.bounced.as_ref()) else { return Ok(Value::Null) };
+    let report = store.message(bounce.report)?.filter(|entry| {
+        let held = entry.message();
+        held.account() == message.account() && held.summary().envelope().signs().report()
+    });
+    Ok(json!({ "report": report.map(|_| bounce.report.get()), "reason": bounce.reason }))
 }
 
 /// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the
@@ -215,7 +221,7 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
         fields.insert("in_reply_to".into(), json!(envelope.in_reply_to().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
-        fields.insert("bounced".into(), bounced(Some(&store.message_state(id)?)));
+        fields.insert("bounced".into(), bounced(store, message, Some(&store.message_state(id)?))?);
     }
     let body_error = if too_large {
         Some("too_large")
