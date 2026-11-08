@@ -262,3 +262,20 @@ fn a_block_over_several_days_shows_both_dates_and_a_second_press_lets_it_go() {
     pick(&mut harness, "Dentist");
     harness.get_by_label("Personal · busy · private");
 }
+
+#[test]
+fn a_click_on_an_alert_opens_the_calendar_on_the_event_with_its_details() {
+    let mut harness = harness(egui::Theme::Light);
+    let id = {
+        let app = harness.state_mut();
+        let (calendar, mailbox) = app.calendar_mut();
+        calendar.refresh(mailbox);
+        calendar.events().find(|event| event.summary == "Studio stand-up").map(|event| event.id).unwrap()
+    };
+    // Next Monday's stand-up, 09:00 UTC.
+    harness.state_mut().open_event(id, Timestamp::from_unix(1_793_869_200 + 4 * 86_400, 0).unwrap());
+    harness.run();
+    assert_eq!(harness.state().screen(), Screen::Calendar);
+    assert_eq!(harness.state().calendar().focus(), Day::new(2026, 11, 9).unwrap());
+    assert_eq!(harness.state().calendar().picked().map(|event| event.id), Some(id));
+}

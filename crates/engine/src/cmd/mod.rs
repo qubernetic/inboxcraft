@@ -57,6 +57,9 @@ pub(crate) mod act_tests;
 #[path = "add_tests.rs"]
 mod add_tests;
 #[cfg(test)]
+#[path = "alert_tests.rs"]
+mod alert_tests;
+#[cfg(test)]
 #[path = "calendar_sync_tests.rs"]
 mod calendar_sync_tests;
 #[cfg(test)]

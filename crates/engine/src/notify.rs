@@ -13,6 +13,9 @@
 //!   `none`. [`tells`] is the table.
 //! - A snoozed message that comes back and a follow-up reminder that fires tell the owner unless they turned that off
 //!   ([`Settings::returns`], [`Settings::reminders`]).
+//! - A calendar alert (`crate::calendar::alert`) tells the owner of its event at the alert time unless they turned
+//!   that off ([`Settings::alerts`]); one that went off while InboxCraft was off or asleep tells them late, unless the
+//!   event is over by then.
 //! - More than [`MAX_SINGLE`] new messages of one account at once become one notice that counts them, and the queue
 //!   keeps the newest [`MAX_PENDING`] for a front end that does not take them.
 //! - A notice's name and subject are the sender's data: one line, without control characters or invisible marks, at
@@ -20,13 +23,17 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use inboxcraft_model::{AccountId, Address, DraftId, Group, Message, MessageId, Role, Screening, is_invisible_mark};
+use inboxcraft_model::{
+    AccountId, Address, AlertId, CalendarEventId, CalendarId, DraftId, Group, Message, MessageId, Role, Screening, is_invisible_mark,
+};
 use inboxcraft_store::{Change, Storage};
+use inboxcraft_time::{Offsets, Timestamp};
 use serde_json::{Value, json};
 
 use crate::EngineError;
 use crate::arrive::screener::sender_of;
 use crate::arrive::{Arrival, group};
+use crate::calendar::{alert, calendar_by_id, read};
 use crate::schedule::Fired;
 use crate::session::State;
 use crate::sync::Plan;
@@ -86,8 +93,8 @@ impl Level {
     }
 }
 
-/// The owner's choices: a [`Level`] per account, and whether returned snoozes and follow-up reminders tell them. The
-/// front end keeps them on disk ([`Settings::to_value`]) and hands them back at the start.
+/// The owner's choices: a [`Level`] per account, and whether returned snoozes, follow-up reminders and calendar alerts
+/// tell them. The front end keeps them on disk ([`Settings::to_value`]) and hands them back at the start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     levels: BTreeMap<AccountId, Level>,
@@ -95,11 +102,13 @@ pub struct Settings {
     pub returns: bool,
     /// A follow-up reminder that fires tells the owner.
     pub reminders: bool,
+    /// A calendar alert tells the owner of its event.
+    pub alerts: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { levels: BTreeMap::new(), returns: true, reminders: true }
+        Self { levels: BTreeMap::new(), returns: true, reminders: true, alerts: true }
     }
 }
 
@@ -143,7 +152,7 @@ impl Settings {
     #[must_use]
     pub fn to_value(&self) -> Value {
         let accounts: Vec<Value> = self.levels.iter().map(|(account, level)| json!({ "account": account.get(), "level": level.name() })).collect();
-        json!({ "accounts": accounts, "returns": self.returns, "reminders": self.reminders })
+        json!({ "accounts": accounts, "returns": self.returns, "reminders": self.reminders, "alerts": self.alerts })
     }
 
     /// The choices kept in `value` ([`Settings::to_value`]); what cannot be read is left at its default.
@@ -161,6 +170,7 @@ impl Settings {
         let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(true);
         settings.returns = flag("returns");
         settings.reminders = flag("reminders");
+        settings.alerts = flag("alerts");
         settings
     }
 }
@@ -176,6 +186,27 @@ pub struct About {
     pub who: String,
     /// Its subject; the sender's data, empty when it has none.
     pub subject: String,
+}
+
+/// The event occurrence an alert is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventAbout {
+    /// The account its calendar belongs to.
+    pub account: AccountId,
+    /// Its calendar.
+    pub calendar: CalendarId,
+    /// The event, which a click opens.
+    pub event: CalendarEventId,
+    /// What it is called; the organiser's data, empty when it says nothing.
+    pub summary: String,
+    /// Where; the organiser's data, empty when it says nothing.
+    pub location: String,
+    /// When the occurrence starts.
+    pub start: Timestamp,
+    /// When it ends.
+    pub end: Timestamp,
+    /// It takes whole days.
+    pub all_day: bool,
 }
 
 /// Something to tell the owner.
@@ -204,6 +235,13 @@ pub enum Notice {
         /// Its time passed while InboxCraft was off or asleep.
         missed: bool,
     },
+    /// A calendar alert went off.
+    Alert {
+        /// The occurrence.
+        about: EventAbout,
+        /// Its time passed while InboxCraft was off or asleep.
+        missed: bool,
+    },
     /// A send whose time passed while InboxCraft was off or asleep went late: at the start, or when it woke.
     SentLate {
         /// The account it went from.
@@ -222,6 +260,7 @@ impl Notice {
         match self {
             Self::Mail(about) | Self::Returned { about, .. } | Self::Reminder { about, .. } => about.account,
             Self::Mails { account, .. } | Self::SentLate { account, .. } => *account,
+            Self::Alert { about, .. } => about.account,
         }
     }
 
@@ -230,7 +269,7 @@ impl Notice {
     pub fn message(&self) -> Option<MessageId> {
         match self {
             Self::Mail(about) | Self::Returned { about, .. } | Self::Reminder { about, .. } => Some(about.message),
-            Self::Mails { .. } | Self::SentLate { .. } => None,
+            Self::Mails { .. } | Self::SentLate { .. } | Self::Alert { .. } => None,
         }
     }
 }
@@ -338,9 +377,16 @@ fn mark(message: &Message) -> String {
     }
 }
 
-/// The notices for the schedule entries that fired, as the owner's [`Settings`] want them; a send that went late,
-/// one of `sent`, is told whatever they are.
-pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired], sent: &[DraftId]) -> Result<Vec<Notice>, EngineError> {
+/// The notices for the schedule entries that fired at `now`, as the owner's [`Settings`] want them; a send that went
+/// late, one of `sent`, is told whatever they are. `local` is the computer's clock.
+pub(crate) fn fired(
+    store: &dyn Storage,
+    settings: &Settings,
+    fired: &[Fired],
+    sent: &[DraftId],
+    local: &dyn Offsets,
+    now: Timestamp,
+) -> Result<Vec<Notice>, EngineError> {
     let mut notices = Vec::new();
     for entry in fired {
         let missed = entry.missed;
@@ -351,6 +397,7 @@ pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired], s
             inboxcraft_model::Due::FollowUp(id) if settings.reminders => {
                 held(store, id)?.map(|message| Notice::Reminder { about: about(&message, to_whom(&message)), missed })
             }
+            inboxcraft_model::Due::Alert(id) if settings.alerts => alerted(store, id, local, now, missed)?,
             inboxcraft_model::Due::Send(id) if missed && sent.contains(&id) => {
                 store.draft(id)?.map(|draft| Notice::SentLate { account: draft.account, draft: id, subject: draft.subject })
             }
@@ -359,6 +406,31 @@ pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired], s
         notices.extend(notice);
     }
     Ok(notices)
+}
+
+/// The notice of alert `id`, which went off at `now` (late when `missed`): about the occurrence it is for, if the store
+/// still holds the alert and its event; nothing for a late alert of an event that is over.
+fn alerted(store: &dyn Storage, id: AlertId, local: &dyn Offsets, now: Timestamp, missed: bool) -> Result<Option<Notice>, EngineError> {
+    let Some(held) = store.alert(id)? else { return Ok(None) };
+    let Some(event) = store.calendar_event(held.event)? else { return Ok(None) };
+    let Some(calendar) = calendar_by_id(store, event.calendar)? else { return Ok(None) };
+    let Some(object) = read(&event) else { return Ok(None) };
+    let owner = store.accounts()?.into_iter().find(|account| account.id() == calendar.account).map(|account| account.address().as_str().to_owned());
+    let before = held.at.checked_sub(std::time::Duration::from_secs(1)).unwrap_or(held.at);
+    let ring = alert::rings(&object, before, held.at, local, owner.as_deref()).into_iter().find(|ring| ring.at == held.at);
+    let Some(ring) = ring.filter(|ring| !(missed && ring.end < now)) else { return Ok(None) };
+    let Some(source) = object.events.get(ring.event) else { return Ok(None) };
+    let about = EventAbout {
+        account: calendar.account,
+        calendar: calendar.id,
+        event: event.id,
+        summary: line(source.summary.as_deref().unwrap_or_default()),
+        location: line(source.location.as_deref().unwrap_or_default()),
+        start: ring.start,
+        end: ring.end,
+        all_day: source.all_day(),
+    };
+    Ok(Some(Notice::Alert { about, missed }))
 }
 
 /// The message `id`, if the store still holds it.

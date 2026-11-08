@@ -8,9 +8,13 @@
 //! and subject in it are the sender's data and go out as plain text. On Linux ([`bus`]) the Flatpak goes through the
 //! notification portal and everything else through `org.freedesktop.Notifications`, both over the session bus. A
 //! click on the notification opens the message in the full-width reader, and its buttons (where the desktop shows
-//! them) mark it done or read: each is a [`Click`] for the window to answer. Other systems show no notifications yet.
+//! them) mark it done or read: each is a [`Click`] for the window to answer. A calendar alert says when and where its
+//! event takes place on the computer's clock, and a click on it opens the event on the calendar. Other systems show no
+//! notifications yet.
 
 use inboxcraft_engine::notify::{About, Notice};
+use inboxcraft_time::Offset;
+use inboxcraft_ui_egui::calendar::alert_when;
 use inboxcraft_ui_egui::tr;
 
 /// What the owner clicked in a notification.
@@ -24,6 +28,8 @@ pub enum Click {
     Read(u64),
     /// Bring the window forward.
     Show,
+    /// Open the event (by id) on the calendar, at its occurrence that starts then (Unix seconds).
+    Event(u64, i64),
 }
 
 /// A button of a notification, besides the click on the notification itself, which opens.
@@ -73,9 +79,10 @@ pub struct Shown {
     pub mail: bool,
 }
 
-/// The notification of `notice`; `account` names the account of a count.
+/// The notification of `notice`; `account` names the account of a count, and an alert's times are on the clock of
+/// `offset`.
 #[must_use]
-pub fn shown(notice: &Notice, account: Option<&str>) -> Shown {
+pub fn shown(notice: &Notice, account: Option<&str>, offset: Offset) -> Shown {
     let line = |about: &About| {
         let subject = if about.subject.is_empty() { tr!("(no subject)").to_owned() } else { about.subject.clone() };
         if about.who.is_empty() { subject } else { format!("{}: {subject}", about.who) }
@@ -116,6 +123,17 @@ pub fn shown(notice: &Notice, account: Option<&str>) -> Shown {
             buttons: Vec::new(),
             mail: false,
         },
+        Notice::Alert { about, missed } => {
+            let summary = if about.summary.is_empty() { tr!("(No title)").to_owned() } else { about.summary.clone() };
+            let when = alert_when(about.all_day, about.start, about.end, offset);
+            Shown {
+                key: format!("event-{}-{}", about.event.get(), about.start.unix_seconds()),
+                title: if *missed { tr!("{summary}, reminded late", summary = summary) } else { summary },
+                body: if about.location.is_empty() { when } else { format!("{when}\n{}", about.location) },
+                buttons: Vec::new(),
+                mail: false,
+            }
+        }
     }
 }
 
@@ -123,9 +141,14 @@ pub fn shown(notice: &Notice, account: Option<&str>) -> Shown {
 /// so both are read as text from outside: the key counts only written exactly as [`shown`] writes it.
 #[must_use]
 pub fn clicked(key: &str, action: &str) -> Option<Click> {
+    let open = action == OPEN || action == "default";
+    if let Some(rest) = key.strip_prefix("event-") {
+        let (id, start) = rest.split_once('-')?;
+        let (id, start) = (id.parse::<u64>().ok().filter(|id| *id > 0)?, start.parse::<i64>().ok()?);
+        return (open && format!("event-{id}-{start}") == key).then_some(Click::Event(id, start));
+    }
     let (kind, id) = key.split_once('-')?;
     let id = id.parse::<u64>().ok().filter(|id| *id > 0 && format!("{kind}-{id}") == key)?;
-    let open = action == OPEN || action == "default";
     match (kind, action) {
         ("mails", _) if open => Some(Click::Show),
         ("mail" | "returned" | "reminder", _) if open => Some(Click::Open(id)),

@@ -22,6 +22,7 @@ pub mod sample;
 
 use std::collections::BTreeSet;
 
+use inboxcraft_time::{Offset, Timestamp};
 use serde_json::{Value, json};
 
 pub use self::day::Day;
@@ -289,6 +290,25 @@ impl EventRow {
     }
 }
 
+/// When an occurrence from `start` to `end` takes place, on the clock of `offset`, as an alert's notification says it:
+/// [`EventRow::when`]'s words; empty for a time the clock cannot show.
+#[must_use]
+pub fn alert_when(all_day: bool, start: Timestamp, end: Timestamp, offset: Offset) -> String {
+    let end = end.max(start);
+    // The last day it covers: an end at midnight belongs to the day before.
+    let last = end.checked_sub(std::time::Duration::from_secs(1)).filter(|last| *last >= start).unwrap_or(start);
+    match (moment(start, offset), moment(end, offset), Day::of(last, offset)) {
+        (Some(from), Some(to), Some(last)) => when(all_day, from.day, if all_day { last } else { to.day }, from, to),
+        _ => String::new(),
+    }
+}
+
+/// `at` on the clock of `offset`.
+fn moment(at: Timestamp, offset: Offset) -> Option<Moment> {
+    let civil = at.to_civil(offset)?;
+    Some(Moment { day: Day::new(civil.year(), civil.month(), civil.day())?, minute: u16::from(civil.hour()) * 60 + u16::from(civil.minute()) })
+}
+
 /// Days and times in full, both dates when they differ.
 fn when(all_day: bool, first: Day, last: Day, start: Moment, end: Moment) -> String {
     match (all_day, first == last) {
@@ -541,6 +561,19 @@ impl Calendar {
         if self.picked().is_none() {
             self.picked = None;
         }
+    }
+
+    /// Puts the view on the day the occurrence of event `id` at `start` falls on and picks it, as a click on its alert
+    /// asks; an occurrence that does not start at that minute any more is found by its day, and an event gone is not
+    /// picked.
+    pub fn open_event(&mut self, mailbox: &mut Mailbox, id: u64, start: Timestamp) {
+        let Some(at) = moment(start, mailbox.offset()) else { return };
+        self.go_to(mailbox, at.day);
+        let exact = Picked { id, start: at };
+        let found =
+            self.events.iter().find(|event| event.key() == exact).or_else(|| self.events.iter().find(|event| event.id == id && event.covers(at.day)));
+        self.picked = found.map(EventRow::key);
+        self.hidden.retain(|calendar| found.is_none_or(|event| event.calendar != *calendar));
     }
 
     /// Picks an occurrence (`None` lets it go); the side panel shows its details.

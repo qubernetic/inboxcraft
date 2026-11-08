@@ -129,6 +129,10 @@ pub(crate) fn due(context: &Context<'_>, started: Option<Timestamp>) -> Result<P
     let mut sends = Vec::new();
     for entry in store.schedule()?.into_iter().filter(|entry| entry.due <= now) {
         batch.push(Change::RemoveScheduled(entry.id));
+        if let Due::Alert(alert) = entry.what {
+            // Told once: the next one of a repeating event is in the store already.
+            batch.push(Change::RemoveAlert(alert));
+        }
         if let Due::Unsnooze(message) | Due::FollowUp(message) = entry.what {
             let held = match states.get(&message) {
                 Some(state) => state.clone(),

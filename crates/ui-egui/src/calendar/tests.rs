@@ -291,3 +291,35 @@ fn the_views_have_names_and_ids() {
     assert_eq!(View::ALL.map(View::text), ["Day", "Week", "Month", "Agenda"]);
     assert_eq!(View::named("year"), None);
 }
+
+#[test]
+fn an_alert_opens_its_occurrence_on_its_day() {
+    let (mut mailbox, mut calendar) = loaded();
+    let id = named(&calendar, "Studio stand-up").id;
+    // Next Monday's stand-up, 09:00 UTC.
+    calendar.open_event(&mut mailbox, id, Timestamp::from_unix(NOW + 4 * 86_400, 0).unwrap());
+    assert_eq!(calendar.focus(), day(11, 9));
+    let picked = calendar.picked().unwrap();
+    assert_eq!((picked.id, picked.start), (id, Moment { day: day(11, 9), minute: 9 * 60 }));
+}
+
+#[test]
+fn an_alert_off_its_minute_picks_the_event_on_that_day_and_one_gone_picks_nothing() {
+    let (mut mailbox, mut calendar) = loaded();
+    let id = named(&calendar, "Studio stand-up").id;
+    calendar.open_event(&mut mailbox, id, Timestamp::from_unix(NOW + 4 * 86_400 + 3600, 0).unwrap());
+    assert_eq!(calendar.picked().map(|picked| (picked.id, picked.start.day)), Some((id, day(11, 9))));
+    calendar.open_event(&mut mailbox, 999, Timestamp::from_unix(NOW + 11 * 86_400, 0).unwrap());
+    assert_eq!(calendar.focus(), day(11, 16));
+    assert!(calendar.picked().is_none());
+}
+
+#[test]
+fn an_alert_says_when_its_occurrence_is() {
+    let at = |seconds: i64| Timestamp::from_unix(NOW + seconds, 0).unwrap();
+    let utc = inboxcraft_time::Offset::UTC;
+    assert_eq!(super::alert_when(false, at(4 * 86_400), at(4 * 86_400 + 3600), utc), "Monday 9 November, 09:00 – 10:00");
+    // Two whole days: from midnight of the 5th to midnight of the 7th.
+    assert_eq!(super::alert_when(true, at(-9 * 3600), at(2 * 86_400 - 9 * 3600), utc), "Thursday 5 November – Friday 6 November");
+    assert_eq!(super::alert_when(false, at(3600), at(0), utc), "Thursday 5 November, 10:00 – 10:00", "an end before the start");
+}

@@ -14,8 +14,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use inboxcraft_model::{
-    Account, AccountId, Alert, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId, FolderState,
-    Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
+    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
+    FolderState, Job, Message, MessageId, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
 use rusqlite::config::DbConfig;
@@ -496,6 +496,10 @@ impl Storage for Sqlite {
 
     fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError> {
         self.records("SELECT record FROM alert WHERE event = ?1 ORDER BY at, id", [key(event.get())?])
+    }
+
+    fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError> {
+        self.one("SELECT record FROM alert WHERE id = ?1", [key(id.get())?])
     }
 
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {

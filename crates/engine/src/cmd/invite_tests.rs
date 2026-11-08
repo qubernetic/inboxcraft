@@ -540,11 +540,16 @@ fn a_refused_answer_cannot_be_edited() {
     let again = session.run("outbox.retry", &json!({ "id": draft })).unwrap();
     assert_eq!(again["state"], json!("sending"), "{again}");
     assert_eq!(out(&mut session).recipients, ["odile@example.org"]);
-    assert!(session.store().schedule().unwrap().is_empty());
+    assert!(!sends_waiting(&session));
     session.apply(&event(EventKind::SendFailed { draft: sent.draft, kind: inboxcraft_model::ErrorKind::MessageRefused, reply: None })).unwrap();
     // Answering again from the invitation still works.
     answer(&mut session, id, "tentative").unwrap();
     assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));
+}
+
+/// Whether a send waits on the schedule; the answered event's alerts are there too.
+fn sends_waiting(session: &Session) -> bool {
+    session.store().schedule().unwrap().iter().any(|entry| matches!(entry.what, inboxcraft_model::Due::Send(_)))
 }
 
 /// An answer goes at once, whatever hold the owner chose for other sends: it is taken back by changing the answer.
@@ -559,6 +564,6 @@ fn an_answer_goes_at_once_without_the_hold() {
     assert_eq!(sent.recipients, ["odile@example.org"]);
     let outbox = session.store().outbox().unwrap();
     assert!(matches!(outbox.as_slice(), [item] if item.draft == sent.draft && item.state == inboxcraft_model::OutboxState::Sending), "{outbox:?}");
-    assert!(session.store().schedule().unwrap().is_empty(), "no send waits on the schedule");
+    assert!(!sends_waiting(&session), "no send waits on the schedule");
     assert!(bad(session.run("mail.unsend", &json!({ "id": sent.draft.get() }))));
 }

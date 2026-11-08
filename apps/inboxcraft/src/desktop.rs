@@ -205,6 +205,12 @@ impl Desktop {
                     reader.set_full_width(true);
                     show = true;
                 }
+                Click::Event(id, start) => {
+                    if let Some(start) = inboxcraft_time::Timestamp::from_unix(start, 0) {
+                        self.app.open_event(id, start);
+                    }
+                    show = true;
+                }
                 Click::Show => show = true,
                 Click::Done(id) => self.app.mailbox_mut().act(id, Act::Done),
                 Click::Read(id) => self.app.mailbox_mut().act(id, Act::Read),
@@ -226,7 +232,7 @@ impl Desktop {
         if let Some(deliver) = self.deliver.as_mut() {
             for notice in &notices {
                 let account = self.app.mailbox().account(notice.account().get()).map(|row| row.address.clone());
-                if let Err(error) = deliver.deliver(&shown(notice, account.as_deref()))
+                if let Err(error) = deliver.deliver(&shown(notice, account.as_deref(), self.app.mailbox().offset()))
                     && !self.failed
                 {
                     eprintln!("inboxcraft: {error}");

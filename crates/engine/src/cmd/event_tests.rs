@@ -331,7 +331,8 @@ fn undo_within_the_window_brings_the_event_back_and_nothing_reaches_the_server()
     clock.advance(Duration::from_secs(10));
     session.tick().unwrap();
     assert!(calendar_jobs(&mut session).is_empty());
-    assert_eq!(session.next_due().unwrap(), None);
+    // No held delete is left: only the lunch's alert, ten minutes before it, is due.
+    assert_eq!(session.next_due().unwrap(), Some(utc("2026-11-06T10:50:00Z")));
 }
 
 #[test]

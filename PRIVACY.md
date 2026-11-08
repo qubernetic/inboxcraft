@@ -71,12 +71,17 @@ notification service (in the Flatpak, its notification portal), which runs on yo
 - for new mail and for snoozed mail that comes back: the sender's name, or their address when the mail gives no name,
   and the subject;
 - for a follow-up reminder: the name or address of the first person you wrote to, and the subject;
+- for a calendar alert: the event's title, when it takes place on your computer's clock, and its place. Every event
+  in your calendars alerts, unless it is cancelled or you declined it, also one you have not answered yet: at its own
+  reminders, which whoever wrote the event chose, or without any ten minutes before (a day before for a whole day);
+  an invitation only in your inbox does not;
 - for more than three new messages of one account at once: the number of new messages and the account's address.
 
 Your desktop may keep notifications in its list until you clear it, and its own settings for InboxCraft decide
 whether they show on the lock screen. You can choose per account to be told of all new mail, of the people you know,
-or of nothing, and whether snoozed mail that comes back and follow-up reminders tell you (`notify.set`, the
-Notifications page of the settings). The window keeps these choices in `notify.json` beside `appearance.json` in your
+or of nothing, and whether snoozed mail that comes back, follow-up reminders and calendar alerts tell you
+(`notify.set`; the Notifications page of the settings has all of them except calendar alerts, which only
+`notify.set` turns off for now). The window keeps these choices in `notify.json` beside `appearance.json` in your
 config folder; the file names each account by its number only, never by its address. The sample window keeps none.
 Whether closing the window leaves InboxCraft running is kept in `background.json` beside them, and nothing else is.
 
