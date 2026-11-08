@@ -962,7 +962,7 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
 fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: DeskView) -> Option<Asked> {
     let mut asked = None;
     let elsewhere = tr!("Not available in this window");
-    let mut notes = vec![tr!("Closing the window leaves InboxCraft running in the tray, so new mail, send later and snooze keep their times.")];
+    let mut notes = vec![tr!("Closing the window leaves InboxCraft running, so new mail, send later and snooze keep their times.")];
     if desk.background.is_none() {
         notes.push(elsewhere);
     }
