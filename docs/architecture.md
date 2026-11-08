@@ -271,7 +271,8 @@ account's signature below `-- `; `compose.update` changes the fields it is given
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
 the server named it; all
 `safe`. A draft on its way (its outbox item waits for the worker's answer) is neither changed nor discarded, so the
-answer finds it as it went. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
+answer finds it as it went; the draft of an answer to an invitation (`invite.answer`) is not changed either, so it
+cannot go elsewhere or into the Drafts folder. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
 `Name <address>` or a bare address: one that cannot be an address is marked with what is wrong, and it blocks Send
 (`blocks`), like a draft without a recipient. `mail.thread` lists the drafts that answer a message of the thread.
 `Session::tick` hands a draft that changed and has been still for ten seconds to its account's worker as a kept

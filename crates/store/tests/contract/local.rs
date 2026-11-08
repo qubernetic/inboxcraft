@@ -251,11 +251,15 @@ pub fn message_state_is_kept_with_its_message<S: Storage>(mut store: S) {
     put(&mut store, vec![Change::SetMessageState(m(2), done.clone()), Change::SetMessageState(m(1), pinned.clone())]).unwrap();
     assert_eq!(store.message_state(m(2)).unwrap(), done);
     put(&mut store, vec![Change::PutMessage(message(2, 1, 2, 7, "two, archived", Some(1)))]).unwrap();
-    assert_eq!(store.message_states().unwrap(), [(m(1), pinned), (m(2), done)], "a moved message keeps its state");
+    assert_eq!(store.message_states().unwrap(), [(m(1), pinned.clone()), (m(2), done.clone())], "a moved message keeps its state");
+    put(&mut store, vec![Change::PutBody(m(2), super::body("two")), Change::RemoveBody(m(2))]).unwrap();
+    assert_eq!(store.message_state(m(2)).unwrap(), done, "the state, an invitation's mark too, outlives the body");
     put(&mut store, vec![Change::SetMessageState(m(1), MessageState::default()), Change::SetMessageState(m(3), MessageState::default())]).unwrap();
     assert_eq!(store.message_states().unwrap().len(), 1, "no state is no row");
+    put(&mut store, vec![Change::SetMessageState(m(3), pinned.clone()), Change::RemoveMessage(m(2))]).unwrap();
+    assert_eq!(store.message_states().unwrap(), [(m(3), pinned)], "a removed message takes its state");
     put(&mut store, vec![Change::RemoveFolder(FolderId::new(2))]).unwrap();
-    assert!(store.message_states().unwrap().is_empty(), "a removed message takes its state");
+    assert!(store.message_states().unwrap().is_empty(), "a removed folder takes its messages' states");
 }
 
 pub fn calendars_hold_events_and_alerts<S: Storage>(mut store: S) {

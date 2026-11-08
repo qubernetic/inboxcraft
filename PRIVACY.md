@@ -31,7 +31,9 @@ and `~/Library/Application Support` on macOS. Only your own user account can rea
   came back, which delivery report said so and why (the To and Cc addresses it failed for and the remote server's
   reply). That mark stays with the Sent copy after the report is deleted and cannot be cleared on its own; it goes
   when the Sent message or its account is removed from InboxCraft. For a message that carries an invitation, what
-  its calendar part says of the event (its id, version, title, times, repeat and place) and the answer you sent;
+  its calendar part says of the event (its id, version, title, times, repeat and place) and the answer you sent.
+  It goes when the message or its account is removed from InboxCraft, and stays when the message's body is no longer
+  kept;
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
 A draft also has a copy on your mail server, in the account's own Drafts folder, once it has been still for ten
@@ -173,10 +175,12 @@ never overwrites a file.
 ## Answering an invitation
 An invitation in a message changes nothing by itself. Only when you press Going, Maybe or No does InboxCraft send your
 answer, at once, from that account to the organiser the invitation names: a short message whose calendar part says the
-event's id, version, start and title, the organiser, and you with your answer. The other guests are not named in it.
+event's id, version, start and title, the organiser, and you with your answer. The other guests are not named in it,
+nor anyone the invitation names beside you (a delegate, a group, someone sending for you). An answer that could not
+go cannot be edited as a draft; you answer again from the invitation.
 Going and Maybe put the event into the account's first calendar on your CalDAV server, No takes it out; Remove from
-calendar on a cancellation takes it out too. The reminders the organiser put in the invitation stay out of your
-calendar; the ones you set on the event there are kept.
+calendar on a cancellation takes it out too. Only the event goes in: the reminders, attachments and extra parts the
+organiser put in the invitation stay out of your calendar, and the reminders you set on the event there are kept.
 
 ## Scripts and agents
 The control channel, through which the command-line client and the MCP server reach the running app, is a socket in

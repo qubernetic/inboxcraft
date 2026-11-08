@@ -469,3 +469,71 @@ fn the_organisers_reminders_stay_out_of_the_calendar() {
     let copy = put_text(write);
     assert!(copy.contains("Anna's own") && !copy.contains("Odile says go"), "{copy}");
 }
+
+/// The copy in the owner's calendar is the event alone: no reminder, attachment, `X-` property or other component of
+/// the organiser's, and every person in it marked for no server to mail.
+#[test]
+fn the_calendar_copy_keeps_no_alarm_or_component_of_the_organiser() {
+    let mut session = session();
+    let extra = "ATTACH:https://example.org/agenda.pdf\r\nX-ODILE-NOTE:bring the slides\r\n\
+                 BEGIN:VALARM\r\nACTION:EMAIL\r\nATTENDEE:mailto:cili@example.org\r\nSUMMARY:Go\r\nDESCRIPTION:Go\r\nTRIGGER:-PT1H\r\nEND:VALARM\r\n";
+    let calendar = object("REQUEST", "lunch@example.org", 0, REQUEST_AT, extra).replace(
+        "END:VCALENDAR\r\n",
+        "BEGIN:VTODO\r\nUID:todo@example.org\r\nORGANIZER:mailto:anna@example.org\r\nATTENDEE:mailto:cili@example.org\r\nEND:VTODO\r\n\
+         BEGIN:VEVENT\r\nUID:broken@example.org\r\nATTENDEE:mailto:cili@example.org\r\nEND:VEVENT\r\nX-WR-CALNAME:Odile's\r\nEND:VCALENDAR\r\n",
+    );
+    let id = arrive(&mut session, 40, "i1@example.org", &calendar);
+    answer(&mut session, id, "accepted").unwrap();
+    let sent = out(&mut session);
+    let [write] = sent.writes.as_slice() else { panic!("{:?}", sent.writes) };
+    let copy = put_text(write);
+    for gone in ["VALARM", "VTODO", "cili@example.org", "ATTACH", "X-ODILE-NOTE", "X-WR-CALNAME", "broken@example.org"] {
+        assert!(!copy.contains(gone), "{gone} in {copy}");
+    }
+    assert_eq!(copy.matches("BEGIN:VEVENT").count(), 1, "{copy}");
+    for line in copy.lines().filter(|line| line.starts_with("ORGANIZER") || line.starts_with("ATTENDEE")) {
+        assert!(line.contains("SCHEDULE-AGENT=CLIENT"), "{line}");
+    }
+}
+
+/// The answer names the organiser and the owner, and nobody the owner's line in the invitation points to.
+#[test]
+fn the_reply_names_the_organiser_and_the_owner_only() {
+    let mut session = session();
+    let calendar = object("REQUEST", "lunch@example.org", 0, REQUEST_AT, "").replace(
+        "ATTENDEE;CN=Anna;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:anna@example.org",
+        "ATTENDEE;CN=Anna;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;\
+         DELEGATED-FROM=\"mailto:dora@example.org\";MEMBER=\"mailto:team@example.org\";\
+         SENT-BY=\"mailto:emil@example.org\";X-SEAT=12:mailto:anna@example.org",
+    );
+    let id = arrive(&mut session, 40, "i1@example.org", &calendar);
+    answer(&mut session, id, "accepted").unwrap();
+    let sent = out(&mut session);
+    let reply = itip(&sent.raw);
+    for gone in ["dora@example.org", "team@example.org", "emil@example.org", "X-SEAT", "DELEGATED", "MEMBER", "SENT-BY"] {
+        assert!(!reply.contains(gone), "{gone} in {reply}");
+    }
+    let line = reply.lines().find(|line| line.starts_with("ATTENDEE")).unwrap();
+    assert_eq!(line, "ATTENDEE;CN=Anna;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;CUTYPE=INDIVIDUAL:mailto:anna@example.org");
+    let [write] = sent.writes.as_slice() else { panic!("{:?}", sent.writes) };
+    assert!(!put_text(write).contains("dora@example.org"), "the copy names nobody new either");
+}
+
+/// An answer the server refused stays in the outbox as it was: it is not a draft to edit and send elsewhere.
+#[test]
+fn a_refused_answer_cannot_be_edited() {
+    let mut session = session();
+    let id = arrive(&mut session, 40, "i1@example.org", &object("REQUEST", "lunch@example.org", 0, REQUEST_AT, ""));
+    answer(&mut session, id, "accepted").unwrap();
+    let sent = out(&mut session);
+    let refused = EventKind::SendFailed { draft: sent.draft, kind: inboxcraft_model::ErrorKind::MessageRefused, reply: None };
+    session.apply(&event(refused)).unwrap();
+    let draft = sent.draft.get();
+    assert!(bad(session.run("compose.update", &json!({ "id": draft, "to": ["cili@example.org"] }))));
+    assert!(bad(session.run("compose.update", &json!({ "id": draft, "account": 2 }))));
+    assert!(bad(session.run("compose.template", &json!({ "id": draft, "name": "thanks" }))));
+    assert_eq!(session.store().draft(sent.draft).unwrap().unwrap().to, ["odile@example.org"]);
+    // Answering again from the invitation still works.
+    answer(&mut session, id, "tentative").unwrap();
+    assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));
+}

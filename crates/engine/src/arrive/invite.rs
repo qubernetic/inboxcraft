@@ -178,7 +178,11 @@ impl Owner {
     }
 }
 
-/// The owner as an attendee who gave `answer`: as `event` names them among its attendees (name and parameters kept),
+/// The parameters of the owner's line an answer keeps beside the address, `CN`, `ROLE` and `PARTSTAT`: none that names
+/// another person (`DELEGATED-FROM`, `MEMBER`, `SENT-BY`) or that the organiser made up (`X-`).
+const KEPT_PARAMS: [&str; 1] = ["CUTYPE"];
+
+/// The owner as an attendee who gave `answer`: as `event` names them among its attendees (name, role and kind kept),
 /// or as the account's address and name.
 fn answering(event: &Event, owner: &Owner, answer: Rsvp) -> Attendee {
     let mut attendee = event
@@ -187,9 +191,16 @@ fn answering(event: &Event, owner: &Owner, answer: Rsvp) -> Attendee {
         .find(|attendee| owner.is(attendee))
         .cloned()
         .unwrap_or_else(|| Attendee { name: owner.name.clone(), ..Attendee::new(&format!("mailto:{}", owner.address)) });
+    attendee.params.retain(|param| KEPT_PARAMS.iter().any(|kept| param.name().eq_ignore_ascii_case(kept)));
     attendee.status = part_stat(answer);
     attendee.rsvp = false;
     attendee
+}
+
+/// Whether the property `name` is one a copy in the owner's calendar leaves out: an attachment or one the organiser
+/// made up (`X-`).
+fn left_out(name: &str) -> bool {
+    name.eq_ignore_ascii_case("ATTACH") || name.get(..2).is_some_and(|start| start.eq_ignore_ascii_case("X-"))
 }
 
 /// The owner's iTIP answer (RFC 5546 section 3.2.3) to `event` of the invitation `calendar`: `METHOD:REPLY` with the
@@ -218,15 +229,19 @@ pub(crate) fn reply(calendar: &Calendar, event: &Event, owner: &Owner, answer: R
 }
 
 /// The invitation `calendar` as it goes into the owner's calendar after `answer`: no `METHOD`, the events of its
-/// `UID` with the owner's answer, the reminders the owner set on the copy held (`held`) kept and the organiser's left
-/// out, and nobody mailed by a server that schedules on its own (`SCHEDULE-AGENT=CLIENT`). `None` when it cannot be
-/// written.
+/// `UID` alone (with their time zones) with the owner's answer, the reminders the owner set on the copy held (`held`)
+/// kept and the organiser's left out, no attachment, `X-` property or other component of the organiser's, and nobody
+/// mailed by a server that schedules on its own (`SCHEDULE-AGENT=CLIENT`). `None` when it cannot be written.
 pub(crate) fn copy(calendar: &Calendar, uid: &str, held: Option<&Calendar>, owner: &Owner, answer: Rsvp) -> Option<String> {
     let mut object = calendar.clone();
     object.method = None;
     object.product = crate::calendar::PRODUCT.to_owned();
+    object.other.retain(|property| !left_out(property.name()));
+    object.components.clear();
     object.events.retain(|event| event.uid == uid);
     for event in &mut object.events {
+        event.other.retain(|property| !left_out(property.name()));
+        event.components.clear();
         let answered = answering(event, owner, answer);
         match event.attendees.iter_mut().find(|attendee| owner.is(attendee)) {
             Some(listed) => *listed = answered,
