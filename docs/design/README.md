@@ -28,14 +28,21 @@ icons show as empty boxes.
 | Screens · Writing | the composer in place of the reader (the default) and in a window of its own, an impossible address, send later, undo send and the outbox, a bounce, a template with a blank | [screens-writing.png](screens-writing.png) |
 | Screens · Calendar | week, month, agenda, day with the event editor, an invitation in a message | [screens-calendar.png](screens-calendar.png) |
 | Screens · Setup and settings | first start, the settings sheet on Accounts (none yet, adding, the check under way, failed and passed, the list), appearance, notifications and shortcuts | [screens-setup.png](screens-setup.png) |
-| Mood | the main window in Electric, Aurora and Citrus, light and dark | [mood.png](mood.png) |
-| Scenarios | five flows as numbered storyboards, in light and in dark side by side: first start, a morning of triage, write and send, an invitation, make it yours | [scenarios.png](scenarios.png) |
+| Planned · Mail and triage | what is on the way: a folder asked about once, one account narrowed, the full header, the screener inside the inbox, the grouped list, the parked pile, blocked mail, a refused send, a missed send time, one name for two people, smart folders, keyboard use, the Hungarian interface; why a message is where it is, trackers shown and kept out, a last look before sending, subscriptions, what waits for a reply | [planned-mail.png](planned-mail.png) |
+| Planned · Calendar and settings | an invitation answered, cancelled or clashing with your day, deleting with guests, reminders, the calendar, privacy and about settings | [planned-calendar.png](planned-calendar.png) |
+| Planned · Your own AI | the panel beside the list (briefing, emptying the inbox, new senders, newsletters, a free hour), a reply into Drafts, the approval card, a message that gives orders, a request above the level, the settings, a key of your own, what goes to the cloud, tokens, the journal | [planned-ai.png](planned-ai.png) |
+| Later · Ideas | not planned yet: important people, tags, rules on the server, an always-on companion, contacts, folder clean-up, a calendar by its address, the browser version, setting up a phone from the desktop, signs of a fake sender, a rule tried before it runs, export, a booking as a card, a date in the text, a one-time code, every attachment, notifications in batches, muting a conversation, duplicates | [later-ideas.png](later-ideas.png) |
+| Mood | the main window in Electric, Aurora, Citrus and the custom example, light and dark | [mood.png](mood.png) |
+| Custom colours | an example of four colours of your own (`#A46CD6`, `#3A7ADA`, `#06C4D2`, accent `#428CE6`): the inbox, the week, the event editor and the appearance page, dark and light | [custom-colours.png](custom-colours.png) |
+| Scenarios | fourteen flows as numbered storyboards, in light and in dark side by side: first start, a morning of triage, write and send, an invitation, a week in the calendar, when a send goes wrong, an invitation to the end, find it again, nothing hidden, nothing slips, bring your own AI, a morning with your AI, a phone from the desktop, make it yours | [scenarios.png](scenarios.png) |
+
+The screens follow the app as built: the inbox over the whole width and with Show done, the snoozed and pinned piles, the composer's reply, suggestions and folded float, the calendar's views with the details in the side panel, the event editor, and the Triage and Sending settings.
 
 Each screens page has a "Dark" column on the right with its main screens in Electric dark.
 
 ## How it is organised
 - **Colours are variables.** The Colour collection has one mode per preset and mode (`Electric · Light`, `Electric ·
-  Dark`, `Aurora · Light` …) and one variable per token of `docs/design.md`, with the values `theme.rs` derives.
+  Dark`, `Aurora · Light` … and the example `Custom · Light`, `Custom · Dark`) and one variable per token of `docs/design.md`, with the values `theme.rs` derives.
   Every fill, stroke, gradient stop and shadow in the file is bound to a variable, so switching a frame's Colour mode
   shows it in another preset or mode. Distance and Motion hold the distances and the motion durations.
 - **Type is text styles.** `Type/<token>` for every font token (caption, body, strong, button, sender, sender
@@ -45,19 +52,30 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Pages are transparent** and default to Electric dark, so the labels read on a dark canvas; each screen sets
   its own mode. The PNGs are drawn on a dark base.
 - **Glass is faked, as in the app.** Colour fields behind the window, translucent layers with a light top edge and a
-  soft shadow; no background blur, because the app has none.
+  soft shadow; no background blur, because the app has none. What pops up over content is not glass: it is solid.
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-- The "Settings · notifications and triage" screen also draws Screener, Undo send and "When a message leaves the
-  list" on one page. The app keeps Screener on the Triage page and Undo send on the Sending page, and has no choice
-  of what shows after a message leaves the list yet (#139).
+- **Cards:** the list's and the reader's cards use the new translucent `card` token (`surface` at 62 % dark, 80 %
+  light), without a shadow, in place of the opaque `surface`.
+- **Selection:** `selection` is one even tone (the surface with 30 % dark or 16 % light of the middle stop) and
+  `selection_end` is gone. A selected pill or segment adds an edge in the full gradient and a SemiBold label; other
+  pills have no fill and a quiet `control_edge`.
+- **White on custom colours:** the text gradient may darken up to 40 % instead of 30 %. The rail gets its own stops
+  (`rail1`–`rail3`): each stop darkened only as far as white needs for 3:1, at most 25 %; otherwise the full gradient
+  with the better ink (Citrus).
+- **Controls:** Day, Week, Month and Agenda, and Show as, are segmented controls; Repeat is a select with a popup.
+- **Floats:** everything that pops up over content (menus, tooltips, popups, hover actions, toasts, the command
+  palette, the event editor) is on one solid `float` with an edge and a shadow. `float over text` and the 80 % float
+  are gone, and with them `glass::faded`'s reason for being and the `Under` choice.
+- **Events:** a tint of the account's colour (`event1`–`event6`) with the edge at full strength.
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui
   premultiplies colours.
-- Screens for features not built yet (triage, writing, settings) show the intended behaviour from the plan
-  and `docs/design.md`; they show the intended layout. The composer's place is still being designed: the file shows it in place of the
+- Screens for features not built yet show the intended behaviour and layout. The "Planned" pages hold what is on the
+  way, "Later · Ideas" what is only an idea and may never be built. Google and Microsoft 365 accounts are left out on
+  purpose. The picture of the phone code is decorative and decodes to nothing. The composer's place is still being designed: the file shows it in place of the
   reader and in a window of its own.
 - Each flow is also a prototype flow on the full-size screens (a click goes to the next step). Steps on different
   pages may not play through in every viewer; the storyboards on the Scenarios page always show the whole flow.
