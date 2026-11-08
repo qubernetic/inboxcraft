@@ -19,8 +19,8 @@ every screen of the app, in FigCraft. Where this page or `theme.rs` disagrees wi
   surfaces are near-neutral with a trace of the preset's middle stop.
 - **Glass without blur, and readability beats glass.** egui cannot blur what lies behind a shape, so glass is faked:
   soft colour fields painted once behind the window, and translucent layers over them with a light top edge and a
-  soft shadow. Translucency is only ever laid over the colour fields, never over text; what floats over content
-  is about 80 % opaque where the content fades before it, and more opaque over sharp text. See "Glass and floats".
+  soft shadow. Translucency is only ever laid over the colour fields, never over text; everything that pops up over
+  content is solid. See "Glass and floats".
 - **One gradient helper.** Every colour transition (shapes, lines, text, shadows) is painted by
   `crates/ui-egui/src/gradient.rs`, dithered, so its quality is decided in one place; a test refuses a gradient
   painted anywhere else.
@@ -77,11 +77,11 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 |---|---|---|---|
 | background | `#F3F5F9` with 3 % of the middle stop | `#0D1016` with 5 % | the base of the colour fields behind the window |
 | panel | `#EBEEF3` with 3.6 % | `#141821` with 6 % | buttons and the remote-content banner |
-| surface | `#FBFCFD` with 1.8 % | `#10131A` with 3 % | the base of the selection; a surface text is checked on |
+| surface | `#FBFCFD` with 1.8 % | `#10131A` with 3 % | the base of the selection and the cards; the settings sheet; a surface text is checked on |
+| card | surface at 80 % | surface at 62 % | the list's and the reader's cards, without a shadow; the colour fields show through |
 | field | `#FFFFFF` with 0.9 % | `#090B10` with 1.5 % | inside text fields |
-| selection | surface with 20 % of the first stop | with 32 % | the selected row or folder; the start of the selection gradient |
-| selection end | surface with 12 % of the last stop | with 20 % | the end of the selection gradient |
-| text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text (readable also on glass over each field, hovered or not, and on a float over the fields and the gradient) |
+| selection | surface with 16 % of the middle stop | with 30 % | the selected row, folder, pill or segment: one even tone |
+| text | `#161A22` tinted, readable at 4.5:1 | `#EEF1F6` tinted, readable at 4.5:1 | text (readable also on glass and on a card over each field and on the selection, hovered or not, and on the float) |
 | muted | `#5D6676` tinted, readable at 4.5:1 | `#9AA3B2` tinted, readable at 4.5:1 | previews, dates, addresses, section headings |
 | accent | the middle stop mixed 62/38 with black, readable at 4.5:1 | the preset's accent, readable at 4.5:1 | links, accent text |
 | on accent | white or deep ink, by contrast | the same | text on the accent |
@@ -89,20 +89,23 @@ moved towards black (light) or white (dark) in small steps until the ratio holds
 | flag | the last stop, readable at 4.5:1 | the same | the flag; text that asks for a second look |
 | focus | the first stop, readable at 3:1 | the same | the keyboard focus ring, the hovered control's edge |
 | field border | muted towards the surface, readable at 3:1 | the same | the edge of fields and windows |
+| control edge | text-tone at 18 % | near-white at 18 % | the quiet edge of a pill that is not selected and of a segmented control |
 | badge / on badge | panel with 16 % of the middle stop / accent, readable on it | 30 % / the same | unread counts |
 | error / on error | `#B3261E` readable / white or deep ink | `#F2B8B5` readable / white or deep ink | the error banner, error text |
-| gradient | the three stops at full strength | the same | the rail, the primary button, group badges (to come) |
+| gradient | the three stops at full strength | the same | the edge of a selected pill or segment, the primary button, group badges (to come) |
+| rail 1 to 3 / rail ink | each stop darkened only as far as white needs for 3:1, at most 25 %; otherwise the full gradient / white, or the better ink on the full gradient | the same | the navigation rail and its icons |
 | ink | deep ink `#05060A` | the same | text on the gradient where white does not read |
 | glass / edge / highlight | near-white at 72 % / text-tone at 8 % / white at 90 % | near-white at 5.5 % / 9 % / 7 % | the glass layers of the panes, their edge and light top edge |
 | shadow | text-tone at 10 % | black at 35 % | under glass and floats |
-| float | near-white at 80 % | `#1E2330` tinted at 80 % | floats over content that fades before them (hover actions, toasts) |
-| float over text | the float, as opaque as it takes | the same | menus, tooltips and popups, which may sit over sharp text: opaque enough that text, muted and accent text under it show at no more than 1.2:1 (`theme::GHOST`) |
+| float | near-white, solid | `#1E2330` tinted, solid | everything that pops up over content: menus, tooltips, popups, hover actions, toasts, the command palette, the event editor |
 | line / hover | text-tone at 7 % / 4.5 % | near-white at 6 % / 6 % | row separators and hovered rows on glass |
 | colour fields | each stop at 30 % | each stop at 34 % | the soft fields painted once behind the window |
+| event 1 to 6 | the account's colour at up to 20 %, less while text on it would not read at 4.5:1 over every glass | at up to 30 % | an event's fill, one per account; its edge is the account's colour at full strength |
 
 **Text on the gradient** (a primary button) sits on a text gradient: the preset's stops darkened together in steps of
-2 % until white reads at 4.5:1 on every stop, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %);
-otherwise the full gradient with the deep ink (Citrus). Icons on the rail keep the full gradient.
+2 % until white reads at 4.5:1 on every stop, as long as that takes no more than 40 % (Electric 14 %, Aurora 30 %);
+otherwise the full gradient with the ink that reads better across it (Citrus). The rail has its own stops, darkened
+one by one.
 
 **Account colours**, in account order and repeating after the sixth: the first, middle and last stop, the accent,
 the mix of the first and middle stop and the mix of the middle and last, each readable at 3:1 on the surfaces.
@@ -210,21 +213,21 @@ The app icon is not from a set: it stays drawn in code (see "The app icon").
   edge, tiled along the layer, so a resize never rasterises it again whatever the layer's size. All layers go into one place reserved right after the colour fields, shadows first, so a layer
   never covers another's content and translucency is never laid over text (a UI test checks every shape of the
   window in every preset and mode).
-- **Floats** (`glass::float`): what floats over content is frosted: `float` (about 80 %) where the content under
-  it fades before it, so a little of the colour behind glows through, and `float over text` where it would sit over
-  sharp text that cannot fade, opaque enough that the text under it is barely there; that one casts no shadow,
-  which would darken the text around it. Menus, tooltips and popups use
-  `float over text`. Text that a float covers fades out over a few points before the float's edge and is cut there
-  (`glass::faded`), so no letter shows through or touches it. A UI test draws a menu over the reader's text and
-  hover actions over a fading row in every preset and mode, and checks the float's text reads at 4.5:1 while the
-  content under it changes the picture by no more than 1.2:1.
+- **Cards**: the list's and the reader's cards sit on the glass layers in the `card` colour, the surface at 62 % dark
+  or 80 % light, with a 1-point line and no shadow, so the colour fields show through. The screener card's gradient
+  ring stays opaque inside, or the ring would show through it.
+- **Floats** (`glass::float`): everything that pops up over content (menus, tooltips, popups, hover actions, toasts,
+  the command palette, the event editor) is on one solid `float`, with a 1-point edge, a light top edge and the soft
+  shadow, so text under it never shows through. A float is drawn after the content it covers. A UI test draws a
+  menu over the reader's text and hover actions over a row in every preset and mode, and checks the float's text
+  reads at 4.5:1 while the content under it does not change the picture at all.
 - **Gradients** (`gradient`): a gradient is linear through stops, soft colour fields over a base (a gradient mesh),
   or a layer's shadow. Shapes get it as a picture rasterised once per gradient and size, every pixel dithered with
   a noise below one step of eight-bit colour added before rounding, so a wide gradient over few steps shows no
   bands (a test over 1024 pixels and eight steps of grey); lines and text are coloured at their vertices, dithered
   the same way. At the end of every frame the window gives back the pictures that frame did not paint
   (`gradient::sweep`), so a finished resize leaves no textures behind (a UI test resizes the window at scale 1 and
-  2 and checks the kept texture bytes). The selected row and folder show the selection gradient from left to right. egui's own fade at the
+  2 and checks the kept texture bytes). egui's own fade at the
   ends of a scroll area is off: it was a gradient of its own laid over text.
 - **No repaint while nothing moves.** Nothing in the look asks for another frame; a UI test runs the window idle in
   every preset and mode and counts no repaint and no picture rasterised again.
@@ -238,14 +241,14 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Card (`card`) | A rounded card on the surface colour (corner `card`), its header in the heading token as tall as the font asks; a click on the header opens or closes it, and the body unrolls and rolls up over the card motion. For grouped inbox groups, the screener and the messages of a thread. |
 | Icon button (`button::IconButton`) | An icon in a square one line of button text and a little room high; its hover fill fades in. Active: the Fill icon in the accent on the selection. Disabled (an action without a command yet): muted, takes no click, still has its tooltip; `unavailable` adds a note under the name that says why ("Not available yet"). On a gradient (the rail) it is drawn in one ink, its active and hover fills that ink at 24 % and 14 %. |
 | Text button (`button::TextButton`, `button::text`) | A word, an optional icon before it, in a fully rounded field one control high, with its tooltip: quiet (a hover fill only), secondary (outlined in the field border) or primary (on the text gradient). `button::unavailable` draws one that cannot be pressed yet: faded to 45 %, no click, its tooltip saying why. |
-| Pill (`pill`) | A fully rounded chip with a word, for filters and choices: the selection gradient when selected, otherwise the panel colour with a control edge. |
-| Tooltip (`tooltip`) | A rounded bubble on the float over text: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once, and for a control that cannot be used yet a muted note under them. Every icon button has one. |
+| Pill (`pill`) | A fully rounded chip with a word, for filters and choices. Selected: the selection, a 1.5-point edge in the full gradient and a SemiBold label. Otherwise no fill and a quiet control edge. |
+| Tooltip (`tooltip`) | A rounded bubble on the float: the action's name and its key as a chip (`Ctrl+F`), read from the keymap whenever it is drawn, so a changed key shows at once, and for a control that cannot be used yet a muted note under them. Every icon button has one. |
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
 | Badge (`badge`) | An unread count in a pill of the badge colour, or a group's outline (Regular) icon in the muted colour, without a background. |
-| Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
+| Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard, drawn over the row's text. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
-| Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
-| Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection gradient; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
+| Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion. |
+| Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
 | Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel, Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
@@ -307,12 +310,11 @@ window asks for the next frame; once it has landed, nothing does.
   the unread dot, the sender's avatar two lines high, the sender and the date (time today, "Yesterday", the weekday
   in the last week, then the day and month, with the year for earlier years), the subject and the preview in muted
   text, and the Flag icon (Fill, in the flag colour, one subject line high) for flagged mail. Unread rows show the
-  dot and a heavier sender and subject; the selected row the selection gradient, a hovered one the hover fill, both
+  dot and a heavier sender and subject; the selected row the selection, a hovered one the hover fill, both
   with the `corner` radius inside the card.
 - **Hover actions**: Done, "Mark as read" or "Mark as unread", and Delete on a float at the row's right end
   (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
-  date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
-  their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
+  float is solid and drawn after the row, so it covers the date, the flag and the text under it.
   Their keys work on the selected row: D Done, R read or unread, Delete, and A Archive and S flag or not, which have
   no button on the row; while a text field has the focus they are the field's. They act on a real account as on the
   sample, through the engine's commands (`mail.seen`, `mail.flag`, `mail.archive`, `mail.delete`): the change shows
@@ -402,7 +404,7 @@ the icon sits among others at the same size.
   menu that a click outside, Cancel or Escape closes. Pin pins the open message, and shows as active ("Take the pin
   off") while it is pinned. Each is an act with a toast and Undo ("Snoozed until <time>", "Reminder set for <time>",
   "Pinned", "Pin taken off").
-- **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
+- **More**: a menu over the reader (on the float) with Flag or Take the flag off (S) and Mark as read or
   unread (R) for the open message, Park or Take off the park pile, Bring back now for a snoozed message, Take the
   reminder off for one with a reminder, then Full width or Leave full width, Close, and the next-message rule ("When a
   message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.
@@ -437,7 +439,7 @@ the icon sits among others at the same size.
 - **Where**: New message in the folder pane, C or the command palette writes a new message in the reader's place,
   the list a column beside it, as on the design file's "Composer · in place of the reader" screen. There is one at a
   time: New message brings back the one being written. A message pressed in the list, or the calendar, sends the
-  composer to its floating panel at the window's bottom right (the frosted float: the Compose icon, the subject or
+  composer to its floating panel at the window's bottom right (the float: the Compose icon, the subject or
   "New message", its key, Close); a press on it brings the composer back whole. The keys that act on a message (D,
   A, R, S, Delete, the arrows) rest while the composer hides it.
 - **Layout**: the title ("New message", or the subject once there is one) with Close; then a line each, its name
@@ -659,7 +661,7 @@ A message that carries an invitation (iMIP) shows a card between its header and 
   reads over it, three invented rows as the list draws them (one selected, two unread), Reply and Archive in Regular,
   Pin and Flag in Fill in the accent, a selected and a plain pill, and a line in the link colour. It is drawn in the
   mode, typeface, icon set and text size in use.
-- **Switch**: a track one body line high and 1.8 lines long, the selection gradient when on and the field colour
+- **Switch**: a track one body line high and 1.8 lines long, the selection when on and the field colour
   when off, with a knob that slides over the hover token (at once with reduced motion); a screen reader hears a
   switch, on or off.
 
