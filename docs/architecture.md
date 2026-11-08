@@ -200,7 +200,10 @@ Message-ID (or sender, subject and date) when it went to an inbox, so the sync t
 `screener.accept`, tells nothing. The account's level (`notify.set`, `owner`; `notify.settings`, `safe`) has the last
 word: `all`, `people` (a sender known or accepted whose message is in People, by the owner's group for the sender or
 else the classifier) or `none`; `notify::tells` is the decision table. `Session::tick` adds a notice for a returned
-snooze and a follow-up reminder unless the owner turned that off. The session queues the notices (at most 100, the oldest go) until the front end takes them
+snooze, a follow-up reminder and a calendar alert unless the owner turned that off (`returns`, `reminders`,
+`alerts`). An alert's notice names its account, calendar and event, the occurrence's start and end, all-day or not,
+and the event's title and place as clean lines; one that went off while InboxCraft was off tells late (`missed`),
+and not at all once the event is over. The session queues the notices (at most 100, the oldest go) until the front end takes them
 (`Session::take_notices`), more than three new messages of one account as one count. A notice carries the sender's
 name and subject as one clean line of at most 120 characters, never markup.
 
@@ -217,7 +220,20 @@ batch as what it changes (a returned snooze or a fired reminder clears its time 
 returned snooze comes back to the inbox with its jobs), and comes
 back as a `Fired` event, `missed` when it was due before `Session::start` or is handled more than a minute late (the
 computer was asleep). `Session::next_due` tells the front end when to tick next. Commands add entries with an id from
-`Context::next_schedule_id`. `schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
+`Context::next_schedule_id`.
+
+Event alerts (`engine::calendar::alert`): an event's `DISPLAY` and `AUDIO` alarms, or without any alarm the defaults
+(ten minutes before a timed event, a day before an all-day one), go off at times the store holds as `Alert`s, each
+with a schedule entry. A trigger's days follow the wall clock of the event's zone (the computer's for a floating
+time or a whole day) and its hours do not, so a day before noon is noon the day before across a change of the clock.
+A cancelled event, one the owner declined and an alarm further than a year from its event alert nothing. The store
+holds the alerts of the next two weeks, at most 64 an event: `Session::commit` works them out for every event a
+batch puts, in the same batch (an alert at its old time keeps its id and entry), `Session::start` and then a sweep a
+day (`Session::next_due` counts it while a calendar is held) for every event held, so a repeating or far event comes
+into the horizon in time; an alert whose time came stays for the tick. A fired alert leaves the store with its
+entry.
+
+`schedule.presets` (`safe`) answers the presets still ahead: later today (three hours
 on, rounded to the nearest half hour of the wall clock, while still today), this evening (20:00) and tomorrow
 morning (08:00). They are in the computer's wall-clock time, from the `inboxcraft_time::Offsets` the front end
 hands over with `Session::set_offsets` (UTC until then); a wall-clock time the clock skips in spring lands after the
@@ -460,7 +476,8 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   the body escaped where the server reads markup and the buttons (Done, Mark read) only where it shows actions. A
   thread per connection listens for the clicks on what was shown; each comes to the window as a `Click`: a click
   opens the message in the full-width reader and brings the window forward (or opens one), the buttons run the same
-  acts as the window. A later notice with the same key (the count of an account) takes the place of the first.
+  acts as the window. A calendar alert says when its occurrence takes place on the window's clock and where; a
+  click on it opens the calendar on the occurrence's day with the event picked (`InboxApp::open_event`). A later notice with the same key (the count of an account) takes the place of the first.
 
 ## Start-up
 

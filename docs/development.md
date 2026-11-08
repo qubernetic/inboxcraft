@@ -490,7 +490,8 @@ server's input, `control_lines` (#142), the control channel's request and answer
 written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the DAV XML and multistatus readers, the
 CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
 and XML readers and session, and `engine_invite` (#149): any bytes kept as a message's body, and as an invitation's
-calendar part, read into its invitation mark and card, answered and removed.
+calendar part, read into its invitation mark and card, answered and removed, and `engine_alerts` (#150): any bytes
+a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
