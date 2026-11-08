@@ -1017,6 +1017,11 @@ impl Mailbox {
         self.session.set_appearance(appearance);
     }
 
+    /// The time now on the list's clock, and the offset the window shows dates at.
+    pub(crate) fn now(&self) -> (Timestamp, Offset) {
+        (self.clock.now(), self.offset)
+    }
+
     pub(crate) fn run(&mut self, command: &'static str, params: &Value) -> Result<Value, UiError> {
         self.runs = self.runs.saturating_add(1);
         self.last = Some(command);

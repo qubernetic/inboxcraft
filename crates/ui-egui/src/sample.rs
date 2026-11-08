@@ -11,7 +11,8 @@
 //! senders' mail says a machine sent it (Updates) and a newsletter comes through a list. Nothing in it connects
 //! anywhere: the accounts point at `imap.example.org`, the sample session never starts their workers, and
 //! [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
-//! unread, Done, Delete) change it in memory only, and it is built afresh at every start.
+//! unread, Done, Delete) change it in memory only, and it is built afresh at every start. Three calendars with
+//! invented events around the week of `now` come from [`crate::calendar::sample`].
 
 use std::time::Duration;
 
@@ -574,6 +575,9 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
         batch.push(Change::PutMessage(message(id, uid, account, sample, now)?));
         let (source, text) = source(sample)?;
         batch.push(Change::PutBody(MessageId::new(id), Body::new(source, &text).map_err(UiError::sample)?));
+    }
+    for change in crate::calendar::sample::changes(now)? {
+        batch.push(change);
     }
     let mut store = Memory::new(StoreConfig::default());
     store.apply(&batch).map_err(UiError::sample)?;

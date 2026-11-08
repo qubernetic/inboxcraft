@@ -102,6 +102,10 @@ try:
   open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
   puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
   list, simple list) and each account's grouping. Each act has a toast with Undo.
+- the calendar (the rail's Calendar, Ctrl+2): three invented calendars (Personal, Studio, Choir) with events around
+  the current week: overlapping ones on today, repeating ones, all-day blocks over several days and a ferry in the
+  Azores' zone, whose details label the event's own time. Day, Week, Month and Agenda, the steps and the mini month
+  move through them; a calendar's box hides its events.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the

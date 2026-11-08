@@ -395,10 +395,33 @@ impl InboxApp {
         }
     }
 
-    /// Shows the calendar screen, leaving the settings sheet.
+    /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
     pub fn show_calendar(&mut self) {
         self.close_settings();
         self.screen = Screen::Calendar;
+        self.calendar.refresh(&mut self.mailbox);
+    }
+
+    /// The calendar screen, to pick a view or a day from outside (the `ui_shot` scripts).
+    pub fn calendar_mut(&mut self) -> (&mut Calendar, &mut Mailbox) {
+        (&mut self.calendar, &mut self.mailbox)
+    }
+
+    /// Applies what was pressed on the calendar screen.
+    fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
+        let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
+        for asked in asked {
+            match asked {
+                calendar::Asked::View(view) => calendar.set_view(mailbox, view),
+                calendar::Asked::Step(forward) => calendar.step(mailbox, forward),
+                calendar::Asked::Today => calendar.go_today(mailbox),
+                calendar::Asked::Month(forward) => calendar.step_month(forward),
+                calendar::Asked::Go(day) => calendar.go_to(mailbox, day),
+                calendar::Asked::Open(day) => calendar.open_day(mailbox, day),
+                calendar::Asked::Toggle(id) => calendar.toggle(id),
+                calendar::Asked::Pick(picked) => calendar.pick(picked),
+            }
+        }
     }
 
     /// Opens the settings sheet on Shortcuts, closing the add-account form.
@@ -544,6 +567,9 @@ impl InboxApp {
         let changed = self.mailbox.pump(&mut *self.workers);
         if changed {
             self.onboarding.load(&mut self.mailbox);
+            if self.screen == Screen::Calendar {
+                self.calendar.refresh(&mut self.mailbox);
+            }
         }
         changed
     }
@@ -1039,8 +1065,9 @@ impl InboxApp {
             .inner;
         self.own_frame_parts(ui, &theme, corner);
         ran.extend(clicked_rail.actions());
+        let mut on_calendar = Vec::new();
         if self.screen == Screen::Calendar {
-            self.calendar_screen(ui, &theme, &mut layers);
+            on_calendar = self.calendar_screen(ui, &theme, &mut layers);
         } else if self.mailbox.accounts().is_empty() {
             add = self.welcome(ui, &theme, &mut layers);
         } else if !full {
@@ -1141,6 +1168,7 @@ impl InboxApp {
             || clicked.is_some()
             || add
             || asked.compose
+            || !on_calendar.is_empty()
             || !composed.is_empty()
             || !drawn.asked.is_empty();
         if busy {
@@ -1148,6 +1176,7 @@ impl InboxApp {
             ui.ctx().request_repaint();
         }
         self.act(out, acted, undone);
+        self.apply_calendar(on_calendar);
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
@@ -1251,11 +1280,13 @@ impl InboxApp {
         middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
     }
 
-    /// The calendar screen: its empty state on one card in the middle until there are calendars.
-    fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) {
+    /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
+    fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> Vec<calendar::Asked> {
         if self.calendar.is_empty() {
             middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
+            return Vec::new();
         }
+        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers)
     }
 
     /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,

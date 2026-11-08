@@ -55,7 +55,7 @@ Nothing at the moment: the text gradient, the dark accent, the outline group ico
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui
   premultiplies colours.
-- Screens for features not built yet (triage, writing, calendar, settings) show the intended behaviour from the plan
+- Screens for features not built yet (triage, writing, the calendar's event editor and invitations, settings) show the intended behaviour from the plan
   and `docs/design.md`; they show the intended layout. The composer's place is still being designed: the file shows it in place of the
   reader and in a window of its own.
 - Each flow is also a prototype flow on the full-size screens (a click goes to the next step). Steps on different

@@ -57,6 +57,9 @@ const fn point(id: IconId) -> char {
         IconId::Back => '\u{e058}',      // arrow-left
         IconId::Caret => '\u{e136}',     // caret-down
         IconId::Newspaper => '\u{e344}', // newspaper
+        IconId::Previous => '\u{e138}',  // caret-left
+        IconId::Next => '\u{e13a}',      // caret-right
+        IconId::Globe => '\u{e288}',     // globe
     }
 }
 
