@@ -147,3 +147,12 @@ fn answers_name_themselves_both_ways() {
     assert_eq!(Rsvp::named("needs_action"), None);
     assert_eq!(Rsvp::ALL.map(Rsvp::text), ["Going", "Maybe", "No"]);
 }
+
+#[test]
+fn a_body_that_only_says_what_the_card_says_is_a_restatement() {
+    let invite = Invite::read(7, &update()).unwrap();
+    assert!(invite.restates("Odile invites you to Lunch with Odile at The Gull café."));
+    assert!(invite.restates(""));
+    assert!(!invite.restates("Lunch with Odile at The Gull café. Bring the keys to the shed, please."), "their own words stay on screen");
+    assert!(!invite.restates(&"Lunch ".repeat(1000)), "too long to be a generated line");
+}
