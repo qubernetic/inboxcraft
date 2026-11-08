@@ -126,6 +126,7 @@ pub struct MessageBuilder {
     extra: Vec<(String, String)>,
     text: Option<String>,
     html: Option<String>,
+    calendar: Option<(String, String)>,
     attachments: Vec<Attachment>,
 }
 
@@ -229,6 +230,14 @@ impl MessageBuilder {
         self
     }
 
+    /// A calendar object (iMIP, RFC 6047) beside the text and the HTML, as `text/calendar` whose `method` is
+    /// `method`, the `METHOD` the object names.
+    #[must_use]
+    pub fn calendar(mut self, method: &str, calendar: &str) -> Self {
+        self.calendar = Some((method.to_owned(), calendar.to_owned()));
+        self
+    }
+
     /// Adds an attachment.
     #[must_use]
     pub fn attach(mut self, attachment: Attachment) -> Self {
@@ -243,7 +252,8 @@ impl MessageBuilder {
     /// [`MimeError::BadHeader`] naming the kind of value that does not fit its grammar: `"address"` (RFC 5322
     /// `addr-spec`, at most 254 bytes), `"message id"` (`msg-id`, ASCII, at most 250 bytes), `"field name"` (printable
     /// ASCII without `:`, at most 76 characters, none the builder writes itself) or `"media type"` (`type/subtype`
-    /// of RFC 2045 tokens of at most 127 characters, no multipart, no `message` type but `message/global`).
+    /// of RFC 2045 tokens of at most 127 characters, no multipart, no `message` type but `message/global`) or
+    /// `"calendar method"` (an RFC 2045 token).
     /// [`MimeError::FieldTooLong`] and [`MimeError::TooLarge`] when the reader
     /// could not read the result back ([`crate::MAX_FIELD_BYTES`], [`MAX_MESSAGE_BYTES`]).
     pub fn build(&self) -> Result<Vec<u8>, MimeError> {
@@ -277,10 +287,13 @@ impl MessageBuilder {
     fn body(&self) -> Result<Node, MimeError> {
         let text = self.text.as_deref().map(|text| text_part("plain", text));
         let html = self.html.as_deref().map(|html| text_part("html", html));
-        let main = match (text, html) {
-            (Some(text), Some(html)) => Some(Node::Multipart("alternative", vec![text, html])),
-            (text, html) => text.or(html),
+        let calendar = match &self.calendar {
+            Some((method, _)) if !is_token(method) || method.len() > MAX_MEDIA_NAME => return Err(MimeError::BadHeader("calendar method")),
+            Some((method, calendar)) => Some(text_part(&format!("calendar; method={method}"), calendar)),
+            None => None,
         };
+        let mut alternatives: Vec<Node> = [text, html, calendar].into_iter().flatten().collect();
+        let main = if alternatives.len() > 1 { Some(Node::Multipart("alternative", alternatives)) } else { alternatives.pop() };
         if self.attachments.is_empty() {
             return Ok(main.unwrap_or_else(|| text_part("plain", "")));
         }
@@ -336,7 +349,7 @@ fn write(node: Node, depth: usize, mut head: Vec<u8>) -> Result<Vec<u8>, MimeErr
     Ok(head)
 }
 
-/// A `text/<subtype>` part in UTF-8: `7bit` when it can be, else quoted-printable. White space at the end of a
+/// A `text/<subtype>` part (the subtype with any parameters before the charset) in UTF-8: `7bit` when it can be, else quoted-printable. White space at the end of a
 /// line makes it quoted-printable too, as mail servers may drop it.
 fn text_part(subtype: &str, text: &str) -> Node {
     let text = crlf(text);
@@ -495,6 +508,19 @@ fn field_name(name: &str) -> Result<String, MimeError> {
         && !OWN_FIELDS.contains(&lower.as_str())
         && !lower.starts_with("content-");
     if ok { Ok(name.to_owned()) } else { Err(MimeError::BadHeader("field name")) }
+}
+
+/// Whether [`MessageBuilder`] writes `text` as a message id (in `Message-ID`, `In-Reply-To` or `References`): ASCII
+/// `dot-atom-text`, `@` and a `dot-atom-text` or domain literal, at most 250 bytes, with or without angle brackets.
+#[must_use]
+pub fn is_message_id(text: &str) -> bool {
+    message_id(text).is_ok()
+}
+
+/// Whether [`MessageBuilder`] takes `text` as the media type of an [`Attachment`].
+#[must_use]
+pub fn is_media_type(text: &str) -> bool {
+    media_type(text).is_ok()
 }
 
 /// A media type for an attachment: `type/subtype` of RFC 2045 tokens of at most 127 characters each, lower case, no

@@ -38,10 +38,13 @@ impl CheckStep {
     /// Every step, in order.
     pub const ALL: [Self; 7] = [Self::Dns, Self::Tcp, Self::Tls, Self::Certificate, Self::ImapLogin, Self::SmtpLogin, Self::CaldavDiscovery];
 
-    /// Whether this version runs the step; the others report [`StepStatus::NotBuilt`].
+    /// Whether this version runs the step; the others report [`StepStatus::NotBuilt`]. Every step is built now; a new
+    /// one says here whether it is.
     #[must_use]
     pub const fn is_built(self) -> bool {
-        !matches!(self, Self::SmtpLogin | Self::CaldavDiscovery)
+        match self {
+            Self::Dns | Self::Tcp | Self::Tls | Self::Certificate | Self::ImapLogin | Self::SmtpLogin | Self::CaldavDiscovery => true,
+        }
     }
 
     /// Every step before the check runs: pending, or not built yet.
@@ -67,6 +70,8 @@ pub enum StepStatus {
     /// Not run: the last sign-in was refused or went unanswered, and only a check the owner starts sends the
     /// password again.
     NeedsOwner,
+    /// Not run: the account has no server for the step (no submission server for the SMTP sign-in).
+    NotSet,
     /// Not run: this version does not have the step yet.
     NotBuilt,
 }

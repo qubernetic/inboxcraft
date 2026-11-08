@@ -13,15 +13,19 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 inboxcraft-time = { path = "../crates/time" }
+inboxcraft-control-key = { path = "../crates/control-key" }
 inboxcraft-charset = { path = "../crates/charset" }
 inboxcraft-html = { path = "../crates/html" }
 inboxcraft-model = { path = "../crates/model" }
 inboxcraft-mime = { path = "../crates/mime" }
+inboxcraft-ical = { path = "../crates/ical" }
+inboxcraft-dav = { path = "../crates/dav" }
 inboxcraft-proto = { path = "../crates/proto" }
 inboxcraft-net = { path = "../crates/net" }
 inboxcraft-testkit = { path = "../crates/testkit" }
 inboxcraft-store = { path = "../crates/store" }
 inboxcraft-engine = { path = "../crates/engine" }
+inboxcraft-mcp = { path = "../crates/mcp" }
 inboxcraft-ui-egui = { path = "../crates/ui-egui" }
 serde_json = "1"
 
@@ -85,8 +89,22 @@ doc = false
 bench = false
 
 [[bin]]
+name = "smtp_client"
+path = "fuzz_targets/smtp_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "testkit_imap"
 path = "fuzz_targets/testkit_imap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "testkit_smtp"
+path = "fuzz_targets/testkit_smtp.rs"
 test = false
 doc = false
 bench = false
@@ -127,6 +145,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "engine_alerts"
+path = "fuzz_targets/engine_alerts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "engine_invite"
+path = "fuzz_targets/engine_invite.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "html_display"
 path = "fuzz_targets/html_display.rs"
 test = false
@@ -136,6 +168,69 @@ bench = false
 [[bin]]
 name = "ui_reader"
 path = "fuzz_targets/ui_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ui_typed_time"
+path = "fuzz_targets/ui_typed_time.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ui_keymap"
+path = "fuzz_targets/ui_keymap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_lines"
+path = "fuzz_targets/mcp_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_lines"
+path = "fuzz_targets/control_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ical_calendar"
+path = "fuzz_targets/ical_calendar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ical_rule"
+path = "fuzz_targets/ical_rule.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dav_xml"
+path = "fuzz_targets/dav_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dav_client"
+path = "fuzz_targets/dav_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "testkit_dav"
+path = "fuzz_targets/testkit_dav.rs"
 test = false
 doc = false
 bench = false

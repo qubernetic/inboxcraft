@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The events of the read path: what an account's `net` worker reports back to the engine.
+//! The events: what an account's `net` worker reports back to the engine.
 //!
 //! The worker turns everything the server says into these, in our own model; the engine applies them and never sees
 //! a protocol type. Every UID in an event belongs to the UIDVALIDITY it carries: an event for an older UIDVALIDITY is
@@ -11,7 +11,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, Flags, FolderId, FolderListing, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet, UidValidity};
+use crate::{
+    AccountId, CalendarReport, DraftId, Flags, FolderId, FolderListing, FolderPath, FolderState, JobId, ModSeq, StepReport, Summary, Uid, UidSet,
+    UidValidity,
+};
 
 /// New flags for one message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +25,23 @@ pub struct FlagChange {
     pub flags: Flags,
     /// The modification sequence of the change.
     pub modseq: Option<ModSeq>,
+}
+
+/// The UIDs moved messages got in the folder they went to (`COPYUID`, RFC 4315).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Copied {
+    /// The UIDVALIDITY of the folder they went to.
+    pub uid_validity: UidValidity,
+    /// Each old UID with its new one.
+    pub uids: Vec<(Uid, Uid)>,
+}
+
+impl Copied {
+    /// The new UID of the message that had `old`, if the server named one.
+    #[must_use]
+    pub fn new_uid(&self, old: Uid) -> Option<Uid> {
+        self.uids.iter().find_map(|(from, to)| (*from == old).then_some(*to))
+    }
 }
 
 /// How an account's connection stands.
@@ -92,6 +112,19 @@ pub enum ErrorKind {
     FolderGone,
     /// The message no longer exists on the server.
     MessageGone,
+    /// The submission server refused the message, its sender or one of its recipients; nothing was sent.
+    MessageRefused,
+    /// The account has no submission (SMTP) server, so it cannot send.
+    NoSubmissionServer,
+    /// The message went to the submission server and the connection ended before its answer: it may have gone.
+    SendUnanswered,
+    /// The server's address is not `https`, so no password goes to it.
+    NotEncrypted,
+    /// The server sent the client on to another server, which it does not follow on its own: the password would go
+    /// with it.
+    OtherServer,
+    /// The server has no CalDAV calendars at the address.
+    NoCalendarServer,
 }
 
 impl ErrorKind {
@@ -128,6 +161,12 @@ impl fmt::Display for ErrorKind {
             Self::TooLarge => "the server sent more than this program accepts at once",
             Self::FolderGone => "the folder no longer exists on the server",
             Self::MessageGone => "the message no longer exists on the server",
+            Self::MessageRefused => "the mail server refused the message, so it was not sent",
+            Self::NoSubmissionServer => "the account has no server for sending mail set",
+            Self::SendUnanswered => "the connection ended after the message went and before the server answered, so the message may have gone",
+            Self::NotEncrypted => "the server's address is not encrypted (https), so no password goes to it",
+            Self::OtherServer => "the server sent this program on to another server, which it does not follow on its own",
+            Self::NoCalendarServer => "the server has no calendars (CalDAV) at this address",
         })
     }
 }
@@ -199,6 +238,72 @@ pub enum EventKind {
     CheckStep(StepReport),
     /// The connection changed.
     Connection(ConnectionState),
+    /// What the server can do, as far as the engine chooses by it; told after each sign-in.
+    Abilities {
+        /// Whether it removes only the messages named (UID EXPUNGE: UIDPLUS or IMAP4rev2).
+        uid_expunge: bool,
+    },
+    /// A [`crate::JobKind::StoreFlags`] job is done; the flags it left came before it as
+    /// [`EventKind::MessagesChanged`].
+    FlagsStored {
+        /// The folder.
+        folder: FolderId,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages of the job.
+        uids: UidSet,
+    },
+    /// A [`crate::JobKind::Move`] job is done.
+    Moved {
+        /// The folder they were in.
+        folder: FolderId,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages of the job.
+        uids: UidSet,
+        /// The folder they went to.
+        to: FolderId,
+        /// Their UIDs there, when the server gave them; a message of the job missing from them was gone already.
+        copied: Option<Copied>,
+    },
+    /// A [`crate::JobKind::Expunge`] job is done: the messages are gone for good.
+    Expunged {
+        /// The folder.
+        folder: FolderId,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages of the job.
+        uids: UidSet,
+    },
+    /// A [`crate::JobKind::Append`] job is done.
+    Appended {
+        /// The folder.
+        folder: FolderId,
+        /// The message's UIDVALIDITY and UID there, when the server gave them (`APPENDUID`, RFC 4315).
+        uid: Option<(UidValidity, Uid)>,
+    },
+    /// A [`crate::JobKind::CreateFolder`] job is done; the folder comes with the next folder list.
+    FolderCreated {
+        /// Its path on the server.
+        path: FolderPath,
+    },
+    /// A [`crate::JobKind::Send`] job is done: the submission server took the message for every recipient.
+    Sent {
+        /// The draft it was made from.
+        draft: DraftId,
+    },
+    /// A [`crate::JobKind::Send`] job failed. The message went to nobody, except with [`ErrorKind::SendUnanswered`]:
+    /// the server got it and never answered, so it may have gone.
+    SendFailed {
+        /// The draft it was made from.
+        draft: DraftId,
+        /// Why.
+        kind: ErrorKind,
+        /// The server's refusal, as it gave it (`550 5.1.1 No such user`), when it refused.
+        reply: Option<String>,
+    },
+    /// What a [`crate::JobKind::Calendar`] job found or did.
+    Calendar(CalendarReport),
     /// A job or the connection failed.
     Failed {
         /// Why.
@@ -213,13 +318,24 @@ impl EventKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::Folders { .. } | Self::CheckStep(_) | Self::Connection(_) => None,
+            Self::Folders { .. }
+            | Self::CheckStep(_)
+            | Self::Connection(_)
+            | Self::Abilities { .. }
+            | Self::FolderCreated { .. }
+            | Self::Sent { .. }
+            | Self::SendFailed { .. }
+            | Self::Calendar(_) => None,
             Self::MessagesAdded { folder, .. }
             | Self::MessagesChanged { folder, .. }
             | Self::MessagesExpunged { folder, .. }
             | Self::UidValidityReset { folder, .. }
             | Self::BodyFetched { folder, .. }
-            | Self::FolderSynced { folder, .. } => Some(*folder),
+            | Self::FolderSynced { folder, .. }
+            | Self::FlagsStored { folder, .. }
+            | Self::Moved { folder, .. }
+            | Self::Expunged { folder, .. }
+            | Self::Appended { folder, .. } => Some(*folder),
             Self::Failed { folder, .. } => *folder,
         }
     }

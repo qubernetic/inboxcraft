@@ -1,0 +1,30 @@
+# CREATE (RFC 9051 section 6.3.4): a new mailbox; the refusal carries the server's code (ALREADYEXISTS, RFC 5530).
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> create InboxCraft/Screener
+C: A0001 CREATE "InboxCraft/Screener"
+S: A0001 OK CREATE completed
+= A0001 created
+> create InboxCraft/Screener
+C: A0002 CREATE "InboxCraft/Screener"
+S: A0002 NO [ALREADYEXISTS] Mailbox exists
+= A0002 No [ALREADYEXISTS] Mailbox exists
+# A name with a control character cannot be sent.
+> create Bad|name
+! BadArgument("mailbox name")
+# In a mailbox open too.
+> select INBOX
+C: A0003 SELECT "INBOX"
+S: A0003 OK [READ-WRITE] done
+= A0003 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> create Archive/2026
+C: A0004 CREATE "Archive/2026"
+S: A0004 OK CREATE completed
+= A0004 created
+
+@ tls
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready
+= greeted
+> create Archive
+! WrongState { command: "CREATE", state: NotAuthenticated }

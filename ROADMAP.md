@@ -1,33 +1,41 @@
 # InboxCraft roadmap
 
-**Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
+**Stage: pre-alpha** · next: beta, after the three blocking gaps of [docs/gaps.md](docs/gaps.md) (about 14 hours)
+and the owner's daily use on both mailboxes (E3.11)
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
 ## Headline numbers
 | Number | Value | Kind |
 |---|---|---|
-| Commands in the registry | <n> | measured (`cargo xtask stats`) |
-| Tests | <n> | measured |
-| Fuzz targets | <n> | measured |
-| Hours to beta | <n> Opus 5.5 agent-hours | estimated (<how>) |
+| Commands in the registry | 81 | measured (`inboxcraft-cli commands`) |
+| Tests | 3266 | measured (`cargo xtask ci`, nextest) |
+| Fuzz targets | 29 | measured (`fuzz/Cargo.toml`) |
+| Lines of Rust | 69846 code, 55671 test, in 667 files | measured (`cargo xtask stats`) |
+| Hours to beta | 14 Opus 5.5 agent-hours | estimated (the blocking gaps of docs/gaps.md; the owner's daily use not counted) |
 
 ## By area
 | Area | Ready | Hours left | Doc |
 |---|---|---|---|
-| IMAP sync (IDLE, CONDSTORE/QRESYNC, offline queue) | <%> | <h> | |
-| SMTP sending | <%> | <h> | |
-| CalDAV calendars | <%> | <h> | |
-| Account autodetect | <%> | <h> | |
-| Tray and background mode | <%> | <h> | |
-| Screener / grouped inbox / snooze / send later | <%> | <h> | |
-| Reading mail safely (HTML) | <%> | <h> | |
-| Search | <%> | <h> | |
+| IMAP sync (IDLE, CONDSTORE/QRESYNC, offline queue) | 85 % | 10 | [architecture](docs/architecture.md) |
+| SMTP sending | 75 % | 6 | |
+| CalDAV calendars | 75 % | 14 | |
+| Account autodetect | 70 % | 6 | |
+| Tray and background mode | 60 % | 30 | |
+| Screener / grouped inbox / snooze / send later | 90 % | 6 | |
+| Reading mail safely (HTML) | 90 % | 4 | |
+| Search | 40 % | 12 | |
+
+Ready and hours left are estimates from the gaps in [docs/gaps.md](docs/gaps.md). SMTP and CalDAV count the add-account
+form that does not ask for their servers; tray and background count Windows and macOS, which have none yet.
 
 ## Upcoming
-1. <item> (<hours>)
+1. The add-account form asks for the SMTP server and the CalDAV address (4)
+2. The computer's time zone handed to the engine, for presets, snooze, send later and the calendar (4)
+3. Drafts opened again in the window, and attachments in the composer (6)
+4. Beta hardening on the owner's two mailboxes (E3.11, the owner's hands-on use)
 
 ## Later ideas
 Not planned for now; the model keeps room for them.
@@ -81,6 +89,47 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | Accounts move to the settings sheet: the Accounts page lists them and adds one (form, Detect, the check), the empty window is one card, the folder pane drops Add account (#104) |
 | 2026-11-07 | Tests for the weakest files of the read mail epic: the account workers and the credential store without one, the owner's config folder, IDLE ended or refused by the server, the pill's hover and focus (#108) |
 | 2026-11-07 | The IDLE tests wait at the fake server for the IDLE they count (`FakeServer::wait_received`) instead of racing the worker's stop (#164) |
+| 2026-11-08 | IMAP: the base64 forms of the credentials are hidden like the password (#64) |
+| 2026-11-08 | Change fragments in `changes/`, checked in `cargo xtask ci` and folded by `cargo xtask changes --fold`; one command list per engine module, with stubs for the daily-use areas (#111) |
+| 2026-11-08 | The desktop app keeps its store on disk; schema version 4 holds the job queue, drafts, outbox, schedule, senders, message state and calendars; kept jobs survive a restart (#113) |
+| 2026-11-08 | The engine acts on mail: flag, read and unread, open, move, archive and delete, each undoable, with the write jobs for the server (#114) |
+| 2026-11-08 | The IMAP write path: flags, move, delete for good, APPEND and CREATE on the server, the offline queue run after the reconnect, a message gone meanwhile told as an event (#115) |
+| 2026-11-08 | Drafts that are never lost: kept at every change, copied to the Drafts folder, with the compose commands, a signature per account and checked recipients (#116) |
+| 2026-11-08 | SMTP: the sans-I/O submission client in `proto` (EHLO, STARTTLS, AUTH PLAIN and LOGIN, MAIL, RCPT, DATA, SIZE, 8BITMIME, SMTPUTF8, enhanced status codes), golden transcripts and a fuzz target (#117) |
+| 2026-11-08 | `testkit`: the fake SMTP submission server with its own command reader, scripted refusals with enhanced codes, captured messages, a bounce script into the fake IMAP mailbox, STARTTLS and implicit TLS with the certificate faults, fuzz target (#118) |
+| 2026-11-08 | SMTP submission in `net` and `mail.send`: implicit TLS and STARTTLS, AUTH only after TLS, Bcc in the envelope only, the Sent copy, the SMTP step of the account check, and a live test (#119) |
+| 2026-11-08 | Reply, reply all, forward and templates in the engine: threading headers, standard prefixes, a quote line of our own, reply all without the owner's addresses, forwards with their attachments, and template blanks that block Send (#120) |
+| 2026-11-08 | Outbox, send errors and bounces in the engine: refusals with the server's reply and enhanced code, retry by command, delivery reports linked to the sent message by `Message-ID` and let past the screener, tested against the fake SMTP server's refusal and DSN scripts (#121) |
+| 2026-11-08 | The scheduler with its time presets in the computer's wall-clock time, tested across summer-time changes (#122) |
+| 2026-11-08 | Undo send and send later in the engine: every send held 5 to 60 seconds and undoable with its draft intact, send later through the scheduler, a time missed while the app was off sent at the next start with a notice, and the window ticking the engine, tested on a fake clock (#123) |
+| 2026-11-08 | The screener with the known-sender index: before the inbox, inside it or off, accept (with a group, open or done) and block, both undoable (#124) |
+| 2026-11-08 | The grouped inbox: our classifier with its table test, People, Updates, Newsletters and Invitations, a per-sender choice with undo, grouping per account (#125) |
+| 2026-11-08 | Done, park and pin: done files in the archive and "show done" lists it in its old place, the park pile, the pins view, a pin through done by setting, each undoable (#126) |
+| 2026-11-08 | Snooze: a copy with the time in our own header field in `InboxCraft/Snoozed`, back unread at the top at the time, read by a second InboxCraft, undoable (#127) |
+| 2026-11-08 | Follow-up reminders: "remind me if no reply by" on a sent message, cancelled by a synced reply, a notice that opens the sent message at the time, undoable (#128) |
+| 2026-11-08 | The shared time picker for snooze, send later and reminders, with typed times, in the component gallery (#129) |
+| 2026-11-08 | The command palette (Ctrl+K), keys for every action changed on the Shortcuts page and kept between runs, and the calendar screen's place behind the rail with its empty state (#130) |
+| 2026-11-08 | The window acts on real mail: read and unread, flag, done, archive, delete and move from the hover actions, the toolbar and the keys, opening marks read, and Undo and Ctrl+Z through the engine's history (#131) |
+| 2026-11-08 | Writing mail: the composer in the reader's place with recipient chips, suggestions, the account's signature, silent draft saving and Send, a floating panel while the reader has the window, and the Sending page (#132) |
+| 2026-11-08 | Reply, reply all, forward and templates in the window: the reader's buttons open the composer filled in, a template menu, and the blanks asked for one at a time before Send is free (#133) |
+| 2026-11-08 | The screener and the grouped inbox in the window: New senders with a preview, accept (with a group, or open) and block; cards, grouped list or simple list from the engine's groups; a sender's group changed with undo; the Triage page with the screener's mode kept between runs (#134) |
+| 2026-11-08 | Done, park, pin, snooze and follow-up reminders in the window: the time picker, Later on the rail with its piles, "Show done", the returned mark, "Done all" and the pin setting (#135) |
+| 2026-11-08 | The outbox, undo send, send later and the bounce mark in the window, and the undo-send seconds on the Sending page (#136) |
+| 2026-11-08 | InboxCraft runs on with its window closed: one instance on the owner's mailbox, `--background`, `--quit`, the Linux tray with the unread count, and start at login through XDG autostart or the Background portal (#137) |
+| 2026-11-08 | Desktop notifications for new mail, returned snoozes and follow-up reminders, decided by the engine per account (all, people, none) and shown through the notification portal or `org.freedesktop.Notifications` (#138) |
+| 2026-11-08 | The Notifications page: each account's notification level, returned snoozes and reminders, running in the background and starting with the computer, kept between runs (#139) |
+| 2026-11-08 | E2.7 part 1: the headless CLI runs every command by id on a local store, `--json`, agent classes enforced (#140) |
+| 2026-11-08 | E2.8: the read-only MCP server over stdio on a local store, message text marked untrusted (#141) |
+| 2026-11-08 | E2.7 part 2: the local control channel with a token in the credential store, revocable; the CLI and MCP talk to the running app when no `--store` is given (#142) |
+| 2026-11-08 | E4.1: `ical` reads and writes iCalendar, time zones from `VTIMEZONE`, recurrence expanded with property tests, two fuzz targets (#143) |
+| 2026-11-08 | E4.2 part 1: `dav` finds the calendars, syncs them with sync tokens or entity tags and writes and removes events with entity tags; the fake CalDAV server in `testkit` with Basic auth over TLS only; three fuzz targets (#144) |
+| 2026-11-08 | E4.2 part 2: the `net` worker finds, syncs, writes and removes CalDAV calendars and events with sync tokens and entity tags, conflicts reported and never overwritten, Basic auth over verified TLS only; the CalDAV step of the account check; a live test on the `InboxCraft-Test` calendar (#145) |
+| 2026-11-08 | E4.4 and E4.5 in the engine: the calendars and their events listed with recurrence expanded and the event's own zone, events made, changed and deleted with repeat presets, all-day, busy or free, private and guests, a delete held for the undo window, undo, the CalDAV reports applied (#146) |
+| 2026-11-08 | E4.4 in the window: the day, week, month and agenda views with overlaps side by side and blocks over several days, the mini month, the calendars' boxes and the details with the event's own zone (#147) |
+| 2026-11-08 | E4.5 in the window: the event editor with repeat presets, all-day, busy or free, private, the guests and the question whether to tell them, and Undo on its toast (#148) |
+| 2026-11-08 | E4.6 invitations: an invitation in mail becomes a card in the reader, answered at once with Going, Maybe or No and changed later; updates and cancellations follow the same event by `UID` and `SEQUENCE`, with the request, reply, update and cancel chain tested on invented events (#149) |
+| 2026-11-08 | E4.7 reminders: calendar alerts become desktop notifications at the alert time, on a fake clock in tests and across a change of the clock, and a click opens the event (#150) |
+| 2026-11-08 | The daily-use epic's change fragments folded into the docs; the headline numbers, the by-area table, the ranked gaps and the README's "What works today" filled (#151) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -130,3 +179,44 @@ Not planned for now; the model keeps room for them.
 | 2026-11-06 | minor | Progress log: accounts on the settings sheet (#104) |
 | 2026-11-07 | minor | Progress log: tests for the weakest files of the read mail epic (#108) |
 | 2026-11-07 | minor | Progress log: the IDLE tests wait for the IDLE they count (#164) |
+| 2026-11-08 | minor | Progress log: base64 forms of the credentials hidden (#64) |
+| 2026-11-08 | minor | Progress log: change fragments and per-module command lists (#111) |
+| 2026-11-08 | minor | Progress log: the store on disk with the local tables (#113) |
+| 2026-11-08 | minor | Progress log: the acts on mail with undo and the write jobs (#114) |
+| 2026-11-08 | minor | Progress log: the IMAP write path and the offline queue run after the reconnect (#115) |
+| 2026-11-08 | minor | Progress log: drafts and the compose commands (#116) |
+| 2026-11-08 | minor | Progress log: the sans-I/O SMTP client (#117) |
+| 2026-11-08 | minor | Progress log: the fake SMTP server (#118) |
+| 2026-11-08 | minor | Progress log: SMTP submission and `mail.send` (#119) |
+| 2026-11-08 | minor | Progress log: reply, reply all, forward and templates in the engine (#120) |
+| 2026-11-08 | minor | Progress log: outbox, send errors and bounces in the engine (#121) |
+| 2026-11-08 | minor | Progress log: the scheduler with time presets (#122) |
+| 2026-11-08 | minor | Progress log: undo send and send later in the engine (#123) |
+| 2026-11-08 | minor | Progress log: the screener and the known-sender index (#124) |
+| 2026-11-08 | minor | Progress log: the grouped inbox (#125) |
+| 2026-11-08 | minor | Progress log: done, park and pin (#126) |
+| 2026-11-08 | minor | Progress log: snooze (#127) |
+| 2026-11-08 | minor | Progress log: follow-up reminders (#128) |
+| 2026-11-08 | minor | Progress log: the shared time picker (#129) |
+| 2026-11-08 | minor | Progress log: the command palette, the Shortcuts page and the calendar screen (#130) |
+| 2026-11-08 | minor | Progress log: acting on real mail with undo (#131) |
+| 2026-11-08 | minor | Progress log: the composer with drafts (#132) |
+| 2026-11-08 | minor | Progress log: reply, forward and templates in the window (#133) |
+| 2026-11-08 | minor | Progress log: the screener and the grouped inbox in the window (#134) |
+| 2026-11-08 | minor | Progress log: done, park, pin, snooze and follow-up in the window (#135) |
+| 2026-11-08 | minor | Progress log: the outbox, undo send and send later in the window (#136) |
+| 2026-11-08 | minor | Progress log: the app runs on with its window closed, with the Linux tray (#137) |
+| 2026-11-08 | minor | Progress log: desktop notifications (#138) |
+| 2026-11-08 | minor | Progress log: the Notifications page (#139) |
+| 2026-11-08 | minor | Progress log: the headless CLI (#140) |
+| 2026-11-08 | minor | Progress log: the read-only MCP server (#141) |
+| 2026-11-08 | minor | Progress log: the local control channel (#142) |
+| 2026-11-08 | minor | Progress log: `ical` (#143) |
+| 2026-11-08 | minor | Progress log: `dav` and the fake CalDAV server (#144) |
+| 2026-11-08 | minor | Progress log: CalDAV sync in `net` (#145) |
+| 2026-11-08 | minor | Progress log: the calendar commands in the engine (#146) |
+| 2026-11-08 | minor | Progress log: the calendar's views in the window (#147) |
+| 2026-11-08 | minor | Progress log: the event editor in the window (#148) |
+| 2026-11-08 | minor | Progress log: invitations answered from mail (#149) |
+| 2026-11-08 | minor | Progress log: event reminders (#150) |
+| 2026-11-08 | minor | Stage, headline numbers, by-area table and upcoming filled for the daily-use epic (#151) |

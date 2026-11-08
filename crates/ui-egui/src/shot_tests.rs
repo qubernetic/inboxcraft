@@ -219,9 +219,12 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
     assert_ne!(stepped, toast);
     assert_ne!(toast, sliding);
     assert_ne!(toast, read, "another toast");
+    for act in ["flag", "unflag", "archive", "delete", "unread"] {
+        assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
+    }
     for (more, says) in [
-        (r#", "act": "archive""#, "not read, unread, done or delete"),
-        (r#", "act": "read", "slide": true"#, "only done and delete slide"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters"),
+        (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {
         let error = shoot(&line(more)).unwrap_err().to_string();
@@ -251,6 +254,7 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
         (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
+        (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not cards, list or simple"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();
         assert!(error.contains(says), "{json}: {error}");
@@ -384,4 +388,196 @@ fn the_picture_credential_store_takes_and_keeps_nothing() {
     use crate::onboard::Keychain as _;
     assert_eq!(super::Pictured.store(1, "invented-pass"), Ok(()));
     assert_eq!(super::Pictured.forget(1), Ok(()));
+}
+
+#[test]
+fn a_shot_shows_the_palette_the_shortcuts_page_and_the_calendar() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    for place in [
+        r#""palette": """#,
+        r#""palette": "mode""#,
+        r#""shortcuts": true"#,
+        r#""shortcuts": true, "capture": "ui.calendar.show""#,
+        r#""calendar": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600], {place}}}"#))).unwrap();
+        assert_ne!(picture, window, "{place}");
+    }
+    for bad in [r#""shortcuts": true, "capture": "mail.nothing""#, r#""capture": "ui.calendar.show""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", {bad}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("is not an action on the Shortcuts page"), "{error}");
+    }
+    for place in [r#""palette": "x""#, r#""calendar": true"#, r#""shortcuts": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_each_calendar_view_and_a_picked_event() {
+    let base = r#""out": "x.png", "mode": "light", "size": [900, 600]"#;
+    let mut seen = vec![shoot(&shot(&format!(r#"{{{base}, "calendar": true}}"#))).unwrap()];
+    for place in [
+        r#""calendar_view": "day""#,
+        r#""calendar_view": "month""#,
+        r#""calendar_view": "agenda""#,
+        r#""event": "Ferry to the island""#,
+        r#""first": true, "calendar": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap();
+        assert!(!seen.contains(&picture), "{place}");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(&format!(r#"{{{base}, "calendar_view": "year"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("is not day, week, month or agenda"), "{error}");
+    let error = shoot(&shot(&format!(r#"{{{base}, "event": "Nothing like it"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("no calendar event"), "{error}");
+    for place in [r#""calendar_view": "day""#, r#""event": "Dentist""#, r#""edit_event": "new""#, r#""delete_event": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_the_event_editor_and_the_toast_of_a_deleted_event() {
+    let base = r#""out": "x.png", "mode": "light", "size": [1200, 820], "calendar_view": "week""#;
+    let week = shoot(&shot(&format!("{{{base}}}"))).unwrap();
+    let mut seen = vec![week];
+    for place in [
+        r#""edit_event": "new""#,
+        r#""event": "Allotment work party", "edit_event": "edit""#,
+        r#""event": "Dentist", "edit_event": "edit""#,
+        r#""event": "Dentist", "delete_event": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap();
+        assert!(!seen.contains(&picture), "{place}");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(&format!(r#"{{{base}, "edit_event": "later"}}"#))).unwrap_err().to_string();
+    assert!(error.contains("is not new or edit"), "{error}");
+    for place in [r#""edit_event": "edit""#, r#""delete_event": true"#] {
+        let error = shoot(&shot(&format!(r#"{{{base}, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("needs an event"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_the_composer_in_each_scene_and_the_sending_page() {
+    let window = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [900, 600]}"#)).unwrap();
+    let mut seen = Vec::new();
+    for place in [
+        r#""compose": "new""#,
+        r#""compose": "written""#,
+        r#""compose": "bad""#,
+        r#""compose": "suggest""#,
+        r#""compose": "floating""#,
+        r#""compose": "reply""#,
+        r#""compose": "template""#,
+        r#""sending": true"#,
+    ] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [900, 600], {place}}}"#))).unwrap();
+        assert_ne!(picture, window, "{place}");
+        assert!(!seen.contains(&picture), "{place} shows something of its own");
+        seen.push(picture);
+    }
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "compose": "sent"}"#)).unwrap_err().to_string();
+    assert!(error.contains("is not new, written, bad, suggest, floating, reply or template"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "reply"}"#)).unwrap_err().to_string();
+    assert!(error.contains("the reply did not open"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "first": true, "compose": "new"}"#)).unwrap_err().to_string();
+    assert!(error.contains("the composer did not open"), "{error}");
+    for place in [r#""compose": "new""#, r#""sending": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {place}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_new_senders_the_triage_page_the_inbox_views_and_the_screening_acts() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let senders = shoot(&line(r#", "open": {"role": "senders"}"#)).unwrap();
+    let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    let listed = shoot(&line(r#", "view": "list""#)).unwrap();
+    let simple = shoot(&line(r#", "view": "simple""#)).unwrap();
+    let cards = shoot(&line(r#", "view": "cards""#)).unwrap();
+    assert_eq!(window, cards, "cards when left out");
+    for (name, picture) in [("senders", &senders), ("triage", &triage), ("list", &listed), ("simple", &simple)] {
+        assert_ne!(&window, picture, "{name}");
+    }
+    let held = |act: &str| shoot(&line(&format!(r#", "open": {{"role": "senders"}}, "select": "Winter swim at the harbour steps"{act}"#))).unwrap();
+    let preview = held("");
+    for act in ["accept", "accept_open", "block", "newsletters"] {
+        assert_ne!(held(&format!(r#", "act": "{act}""#)), preview, "{act}");
+    }
+    for page in [r#""triage": true"#, r#""view": "list""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "icons": true, {page}}}"#))).unwrap_err().to_string();
+        assert!(error.contains("has no window"), "{error}");
+    }
+}
+
+#[test]
+fn a_shot_shows_the_notifications_page_with_the_background_switches() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let page = shoot(&line(r#", "notifications": true"#)).unwrap();
+    let triage = shoot(&line(r#", "triage": true"#)).unwrap();
+    assert_ne!(window, page);
+    assert_ne!(triage, page);
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "notifications": true}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
+fn the_pictured_desk_runs_in_the_background_starts_with_the_computer_and_changes_nothing() {
+    use crate::desk::Desk;
+
+    let mut desk = super::PicturedDesk;
+    assert_eq!(desk.background(), Some(true));
+    assert_eq!(desk.login(), Some(true));
+    assert!(!desk.asking());
+    assert!(desk.set_background(false).is_ok());
+    desk.set_login(false);
+    assert_eq!(desk.answer(), None);
+    assert_eq!(desk.background(), Some(true));
+}
+
+#[test]
+fn a_shot_shows_later_show_done_and_the_time_picker() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let put = shoot(&line(r#", "put_away": true"#)).unwrap();
+    assert_ne!(window, put, "mail put away leaves the inbox");
+    let done = shoot(&line(r#", "put_away": true, "show_done": true"#)).unwrap();
+    assert_ne!(put, done, "the done mail shows dimmed");
+    let piles: Vec<_> =
+        ["snoozed", "pins", "parked"].iter().map(|pile| shoot(&line(&format!(r#", "put_away": true, "later": "{pile}""#))).unwrap()).collect();
+    assert_ne!(piles[0], piles[1]);
+    assert_ne!(piles[1], piles[2]);
+    let open = line(r#", "select": "Allotment rota for November""#);
+    let picker = shoot(&line(r#", "select": "Allotment rota for November", "picker": "sat 9""#)).unwrap();
+    assert_ne!(shoot(&open).unwrap(), picker, "the picker shows over the reader");
+    let error = shoot(&line(r#", "later": "someday""#)).unwrap_err().to_string();
+    assert!(error.contains("is not snoozed, pins or parked"), "{error}");
+    let error = shoot(&line(r#", "picker": "sat 9""#)).unwrap_err().to_string();
+    assert!(error.contains("needs a selected row"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "later": "pins"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
+fn a_shot_shows_the_outbox_the_countdown_send_later_and_a_bounce() {
+    let line = |more: &str| shot(&format!(r#"{{"out": "x.png", "mode": "light", "size": [900, 600]{more}}}"#));
+    let window = shoot(&line("")).unwrap();
+    let scenes: Vec<_> =
+        ["waiting", "countdown", "schedule", "bounce"].iter().map(|scene| shoot(&line(&format!(r#", "outbox": "{scene}""#))).unwrap()).collect();
+    for (at, scene) in scenes.iter().enumerate() {
+        assert_ne!(*scene, window, "scene {at} differs from the plain window");
+    }
+    assert_ne!(scenes[0], scenes[1]);
+    assert_ne!(scenes[2], scenes[3]);
+    let error = shoot(&line(r#", "outbox": "lost""#)).unwrap_err().to_string();
+    assert!(error.contains("is not waiting, countdown, schedule or bounce"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "outbox": "waiting"}"#)).unwrap_err().to_string();
+    assert!(error.contains("has no window"), "{error}");
 }

@@ -6,7 +6,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use inboxcraft_model::{Account, AccountId, Flags, Folder, FolderId, FolderState, Message, MessageId, Uid};
+use inboxcraft_model::{
+    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, Flags, Folder,
+    FolderId, FolderState, Job, Message, MessageId, MessageState, Outgoing, ScheduleId, Scheduled, Sender, Uid,
+};
 use inboxcraft_time::Timestamp;
 
 use crate::search::{Fields, has_phrase, order_key, words};
@@ -28,6 +31,22 @@ struct State {
     folders: BTreeMap<FolderId, (Folder, Option<FolderState>)>,
     messages: BTreeMap<MessageId, Held>,
     uids: BTreeMap<FolderId, BTreeMap<Uid, MessageId>>,
+    /// The job queue, in order.
+    jobs: Vec<Job>,
+    drafts: BTreeMap<DraftId, Draft>,
+    outbox: BTreeMap<DraftId, Outgoing>,
+    schedule: BTreeMap<ScheduleId, Scheduled>,
+    /// By address in lower case.
+    senders: BTreeMap<String, Sender>,
+    states: BTreeMap<MessageId, MessageState>,
+    calendars: BTreeMap<CalendarId, (Calendar, Option<String>)>,
+    events: BTreeMap<CalendarEventId, CalendarEvent>,
+    alerts: BTreeMap<AlertId, Alert>,
+}
+
+/// The key a sender is kept under: its address in lower case.
+pub(crate) fn sender_key(address: &EmailAddress) -> String {
+    address.as_str().to_lowercase()
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +88,16 @@ impl State {
                 for folder in folders {
                     self.remove_folder(folder);
                 }
+                self.jobs.retain(|job| job.account != *id);
+                let drafts: Vec<DraftId> = self.drafts.values().filter(|draft| draft.account == *id).map(|draft| draft.id).collect();
+                for draft in drafts {
+                    self.remove_draft(draft);
+                }
+                let calendars: Vec<CalendarId> =
+                    self.calendars.values().filter(|(calendar, _)| calendar.account == *id).map(|(calendar, _)| calendar.id).collect();
+                for calendar in calendars {
+                    self.remove_calendar(calendar);
+                }
             }
             Change::PutFolder(folder) => self.put_folder(folder)?,
             Change::RemoveFolder(id) => self.remove_folder(*id),
@@ -92,8 +121,111 @@ impl State {
                 }
             }
             Change::MarkOpened(id) => self.held(*id)?.opened = true,
+            Change::QueueJob(job) => {
+                self.account(job.account)?;
+                match self.jobs.iter_mut().find(|queued| queued.id == job.id) {
+                    Some(queued) => *queued = job.clone(),
+                    None => self.jobs.push(job.clone()),
+                }
+            }
+            Change::RemoveJob(id) => self.jobs.retain(|job| job.id != *id),
+            Change::PutDraft(draft) => {
+                self.account(draft.account)?;
+                self.drafts.insert(draft.id, draft.clone());
+            }
+            Change::RemoveDraft(id) => self.remove_draft(*id),
+            Change::PutOutgoing(outgoing) => {
+                if !self.drafts.contains_key(&outgoing.draft) {
+                    return Err(StoreError::UnknownDraft(outgoing.draft));
+                }
+                self.outbox.insert(outgoing.draft, outgoing.clone());
+            }
+            Change::RemoveOutgoing(id) => {
+                self.outbox.remove(id);
+            }
+            Change::PutScheduled(entry) => {
+                match entry.what {
+                    Due::Send(id) if !self.drafts.contains_key(&id) => return Err(StoreError::UnknownDraft(id)),
+                    Due::Unsnooze(id) | Due::FollowUp(id) if !self.messages.contains_key(&id) => return Err(StoreError::UnknownMessage(id)),
+                    Due::Alert(id) if !self.alerts.contains_key(&id) => return Err(StoreError::UnknownAlert(id)),
+                    _ => {}
+                }
+                self.schedule.insert(entry.id, entry.clone());
+            }
+            Change::RemoveScheduled(id) => {
+                self.schedule.remove(id);
+            }
+            Change::PutSender(sender) => {
+                self.senders.insert(sender_key(&sender.address), sender.clone());
+            }
+            Change::RemoveSender(address) => {
+                self.senders.remove(&sender_key(address));
+            }
+            Change::SetMessageState(id, state) => {
+                self.held(*id)?;
+                if state.is_empty() {
+                    self.states.remove(id);
+                } else {
+                    self.states.insert(*id, state.clone());
+                }
+            }
+            Change::PutCalendar(calendar) => {
+                self.account(calendar.account)?;
+                let token = self.calendars.get(&calendar.id).and_then(|(_, token)| token.clone());
+                self.calendars.insert(calendar.id, (calendar.clone(), token));
+            }
+            Change::RemoveCalendar(id) => self.remove_calendar(*id),
+            Change::SetSyncToken(id, token) => {
+                let (_, held) = self.calendars.get_mut(id).ok_or(StoreError::UnknownCalendar(*id))?;
+                held.clone_from(token);
+            }
+            Change::PutCalendarEvent(event) => {
+                if !self.calendars.contains_key(&event.calendar) {
+                    return Err(StoreError::UnknownCalendar(event.calendar));
+                }
+                self.events.insert(event.id, event.clone());
+            }
+            Change::RemoveCalendarEvent(id) => self.remove_event(*id),
+            Change::PutAlert(alert) => {
+                if !self.events.contains_key(&alert.event) {
+                    return Err(StoreError::UnknownCalendarEvent(alert.event));
+                }
+                self.alerts.insert(alert.id, alert.clone());
+            }
+            Change::RemoveAlert(id) => self.remove_alert(*id),
         }
         Ok(())
+    }
+
+    fn account(&self, id: AccountId) -> Result<(), StoreError> {
+        if self.accounts.contains_key(&id) { Ok(()) } else { Err(StoreError::UnknownAccount(id)) }
+    }
+
+    fn remove_draft(&mut self, id: DraftId) {
+        self.drafts.remove(&id);
+        self.outbox.remove(&id);
+        self.schedule.retain(|_, entry| entry.what != Due::Send(id));
+    }
+
+    fn remove_alert(&mut self, id: AlertId) {
+        self.alerts.remove(&id);
+        self.schedule.retain(|_, entry| entry.what != Due::Alert(id));
+    }
+
+    fn remove_calendar(&mut self, id: CalendarId) {
+        self.calendars.remove(&id);
+        let events: Vec<CalendarEventId> = self.events.values().filter(|event| event.calendar == id).map(|event| event.id).collect();
+        for event in events {
+            self.remove_event(event);
+        }
+    }
+
+    fn remove_event(&mut self, id: CalendarEventId) {
+        self.events.remove(&id);
+        let alerts: Vec<AlertId> = self.alerts.values().filter(|alert| alert.event == id).map(|alert| alert.id).collect();
+        for alert in alerts {
+            self.remove_alert(alert);
+        }
     }
 
     fn held(&mut self, id: MessageId) -> Result<&mut Held, StoreError> {
@@ -101,9 +233,7 @@ impl State {
     }
 
     fn put_folder(&mut self, folder: &Folder) -> Result<(), StoreError> {
-        if !self.accounts.contains_key(&folder.account()) {
-            return Err(StoreError::UnknownAccount(folder.account()));
-        }
+        self.account(folder.account())?;
         let state = match self.folders.get(&folder.id()) {
             Some((old, _)) if old.account() != folder.account() => {
                 return Err(StoreError::WrongAccount { folder: folder.id(), account: folder.account() });
@@ -149,6 +279,8 @@ impl State {
         if let Some(held) = self.messages.remove(&id) {
             self.forget_uid(&held.message);
         }
+        self.states.remove(&id);
+        self.schedule.retain(|_, entry| !matches!(entry.what, Due::Unsnooze(message) | Due::FollowUp(message) if message == id));
     }
 
     fn forget_uid(&mut self, message: &Message) {
@@ -161,7 +293,7 @@ impl State {
 /// `message` with its flags replaced.
 pub(crate) fn with_flags(message: &Message, flags: &Flags) -> Message {
     let summary = message.summary().clone().with_flags(flags.clone());
-    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(message.thread())
+    Message::new(message.id(), message.account(), message.folder(), summary).with_thread(message.thread()).with_moving(message.moving().cloned())
 }
 
 impl Storage for Memory {
@@ -214,6 +346,70 @@ impl Storage for Memory {
             .collect();
         found.sort_by_key(|(date, id)| order_key(*date, *id));
         Ok(found.into_iter().take(search.limit()).map(|(_, id)| id).collect())
+    }
+
+    fn queued_jobs(&self) -> Result<Vec<Job>, StoreError> {
+        Ok(self.state.jobs.clone())
+    }
+
+    fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError> {
+        Ok(self.state.drafts.values().filter(|draft| draft.account == account).cloned().collect())
+    }
+
+    fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError> {
+        Ok(self.state.drafts.get(&id).cloned())
+    }
+
+    fn outbox(&self) -> Result<Vec<Outgoing>, StoreError> {
+        Ok(self.state.outbox.values().cloned().collect())
+    }
+
+    fn schedule(&self) -> Result<Vec<Scheduled>, StoreError> {
+        let mut entries: Vec<Scheduled> = self.state.schedule.values().cloned().collect();
+        entries.sort_by_key(|entry| (entry.due.unix_seconds(), entry.id));
+        Ok(entries)
+    }
+
+    fn sender(&self, address: &EmailAddress) -> Result<Option<Sender>, StoreError> {
+        Ok(self.state.senders.get(&sender_key(address)).cloned())
+    }
+
+    fn senders(&self) -> Result<Vec<Sender>, StoreError> {
+        Ok(self.state.senders.values().cloned().collect())
+    }
+
+    fn message_state(&self, id: MessageId) -> Result<MessageState, StoreError> {
+        Ok(self.state.states.get(&id).cloned().unwrap_or_default())
+    }
+
+    fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, StoreError> {
+        Ok(self.state.states.iter().map(|(id, state)| (*id, state.clone())).collect())
+    }
+
+    fn calendars(&self, account: AccountId) -> Result<Vec<Calendar>, StoreError> {
+        Ok(self.state.calendars.values().filter(|(calendar, _)| calendar.account == account).map(|(calendar, _)| calendar.clone()).collect())
+    }
+
+    fn sync_token(&self, calendar: CalendarId) -> Result<Option<String>, StoreError> {
+        Ok(self.state.calendars.get(&calendar).and_then(|(_, token)| token.clone()))
+    }
+
+    fn calendar_events(&self, calendar: CalendarId) -> Result<Vec<CalendarEvent>, StoreError> {
+        Ok(self.state.events.values().filter(|event| event.calendar == calendar).cloned().collect())
+    }
+
+    fn calendar_event(&self, id: CalendarEventId) -> Result<Option<CalendarEvent>, StoreError> {
+        Ok(self.state.events.get(&id).cloned())
+    }
+
+    fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError> {
+        let mut alerts: Vec<Alert> = self.state.alerts.values().filter(|alert| alert.event == event).cloned().collect();
+        alerts.sort_by_key(|alert| (alert.at.unix_seconds(), alert.id));
+        Ok(alerts)
+    }
+
+    fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError> {
+        Ok(self.state.alerts.get(&id).cloned())
     }
 
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {

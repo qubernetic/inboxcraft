@@ -77,7 +77,7 @@ pub(crate) const INTRA_LAYER_ORDER: &[(&str, &str)] =
 
 /// The crates whose parsers the fake servers test: `testkit` never depends on them, not even for its own tests, so a
 /// parser bug cannot hide behind the same bug in the fake.
-pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto"];
+pub(crate) const TESTKIT_NEVER: &[&str] = &["inboxcraft-proto", "inboxcraft-dav"];
 
 /// Crates the fakes need and nothing that ships does: `testkit` only, or a dev-dependency. A crate that comes to need
 /// one lifts it here as a reviewed choice.

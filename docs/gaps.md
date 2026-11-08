@@ -1,21 +1,31 @@
 # Where InboxCraft falls short
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
 |---|---|---|---|---|---|---|
-| 1 | <gap> | ✓ | <how we know> | <who it hurts> | <h> | |
+| 1 | The add-account form asks for no SMTP server and no CalDAV address, and nothing else the owner can reach sets them | ✓ | `onboard.rs` sends `account.add` with the IMAP fields only; `account.add` and `calendar.server` are `owner`, which the CLI refuses | An account added today cannot send and has no calendar | 4 | [Onboarding](#known-rough-edges-not-ranked) |
+| 2 | No front end hands the engine the computer's time zone: presets, send later, snooze, reminders and the calendar run in UTC | ✓ | `Session::set_offsets` has no caller | "Tomorrow 8:00" and every event are off by the UTC offset, an hour or two in Europe | 4 | |
+| 3 | The composer cannot open a draft closed earlier or left from an earlier run, and has no attachments | ✓ | `ui-egui` has no drafts list and no attach field (#132) | A reply started yesterday or a mail with a file must go through another program | 6 | |
+| 4 | Only the inbox is watched (IMAP IDLE, no NOTIFY); other folders change when the engine syncs them | | `net` watches one folder per account (#26) | Mail filed by a server rule or another device shows late | 6 | |
+| 5 | Sign-in with a password only: no OAuth (XOAUTH2, OAUTHBEARER) for IMAP, SMTP or CalDAV | | `proto` and `dav` have no OAuth (#20, #144) | Providers that require OAuth cannot be added | 12 | |
+| 6 | One message at a time: no selection of several messages | | `ui-egui` acts on the open message or the hovered row (#131) | Clearing a full inbox takes one act per message | 6 | |
+| 7 | A flag changed here overwrites one changed on another device meanwhile | | `net` sends no `UNCHANGEDSINCE` (#115) | Rarely loses a flag change made elsewhere | 3 | |
+| 8 | Repeating events change and delete as a whole series only | | no `RECURRENCE-ID` writes (#146, #148) | Moving one meeting of a series moves them all | 8 | |
+| 9 | Search looks at subject, sender and recipients only, not the body text | | the search field runs `mail.search` per field (#27) | A message is found only by its header | 6 | |
+| 10 | Tray, notifications, single instance and the control channel exist on Linux only | | no Windows or macOS code (#137, #138, #142) | InboxCraft is for Linux desktops for now | 30 | |
 
-B = blocks the next stage.
+B = blocks the next stage (beta: the owner uses InboxCraft daily on both mailboxes). Hours are estimates of agent
+time from the code as it is, not measured.
 
 ## Known rough edges (not ranked)
-- `inboxcraft-cli` and `inboxcraft-web` answer `--version` and refuse everything else (#5).
+- `inboxcraft-web` answers `--version` and refuses everything else (#5).
 - The app crates have no coverage floor of their own; their `main` counts only for its crate, which has none (#7).
 - `cargo xtask ci` runs the tests only in the coverage-instrumented build (`cov` gate); a bug that shows only in
   an uninstrumented build goes unseen in CI (#66).
 - `testkit` serves one client per fake server. A line script speaks implicit TLS only and matches whole lines
-  exactly (#8); the fake IMAP server also speaks STARTTLS (#23).
+  exactly (#8); the fake IMAP and SMTP servers also speak STARTTLS (#23, #118).
 - `testkit`'s `TestClient` checks certificates with the rustls WebPKI verifier and the test trust store, not the
   OS verifier `net` will use. It knows its clock is far off because the test sets the offset; the real
   `account.check` needs another reference for the clock (#8).
@@ -29,8 +39,10 @@ B = blocks the next stage.
   hide it; a short login name that also occurs in ordinary output fails the run (#10).
 - A server without a hierarchy delimiter (`NIL` in `LIST`) has no run folder under `InboxCraft-Test`;
   `RunFolder` needs a delimiter (#10).
-- `time` knows fixed offsets only: no IANA zones and no lookup of the computer's own zone yet, so a date shows in
-  the sender's offset or UTC. ISO 8601 and iCalendar text come with `ical` (#15).
+- `time` has no IANA zones and no lookup of the computer's own zone yet: `Offsets` takes a fixed offset or an
+  `OffsetTable` someone filled, so a date shows in the sender's offset or UTC and the engine works in UTC until a
+  front end hands it the computer's offsets. iCalendar text is read by `ical`, whose zones come from the
+  calendar's own `VTIMEZONE`s; ISO 8601 text is not read yet (#15, #122, #143).
 - RFC 5322 dates are read leniently where RFC 5322 section 4.3 allows it or real mail needs it: the day of the
   week is not checked against the date, second 60 reads as 59, and a missing zone, a military letter or an unknown
   zone name (`CET`) reads as `-0000`. Text after the zone other than a comment (`+0100 CET`) is refused (#15).
@@ -71,7 +83,8 @@ B = blocks the next stage.
   pictures, no `Content-ID` and no `name` parameter on an attachment's `Content-Type`; every attachment is base64,
   so it refuses `message/rfc822` and every other `message` type but `message/global` (RFC 2046 allows those only
   in an identity encoding): forwarding a message as an attachment needs a writer of its own. Addresses outside ASCII are written as given (RFC 6532), so such a message needs a
-  server with `SMTPUTF8`; nothing checks that yet (#19).
+  server with `SMTPUTF8`; the SMTP client says `SMTPUTF8` only when `MailOptions::utf8` is set or the sender is not
+  ASCII, and nothing sets it from the message yet (#19, #117).
 - `MessageBuilder` keeps a display name of printable ASCII as a quoted string and writes any other as `B` encoded
   words, which a person reading the raw source cannot read; the text of a long word without spaces becomes encoded
   words throughout so that it can be folded (#19).
@@ -203,12 +216,14 @@ B = blocks the next stage.
 - `net` opens and resyncs the watched folder again after every job, also after a job that opened no other folder:
   one EXAMINE and one fetch more than needed. An `Idle` job for a folder this worker has not synced starts with a
   full sync, which reports every message as added again (#26).
-- `net`'s back-off has no random spread; a job that was running when its connection ended is reported failed and
-  not run again (the engine decides). The offline queue is in memory: what is queued when the app ends is gone. A
-  certificate fault, a refused sign-in, a sign-in the server never answered (one more try after a dropped or
-  timed-out one) or a server without a sign-in method stops the tries until the engine starts a new worker. A
-  connection that drops during the sign-in twice for an ordinary network reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next job asks again
-  (#26).
+- `net`'s back-off has no random spread; a read job that was running when its connection ended is reported failed and
+  not run again (the engine decides); a write job runs again after the reconnect, three times at most (#115). The
+  worker's offline queue is in memory; a job the engine keeps (`Outcome::with_kept_job`) is also in the store and
+  goes out again at the next start, other jobs are gone. A certificate fault, a refused sign-in, a sign-in the server
+  never answered (one more try after a dropped or timed-out one) or a server without a sign-in method stops the tries
+  until the engine starts a new worker. A connection that drops during the sign-in twice for an ordinary network
+  reason halts too, and needs a new worker; a missing password fails the queued jobs and ends the watch, and the next
+  job asks again (#26).
 - `net` compresses after the sign-in, so no password goes through COMPRESS. What the server sends (mail) is
   compressed together inside TLS; someone who can both put mail in the mailbox and watch the sizes of the encrypted
   traffic could in theory learn something of other mail in the same stream (as with CRIME). `WorkerSettings::compress`
@@ -261,7 +276,8 @@ B = blocks the next stage.
 - `account.check` runs for saved accounts only, as a job of the account's worker: onboarding adds the account
   first (`account.add`) and checks it then; changing the settings after a failed check removes the account and adds
   it again under a new id. Detect is no command: the window runs `net`'s Detect on a thread of its own, so an agent
-  cannot run it. The SMTP sign-in and the CalDAV discovery report "not built yet" until E2.2 and E4.2 (#28, #34).
+  cannot run it. The SMTP sign-in of an account without a submission server, and the CalDAV discovery of one without
+  a CalDAV address, report "not set" (#28, #34, #119, #145).
 - `account.check` starts nothing while a check of the account runs. A check whose worker ended before its last step
   stays running until the workers are started again (`Session::start`), which forgets it (#28).
 - After a refused or unanswered sign-in, an agent's `account.check` stops before the sign-in (`needs_owner`) and only
@@ -284,8 +300,8 @@ B = blocks the next stage.
 - Detect's MX domain is the MX host's last two labels, or three under a two-letter country label: a rule of thumb
   without the public suffix list, so a provider under a longer public suffix is not recognised by its MX (#28).
 - Detect stops at the first source that names an IMAP server and does not probe the candidates; the common host
-  names are hints, never checked until the owner asks. `/.well-known/caldav` and `carddav` with
-  `current-user-principal`, and the CalDAV SRV records (RFC 6764), come with CalDAV (E4.2) (#28).
+  names are hints, never checked until the owner asks. Detect proposes no CalDAV address: the CalDAV SRV records and
+  `/.well-known/caldav` at the address's domain (RFC 6764) are not asked, and no CardDAV (#28, #145).
 - The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
   domain whose provider publishes no autoconfig and no SRV records gets only the common host names as hints (#28).
 
@@ -302,12 +318,11 @@ B = blocks the next stage.
   shown text keeps the joiners, variation selectors and tag characters emoji and flags need (#29).
 - `html` ignores start tags past 256 open elements and lays tables past 8 deep out as paragraphs; their text
   stays. A one-column table is laid out as its cells' blocks; `colspan` and `rowspan` are not read (#29).
-- The window keeps nothing on disk yet: `inboxcraft` alone shows an empty mailbox in memory, `--sample` an invented
-  one that is forgotten on exit (#30). An account added in the window is forgotten on exit too, and so is its
-  password: when the window closes, it removes the credential store entry (`io.github.qubernetic.inboxcraft`,
-  `account-<id>`) of every account added in it, trying again one the store refused to remove in "Change settings".
-  A crash, a killed process or a store that refuses at exit leaves the entry behind; the next account with that id
-  in a later session overwrites it, and `PRIVACY.md` says how to remove one by hand (#34).
+- `--sample` shows an invented mailbox in memory that is forgotten on exit (#30). `inboxcraft` alone keeps the
+  owner's store on disk with its accounts, so their passwords stay in the credential store
+  (`io.github.qubernetic.inboxcraft`, `account-<store id>-<id>`) until the account is removed in "Change settings";
+  a crash or a store that refuses then leaves the entry behind, and `PRIVACY.md` says how to remove one by hand. An
+  entry an older build left (`account-<id>`) is never read again and stays until removed by hand (#34, #113).
 - Dates in the list are shown in UTC: the `time` crate has no local time zone yet (#30).
 - The search field looks at subject, sender and recipients in every folder of the accounts shown, not at body text
   and not only in the open folder; it runs one `mail.search` per field and merges them. The query language comes
@@ -364,7 +379,7 @@ B = blocks the next stage.
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
-  runs them exist; of the sheet's sections only Appearance and Accounts are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
+  runs them exist; of the sheet's sections only Appearance, Accounts and Shortcuts (#130) are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
   or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
   colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
   label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
@@ -372,36 +387,37 @@ B = blocks the next stage.
   owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
   the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of
   missing glyphs. The file sits in the config folder and is written in the sample window too: it
-  holds no mail and nothing about an account, so the sample mode writes this one file and nothing else. A custom
+  holds no mail and nothing about an account, so the sample mode writes these files (the look, the keys and the inbox
+  view of `triage.json`, never the screener's mode) and nothing else. A custom
   accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
   made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
   open at once each keep their own last change; the later write wins.
-- Message list (#88): the screener card and the grouped inbox's cards are built but have no data or command: they
-  wait for E3.1 and E3.2. The app draws neither; only `ui_shot` shows them, with invented data (`showcase`), and
-  there "Review" and "Done all" do nothing when pressed. In the grouped inbox the arrow keys still step through the list in date order, not in
-  the order of the cards, and every row is drawn each frame (the plain list draws only the rows in view). The rail
-  holds Mail and the settings only; the other places of the brief (calendar, the owner's own avatar) come with
+- Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
+  group card marks the whole group done with one Undo, but none for a group that takes more than the 100 acts the
+  undo history holds (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
+  the list in date order, not in the order of the groups, a card shows its first three rows while the keys can select
+  one hidden under "Show all", and every row is drawn each frame (the simple list draws only the rows in view). The
+  group menu is a right click on a row or the reader's More menu; it has no key. The rail
+  holds Mail, the calendar and the settings; the other places of the brief (the owner's own avatar) come with
   their features. A row shows the first sender's avatar from initials only.
-- Hover actions (#89): they act on the sample mailbox only, through `sample.mail.set`, in memory; on a real mailbox
-  they stay hidden and their keys do nothing until E2.1 (read, unread, Delete) and E3.3 (Done) bring the commands
-  that reach the server. Done there means "read, and into the account's Archive", a stand-in until E3.3 says what
-  Done is; in the Archive it only marks the row read, and Delete in the Trash moves nothing. Only the last act can
-  be undone, and only while its toast shows (six seconds); there is no undo history yet. The leaving row slides out
-  but the rows below jump up rather than close the gap smoothly. The keys (D, R, Delete, Ctrl+Z) are fixed until
-  the keymap can be changed in the settings.
-- Reader (#90): of the toolbar's actions only Done and Delete act, and only on the sample mailbox (the same
-  `sample.mail.set` as the hover actions); Archive, Snooze, Pin and Move to a folder wait for their commands
-  (moving and deleting on a real account with E2.1, Done with E3.3, the rest later), Reply, Reply all and Forward
-  for the composer (E2.3). They are drawn disabled with "Not available yet" in their
-  tooltips. More holds Full width, Close and the next-message rule; Escape leaves full width but does not close the
+- Hover actions (#89, #131): Done, read or unread and Delete act on a real account as on the sample, through the
+  engine's commands (#131). Done marks the message read and done (`mail.done`, #135); on a done row under "Show
+  done" it is "Not done". Flag and Archive have keys (S, A) but no hover button: the design's hover group is Done,
+  read, Delete and Snooze, and the hover Snooze stays disabled ("Open the message to snooze it") because the time
+  picker opens from the reader only (#135). The leaving row slides out but the rows below jump up rather than
+  close the gap smoothly. The keys (D, A, R, S, Delete, Ctrl+Z) can be changed on the Shortcuts page (#130).
+- Reader (#90, #131): Done, Archive, Delete and Move to a folder act on the open message, flag and read or unread
+  from More (#131); Reply, Reply all and Forward open the composer filled in (#133). Snooze (H) and Pin act on the
+  open message (#135). More also holds Full width,
+  Close and the next-message rule; Escape leaves full width but does not close the
   reader. The buttons inside a message (Details, Fold, the quote toggles, the remote-content banner, Save) are
   still egui's own buttons in the theme's style, not the design system's text buttons. `ui_shot` cannot open the
-  More menu or hover a link, so neither has a picture; the UI tests cover both. The thread's earlier messages fold
+  More menu or the Move menu or hover a link, so none of them has a picture; the UI tests cover them. The thread's earlier messages fold
   to one line, but the open message is the selected one, not always the latest of the thread.
 - Components and motion (#85): the card, icon button, pill, tooltip, avatar, badge, hover action group, toast and
   popup exist and are shown in the `ui_shot` gallery; the list uses them since #88 and the reader since #90. The keymap knows three keys of its own (Ctrl+F for the search, Ctrl+1 for Mail, Ctrl+Comma for the
-  settings); the arrow keys and Escape are still read directly, and changing a key is
-  possible only from code (`InboxApp::keymap_mut`), not from a command or the settings. Reduced motion is set with
+  settings); the arrow keys and Escape are still read directly; the other keys are changed on the Shortcuts page
+  (#130). Reduced motion is set with
   `ui.motion.set` (on, off or follow the system) and kept on disk; its switch comes with the settings page (E1.16b).
   The desktop cannot read the system's wish for less motion (GNOME and KDE keep it differently and the portal has
   none), so there motion is on; the web build has no window yet, so nothing reads `prefers-reduced-motion` so far.
@@ -440,12 +456,15 @@ B = blocks the next stage.
 - The Flatpak builds with the Rust of the `rust-stable` SDK extension, not the exact `rust-toolchain.toml` version;
   it needs at least the workspace's `rust-version` (1.95). The runtime is pinned to freedesktop 25.08 (#31).
 - The metainfo has no releases and no screenshots, which Flathub would ask for; `just flatpak` shows the linter's
-  findings and builds anyway. The notification and Background portal permissions are there before the app uses
-  them; the Secret Service one is used for the account passwords since #34 (#31).
+  findings and builds anyway. The Secret Service permission is used for the account passwords since #34; the
+  Background portal (since #137) and the notification portal (since #138) need none (#31).
 
 - Onboarding (#34):
-  - The add-account form asks for IMAP only: the SMTP server, CalDAV and the sending identity come with E2.2 and
-    E4.2. Detect fills in its first IMAP proposal; the others are not offered to choose from.
+  - The add-account form asks for IMAP only: `account.add` takes a submission server (#119), but the form does not
+    ask for one yet, so an account added in the window cannot send; nor does it ask for a CalDAV address (#145).
+    Both `account.add` and `calendar.server` are `owner` commands, which the CLI and the control channel refuse,
+    so nothing the owner can reach sets them for an account yet.
+    Detect fills in its first IMAP proposal; the others are not offered to choose from.
   - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
     not yet through the i18n macros.
   - The password field edits a buffer made once for 256 characters, so typing never moves it, and the window
@@ -467,11 +486,294 @@ B = blocks the next stage.
   where no control takes the press; the strip moves it by any drag. The desktop's own snapping and its window menu
   (right click on a title bar) are not offered. Pictures and the web build draw no
   frame, so the screens in `docs/images` show the window's content only.
-- **The rail** (#104) offers Start, Calendar and Pins before those views exist: they are disabled and say "Not
-  available yet". The owner's initials at its foot come from the first account's address, as no account holds a
+- **The rail** (#104) offers Start and Pins before those views exist: they are disabled and say "Not available
+  yet". Calendar shows the calendars, or their empty state while there is none (#130, #147). The owner's initials at its foot come from the first account's address, as no account holds a
   name of the person yet.
 - **The folder pane** (#104) lists only an account's own folders under it; its inbox, sent mail and the like are
   reached through the unified views, narrowed to the account with the picker.
+- The IMAP client hides the password as sent, as LOGIN quotes it and in base64 (the PLAIN token and the password
+  alone); it is shown as it comes in any other encoding a server writes it back in (base64 at another offset,
+  quoted-printable, percent encoding), with an invisible mark inside it, in another case of ASCII letters (as
+  itself or as a base64 token), and as a token cut short (#64).
+- `cargo xtask changes --fold` checks everything before it writes, but writes the documents one by one: a write
+  that fails halfway (a full disk) leaves the documents before it folded and every fragment in place. A new
+  command module, unlike a new command, still adds its name to the `modules!` line in `cmd/mod.rs` (#111).
+- `store` keeps senders across accounts: removing an account leaves what is known of its senders, which goes only
+  with the data folder (no command removes a sender yet). Schedule entries and alerts are ordered by the second
+  they are due, then id; the fraction of a second is kept but not sorted on. Senders are told apart by the address in Unicode lower case, as `EmailAddress` compares them (#113).
+- A kept job runs again after a restart under its old id, also when its worker had already run it before the app
+  ended: kept jobs are for acts that can be done twice (#113).
+- A message moved on a server without `COPYUID` (UIDPLUS) comes back from the next sync of its folder under a new
+  id, without what the owner did to it meanwhile; a message still on its way cannot be deleted for good yet. A sync
+  of the old folder that runs before the move can show the message there again until the move is done (#114).
+- The undo history lives for the session only (#114).
+- A write that a connection cut off runs again after the reconnect. APPEND cut off after the server took the message
+  but before its answer adds it a second time. A move on a server without MOVE cut off after its UID COPY is not run
+  again: it fails and the engine takes it back, but the copy stays in the target folder until the owner removes it
+  (#115).
+- A delete for good on a server without UIDPLUS (and not IMAP4rev2) fails before anything is sent, so the message
+  stays: EXPUNGE there would remove every message marked `\Deleted`. A move on such a server leaves the moved
+  messages in the old folder marked `\Deleted` (#115).
+- `net` does not use UNCHANGEDSINCE yet: a flag the owner changes overwrites a change made on another device
+  meanwhile (#115).
+- `proto` takes an unclosed list at the end of a line (`* 1 FETCH (`) in an open mailbox as an empty FETCH instead
+  of refusing it (#115).
+- A draft copy goes to the server without Bcc. On a server without UIDPLUS the copy cannot be named: the draft's
+  first copy stays in the Drafts folder, no later one goes up, and discarding the draft leaves it there (#116).
+- A draft copy whose APPEND answer is lost (a restart, a cut connection) stays unnamed in the Drafts folder for good.
+  Finding and removing it needs a stable `Message-ID` per draft in the copy (#116).
+- A failed draft upload is not tried again until the draft changes (#116).
+- The SMTP client sends one command at a time (no PIPELINING), has no CHUNKING or BINARYMIME, no DSN parameters, no
+  HELO after a refused EHLO, and signs in only with AUTH PLAIN and AUTH LOGIN (no XOAUTH2 or OAUTHBEARER). It checks
+  a message against the server's SIZE as given, before its line ends become CRLF and its lines are dot-stuffed
+  (#117).
+- The fake SMTP server reads one command after the other, though it lists PIPELINING; it knows no CHUNKING,
+  BINARYMIME, DSN parameters, XOAUTH2 or VRFY, and reads command lines up to 8192 bytes where RFC 5321 asks for 512.
+  Its delivery reports carry a fixed date, quote the header block of the message as text even when it is not ASCII,
+  and name one recipient each. A client idling on the fake IMAP server hears of a report only at its next command
+  (#118).
+- A send is not held for undo and not retried on its own: one cut off by a dropped connection after the message went
+  (new `ErrorKind::SendUnanswered`) or by a restart may have gone, and its outbox item says so until the owner sends
+  it again. Only the outbox item holds the reply, which the window's outbox shows (#119, #136).
+- The Sent copy is always appended, also on servers that keep a copy of what they send themselves, which then hold
+  two. A send whose answer is lost leaves no Sent copy (#119).
+- The live send test takes the account's IMAP host on port 465 as its submission server; the live configuration
+  names no SMTP host of its own (#119).
+- A reply or forward of a message without a plain-text part quotes its preview, not its HTML; a forward carries the
+  attachments but not the inline pictures of an HTML message (#120).
+- The quote line and the forward header are in English whatever the window's language, and the date in them is
+  written `5 Nov 2026 at 08:00` (#120).
+- Templates belong to one account each; saving or deleting one is not undoable (#120).
+- Reply all knows the owner's addresses only as each account's address and login; aliases and other addresses the
+  owner receives mail at are not modelled yet, so they stay on a reply all (#120).
+- A bounce is linked only to a message in the Sent folder of the account the report came to, by the `Message-ID` of
+  the report's returned header; a report without one, a report that names no kept Sent copy, and an account without
+  a Sent folder mark nothing, nor does a report kept before the Sent copy came in with a sync (#121).
+- A delivery report passes the screener and has its body downloaded on arrival only when its sender's local part is
+  `MAILER-DAEMON` or `postmaster`, so a sender that calls itself that gets past the screener with a report header;
+  a report from any other sender is screened like other mail and links once it is let in and opened. Reports that
+  come with a folder's first sync, or into the trash, junk or Sent folder, are not fetched (#121).
+- Only the failed recipients the Sent copy names in To or Cc count, by the report's final or original recipient
+  address; a report about a Bcc recipient, or about an address a forward or alias turned it into without an
+  `Original-Recipient`, marks nothing (#121).
+- A bounce mark cannot be cleared and is not undoable; it outlives its report, which it then no longer names, and
+  a later delivery report for the same message about its recipients replaces the reason (#121).
+- No front end hands the session the computer's offsets, so presets and dates are in UTC there (#122, #123).
+- Undo send is its own command (`mail.unsend`), not a step of `history.undo`, and a scheduled draft cannot be edited
+  in place: take the send back, change the draft, schedule it again (#123).
+- A send later that can no longer go at its time (its account lost the submission server, a forward's body is gone)
+  is refused in the outbox with why, and no notice tells of it (#123).
+- A send held when InboxCraft stops goes at the next start, late, with a notice, not taken back (#123).
+- A minimized window's wake is not tried on a real Linux desktop yet. From eframe 0.37's code: on X11 a minimized
+  window runs only the app's logic, which ticks and asks for the next wake, at most every 100 ms; on Wayland the app
+  cannot tell it is minimized, the frame waits for the compositor, and eframe runs the logic after 250 ms without
+  one. Both are by reading the code, not by a check by hand (#123).
+- The screener's mode is kept by the window in `triage.json` (#134); the CLI and the MCP server read it from no
+  file and start with the screener off. A delivery report is known
+  by its sender only (`MAILER-DAEMON`, `postmaster`), not by its `multipart/report` type. An account whose folders
+  have no hierarchy delimiter gets no screener or blocked folder: its new mail stays in the inbox, marked (#124).
+- Accept-and-done files the held mail in the archive with the done state, as `mail.done` does (#126). A held message
+  whose move to the screener folder is still on its way follows the owner's later decision only once the server
+  answered the move (#124).
+- The grouped inbox knows a `text/calendar` part only once the message's body is kept: an invitation sent as a
+  multipart whose body was never fetched (older than the sync's cutoff, or too large) stays in the group its header
+  gives. The classifier reads no message text and keeps no learned weights; the owner's per-sender choice is the
+  only correction. A group choice holds for an address across the accounts, not per account. Mail the owner sent to
+  themselves is People unless its header says otherwise (#125).
+- `mail.list` with `group` works out the group of every message of the view before it pages, which reads the sender
+  record of each sender once per call; fast enough for one mailbox, not measured on a large one (#125).
+- Done, park and pin are kept in this computer's store only: another InboxCraft or another mail program sees a done
+  message as archived and nothing of a park or a pin. A done message moved on later by hand still says done and lists
+  under "show done" in its old place, until done files it again from there. On a server without UIDPLUS, done keeps
+  only the move: the done mark, a pin kept through done, "show done" and the way back are lost once the server
+  answers, as the message comes back from the archive's sync under a new id. Done refuses on an account without an
+  archive folder; there is no fallback to All Mail. Whether done keeps pins is kept by the window in `triage.json` (#135) (#126).
+- Snooze writes its time into the server's copy only for a message whose body is kept, on a server with UID EXPUNGE
+  (UIDPLUS or IMAP4rev2) that InboxCraft has signed in to since it started: elsewhere, and for a message whose move is
+  still on its way, the message goes to the snoozed folder without the field, and another InboxCraft cannot tell when
+  it comes back (it stays there until the owner moves it). A server with UIDPLUS that names no UID for the copy
+  (UIDNOTSTICKY) gives it back from the folder's sync under a new id: its time is read from the field, but a park or
+  a pin on it is lost. The copy goes up without the old one's arrival time (APPEND sends no date), so the server
+  records it as received at the snooze, and the field stays in it after the return, an unsnooze or an undo. A copy the
+  server refused leaves the message in its old folder with its time kept, and the time then only clears it. The
+  returned mark stays until the message is snoozed again; the window shows it only while the message is unread
+  (#135) (#127).
+- A follow-up reminder is kept in this computer's store only: another InboxCraft does not see it. A reply is told
+  only by its `In-Reply-To` or `References`, so a reply from a program that writes neither, or to a sent message
+  without a Message-ID, does not cancel it; a reply that arrives while InboxCraft is off cancels it only if the sync
+  brings it before the next tick, and an answer from the owner's own address never does (#128).
+- The time picker reads typed times in English words only and on one fixed offset from UTC: a time typed across a
+  daylight saving change is off by the change, and the app still passes UTC until the computer's offset is read.
+  The presets come from the caller; the scheduler's presets join with the snooze and send later screens. The
+  alert switch keeps its value while the app runs, not between runs (#129).
+- The palette and the Shortcuts page list the window's own actions (`keymap::actions`), each running the engine's
+  commands it needs; the engine's commands that need a message, an account or other parameters are not listed one
+  by one. Changing a key is not an engine command yet, so the control channel and MCP cannot change one. A key
+  given to an action may also be one the window reads directly (the arrows, Escape, Enter); both then run. egui
+  matches a key with Shift or Alt held to the key without them when no other action has that one. The calendar
+  screen shows its empty state while no account has a calendar (#130, #147).
+- Acting on mail (#131): one message at a time, no selection of several. The toast's Undo takes back every act made
+  after its own, so a message opened (and marked read) after it is unread again. The Move menu lists every folder of
+  the account that holds mail but the message's own; it has no search and no picture (`ui_shot` cannot open it). The
+  window counts the acts it put into the engine's history from the commands' answers; when the engine holds fewer (it
+  keeps 100), Ctrl+Z stops quietly. A failed write the server refuses is taken back by the engine, and its toast still
+  shows until it goes.
+- Composer (#132): one message at a time; a draft closed or left from an earlier run cannot be opened again in the
+  window yet, unless the outbox hands it back (#136); it stays in the store (`compose.list`) and in the account's
+  Drafts folder. Plain text only: no formatting, no attachments. Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
+  address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
+  takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
+  empty part is marked as none. The composer has no window of its own.
+- Reply, reply all and forward have no keys yet, only the reader's buttons and the engine's commands; templates are
+  written and removed only through the engine's `template.save` and `template.delete` (`owner`), not in the window:
+  the settings sheet has no page for them yet (#133).
+- A blank is asked for at the foot of the composer, one at a time; its mark in the text is tinted but cannot be
+  clicked to fill it in (#133).
+- The Let in card's group pills are forgotten when another message opens; a sender's group is chosen on the card or
+  later in the group menu, not when the sender is blocked. New senders lists the held mail of the accounts shown, at
+  most 1000 messages of the screener folders and 1000 of the inboxes (#134).
+- The time picker opens from the reader only: the hover Snooze on a row stays disabled, and Pin and Park have no keys.
+  The picker's alert switch is not shown, because notifying of a returned snooze is one choice for all mail
+  (`notify.set`), not one per message. "Show done" is forgotten at a restart and is not offered while searching or
+  in New senders. The rail's Later opens on the pins; it shows the snoozed, pinned and parked mail of the accounts
+  shown, at most 1000 of each (#135).
+- The countdown toast follows the last send the window made: a second send takes its place, and the first one is
+  counted down in the outbox only. Undo send in the toast and in the outbox works only in the hold; a scheduled
+  send's Edit takes it back, and it is scheduled again from the composer. The Outbox opens from the folder pane only,
+  with no button on the rail and no key. A hold set to another value than 5, 10, 30 or 60 seconds through `send.set`
+  shows with none of them chosen (#136).
+- The bounce banner gives the report's reason only: it has no "Edit and resend" (no command makes a new draft from a
+  sent message yet) and does not open the delivery report. The note that a send went late is a toast of six seconds,
+  shown once (#136).
+- No tray outside Linux yet, and outside Unix no socket: on Windows a later start says that InboxCraft is already
+  running instead of bringing its window forward, and closing the window ends InboxCraft, since nothing could bring
+  it back. Start at login is XDG autostart and the Background portal only; Windows and macOS have none
+  yet. A desktop without a StatusNotifierWatcher (GNOME without the AppIndicator extension) shows no tray icon:
+  InboxCraft then runs on without a window all the same, and a start from the menu brings it back (#137).
+- Without a window InboxCraft looks for the workers' events every half second rather than at once. A window opened
+  again starts with egui's state fresh (scroll positions, open popups); the reader keeps the textures of the
+  pictures it showed in the window before, whose ids mean nothing (or another picture) in the new one, so such a
+  picture may be drawn wrong or not at all until `ui-egui` forgets them when a new window opens (#165). On Wayland
+  a later start may only mark the running window as wanting attention rather than raise it, since no activation
+  token is passed on (#137).
+- The tray's tooltip counts the unread mail of every account's inbox; the icon itself carries no count yet, and its
+  menu has no entries per account (#137).
+- No notifications outside Linux. New mail notifies also while the window is open and in front. A click on a
+  notification reaches InboxCraft only while it runs (it is not D-Bus activatable), and without a window it is
+  answered within half a second. A desktop that shows no actions shows no buttons and may send no click either (#138).
+- No choice to notify without the sender and subject; a notification always hands the desktop who the mail is from
+  (or, for a reminder, to) and its subject, and the desktop may keep it in its list and show it on the lock screen as
+  its own settings say (#138).
+- The Notifications page has no way to turn notifications off for a while (the design file's "Snooze notifications
+  for an hour") and no choice to notify without the sender and subject. "Start with the computer" shows what the
+  autostart entry says; in the Flatpak a desktop that later revokes the Background portal's permission is not
+  noticed until the page asks again. A start at login while running in the background is off (an entry left from
+  an earlier choice) still starts without a window, and its window then ends InboxCraft when closed (#139).
+- `inboxcraft-cli` runs no job a command asks for: a body not kept yet is not fetched and `account.check` checks
+  nothing on a store (in the running app, through the control channel, the app runs it) (#140).
+- On a store the MCP server runs no job: `mail_read` does not fetch a body that is not kept and `account_check`
+  checks nothing (bridged to the running app, the app runs them). Its results are text
+  only (no `outputSchema`, not the CLI's JSON), `mail_list` has no group column yet, and an HTML-only message gives
+  no text (#141).
+- The store takes no lock, and opening it tidies away files the running app may not have committed yet: until it
+  takes one, `inboxcraft-cli mcp` (and every CLI command) runs only while the app is closed, or on a copy of the
+  store (#141).
+- The control channel works on Linux only: the user id comes from `/proc/self`, so on the other Unix systems the app
+  runs without a channel and the CLI trusts no socket, and on Windows it is not built; `--store` works everywhere. The
+  CLI does not check the user id of the app it connects to (the standard library cannot read it yet, and the channel
+  adds no crate for it); the owner and mode of the folders stand in for that check. It does not check the client's
+  process, so any process of the owner's that can read the credential
+  store can use it. It has no approvals, so an `owner` command cannot be asked for over it. Without a window a call
+  waits up to half a second for the app's next look (#142).
+- An agent's act over the control channel ends the window's Undo for the owner's acts before it, rather than keeping
+  both apart (#142).
+- `ical` has no IANA zone data: a `TZID` without a `VTIMEZONE` in the same calendar object is read on the owner's
+  own wall clock (UTC's own names excepted), and `ical` cannot write a `VTIMEZONE` for a zone it has not read. A
+  UTC offset's seconds are dropped (#143).
+- Recurrence: `DTSTART` is always the first instance, also where the rule would not make it, and `COUNT` counts the
+  rule's own occurrences; `RECURRENCE-ID;RANGE=THISANDFUTURE` changes only its own instance; an `RDATE` period
+  counts by its start, its own end dropped; second 60 reads as 59. An expansion stops after 100 000 empty periods
+  in a row, 100 000 candidates in one period or 2 000 000 steps of work for the whole calendar (rule periods, days
+  and candidates, ten for each event, date and instance it looks at), keeps the earliest 10 000 occurrences, and
+  says so; with more work than that in a span, which events are left out depends on their order (#143).
+- A `VTIMEZONE` is read only when its rules are yearly at one time of day, at most 16 rules without a `COUNT`, a
+  `COUNT` that ends within 2 000 steps, and at most 10 000 onsets; any other zone is kept as it came and its
+  `TZID` is read on the owner's own wall clock. A zone rule's onsets are looked for in this year and the year
+  before only (#143).
+- `Event` keeps the properties and components it does not read, but parameters it does not read on the properties
+  it reads (`ALTREP` or `LANGUAGE` on `SUMMARY`, an `X-` parameter on `DTSTART`) are lost when an event is written
+  from its fields; the component tree keeps everything. `VTODO`, `VJOURNAL` and `VFREEBUSY` are kept unread (#143).
+- `dav` signs in with Basic auth only: no Digest and no OAuth bearer token yet, so Google's CalDAV cannot be used. It
+  reads no SRV records (RFC 6764 section 3) and no `DAV:current-user-privilege-set`, so a calendar the owner may only
+  read is found out at the first refused write. A redirect to another origin ends discovery with
+  `DavError::OtherOrigin` and the caller decides. No scheduling (RFC 6638), no MKCALENDAR, no time-range
+  `calendar-query`, no CardDAV (#144).
+- `dav` sends no `Accept-Encoding`, so answers come uncompressed, and reads one response at a time on a connection.
+  A resource a sync lists but `calendar-multiget` does not return leaves the new token out of `Changes`, so the next
+  sync compares the whole calendar; members that are collections are skipped. A `DAV:displayname` keeps at most 256
+  characters and a colour 32 (#144).
+- The fake CalDAV server knows one principal and one home set, applies no `calendar-query` filter, has no access
+  control, and records the head lines of each request in its transcript, not the bodies (#144).
+- `account.add` and the add-account form do not ask for a CalDAV address: an account gets one through
+  `calendar.server` (`owner`), and until then its calendar jobs and the CalDAV step of the check do not run (#145,
+  #146).
+- A calendar job runs once, failing on a dropped connection, and the engine does not retry it: a write that failed
+  leaves the event as edited here until a sync brings the server's copy or the owner changes it again. Calendars sync
+  at the start, on `calendar.sync` and after a conflict, not periodically (#145, #146).
+- A calendar job opens a connection of its own each time and closes it at its end; a connection the server closes
+  between two requests of a job fails the job (`ConnectionDropped`) instead of being opened again. The password is
+  copied into `dav`'s Basic auth credentials for the length of a job, a copy that is not overwritten when dropped
+  (#145).
+- Only a 401 holds the CalDAV password. A 403 is also how a server answers a write to a calendar the owner may only
+  read, so a server that answers a locked account with 403 gets the password again with each calendar job, twice
+  per discovery (the well-known path, then `/`) and twice per sync (the report, then the comparison by entity tags)
+  (#145).
+- The live calendar test takes the account's IMAP host over `https` as its CalDAV server; the live configuration
+  names no CalDAV address of its own (#145).
+- A new event is written in UTC, a repeating one on the computer's wall clock (floating), never in a named zone: the
+  engine knows the computer's offsets, not its zone's name or rules, so it writes no `VTIMEZONE`. A repeating event
+  shared with guests elsewhere shows at their own wall-clock time (#146).
+- Changing or deleting a repeating event changes or deletes the whole series: no single instance (`RECURRENCE-ID`,
+  `EXDATE`) is edited or deleted, changed instances stay as they were when the series moves, and a repeat preset
+  replaces the series' `RDATE`s (#146).
+- `notify` only counts `SEQUENCE` on, and a new event's guests are only named in it: nothing is mailed to them until
+  the invitations send iTIP over iMIP. Changing an event someone else organises changes the copy on the owner's
+  server only (#146).
+- An edit or delete the server refuses because the event changed elsewhere (412) is replaced by the server's copy at
+  the full sync the conflict starts: the owner's change is lost, with no notice yet. A failed calendar job is not
+  shown to the owner (#146).
+- A write to an event whose earlier write the server took without an entity tag waits for the next sync of its
+  calendar; if that sync is lost without a failure, the write waits until the next start (#146).
+- A CalDAV server that ignores `SCHEDULE-AGENT=CLIENT` may still mail the guests of an event InboxCraft writes (#146).
+- A delete within its undo window when InboxCraft quits goes to the server at the next start, without the window
+  (#146).
+- `event.list` answers at most 1000 occurrences, and a discovery keeps at most 100 calendars of an account (#146).
+- The calendar's views read the computer's clock as the engine knows it, which is UTC until a front end hands the
+  engine the computer's offsets; the line at the time now moves only when the calendar is read again (a view, a
+  step, a sync). Weeks start on Monday and the hours have no setting for the start of the day (#147).
+- An event over more than one day shows as a block over whole days in the day, week and month views, even when it
+  has times (a night from 22:00 to 02:00); its times show in its details. Overlapping timed events share their
+  group's width in equal columns, however short the overlap (#147).
+- The calendar's views have no keys of their own (steps, views, today), and an event picked by the keyboard is
+  reached by Tab only (#147).
+- Hiding a calendar lasts until the window closes; it is not kept between runs (#147).
+- The event editor takes times typed as `2026-11-06 13:00` at the computer's present offset; it has no date or time
+  picker yet, and the place, the description and the event's own zone are not edited in it (#148).
+- Changing the times of one occurrence of a repeating event moves the whole series to them; there is no "this
+  occurrence only" (#148).
+- Telling the guests of a change only counts the event's `SEQUENCE` on: InboxCraft answers invitations (#149) but
+  sends none of its own yet, and a new event's guests are named in it and not told (#148).
+- An invitation is read only once its body is kept: one older than the sync's cutoff shows its card when it is
+  opened, and the versions of an event are linked only among the messages whose bodies were read (#149).
+- An answer to one occurrence of a repeating event (`RECURRENCE-ID`) is sent, but leaves the calendar as it is; a
+  cancellation of one occurrence offers no Remove from calendar (#149).
+- `COUNTER`, `REFRESH`, `ADD`, `PUBLISH` and `DECLINECOUNTER` show a card that asks for no answer; a guest's answer
+  to an event the owner organises is shown, not written into the event's guests; delegating is not offered (#149).
+- An answer carries no comment, and its message text is English; Going and Maybe put the event into the account's
+  first calendar, with no choice of calendar (#149).
+- The Notifications page has no switch for calendar alerts yet: `notify.set` with `alerts` turns them off (#150).
+- An alert notification has no snooze or dismiss button; mail (`EMAIL`) alarms and alarms more than a year from their
+  event are left out; the default alert of an all-day event goes off at midnight the day before (#150).
 
 ## Revision history
 | Date | Change | Summary |
@@ -540,3 +842,44 @@ B = blocks the next stage.
 | 2026-11-06 | minor | The settings' Accounts page and what it lacks (#104) |
 | 2026-11-06 | minor | The settings sheet: only Appearance among its sections (#104) |
 | 2026-11-06 | minor | Lucide's Fill without a disc (#104) |
+| 2026-11-08 | minor | Encodings of the password the IMAP client does not recognise (#64) |
+| 2026-11-08 | minor | The fold writes document by document; a new command module edits `cmd/mod.rs` (#111) |
+| 2026-11-08 | minor | The store on disk: passwords stay, kept jobs, the schedule and senders, two windows (#113) |
+| 2026-11-08 | minor | Moves without COPYUID, the undo history per session (#114) |
+| 2026-11-08 | minor | Writes run again after a reconnect; APPEND twice, no UIDPLUS, no UNCHANGEDSINCE yet (#115) |
+| 2026-11-08 | minor | Draft copies without Bcc or threading headers; unnamed copies; a failed upload waits (#116) |
+| 2026-11-08 | minor | What the SMTP client leaves out; who sets SMTPUTF8 (#117) |
+| 2026-11-08 | minor | The fake SMTP server: STARTTLS, what it leaves out, its delivery reports (#118) |
+| 2026-11-08 | minor | Sending without undo or retry, the Sent copy, the SMTP step; the form asks for no SMTP server (#119) |
+| 2026-11-08 | minor | Quotes of HTML-only mail, English quote lines, templates per account, aliases on reply all (#120) |
+| 2026-11-08 | minor | Bounces linked by the Sent copy's `Message-ID` only, reports let past the screener (#121) |
+| 2026-11-08 | minor | `Offsets` without a zone lookup (#122) |
+| 2026-11-08 | minor | Undo send outside the undo history, refused send laters told only in the outbox, a minimized window's wake not tried by hand (#123) |
+| 2026-11-08 | minor | The screener's mode per session, delivery reports by sender, flat folder lists (#124) |
+| 2026-11-08 | minor | The grouped inbox: calendar parts known from kept bodies, choices per address, list cost (#125) |
+| 2026-11-08 | minor | Done, park and pin in the local store only, lost without UIDPLUS, no archive fallback (#126) |
+| 2026-11-08 | minor | Snooze without the field for mail not downloaded or without UIDPLUS, the copy's arrival time (#127) |
+| 2026-11-08 | minor | Follow-up reminders in the local store only, told by In-Reply-To and References (#128) |
+| 2026-11-08 | minor | The time picker: English words, one fixed offset, presets from the caller, the alert value per run (#129) |
+| 2026-11-08 | minor | The palette lists the window's actions; keys are no engine command yet; the calendar's empty state (#130) |
+| 2026-11-08 | minor | Hover actions and the reader's toolbar act on a real account (#131) |
+| 2026-11-08 | minor | Composer limits; Reply waits for #133 (#132) |
+| 2026-11-08 | minor | The reader's Reply row works; reply keys and the template settings page wait (#133) |
+| 2026-11-08 | minor | The screener and the groups show the engine's data; the sample writes the inbox view too (#134) |
+| 2026-11-08 | minor | Done all, Done, Snooze and Pin work; the hover Snooze waits (#135) |
+| 2026-11-08 | minor | The countdown follows the last send, the outbox opens from the pane only, the bounce banner without Edit and resend (#136) |
+| 2026-11-08 | minor | Tray and autostart outside Linux, the windowless half second, the Background portal in use (#137) |
+| 2026-11-08 | minor | Notification choices not kept, the scheduler not driven, Linux only, no notice without names (#138) |
+| 2026-11-08 | minor | No pause of notifications, a revoked portal permission not noticed (#139) |
+| 2026-11-08 | minor | The CLI runs no jobs headless; the `--version`-only line names the web app alone (#140) |
+| 2026-11-08 | minor | The MCP server: store only, no jobs, text results, no group column, no HTML text, no store lock (#141) |
+| 2026-11-08 | minor | The control channel: Linux only, no peer or process check, no approvals; an agent's act ends the window's Undo (#142) |
+| 2026-11-08 | minor | `ical`: zones, recurrence, what an event drops (#143) |
+| 2026-11-08 | minor | `dav` and the fake CalDAV server: Basic only, no privileges, sync limits (#144) |
+| 2026-11-08 | minor | The CalDAV step of the check, Detect proposes no CalDAV address, calendar sync limits (#145) |
+| 2026-11-08 | minor | Calendar commands: no named zone for new events, whole series only, guests not mailed, conflicts, a write waiting on a lost sync, servers that ignore SCHEDULE-AGENT (#146) |
+| 2026-11-08 | minor | The calendar's views: UTC clock, Monday weeks, timed blocks over days, no keys, hidden calendars not kept (#147) |
+| 2026-11-08 | minor | The event editor: typed times, no place or zone, whole series only, guests not mailed (#148) |
+| 2026-11-08 | minor | Invitations: read from kept bodies, occurrences, methods without an answer (#149) |
+| 2026-11-08 | minor | Event reminders: no switch on the Notifications page, left-out alarms (#150) |
+| 2026-11-08 | minor | The ranked table filled for the daily-use epic; stale lines on the scheduler, alerts and the composer edited (#151) |

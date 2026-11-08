@@ -97,11 +97,25 @@ pub enum IconId {
     Close,
     /// Back: an arrow to the left, before the name of the page it leads back to.
     Back,
+    /// Caret: a chevron pointing down, after a choice that opens a menu.
+    Caret,
+    /// Newspaper: the Newsletters group of the grouped inbox.
+    Newspaper,
+    /// Previous: a chevron pointing left, a step back (the calendar's days, the mini month).
+    Previous,
+    /// Next: a chevron pointing right, a step on.
+    Next,
+    /// Globe: a time zone, the event's own beside the computer's.
+    Globe,
+    /// Changed: arrows round in a circle, what a newer invitation changed.
+    Changed,
+    /// Older: a clock turning back, an invitation a later one replaced.
+    Older,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 45] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -140,6 +154,13 @@ impl IconId {
         Self::Info,
         Self::Close,
         Self::Back,
+        Self::Caret,
+        Self::Newspaper,
+        Self::Previous,
+        Self::Next,
+        Self::Globe,
+        Self::Changed,
+        Self::Older,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -184,6 +205,13 @@ impl IconId {
             Self::Info => 35,
             Self::Close => 36,
             Self::Back => 37,
+            Self::Caret => 38,
+            Self::Newspaper => 39,
+            Self::Previous => 40,
+            Self::Next => 41,
+            Self::Globe => 42,
+            Self::Changed => 43,
+            Self::Older => 44,
         }
     }
 }

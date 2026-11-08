@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 InboxCraft's own look: the colours, distances and font tokens of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -245,6 +245,8 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard; the row's text fades out before it. |
 | Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion; over sharp text it is the float over text. |
+| Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection gradient; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
+| Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel, Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -255,8 +257,12 @@ colours far enough apart, and that everyone in the sample mail gets an avatar co
 sender's avatar in the message header.
 
 **Keys.** The keymap (`keymap::Keymap`) names which key runs which action, by id (the engine's command ids once
-they have a key; `ui.search.focus`, Ctrl+F, until then). One key runs one action: binding a key takes it from the
-action that had it. Everything that shows a key (tooltips, menu rows, a toast's Undo) reads it when it is drawn.
+they have a key; `ui.search.focus`, Ctrl+F, until then). Every action of the window is listed with its name and icon
+(`keymap::actions`): the command palette shows them all and the Shortcuts page gives each one a key. One key runs one
+action: binding a key takes it from the action that had it. Everything that shows a key (tooltips, menu rows, a
+toast's Undo) reads it when it is drawn. A key without Ctrl, Alt or ⌘ runs nothing while a text field has the focus
+or the settings sheet is open, so a letter typed is typed. The keys are kept in `shortcuts.json` beside the
+appearance file, every action with its key or `null`; an action the file does not name keeps its first key.
 
 ## Motion
 Short and snappy, nothing decorative. Every duration is a motion token (`motion::MOTION`), none longer than 0.25 s:
@@ -282,12 +288,14 @@ window asks for the next frame; once it has landed, nothing does.
 
 ## The mail list window
 - **Navigation rail** (the window's left edge, full height): the preset's three gradient stops at full strength from
-  top to bottom, the one place the palette runs undiluted. Mail sits at the top and the appearance settings at the
-  foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise the deep ink
-  (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at 24 %. Mail
-  (Ctrl+1) leaves the settings sheet; the settings button (Ctrl+Comma) opens the settings page and
-  closes it again. The rail is one button and 8 points either side wide, and shows on every page.
-- **Folder pane** (left of the list): the app name, the account picker (all accounts or one), "Mailboxes" with the unified views
+  top to bottom, the one place the palette runs undiluted. Mail and Calendar sit at the top and the appearance
+  settings at the foot, as icon buttons in the rail's ink: white wherever white reaches 3:1 on every stop, otherwise
+  the deep ink (`pane::rail_ink`, tested for every preset in both modes); the active one carries a fill of the ink at
+  24 %. Mail (Ctrl+1) and Calendar (Ctrl+2) leave the settings sheet; the settings button (Ctrl+Comma) opens the
+  settings page and closes it again. Later (the Pin icon) opens "Later" on the pins, or on the pile shown last, and
+  shows as active there; Mail leaves it for the inbox. The rail is one button and 8 points either side wide, and
+  shows on every page.
+- **Folder pane** (left of the list): the app name with New message (the Compose icon, C) at its right end, the account picker (all accounts or one), "Mailboxes" with the unified views
   (Inbox, Drafts, Sent, Archive, Junk, Trash: those some account has), then each account shown with its colour,
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
   view and folder with unread mail carries a badge with the count.
@@ -305,25 +313,64 @@ window asks for the next frame; once it has landed, nothing does.
   (`component::hover`), shown while the pointer is over the row or the row was selected with the arrow keys. The
   date, the flag and the text under the float give way: the sender, the subject and the preview each fade out in
   their own colour over 24 points before the float's left edge (`glass::faded`), so no letter shows through it.
-  Their keys work on the selected row: D Done, R read or unread, Delete; while a text field has the focus they are
-  the field's. They act on the sample mailbox only (`sample.mail.set`); anywhere else no action is drawn and no key
-  acts, until the commands for a real mailbox exist. Done marks the message read and moves it to its account's
-  Archive, Delete to its Trash, read and unread change the dot and the weight.
-- **Slide-out**: a row that Done or Delete takes out of the list slides to the right and fades over the
+  Their keys work on the selected row: D Done, R read or unread, Delete, and A Archive and S flag or not, which have
+  no button on the row; while a text field has the focus they are the field's. They act on a real account as on the
+  sample, through the engine's commands (`mail.seen`, `mail.flag`, `mail.archive`, `mail.delete`): the change shows
+  at once and goes to the server after. Done marks the message read and moves it to its account's Archive, Delete to
+  its Trash (in the Trash it deletes for good), read and unread change the dot and the weight.
+- **Opening** a message marks it read (`mail.open`), as an act Ctrl+Z can take back; a message an undo brought back
+  opens as it was.
+- **Slide-out**: a row that Done, Archive, Delete or a move takes out of the list slides to the right and fades over the
   `row_slide` token, clipped to its place; then it goes and the next-message rule picks the selection. With reduced
   motion it goes at once.
 - **Toast**: after an act, a toast rises from the bottom edge over the `toast` token (in place at once with reduced
-  motion) and says what was done ("Marked as read", "Marked as unread", "Marked as done", "Moved to Trash"), with
-  Undo and its key chip (Ctrl+Z, Cmd+Z on macOS). It stays six seconds; Undo puts the row back where it was, read or
-  unread as it was, and selected again when it was. A new act replaces the toast; once it has gone the act stays.
+  motion) and says what was done ("Marked as read", "Marked as unread", "Flagged", "Flag taken off", "Marked as
+  done", "Moved to Archive", "Moved to Trash", "Moved to <folder>", "Deleted for good"), with Undo and its key chip
+  (Ctrl+Z, Cmd+Z on macOS) when the act can be taken back (not a delete for good, not an act that changed nothing).
+  It stays six seconds; Undo takes the act back through the engine's history (`history.undo`) with every act after
+  it (the next message marked read as it opened), so the row is back where it was, read or unread as it was, and
+  selected again when it was. A new act replaces the toast; once it has gone, Ctrl+Z still walks back through the
+  session's acts, newest first, one at a time.
 - **Screener card** (the unified inbox, on top, while senders wait): the waiting senders' avatars overlapping, "n
   new senders", "Held back until you let them in" and Review, the primary text button on the preset's gradient. The
-  card's edge is the preset's gradient, 1.5 points wide.
-- **Group cards** (the grouped unified inbox): a header with the group's badge, its name and unread count, and
-  "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds more. The rows no
-  group holds follow on a card of their own.
-- The screener and the groups have no data yet. The app draws neither; `ui_shot` shows them with invented data
-  (`"showcase": true`, and `"step": n` to select by keyboard, which also shows the hover actions).
+  card's edge is the preset's gradient, 1.5 points wide. Review is placed first; the two lines are cut before it
+  rather than running under it. Review opens **New senders**: the mail held (`screener.list`, `mail.list` of the
+  screener folders and of the inbox rows marked as new), newest first. A row from a new sender says "New sender"
+  in the accent colour after the sender, and a screen reader hears "new sender".
+- **Let in card** (the reader, over a message the screener holds; the design file's Triage page): "Let <sender>
+  in?" in the heading font, "Into" and a pill for each group (none chosen at first; a second press clears it),
+  Accept (primary), Accept and open, Block, and what they do in the caption font; the card's edge is the focus
+  colour. Under it "Preview · nothing is accepted yet": the message is read with `mail.read`, so it stays unread and
+  nothing goes into the history, and it shows no group chip. Accept, Accept and open and Block are acts with a toast
+  and Undo ("Accepted <sender> into <group>", "Accepted <sender>", "Blocked <sender>"); Accept and open shows the
+  message in the inbox.
+- **Grouped inbox**, as the Triage page chooses: **Cards** (the default): a card for each group (People, Updates,
+  Newsletters with the newspaper icon, Invitations with the calendar), its header with the group's badge, its name
+  and unread count, and "Done all"; the first three rows, and "Show all (n)" (then "Show fewer") when the group holds
+  more. The rows no group holds (an account not grouped) follow on a card of their own. **Grouped list**: one card,
+  each group's rows under a heading with its badge, name and unread count, the rest under "Other". **Simple list**:
+  one list by date, as any folder. The account stripe shows in the simple list only.
+- **Group menu**: a row of a grouped account has a context menu (a right click), and the reader's More menu the same
+  choices: a radio choice for each group, the one the sender is in marked, and "Let InboxCraft sort it", with "Moves
+  all mail from <address>, kept and future." under them. The choice is an act with a toast and Undo ("<sender> now
+  goes to <group>", "<sender> goes where InboxCraft sorts it").
+- `ui_shot` can show invented waiting senders and groups instead of the sample's (`"showcase": true`, and `"step": n`
+  to select by keyboard, which also shows the hover actions), `"open": {"role": "senders"}` for New senders and
+  `"view"` for the inbox view; `"put_away": true` snoozes, pins, parks and marks done some of the sample's mail,
+  `"later"` opens a pile, `"show_done": true` turns "Show done" on and `"picker"` opens the time picker over the
+  selected message with that text typed.
+- **Pills under the header** (the design file's Triage page): in a folder or a view, "Show done", which lists the done
+  mail in its old place (`mail.list` with `done`), dimmed to 55 %, with "Not done" in place of Done on its hover
+  actions and on D; with it on, Done leaves the row in place, dimmed, instead of sliding it out. "Parked (n)" follows
+  while mail of the place waits on the park pile and opens it. In **Later** a pill for each pile with its count:
+  Snoozed (the snoozed folders, the one coming back first on top, each row dated by when it comes back), Pins
+  (`pin.list`) and Parked (`park.list`); an empty pile says what it is for. Pills are left out while searching.
+- **Marks on a row**: a pinned row shows the Pin (Fill, in the accent) left of the flag on the subject's line; a row
+  back from a snooze says "Returned" in the accent after the sender while it is unread. A screen reader hears
+  "pinned", "done" and "returned".
+- **Done all** on a group's card marks every message of the group read and done, one toast ("Marked n as done") whose
+  Undo brings them all back. The engine's history holds the newest 100 acts, and each message takes one (two when
+  it was unread): when the group takes more, the toast says "Marked n as done, too many to undo" and has no Undo.
 - **Buttons**: every button of the rail and the list has a tooltip with its name and, where its action has a key, the
   key chip. Text buttons (`button::text`) are quiet (a hover fill) or primary (the gradient, its ink white or the
   deep ink, whichever reads at 4.5:1 on every stop).
@@ -345,20 +392,30 @@ the icon sits among others at the same size.
   back. More, Close ends the selection. The arrow keys step through the list while no field has the focus.
 - **Toolbar**: mail actions, not view settings, as icon buttons on a small card of their own: Done, Archive and
   Delete; Snooze, Pin and Move to a folder; More, each group set apart by a thin line, wrapping when there is no
-  room. Every action has a tooltip with its key. An action without a command is drawn disabled and its tooltip
-  says "Not available yet": on the sample mailbox Done (D) and Delete (Delete) act on the open message as the
-  list's hover actions do (the toast with Undo follows), everywhere else they are disabled too; Archive, Snooze, Pin
-  and Move wait for their commands.
-- **More**: a menu over the reader (the float over text) with Full width or Leave full width, Close, and the
-  next-message rule ("When a message leaves the list": show the next, show the previous, go back to the list), the
-  chosen one marked.
+  room. Every action has a tooltip with its key. Done (D), Archive (A) and Delete (Delete) act on the open message
+  as the list's hover actions do (the toast with Undo follows); on a done message, open under "Show done", Done reads
+  "Not done" and brings it back, as the row does; Move to a folder opens a menu ("Move to") of the
+  folders of the message's account that hold mail but its own, each by its full path, and the one chosen moves it
+  there; with none it is drawn disabled. Snooze (H) opens the time picker under it ("Snooze until", the presets of
+  `schedule.presets` still ahead, a typed time, Snooze); on a message in a sent folder the same button is "Remind me
+  if no reply" and its picker ("Remind me if no reply by", Remind me) sets the follow-up reminder. The picker is a
+  menu that a click outside, Cancel or Escape closes. Pin pins the open message, and shows as active ("Take the pin
+  off") while it is pinned. Each is an act with a toast and Undo ("Snoozed until <time>", "Reminder set for <time>",
+  "Pinned", "Pin taken off").
+- **More**: a menu over the reader (the float over text) with Flag or Take the flag off (S) and Mark as read or
+  unread (R) for the open message, Park or Take off the park pile, Bring back now for a snoozed message, Take the
+  reminder off for one with a reminder, then Full width or Leave full width, Close, and the next-message rule ("When a
+  message leaves the list": show the next, show the previous, go back to the list), the chosen one marked.
 - **Subject**: under the toolbar, in the title token, the largest text of the window, wrapped rather than cut;
   under it, for a thread, who wrote (each once, in the order they first wrote) and how many messages there are.
+  Chips beside the group's say until when the message is snoozed ("Snoozed until Sat 08:00"), when its reminder is
+  due ("Reminder Mon 09:00") and "Returned" while it is unread after a snooze; a screen reader hears each in full.
 - **Thread**: cards, oldest first. The open message and the ones the owner unfolded are full cards on the surface
   colour with a line round them (corner `card`); the others are cards of one line (the sender's avatar, the sender
   strong, the first words muted, the date) that unfold on a click; an unfolded older message has Fold. The open
-  message ends with Reply (primary, on the preset's gradient), Reply all and Forward, disabled with "Not available
-  yet" until the composer comes.
+  message ends with Reply (primary, on the preset's gradient), Reply all and Forward; each opens the composer in the
+  reader's place over a draft the engine filled in (the recipients, "Re: " or "Fwd: ", the quote), the text with the
+  focus, or To for a forward. A draft being written is closed and kept first.
 - **Header**: the sender's avatar, the name large with the address muted, the date on the right, "to ..." under
   it; the name and the address are cut with an ellipsis before they reach the date. Details shows From, Reply to,
   To, Copy and the date in full.
@@ -375,6 +432,89 @@ the icon sits among others at the same size.
   goes; a link whose text names another place shows "Careful: ..." in the error colour. The float takes no
   pointer, so the link under it stays hovered. A notice (a save, a copied link, an error) shows in a line at the
   bottom with Dismiss until it is dismissed.
+
+## The composer
+- **Where**: New message in the folder pane, C or the command palette writes a new message in the reader's place,
+  the list a column beside it, as on the design file's "Composer · in place of the reader" screen. There is one at a
+  time: New message brings back the one being written. A message pressed in the list, or the calendar, sends the
+  composer to its floating panel at the window's bottom right (the frosted float: the Compose icon, the subject or
+  "New message", its key, Close); a press on it brings the composer back whole. The keys that act on a message (D,
+  A, R, S, Delete, the arrows) rest while the composer hides it.
+- **Layout**: the title ("New message", or the subject once there is one) with Close; then a line each, its name
+  muted in a column on the left and a rule under it: From (the sender as "Name <address>" with a chevron, a menu of
+  the accounts; the account's name muted at the right end), To (the chips, then the field, "Name or address" while
+  it is empty; "Cc Bcc" at the right end shows those two lines), Subject; then the text, scrolling, and at the foot
+  Discard (the Delete icon) and Templates (the File icon) on the left and Send (primary, Ctrl+Enter) on the right
+  with why it is blocked before it and the caret of Send later after it.
+- **Chips**: a fully rounded chip on the panel colour with the recipient's avatar, the name (or the address) and a
+  cross that removes it; one that is no address is on the error colour with a warning instead of the avatar, and
+  Send is blocked with "<address> is not an address" (or "Add a recipient to send" without any). Enter, a comma, a
+  semicolon or leaving the line makes a chip of what was typed; Backspace in the empty field removes the last chip.
+  A recipient is there once across To, Cc and Bcc.
+- **Suggestions**: typing shows the people in the mail kept here whose name or address holds the text (at most six,
+  not the owner's own addresses or a recipient already there) on a float under the field. The arrows move the
+  highlight (the Done mark), Enter or a press takes it instead of what was typed, Escape puts the list away.
+- **Templates**: Templates opens a menu of the templates of the account in From (disabled, "This account has no
+  templates", without any); the one chosen goes in front of the text, its subject where there is none. Each blank it
+  leaves is a `[[prompt]]` mark on the accent's tint in the text, as on the design file's "Template with a blank to
+  fill" screen; a line on the panel colour over the toolbar asks for the first one (a field saying "Fill in "time""
+  and Fill in), Enter or Fill in puts what was typed in every place of that mark, and Send is blocked with "Fill in
+  "time" to send" while one is left.
+- **Drafts**: the draft is kept at once and after every change (`compose.update`), with nothing to press and
+  nothing shown. Close keeps it (the toast says "Draft saved"); Discard removes it here and on the server ("Draft
+  discarded"); Send puts it in the outbox for the hold (`mail.send`) and the composer closes. A refusal (an account
+  without a submission server) shows in the error banner and leaves the composer open with everything in it.
+- **Undo send**: while a send waits for its hold, a toast counts it down ("Sending "Work party on Saturday" in 4 s",
+  a new frame as each second ends) with Undo and Ctrl+Z, which take it back (`mail.unsend`) and open its draft again
+  in the reader's place as it was; a draft being written is closed and kept first. The countdown toast stands in for
+  the act's toast while it shows, and Ctrl+Z is its own. Once the hold is over the send is on its way and the toast
+  goes.
+- **Send later**: the caret beside Send ("Send later") opens the time picker ("Send later", the presets of
+  `schedule.presets` still ahead, a typed time, Schedule) with "Send now instead" while a time is picked, and the
+  note that it goes while InboxCraft or its tray runs and that a time missed sends at the next start and says so, as
+  on the design file's "Send later" screen. A time picked makes Send "Schedule · Fri 08:00"; pressed, it sends at
+  that time (`mail.send_later`) and the toast says "Scheduled for Friday 6 November, 08:00". A time picked that has
+  passed blocks it with "The time picked has passed: pick another". A send that went late, its time passed while
+  InboxCraft was not running, says so in a toast once ("Sent late, InboxCraft was not running at its time: <subject>"),
+  besides the desktop's notification.
+- **Outbox**: while anything is in it, "Outbox" (the Snooze clock) shows under the views in the folder pane with how
+  many; it opens the outbox in the list's place, as on the design file's "Undo send and the outbox" screen, and gives
+  way to the inbox once it is empty. The header says "2 waiting · 1 not sent". One card holds each send: the first
+  recipient's avatar, "To <names>", the subject, then on the right where it stands on the panel colour ("Sending in
+  4 s" or "Scheduled · Fri 08:00" with the clock, "Sending…" with the Send icon, "Not sent" with the Failed icon in
+  the error colour) and its buttons: Undo for a send in its hold and Edit for one scheduled, which take it back and
+  open its draft; Edit (open the draft) and Send again (primary, `outbox.retry`, the countdown toast again) for a
+  refused one, whose server reply follows under the subject in the error colour. A screen reader hears "To <names>,
+  <subject>, <where it stands>", the reply for a refused one, and each button with its subject ("Undo the send of
+  "<subject>"").
+- **Bounce**: a sent message a delivery report says did not get through says "Not delivered" in the error colour
+  after the sender in its row ("not delivered" to a screen reader), and opens under a banner ringed in the error
+  colour with the Failed icon: "Not delivered: <the reason the report gave>".
+- **Sending page**: the settings sheet's Sending section starts with "Undo send", how long every send is held before
+  it goes: segmented 5 s, 10 s, 30 s and 60 s (`send.set`), with the seconds now in its note, kept in `triage.json`.
+  Then each account's signature in a field (its name and
+  address over it) with Save, disabled until the text differs; an empty field clears it. A new message starts with
+  the signature under "-- "; another account in From swaps it while it is still at the end as it was.
+- **Triage page**: the settings sheet's Triage section (the Funnel icon; the design file draws only its place in the
+  list of sections). Screener: segmented Before the inbox, Inside, marked, and Off (`screener.mode`), with what each
+  does. Inbox: segmented Cards, Grouped list and Simple list. "Keep pins on done mail": a switch (`pin.set`). Then
+  "Grouped inbox" and a row per account (the At icon, its name, a note with its address) with a switch, "Group the
+  inbox of <account>" to a screen reader (`group.account`). The mode, the view and the pin switch are kept in
+  `triage.json` beside `appearance.json`; the sample window takes the kept view and pin switch but keeps its own mode
+  and never writes it.
+- **Notifications page**: the settings sheet's Notifications section (the Notify bell), after the design file's
+  "Settings · notifications and triage" screen. Two notes first: what the levels mean, and that a notification shows
+  who the mail is from and its subject, which the desktop may keep in its list and on the lock screen. Then a row per
+  account, "<account> · <address>", with segmented All, People only and None (`notify.set`); a screen reader hears
+  "People only for <account>". Without an account a note says to add one first. "Returned snoozes" and "Follow-up
+  reminders" are switches (`notify.set`). "Run in the background" (closing the window leaves InboxCraft running in the
+  tray) and "Start with the computer" (as the design file names it: InboxCraft starts in the background at login)
+  are switches of the app's desk (`ui_egui::desk::Desk`); where the window has none (the sample) both are faded and
+  say "Not available in this window". Starting with the computer is faded while running in the background is off
+  ("Turn on Run in the background first: a start at login opens no window"), and while the desktop is asked
+  ("Waiting for the desktop's answer…"); a refusal shows under it ("Not changed: <why>.") until the sheet closes.
+  Turning running in the background off also stops starting with the computer. The levels and the two notification
+  switches are kept in `notify.json` beside `appearance.json`; the sample window neither takes nor keeps them.
 
 ## Adding an account
 - **Where**: on the settings sheet's Accounts page. "Your accounts" heads it (the At icon in the accent colour, a
@@ -398,11 +538,107 @@ the icon sits among others at the same size.
   tried and the certificate's issuer, muted, and the cause of a failure in the error colour. Done when signed in;
   Check again and Change settings after a failure; the link above the page leads back while it runs.
 
+## Command palette
+- **Where**: Ctrl+K anywhere opens it; it leaves the settings sheet. A float on a solid surface 640 points wide near the
+  top of the dimmed window, as on the design file's "Command palette · Ctrl+K" screen.
+- **Layout**: the field ("Type a command", with the magnifier), a line, then every action of the window with its icon,
+  its name and its key at the right end, eight rows in view and the rest scrolling; under them "↑↓ to move · Enter to
+  run · Esc to close" in the caption's muted colour.
+- **Behaviour**: typing narrows the list to the actions whose name (or id) holds every word typed, the names that
+  start with the text first; the first row is picked, on the hover fill. The arrows move the pick round the list,
+  Enter or a press runs it and closes the palette; Escape or a press beside the float closes it and runs nothing. An
+  action that cannot run here (Done with no message selected, Undo with nothing to undo) is listed faded and runs
+  nothing. While the palette is open its keys are its own: the arrows step nothing in the list.
+
+## Shortcuts
+- **Where**: the Shortcuts section of the settings sheet, as on the design file's "Settings · shortcuts" screen.
+- **Layout**: a line on the rule (one key runs one action), the field "Find a command" with Reset all keys at the
+  right, then a row per action: its name, and at the right end its key as a chip ("No key" when it has none) with
+  Remove (the Close icon) before it.
+- **Behaviour**: a press on the chip makes it wait: "press a key…" in the accent with the focus ring. The next key
+  pressed, with the modifiers held, becomes the action's; a key another action had moves, and a line over the list
+  says so ("Ctrl+K was the key of Command palette; it has none now."). Escape stops the wait and keeps the old key;
+  the press reaches nothing else. The new key shows at once everywhere it is shown.
+
+## Calendar
+- **Where**: the rail's Calendar button (Ctrl+2) shows the calendar screen in the place of the folders, the list and
+  the reader; Mail brings them back. The strip's title says "Calendar · InboxCraft".
+- **Empty state** (while no account has a calendar): one card in the middle with the Calendar icon in Duotone, "No
+  calendars yet" and a line on what will show there. The mail's keys (the arrows, D, R, Delete) rest while it shows.
+- **Layout**: the side panel on a card 260 points wide at the left, the view on a card beside it. Over the view a
+  toolbar: the view's title in the title font ("2 – 8 November 2026", "November 2026", "Thursday 5 November 2026",
+  "From today"), the Previous icon, Today and the Next icon (named after the step: "Previous week", "Next month",
+  "Earlier days"), and at the right a pill per view, Day, Week, Month and Agenda, the one shown selected, and the
+  primary New event button with the Add icon. The calendar opens on this week, on today; weeks start on Monday.
+- **Events**: an event is a block in a tint of its calendar's colour (the server's, or an account colour by the
+  calendar's place) with a 3-point bar of the colour at its left, its summary in the caption size, strong, and its
+  times under it where there is room; hovered or picked the tint deepens. Each is a button named after its summary,
+  its days and its times; a press picks it and the side panel shows its details, a second press or the details'
+  Close lets it go.
+- **Day and week**: a column per day under its short name and date ("Thu 5"; today on the selection; in the week a
+  press opens the day), a lane of blocks over whole days (all-day events and events over more than one day, in
+  lanes), then the hours, 44 points each with their labels in a 52-point gutter, scrolled to 07:00 (or the
+  earliest event) at first. Timed events sit by their minutes, side by side in equal columns where they overlap;
+  an event without length takes a quarter of an hour. A line in the accent marks the time now across today.
+- **Month**: six weeks from the Monday on or before the month's first day under the weekdays' short names; each
+  day's number is a button that opens the day (today on an accent disc, other months' days muted). Blocks over whole
+  days run across the cells of a week in lanes; under them the day's timed events, one line each with the start,
+  and "+N more" (a button to the day) when they do not all fit.
+- **Agenda**: the 30 days from the focus, each day with events under its name ("Today · Thursday 5 November"), an
+  event a row: its start, "All day" or "Until" the end, the summary and the place, and the event's own zone with its
+  start in a chip at the right when its clock differs from the computer's. "Nothing in these 30 days." when empty.
+- **Side panel**: the mini month (its name, "Month before" and "Month after", a button per day that puts the view
+  there; today on an accent disc, the days shown on the selection), "Calendars" with a box per calendar and its
+  colour dot (unticked hides its events), and the details of the picked event: the colour dot, the summary in the
+  heading font and Close; both dates with the times ("Monday 16 November – Wednesday 18 November", "Sunday 8
+  November, 08:00 – 11:00"); the event's own zone after the Globe icon, labelled, only when its clock differs from
+  the computer's ("Event zone Atlantic/Azores: 07:00 – 10:00", with the dates when they differ too); the place; the
+  description; the calendar, busy or free, private and the repeat ("Personal · busy · private · repeats weekly");
+  and up to eight guests with their answers ("Petra Lindqvist · going"); then Edit (the Compose icon) and Delete
+  (the Delete icon), secondary buttons.
+- **Event editor**: New event and Edit open it as a float 440 points wide over the view's top right, as the design
+  file's Calendar page shows it: "New event" or "Edit event" in the heading font; Title; Starts and Ends side by
+  side, typed as "2026-11-06 13:00" (a day alone, "2026-11-06", for an all-day event); the boxes All day (which
+  turns the times into their days and back) and Private; Repeat with a pill per preset (Never, Daily, Weekdays,
+  Weekly, Monthly, Yearly; Custom, selected, for a repeat the presets do not name, kept until a preset is picked);
+  Show as with Busy and Free; for a new event Calendar with a pill per calendar; Guests, addresses with commas. Only
+  an edit of an event with guests adds, on a tinted box, "Tell the 2 guests about this change?" with the radio
+  buttons Don't tell them (the default) and Send them the update. Why the last Save was refused shows over the
+  buttons in the flag colour; Cancel (secondary) and Save (primary) end it, Escape is Cancel. Each field is named by
+  its label.
+- **Undo**: a saved event, a saved edit and a delete show the act's toast at the window's foot ("Event added",
+  "Event saved", "Event saved; the guests are told", "Event deleted") with Undo and Ctrl+Z, which take the change
+  back and read the calendar again; a deleted event reaches the server only once the toast's six seconds are over.
+
+## Invitation card
+A message that carries an invitation (iMIP) shows a card between its header and its text, as the design file's
+"Invitation in a message" draws it, and its calendar part is no file tile:
+- **Head**: a date tile on the accent's text gradient (the month in three capitals in the caption size, the day of
+  the month in the title size, named by the event's time for a screen reader), the event's title in the heading
+  font and under it, muted, when and where ("Saturday 7 November · 12:30 – 13:30 · The Gull café").
+- **Changed**: on a panel-tinted chip with the Changed icon (arrows in a circle), strong, what a newer version changed
+  since the one before: "Changed: time 11:00 → 12:30", "place The Gull café → Harbour Kitchen", "title", "repeat".
+- **Answers**: Going (primary, the Done icon), Maybe and No (secondary), and in the caption, muted, "Your answer goes
+  to odile@example.org at once." A press sends the answer at once and the reader's notice says "Your answer is on its
+  way."; the card then says "You answered Going." with Change answer (secondary), which offers the three again with
+  Keep my answer. An invitation that cannot be answered says why in the caption ("This invitation cannot be
+  answered: you organise it.").
+- **Cancelled**: "Odile Brannock cancelled this event." and Remove from calendar (secondary, the Delete icon) while
+  the event is in the calendar, with the toast "Removed from your calendar" and Undo; else "It is not in your
+  calendar."
+- **A guest's answer**: a line per guest ("Béla is not going."). Any other calendar message: "This calendar message
+  asks for no answer."
+- **Versions**: under the card a strip on the panel tint at 75 % with the Older icon (a clock turning back) tells of
+  the version before: "Out of date: the invitation from Monday showed 11:00. You answered Going." The card of a
+  version a later one replaced is only such a strip: "Out of date: a later invitation replaces this one."
+
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
-  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance and Accounts are built, the
-  rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it.
+  leaves it. The sheet lies over the dimmed window; its sections on the left (Appearance, Accounts, Notifications,
+  Triage, Sending and Shortcuts are built, the rest faded with "Not available yet") pick the page. Close, Escape or a press beside it leaves it, as do
+  the rail's places and their keys; every way out forgets what the open sheet held (the text on the Shortcuts page,
+  an action waiting for a key, the notes), so it opens clean the next time.
 - **Layout**: the title, a line saying every change shows at once and is kept, then the controls in a column 440
   points wide with the preview beside them; when the card is narrower than the column, the preview and 24 points,
   the preview goes above the controls. The page scrolls.
@@ -433,20 +669,44 @@ sample window without a display and writes the PNGs under `docs/images/`: the un
 search, the reader (a reply with its quote, a newsletter before and after its pictures load, attachments full
 width, the full-width reader also in Aurora and Citrus as `reader-full-<preset>-<mode>.png`), and adding an account (the form, after Detect, the check under way, passed, failed), each in light and
 dark in Electric; and the list, the thread and the failed check in Aurora and Citrus (`<shot>-<preset>-<mode>.png`).
+The command palette whole and narrowed to "mode" (`palette-<mode>.png`, `palette-mode-<mode>.png`, `"palette"`),
+the Shortcuts page with one action waiting for a key (`shortcuts-<mode>.png`, `"shortcuts"` and `"capture"`) and
+the calendar's empty state (`calendar-empty-<mode>.png`, `"first"` and `"calendar"`) and its views over the
+sample's three calendars (`calendar-week-<mode>.png` with the ferry's zone in the details,
+`calendar-month-<mode>.png` with a trip over three days picked, `calendar-agenda-<mode>.png`, `calendar-day-<mode>.png`;
+`"calendar_view"` and `"event"`) and the event editor (`event-new-<mode>.png`, `event-edit-<mode>.png` with the
+question to the guests, `"edit_event"`; `event-deleted-<mode>.png` with the toast, `"delete_event"`) and the
+invitation card over the sample's invitations (`"invitations"`: `invite-update-<mode>.png`, the update with what
+changed and the answer given before, `invite-outdated-<mode>.png`, the first invitation as the strip) are drawn in
+light and dark, and so are the
+composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
+`compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
+and `compose-template-<mode>.png` with a blank left) and the Sending page
+(`settings-sending-<mode>.png`, `"sending"`), the first account signed with an invented signature. `"outbox"` draws
+the sample with its first account able to send and its sent message bounced: the outbox with a send counting down,
+one scheduled and one refused (`outbox-<mode>.png`, `"waiting"`), the countdown toast of a message just sent
+(`undo-send-<mode>.png`, `"countdown"`), the composer with a time picked and its picker open
+(`send-later-<mode>.png`, `"schedule"`) and the bounced message open (`bounce-<mode>.png`, `"bounce"`). The screener
+and the grouped inbox are drawn in light and dark too: New senders with the Let in card
+(`screener-senders-<mode>.png`), the toast after Accept into Updates (`screener-accepted-<mode>.png`), the cards
+after the rota's sender went to Newsletters (`grouped-cards-<mode>.png`), the grouped list (`grouped-list-<mode>.png`)
+and the Triage page (`settings-triage-<mode>.png`).
 A script line picks its preset with `"preset"` and its text scale with `"text_scale"` (90 to 130); the list with
 the reader is also drawn at 90 % and 130 % (`list-text-<percent>-<mode>.png`). A line with `"icons": true` draws
 the icon sheet instead of the window: every icon in Regular (text colour), Fill and Duotone (accent) at 24 points
 and in Regular at the body size (muted), on the panel colour (`icons-<preset>-<mode>.png`, `icons-<mode>.png` for
 Electric). A line with `"components": true` draws the component gallery instead: cards open and closed, icon
 buttons (active and disabled), pills, badges, the sample's people as avatars, a row with its hover actions, a
-tooltip, a popup menu and a toast with their key chips (`components-<preset>-<mode>.png`, `components-<mode>.png`
+tooltip, a popup menu and a toast with their key chips, and the time picker for snooze at Friday 14:30 with
+`thu 9` typed and a preset behind hidden (`components-<preset>-<mode>.png`, `components-<mode>.png`
 for Electric). `"font": "inter"` and `"icon_set": "lucide"` draw a line in the second typeface or icon set: the
 list with the reader in Inter (`list-inter-<mode>.png`), and the icon sheet and the gallery in Lucide
 (`icons-lucide-<mode>.png`, `components-lucide-<mode>.png`). `"settings": true` opens the appearance settings
 page: in Electric, Aurora and Citrus (`settings-<preset>-<mode>.png`, `settings-<mode>.png` for Electric), in Inter
 (`settings-inter-<mode>.png`) and with Lucide (`settings-lucide-<mode>.png`). `"act"` does a hover action to the
-selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done); with `"slide": true` the row of a Done
-or Delete is caught sliding out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
+selected row and shows its toast (`list-toast-<preset>-<mode>.png`, Done; `reader-archive-<mode>.png`, Archive on
+the open message, the next one open); with `"slide": true` the row of a Done, Archive or Delete is caught sliding
+out instead (`list-slide-<preset>-<mode>.png`); the hover actions themselves show on
 the keyboard-selected row of `list-showcase-<preset>-<mode>.png`. Every picture but a slide is drawn with reduced
 motion, so it shows where each motion ends. Every UI change shows them in its PR.
 
@@ -486,3 +746,15 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
 | 2026-11-06 | minor | Lucide's Fill draws no disc (#104) |
 | 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the empty window is one card (#104) |
+| 2026-11-08 | minor | The switch and the time picker components; the time picker in the gallery picture (#129) |
+| 2026-11-08 | minor | The command palette, the Shortcuts page and the calendar's empty state; keys kept between runs (#130) |
+| 2026-11-08 | minor | The acts work on a real account; Move to a folder, flag and read in More; opening marks read; undo through the history (#131) |
+| 2026-11-08 | minor | The composer, its chips, suggestions and floating panel, and the Sending page (#132) |
+| 2026-11-08 | minor | Reply, reply all and forward open the composer; Templates and the blank line (#133) |
+| 2026-11-08 | minor | The screener card, New senders, the Let in card, the inbox views, the group menu and the Triage page (#134) |
+| 2026-11-08 | minor | Later on the rail, the pills under the header, the marks on a row, Done all, Snooze, Pin and the time picker in the reader, the pin switch, Done all past the undo history, Not done in the reader (#135) |
+| 2026-11-08 | minor | Undo send, send later, the outbox, the bounce mark and banner, Undo send on the Sending page, the outbox pictures (#136) |
+| 2026-11-08 | minor | The Notifications page; Notifications and Triage built on the sheet (#139) |
+| 2026-11-08 | minor | The calendar's views, side panel and details; the calendar pictures (#147) |
+| 2026-11-08 | minor | The event editor, Edit and Delete in the details, New event in the toolbar, the toast with Undo (#148) |
+| 2026-11-08 | minor | The invitation card in the reader and its pictures (#149) |

@@ -16,6 +16,9 @@
 {"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
 {"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
+{"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
+{"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
 # Adding an account (E1.11), over the sample: the form typed by hand, after Detect, the check under way, passed, and
 # failed at the certificate. The check is scripted; nothing connects.
 {"out": "docs/images/onboard-form-light.png", "mode": "light", "size": [1200, 820], "onboard": "form"}
@@ -53,7 +56,8 @@
 {"out": "docs/images/icons-aurora-dark.png", "mode": "dark", "preset": "aurora", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-light.png", "mode": "light", "preset": "citrus", "icons": true, "scale": 2}
 {"out": "docs/images/icons-citrus-dark.png", "mode": "dark", "preset": "citrus", "icons": true, "scale": 2}
-# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast.
+# The components (E1.15e): cards, icon buttons, pills, badges, avatars, hover actions, tooltip, popup and toast;
+# the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
 {"out": "docs/images/components-aurora-light.png", "mode": "light", "preset": "aurora", "components": true}
@@ -104,3 +108,90 @@
 {"out": "docs/images/reader-full-aurora-dark.png", "mode": "dark", "preset": "aurora", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-citrus-light.png", "mode": "light", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-citrus-dark.png", "mode": "dark", "preset": "citrus", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# The command palette, the Shortcuts page (one action waiting for a key) and the calendar's empty state (E3.10).
+{"out": "docs/images/palette-light.png", "mode": "light", "size": [1200, 820], "palette": ""}
+{"out": "docs/images/palette-dark.png", "mode": "dark", "size": [1200, 820], "palette": ""}
+{"out": "docs/images/palette-mode-light.png", "mode": "light", "size": [1200, 820], "palette": "mode"}
+{"out": "docs/images/palette-mode-dark.png", "mode": "dark", "size": [1200, 820], "palette": "mode"}
+{"out": "docs/images/shortcuts-light.png", "mode": "light", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/shortcuts-dark.png", "mode": "dark", "size": [1200, 820], "shortcuts": true, "capture": "ui.calendar.show"}
+{"out": "docs/images/calendar-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "calendar": true}
+{"out": "docs/images/calendar-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "calendar": true}
+# The calendar's views over the sample's calendars, an event picked with its details in the side panel (E4.4).
+{"out": "docs/images/calendar-week-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
+{"out": "docs/images/calendar-week-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Ferry to the island"}
+{"out": "docs/images/calendar-month-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
+{"out": "docs/images/calendar-month-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "month", "event": "Coast trip"}
+{"out": "docs/images/calendar-agenda-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-agenda-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "agenda"}
+{"out": "docs/images/calendar-day-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
+{"out": "docs/images/calendar-day-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "day", "event": "Call with Petra about the logo"}
+# The event editor: a new event, an edit of an event with guests (the notify prompt), a deleted event's toast (E4.5).
+{"out": "docs/images/event-new-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-new-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "edit_event": "new"}
+{"out": "docs/images/event-edit-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
+{"out": "docs/images/event-edit-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Allotment work party", "edit_event": "edit"}
+{"out": "docs/images/event-deleted-light.png", "mode": "light", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
+{"out": "docs/images/event-deleted-dark.png", "mode": "dark", "size": [1200, 820], "calendar_view": "week", "event": "Dentist", "delete_event": true}
+# The composer in the reader's place (E2.3): new, written, an address that is none, the suggestions under a
+# half-typed name, the floating panel over the reader, and the Sending page with a signature.
+{"out": "docs/images/compose-new-light.png", "mode": "light", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-new-dark.png", "mode": "dark", "size": [1400, 860], "compose": "new"}
+{"out": "docs/images/compose-written-light.png", "mode": "light", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-written-dark.png", "mode": "dark", "size": [1400, 860], "compose": "written"}
+{"out": "docs/images/compose-bad-address-light.png", "mode": "light", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-bad-address-dark.png", "mode": "dark", "size": [1400, 860], "compose": "bad"}
+{"out": "docs/images/compose-suggest-light.png", "mode": "light", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-suggest-dark.png", "mode": "dark", "size": [1400, 860], "compose": "suggest"}
+{"out": "docs/images/compose-floating-light.png", "mode": "light", "size": [1400, 860], "compose": "floating"}
+{"out": "docs/images/compose-floating-dark.png", "mode": "dark", "size": [1400, 860], "compose": "floating"}
+# Reply and templates (E2.4, E2.5): a reply to Odile's rota with a line written over the quote; a template whose
+# blank is still to fill in, Send blocked until it is.
+{"out": "docs/images/compose-reply-light.png", "mode": "light", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-reply-dark.png", "mode": "dark", "size": [1400, 860], "compose": "reply"}
+{"out": "docs/images/compose-template-light.png", "mode": "light", "size": [1400, 860], "compose": "template"}
+{"out": "docs/images/compose-template-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template"}
+{"out": "docs/images/settings-sending-light.png", "mode": "light", "size": [1200, 820], "sending": true}
+{"out": "docs/images/settings-sending-dark.png", "mode": "dark", "size": [1200, 820], "sending": true}
+{"out": "docs/images/screener-senders-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/screener-accepted-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
+{"out": "docs/images/grouped-cards-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
+{"out": "docs/images/grouped-list-light.png", "mode": "light", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/settings-triage-light.png", "mode": "light", "size": [1400, 860], "triage": true}
+{"out": "docs/images/screener-senders-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/screener-accepted-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
+{"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
+{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
+{"out": "docs/images/settings-notifications-light.png", "mode": "light", "size": [1400, 860], "notifications": true}
+{"out": "docs/images/settings-notifications-dark.png", "mode": "dark", "size": [1400, 860], "notifications": true}
+# Done, park, pin, snooze and follow-up (E3.3, E3.5, E3.7): Later from the rail on the snoozed pile and on the pins,
+# the inbox with "Show done" (a done message dimmed, one back from a snooze marked), the time picker of Snooze with a
+# typed time, and the reminder picker over a sent message.
+{"out": "docs/images/later-snoozed-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
+{"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
+{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "pins"}
+{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "pins"}
+{"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
+{"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
+{"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
+{"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
+{"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+{"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+# The invitation card (E4.6): Odile's lunch moved from 11:00 to 12:30, its update with what changed and the answer
+# given before, and the first invitation as the strip a later one replaced.
+{"out": "docs/images/invite-update-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/invite-update-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/invite-outdated-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
+{"out": "docs/images/invite-outdated-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
+# The outbox (E2.6, E3.6): a send counting down its hold with its toast, one scheduled and one the server refused;
+# the toast of a message just sent; the composer with a time picked, Send become Schedule, and its send-later picker;
+# a sent message a delivery report says did not get through.
+{"out": "docs/images/outbox-light.png", "mode": "light", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/outbox-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "waiting"}
+{"out": "docs/images/undo-send-light.png", "mode": "light", "size": [1400, 860], "outbox": "countdown"}
+{"out": "docs/images/undo-send-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "countdown"}
+{"out": "docs/images/send-later-light.png", "mode": "light", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/send-later-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "schedule"}
+{"out": "docs/images/bounce-light.png", "mode": "light", "size": [1400, 860], "outbox": "bounce"}
+{"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}

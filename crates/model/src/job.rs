@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The jobs of the read path: what the engine asks an account's `net` worker to do.
+//! The jobs: what the engine asks an account's `net` worker to do, to read and to write.
 //!
 //! They live here, not in `engine`, because `net` (layer 3) may not depend on `engine` (layer 4). A job carries
 //! everything the worker needs, so the worker never reads the engine's state.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, FolderId, FolderPath, JobId, ModSeq, Uid, UidValidity};
+use crate::{AccountId, CalendarJob, DraftId, EmailAddress, Flags, FolderId, FolderPath, JobId, MessageId, ModSeq, Uid, UidSet, UidValidity};
 
 /// What we know of a folder from the last sync: where a resync starts (CONDSTORE and QRESYNC, RFC 7162).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,8 +60,9 @@ impl FolderState {
     }
 }
 
-/// What to do.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What to do. Printed (`Debug`), a message shows only its length and a send only how many it goes to, so neither
+/// what the owner wrote nor a Bcc address lands in a log.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobKind {
     /// List the account's folders; answered with [`crate::EventKind::Folders`].
     SyncFolderList,
@@ -101,6 +104,90 @@ pub enum JobKind {
         /// Its path on the server.
         path: FolderPath,
     },
+    /// Set and clear flags of messages (`UID STORE`); answered with their flags as the server now has them
+    /// ([`crate::EventKind::MessagesChanged`]) and [`crate::EventKind::FlagsStored`] last.
+    StoreFlags {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+        /// The flags to set.
+        add: Flags,
+        /// The flags to clear.
+        remove: Flags,
+    },
+    /// Move messages to another folder of the account (`UID MOVE`, or `UID COPY`, `\Deleted` and `UID EXPUNGE` where
+    /// the server has no MOVE); answered with [`crate::EventKind::Moved`], which carries their new UIDs where the
+    /// server gives them (`COPYUID`).
+    Move {
+        /// Our id of the folder they are in.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+        /// Our id of the folder they go to.
+        to: FolderId,
+        /// Its path on the server.
+        to_path: FolderPath,
+    },
+    /// Remove messages for good: `\Deleted` on them and `UID EXPUNGE` of these UIDs only, so nothing else marked
+    /// deleted goes with them; answered with [`crate::EventKind::Expunged`].
+    Expunge {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The UIDVALIDITY the UIDs belong to.
+        uid_validity: UidValidity,
+        /// The messages.
+        uids: UidSet,
+    },
+    /// Add a message to a folder (`APPEND`); answered with [`crate::EventKind::Appended`].
+    Append {
+        /// Our id of the folder.
+        folder: FolderId,
+        /// Its path on the server.
+        path: FolderPath,
+        /// The flags it gets.
+        flags: Flags,
+        /// The message (RFC 5322 bytes).
+        raw: Vec<u8>,
+        /// The draft it is a copy of, whose earlier copy the answer replaces.
+        #[serde(default)]
+        draft: Option<DraftId>,
+        /// The message it is a new copy of (a snooze writes its time into one): the answer gives the message the
+        /// copy's place, and the old copy goes.
+        #[serde(default)]
+        message: Option<MessageId>,
+    },
+    /// Create a folder (`CREATE`); answered with [`crate::EventKind::FolderCreated`].
+    CreateFolder {
+        /// Its path on the server.
+        path: FolderPath,
+    },
+    /// Send a message through the account's submission (SMTP) server, to the recipients of the envelope alone; Bcc
+    /// recipients are among them and in no header. Answered with [`crate::EventKind::Sent`] or
+    /// [`crate::EventKind::SendFailed`].
+    Send {
+        /// The draft it is made from.
+        draft: DraftId,
+        /// The envelope's sender (MAIL FROM).
+        from: EmailAddress,
+        /// The envelope's recipients (RCPT TO): To, Cc and Bcc.
+        recipients: Vec<EmailAddress>,
+        /// The message (RFC 5322 bytes), as it goes.
+        raw: Vec<u8>,
+    },
+    /// A CalDAV job, run at once on an HTTPS connection of its own; answered with one
+    /// [`crate::EventKind::Calendar`].
+    Calendar(CalendarJob),
 }
 
 impl JobKind {
@@ -108,8 +195,76 @@ impl JobKind {
     #[must_use]
     pub fn folder(&self) -> Option<FolderId> {
         match self {
-            Self::SyncFolderList | Self::Check { .. } => None,
-            Self::SyncFolder { folder, .. } | Self::FetchBody { folder, .. } | Self::Idle { folder, .. } => Some(*folder),
+            Self::SyncFolderList | Self::Check { .. } | Self::CreateFolder { .. } | Self::Send { .. } | Self::Calendar(_) => None,
+            Self::SyncFolder { folder, .. }
+            | Self::FetchBody { folder, .. }
+            | Self::Idle { folder, .. }
+            | Self::StoreFlags { folder, .. }
+            | Self::Move { folder, .. }
+            | Self::Expunge { folder, .. }
+            | Self::Append { folder, .. } => Some(*folder),
+        }
+    }
+
+    /// Whether the job changes something on the IMAP server: an act of the owner, which must not be lost. A send is
+    /// not one: it goes to the submission server, and one cut off may have gone, so it is never run again on its own.
+    /// Nor is a calendar job: it goes to the CalDAV server.
+    #[must_use]
+    pub fn writes(&self) -> bool {
+        matches!(self, Self::StoreFlags { .. } | Self::Move { .. } | Self::Expunge { .. } | Self::Append { .. } | Self::CreateFolder { .. })
+    }
+}
+
+impl fmt::Debug for JobKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SyncFolderList => f.write_str("SyncFolderList"),
+            Self::SyncFolder { folder, path, known } => {
+                f.debug_struct("SyncFolder").field("folder", folder).field("path", path).field("known", known).finish()
+            }
+            Self::FetchBody { folder, path, uid_validity, uid } => {
+                f.debug_struct("FetchBody").field("folder", folder).field("path", path).field("uid_validity", uid_validity).field("uid", uid).finish()
+            }
+            Self::Check { by_owner } => f.debug_struct("Check").field("by_owner", by_owner).finish(),
+            Self::Idle { folder, path } => f.debug_struct("Idle").field("folder", folder).field("path", path).finish(),
+            Self::StoreFlags { folder, path, uid_validity, uids, add, remove } => f
+                .debug_struct("StoreFlags")
+                .field("folder", folder)
+                .field("path", path)
+                .field("uid_validity", uid_validity)
+                .field("uids", uids)
+                .field("add", add)
+                .field("remove", remove)
+                .finish(),
+            Self::Move { folder, path, uid_validity, uids, to, to_path } => f
+                .debug_struct("Move")
+                .field("folder", folder)
+                .field("path", path)
+                .field("uid_validity", uid_validity)
+                .field("uids", uids)
+                .field("to", to)
+                .field("to_path", to_path)
+                .finish(),
+            Self::Expunge { folder, path, uid_validity, uids } => {
+                f.debug_struct("Expunge").field("folder", folder).field("path", path).field("uid_validity", uid_validity).field("uids", uids).finish()
+            }
+            Self::Append { folder, path, flags, raw, draft, message } => f
+                .debug_struct("Append")
+                .field("folder", folder)
+                .field("path", path)
+                .field("flags", flags)
+                .field("message_bytes", &raw.len())
+                .field("draft", draft)
+                .field("message", message)
+                .finish(),
+            Self::CreateFolder { path } => f.debug_struct("CreateFolder").field("path", path).finish(),
+            Self::Send { draft, from: _, recipients, raw } => f
+                .debug_struct("Send")
+                .field("draft", draft)
+                .field("recipients", &recipients.len())
+                .field("message_bytes", &raw.len())
+                .finish_non_exhaustive(),
+            Self::Calendar(job) => f.debug_tuple("Calendar").field(job).finish(),
         }
     }
 }

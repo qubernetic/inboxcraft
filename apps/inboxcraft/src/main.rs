@@ -2,25 +2,44 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The `inboxcraft` binary: reads its arguments with [`inboxcraft::run`] and opens the window.
+//!
+//! On the owner's mailbox it first claims the store's folder ([`inboxcraft::arrive`]): a later start brings the running
+//! window forward and leaves. The first start listens for later ones, puts the tray up on Linux, and in the Flatpak asks
+//! the Background portal to let it run without a window. On Linux, what the engine has to tell the owner shows as
+//! notifications (through the notification portal in the Flatpak). The CLI and the MCP server reach it through the control
+//! channel ([`inboxcraft::control`]), with the token in the credential store. Closing the window leaves it running
+//! ([`Desktop`]) unless the owner turned that off on the Notifications page ([`OwnerDesk`], which also starts
+//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 
 use eframe::egui;
+use inboxcraft::accounts::{Entries, OsEntries};
+use inboxcraft::control::Listening;
+use inboxcraft::desk::OwnerDesk;
+use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
+use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
 use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
-use inboxcraft_ui_egui::InboxApp;
 use inboxcraft_ui_egui::fetch::Wake;
 
-/// The window's content as eframe draws it.
-struct Desktop(InboxApp);
+/// The window's content as eframe draws it, for as long as one window lives.
+struct Window<'a>(&'a mut Desktop);
 
-impl eframe::App for Desktop {
+impl eframe::App for Window<'_> {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.0.tick(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.0.ui(ui);
+        self.0.app_mut().ui(ui);
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -33,52 +52,287 @@ impl eframe::App for Desktop {
         [0.0; 4]
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.0.on_exit();
+    // No `on_exit`: the store keeps the accounts from one start to the next, so their passwords stay in the
+    // credential store when the window closes (`InboxApp::on_exit` is for a window whose accounts are forgotten).
+}
+
+/// The context of the window that is open, if one is; a wake redraws it.
+type Shown = Arc<Mutex<Option<egui::Context>>>;
+
+/// Opens windows on `desktop` until InboxCraft ends: while the desktop has no window it keeps the mail in step and
+/// waits for a request for one.
+fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
+    loop {
+        if desktop.is_quitting() {
+            return ExitCode::SUCCESS;
+        }
+        if !desktop.has_window() {
+            desktop.wait(WINDOWLESS_TICK);
+            continue;
+        }
+        let mut viewport = egui::ViewportBuilder::default()
+            .with_title("InboxCraft")
+            .with_app_id("io.github.qubernetic.inboxcraft")
+            .with_inner_size([1200.0, 760.0])
+            .with_min_inner_size([720.0, 480.0])
+            // See-through where the app paints nothing: the corners of its own frame.
+            .with_transparent(true)
+            // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
+            .with_decorations(desktop.app().mailbox().appearance().frame == WindowFrame::System);
+        desktop.app_mut().set_own_frame(true);
+        // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
+        if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
+            viewport = viewport.with_icon(icon);
+        }
+        // `run_and_return` (the default) keeps eframe's event loop, so a later window can open on it.
+        let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
+        let context = Arc::clone(shown);
+        let window = Window(&mut desktop);
+        let made = move |creation: &eframe::CreationContext<'_>| {
+            if let Ok(mut shown) = context.lock() {
+                *shown = Some(creation.egui_ctx.clone());
+            }
+            // Figtree from the first frame on, so no text is drawn in another font first.
+            inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
+            Ok(Box::new(window) as Box<dyn eframe::App + '_>)
+        };
+        let ran = eframe::run_native("InboxCraft", options, Box::new(made));
+        if let Ok(mut shown) = shown.lock() {
+            *shown = None;
+        }
+        if let Err(error) = ran {
+            eprintln!("inboxcraft: the window could not open: {error}");
+            return ExitCode::FAILURE;
+        }
+        // A window that went away without a close request (the session ended) ends InboxCraft as well.
+        if desktop.has_window() {
+            return ExitCode::SUCCESS;
+        }
     }
 }
 
-fn window(source: Source) -> ExitCode {
-    // The window's context exists once eframe made it; a picture that arrives before then needs no redraw.
-    let context: Arc<OnceLock<egui::Context>> = Arc::new(OnceLock::new());
-    let woken = Arc::clone(&context);
-    let wake: Wake = Arc::new(move || {
-        if let Some(context) = woken.get() {
+/// A wake that redraws the window that is open, if one is.
+fn wake_of(shown: &Shown) -> Wake {
+    let shown = Arc::clone(shown);
+    Arc::new(move || {
+        if let Ok(shown) = shown.lock()
+            && let Some(context) = shown.as_ref()
+        {
             context.request_repaint();
         }
-    });
-    let mut app = match inboxcraft::app(source, || Box::new(SystemClock::new()), Some(wake), inboxcraft::owner_keep()) {
+    })
+}
+
+/// The sample, in a window that ends InboxCraft when closed.
+fn sample() -> ExitCode {
+    let shown = Shown::default();
+    let app = match inboxcraft::app(inboxcraft::Mail::Sample, || Box::new(SystemClock::new()), Some(wake_of(&shown)), inboxcraft::owner_keep()) {
         Ok(app) => app,
         Err(error) => {
             eprintln!("inboxcraft: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("InboxCraft")
-        .with_app_id("io.github.qubernetic.inboxcraft")
-        .with_inner_size([1200.0, 760.0])
-        .with_min_inner_size([720.0, 480.0])
-        // See-through where the app paints nothing: the corners of its own frame.
-        .with_transparent(true)
-        // The app draws its own frame unless the owner chose the desktop's title bar (`ui.frame.set`).
-        .with_decorations(app.mailbox().appearance().frame == WindowFrame::System);
-    app.set_own_frame(true);
-    // On Wayland the desktop finds the icon through the app id; X11 and other systems take it from the window.
-    if let Ok(icon) = inboxcraft_ui_egui::icons::window_icon() {
-        viewport = viewport.with_icon(icon);
-    }
-    let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
-    let made = move |creation: &eframe::CreationContext<'_>| {
-        let _ = context.set(creation.egui_ctx.clone());
-        // Figtree from the first frame on, so no text is drawn in another font first.
-        inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
-        Ok(Box::new(Desktop(app)) as Box<dyn eframe::App>)
+    let (_send, heard) = mpsc::channel();
+    windows(Desktop::new(app, heard).closing_ends(), &shown)
+}
+
+/// The owner's mailbox, with a window or (`background`) without one.
+fn owner(background: bool) -> ExitCode {
+    let Some(dir) = inboxcraft::instance_dir() else {
+        eprintln!("inboxcraft: there is no folder to keep the mail in: HOME (or XDG_DATA_HOME) is not set");
+        return ExitCode::FAILURE;
     };
-    match eframe::run_native("InboxCraft", options, Box::new(made)) {
-        Ok(()) => ExitCode::SUCCESS,
+    let instance = match inboxcraft::arrive(&dir, background, &mut std::io::stderr()) {
+        Ok(instance) => instance,
+        Err(code) => return ExitCode::from(code),
+    };
+    let shown = Shown::default();
+    let wake = wake_of(&shown);
+    let (send, heard) = mpsc::channel::<Request>();
+    let asked = asking(send.clone(), Arc::clone(&wake));
+    let listening = instance.listen(asked);
+    let reachable = match listening.error() {
+        Some(error) => {
+            eprintln!("inboxcraft: {error}; a later start cannot bring this window back");
+            false
+        }
+        None => true,
+    };
+    let mail = match inboxcraft::store::mail(Source::Owner) {
+        Ok(mail) => mail,
         Err(error) => {
-            eprintln!("inboxcraft: the window could not open: {error}");
+            eprintln!("inboxcraft: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let app = match inboxcraft::app(mail, || Box::new(SystemClock::new()), Some(Arc::clone(&wake)), inboxcraft::owner_keep()) {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("inboxcraft: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut desktop = Desktop::new(app, heard);
+    let kept = inboxcraft::background_file();
+    // Closing the window leaves InboxCraft running unless the owner turned that off on the Notifications page.
+    desktop.stays().store(kept.as_deref().is_none_or(inboxcraft::desk::kept), Ordering::SeqCst);
+    if background {
+        desktop = desktop.without_window();
+    }
+    let (desktop, tray) = linux::desktop(desktop, &send, &wake);
+    let (desktop, control) = control(desktop, &wake);
+    // Closing the window ends InboxCraft when nothing could bring a window back.
+    let comes_back = reachable || tray;
+    let mut desktop = if comes_back { desktop } else { desktop.closing_ends() };
+    let program = std::env::current_exe().unwrap_or_else(|_| "inboxcraft".into());
+    let mut desk = OwnerDesk::new(desktop.stays(), kept, inboxcraft::autostart::autostart_dir(), program);
+    if !comes_back {
+        desk = desk.without_background();
+    }
+    #[cfg(target_os = "linux")]
+    if inboxcraft::autostart::sandboxed() {
+        desk = desk.with_portal(Arc::new(linux::ask), Arc::clone(&wake));
+    }
+    desktop.app_mut().set_desk(Box::new(desk));
+    drop(send);
+    let ended = windows(desktop, &shown);
+    drop(control);
+    drop(listening);
+    ended
+}
+
+/// `desktop` answering the control channel, and the channel's socket; without it where it cannot be served.
+fn control(desktop: Desktop, wake: &Wake) -> (Desktop, Option<Listening>) {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    let entries: Arc<dyn Entries> = Arc::new(OsEntries);
+    match inboxcraft::control::start(runtime.as_deref(), inboxcraft::autostart::sandboxed(), entries, &inboxcraft::control::fresh, Arc::clone(wake)) {
+        Ok((listening, calls)) => (desktop.with_control(calls), Some(listening)),
+        Err(error) => {
+            eprintln!("inboxcraft: {error}; the CLI and MCP cannot reach this InboxCraft");
+            (desktop, None)
+        }
+    }
+}
+
+/// Hands a request to the window and wakes it to answer.
+fn asking(send: Sender<Request>, wake: Wake) -> impl Fn(Request) + Send + 'static {
+    let send = Mutex::new(send);
+    move |request| {
+        if let Ok(send) = send.lock()
+            && send.send(request).is_ok()
+        {
+            wake();
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::sync::mpsc::{self, Sender};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use inboxcraft::autostart::{self, portal};
+    use inboxcraft::desktop::Desktop;
+    use inboxcraft::instance::Request;
+    use inboxcraft::notify::{self, Click};
+    use inboxcraft::tray::{self, InboxTray};
+    use inboxcraft_ui_egui::fetch::Wake;
+
+    /// How long the portal may take: the desktop may ask the person first.
+    pub(crate) const PORTAL_PATIENCE: Duration = Duration::from_secs(120);
+
+    /// `desktop` with the tray and the notifications, and whether the tray is up; in the Flatpak, the Background portal
+    /// is asked on a thread.
+    pub(crate) fn desktop(desktop: Desktop, send: &Sender<Request>, wake: &Wake) -> (Desktop, bool) {
+        let sandboxed = autostart::sandboxed();
+        if sandboxed {
+            let autostart = autostart::autostart_dir().is_some_and(|dir| autostart::is_on(&dir));
+            let asked = std::thread::Builder::new().name("inboxcraft-portal".to_owned()).spawn(move || {
+                let granted = zbus::blocking::Connection::session()
+                    .map_err(|error| error.to_string())
+                    .and_then(|bus| portal::request(&bus, autostart, PORTAL_PATIENCE));
+                if let Err(error) = granted {
+                    eprintln!("inboxcraft: {error}; the desktop may end InboxCraft when its window is closed");
+                }
+            });
+            if let Err(error) = asked {
+                eprintln!("inboxcraft: the Background portal could not be asked: {error}");
+            }
+        }
+        let desktop = notices(desktop, sandboxed, wake);
+        match tray::start(InboxTray::new(send.clone(), wake.clone()), sandboxed) {
+            Ok(badge) => (desktop.with_badge(Box::new(badge)), true),
+            Err(error) => {
+                eprintln!("inboxcraft: {error}");
+                (desktop, false)
+            }
+        }
+    }
+
+    /// `desktop` showing notifications over the session bus; without them where the bus has no notification server.
+    fn notices(desktop: Desktop, sandboxed: bool, wake: &Wake) -> Desktop {
+        let (send, clicks) = mpsc::channel::<Click>();
+        let send = Mutex::new(send);
+        let wake = wake.clone();
+        let clicked: notify::bus::Clicked = Arc::new(move |click| {
+            if let Ok(send) = send.lock()
+                && send.send(click).is_ok()
+            {
+                wake();
+            }
+        });
+        let connected = zbus::blocking::Connection::session()
+            .map_err(|error| format!("notifications cannot be shown: {error}"))
+            .and_then(|bus| notify::bus::connect(&bus, sandboxed, clicked));
+        match connected {
+            Ok(deliver) => desktop.with_notices(deliver, clicks),
+            Err(error) => {
+                eprintln!("inboxcraft: {error}");
+                desktop
+            }
+        }
+    }
+
+    /// Asks the Background portal over the session bus.
+    pub(crate) fn ask(on: bool) -> Result<autostart::Granted, String> {
+        let bus = zbus::blocking::Connection::session().map_err(|error| format!("the Background portal could not be asked: {error}"))?;
+        portal::request(&bus, on, PORTAL_PATIENCE)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod linux {
+    use std::sync::mpsc::Sender;
+
+    use inboxcraft::desktop::Desktop;
+    use inboxcraft::instance::Request;
+    use inboxcraft_ui_egui::fetch::Wake;
+
+    /// No tray outside Linux yet.
+    pub(crate) fn desktop(desktop: Desktop, _send: &Sender<Request>, _wake: &Wake) -> (Desktop, bool) {
+        (desktop, false)
+    }
+}
+
+/// `--autostart` and `--no-autostart`.
+fn autostart(on: bool) -> ExitCode {
+    let dir = inboxcraft::autostart::autostart_dir();
+    let program = std::env::current_exe().unwrap_or_else(|_| "inboxcraft".into());
+    #[cfg(target_os = "linux")]
+    let portal: Option<inboxcraft::autostart::Ask<'_>> = if inboxcraft::autostart::sandboxed() { Some(&linux::ask) } else { None };
+    #[cfg(not(target_os = "linux"))]
+    let portal: Option<inboxcraft::autostart::Ask<'_>> = None;
+    ExitCode::from(inboxcraft::set_autostart(on, dir.as_deref(), &program, portal, &mut std::io::stdout(), &mut std::io::stderr()))
+}
+
+/// `--quit`.
+fn quit() -> ExitCode {
+    match inboxcraft::instance_dir() {
+        Some(dir) => ExitCode::from(inboxcraft::quit(&dir, &mut std::io::stdout(), &mut std::io::stderr())),
+        None => {
+            eprintln!("inboxcraft: InboxCraft is not running");
             ExitCode::FAILURE
         }
     }
@@ -87,6 +341,13 @@ fn window(source: Source) -> ExitCode {
 fn main() -> ExitCode {
     match inboxcraft::run(std::env::args_os().skip(1), &mut std::io::stdout(), &mut std::io::stderr()) {
         Step::Exit(code) => ExitCode::from(code),
-        Step::Window(source) => window(source),
+        Step::Window(Source::Sample) => sample(),
+        Step::Window(Source::Owner) => owner(false),
+        Step::Background => owner(true),
+        Step::Quit => quit(),
+        Step::Autostart(on) => autostart(on),
+        Step::RevokeControl => {
+            ExitCode::from(inboxcraft::control::revoke(&OsEntries, &inboxcraft::control::fresh, &mut std::io::stdout(), &mut std::io::stderr()))
+        }
     }
 }

@@ -1,0 +1,94 @@
+# AUTH LOGIN: the user name and the password each after a go-ahead, in base64.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 AUTH=LOGIN
+= EHLO hello AUTH
+> auth-plain ada@example.org secret
+! NotOffered("AUTH PLAIN")
+> auth-login ada@example.org secret
+C: AUTH LOGIN
+S: 334 VXNlcm5hbWU6
+C: YWRhQGV4YW1wbGUub3Jn
+S: 334 UGFzc3dvcmQ6
+C: c2VjcmV0
+S: 235 2.7.0 Authentication successful
+= AUTH signed in
+
+# A refusal hides every form of the password the server writes back.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250-ENHANCEDSTATUSCODES
+S: 250 AUTH PLAIN LOGIN
+= EHLO hello ENHANCEDSTATUSCODES AUTH
+> auth-login ada@example.org secret
+C: AUTH LOGIN
+S: 334 VXNlcm5hbWU6
+C: YWRhQGV4YW1wbGUub3Jn
+S: 334 UGFzc3dvcmQ6
+C: c2VjcmV0
+S: 535-5.7.8 c2VjcmV0 is not the password
+S: 535 5.7.8 neither is secret
+= AUTH refused 535 5.7.8 *** is not the password neither is ***
+> auth-plain ada@example.org secret
+C: AUTH PLAIN AGFkYUBleGFtcGxlLm9yZwBzZWNyZXQ=
+S: 535 5.7.8 Bad token AGFkYUBleGFtcGxlLm9yZwBzZWNyZXQ
+= AUTH refused 535 5.7.8 Bad token ***
+? Ready
+> auth-plain ada@example.org secret
+C: AUTH PLAIN AGFkYUBleGFtcGxlLm9yZwBzZWNyZXQ=
+S: 454 4.7.0 Temporary authentication failure
+= AUTH refused for now 454 4.7.0 Temporary authentication failure
+
+# Credentials that cannot be sent are refused before anything is written.
+> auth-plain ada@example.org \0
+! BadArgument("user name or password with a NUL")
+> auth-login ada@example.org \0
+! BadArgument("user name or password with a NUL")
+
+# A go-ahead after the last step, or for PLAIN with its response sent, breaks the protocol.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250 AUTH PLAIN LOGIN
+= EHLO hello
+> auth-plain ada@example.org secret
+! NotOffered("AUTH PLAIN")
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 AUTH PLAIN
+= EHLO hello AUTH
+> auth-plain ada@example.org secret
+C: AUTH PLAIN AGFkYUBleGFtcGxlLm9yZwBzZWNyZXQ=
+S: 334
+! Unexpected("go-ahead")
+? Closed
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 250-smtp.example.org
+S: 250 AUTH LOGIN
+= EHLO hello AUTH
+> auth-login ada@example.org secret
+C: AUTH LOGIN
+S: 334 VXNlcm5hbWU6
+C: YWRhQGV4YW1wbGUub3Jn
+S: 334 UGFzc3dvcmQ6
+C: c2VjcmV0
+S: 334 again?
+! Unexpected("go-ahead")

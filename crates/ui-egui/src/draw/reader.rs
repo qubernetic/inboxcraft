@@ -5,11 +5,25 @@
 //! largest text of the window, which wraps rather than being cut, and who wrote in the thread. The thread follows as
 //! cards, oldest first: the open message and the ones the owner unfolded in full (each message's header, the
 //! remote-content banner, the body and the attachment tiles; Reply, Reply all and Forward on the open one), the rest
-//! folded to one line. More holds what is not a mail action: full width, closing the reader and the next-message
-//! rule. While the pointer is on a link, a float at the bottom says where it goes.
+//! folded to one line. More holds flag and read or unread for the open message, then what is not a mail action: full
+//! width, closing the reader and the next-message rule. Move to a folder opens a menu of the folders of the message's
+//! account. While the pointer is on a link, a float at the bottom says where it goes.
 //!
-//! Actions without a command are drawn disabled, and their tooltips say so. Done and Delete act on the sample mailbox
-//! as the hover actions of the list do.
+//! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
+//! real account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in.
+//! More also puts the sender's mail in another group, for a message of a grouped account.
+//!
+//! Snooze opens the time picker ("Snooze until"); on a message the owner sent the same button is "Remind me if no
+//! reply" and its picker sets the follow-up reminder. Pin pins the message or takes its pin off. More parks it or
+//! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Under the subject, chips
+//! say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
+//!
+//! A message with an invitation shows its card over the text (see `super::invite`): the event, what changed, and
+//! Going, Maybe and No, or the answer given with a way to change it.
+//!
+//! A message the screener holds opens as a preview that decides nothing: over it a card asks "Let <sender> in?", with
+//! the groups to let them into, Accept, Accept and open, and Block. A sent message a delivery report says did not get
+//! through opens under a banner that says so, with the reason the report gave.
 //!
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
@@ -18,18 +32,22 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Layout, Margin, Order, Popup, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
-    Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
 use crate::component::button::{IconButton, TextButton};
+use crate::component::pill::pill;
+use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
+use crate::component::typed_time;
 use crate::component::{badge, popup};
+use crate::compose::Answer;
 use crate::glass::{self, Under};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, Mailbox};
+use crate::mailbox::{Act, After, GroupKind, Mailbox};
 use crate::picture::Decoded;
 use crate::quote::Segment;
 use crate::reader::{Content, File, Header, Opened, Person, PictureState, Reader, ThreadRow, inline_key, link_status, size_text};
@@ -67,8 +85,14 @@ pub(super) enum Asked {
     Copy(String),
     /// Hide the notice.
     Dismiss,
-    /// Do `Act` to a message (the sample mailbox only, for now).
+    /// Do `Act` to a message.
     Act(u64, Act),
+    /// Write a draft made from a message.
+    Answer(u64, Answer),
+    /// A time picker opened: read the time presets still ahead.
+    Presets,
+    /// Something asked on the invitation card of a message.
+    Invite(u64, super::invite::Ask),
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -108,9 +132,42 @@ fn divider(ui: &mut Ui, theme: &Theme) {
     ui.painter().vline(rect.center().x, rect.shrink2(vec2(0.0, side / 4.0)).y_range(), Stroke::new(1.0, theme.palette.line));
 }
 
-/// The More menu: full width, close, and the next-message rule.
+/// The More menu: flag and read or unread for the open message, full width, close, and the next-message rule.
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
+    let open = reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id));
+    if let Some(row) = open {
+        let (name, act) = if row.flagged { (tr!("Take the flag off"), Act::Unflag) } else { (tr!("Flag"), Act::Flag) };
+        if popup::item(ui, theme, keymap, IconId::Flag, name, Some(keymap::FLAG)).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        let (icon, name, act) =
+            if row.seen { (IconId::Mail, tr!("Mark as unread"), Act::Unread) } else { (IconId::MarkRead, tr!("Mark as read"), Act::Read) };
+        if popup::item(ui, theme, keymap, icon, name, Some(keymap::READ)).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        let (name, act) = if row.parked { (tr!("Take off the park pile"), Act::Park(false)) } else { (tr!("Park"), Act::Park(true)) };
+        if popup::entry(ui, theme, keymap, name, None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        if mailbox.is_snoozed(row.id) && popup::entry(ui, theme, keymap, tr!("Bring back now"), None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, Act::Unsnooze));
+        }
+        if row.follow_up.is_some() && popup::entry(ui, theme, keymap, tr!("Take the reminder off"), None).clicked() {
+            drawn.asked.push(Asked::Act(row.id, Act::CancelFollowUp));
+        }
+        ui.add_space(theme.spacing.xs);
+        ui.separator();
+        if row.group.is_some()
+            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
+        {
+            drawn.asked.push(Asked::Act(row.id, act));
+        }
+        if row.group.is_some() {
+            ui.add_space(theme.spacing.xs);
+            ui.separator();
+        }
+    }
     let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
     if popup::entry(ui, theme, keymap, name, None).clicked() {
         drawn.asked.push(Asked::FullWidth(full));
@@ -129,11 +186,117 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     }
 }
 
+/// Move to a folder: a menu of the folders of the open message's account but its own; the one chosen moves it there.
+fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let button = IconButton::new(IconId::Move, tr!("Move to a folder"));
+    let (Some(id), false) = (open, open.is_none_or(|id| mailbox.move_targets(id).is_empty())) else {
+        button.unavailable(tr!("No folder to move it to")).show(ui, theme, keymap);
+        return;
+    };
+    let response = button.show(ui, theme, keymap);
+    let width = theme.fonts.body.size * MENU_WIDTH;
+    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            ui.label(RichText::new(tr!("Move to")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            for folder in mailbox.move_targets(id) {
+                // The full path, so a folder inside another says where it is.
+                if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
+                    drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
+                }
+            }
+        })
+    });
+}
+
+/// The width of the time picker, in body text sizes.
+const PICKER_WIDTH: f32 = 22.0;
+
+/// The id the time picker's state is kept under between frames and openings.
+pub(super) fn picker_id() -> Id {
+    Id::unique("reader-time-picker")
+}
+
+/// The id of the time picker's popup, so a key can open it.
+pub(super) fn picker_popup() -> Id {
+    Id::unique("reader-time-picker-popup")
+}
+
+/// Snooze, or "Remind me if no reply" on a message the owner sent: a button opening the time picker over the presets
+/// still ahead; the time picked snoozes the message `id` or sets its reminder. Without a message it is disabled.
+fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let sent = open.is_some_and(|id| mailbox.is_sent(id));
+    let (name, title, confirm) = if sent {
+        (tr!("Remind me if no reply"), tr!("Remind me if no reply by"), tr!("Remind me"))
+    } else {
+        (tr!("Snooze"), tr!("Snooze until"), tr!("Snooze"))
+    };
+    let button = IconButton::new(IconId::Snooze, name).action(keymap::SNOOZE);
+    let Some(id) = open else {
+        button.unavailable(tr!("Open a message first")).show(ui, theme, keymap);
+        return;
+    };
+    let response = button.show(ui, theme, keymap);
+    if response.clicked() {
+        // A new opening: the presets read again, the text typed before gone.
+        drawn.asked.push(Asked::Presets);
+        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+    }
+    let width = theme.fonts.body.size * PICKER_WIDTH;
+    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
+        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+            let ask = Ask { title, confirm, alert: None, presets: &presets };
+            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+            ui.data_mut(|data| data.insert_temp(picker_id(), state));
+            match picked {
+                Picked::At { at, .. } => {
+                    drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
+                    ui.close();
+                }
+                Picked::Cancelled => ui.close(),
+                Picked::Open => {}
+            }
+        })
+    });
+}
+
+/// Pin, or "Take the pin off" (shown active) for a pinned message.
+fn pin(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
+    let Some(row) = open.and_then(|id| mailbox.messages().iter().find(|row| row.id == id)) else {
+        IconButton::new(IconId::Pin, tr!("Pin")).unavailable(tr!("Open a message first")).show(ui, theme, keymap);
+        return;
+    };
+    let name = if row.pinned { tr!("Take the pin off") } else { tr!("Pin") };
+    if IconButton::new(IconId::Pin, name).active(row.pinned).show(ui, theme, keymap).clicked() {
+        drawn.asked.push(Asked::Act(row.id, Act::Pin(!row.pinned)));
+    }
+}
+
+/// The chips of the open message's state: until when it is snoozed, when its reminder is due, that it came back.
+fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return Vec::new() };
+    let (now, offset) = (mailbox.now(), mailbox.offset());
+    let mut chips = Vec::new();
+    if let Some(until) = row.snoozed_until {
+        let short = typed_time::short(until, now, offset);
+        chips.push((tr!("Snoozed until {when}", when = short), tr!("Snoozed until {when}", when = typed_time::long(until, now, offset))));
+    }
+    if let Some(due) = row.follow_up {
+        let short = typed_time::short(due, now, offset);
+        chips.push((tr!("Reminder {when}", when = short), tr!("Reminder if no reply by {when}", when = typed_time::long(due, now, offset))));
+    }
+    if mailbox.returned(row) {
+        chips.push((tr!("Returned").to_owned(), tr!("Back from a snooze").to_owned()));
+    }
+    chips
+}
+
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let open = reader.open_id().filter(|_| mailbox.can_act());
+    let open = reader.open_id();
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
     // In the top row the window controls sit at the end of the actions' line.
     super::frame::beside(ui, theme, |ui| {
@@ -154,13 +317,16 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                     };
                     button.unavailable(not_yet()).show(ui, theme, keymap);
                 };
-                action(ui, IconId::Done, tr!("Done"), Some((Act::Done, keymap::DONE)));
-                action(ui, IconId::Archive, tr!("Archive"), None);
+                // A done message, open under "Show done", is brought back by the same button.
+                let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+                let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
+                action(ui, IconId::Done, name, Some((act, keymap::DONE)));
+                action(ui, IconId::Archive, tr!("Archive"), Some((Act::Archive, keymap::ARCHIVE)));
                 action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
                 divider(ui, theme);
-                action(ui, IconId::Snooze, tr!("Snooze"), None);
-                action(ui, IconId::Pin, tr!("Pin"), None);
-                action(ui, IconId::Move, tr!("Move to a folder"), None);
+                picker(ui, theme, keymap, mailbox, open, drawn);
+                pin(ui, theme, keymap, mailbox, open, drawn);
+                move_to(ui, theme, keymap, mailbox, open, drawn);
                 divider(ui, theme);
                 let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
                 let width = theme.fonts.body.size * MENU_WIDTH;
@@ -178,14 +344,27 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
     ui.add_space(s.xl);
     ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.text)).wrap());
-    let group = reader.open_id().and_then(|id| mailbox.showcase().groups.iter().find(|group| group.messages.contains(&id)));
+    // Held mail is in no group until its sender is let in.
+    let group = reader.open_id().filter(|id| !mailbox.held(*id)).and_then(|id| {
+        let row = mailbox.messages().iter().find(|row| row.id == id);
+        mailbox
+            .groups()
+            .into_iter()
+            .find(|group| group.messages.contains(&id))
+            .map(|group| group.name)
+            .or_else(|| row.and_then(|row| row.group).map(|kind| kind.text().to_owned()))
+    });
     let count = reader.thread().len();
-    if group.is_some() || count > 1 {
-        // The message's group as a chip, then who wrote in the thread.
-        ui.horizontal(|ui| {
+    let chips = reader.open_id().map(|id| states(mailbox, id)).unwrap_or_default();
+    if group.is_some() || count > 1 || !chips.is_empty() {
+        // The message's group and its state as chips, then who wrote in the thread.
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s;
-            if let Some(group) = group {
-                badge::chip(ui, theme, &group.name, &tr!("In {group}", group = group.name));
+            if let Some(group) = &group {
+                badge::chip(ui, theme, group, &tr!("In {group}", group = group));
+            }
+            for (name, spoken) in &chips {
+                badge::chip(ui, theme, name, spoken);
             }
             if count > 1 {
                 let writers = reader.writers().join(", ");
@@ -300,6 +479,24 @@ fn header(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, reader: &Reader, opened
             row(ui, tr!("Date"), mailbox.full_date(*date));
         }
     });
+}
+
+/// The banner over a sent message that did not get through: the warning and the reason the delivery report gave.
+fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {
+    let p = &theme.palette;
+    let text = tr!("Not delivered: {reason}", reason = reason);
+    Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.error)).inner_margin(margin(theme.spacing.m)).corner_radius(theme.spacing.corner).show(
+        ui,
+        |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let side = super::paint::line_height(ui, theme.fonts.body);
+                let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                theme.icons.paint(ui.painter(), rect, IconId::Failed, Style::Regular, p.error);
+                ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.text)).wrap());
+            });
+        },
+    );
 }
 
 /// The remote-content banner, while remote pictures of the message are blocked.
@@ -637,6 +834,9 @@ fn message(
         header(ui, theme, mailbox, reader, opened, drawn);
         ui.add_space(theme.spacing.m);
         banner(ui, theme, reader, opened, drawn);
+        if let Some(invite) = &opened.invite {
+            super::invite::card(ui, theme, keymap, reader, invite, drawn);
+        }
         ui.add_space(theme.spacing.s);
         let say = |ui: &mut Ui, text: &str| {
             ui.label(RichText::new(text).font(theme.fonts.body.id()).color(p.muted));
@@ -657,12 +857,61 @@ fn message(
             ui.add_space(theme.spacing.m);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s;
-                TextButton::new(tr!("Reply")).primary().icon(IconId::Reply).unavailable(not_yet()).show(ui, theme, keymap);
-                TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll).unavailable(not_yet()).show(ui, theme, keymap);
-                TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward).unavailable(not_yet()).show(ui, theme, keymap);
+                let answers = [
+                    (TextButton::new(tr!("Reply")).primary().icon(IconId::Reply), Answer::Reply),
+                    (TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll), Answer::ReplyAll),
+                    (TextButton::new(tr!("Forward")).secondary().icon(IconId::Forward), Answer::Forward),
+                ];
+                for (button, answer) in answers {
+                    if button.show(ui, theme, keymap).clicked() {
+                        drawn.asked.push(Asked::Answer(opened.id, answer));
+                    }
+                }
             });
         }
     });
+}
+
+/// The card over a message the screener holds: "Let <sender> in?", the groups to let them into (none chosen at first),
+/// Accept, Accept and open, and Block, with what Block does; then a line that says the message is only a preview.
+fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id: u64, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
+    let chosen_id = egui::Id::unique("screen-into").with(id);
+    let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
+    Frame::new().fill(p.surface).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = s.s;
+        let title = tr!("Let {sender} in?", sender = row.sender);
+        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.text)).wrap());
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = s.xs;
+            ui.label(RichText::new(tr!("Into")).font(theme.fonts.caption.id()).color(p.muted));
+            for kind in GroupKind::ALL {
+                if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
+                    into = if into == Some(kind) { None } else { Some(kind) };
+                    ui.data_mut(|data| data.insert_temp(chosen_id, into));
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s;
+            if TextButton::new(tr!("Accept")).primary().icon(IconId::Done).show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false }));
+            }
+            if TextButton::new(tr!("Accept and open")).secondary().show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: true }));
+            }
+            if TextButton::new(tr!("Block")).secondary().icon(IconId::Junk).show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Block));
+            }
+        });
+        let note =
+            tr!("Accept lets their held mail and their future mail in. Blocked mail goes to Blocked, never loads remote content and never notifies.");
+        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(p.muted)).wrap());
+    });
+    ui.label(RichText::new(tr!("Preview · nothing is accepted yet")).font(theme.fonts.caption.id()).color(p.muted));
 }
 
 /// Where the link under the pointer goes, on a float over the bottom left corner of `rect`. It takes no pointer, so
@@ -724,6 +973,14 @@ pub(super) fn show(
                 bottom: margin(theme.spacing.l).bottom,
             })
             .show(ui, |ui| {
+                if let Some(id) = reader.open_id().filter(|id| mailbox.held(*id)) {
+                    screening(ui, theme, keymap, mailbox, id, &mut drawn);
+                }
+                if let Some(reason) =
+                    reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())
+                {
+                    bounced(ui, theme, reason);
+                }
                 for row in reader.thread() {
                     match (&row.opened, reader.is_expanded(row.id)) {
                         (Some(opened), true) => message(ui, theme, keymap, mailbox, reader, opened, textures, &mut drawn),

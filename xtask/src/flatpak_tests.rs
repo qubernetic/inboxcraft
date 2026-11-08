@@ -249,6 +249,16 @@ fn the_only_folder_the_manifest_opens_is_downloads_for_save() {
 }
 
 #[test]
+fn the_manifest_does_not_talk_to_the_notification_server() {
+    // In the sandbox, notifications go through the notification portal, which needs no permission; a direct line to
+    // the notification server would let the app bypass it.
+    let manifest = repo_file(MANIFEST);
+    let notifications: Vec<&str> =
+        manifest.lines().map(str::trim_start).filter(|line| line.starts_with("- --talk-name=org.freedesktop.Notifications")).collect();
+    assert_eq!(notifications, Vec::<&str>::new(), "{manifest}");
+}
+
+#[test]
 fn the_manifest_installs_files_that_exist_under_the_app_id() {
     let manifest = repo_file(MANIFEST);
     assert!(manifest.starts_with("# ") && manifest.contains(&format!("\napp-id: {APP_ID}\n")), "{manifest}");
@@ -263,11 +273,13 @@ fn the_manifest_installs_files_that_exist_under_the_app_id() {
 }
 
 #[test]
-fn the_desktop_file_opens_the_app_and_its_second_action_the_sample() {
+fn the_desktop_file_opens_the_app_and_its_actions_the_sample_and_quit() {
     let desktop = repo_file(&format!("contrib/flatpak/{APP_ID}.desktop"));
     assert!(desktop.contains("\nExec=inboxcraft\n") && desktop.contains(&format!("\nIcon={APP_ID}\n")), "{desktop}");
-    assert!(desktop.contains("\nActions=sample;\n") && desktop.contains("\n[Desktop Action sample]\n"), "{desktop}");
-    assert!(desktop.ends_with("\nExec=inboxcraft --sample\n"), "{desktop}");
+    assert!(desktop.contains("\nSingleMainWindow=true\n"), "one window: a second start brings it forward: {desktop}");
+    assert!(desktop.contains("\nActions=sample;quit;\n") && desktop.contains("\n[Desktop Action sample]\n"), "{desktop}");
+    assert!(desktop.contains("\nExec=inboxcraft --sample\n"), "{desktop}");
+    assert!(desktop.ends_with("\n[Desktop Action quit]\nName=Quit InboxCraft\nExec=inboxcraft --quit\n"), "{desktop}");
     let metainfo = repo_file(&format!("contrib/flatpak/{APP_ID}.metainfo.xml"));
     assert!(
         metainfo.contains(&format!("<id>{APP_ID}</id>"))

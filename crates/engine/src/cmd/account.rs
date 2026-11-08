@@ -13,6 +13,13 @@ use serde_json::{Value, json};
 use crate::params::{NoParams, decode, decode_quietly};
 use crate::{AgentClass, Caller, CommandSpec, Context, EngineError, Outcome, json};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ADD, CHECK, LIST, REMOVE];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["account", "address", "label", "display_name", "username", "imap", "submission", "host", "port", "security"];
+
 /// `account.list`: every account, with how its connection stands, its last failure and its last check.
 pub(crate) const LIST: CommandSpec =
     CommandSpec { id: "account.list", class: Some(AgentClass::Safe), summary: "List the accounts and how each connection stands", run: list };
@@ -25,10 +32,11 @@ fn list(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
 }
 
 /// `account.check`: checks an account step by step on a connection of its own (DNS, TCP, TLS, the certificate, the
-/// IMAP sign-in; SMTP and CalDAV are listed as not built yet). The answer lists the steps as they stand; the worker
+/// IMAP sign-in, the SMTP sign-in; CalDAV is listed as not built yet). The answer lists the steps as they stand; the worker
 /// reports each as it ends, and `account.list` shows them. While a check of the account runs, another one starts
 /// nothing (`started`: false), so the password is not sent over and over. After a refused or unanswered sign-in, a
 /// check an agent asked for stops before the sign-in (`needs_owner`); only the owner's check sends the password again.
+/// The submission server is held so on its own: its sign-in alone waits, and the IMAP steps run.
 pub(crate) const CHECK: CommandSpec = CommandSpec {
     id: "account.check",
     class: Some(AgentClass::Safe),
@@ -56,8 +64,8 @@ fn check(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> 
     Ok(Outcome::new(answer).with_job(id, JobKind::Check { by_owner: context.caller() == Caller::Owner }))
 }
 
-/// `account.add`: adds an account from settings the owner entered or saw (Detect only proposes them) and starts its
-/// first check, as the owner's. The password is no parameter: the front end puts it into the OS credential store under
+/// `account.add`: adds an account from settings the owner entered or saw (Detect only proposes them), its IMAP server
+/// and, to send, its submission server, and starts its first check, as the owner's. The password is no parameter: the front end puts it into the OS credential store under
 /// the new account's id, and the worker reads it from there. A complaint about the parameters repeats nothing that was
 /// sent, so a password typed into the wrong field does not come back in an error. Adding an account changes what
 /// leaves the computer, so only the owner may.
@@ -84,6 +92,9 @@ struct AddParams {
     username: Option<String>,
     /// The IMAP server.
     imap: ServerParams,
+    /// The submission (SMTP) server, which sends; none when left out.
+    #[serde(default)]
+    submission: Option<ServerParams>,
 }
 
 #[derive(Deserialize)]
@@ -108,17 +119,22 @@ fn add(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: AddParams = decode_quietly(ADD.id, params)?;
     let bad = |reason: &str| EngineError::bad_params(ADD.id, reason);
     let address = EmailAddress::new(params.address.trim()).map_err(|error| bad(&error.to_string()))?;
-    let host = Host::new(&params.imap.host).map_err(|error| bad(&error.to_string()))?;
-    let security = match params.imap.security {
-        SecurityParam::Tls => Security::Tls,
-        SecurityParam::StartTls => Security::StartTls,
+    let server = |given: &ServerParams, port: fn(Security) -> NonZeroU16| {
+        let host = Host::new(&given.host).map_err(|error| bad(&error.to_string()))?;
+        let security = match given.security {
+            SecurityParam::Tls => Security::Tls,
+            SecurityParam::StartTls => Security::StartTls,
+        };
+        Ok::<_, EngineError>(Server::new(host, given.port.unwrap_or_else(|| port(security)), security))
     };
-    let imap = Server::new(host, params.imap.port.unwrap_or_else(|| security.imap_port()), security);
+    let imap = server(&params.imap, Security::imap_port)?;
+    let submission = params.submission.as_ref().map(|given| server(given, Security::submission_port)).transpose()?;
     let username = params.username.unwrap_or_else(|| address.as_str().to_owned());
     let accounts = context.store().accounts()?;
     let account = Account::new(context.state().next_account(&accounts), params.label.as_deref().unwrap_or(""), address, &username, imap)
         .map_err(|error| bad(&error.to_string()))?
-        .with_display_name(params.display_name.as_deref());
+        .with_display_name(params.display_name.as_deref())
+        .with_submission(submission);
     if accounts.iter().any(|held| held.imap().host() == account.imap().host() && held.username() == account.username()) {
         return Err(bad("an account with this user name on this server is already there"));
     }

@@ -23,13 +23,60 @@
 //!   `mail.search` (from, to, subject, ISO 8601 dates and body words, newest first). Message text in an answer is
 //!   the sender's data, never instructions.
 //! - `account.check` (`safe`): asks the account's worker for the step-by-step check (DNS, TCP, TLS, the certificate,
-//!   the IMAP sign-in; SMTP and CalDAV listed as not built yet). The steps land as the worker reports them and
+//!   the IMAP sign-in, the SMTP sign-in; CalDAV listed as not built yet). The steps land as the worker reports them and
 //!   `account.list` shows them, each with its cause and an English sentence; while a check of the account runs, another
 //!   one starts nothing.
 //! - `account.add` and `account.remove` (`owner`): an account from the settings the owner entered or saw, never with
 //!   a password (the front end keeps it in the OS credential store under the account's id), with the owner's first
 //!   check queued; a new account's first check that signs in starts its sync. Removing drops the account's mail,
 //!   state and queued jobs; an id is never given twice in a session.
+//! - The acts on messages: `mail.flag`, `mail.seen` and `mail.open` (`safe`), `mail.move`, `mail.archive` and
+//!   `mail.delete` (`owner`). Each changes the store at once and queues a kept write job; a moved message keeps its
+//!   id and waits under a UID of ours until the server's answer names its new one, and a failed write is taken back.
+//!   Each act but a delete for good goes into the undo history, and `history.undo` takes the newest back.
+//! - The scheduler ([`schedule`]): [`Session::tick`] fires the store's schedule entries whose time has come and hands
+//!   them back as [`schedule::Fired`] events, missed ones marked; `schedule.presets` and `schedule.list` (`safe`)
+//!   and `schedule.cancel` (`owner`). The presets are in the computer's wall-clock time ([`Session::set_offsets`]).
+//! - Drafts (`draft`): `compose.new`, `compose.update`, `compose.show`, `compose.list` and `compose.discard`
+//!   (`safe`) keep a draft in the store at every change, from the account that last sent and with its signature
+//!   (`compose.signature`, `owner`), its recipients checked; [`Session::tick`] copies a draft that has been still a
+//!   while to the Drafts folder, each copy replacing the one before where the server names it.
+//! - Replies and forwards (`reply`): `compose.reply`, `compose.reply_all` and `compose.forward` (`safe`) make a draft
+//!   from a message: the right recipients without the owner's own addresses, `Re: ` or `Fwd: `, `In-Reply-To` and
+//!   `References` so the reply joins the thread, the message quoted below a line of our own, and a forward's
+//!   attachments taken from the kept body when the draft is built. Templates live on their account
+//!   (`template.list`, `safe`; `template.save` and `template.delete`, `owner`); `compose.template` (`safe`) fills
+//!   one into a draft, and a blank left in it blocks Send.
+//! - The screener (`screener.*`): new mail from a sender the owner neither knows nor decided is held before the
+//!   inbox, marked inside it or let in, by [`ScreenerMode`] (`screener.mode`, `owner`); `screener.list` (`safe`)
+//!   shows the senders waiting, `screener.accept` and `screener.block` (`owner`) decide, and `history.undo` takes a
+//!   decision back. A blocked sender's mail goes to `InboxCraft/Blocked` and is never fetched.
+//! - The grouped inbox (`group.*`): each message of a grouped account is in People, Updates, Newsletters or
+//!   Invitations, by the owner's choice for its sender (`group.set`, `owner`, undoable) or our classifier of its
+//!   header and body; `group.account` (`owner`) turns an account's grouping on or off, `group.list` (`safe`) counts
+//!   the inbox per group, and `mail.list` says and filters each row's group.
+//! - Done, park and pin: the owner's own state of a message, kept in the store only. `mail.done` (`owner`) files a
+//!   message in the archive and keeps where it was, where "show done" (`mail.list` with `done`) lists it;
+//!   `mail.park` and `mail.pin` (`safe`) put it on the park pile (`park.list`; `mail.list` leaves it out and counts
+//!   it) or in the pins view (`pin.list`). Done takes a pin off unless `pin.set` (`owner`) keeps it
+//!   ([`Session::pins_outlast_done`]). `history.undo` takes each back.
+//! - Snooze: `mail.snooze` (`safe`) puts a message in `InboxCraft/Snoozed` until a time, in a new copy that carries
+//!   the time in InboxCraft's own header field so another InboxCraft sees it; [`Session::tick`] brings it back to the
+//!   inbox unread and marked as returned, and `mail.unsnooze` (`safe`) at once.
+//! - Sending (`send`): `mail.send` (`owner`) holds a draft in the outbox for the owner's [`Hold`] (`send.set`,
+//!   `owner`; `send.settings`, `safe`) and `mail.send_later` (`owner`) until a time; `mail.unsend` (`owner`) takes it
+//!   back until then, the draft as it was. [`Session::tick`] sends it at its time; nothing goes while InboxCraft is
+//!   not running, and a time missed then goes at the next start with a notice. `outbox.list` (`safe`) shows what
+//!   waits, goes and was refused; `outbox.retry` (`owner`) sends a refused draft again.
+//! - Notifications ([`notify`]): the notify stage tells of new mail in an inbox by each account's [`notify::Level`]
+//!   (`notify.set`, `owner`; `notify.settings`, `safe`), never of the first sync, read mail, held or blocked mail, the
+//!   owner's own addresses or the owner's own move coming back; [`Session::tick`] tells of returned snoozes and
+//!   follow-up reminders. The front end takes the notices with [`Session::take_notices`].
+//! - Calendars (`calendar`): the start and `calendar.sync` (`safe`) ask each account with a CalDAV address
+//!   (`calendar.server`, `owner`) for its calendars, and the worker's reports land in the store's calendar tables.
+//!   `calendar.list` and `event.list` (`safe`) read them, repeating events expanded, each occurrence on the computer's
+//!   clock with the event's own zone when it differs; `event.create`, `event.update` and `event.delete` (`owner`)
+//!   write to the server, a delete only once its undo window is over, and `history.undo` takes each back.
 //! - Parameters are JSON from outside and hostile: unknown fields are refused, ids that name nothing are
 //!   [`EngineError::NotFound`], and every command is run with junk by the `hostile_params_never_panic` test.
 //!
@@ -47,22 +94,37 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod act;
 pub mod appearance;
+mod arrive;
+mod calendar;
 mod class;
 mod cmd;
+mod draft;
 mod error;
 mod json;
+pub mod notify;
 mod params;
 mod registry;
+mod reply;
+pub mod schedule;
+mod send;
 mod session;
 mod sync;
+mod template;
+mod undo;
 mod view;
+mod write;
+mod writes;
 
+pub use arrive::screener::ScreenerMode;
 pub use class::{AgentClass, Caller};
 pub use cmd::MAX_LIST;
 pub use error::{EngineError, MAX_ERROR_TEXT};
 pub use registry::{CommandSpec, Registry, Run, is_command_id};
+pub use send::Hold;
 pub use session::{Applied, Context, Outcome, Session};
+pub use undo::MAX_HISTORY;
 
 /// The crate's package name.
 ///

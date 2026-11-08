@@ -3,8 +3,13 @@
 
 //! The opt-in live tests of `net` on the owner's two throwaway accounts on the reference provider (`just it-live`,
 //! profile `live`): both `live-imap` and `live-imap2` sign in and list their folders; on `live-imap`, the folder list, the per-run folder `InboxCraft-Test/<run id>`, APPEND of an invented message, the first sync,
-//! IDLE, the resync of a new worker, and the folder removed; and `account.check`, whose every IMAP step passes on the
-//! real chain.
+//! IDLE, the resync of a new worker, and the folder removed; the write path in the run folder (APPEND by the worker, a
+//! flag, CREATE of a folder inside it and a move there); one invented message sent from `live-imap` to `live-imap2`
+//! through the submission server, found in the inbox of `live-imap2` and removed from it again; and `account.check`,
+//! whose every IMAP step, the SMTP sign-in and the CalDAV discovery pass on the real chain; and the `InboxCraft-Test`
+//! calendar of `live-imap`, found by CalDAV discovery and synced (read only). The submission server is taken to be
+//! the account's IMAP host on port 465 (implicit TLS), and the CalDAV server its IMAP host over `https`, found from
+//! the well-known path, as on the reference provider.
 //!
 //! [`live::start`] skips it, with the reason printed, without the `INBOXCRAFT_LIVE_*` credentials and always in the
 //! agent sandbox and in CI. Agents never run it. The accounts are reached over implicit TLS on port 993, checked by
@@ -20,18 +25,20 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security,
-    Server, StepReport, StepStatus,
+    Account, AccountId, CalendarId, CalendarJob, CalendarReport, CheckStep, DraftId, EmailAddress, ErrorKind, Event, EventKind, Flag, Flags,
+    FolderId, FolderPath, FolderState, Host, JobId, JobKind, Security, Server, StepReport, StepStatus, UidSet,
 };
 use inboxcraft_net::{CheckTarget, Connector, Credentials, Password, TlsSettings, Trust, Worker, WorkerSettings, check_account};
-use inboxcraft_testkit::live::{self, LiveConfig, RunFolder};
+use inboxcraft_testkit::live::{self, Folders, LiveConfig, RunFolder};
 use inboxcraft_time::SystemClock;
 use support::Result;
 use support::admin::Admin;
-use support::run::{added, state};
+use support::run::{added, changed, expunged, state};
 
 const ACCOUNT: AccountId = AccountId::new(1);
 const RUN: FolderId = FolderId::new(1);
+/// The folder the write test makes inside the run folder.
+const MOVED: FolderId = FolderId::new(2);
 /// How long a step may take on a real server.
 const STEP: Duration = Duration::from_secs(120);
 
@@ -51,11 +58,23 @@ struct Live {
     next: u64,
 }
 
+/// The submission server of a live account: its IMAP host on port 465.
+fn submission(imap: &live::Account) -> Result<Server> {
+    Ok(Server::new(Host::new(imap.host())?, Security::Tls.submission_port(), Security::Tls))
+}
+
+/// The CalDAV server of a live account: its IMAP host over `https`, found from its well-known path.
+fn caldav(imap: &live::Account) -> String {
+    format!("https://{}/", imap.host())
+}
+
 impl Live {
     fn start(imap: &live::Account, tls: &TlsSettings) -> Result<Self> {
         let port = NonZeroU16::new(993).ok_or("port")?;
         let server = Server::new(Host::new(imap.host())?, port, Security::Tls);
-        let account = Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?;
+        let account = Account::new(ACCOUNT, imap.name(), EmailAddress::new(imap.address())?, imap.user(), server)?
+            .with_submission(Some(submission(imap)?))
+            .with_caldav(Some(&caldav(imap)))?;
         let (sender, events) = mpsc::channel();
         let secret = Arc::new(Secret(imap.secret().expose().to_owned()));
         let worker = Worker::spawn(account, WorkerSettings::new(Connector::new(tls.clone())), secret, sender)?;
@@ -178,14 +197,84 @@ fn live_imap_round_trip() -> Result {
 }
 
 #[test]
-fn live_account_check_passes_every_imap_step() -> Result {
-    let Some(config) = live::start("live_account_check_passes_every_imap_step")? else {
+fn live_imap_writes_in_the_run_folder() -> Result {
+    let Some(config) = live::start("live_imap_writes_in_the_run_folder")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut worker = Live::start(config.imap(), &tls)?;
+    worker.job(JobKind::SyncFolderList)?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
+    let Some(EventKind::Folders { listings }) = events.last() else { return Err("no folder list".into()) };
+    let delimiter = listings.iter().find(|listing| listing.path().is_inbox()).and_then(|listing| listing.path().delimiter()).unwrap_or('/');
+
+    let imap = config.imap();
+    let mut admin = Admin::connect_host(imap.host(), tls.client_config()?, imap.user(), imap.secret().expose())?;
+    let mut folder = RunFolder::create(&mut admin, &config, delimiter)?;
+    let name = folder.name().to_owned();
+    let path = FolderPath::new(&name, Some(delimiter))?;
+    // Inside the run folder, so the test touches nothing else of the account.
+    let moved_name = format!("{name}{delimiter}Moved");
+    let moved_path = FolderPath::new(&moved_name, Some(delimiter))?;
+
+    // APPEND by the worker; the first sync finds the message.
+    let raw = config.invented_message(1).into_bytes();
+    worker.job(JobKind::Append { folder: RUN, path: path.clone(), flags: Flags::default(), raw, draft: None, message: None })?;
+    worker.until(|kind| matches!(kind, EventKind::Appended { .. }))?;
+    worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: None })?;
+    let events = worker.synced()?;
+    assert_eq!(subjects(&events), [subject(&config, 1)]);
+    let message = added(&events).into_iter().next().ok_or("no message")?;
+    let state = state(&events).ok_or("no state")?;
+    let uids: UidSet = std::iter::once(message.uid()).collect();
+    println!("live: APPEND done, the sync found the message");
+
+    // A flag, as the server then has it.
+    let flagged: Flags = std::iter::once(Flag::Flagged).collect();
+    let uid_validity = state.uid_validity();
+    worker.job(JobKind::StoreFlags { folder: RUN, path: path.clone(), uid_validity, uids: uids.clone(), add: flagged, remove: Flags::default() })?;
+    let events = worker.until(|kind| matches!(kind, EventKind::FlagsStored { .. }))?;
+    assert!(changed(&events).iter().any(|change| change.uid == message.uid() && change.flags.is_flagged()));
+    println!("live: flag stored");
+
+    // A folder of its own, and the message moved there with its flag. The folder goes before anything is checked: a
+    // server may refuse to delete the run folder while it has a child.
+    let moved = || -> Result<(Vec<EventKind>, Vec<EventKind>)> {
+        worker.job(JobKind::CreateFolder { path: moved_path.clone() })?;
+        worker.until(|kind| matches!(kind, EventKind::FolderCreated { .. }))?;
+        worker.job(JobKind::Move { folder: RUN, path: path.clone(), uid_validity, uids, to: MOVED, to_path: moved_path.clone() })?;
+        let events = worker.until(|kind| matches!(kind, EventKind::Moved { .. }))?;
+        println!("live: moved, new UID named: {}", matches!(events.last(), Some(EventKind::Moved { copied: Some(_), .. })));
+        worker.job(JobKind::SyncFolder { folder: MOVED, path: moved_path.clone(), known: None })?;
+        let in_moved = worker.synced()?;
+        worker.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(state) })?;
+        Ok((in_moved, worker.synced()?))
+    };
+    let outcome = moved();
+    worker.worker.stop();
+    let removed = folder.folders().delete(&moved_name);
+    let (in_moved, in_run) = outcome?;
+    removed?;
+    assert_eq!(subjects(&in_moved), [subject(&config, 1)]);
+    assert!(added(&in_moved).iter().all(|summary| summary.flags().is_flagged()));
+    assert!(expunged(&in_run).contains(&message.uid().get()), "the message is still in the run folder");
+    println!("live: the message is in the new folder only");
+
+    folder.remove()?;
+    admin.logout();
+    println!("live: folders removed");
+    Ok(())
+}
+
+#[test]
+fn live_account_check_passes_every_step() -> Result {
+    let Some(config) = live::start("live_account_check_passes_every_step")? else {
         return Ok(());
     };
     let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
     let imap = config.imap();
     let server = Server::new(Host::new(imap.host())?, NonZeroU16::new(993).ok_or("port")?, Security::Tls);
-    let target = CheckTarget::new(server, imap.user());
+    let target = CheckTarget::new(server, imap.user()).with_submission(Some(submission(imap)?)).with_caldav(Some(&caldav(imap)));
     let mut reports = Vec::new();
     check_account(&target, &Connector::new(tls), &mut || Some(Password::new(imap.secret().expose().to_owned())), &mut |report| {
         // The step and its status only: no host, no issuer, nothing of the account.
@@ -194,7 +283,106 @@ fn live_account_check_passes_every_imap_step() -> Result {
     });
     let statuses: Vec<StepStatus> = reports.iter().map(StepReport::status).collect();
     let passed = StepStatus::Passed;
-    assert_eq!(statuses, [passed, passed, passed, passed, passed, StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    assert_eq!(statuses, [passed, passed, passed, passed, passed, passed, passed]);
     assert!(reports.iter().find(|report| report.step() == CheckStep::Certificate).and_then(StepReport::issuer).is_some());
     Ok(())
+}
+
+#[test]
+fn live_smtp_sends_from_live_imap_to_live_imap2() -> Result {
+    let Some(config) = live::start("live_smtp_sends_from_live_imap_to_live_imap2")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let (from, to) = (config.imap(), config.imap2());
+    // The allow-list: the message goes to the second test account and nowhere else.
+    config.check_recipient(to.address())?;
+    let subject = format!("{} {} sent", config.message_subject_prefix(), config.run_id());
+
+    // The inbox of live-imap2 as it stands, so the resync after the send brings only what came since.
+    let mut inbox = Live::start(to, &tls)?;
+    inbox.job(JobKind::SyncFolderList)?;
+    let events = inbox.until(|kind| matches!(kind, EventKind::Folders { .. }))?;
+    let Some(EventKind::Folders { listings }) = events.last() else { return Err("live-imap2: no folder list".into()) };
+    let path = listings.iter().find(|listing| listing.path().is_inbox()).map(|listing| listing.path().clone()).ok_or("live-imap2: no inbox")?;
+    inbox.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: None })?;
+    let mut known = state(&inbox.synced()?).ok_or("live-imap2: no state")?;
+    println!("live: live-imap2 inbox synced");
+
+    // One invented message, sent by the worker of live-imap.
+    let message = [
+        format!("From: InboxCraft live test <{}>", from.address()),
+        format!("To: <{}>", to.address()),
+        format!("Subject: {subject}"),
+        "Date: Thu, 05 Nov 2026 12:00:00 +0000".to_owned(),
+        format!("Message-ID: <{}.sent@live-test.example.org>", config.run_id()),
+        "MIME-Version: 1.0".to_owned(),
+        "Content-Type: text/plain; charset=utf-8".to_owned(),
+        String::new(),
+        format!("An invented message of the InboxCraft live tests, run {}. It can be deleted.", config.run_id()),
+        String::new(),
+    ]
+    .join("\r\n");
+    let mut sender = Live::start(from, &tls)?;
+    let recipients = vec![EmailAddress::new(to.address())?];
+    let job =
+        sender.job(JobKind::Send { draft: DraftId::new(1), from: EmailAddress::new(from.address())?, recipients, raw: message.into_bytes() })?;
+    let events = sender.until(|kind| matches!(kind, EventKind::Sent { .. } | EventKind::SendFailed { .. }))?;
+    sender.worker.stop();
+    match events.last() {
+        Some(EventKind::Sent { .. }) => println!("live: sent from live-imap (job {job:?})"),
+        Some(EventKind::SendFailed { kind, .. }) => return Err(format!("live-imap: the send failed: {kind}").into()),
+        _ => return Err("live-imap: no answer to the send".into()),
+    }
+
+    // It arrives in the inbox of live-imap2, and is removed from it again.
+    let mut found = None;
+    for _ in 0..24 {
+        std::thread::sleep(Duration::from_secs(5));
+        inbox.job(JobKind::SyncFolder { folder: RUN, path: path.clone(), known: Some(known) })?;
+        let events = inbox.synced()?;
+        known = state(&events).unwrap_or(known);
+        found = added(&events).into_iter().find(|summary| summary.envelope().subject() == subject);
+        if found.is_some() {
+            break;
+        }
+    }
+    let found = found.ok_or("live-imap2: the message did not arrive within two minutes")?;
+    println!("live: arrived in the live-imap2 inbox");
+    let uids: UidSet = std::iter::once(found.uid()).collect();
+    inbox.job(JobKind::Expunge { folder: RUN, path, uid_validity: known.uid_validity(), uids })?;
+    inbox.until(|kind| matches!(kind, EventKind::Expunged { .. }))?;
+    inbox.worker.stop();
+    println!("live: removed from the live-imap2 inbox");
+    Ok(())
+}
+
+#[test]
+fn live_caldav_lists_the_test_calendar() -> Result {
+    let Some(config) = live::start("live_caldav_lists_the_test_calendar")? else {
+        return Ok(());
+    };
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut worker = Live::start(config.imap(), &tls)?;
+    worker.job(JobKind::Calendar(CalendarJob::Discover { url: None }))?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Calendar(_)))?;
+    let calendars = match events.last() {
+        Some(EventKind::Calendar(CalendarReport::Found { calendars, .. })) => calendars.clone(),
+        Some(EventKind::Calendar(CalendarReport::Failed { kind, .. })) => return Err(format!("live-imap: discovery failed: {kind}").into()),
+        _ => return Err("live-imap: no calendars found".into()),
+    };
+    println!("live: {} calendars found", calendars.len());
+    let test = calendars.iter().find(|calendar| calendar.name.as_deref() == Some(live::RUN_ROOT)).ok_or("live-imap: no InboxCraft-Test calendar")?;
+    worker.job(JobKind::Calendar(CalendarJob::Sync { calendar: CalendarId::new(1), url: test.url.clone(), token: None, known: Vec::new() }))?;
+    let events = worker.until(|kind| matches!(kind, EventKind::Calendar(_)))?;
+    worker.worker.stop();
+    match events.last() {
+        Some(EventKind::Calendar(CalendarReport::Synced { changed, full, .. })) => {
+            assert!(*full, "a first sync compares the whole calendar");
+            println!("live: the InboxCraft-Test calendar holds {} events", changed.len());
+            Ok(())
+        }
+        Some(EventKind::Calendar(CalendarReport::Failed { kind, .. })) => Err(format!("live-imap: the sync failed: {kind}").into()),
+        _ => Err("live-imap: no sync".into()),
+    }
 }

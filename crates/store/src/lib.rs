@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The local-first cache: accounts, folders, messages, flags, bodies and sync state, written atomically.
+//! The local-first cache: accounts, folders, messages, flags, bodies and sync state, and the local records beside
+//! them (job queue, drafts, outbox, schedule, senders, message state, calendars), written atomically.
 //!
 //! Layer 1 (see `docs/architecture.md`). The [`Storage`] trait is the store; two backends implement it:
 //!
@@ -46,7 +47,10 @@ pub use change::{Batch, Change};
 pub use config::StoreConfig;
 pub use entry::Entry;
 pub use error::StoreError;
-use inboxcraft_model::{Account, AccountId, Folder, FolderId, FolderState, MessageId};
+use inboxcraft_model::{
+    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
+    FolderState, Job, MessageId, MessageState, Outgoing, Scheduled, Sender,
+};
 use inboxcraft_time::Timestamp;
 pub use memory::Memory;
 pub use search::{MAX_QUERY_CHARS, MAX_QUERY_WORDS, MAX_RESULTS, Search};
@@ -128,6 +132,111 @@ pub trait Storage {
     ///
     /// As [`Storage::accounts`].
     fn missing_bodies(&self, folder: FolderId, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError>;
+
+    /// The jobs waiting for their `net` worker, in the order they were queued.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn queued_jobs(&self) -> Result<Vec<Job>, StoreError>;
+
+    /// The drafts of `account`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn drafts(&self, account: AccountId) -> Result<Vec<Draft>, StoreError>;
+
+    /// One draft.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn draft(&self, id: DraftId) -> Result<Option<Draft>, StoreError>;
+
+    /// The outbox, in draft id order.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn outbox(&self) -> Result<Vec<Outgoing>, StoreError>;
+
+    /// The schedule, by the second each entry is due, then id.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn schedule(&self) -> Result<Vec<Scheduled>, StoreError>;
+
+    /// What we know of the sender `address`, told apart without case.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn sender(&self, address: &EmailAddress) -> Result<Option<Sender>, StoreError>;
+
+    /// Every sender we know something of, by address in lower case.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn senders(&self) -> Result<Vec<Sender>, StoreError>;
+
+    /// The owner's own state of a message; the empty state when it has none.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn message_state(&self, id: MessageId) -> Result<MessageState, StoreError>;
+
+    /// Every message with a state of its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn message_states(&self) -> Result<Vec<(MessageId, MessageState)>, StoreError>;
+
+    /// The calendars of `account`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn calendars(&self, account: AccountId) -> Result<Vec<Calendar>, StoreError>;
+
+    /// Where the next sync of `calendar` starts, if it was synced.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn sync_token(&self, calendar: CalendarId) -> Result<Option<String>, StoreError>;
+
+    /// The events of `calendar`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn calendar_events(&self, calendar: CalendarId) -> Result<Vec<CalendarEvent>, StoreError>;
+
+    /// One calendar event.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn calendar_event(&self, id: CalendarEventId) -> Result<Option<CalendarEvent>, StoreError>;
+
+    /// The alerts of `event`, by the second each goes off, then id.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError>;
+
+    /// One alert.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError>;
 
     /// Removes the bodies that are no longer kept at `now`, as one batch; returns how many.
     ///

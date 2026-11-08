@@ -76,10 +76,17 @@ egui = { version = "0.37", default-features = false, features = ["default_fonts"
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
 # ui-egui tests only: drives the UI through its AccessKit tree and refuses controls without an accessible name
 egui_kittest = { version = "0.37", default-features = false }
-# the desktop app only: the OS credential store for the account passwords (approved for E1): Secret Service over
+# the desktop app and the CLI only: the OS credential store for the account passwords and the control token (approved
+# for E1; the CLI reads the token): Secret Service over
 # D-Bus (zbus, pure Rust) on Linux and the BSDs, Keychain on macOS, Credential Manager on Windows. Opens no network
 # connection.
 keyring = "4.2"
+# the desktop app on Linux only (approved for the daily-use epic): the tray icon, a StatusNotifierItem over D-Bus.
+# Opens no network connection.
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
+# the desktop app on Linux only (approved for the daily-use epic, already in the graph through `keyring`): the
+# Background portal and, in tests, a private session bus. Opens no network connection.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 # ui-egui only: writes the `ui_shot` pictures and reads the PNG pictures of a message
 png = "0.18"
 # ui-egui only: reads the JPEG pictures of a message (already in the graph through `image`, so no new crate)

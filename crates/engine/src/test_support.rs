@@ -66,6 +66,20 @@ pub fn mailbox() -> Memory {
     store
 }
 
+/// Makes `change` in the session's store, as an earlier event or another session would have.
+pub fn change(session: &mut Session, change: Change) {
+    session.store_mut().apply(&Batch::new().with(change)).unwrap();
+}
+
+/// Runs `command` (`mail.send` or `outbox.retry`) on the draft `id` for the owner and lets the hold pass on `clock`, so
+/// the send goes; the command's answer.
+pub fn send_now(session: &mut Session, clock: &FakeClock, command: &str, id: u64) -> serde_json::Value {
+    let answer = session.run(command, &serde_json::json!({ "id": id })).unwrap();
+    clock.advance(session.send_hold().duration());
+    session.tick().unwrap();
+    answer
+}
+
 pub fn session_with(store: Memory, registry: Registry) -> Session {
     Session::with_registry(Box::new(store), Box::new(clock()), registry).unwrap()
 }

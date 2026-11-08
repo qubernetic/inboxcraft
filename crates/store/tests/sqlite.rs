@@ -11,7 +11,10 @@ use std::fs;
 use std::path::Path;
 
 use contract::{account, body, folder, m, message, two_accounts};
-use inboxcraft_model::{Account, AccountId, EmailAddress, FolderId};
+use inboxcraft_model::{
+    Account, AccountId, AlertId, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, Due, EmailAddress, FolderId, Job, JobId, JobKind,
+    MessageState, OutboxState,
+};
 use inboxcraft_store::{Batch, Change, DATABASE_FILE, SCHEMA_VERSION, SOURCES_DIR, Search, Sqlite, Storage, StoreConfig, StoreError};
 
 /// A fresh store directory under the target directory, removed when the value drops.
@@ -315,4 +318,150 @@ fn an_open_store_is_tightened() {
         assert_eq!(mode(&path), 0o600, "{}", path.display());
     }
     assert_eq!(store.body(m(1)).unwrap(), Some(body("hello")));
+}
+
+#[test]
+fn queued_jobs_and_local_records_are_there_after_a_reopen() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = with_body(dir);
+    let batch = Batch::new()
+        .with(Change::QueueJob(contract::job(7, 1)))
+        .with(Change::QueueJob(contract::job(3, 2)))
+        .with(Change::PutDraft(contract::draft(1, 1, "kept")))
+        .with(Change::PutOutgoing(contract::outgoing(1, OutboxState::Waiting)))
+        .with(Change::PutScheduled(contract::scheduled(1, 5, Due::Send(DraftId::new(1)))))
+        .with(Change::PutSender(contract::sender("anna@example.org")))
+        .with(Change::SetMessageState(m(1), MessageState { parked: true, ..MessageState::default() }))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::SetSyncToken(CalendarId::new(1), Some("token-1".to_owned())));
+    store.apply(&batch).unwrap();
+    drop(store);
+    let store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    assert_eq!(store.queued_jobs().unwrap(), [contract::job(7, 1), contract::job(3, 2)], "the queue keeps its order");
+    assert_eq!(store.draft(DraftId::new(1)).unwrap(), Some(contract::draft(1, 1, "kept")));
+    assert_eq!(store.outbox().unwrap(), [contract::outgoing(1, OutboxState::Waiting)]);
+    assert_eq!(store.schedule().unwrap().len(), 1);
+    assert_eq!(store.senders().unwrap(), [contract::sender("anna@example.org")]);
+    assert!(store.message_state(m(1)).unwrap().parked);
+    assert_eq!(store.sync_token(CalendarId::new(1)).unwrap().as_deref(), Some("token-1"));
+}
+
+#[test]
+fn a_damaged_local_record_is_reported() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = with_body(dir);
+    let batch = Batch::new()
+        .with(Change::QueueJob(contract::job(1, 1)))
+        .with(Change::PutDraft(contract::draft(1, 1, "x")))
+        .with(Change::SetMessageState(m(1), MessageState { pinned: true, ..MessageState::default() }))
+        .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+        .with(Change::PutCalendarEvent(contract::event(1, 1)));
+    store.apply(&batch).unwrap();
+    sql(
+        dir,
+        "UPDATE job SET record = '{'; UPDATE draft SET record = '[]'; UPDATE message_state SET record = 'null'; UPDATE calendar_event SET record = '1';",
+    );
+    assert_eq!(store.queued_jobs(), Err(StoreError::Corrupt("a record")));
+    assert_eq!(store.draft(DraftId::new(1)), Err(StoreError::Corrupt("a record")));
+    assert_eq!(store.message_states(), Err(StoreError::Corrupt("a record")));
+    assert_eq!(store.message_state(m(1)), Err(StoreError::Corrupt("a record")));
+    assert_eq!(store.calendar_event(CalendarEventId::new(1)), Err(StoreError::Corrupt("a record")));
+    sql(dir, "PRAGMA foreign_keys = OFF; UPDATE message_state SET message = -2, record = '{}';");
+    assert_eq!(store.message_states(), Err(StoreError::Corrupt("a message id")));
+    sql(dir, "UPDATE calendar SET sync_token = x'ff';");
+    assert!(matches!(store.sync_token(CalendarId::new(1)), Err(StoreError::Database(_))));
+}
+
+#[test]
+fn every_store_has_an_id_of_its_own_for_good() {
+    let (one, one_dir) = fresh();
+    let (other, _other_dir) = fresh();
+    let id = one.id().unwrap();
+    assert!(id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()), "{id}");
+    assert_ne!(other.id().unwrap(), id, "two stores on one computer never share one");
+    drop(one);
+    assert_eq!(fresh_in(one_dir.path()).id().unwrap(), id, "kept between runs");
+    sql(one_dir.path(), "DELETE FROM meta;");
+    assert_eq!(fresh_in(one_dir.path()).id(), Err(StoreError::Corrupt("the store's id")));
+}
+
+#[test]
+fn a_local_id_sqlite_cannot_hold_is_refused() {
+    let (mut store, _tmp) = fresh();
+    two_accounts(&mut store);
+    let out_of_range = Err(StoreError::Database(format!("id {} is out of range", u64::MAX)));
+    for change in [
+        Change::QueueJob(Job::new(JobId::new(u64::MAX), AccountId::new(1), JobKind::SyncFolderList)),
+        Change::PutDraft(contract::draft(u64::MAX, 1, "x")),
+        Change::PutOutgoing(contract::outgoing(u64::MAX, OutboxState::Waiting)),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::Send(DraftId::new(u64::MAX)))),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::FollowUp(m(u64::MAX)))),
+        Change::PutScheduled(contract::scheduled(1, 1, Due::Alert(AlertId::new(u64::MAX)))),
+        Change::SetMessageState(m(u64::MAX), MessageState::default()),
+        Change::PutCalendar(contract::calendar(u64::MAX, 1, "home")),
+        Change::SetSyncToken(CalendarId::new(u64::MAX), None),
+        Change::PutCalendarEvent(contract::event(1, u64::MAX)),
+        Change::PutAlert(contract::alert(1, u64::MAX, 1)),
+        Change::RemoveJob(JobId::new(u64::MAX)),
+    ] {
+        assert_eq!(store.apply(&Batch::new().with(change)), out_of_range);
+    }
+    store.apply(&Batch::new().with(Change::PutDraft(contract::draft(1, 1, "x")))).unwrap();
+    let entry = Change::PutScheduled(contract::scheduled(u64::MAX, 1, Due::Send(DraftId::new(1))));
+    assert_eq!(store.apply(&Batch::new().with(entry)), out_of_range);
+    assert_eq!(store.drafts(AccountId::new(u64::MAX)), out_of_range.map(|()| Vec::new()));
+}
+
+#[test]
+fn a_removed_draft_leaves_no_words_in_the_files() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    two_accounts(&mut store);
+    let secret = Draft { text: "the quokkadraft plan".to_owned(), ..contract::draft(1, 1, "x") };
+    let event = CalendarEvent { ical: "SUMMARY:narwhalmeeting".to_owned(), ..contract::event(1, 1) };
+    store
+        .apply(
+            &Batch::new()
+                .with(Change::PutDraft(secret))
+                .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+                .with(Change::PutCalendarEvent(event)),
+        )
+        .unwrap();
+    assert!(!holding(dir, "quokkadraft").is_empty());
+    store.apply(&Batch::new().with(Change::RemoveDraft(DraftId::new(1))).with(Change::RemoveCalendarEvent(CalendarEventId::new(1)))).unwrap();
+    for marker in ["quokkadraft", "narwhalmeeting"] {
+        assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
+    }
+}
+
+#[test]
+fn a_forgotten_sender_refusal_or_sync_token_leaves_nothing_in_the_files() {
+    let tmp = dir();
+    let dir = tmp.path();
+    let mut store = Sqlite::open(dir, StoreConfig::default()).unwrap();
+    two_accounts(&mut store);
+    let refused = OutboxState::Refused { reply: "550 5.1.1 no user penguinrecipient".to_owned() };
+    store
+        .apply(
+            &Batch::new()
+                .with(Change::PutSender(contract::sender("walrusperson@example.org")))
+                .with(Change::PutDraft(contract::draft(1, 1, "x")))
+                .with(Change::PutOutgoing(contract::outgoing(1, refused)))
+                .with(Change::PutCalendar(contract::calendar(1, 1, "home")))
+                .with(Change::SetSyncToken(CalendarId::new(1), Some("http://example.org/sync/ottertoken".to_owned()))),
+        )
+        .unwrap();
+    let forgotten = [
+        (Change::RemoveSender(EmailAddress::new("walrusperson@example.org").unwrap()), "walrusperson"),
+        (Change::RemoveOutgoing(DraftId::new(1)), "penguinrecipient"),
+        (Change::SetSyncToken(CalendarId::new(1), None), "ottertoken"),
+    ];
+    for (change, marker) in forgotten {
+        assert!(!holding(dir, marker).is_empty(), "{marker}");
+        store.apply(&Batch::new().with(change)).unwrap();
+        assert_eq!(holding(dir, marker), Vec::<String>::new(), "{marker}");
+    }
 }

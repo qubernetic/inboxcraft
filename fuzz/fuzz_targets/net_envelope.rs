@@ -20,6 +20,7 @@ fuzz_target!(|data: &[u8]| {
             assert!(!address.name().unwrap_or_default().chars().any(char::is_control), "{address:?}");
         }
     }
+    assert!(!envelope.signs().calendar(), "a header block knows no parts");
     let text = String::from_utf8_lossy(data);
     assert!(addresses(&text).len() <= MAX_ADDRESSES);
     let _ = message_refs(&text);

@@ -58,6 +58,8 @@ pub(crate) fn account(account: &Account, state: Option<&AccountState>) -> Value 
         "label": account.label(),
         "address": account.address().as_str(),
         "display_name": account.display_name(),
+        "signature": account.signature(),
+        "grouped": account.grouped(),
         "username": account.username(),
         "imap": server(account.imap()),
         "submission": account.submission().map(server),
@@ -83,6 +85,7 @@ fn step(report: &StepReport) -> Value {
                 StepStatus::NeedsOwner => {
                     Some("not run: the last sign-in was refused or went unanswered, so only a check the owner starts sends the password again")
                 }
+                StepStatus::NotSet => Some("not run: the account has no submission server"),
                 StepStatus::NotBuilt => Some("not built yet"),
                 StepStatus::Pending | StepStatus::Passed | StepStatus::Failed(_) => None,
             };
@@ -149,7 +152,8 @@ pub(crate) fn message(entry: &Entry) -> Value {
         "id": message.id().get(),
         "account": message.account().get(),
         "folder": message.folder().get(),
-        "uid": summary.uid().get(),
+        "uid": message.moving().is_none().then(|| summary.uid().get()),
+        "moving": message.moving().is_some(),
         "thread": message.thread().map(ThreadId::get),
         "date": view::date(message).map(date),
         "received": summary.received().map(date),

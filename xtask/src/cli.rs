@@ -8,15 +8,18 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::side_by_side::{self, Options};
-use crate::{Context, Error, FAILED, OK, USAGE, assets, cache_prune, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
+use crate::{Context, Error, FAILED, OK, USAGE, assets, cache_prune, changes, ci, cov, flatpak, layers, spdx, stats, test_files, wasm};
 
 const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, changes, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
   assets        every asset file has a row in ATTRIBUTION.md
   cache-prune   delete from target/ all but third-party deps, build and .fingerprint entries (CI, before the cache save)
+  changes [--fold]
+                every change fragment in changes/ is well formed; --fold writes them into CHANGELOG.md, ROADMAP.md,
+                docs/gaps.md and the revision tables, dated today (UTC), and deletes them
   cov [--check] line coverage per crate under cargo llvm-cov nextest; --check fails below the floors in .config/coverage.toml
   flatpak-sources        write contrib/flatpak/cargo-sources.json from Cargo.lock
   flatpak-sources-check  contrib/flatpak/cargo-sources.json matches Cargo.lock
@@ -40,6 +43,7 @@ exit codes: 0 passed, 1 a gate failed, 2 usage or setup error
 pub(crate) enum Command {
     Assets,
     CachePrune,
+    Changes { fold: bool },
     Ci,
     Cov { check: bool },
     FlatpakSources { check: bool },
@@ -71,6 +75,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
         None | Some("help" | "--help" | "-h") => Command::Help,
         Some("assets") => Command::Assets,
         Some("cache-prune") => Command::CachePrune,
+        Some("changes") => Command::Changes { fold: false },
         Some("ci") => Command::Ci,
         Some("cov") => Command::Cov { check: false },
         Some("flatpak-sources") => Command::FlatpakSources { check: false },
@@ -93,6 +98,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocati
             "--fix" => match &mut invocation.command {
                 Command::Spdx { fix } => *fix = true,
                 _ => return Err("`--fix` only goes with `spdx`".to_owned()),
+            },
+            "--fold" => match &mut invocation.command {
+                Command::Changes { fold } => *fold = true,
+                _ => return Err("`--fold` only goes with `changes`".to_owned()),
             },
             "--check" => match &mut invocation.command {
                 Command::Cov { check } => *check = true,
@@ -141,6 +150,7 @@ fn dispatch(command: &Command, ctx: &mut Context, out: &mut dyn Write) -> Result
     match command {
         Command::Assets => assets::gate(&ctx.root, out),
         Command::CachePrune => cache_prune::prune(ctx, out),
+        Command::Changes { fold } => changes::gate(&ctx.root, *fold, &changes::today(), out),
         Command::Ci => ci::gate(ctx, out),
         Command::Cov { check } => cov::gate(ctx, *check, out),
         Command::FlatpakSources { check } => flatpak::gate(&ctx.root, *check, out),

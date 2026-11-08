@@ -3,7 +3,7 @@
 
 use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 
-use super::{FILE, Keep, KeepFile, MAX_FILE, NoKeep};
+use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
 fn chosen() -> Appearance {
     Appearance {
@@ -131,4 +131,116 @@ fn the_owner_s_file_follows_xdg_config_home_then_home_and_is_none_without_either
     assert_eq!(owner_file_with(&[("USERPROFILE", dir_text)]), home);
     assert_eq!(owner_file_with(&[("HOME", "relative/home")]), "none");
     assert_eq!(owner_file_with(&[]), "none");
+}
+
+#[test]
+fn the_keys_are_kept_beside_the_appearance_and_come_back() {
+    use egui::{Key, KeyboardShortcut, Modifiers};
+
+    use crate::keymap::{self, Keymap};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_keys(), None, "nothing kept yet");
+    let mut keymap = Keymap::default();
+    keymap.bind(keymap::SENT, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num3));
+    keymap.unbind(keymap::DONE);
+    keep.store_keys(&keymap).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_keys(), Some(keymap.clone()));
+    let kept = dir.path().join("nested").join(KEYS_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"ui.sent.show\": \"Command+3\""), "{text}");
+    assert_eq!(keep.load(), None, "the appearance file is another file");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"keys\": { \"ui.sent.show\": 3 } }").unwrap();
+    assert_eq!(keep.load_keys(), Some(Keymap::default()));
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_keys(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_keys(), None);
+    // NoKeep keeps no key either.
+    let mut none = NoKeep;
+    none.store_keys(&keymap).unwrap();
+    assert_eq!(none.load_keys(), None);
+    // A keys file that cannot be written is an error.
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_keys(&keymap).is_err());
+    // A path that names no file has no keys' file beside it.
+    assert!(KeepFile::new(std::path::PathBuf::new()).store_keys(&keymap).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::new()).load_keys(), None);
+}
+
+#[test]
+fn the_triage_choices_are_kept_beside_the_appearance_and_come_back() {
+    use inboxcraft_engine::ScreenerMode;
+
+    use super::{TRIAGE_FILE, Triage};
+    use crate::mailbox::InboxView;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_triage(), None, "nothing kept yet");
+    let chosen = Triage { screener: ScreenerMode::Inside, view: InboxView::List, keep_pins: true, hold: Some(30) };
+    keep.store_triage(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_triage(), Some(chosen));
+    let kept = dir.path().join("nested").join(TRIAGE_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"screener\": \"inside\"") && text.contains("\"view\": \"list\"") && text.contains("\"keep_pins\": true"), "{text}");
+    assert!(text.contains("\"hold_seconds\": 30"), "{text}");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"screener\": 3, \"view\": \"tiles\", \"keep_pins\": \"yes\", \"hold_seconds\": 600 }").unwrap();
+    assert_eq!(keep.load_triage(), Some(Triage::default()));
+    assert_eq!(Triage::default(), Triage { screener: ScreenerMode::Off, view: InboxView::Cards, keep_pins: false, hold: None });
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_triage(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_triage(), None);
+    let mut none = NoKeep;
+    none.store_triage(&chosen).unwrap();
+    assert_eq!(none.load_triage(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_triage(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_triage(&chosen).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_triage(), None);
+}
+
+#[test]
+fn the_notification_choices_are_kept_beside_the_appearance_and_come_back() {
+    use inboxcraft_engine::notify::{Level, Settings};
+    use inboxcraft_model::AccountId;
+
+    use super::NOTIFY_FILE;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join(FILE);
+    let mut keep = KeepFile::new(path.clone());
+    assert_eq!(keep.load_notify(), None, "nothing kept yet");
+    let mut chosen = Settings::default();
+    chosen.set_level(AccountId::new(2), Level::People);
+    chosen.returns = false;
+    keep.store_notify(&chosen).unwrap();
+    assert_eq!(KeepFile::new(path.clone()).load_notify(), Some(chosen.clone()));
+    let kept = dir.path().join("nested").join(NOTIFY_FILE);
+    let text = std::fs::read_to_string(&kept).unwrap();
+    assert!(text.contains("\"level\": \"people\"") && text.contains("\"returns\": false"), "{text}");
+    // Damaged, huge and wrong: the defaults or nothing.
+    std::fs::write(&kept, b"{ \"accounts\": [{ \"account\": 0, \"level\": \"none\" }, { \"account\": 3, \"level\": \"loud\" }], \"returns\": 1 }")
+        .unwrap();
+    assert_eq!(keep.load_notify(), Some(Settings::default()));
+    std::fs::write(&kept, b"\xff not json").unwrap();
+    assert_eq!(keep.load_notify(), None);
+    std::fs::write(&kept, vec![b' '; MAX_FILE + 1]).unwrap();
+    assert_eq!(keep.load_notify(), None);
+    let mut none = NoKeep;
+    none.store_notify(&chosen).unwrap();
+    assert_eq!(none.load_notify(), None);
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where the folder should be").unwrap();
+    assert!(KeepFile::new(blocker.join(FILE)).store_notify(&chosen).is_err());
+    assert!(KeepFile::new(std::path::PathBuf::from("/")).store_notify(&chosen).is_err());
+    assert_eq!(KeepFile::new(std::path::PathBuf::from("/")).load_notify(), None);
 }

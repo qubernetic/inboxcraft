@@ -45,6 +45,7 @@ fn the_worker_backs_off_and_keeps_its_queue_until_it_is_online() -> Result {
             backing_off(2),
             EventKind::Connection(ConnectionState::Connecting),
             EventKind::Connection(ConnectionState::Online),
+            EventKind::Abilities { uid_expunge: true },
         ]
     );
     // Both jobs waited and ran, in order, and neither failed.
@@ -84,7 +85,8 @@ fn the_wait_takes_new_jobs_and_keeps_its_length() -> Result {
     let clock = SystemClock::new();
     let before = clock.now();
     run.job(JobKind::SyncFolderList)?;
-    run.until(|kind| *kind == EventKind::Connection(ConnectionState::Online))?;
+    // Online, then what the server can do.
+    run.until(|kind| matches!(kind, EventKind::Abilities { .. }))?;
     let took = clock.now().duration_since(before).unwrap_or_default();
     assert!(took >= Duration::from_millis(250), "a new job cut the wait short: {took:?}");
     let folders = run.until(|kind| matches!(kind, EventKind::Folders { .. }))?;

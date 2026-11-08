@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The navigation rail and the folder pane. The rail runs the preset's gradient at full strength down the window's
-//! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds the account picker,
-//! the unified views and each account's folders with their unread badges.
+//! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds New message,
+//! the account picker, the unified views, the Outbox while anything is in it (its badge how many), and each account's
+//! folders with their unread badges.
 
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
+use super::Screen;
 use super::paint::{NavRow, line_height, nav_row};
 use crate::component::avatar;
 use crate::component::button::IconButton;
@@ -38,8 +40,25 @@ pub(super) fn rail_width(theme: &Theme) -> f32 {
 pub(super) struct Rail {
     pub(super) mail: bool,
     pub(super) sent: bool,
+    pub(super) later: bool,
     pub(super) search: bool,
+    pub(super) calendar: bool,
     pub(super) settings: bool,
+}
+
+impl Rail {
+    /// The actions of the buttons pressed, besides the settings, which the rail's button opens and closes.
+    pub(super) fn actions(&self) -> impl Iterator<Item = &'static str> {
+        [
+            (self.mail, keymap::MAIL),
+            (self.sent, keymap::SENT),
+            (self.later, keymap::LATER),
+            (self.search, keymap::FIND),
+            (self.calendar, keymap::CALENDAR),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, action)| pressed.then_some(action))
+    }
 }
 
 /// The app's mark at the rail's top: the mail icon on a tile of the ink, faint.
@@ -77,10 +96,20 @@ pub(super) struct RailPlace {
     pub(super) top: f32,
 }
 
-/// Draws the rail over the whole of `ui`: the app's mark, the views (Mail active unless `settings` or `adding` show
-/// another page; the views not built yet disabled, saying so), and at the foot the settings and the owner. Its left
-/// corners follow the window's `corner`.
-pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, settings: bool, adding: bool, place: RailPlace) -> Rail {
+/// Draws the rail over the whole of `ui`: the app's mark, the views (the `screen` shown active unless `settings` or
+/// `adding` show another page; the views not built yet disabled, saying so), and at the foot the settings and the
+/// owner. Its left corners follow the window's `corner`.
+#[expect(clippy::too_many_arguments, reason = "the rail reads the window's state, which is not one value")]
+pub(super) fn rail(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    screen: Screen,
+    settings: bool,
+    adding: bool,
+    place: RailPlace,
+) -> Rail {
     let corner = place.corner;
     let s = &theme.spacing;
     let rect = ui.max_rect();
@@ -94,8 +123,10 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let ink = rail_ink(theme);
     let not_yet = tr!("Not available yet");
     let tile = RAIL_TILE;
-    let mail_shown = !settings && !adding;
+    let shown = !settings && !adding;
+    let mail_shown = shown && screen == Screen::Mail;
     let in_sent = mail_shown && mailbox.place() == Place::View(FolderRole::Sent);
+    let in_later = mail_shown && matches!(mailbox.place(), Place::Later(_));
     let mut asked = Rail::default();
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = s.s;
@@ -106,14 +137,27 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         IconButton::new(IconId::Home, tr!("Start")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
         asked.mail = IconButton::new(IconId::Inbox, tr!("Mail"))
             .action(keymap::MAIL)
-            .active(mail_shown && !in_sent)
+            .active(mail_shown && !in_sent && !in_later)
             .ink(ink)
             .side(tile)
             .show(ui, theme, keymap)
             .clicked();
-        IconButton::new(IconId::Calendar, tr!("Calendar")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
-        IconButton::new(IconId::Pin, tr!("Pins")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
-        asked.sent = IconButton::new(IconId::Send, tr!("Sent mail")).active(in_sent).ink(ink).side(tile).show(ui, theme, keymap).clicked();
+        asked.calendar = IconButton::new(IconId::Calendar, tr!("Calendar"))
+            .action(keymap::CALENDAR)
+            .active(shown && screen == Screen::Calendar)
+            .ink(ink)
+            .side(tile)
+            .show(ui, theme, keymap)
+            .clicked();
+        asked.later =
+            IconButton::new(IconId::Pin, tr!("Later")).action(keymap::LATER).active(in_later).ink(ink).side(tile).show(ui, theme, keymap).clicked();
+        asked.sent = IconButton::new(IconId::Send, tr!("Sent mail"))
+            .action(keymap::SENT)
+            .active(in_sent)
+            .ink(ink)
+            .side(tile)
+            .show(ui, theme, keymap)
+            .clicked();
         asked.search = IconButton::new(IconId::Search, tr!("Search mail")).action(keymap::FIND).ink(ink).side(tile).show(ui, theme, keymap).clicked();
     });
     ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
@@ -136,6 +180,8 @@ pub(super) fn rail(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
 pub(super) struct Asked {
     pub(super) narrow: Option<Option<u64>>,
     pub(super) open: Option<Place>,
+    /// New message.
+    pub(super) compose: bool,
 }
 
 fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
@@ -206,11 +252,18 @@ fn folder_icon(role: Option<FolderRole>) -> IconId {
 
 /// Draws the pane and returns what was asked for; the caller applies it after the frame's drawing. Accounts are added
 /// in the settings, not here: most people have one, and a link here would hold its room for nothing.
-pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Asked {
+pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
     ui.add_space(theme.spacing.s);
-    ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+        if !mailbox.accounts().is_empty() {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                asked.compose = IconButton::new(IconId::Compose, tr!("New message")).action(keymap::COMPOSE).show(ui, theme, keymap).clicked();
+            });
+        }
+    });
     if !mailbox.accounts().is_empty() {
         ui.add_space(theme.spacing.s);
         ui.scope(|ui| account_picker(ui, theme, mailbox, &mut asked));
@@ -235,6 +288,23 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Asked {
             };
             if nav_row(ui, theme, &row).clicked() {
                 asked.open = Some(Place::View(view.role));
+            }
+        }
+        let sends = u64::try_from(mailbox.outbox().len()).unwrap_or(u64::MAX);
+        if sends > 0 {
+            let text = tr!("Outbox");
+            let spoken = if sends == 1 { tr!("Outbox, 1 send").to_owned() } else { tr!("Outbox, {count} sends", count = sends) };
+            let row = NavRow {
+                text,
+                spoken,
+                badge: sends,
+                selected: !searching && mailbox.place() == Place::Outbox,
+                depth: 0,
+                icon: Some(IconId::Snooze),
+                enabled: true,
+            };
+            if nav_row(ui, theme, &row).clicked() {
+                asked.open = Some(Place::Outbox);
             }
         }
         for account in mailbox.accounts().iter().filter(|account| mailbox.narrowed().is_none_or(|id| id == account.id)) {

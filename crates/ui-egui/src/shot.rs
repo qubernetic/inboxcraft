@@ -18,18 +18,39 @@
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
 //! sample: `form` (typed by hand), `detected` (after Detect), `checking` (half the steps in), `passed` or `failed`
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
-//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page.
-//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts. `showcase` set to `true` fills the parts of the list that have no data yet with
-//! invented data ([`sample::showcase`]: the screener and grouped inbox cards) and gives their buttons keys; `step`
+//! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
+//! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
+//! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
+//! `notifications` set to `true` the Notifications page (Studio notifying of people only, and a desk that runs in the
+//! background and starts with the computer, [`PicturedDesk`]). `palette` opens the command palette with that text
+//! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
+//! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
+//! that summary, whose details show in the side panel; `edit_event` opens the event editor on a `new` event or, with
+//! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
+//! opens the
+//! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
+//! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
+//! `template` (two people and a template with a blank); the first account then has an invented signature.
+//! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts.
+//! `open` takes `{"role": "senders"}` for "New senders", and `view` shows the inbox's groups as `cards` (when left
+//! out), a grouped `list` or the `simple` list. `showcase` set to `true` shows invented waiting senders and groups
+//! instead of the sample's ([`sample::showcase`]) and gives their buttons keys; `step`
 //! selects that many rows down by keyboard, as the arrow keys do, so the selected row shows the hover actions. `act`
-//! does a hover action to the selected row (`read`, `unread`, `done` or `delete`), so the toast with Undo shows;
-//! `slide` set to `true` catches a `done` or `delete` row sliding out instead, four frames in with motion on.
+//! does an act to the selected row (`read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; `accept` into
+//! Updates, `accept_open`, `block`, or `newsletters` for its sender's group), so the toast shows; `slide` set to `true` catches a `done`, `archive` or `delete` row sliding out instead, four frames in with
+//! motion on.
 //! `icons` set to `true` draws every icon of
 //! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
 //! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
-//! at `[x, y]` points, so what lies under it shows its hover;
+//! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
+//! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
+//! or `parked`), `show_done` set to `true` lists the done mail in its old place, and `picker` opens the time picker
+//! over the selected message with that text typed (`""` for none). `outbox` shows the sample with its first account
+//! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
+//! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
+//! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
 //! motion, so it shows where each motion ends.
 
@@ -44,8 +65,10 @@ use inboxcraft_model::{CheckStep, ErrorKind, Role, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde::Deserialize;
 
+use crate::calendar::{EventRow, View};
 use crate::component::gallery;
-use crate::mailbox::{Act, Mailbox, Place};
+use crate::compose::Line;
+use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Pile, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
 use crate::theme::{self, Look, Mode, Preset, TextScale, Theme};
@@ -62,7 +85,7 @@ pub const SHOT_TIME: i64 = 1_793_869_200;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum Open {
-    /// A unified view by role name (`inbox`, `sent` ...).
+    /// A unified view by role name (`inbox`, `sent` ...), or `senders` for "New senders".
     Role(String),
     /// A folder by id.
     Folder(u64),
@@ -122,16 +145,62 @@ pub struct Shot {
     /// Whether the settings sheet is open on Accounts.
     #[serde(default)]
     pub accounts: Option<bool>,
+    /// Whether the settings sheet is open on Shortcuts.
+    #[serde(default)]
+    pub shortcuts: Option<bool>,
+    /// Whether the settings sheet is open on Sending, the first account signed.
+    #[serde(default)]
+    pub sending: Option<bool>,
+    /// Whether the settings sheet is open on Triage.
+    #[serde(default)]
+    pub triage: Option<bool>,
+    /// Whether the settings sheet is open on Notifications.
+    #[serde(default)]
+    pub notifications: Option<bool>,
+    /// How the unified inbox shows its groups: `cards` when left out, `list` or `simple`.
+    #[serde(default)]
+    pub view: Option<String>,
+    /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
+    /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
+    /// could be under it), `floating` (written, then a message opened), `reply` (a reply with a line written) or
+    /// `template` (two people and a template whose blank is left).
+    #[serde(default)]
+    pub compose: Option<String>,
+    /// The action waiting for a key on the Shortcuts page.
+    #[serde(default)]
+    pub capture: Option<String>,
+    /// The text typed into the command palette, which opens it.
+    #[serde(default)]
+    pub palette: Option<String>,
+    /// Whether the calendar screen shows.
+    #[serde(default)]
+    pub calendar: Option<bool>,
+    /// The calendar's view (`day`, `week`, `month` or `agenda`), which shows the calendar screen.
+    #[serde(default)]
+    pub calendar_view: Option<String>,
+    /// The summary of the calendar event picked, which shows the calendar screen and the event's details.
+    #[serde(default)]
+    pub event: Option<String>,
+    /// The event editor on a `new` event or, with `edit`, on the picked one; shows the calendar screen.
+    #[serde(default)]
+    pub edit_event: Option<String>,
+    /// Whether the picked event is deleted, so its toast shows.
+    #[serde(default)]
+    pub delete_event: Option<bool>,
     /// Whether the window has no account yet (and can add one) instead of the sample's.
     #[serde(default)]
     pub first: Option<bool>,
+    /// Whether the sample's inbox holds Odile's two invitations to lunch (`sample::invitations`).
+    #[serde(default)]
+    pub invitations: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
     /// How many rows down the keyboard selects.
     #[serde(default)]
     pub step: Option<u8>,
-    /// A hover action on the selected row: `read`, `unread`, `done` or `delete`; the toast shows after it.
+    /// An act on the selected row: `read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; for its sender
+    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it.
     #[serde(default)]
     pub act: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
@@ -155,6 +224,22 @@ pub struct Shot {
     /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
     #[serde(default)]
     pub pointer: Option<[f32; 2]>,
+    /// Some of the sample's mail snoozed, pinned, parked, done and back from a snooze first ([`sample::put_away`]).
+    #[serde(default)]
+    pub put_away: Option<bool>,
+    /// The pile of "Later" to open: `snoozed`, `pins` or `parked`.
+    #[serde(default)]
+    pub later: Option<String>,
+    /// Whether "Show done" lists the done mail in its old place.
+    #[serde(default)]
+    pub show_done: Option<bool>,
+    /// The time picker open over the selected message, with this text typed (`""` for none).
+    #[serde(default)]
+    pub picker: Option<String>,
+    /// The sending sample: `waiting` (the outbox), `countdown` (a send's toast), `schedule` (the composer with a time
+    /// picked) or `bounce` (the bounced message open).
+    #[serde(default)]
+    pub outbox: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -230,19 +315,265 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let act = match name.as_str() {
         "read" => Act::Read,
         "unread" => Act::Unread,
+        "flag" => Act::Flag,
+        "unflag" => Act::Unflag,
         "done" => Act::Done,
+        "archive" => Act::Archive,
         "delete" => Act::Delete,
-        other => return Err(bad(format!("{}: act {other:?} is not read, unread, done or delete", shot.out))),
+        "accept" => Act::Accept { group: Some(GroupKind::Updates), open: false },
+        "accept_open" => Act::Accept { group: None, open: true },
+        "block" => Act::Block,
+        "newsletters" => Act::Group(Some(GroupKind::Newsletters)),
+        other => {
+            return Err(bad(format!(
+                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters",
+                shot.out
+            )));
+        }
     };
     let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: an act needs a selected row", shot.out))) };
     if shot.slide == Some(true) {
         if !act.slides() {
-            return Err(bad(format!("{}: only done and delete slide out", shot.out)));
+            return Err(bad(format!("{}: only done, archive and delete slide out", shot.out)));
         }
         app.set_reduce_motion(false);
         app.mailbox_mut().start(id, act);
     } else {
         app.mailbox_mut().act(id, act);
+    }
+    Ok(())
+}
+
+/// Puts the calendar screen in the view of `shot` and picks its event.
+fn calendar(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    let (calendar, mailbox) = app.calendar_mut();
+    if let Some(name) = &shot.calendar_view {
+        let view = View::named(name).ok_or_else(|| bad(format!("{}: calendar view {name:?} is not day, week, month or agenda", shot.out)))?;
+        calendar.set_view(mailbox, view);
+    }
+    if let Some(summary) = &shot.event {
+        let key = calendar.events().find(|event| event.summary == *summary).map(EventRow::key);
+        let Some(key) = key else { return Err(bad(format!("{}: no calendar event {summary:?} in the view", shot.out))) };
+        calendar.pick(Some(key));
+    }
+    let picked = |calendar: &crate::calendar::Calendar, what: &str| {
+        calendar.picked().map(|_| ()).ok_or_else(|| bad(format!("{}: {what} needs an event picked with \"event\"", shot.out)))
+    };
+    match shot.edit_event.as_deref() {
+        None => {}
+        Some("new") => calendar.new_event(),
+        Some("edit") => {
+            picked(calendar, "edit_event")?;
+            calendar.edit_picked();
+        }
+        Some(other) => return Err(bad(format!("{}: edit_event {other:?} is not new or edit", shot.out))),
+    }
+    if shot.delete_event == Some(true) {
+        picked(calendar, "delete_event")?;
+        calendar.delete_picked(mailbox);
+    }
+    Ok(())
+}
+
+/// Shows the places of `shot` beyond the mail: the calendar, the Shortcuts page with an action waiting for a key, the
+/// command palette with its text.
+fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
+    if let Some(scene) = &shot.compose {
+        compose(app, &shot.out, scene)?;
+    }
+    if shot.calendar == Some(true) || shot.calendar_view.is_some() || shot.event.is_some() || shot.edit_event.is_some() || shot.delete_event.is_some()
+    {
+        app.show_calendar();
+        calendar(app, shot)?;
+    }
+    if shot.triage == Some(true) {
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Triage, &appearance);
+    }
+    if shot.notifications == Some(true) {
+        app.mailbox_mut().set_notify_level(2, inboxcraft_engine::notify::Level::People);
+        app.set_desk(Box::new(PicturedDesk));
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Notifications, &appearance);
+    }
+    if shot.sending == Some(true) {
+        sign(app);
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Sending, &appearance);
+    }
+    if shot.shortcuts == Some(true) {
+        app.open_shortcuts();
+    }
+    if let Some(waiting) = &shot.capture {
+        let Some(action) = crate::keymap::action(waiting).filter(|_| shot.shortcuts == Some(true)) else {
+            return Err(bad(format!("{}: capture {waiting:?} is not an action on the Shortcuts page", shot.out)));
+        };
+        app.settings_mut().capture(action.id);
+    }
+    if let Some(text) = &shot.palette {
+        let palette = app.palette_mut();
+        palette.open();
+        palette.set_query(text);
+    }
+    Ok(())
+}
+
+/// The desk of the pictures: InboxCraft runs in the background and starts with the computer, and a change changes
+/// nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PicturedDesk;
+
+impl crate::desk::Desk for PicturedDesk {
+    fn background(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn set_background(&mut self, _on: bool) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn login(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn asking(&self) -> bool {
+        false
+    }
+
+    fn set_login(&mut self, _on: bool) {}
+
+    fn answer(&mut self) -> Option<Result<(), String>> {
+        None
+    }
+}
+
+/// Signs the first account's messages with an invented signature.
+fn sign(app: &mut InboxApp) {
+    // The sample takes every signature; a refusal would only leave the picture without one.
+    let _ = app.mailbox_mut().run("compose.signature", &serde_json::json!({ "account": 1, "signature": "Mira\nPlot 14" }));
+    app.mailbox_mut().refresh();
+}
+
+/// Opens the composer as `scene` asks.
+fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
+    if !["new", "written", "bad", "suggest", "floating", "reply", "template"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, reply or template")));
+    }
+    sign(app);
+    if scene == "reply" {
+        // Not selected first: a message selected before the first frame counts as pressed and floats the composer.
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id);
+        if id.is_none_or(|id| !app.answer(id, crate::compose::Answer::Reply)) {
+            return Err(bad(format!("{out}: the reply did not open")));
+        }
+        let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+        let text = format!("The second week works for me. I can bring the hose.{}", composer.text());
+        *composer.text_mut() = text;
+        composer.edited();
+        return composer.save(mailbox);
+    }
+    app.compose();
+    let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+    let mut to = |text: &str| -> Result<(), UiError> {
+        if let Some(field) = composer.typing_mut(Line::To) {
+            text.clone_into(field);
+        }
+        composer.typed(mailbox, Line::To)
+    };
+    match scene {
+        "written" | "bad" | "floating" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "suggest" => to("Odile Brannock <odile@example.org>, te")?,
+        _ => {}
+    }
+    if scene == "bad" {
+        to("ansel.example.org,")?;
+    }
+    if scene == "template" {
+        let params = serde_json::json!({
+            "account": composer.account(),
+            "name": "Work party",
+            "subject": "Work party on Saturday",
+            "text": "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
+        });
+        mailbox.run("template.save", &params)?;
+        return composer.use_template(mailbox, "Work party");
+    }
+    if scene != "new" {
+        "Work party on Saturday".clone_into(composer.subject_mut());
+        let text = format!(
+            "Hi both,\n\nWe meet at the plot at ten and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.{}",
+            composer.text()
+        );
+        *composer.text_mut() = text;
+        composer.edited();
+        composer.save(mailbox)?;
+    }
+    if scene == "suggest" {
+        composer.step(true);
+    }
+    if scene == "floating" {
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
+        app.mailbox_mut().select(id);
+    }
+    Ok(())
+}
+
+/// The reply the server refuses the outbox's picture send with.
+const REFUSAL: &str = "550 5.1.1 hollis@example.org: no such mailbox here";
+
+/// Writes a message to `to` with `subject` and a line of text in the composer, and sends it: at `later`, or after the
+/// hold.
+fn send(app: &mut InboxApp, out: &str, to: &str, subject: &str, later: Option<Timestamp>) -> Result<(), UiError> {
+    app.compose();
+    let (Some(composer), mailbox) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+    if let Some(field) = composer.typing_mut(Line::To) {
+        to.clone_into(field);
+    }
+    composer.typed(mailbox, Line::To)?;
+    subject.clone_into(composer.subject_mut());
+    composer.edited();
+    composer.set_later(later);
+    app.send_composer();
+    if app.composer().is_some() {
+        return Err(bad(format!("{out}: {subject:?} was not sent: {}", app.mailbox().error().unwrap_or("no reason"))));
+    }
+    Ok(())
+}
+
+/// Tomorrow morning, 08:00 in UTC, from the picture's time.
+fn tomorrow_morning() -> Result<Timestamp, UiError> {
+    Timestamp::from_unix(SHOT_TIME + 23 * 3_600, 0).ok_or_else(|| bad("no time"))
+}
+
+/// Puts the sending sample in `scene`, on `clock`.
+fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Result<(), UiError> {
+    match scene {
+        "waiting" => {
+            send(app, out, "Hollis Fenwick <hollis@example.org>,", "Plot 14 handover", None)?;
+            clock.advance(std::time::Duration::from_secs(6));
+            app.mailbox_mut().pump(&mut Scripted::default().refusing(REFUSAL));
+            send(app, out, "Petra Harbour <petra@example.org>,", "Re: Draft logo for the bakery", Some(tomorrow_morning()?))?;
+            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            clock.advance(std::time::Duration::from_secs(1));
+            app.mailbox_mut().open(Place::Outbox);
+        }
+        "countdown" => {
+            send(app, out, "Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,", "Work party on Saturday", None)?;
+            clock.advance(std::time::Duration::from_secs(1));
+        }
+        "schedule" => {
+            compose(app, out, "written")?;
+            let (Some(composer), _) = app.composer_mut() else { return Err(bad(format!("{out}: the composer did not open"))) };
+            composer.set_later(Some(tomorrow_morning()?));
+            app.open_send_later();
+        }
+        "bounce" => {
+            app.mailbox_mut().open(Place::View(Role::Sent));
+            let id = app.mailbox().messages().iter().find(|row| row.bounced.is_some()).map(|row| row.id);
+            let Some(id) = id else { return Err(bad(format!("{out}: no bounced message in Sent"))) };
+            app.mailbox_mut().select(Some(id));
+        }
+        other => return Err(bad(format!("{out}: outbox {other:?} is not waiting, countdown, schedule or bounce"))),
     }
     Ok(())
 }
@@ -256,6 +587,19 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.onboard.is_some()
         || shot.settings.is_some()
         || shot.accounts.is_some()
+        || shot.shortcuts.is_some()
+        || shot.sending.is_some()
+        || shot.triage.is_some()
+        || shot.notifications.is_some()
+        || shot.view.is_some()
+        || shot.compose.is_some()
+        || shot.capture.is_some()
+        || shot.palette.is_some()
+        || shot.calendar.is_some()
+        || shot.calendar_view.is_some()
+        || shot.event.is_some()
+        || shot.edit_event.is_some()
+        || shot.delete_event.is_some()
         || shot.first.is_some()
         || shot.showcase.is_some()
         || shot.step.is_some()
@@ -264,6 +608,11 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.text_scale.is_some()
         || shot.size.is_some()
         || shot.frame.is_some()
+        || shot.put_away.is_some()
+        || shot.later.is_some()
+        || shot.show_done.is_some()
+        || shot.picker.is_some()
+        || shot.outbox.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -636,13 +985,22 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return icon_sheet(shot, mode, &look);
     }
     let time = Timestamp::from_unix(SHOT_TIME, 0).ok_or_else(|| bad("no time"))?;
+    // One clock for the session and the list, so a scene can let time pass.
+    let clock = FakeClock::new(time);
     let session = if shot.first == Some(true) {
         let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
-        inboxcraft_engine::Session::new(Box::new(store), Box::new(FakeClock::new(time))).map_err(UiError::Engine)?
+        inboxcraft_engine::Session::new(Box::new(store), Box::new(clock.clone())).map_err(UiError::Engine)?
+    } else if shot.outbox.is_some() {
+        sample::sending(Box::new(clock.clone()))?
+    } else if shot.invitations == Some(true) {
+        let mut store = sample::mailbox(time)?;
+        let batch = sample::invitations(time)?.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
+        inboxcraft_store::Storage::apply(&mut store, &batch).map_err(UiError::sample)?;
+        sample::session_over(store, Box::new(clock.clone()))?
     } else {
-        sample::session(Box::new(FakeClock::new(time)))?
+        sample::session(Box::new(clock.clone()))?
     };
-    let mailbox = Mailbox::new(session, Box::new(FakeClock::new(time)));
+    let mailbox = Mailbox::new(session, Box::new(clock.clone()));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     if shot.first == Some(true) {
         app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
@@ -666,7 +1024,18 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if let Some(account) = shot.narrow {
         app.mailbox_mut().narrow(Some(account));
     }
+    if let Some(name) = &shot.view {
+        let view = InboxView::named(name).ok_or_else(|| bad(format!("{}: view {name:?} is not cards, list or simple", shot.out)))?;
+        app.mailbox_mut().set_inbox_view(view);
+    }
+    if shot.put_away == Some(true) {
+        sample::put_away(app.mailbox_mut())?;
+    }
+    if shot.show_done == Some(true) {
+        app.mailbox_mut().set_show_done(true);
+    }
     match &shot.open {
+        Some(Open::Role(name)) if name == "senders" => app.mailbox_mut().open(Place::Senders),
         Some(Open::Role(name)) => {
             let role = [Role::Inbox, Role::Drafts, Role::Sent, Role::Archive, Role::Junk, Role::Trash]
                 .into_iter()
@@ -676,6 +1045,10 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
         Some(Open::Folder(id)) => app.mailbox_mut().open(Place::Folder(*id)),
         None => {}
+    }
+    if let Some(name) = &shot.later {
+        let pile = Pile::named(name).ok_or_else(|| bad(format!("{}: pile {name:?} is not snoozed, pins or parked", shot.out)))?;
+        app.mailbox_mut().open(Place::Later(pile));
     }
     if let Some(text) = &shot.search {
         app.search(text);
@@ -715,6 +1088,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));
     }
     act(&mut app, shot)?;
+    if let Some(typed) = &shot.picker {
+        if app.mailbox().selected().is_none() {
+            return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));
+        }
+        app.open_picker(typed);
+    }
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;
     }
@@ -723,6 +1102,10 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.accounts == Some(true) {
         app.open_accounts();
+    }
+    places(&mut app, shot)?;
+    if let Some(scene) = &shot.outbox {
+        outbox(&mut app, &clock, &shot.out, scene)?;
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));

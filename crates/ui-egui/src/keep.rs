@@ -1,23 +1,77 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Where the appearance choices are kept between runs: through a [`Keep`] the app hands in.
+//! Where the appearance choices and the keys are kept between runs: through a [`Keep`] the app hands in.
 //!
 //! The desktop app keeps them in `inboxcraft/appearance.json` in the owner's config folder ([`KeepFile`]), the sample
 //! window too: the file holds no mail and nothing about an account. The file is read as outside data
 //! ([`Appearance::from_value`]): a choice that cannot be read is the default, and a file larger than any appearance is
 //! not read at all. It is written to a temporary file first and moved over the old one, so a crash mid-write leaves
-//! the old choices. A window without a config folder gets [`NoKeep`].
+//! the old choices. The keys go into [`KEYS_FILE`] beside it, read the same way ([`Keymap::from_value`]), and the
+//! triage choices (the screener's mode, the inbox view, whether a pin outlasts done, and how long a send is held) into [`TRIAGE_FILE`] ([`Triage::from_value`]), and the
+//! notification choices (each account's level, returned snoozes and reminders) into [`NOTIFY_FILE`]
+//! ([`NotifySettings::from_value`]); that file names accounts by their number only. A window without a config folder
+//! gets [`NoKeep`].
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use inboxcraft_engine::appearance::Appearance;
+use inboxcraft_engine::notify::Settings as NotifySettings;
+use inboxcraft_engine::{Hold, ScreenerMode};
+use serde_json::{Value, json};
+
+use crate::keymap::Keymap;
+use crate::mailbox::InboxView;
 
 /// The file's name.
 pub const FILE: &str = "appearance.json";
 
-/// The largest file read, in bytes; an appearance takes a few hundred.
+/// The name of the keys' file, beside [`FILE`].
+pub const KEYS_FILE: &str = "shortcuts.json";
+
+/// The name of the triage choices' file, beside [`FILE`].
+pub const TRIAGE_FILE: &str = "triage.json";
+
+/// The name of the notification choices' file, beside [`FILE`].
+pub const NOTIFY_FILE: &str = "notify.json";
+
+/// The triage choices kept between runs: what the screener does with a new sender's first mail, how the unified
+/// inbox shows its groups, whether a pin stays on a message when it is done, and how long a send is held before it
+/// goes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Triage {
+    /// The screener's mode.
+    pub screener: ScreenerMode,
+    /// How the unified inbox shows its groups.
+    pub view: InboxView,
+    /// A pin stays on a message when it is done.
+    pub keep_pins: bool,
+    /// How long a send is held, in seconds ([`Hold::MIN`] to [`Hold::MAX`]); `None` until it was kept.
+    pub hold: Option<u8>,
+}
+
+impl Triage {
+    /// The choices `value` holds, read as outside data: a choice that cannot be read is the default.
+    #[must_use]
+    pub fn from_value(value: &Value) -> Self {
+        let named = |key: &str| value.get(key).and_then(Value::as_str);
+        Self {
+            screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
+            view: named("view").and_then(InboxView::named).unwrap_or_default(),
+            keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
+            hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
+        }
+    }
+
+    /// The choices as they are written.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins, "hold_seconds": self.hold })
+    }
+}
+
+/// The largest file read, in bytes; an appearance takes a few hundred, the keys about a thousand.
 pub const MAX_FILE: usize = 16 * 1024;
 
 /// Keeps the appearance choices between runs.
@@ -31,6 +85,48 @@ pub trait Keep: Send {
     ///
     /// Why nothing was kept, as the owner reads it.
     fn store(&mut self, appearance: &Appearance) -> Result<(), String>;
+
+    /// The keys kept, if any could be read; none by default.
+    fn load_keys(&self) -> Option<Keymap> {
+        None
+    }
+
+    /// Keeps `keymap` in place of the keys kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_keys(&mut self, _keymap: &Keymap) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The triage choices kept, if any could be read; none by default.
+    fn load_triage(&self) -> Option<Triage> {
+        None
+    }
+
+    /// Keeps `triage` in place of the choices kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_triage(&mut self, _triage: &Triage) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The notification choices kept, if any could be read; none by default.
+    fn load_notify(&self) -> Option<NotifySettings> {
+        None
+    }
+
+    /// Keeps `settings` in place of the notification choices kept; keeps nothing by default.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing was kept, as the owner reads it.
+    fn store_notify(&mut self, _settings: &NotifySettings) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// The keeping of a window that may not write files: nothing.
@@ -86,33 +182,81 @@ impl KeepFile {
     }
 }
 
+impl KeepFile {
+    /// The keys' file, beside the appearance's; none when the appearance's path names no file.
+    fn keys_path(&self) -> Option<PathBuf> {
+        self.beside(KEYS_FILE)
+    }
+
+    /// The file `name` beside the appearance's; none when the appearance's path names no file.
+    fn beside(&self, name: &str) -> Option<PathBuf> {
+        self.path.file_name().map(|_| self.path.with_file_name(name))
+    }
+}
+
+/// The JSON in `path`, unless it is missing, larger than [`MAX_FILE`] or not JSON.
+fn read_json(path: &Path) -> Option<Value> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    // One byte past the cap tells a file that is too large from one that is just large enough.
+    file.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > MAX_FILE {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Writes `value` into `path` through a temporary file moved over the old one.
+fn write_json(path: &Path, value: &Value) -> Result<(), String> {
+    let failed = |error: std::io::Error| format!("{}: {error}", path.display());
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder).map_err(failed)?;
+    }
+    let text = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.new");
+    let written = std::fs::File::create(&temporary).and_then(|mut file| file.write_all(text.as_bytes()).and_then(|()| file.sync_all()));
+    if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, path)) {
+        // Nothing is left half written; a temporary file that could not be removed is overwritten next time.
+        let _ = std::fs::remove_file(&temporary);
+        return Err(failed(error));
+    }
+    Ok(())
+}
+
 impl Keep for KeepFile {
     fn load(&self) -> Option<Appearance> {
-        let file = std::fs::File::open(&self.path).ok()?;
-        let mut bytes = Vec::new();
-        // One byte past the cap tells a file that is too large from one that is just large enough.
-        file.take(u64::try_from(MAX_FILE).unwrap_or(u64::MAX).saturating_add(1)).read_to_end(&mut bytes).ok()?;
-        if bytes.len() > MAX_FILE {
-            return None;
-        }
-        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-        Some(Appearance::from_value(&value))
+        read_json(&self.path).map(|value| Appearance::from_value(&value))
     }
 
     fn store(&mut self, appearance: &Appearance) -> Result<(), String> {
-        let failed = |error: std::io::Error| format!("{}: {error}", self.path.display());
-        if let Some(folder) = self.path.parent() {
-            std::fs::create_dir_all(folder).map_err(failed)?;
-        }
-        let text = serde_json::to_string_pretty(&appearance.to_value()).map_err(|error| error.to_string())?;
-        let temporary = self.path.with_extension("json.new");
-        let written = std::fs::File::create(&temporary).and_then(|mut file| file.write_all(text.as_bytes()).and_then(|()| file.sync_all()));
-        if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, &self.path)) {
-            // Nothing is left half written; a temporary file that could not be removed is overwritten next time.
-            let _ = std::fs::remove_file(&temporary);
-            return Err(failed(error));
-        }
-        Ok(())
+        write_json(&self.path, &appearance.to_value())
+    }
+
+    fn load_keys(&self) -> Option<Keymap> {
+        read_json(&self.keys_path()?).map(|value| Keymap::from_value(&value))
+    }
+
+    fn store_keys(&mut self, keymap: &Keymap) -> Result<(), String> {
+        let path = self.keys_path().ok_or_else(|| format!("{}: no file to keep the keys beside", self.path.display()))?;
+        write_json(&path, &keymap.to_value())
+    }
+
+    fn load_triage(&self) -> Option<Triage> {
+        read_json(&self.beside(TRIAGE_FILE)?).map(|value| Triage::from_value(&value))
+    }
+
+    fn store_triage(&mut self, triage: &Triage) -> Result<(), String> {
+        let path = self.beside(TRIAGE_FILE).ok_or_else(|| format!("{}: no file to keep the triage choices beside", self.path.display()))?;
+        write_json(&path, &triage.to_value())
+    }
+
+    fn load_notify(&self) -> Option<NotifySettings> {
+        read_json(&self.beside(NOTIFY_FILE)?).map(|value| NotifySettings::from_value(&value))
+    }
+
+    fn store_notify(&mut self, settings: &NotifySettings) -> Result<(), String> {
+        let path = self.beside(NOTIFY_FILE).ok_or_else(|| format!("{}: no file to keep the notification choices beside", self.path.display()))?;
+        write_json(&path, &settings.to_value())
     }
 }
 

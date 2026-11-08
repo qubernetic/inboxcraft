@@ -35,8 +35,15 @@ pub(crate) fn plain_response(user: &str, password: &str) -> Result<String, Proto
     Ok(base64(&message))
 }
 
+/// Every base64 form a server may write the credentials back in, whichever way they were sent: the PLAIN token and
+/// the password alone, each with and without its padding.
+pub(crate) fn base64_forms(user: &str, password: &str) -> Result<Vec<String>, ProtoError> {
+    let forms = [plain_response(user, password)?, base64(password.as_bytes())];
+    Ok(forms.into_iter().flat_map(|form| [form.trim_end_matches('=').to_owned(), form]).collect())
+}
+
 /// Base64 with padding.
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     let sextet = |group: u32, shift: u32| ALPHABET.get(((group >> shift) & 0x3F) as usize).copied().map_or('A', char::from);
     let mut out = String::with_capacity(bytes.len().div_ceil(3).saturating_mul(4));
     for chunk in bytes.chunks(3) {

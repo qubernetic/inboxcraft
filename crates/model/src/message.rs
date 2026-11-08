@@ -9,7 +9,7 @@ use inboxcraft_time::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::text::clean_line;
-use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid};
+use crate::{AccountId, Address, Flags, FolderId, MessageId, ModSeq, Signs, ThreadId, Uid, UidValidity};
 
 /// The longest subject kept, in characters.
 pub const MAX_SUBJECT_CHARS: usize = 1000;
@@ -75,7 +75,7 @@ impl fmt::Display for MessageRef {
 }
 
 /// [`Timestamp`]s as `[seconds, nanoseconds]`, checked on the way in.
-mod timestamp {
+pub(crate) mod timestamp {
     use inboxcraft_time::Timestamp;
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -90,11 +90,15 @@ mod timestamp {
     }
 }
 
+/// InboxCraft's own header field: the time a snooze ends, as an RFC 5322 date, in the copy of a snoozed message
+/// InboxCraft keeps in `InboxCraft/Snoozed`. Read only there: elsewhere it is what is left of an earlier snooze.
+pub const SNOOZED_UNTIL: &str = "InboxCraft-Snoozed-Until";
+
 /// The header fields of a message that lists, threads and the reader's short header use.
 ///
 /// Every text is cleaned on the way in: the subject is one line of at most [`MAX_SUBJECT_CHARS`] characters, each
 /// address field keeps its first [`MAX_ADDRESSES`], `In-Reply-To` its first and `References` its last
-/// [`MAX_REFERENCES`] ids.
+/// [`MAX_REFERENCES`] ids. Beside them it keeps the [`Signs`] of the message's kind.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "RawEnvelope")]
 pub struct Envelope {
@@ -109,6 +113,9 @@ pub struct Envelope {
     message_id: Option<MessageRef>,
     in_reply_to: Vec<MessageRef>,
     references: Vec<MessageRef>,
+    signs: Signs,
+    #[serde(with = "timestamp")]
+    snoozed_until: Option<Timestamp>,
 }
 
 /// An [`Envelope`] as stored, before it is cleaned.
@@ -125,6 +132,10 @@ struct RawEnvelope {
     message_id: Option<MessageRef>,
     in_reply_to: Vec<MessageRef>,
     references: Vec<MessageRef>,
+    #[serde(default)]
+    signs: Signs,
+    #[serde(default, with = "timestamp")]
+    snoozed_until: Option<Timestamp>,
 }
 
 impl From<RawEnvelope> for Envelope {
@@ -139,6 +150,8 @@ impl From<RawEnvelope> for Envelope {
             .with_message_id(raw.message_id)
             .with_in_reply_to(raw.in_reply_to)
             .with_references(raw.references)
+            .with_signs(raw.signs)
+            .with_snoozed_until(raw.snoozed_until)
     }
 }
 
@@ -279,6 +292,33 @@ impl Envelope {
     pub fn references(&self) -> &[MessageRef] {
         &self.references
     }
+
+    /// With the signs of the message's kind.
+    #[must_use]
+    pub fn with_signs(mut self, signs: Signs) -> Self {
+        self.signs = signs;
+        self
+    }
+
+    /// The signs of the message's kind, for the grouped inbox.
+    #[must_use]
+    pub fn signs(&self) -> &Signs {
+        &self.signs
+    }
+
+    /// With the time a snooze ends, as InboxCraft's own `InboxCraft-Snoozed-Until` field gives it.
+    #[must_use]
+    pub fn with_snoozed_until(mut self, until: Option<Timestamp>) -> Self {
+        self.snoozed_until = until;
+        self
+    }
+
+    /// The time a snooze ends, written by InboxCraft into the copy it keeps in `InboxCraft/Snoozed`, so another
+    /// InboxCraft sees it.
+    #[must_use]
+    pub fn snoozed_until(&self) -> Option<Timestamp> {
+        self.snoozed_until
+    }
 }
 
 /// What the server lists for one message of a folder: UID, envelope, flags, size, arrival time, PREVIEW text (RFC
@@ -325,6 +365,20 @@ impl Summary {
     #[must_use]
     pub fn new(uid: Uid, envelope: Envelope) -> Self {
         Self { uid, envelope, flags: Flags::default(), size: 0, received: None, preview: None, modseq: None }
+    }
+
+    /// With another UID: the same message in another folder, or before the server named its UID there.
+    #[must_use]
+    pub fn with_uid(mut self, uid: Uid) -> Self {
+        self.uid = uid;
+        self
+    }
+
+    /// With another envelope: the same message, its header read again.
+    #[must_use]
+    pub fn with_envelope(mut self, envelope: Envelope) -> Self {
+        self.envelope = envelope;
+        self
     }
 
     /// With the flags.
@@ -405,6 +459,19 @@ impl Summary {
     }
 }
 
+/// Where the server keeps a message the owner moved, until the server's answer names its UID in the folder it went to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Moving {
+    /// The folder the server keeps it in.
+    pub folder: FolderId,
+    /// That folder's UIDVALIDITY.
+    pub uid_validity: UidValidity,
+    /// Its UID there.
+    pub uid: Uid,
+    /// Its flags there.
+    pub flags: Flags,
+}
+
 /// One copy of a message in one folder: our ids, its thread and the server's summary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -413,13 +480,17 @@ pub struct Message {
     folder: FolderId,
     thread: Option<ThreadId>,
     summary: Summary,
+    /// Set while a move the owner made is on its way: the folder is where the owner put it, the UID only ours. Boxed,
+    /// as most messages have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    moving: Option<Box<Moving>>,
 }
 
 impl Message {
     /// The message `id` in `folder` of `account`, in no thread yet.
     #[must_use]
     pub fn new(id: MessageId, account: AccountId, folder: FolderId, summary: Summary) -> Self {
-        Self { id, account, folder, thread: None, summary }
+        Self { id, account, folder, thread: None, summary, moving: None }
     }
 
     /// With its thread.
@@ -427,6 +498,19 @@ impl Message {
     pub fn with_thread(mut self, thread: Option<ThreadId>) -> Self {
         self.thread = thread;
         self
+    }
+
+    /// With where the server keeps it while a move is on its way, or `None` once the folder and UID are the server's.
+    #[must_use]
+    pub fn with_moving(mut self, moving: Option<Moving>) -> Self {
+        self.moving = moving.map(Box::new);
+        self
+    }
+
+    /// Where the server keeps it while a move the owner made is on its way; its UID here is then only ours.
+    #[must_use]
+    pub fn moving(&self) -> Option<&Moving> {
+        self.moving.as_deref()
     }
 
     /// Our id.

@@ -3,53 +3,29 @@
 
 //! `hostile_params_never_panic`: every command, run with junk parameters, answers or refuses and never panics.
 //!
-//! The commands come from `cmd::all`, so a new command is in here without anyone adding it. A panic would be caught
-//! by `Session::run` as `EngineError::Panicked`; that counts as a failure here, because the safety net is not a
-//! licence. Each runs in a session over a store and in a sample session, where the `sample.*` commands run too.
+//! The commands come from `cmd::all` and the parameter names from each module's `FIELDS`, so a new command is in
+//! here without anyone adding it. A panic would be caught by `Session::run` as `EngineError::Panicked`; that counts
+//! as a failure here, because the safety net is not a licence. Each runs in a session over a store and in a sample
+//! session, where the `sample.*` commands run too.
 
 use proptest::prelude::*;
 use serde_json::{Map, Value, json};
 
+use super::MODULES;
 use crate::test_support::{sample_session, session};
 use crate::{Caller, EngineError, Session};
 
-/// Every parameter name any command reads, and a few it does not.
-const FIELDS: [&str; 34] = [
-    "account",
-    "folder",
-    "role",
-    "limit",
-    "offset",
-    "id",
-    "from",
-    "to",
-    "subject",
-    "text",
-    "since",
-    "before",
-    "message",
-    "view",
-    "index",
-    "content_id",
-    "address",
-    "label",
-    "display_name",
-    "username",
-    "imap",
-    "host",
-    "port",
-    "security",
-    "mode",
-    "preset",
-    "custom",
-    "font",
-    "icons",
-    "percent",
-    "reduce",
-    "seen",
-    "",
-    "\u{0}",
-];
+/// Names no command reads.
+const STRANGERS: [&str; 4] = ["message", "view", "", "\u{0}"];
+
+/// Every parameter name a module says its commands read, and a few no command reads.
+fn fields() -> Vec<&'static str> {
+    let mut fields: Vec<&'static str> = MODULES.iter().flat_map(|module| module.fields).copied().collect();
+    fields.extend(STRANGERS);
+    fields.sort_unstable();
+    fields.dedup();
+    fields
+}
 
 fn junk() -> Vec<Value> {
     let mut deep = json!(1);
@@ -93,10 +69,10 @@ fn run_everything(session: &mut Session, params: &Value) {
 
 #[test]
 fn hostile_params_never_panic() {
-    for mut session in [session(), sample_session()] {
+    for mut session in [session(), sample_session(), super::calendar_tests::session()] {
         for value in junk() {
             run_everything(&mut session, &value);
-            for field in FIELDS {
+            for field in fields() {
                 let params = Value::Object(Map::from_iter([(field.to_owned(), value.clone())]));
                 run_everything(&mut session, &params);
             }
@@ -116,7 +92,7 @@ fn hostile_value() -> impl Strategy<Value = Value> {
     leaf.prop_recursive(4, 32, 6, |inner| {
         prop_oneof![
             prop::collection::vec(inner.clone(), 0..6).prop_map(Value::Array),
-            prop::collection::vec((prop::sample::select(FIELDS.to_vec()), inner), 0..6)
+            prop::collection::vec((prop::sample::select(fields()), inner), 0..6)
                 .prop_map(|pairs| Value::Object(pairs.into_iter().map(|(key, value)| (key.to_owned(), value)).collect())),
         ]
     })
@@ -129,6 +105,30 @@ proptest! {
     fn random_params_never_panic(params in hostile_value()) {
         for mut session in [session(), sample_session()] {
             run_everything(&mut session, &params);
+        }
+    }
+}
+
+#[test]
+fn calendar_writes_with_one_hostile_field_never_panic() {
+    let bases = [
+        ("event.create", json!({ "calendar": 1, "summary": "A", "start": "2026-11-12T10:00:00Z" })),
+        ("event.update", json!({ "id": 1, "summary": "A" })),
+        ("event.update", json!({ "id": 4, "start": "2026-11-20" })),
+        ("event.list", json!({ "from": "2026-11-05", "to": "2026-11-12" })),
+        ("calendar.server", json!({ "account": 1, "url": "https://dav.example.org/" })),
+    ];
+    let mut session = super::calendar_tests::session();
+    for (id, base) in bases {
+        for field in fields() {
+            for value in junk() {
+                let mut params = base.clone();
+                if let Value::Object(map) = &mut params {
+                    map.insert(field.to_owned(), value.clone());
+                }
+                let result = session.run(id, &params);
+                assert!(!matches!(result, Err(EngineError::Panicked(_))), "{id} panicked on {params}");
+            }
         }
     }
 }

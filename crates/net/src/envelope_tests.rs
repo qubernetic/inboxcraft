@@ -135,3 +135,42 @@ fn message_ids_are_read_between_angle_brackets() {
     assert_eq!(refs("<> < >"), Vec::<String>::new());
     assert_eq!(refs("bare@example.org"), Vec::<String>::new());
 }
+
+#[test]
+fn a_header_block_gives_the_signs_of_the_messages_kind() {
+    let header = b"From: Example News <news@example.org>\r\n\
+        List-Id: Example News <news.example.org>\r\n\
+        List-Unsubscribe: <mailto:leave@example.org>\r\n\
+        Precedence: Bulk\r\n\
+        Auto-Submitted: auto-generated\r\n\
+        Content-Type: multipart/alternative; boundary=\"b1\"\r\n\
+        \r\n";
+    let envelope = envelope(header);
+    let signs = envelope.signs();
+    assert!(signs.list());
+    assert_eq!(signs.precedence(), Some(inboxcraft_model::Precedence::Bulk));
+    assert!(signs.automatic());
+    assert!(!signs.calendar_type());
+    assert!(!signs.calendar(), "the parts are not known from the header");
+    assert!(super::envelope(b"From: anna@example.org\r\n\r\n").signs().is_empty());
+}
+
+#[test]
+fn inboxcrafts_own_field_gives_the_time_a_snooze_ends() {
+    let header = b"InboxCraft-Snoozed-Until: Thu, 05 Nov 2026 18:00:00 +0000\r\n\
+        inboxcraft-snoozed-until: Fri, 06 Nov 2026 08:00:00 +0000\r\n\
+        From: anna@example.org\r\n\
+        \r\n";
+    assert_eq!(envelope(header).snoozed_until(), Timestamp::from_unix(1_793_901_600, 0), "the first field counts");
+    let lower = b"inboxcraft-snoozed-until: Thu, 05 Nov 2026 18:00:00 +0000\r\nFrom: anna@example.org\r\n\r\n";
+    assert_eq!(envelope(lower).snoozed_until(), Timestamp::from_unix(1_793_901_600, 0), "the name in any case");
+    assert_eq!(envelope(b"From: anna@example.org\r\n\r\n").snoozed_until(), None);
+    let broken = b"InboxCraft-Snoozed-Until: soon\r\nFrom: anna@example.org\r\n\r\n";
+    assert_eq!(envelope(broken).snoozed_until(), None, "a time that cannot be read is no time");
+}
+
+#[test]
+fn envelope_reads_the_snooze_time_only_from_the_first_field() {
+    let below = b"From: anna@example.org\r\nInboxCraft-Snoozed-Until: Thu, 05 Nov 2026 18:00:00 +0000\r\n\r\n";
+    assert_eq!(envelope(below).snoozed_until(), None, "InboxCraft writes it on top; one further down a sender may have written");
+}

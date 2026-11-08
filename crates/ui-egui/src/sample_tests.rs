@@ -5,7 +5,7 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, MESSAGES, mailbox, people, session};
+use super::{FOLDERS, INVITATIONS, MESSAGES, invitations, mailbox, people, session, session_over};
 use crate::component::avatar;
 use crate::theme::{AVATARS, Mode, PRESETS, Theme};
 
@@ -189,4 +189,81 @@ fn everyone_who_writes_or_is_written_to_has_an_avatar_from_the_avatar_palette() 
             }
         }
     }
+}
+
+#[test]
+fn the_screener_holds_two_new_senders_before_the_inbox() {
+    let answer = run("screener.list", &json!({}));
+    assert_eq!(answer["mode"], "before");
+    let senders: Vec<&str> = answer["senders"].as_array().unwrap().iter().map(|sender| sender["address"].as_str().unwrap()).collect();
+    assert_eq!(senders, ["club@example.org", "plants@example.org"]);
+    let held = run("mail.list", &json!({ "role": "screener" }));
+    assert_eq!(held["total"], 2);
+    let inbox = run("mail.list", &json!({ "role": "inbox" }));
+    assert!(inbox["messages"].as_array().unwrap().iter().all(|row| row["new_sender"] == false), "the inbox holds no new sender");
+}
+
+#[test]
+fn the_inbox_is_grouped_into_people_and_updates() {
+    let inbox = run("mail.list", &json!({ "role": "inbox", "limit": 100 }));
+    let group = |subject: &str| {
+        let rows = inbox["messages"].as_array().unwrap();
+        rows.iter().find(|row| row["subject"] == subject).map(|row| row["group"].clone()).unwrap()
+    };
+    assert_eq!(group("Allotment rota for November"), "people");
+    assert_eq!(group("Draft logo for the bakery"), "people");
+    assert_eq!(group("Your library loan is due on Friday"), "updates");
+    assert_eq!(group("Your bike is due for a service"), "updates");
+    assert_eq!(group("Invoice 2026-031 is paid"), "updates");
+    let newsletters = run("mail.list", &json!({ "role": "trash", "group": "newsletters" }));
+    assert_eq!(newsletters["total"], 2, "both newsletters carry their list's fields");
+}
+
+#[test]
+fn put_away_fills_every_pile_of_later_and_leaves_a_done_and_a_returned_message() {
+    use crate::mailbox::{Mailbox, Pile, Place};
+
+    let mut mailbox = Mailbox::new(session(Box::new(FakeClock::new(now()))).unwrap(), Box::new(FakeClock::new(now())));
+    super::put_away(&mut mailbox).unwrap();
+    assert!(mailbox.undoable().is_none(), "no toast left over");
+    let subjects = |mailbox: &Mailbox| mailbox.messages().iter().map(|row| row.subject.clone()).collect::<Vec<_>>();
+    mailbox.open(Place::Later(Pile::Snoozed));
+    assert_eq!(
+        subjects(&mailbox),
+        ["Your ferry booking is confirmed", "A question about the font licence", "Tenancy renewal"],
+        "the first back on top"
+    );
+    mailbox.open(Place::Later(Pile::Pins));
+    assert_eq!(mailbox.messages().len(), 2);
+    mailbox.open(Place::Later(Pile::Parked));
+    assert_eq!(mailbox.messages().len(), 2);
+    mailbox.open(Place::View(inboxcraft_model::Role::Inbox));
+    let choir = mailbox.messages().iter().find(|row| row.subject == "Choir practice moves to Thursday").unwrap();
+    assert!(mailbox.returned(choir));
+    assert!(mailbox.messages().iter().all(|row| row.subject != "Re: Soup recipe"), "done");
+    mailbox.set_show_done(true);
+    assert!(mailbox.messages().iter().any(|row| row.subject == "Re: Soup recipe" && row.done));
+}
+
+/// Odile's lunch: the first invitation, answered Going, is out of date; the update says what changed and waits for an
+/// answer, both in the Invitations group.
+#[test]
+fn the_sample_invitations_are_two_versions_of_one_lunch() {
+    let mut store = mailbox(now()).unwrap();
+    let mut batch = inboxcraft_store::Batch::new();
+    for change in invitations(now()).unwrap() {
+        batch.push(change);
+    }
+    store.apply(&batch).unwrap();
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    assert_eq!(INVITATIONS.len(), 2);
+    let first = u64::try_from(MESSAGES.len()).unwrap() + 1;
+    let update = session.run("invite.show", &json!({ "id": first + 1 })).unwrap()["invite"].clone();
+    assert_eq!((&update["outdated"], &update["answer"], &update["earlier_answer"]), (&json!(false), &Value::Null, &json!("accepted")));
+    assert_eq!((&update["changes"], &update["start"]), (&json!(["time"]), &json!("2026-11-07T12:30:00Z")));
+    let old = session.run("invite.show", &json!({ "id": first })).unwrap()["invite"].clone();
+    assert_eq!((&old["outdated"], &old["answer"]), (&json!(true), &json!("accepted")));
+    let listed = session.run("mail.list", &json!({ "account": 1, "group": "invitations" })).unwrap();
+    assert_eq!(listed["messages"].as_array().unwrap().len(), 2);
+    assert!(session.take_jobs().is_empty(), "the sample fetches nothing");
 }

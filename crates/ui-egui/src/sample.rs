@@ -7,17 +7,23 @@
 //! Every name, address, subject, text and picture here is made up for InboxCraft; the pictures are drawn in code.
 //! The dates count back from the `now` given, so the sample always looks recent. Two replies quote what they answer
 //! and share a thread with it; a newsletter and a junk message carry remote pictures and links on `example.org` and
-//! `example.net`. Nothing in it connects anywhere: the accounts point at `imap.example.org`, the sample session never
-//! starts their workers, and [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
-//! unread, Done, Delete) change it in memory only, and it is built afresh at every start.
+//! `example.net`. The screener holds mail from two new senders before the inbox, and the inbox is grouped: three
+//! senders' mail says a machine sent it (Updates) and a newsletter comes through a list. Nothing in it connects
+//! anywhere: the accounts point at `imap.example.org`, the sample session never starts their workers, and
+//! [`Pictures`] draws the remote pictures instead of fetching them. The hover actions (read,
+//! unread, Done, Delete) change it in memory only, and it is built afresh at every start. Three calendars with
+//! invented events around the week of `now` come from [`crate::calendar::sample`]. [`invitations`] adds, for the
+//! invitation card's pictures and tests, Odile's invitation of Mira to lunch two days from `now` and the update that
+//! moves it from 11:00 to 12:30 (UTC): the first was answered Going, the update waits for an answer, and the sample
+//! refuses to send one, as it refuses every send.
 
 use std::time::Duration;
 
 use inboxcraft_engine::Session;
 use inboxcraft_mime::{Attachment, Mailbox as Sender, MessageBuilder};
 use inboxcraft_model::{
-    Account, AccountId, Address, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Message, MessageId,
-    MessageRef, Security, Server, SpecialUse, Summary, Uid,
+    Account, AccountId, Address, Bounce, EmailAddress, Envelope, Flag, Flags, Folder, FolderId, FolderListing, FolderPath, Host, Invitation,
+    ItipMethod, Message, MessageId, MessageRef, MessageState, Rsvp, Security, Server, Signs, SpecialUse, Summary, Uid,
 };
 use inboxcraft_store::{Batch, Body, Change, Memory, Storage, StoreConfig};
 use inboxcraft_time::{Clock, Timestamp};
@@ -53,10 +59,18 @@ const PETRA: Person = person("Petra Harbour", "petra@example.org");
 const LUMEN: Person = person("Lumen Print accounts", "accounts@example.org");
 const KASIMIR: Person = person("Kasimir Vell", "kasimir@example.org");
 const NEWS: Person = person("Studio Collective news", "news@example.org");
+const SWIM: Person = person("Harbour Swim Club", "club@example.org");
+const NURSERY: Person = person("Fernhill Nursery", "plants@example.org");
 
 /// Everyone in the sample.
-const PEOPLE: [Person; 15] =
-    [MIRA, MIRA_STUDIO, ODILE, TEODOR, ANSEL, LIBRARY, CYCLES, LETTINGS, PAPER_PINE, PRIZE, FERRIES, PETRA, LUMEN, KASIMIR, NEWS];
+const PEOPLE: [Person; 17] =
+    [MIRA, MIRA_STUDIO, ODILE, TEODOR, ANSEL, LIBRARY, CYCLES, LETTINGS, PAPER_PINE, PRIZE, FERRIES, PETRA, LUMEN, KASIMIR, NEWS, SWIM, NURSERY];
+
+/// The senders whose mail says it was sent by a machine (`Auto-Submitted`), so the grouped inbox puts it in Updates.
+const MACHINES: [Person; 3] = [LIBRARY, CYCLES, LUMEN];
+
+/// The senders whose mail comes through a mailing list (`List-Id`), so the grouped inbox puts it in Newsletters.
+const LISTS: [Person; 1] = [NEWS];
 
 /// Everyone in the sample, `(name, address)`: their avatars take their colours from the theme's avatar palette.
 #[must_use]
@@ -84,6 +98,7 @@ const FOLDERS: &[(u64, u64, &str, &[SpecialUse])] = &[
     (13, 2, "Trash", &[SpecialUse::Trash]),
     (14, 2, "Clients", &[]),
     (15, 2, "Clients/Harbour Bakery", &[]),
+    (16, 1, "InboxCraft/Screener", &[]),
 ];
 
 /// One message: where it is, who wrote it to whom, what it says and how long ago it came.
@@ -301,7 +316,154 @@ const MESSAGES: &[Sample] = &[
         true,
         false,
     ),
+    sample(
+        16,
+        SWIM,
+        MIRA,
+        "Winter swim at the harbour steps",
+        "Join us on Sunday morning for the first winter swim. Towels and hot tea on the quay afterwards.",
+        3 * HOUR,
+        false,
+        false,
+    ),
+    sample(
+        16,
+        NURSERY,
+        MIRA,
+        "Bare-root fruit trees are in",
+        "The apple and pear whips you asked about have arrived. We keep them for you until Saturday.",
+        2 * DAY,
+        false,
+        false,
+    ),
 ];
+
+/// An invitation in the sample's inbox: its subject, how long ago it came, its `Message-ID`, the one it follows, the
+/// event's `SEQUENCE`, the hour and minute it starts (UTC, two days from now, for an hour), and Mira's answer.
+struct Invited {
+    subject: &'static str,
+    minutes_ago: u64,
+    message_id: &'static str,
+    follows: Option<&'static str>,
+    sequence: u32,
+    start: (u8, u8),
+    answer: Option<Rsvp>,
+}
+
+/// The `UID` of Odile's lunch.
+const LUNCH: &str = "lunch-with-odile@example.org";
+
+/// Odile's lunch, and the update that moves it.
+const INVITATIONS: [Invited; 2] = [
+    Invited {
+        subject: "Invitation: Lunch with Odile",
+        minutes_ago: 3 * DAY,
+        message_id: "lunch.1@example.org",
+        follows: None,
+        sequence: 0,
+        start: (11, 0),
+        answer: Some(Rsvp::Accepted),
+    },
+    Invited {
+        subject: "Updated invitation: Lunch with Odile",
+        minutes_ago: 5 * HOUR,
+        message_id: "lunch.2@example.org",
+        follows: Some("lunch.1@example.org"),
+        sequence: 1,
+        start: (12, 30),
+        answer: None,
+    },
+];
+
+/// When the lunch of `invited` starts and ends, two days after `now`.
+fn lunch_times(invited: &Invited, now: Timestamp) -> Option<(Timestamp, Timestamp)> {
+    let day = now.unix_seconds().div_euclid(86_400).checked_add(2)?.checked_mul(86_400)?;
+    let start = day.checked_add(i64::from(invited.start.0) * 3_600 + i64::from(invited.start.1) * 60)?;
+    Some((Timestamp::from_unix(start, 0)?, Timestamp::from_unix(start.checked_add(3_600)?, 0)?))
+}
+
+/// `at` as iCalendar writes a moment in UTC: `20261107T110000Z`.
+fn ical_time(at: Timestamp) -> String {
+    at.to_civil(inboxcraft_time::Offset::UTC).map_or_else(String::new, |civil| {
+        format!("{:04}{:02}{:02}T{:02}{:02}{:02}Z", civil.year(), civil.month(), civil.day(), civil.hour(), civil.minute(), civil.second())
+    })
+}
+
+/// The invitation `invited` as Odile's calendar would send it (iMIP, RFC 6047), its message and its mark: what the
+/// sync reads from a kept body.
+fn invitation(id: u64, uid: u32, invited: &Invited, now: Timestamp) -> Result<Vec<Change>, UiError> {
+    let (start, end) = lunch_times(invited, now).ok_or_else(|| UiError::sample("a lunch time out of range"))?;
+    let received = now.checked_sub(Duration::from_secs(invited.minutes_ago.saturating_mul(60)));
+    let calendar = format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Example//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:{LUNCH}\r\n\
+         SEQUENCE:{}\r\nDTSTAMP:{}\r\nDTSTART:{}\r\nDTEND:{}\r\nSUMMARY:Lunch with Odile\r\nLOCATION:The Gull café\r\n\
+         ORGANIZER;CN=Odile Brannock:mailto:{}\r\nATTENDEE;CN=Mira Holloway;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}\r\n\
+         END:VEVENT\r\nEND:VCALENDAR\r\n",
+        invited.sequence,
+        received.map(ical_time).unwrap_or_default(),
+        ical_time(start),
+        ical_time(end),
+        ODILE.address,
+        MIRA.address,
+    );
+    let text = "Odile Brannock invites you to Lunch with Odile at The Gull café.\n";
+    let mut builder = MessageBuilder::new()
+        .from(Sender::named(ODILE.name, ODILE.address))
+        .to(Sender::named(MIRA.name, MIRA.address))
+        .subject(invited.subject)
+        .message_id(invited.message_id)
+        .text(text)
+        .calendar("REQUEST", &calendar);
+    let mut envelope = Envelope::new(invited.subject)
+        .with_date(received)
+        .with_from(vec![address(ODILE)?])
+        .with_to(vec![address(MIRA)?])
+        .with_message_id(MessageRef::new(invited.message_id))
+        .with_signs(Signs::default().with_calendar(true));
+    if let Some(follows) = invited.follows {
+        builder = builder.in_reply_to(follows).reference(follows);
+        let follows: Vec<MessageRef> = MessageRef::new(follows).into_iter().collect();
+        envelope = envelope.with_in_reply_to(follows.clone()).with_references(follows);
+    }
+    let raw = builder.build().map_err(UiError::sample)?;
+    let flags = if invited.answer.is_some() { std::iter::once(Flag::Seen).collect() } else { Flags::default() };
+    let uid = Uid::new(uid).ok_or_else(|| UiError::Sample("a UID of 0".to_owned()))?;
+    let size = u32::try_from(raw.len()).unwrap_or(u32::MAX);
+    let summary = Summary::new(uid, envelope).with_flags(flags).with_received(received).with_size(size).with_preview(Some(text.trim_end()));
+    let mark = Invitation {
+        sequence: invited.sequence,
+        stamp: received,
+        summary: Some("Lunch with Odile".to_owned()),
+        start: Some(start),
+        end: Some(end),
+        location: Some("The Gull café".to_owned()),
+        answer: invited.answer,
+        ..Invitation::new(ItipMethod::Request, LUNCH)
+    };
+    let id = MessageId::new(id);
+    Ok(vec![
+        Change::PutMessage(Message::new(id, AccountId::new(1), FolderId::new(1), summary)),
+        Change::PutBody(id, Body::new(raw, text).map_err(UiError::sample)?),
+        Change::SetMessageState(id, MessageState { invitation: Some(Box::new(mark)), ..MessageState::default() }),
+    ])
+}
+
+/// Odile's two invitations, as changes to the sample [`mailbox`] of `now`: messages after the sample's, in Mira's
+/// inbox after its mail.
+///
+/// # Errors
+///
+/// None in practice: the sample is fixed. A value the model or the store refuses becomes [`UiError::Sample`].
+pub fn invitations(now: Timestamp) -> Result<Vec<Change>, UiError> {
+    let first_id = u64::try_from(MESSAGES.len()).unwrap_or(u64::MAX).saturating_add(1);
+    let inbox = u32::try_from(MESSAGES.iter().filter(|sample| sample.folder == 1).count()).unwrap_or(u32::MAX);
+    let mut changes = Vec::new();
+    for (index, invited) in INVITATIONS.iter().enumerate() {
+        let n = u32::try_from(index).unwrap_or(0);
+        changes.extend(invitation(first_id.saturating_add(u64::from(n)), inbox.saturating_add(1).saturating_add(n), invited, now)?);
+    }
+    Ok(changes)
+}
 
 /// The thread links: a subject, its `Message-ID` and the `Message-ID` it answers.
 const LINKS: &[(&str, &str, Option<&str>)] = &[
@@ -499,6 +661,14 @@ fn message(id: u64, uid: u32, account: u64, sample: &Sample, now: Timestamp) -> 
     }
     let uid = Uid::new(uid).ok_or_else(|| UiError::Sample("a UID of 0".to_owned()))?;
     let size = u32::try_from(sample.preview.len().saturating_mul(12)).unwrap_or(u32::MAX);
+    let signs = if MACHINES.iter().any(|machine| machine.address == sample.from.address) {
+        Signs::read([("Auto-Submitted", "auto-generated")])
+    } else if LISTS.iter().any(|list| list.address == sample.from.address) {
+        Signs::read([("List-Id", "<news.example.org>")])
+    } else {
+        Signs::default()
+    };
+    let envelope = envelope.with_signs(signs);
     let summary = Summary::new(uid, envelope).with_flags(flags).with_received(received).with_size(size).with_preview(Some(sample.preview));
     Ok(Message::new(MessageId::new(id), AccountId::new(account), FolderId::new(sample.folder), summary))
 }
@@ -536,6 +706,9 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
         let (source, text) = source(sample)?;
         batch.push(Change::PutBody(MessageId::new(id), Body::new(source, &text).map_err(UiError::sample)?));
     }
+    for change in crate::calendar::sample::changes(now)? {
+        batch.push(change);
+    }
     let mut store = Memory::new(StoreConfig::default());
     store.apply(&batch).map_err(UiError::sample)?;
     Ok(store)
@@ -553,7 +726,8 @@ const GROUPS: [(IconId, &str, &[Person]); 2] =
 /// the groups.
 #[must_use]
 pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
-    let screener = WAITING.iter().map(|person| Waiting { name: person.name.to_owned(), address: person.address.to_owned() }).collect();
+    let screener =
+        WAITING.iter().map(|person| Waiting { name: person.name.to_owned(), address: person.address.to_owned(), messages: Vec::new() }).collect();
     let groups = GROUPS
         .iter()
         .map(|(icon, name, senders)| Group {
@@ -565,15 +739,118 @@ pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {
     Showcase { screener, groups }
 }
 
+/// The sample's mail `put_away` snoozes: subject and how long from now it comes back, in hours.
+const SNOOZED: [(&str, i64); 3] =
+    [("Your ferry booking is confirmed", 47), ("A question about the font licence", 95), ("Tenancy renewal", 26 * 24 - 1)];
+
+/// The sample's mail `put_away` pins, parks, marks done, and snoozes and brings back at once.
+const PINNED: [&str; 2] = ["Draft logo for the bakery", "Allotment rota for November"];
+const PARKED: [&str; 2] = ["Board game night?", "Your bike is due for a service"];
+const DONE: &str = "Re: Soup recipe";
+const RETURNED: &str = "Choir practice moves to Thursday";
+
+/// The sample message with `subject`, by its id.
+fn sample_id(subject: &str) -> Result<u64, UiError> {
+    let index = MESSAGES.iter().position(|sample| sample.subject == subject).ok_or_else(|| UiError::sample(format!("no sample {subject:?}")))?;
+    Ok(u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1))
+}
+
+/// Puts some of the sample's mail away, for `ui_shot` to picture "Later" and "Show done": three messages snoozed,
+/// two pinned, two parked, one done and one back from a snooze, unread. The toast of the last act goes.
+///
+/// # Errors
+///
+/// The first act the engine refuses, as [`UiError::Sample`].
+pub fn put_away(mailbox: &mut crate::mailbox::Mailbox) -> Result<(), UiError> {
+    use crate::mailbox::Act;
+
+    let now = mailbox.now();
+    let mut acts = Vec::new();
+    for (subject, hours) in SNOOZED {
+        let until = Timestamp::from_unix(now.unix_seconds().saturating_add(hours.saturating_mul(3_600)), 0)
+            .ok_or_else(|| UiError::sample("a snooze time out of range"))?;
+        acts.push((sample_id(subject)?, Act::Snooze(until)));
+    }
+    for subject in PINNED {
+        acts.push((sample_id(subject)?, Act::Pin(true)));
+    }
+    for subject in PARKED {
+        acts.push((sample_id(subject)?, Act::Park(true)));
+    }
+    acts.push((sample_id(DONE)?, Act::Done));
+    let returned = sample_id(RETURNED)?;
+    let soon = Timestamp::from_unix(now.unix_seconds().saturating_add(3_600), 0).ok_or_else(|| UiError::sample("a snooze time out of range"))?;
+    acts.extend([(returned, Act::Snooze(soon)), (returned, Act::Unsnooze), (returned, Act::Unread)]);
+    for (id, act) in acts {
+        mailbox.act(id, act);
+        if let Some(error) = mailbox.error() {
+            return Err(UiError::sample(error));
+        }
+    }
+    mailbox.forget_undo();
+    Ok(())
+}
+
+/// The sample's sent message a delivery report says did not get through.
+const BOUNCED: &str = "Re: Draft logo for the bakery";
+
+/// Why [`BOUNCED`] did not get through, as the report says.
+const BOUNCE_REASON: &str = "petra@example.org: 550 5.1.1 the mailbox does not exist (reported by mx.example.org)";
+
+/// Marks the sample's sent message as bounced in `store`, as an arriving delivery report would, for `ui_shot` to
+/// picture the mark and the reader's banner. The report itself is not in the sample, so none is named.
+///
+/// # Errors
+///
+/// [`UiError::Sample`] when the store refuses the change.
+pub fn bounce(store: &mut Memory) -> Result<(), UiError> {
+    // A message that is no delivery report: the engine shows the reason and names no report.
+    let bounced = Some(Bounce { report: MessageId::new(sample_id("Allotment rota for November")?), reason: BOUNCE_REASON.to_owned() });
+    let mut batch = Batch::new();
+    batch.push(Change::SetMessageState(MessageId::new(sample_id(BOUNCED)?), MessageState { bounced, ..MessageState::default() }));
+    store.apply(&batch).map_err(UiError::sample)
+}
+
 /// A sample session ([`Session::sample`]) over the sample mailbox, its dates counted back from `clock`'s time now:
-/// the hover actions change the mailbox in memory through `sample.mail.set`, and nothing is kept.
+/// the acts on its messages change the mailbox in memory, nothing goes to a server and nothing is kept.
 ///
 /// # Errors
 ///
 /// As [`mailbox`], and [`UiError::Engine`] when the session refuses the store.
 pub fn session(clock: Box<dyn Clock>) -> Result<Session, UiError> {
-    let store = mailbox(clock.now())?;
-    Session::sample(Box::new(store), clock).map_err(UiError::Engine)
+    session_over(mailbox(clock.now())?, clock)
+}
+
+/// [`session`], but the first account can send through an invented submission server and the sent message bounced
+/// ([`bounce`]): for `ui_shot` to picture the outbox, the countdown and the bounce. Its sends go to the workers the
+/// window is given, which connect nowhere in a picture.
+///
+/// # Errors
+///
+/// As [`session`].
+pub fn sending(clock: Box<dyn Clock>) -> Result<Session, UiError> {
+    let mut store = mailbox(clock.now())?;
+    let [(id, label, owner), _] = ACCOUNTS;
+    let first = account(id, label, owner)?;
+    let server = Server::new(Host::new("smtp.example.org").map_err(UiError::sample)?, Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    batch.push(Change::PutAccount(first.with_submission(Some(server))));
+    store.apply(&batch).map_err(UiError::sample)?;
+    bounce(&mut store)?;
+    session_over(store, clock)
+}
+
+/// A sample session as [`session`] makes it, over `store` (the sample [`mailbox`], perhaps with more in it), the
+/// screener on.
+///
+/// # Errors
+///
+/// [`UiError::Engine`] when the session refuses the store.
+pub fn session_over(store: Memory, clock: Box<dyn Clock>) -> Result<Session, UiError> {
+    let mut session = Session::sample(Box::new(store), clock).map_err(UiError::Engine)?;
+    // Turning the screener on learns everyone the kept mail names; the two senders in the screener folder wait.
+    session.run("screener.mode", &serde_json::json!({ "mode": "before" })).map_err(UiError::Engine)?;
+    Ok(session)
 }
 
 #[cfg(test)]

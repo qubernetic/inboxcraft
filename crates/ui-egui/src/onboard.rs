@@ -8,8 +8,9 @@
 //! `account.add`, puts the password into the OS credential store ([`Keychain`]) under the new account's id and
 //! nowhere else, and forgets it here; the account's worker reads it from there for the check `account.add` started.
 //! When the credential store refuses it, the account is removed again: an account without its password is not kept.
-//! Accounts are not kept on disk yet, so [`Onboarding::forget_passwords`] removes every password stored here when the
-//! window closes.
+//! The password stays in the credential store as long as the account stays in the store, and leaves with it. A window
+//! over a store that is not kept removes the passwords stored in it when it closes ([`Onboarding::forget_passwords`]),
+//! as they would outlive their accounts; the desktop app keeps its store, and so the passwords.
 //!
 //! The steps show as they come, each with the host, port and (for the certificate) issuer it saw. After a failure the
 //! owner can check again, or change the settings, which removes the account and its password and opens the form
@@ -404,6 +405,8 @@ pub enum StepState {
     Skipped,
     /// Not run: no password went out ([`StepRow::message`] says why).
     Held,
+    /// Not run: the account has no server for it (no submission server for the SMTP sign-in).
+    NotSet,
     /// Not built yet.
     NotBuilt,
 }
@@ -447,6 +450,7 @@ fn step_row(value: &Value) -> StepRow {
         Some("failed") => StepState::Failed,
         Some("skipped") => StepState::Skipped,
         Some("needs_review" | "needs_owner") => StepState::Held,
+        Some("not_set") => StepState::NotSet,
         Some("not_built") => StepState::NotBuilt,
         _ => StepState::Pending,
     };
@@ -726,8 +730,9 @@ impl Onboarding {
         };
     }
 
-    /// Removes from the credential store the password of every account added here, for the window's end: accounts
-    /// are not kept on disk yet, so their passwords would outlive them. One the store refuses again stays behind.
+    /// Removes from the credential store the password of every account added here, for the end of a window over a
+    /// store that is not kept, whose accounts the passwords would outlive. A window over a kept store does not call it:
+    /// a password stays until its account is removed. One the credential store refuses again stays behind.
     pub fn forget_passwords(&mut self) {
         let keychain = &self.keychain;
         self.stored.retain(|id| keychain.forget(*id).is_err());

@@ -14,15 +14,23 @@
 //! - [`Worker`]: one thread per account. It takes the engine's [`inboxcraft_model::Job`]s in order on one
 //!   signed-in connection and reports [`inboxcraft_model::Event`]s: the folder list, the first sync of a folder
 //!   (headers with PREVIEW, then the bodies of the messages of the last [`SyncConfig::body_days`] days), and the
-//!   body of a message the owner opens. Folders are opened read-only (EXAMINE): nothing changes on the server.
-//!   Without a connection, jobs wait in an offline queue while the worker reconnects after a [`Backoff`] wait.
+//!   body of a message the owner opens. The read path opens folders read-only (EXAMINE). The write jobs (flags,
+//!   move, delete for good, APPEND, CREATE) open them with SELECT; a message gone meanwhile is told as an event.
+//!   Without a connection, jobs wait in an offline queue while the worker reconnects after a [`Backoff`] wait, and a
+//!   write the connection dropped under runs again after the reconnect.
 //!   A known folder is resynced: changed flags, removed and new messages (QRESYNC where the server offers it). The
 //!   folder of an Idle job is watched between jobs with IDLE ([`WatchConfig`]) and resynced after each change and
 //!   each reconnect; a folder whose UIDVALIDITY changed is reloaded.
+//! - The worker runs a calendar job ([`inboxcraft_model::CalendarJob`]) at once, like a send, on an HTTPS connection
+//!   of its own that drives `inboxcraft-dav`: discovery from the account's CalDAV address, a sync of one calendar
+//!   from its sync token or by entity tags, and the PUT or DELETE of one event with its entity tag, a change made
+//!   elsewhere coming back as a conflict. The password goes as Basic auth over verified TLS only, never to an `http`
+//!   address or after a redirect to another server, and not again once the CalDAV server refused it.
 //! - [`check_account`] runs the account check step by step ([`inboxcraft_model::CheckStep`]): DNS, TCP (with the
 //!   blocked-mail-ports test), TLS, the certificate (its issuer from [`certificate`], and the clock check) and the
 //!   IMAP sign-in, which sends a password only after the certificate verified and only to a [`CheckTarget`] the owner
-//!   has seen. A worker runs it for its account on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
+//!   has seen, then the SMTP sign-in and the CalDAV discovery with the same password. A worker runs it for its account
+//!   on a connection of its own ([`inboxcraft_model::JobKind::Check`]).
 //! - [`envelope`] reads the [`inboxcraft_model::Envelope`] of a message from its header block.
 //! - [`autoconfig`] reads Mozilla's autoconfig file: the encrypted IMAP and submission servers a provider publishes.
 //! - [`detect`] proposes settings from an address: MX ([`dns`]), autoconfig at the domain over HTTPS ([`web`]), the
@@ -39,27 +47,31 @@ pub mod certificate;
 mod check;
 mod compress;
 mod connect;
+mod dav;
 pub mod detect;
 pub mod dns;
 pub mod envelope;
 mod error;
 mod imap;
 pub mod picture;
+mod smtp;
 mod sync;
 mod tls;
 mod watch;
 pub mod web;
 mod worker;
+pub(crate) mod write;
 
 pub use backoff::Backoff;
 pub use check::{CheckTarget, HTTPS_PORT, MAIL_PORTS, check_account};
 pub use connect::{Connector, Dialer, SystemDialer, Timeouts};
 pub use error::NetError;
 pub use imap::{ImapConnection, Password};
+pub use smtp::SmtpConnection;
 pub use sync::SyncConfig;
 pub use tls::{TlsSettings, Trust, classify};
 pub use watch::WatchConfig;
-pub use worker::{Credentials, MAX_QUEUED, Worker, WorkerSettings};
+pub use worker::{Credentials, MAX_QUEUED, WRITE_TRIES, Worker, WorkerSettings};
 
 /// The crate's package name.
 ///

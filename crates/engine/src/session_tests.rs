@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_model::{AccountId, JobId, JobKind, MessageId};
+use inboxcraft_model::{AccountId, CalendarEventId, CalendarId, FolderId, JobId, JobKind, MessageId};
 use inboxcraft_store::Change;
 use serde_json::{Value, json};
 
@@ -121,53 +121,53 @@ fn a_session_shows_its_commands_and_store() {
 fn a_store_that_cannot_be_read_fails_the_session() {
     #[derive(Debug)]
     struct Broken;
+    fn broken<T>() -> Result<T, inboxcraft_store::StoreError> {
+        Err(inboxcraft_store::StoreError::Corrupt("broken"))
+    }
+    #[rustfmt::skip]
     impl inboxcraft_store::Storage for Broken {
-        fn config(&self) -> inboxcraft_store::StoreConfig {
-            inboxcraft_store::StoreConfig::default()
-        }
-        fn apply(&mut self, _: &inboxcraft_store::Batch) -> Result<(), inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn accounts(&self) -> Result<Vec<inboxcraft_model::Account>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn folders(&self, _: AccountId) -> Result<Vec<inboxcraft_model::Folder>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn folder_state(&self, _: inboxcraft_model::FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn messages(&self, _: inboxcraft_model::FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn message(&self, _: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn body(&self, _: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn search(&self, _: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn stale_bodies(&self, _: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
-        fn missing_bodies(
-            &self,
-            _: inboxcraft_model::FolderId,
-            _: inboxcraft_time::Timestamp,
-        ) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> {
-            Err(inboxcraft_store::StoreError::Corrupt("broken"))
-        }
+        fn config(&self) -> inboxcraft_store::StoreConfig { inboxcraft_store::StoreConfig::default() }
+        fn apply(&mut self, _: &inboxcraft_store::Batch) -> Result<(), inboxcraft_store::StoreError> { broken() }
+        fn accounts(&self) -> Result<Vec<inboxcraft_model::Account>, inboxcraft_store::StoreError> { broken() }
+        fn folders(&self, _: AccountId) -> Result<Vec<inboxcraft_model::Folder>, inboxcraft_store::StoreError> { broken() }
+        fn folder_state(&self, _: FolderId) -> Result<Option<inboxcraft_model::FolderState>, inboxcraft_store::StoreError> { broken() }
+        fn messages(&self, _: FolderId) -> Result<Vec<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { broken() }
+        fn message(&self, _: MessageId) -> Result<Option<inboxcraft_store::Entry>, inboxcraft_store::StoreError> { broken() }
+        fn body(&self, _: MessageId) -> Result<Option<inboxcraft_store::Body>, inboxcraft_store::StoreError> { broken() }
+        fn search(&self, _: &inboxcraft_store::Search) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
+        fn queued_jobs(&self) -> Result<Vec<inboxcraft_model::Job>, inboxcraft_store::StoreError> { broken() }
+        fn drafts(&self, _: AccountId) -> Result<Vec<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { broken() }
+        fn draft(&self, _: inboxcraft_model::DraftId) -> Result<Option<inboxcraft_model::Draft>, inboxcraft_store::StoreError> { broken() }
+        fn outbox(&self) -> Result<Vec<inboxcraft_model::Outgoing>, inboxcraft_store::StoreError> { broken() }
+        fn schedule(&self) -> Result<Vec<inboxcraft_model::Scheduled>, inboxcraft_store::StoreError> { broken() }
+        fn sender(&self, _: &inboxcraft_model::EmailAddress) -> Result<Option<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { broken() }
+        fn senders(&self) -> Result<Vec<inboxcraft_model::Sender>, inboxcraft_store::StoreError> { broken() }
+        fn message_state(&self, _: MessageId) -> Result<inboxcraft_model::MessageState, inboxcraft_store::StoreError> { broken() }
+        fn message_states(&self) -> Result<Vec<(MessageId, inboxcraft_model::MessageState)>, inboxcraft_store::StoreError> { broken() }
+        fn calendars(&self, _: AccountId) -> Result<Vec<inboxcraft_model::Calendar>, inboxcraft_store::StoreError> { broken() }
+        fn sync_token(&self, _: CalendarId) -> Result<Option<String>, inboxcraft_store::StoreError> { broken() }
+        fn calendar_events(&self, _: CalendarId) -> Result<Vec<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { broken() }
+        fn calendar_event(&self, _: CalendarEventId) -> Result<Option<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { broken() }
+        fn alerts(&self, _: CalendarEventId) -> Result<Vec<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { broken() }
+        fn alert(&self, _: inboxcraft_model::AlertId) -> Result<Option<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { broken() }
+        fn stale_bodies(&self, _: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
+        fn missing_bodies(&self, _: FolderId, _: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
     }
     use inboxcraft_store::Storage as _;
-    let (folder, message, now) = (inboxcraft_model::FolderId::new(1), MessageId::new(1), inboxcraft_time::Timestamp::UNIX_EPOCH);
+    let (folder, message, now) = (FolderId::new(1), MessageId::new(1), inboxcraft_time::Timestamp::UNIX_EPOCH);
+    let (account, calendar, event) = (AccountId::new(1), CalendarId::new(1), CalendarEventId::new(1));
     let mut broken = Broken;
     assert_eq!(broken.config(), inboxcraft_store::StoreConfig::default());
     assert!(broken.apply(&inboxcraft_store::Batch::new()).is_err());
-    assert!(broken.folders(AccountId::new(1)).is_err() && broken.folder_state(folder).is_err() && broken.messages(folder).is_err());
+    assert!(broken.folders(account).is_err() && broken.folder_state(folder).is_err() && broken.messages(folder).is_err());
     assert!(broken.message(message).is_err() && broken.body(message).is_err() && broken.search(&inboxcraft_store::Search::new()).is_err());
     assert!(broken.stale_bodies(now).is_err() && broken.missing_bodies(folder, now).is_err());
+    assert!(broken.drafts(account).is_err() && broken.draft(inboxcraft_model::DraftId::new(1)).is_err() && broken.outbox().is_err());
+    assert!(broken.schedule().is_err() && broken.senders().is_err());
+    assert!(broken.sender(&inboxcraft_model::EmailAddress::new("anna@example.org").unwrap()).is_err());
+    assert!(broken.message_state(message).is_err() && broken.message_states().is_err() && broken.calendars(account).is_err());
+    assert!(broken.sync_token(calendar).is_err() && broken.calendar_events(calendar).is_err() && broken.calendar_event(event).is_err());
+    assert!(broken.alerts(event).is_err() && broken.queued_jobs().is_err());
     let error = super::Session::new(Box::new(Broken), Box::new(crate::test_support::clock())).unwrap_err();
     assert_eq!(error, EngineError::Store(inboxcraft_store::StoreError::Corrupt("broken")));
 }

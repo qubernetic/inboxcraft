@@ -14,6 +14,13 @@ use serde_json::{Value, json};
 use crate::params::{NoParams, decode};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
+/// The commands of this module, in the registry.
+pub(crate) const COMMANDS: &[CommandSpec] = &[ALLOW, FORGET, LIST];
+
+/// The parameter names these commands read, for `hostile_params_never_panic`.
+#[cfg(test)]
+pub(crate) const FIELDS: &[&str] = &["address"];
+
 /// `remote.allow`: the sender's remote pictures load without asking, in every account.
 pub(crate) const ALLOW: CommandSpec = CommandSpec {
     id: "remote.allow",

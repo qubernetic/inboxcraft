@@ -12,6 +12,7 @@ publish = false
 flate2 = { workspace = true }
 hickory-proto = { workspace = true }
 inboxcraft-charset = { workspace = true }
+inboxcraft-dav = { workspace = true }
 inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-proto = { workspace = true }

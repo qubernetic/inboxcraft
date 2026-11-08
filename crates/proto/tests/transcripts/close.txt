@@ -1,0 +1,69 @@
+# CLOSE (RFC 9051 section 6.4.1) and UNSELECT (RFC 3691, in IMAP4rev2): the mailbox open is closed and the session is
+# back in the authenticated state. CLOSE also removes the messages marked \Deleted from a mailbox opened read-write;
+# UNSELECT removes nothing.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1 UNSELECT] ready
+= greeted preauth
+> close
+! WrongState { command: "CLOSE", state: Authenticated }
+> unselect
+! WrongState { command: "UNSELECT", state: Authenticated }
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: * OK [UIDVALIDITY 9] fine
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=9 uidnext=none unseen=none modseq=none read-only=false
+> unselect
+C: A0002 UNSELECT
+S: A0002 OK UNSELECT completed
+= A0002 unselected
+? Authenticated
+# What only an open mailbox has is refused now.
+> fetch 1 flags
+! WrongState { command: "UID FETCH", state: Authenticated }
+> select INBOX
+C: A0003 SELECT "INBOX"
+S: A0003 OK [READ-WRITE] done
+= A0003 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> close
+C: A0004 CLOSE
+S: A0004 OK CLOSE completed
+= A0004 unselected
+? Authenticated
+# A refusal leaves the mailbox open.
+> examine INBOX
+C: A0005 EXAMINE "INBOX"
+S: A0005 OK [READ-ONLY] done
+= A0005 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=true
+> close
+C: A0006 CLOSE
+S: A0006 NO Not now
+= A0006 No Not now
+? Selected
+> fetch 1 flags
+C: A0007 UID FETCH 1 (UID FLAGS)
+S: A0007 OK done
+= A0007 fetched
+
+# Without UNSELECT or IMAP4rev2 there is only CLOSE.
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev1] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> unselect
+! NotOffered("UNSELECT")
+
+@ tls
+S: * PREAUTH [CAPABILITY IMAP4rev2] ready
+= greeted preauth
+> select INBOX
+C: A0001 SELECT "INBOX"
+S: A0001 OK [READ-WRITE] done
+= A0001 selected exists=0 recent=0 flags=- permanent=- uidvalidity=none uidnext=none unseen=none modseq=none read-only=false
+> unselect
+C: A0002 UNSELECT
+S: A0002 OK UNSELECT completed
+= A0002 unselected

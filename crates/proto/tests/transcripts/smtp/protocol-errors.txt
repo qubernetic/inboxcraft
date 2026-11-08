@@ -1,0 +1,64 @@
+# A server that breaks the protocol ends the session; nothing more is sent or read.
+@ tls
+S: 2200 hello
+! Malformed("reply code")
+? Closed
+> ehlo client.example.org
+! Closed
+@ tls
+S: hello
+! Malformed("reply code")
+@ tls
+S: 220-smtp.example.org
+S: 250 mixed
+! Malformed("reply code")
+
+# The greeting is 220; 554 and 421 mean no service; anything else is not a greeting.
+@ tls
+S: 554 5.3.2 No service for you
+! Bye("5.3.2 No service for you")
+@ plain
+S: 554 No service, see http://example.org/
+! Bye("")
+@ tls
+S: 421 busy
+! Bye("busy")
+@ tls
+S: 250 hello
+! Malformed("greeting")
+
+# 421 at any time: the server is closing the session.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 421 4.3.2 Shutting down
+! Bye("4.3.2 Shutting down")
+? Closed
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+S: 421 4.4.2 Timeout
+! Bye("4.4.2 Timeout")
+
+# A reply nobody asked for.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+S: 250 OK
+! Unexpected("reply")
+@ tls
+S: 220 smtp.example.org ESMTP
+S: 250 OK
+! Unexpected("reply")
+= greeted
+
+# The server's words are cleaned and capped.
+@ tls
+S: 220 smtp.example.org ESMTP
+= greeted
+> ehlo client.example.org
+C: EHLO client.example.org
+S: 550 tab\x09here \xe2\x80\xaeevil\x1b[0m
+= EHLO refused 550 tab here evil [0m

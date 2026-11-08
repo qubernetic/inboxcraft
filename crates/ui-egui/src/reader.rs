@@ -5,11 +5,16 @@
 //! full when asked), its text with the quotes folded or its HTML as safe display blocks, its attachments, and its
 //! pictures.
 //!
-//! Everything comes through the engine's commands (`mail.thread`, `mail.read`, `mail.attachment`, `remote.allow`).
+//! Everything comes through the engine's commands (`mail.thread`, `mail.open` for the message opened, which marks it
+//! read, `mail.read` for the rest of the thread, `mail.attachment`, `remote.allow`).
 //! The text of a message is data: it is shown and never acted on. Remote pictures stay blocked until the owner
 //! allows them for this message once ([`Reader::allow_once`]) or for the sender always ([`Reader::allow_always`]);
 //! only then does the document name their addresses and only then does the reader ask its [`Fetch`]. Pictures inside
 //! the message (`cid:`) come from the message itself and never from the network.
+//!
+//! A message that carries an invitation has its card (`invite.show`, see [`crate::invite`]); its answer goes at once
+//! ([`Reader::answer_invite`], `invite.answer`), and a cancelled event comes out of the calendar with Undo
+//! ([`Reader::remove_invite`], `invite.remove`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -19,6 +24,7 @@ use inboxcraft_time::Timestamp;
 use serde_json::{Value, json};
 
 use crate::fetch::Fetch;
+use crate::invite::{Invite, Rsvp};
 use crate::mailbox::{Mailbox, parse_date, sender, shown};
 use crate::picture::{Decoded, decode_within};
 use crate::quote::{MAX_TEXT, Segment, split};
@@ -127,6 +133,8 @@ pub struct Opened {
     pub cut: bool,
     /// Whether the owner lets the sender's remote pictures load always.
     pub sender_allowed: bool,
+    /// The invitation it carries, as its card shows it.
+    pub invite: Option<Invite>,
     html: Option<String>,
     inline: BTreeSet<String>,
 }
@@ -255,6 +263,11 @@ fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     }
 }
 
+/// The card of the invitation message `id` carries; none when it carries none, or the engine cannot tell.
+fn invite(mailbox: &mut Mailbox, id: u64) -> Option<Invite> {
+    mailbox.run("invite.show", &json!({ "id": id })).ok().and_then(|answer| Invite::read(id, &answer))
+}
+
 /// The reader's state.
 pub struct Reader {
     open: Option<u64>,
@@ -269,6 +282,8 @@ pub struct Reader {
     pictures: BTreeMap<String, PictureState>,
     owners: BTreeMap<String, u64>,
     notice: Option<String>,
+    /// The invitations whose answer the owner is changing: their card offers the three answers again.
+    changing: BTreeSet<u64>,
 }
 
 impl std::fmt::Debug for Reader {
@@ -298,11 +313,12 @@ impl Reader {
             pictures: BTreeMap::new(),
             owners: BTreeMap::new(),
             notice: None,
+            changing: BTreeSet::new(),
         }
     }
 
-    /// Opens message `id` with its thread, or closes the reader (`None`). The message itself is expanded and read;
-    /// the rest of the thread is folded. Leaving a message forgets what was allowed once.
+    /// Opens message `id` with its thread, or closes the reader (`None`). The message itself is expanded, read and
+    /// marked read; the rest of the thread is folded. Leaving a message forgets what was allowed once.
     pub fn open(&mut self, mailbox: &mut Mailbox, id: Option<u64>) {
         self.open = id;
         self.thread.clear();
@@ -310,6 +326,7 @@ impl Reader {
         self.details.clear();
         self.quotes.clear();
         self.once.clear();
+        self.changing.clear();
         self.notice = None;
         let Some(id) = id else {
             self.full_width = false;
@@ -371,7 +388,8 @@ impl Reader {
     }
 
     fn read(&self, mailbox: &mut Mailbox, id: u64) -> Result<Opened, UiError> {
-        let answer = mailbox.run("mail.read", &json!({ "id": id }))?;
+        // The open message is read as the owner opens it, which marks it read; the rest of the thread is only shown.
+        let answer = if Some(id) == self.open { mailbox.open_message(id)? } else { mailbox.run("mail.read", &json!({ "id": id }))? };
         let message = answer.get("message").ok_or_else(|| UiError::Answer { command: "mail.read", detail: "no message".to_owned() })?;
         let header = Header {
             from: people(message.get("from").unwrap_or(&Value::Null)),
@@ -390,7 +408,8 @@ impl Reader {
             .and_then(Value::as_array)
             .map(|parts| parts.iter().filter_map(|part| part.get("content_id").and_then(Value::as_str)).map(str::to_owned).collect())
             .unwrap_or_default();
-        let mut opened = Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, html: None, inline };
+        let mut opened =
+            Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, invite: None, html: None, inline };
         opened.content = match body {
             None if answer.get("fetching").and_then(Value::as_bool) == Some(true) => Content::Loading,
             None if answer.get("body_error").and_then(Value::as_str) == Some("too_large") => Content::TooLarge,
@@ -421,7 +440,57 @@ impl Reader {
                     .collect()
             })
             .unwrap_or_default();
+        if body.is_some() && message.get("invitation").and_then(Value::as_bool) == Some(true) {
+            opened.invite = invite(mailbox, id);
+            // Its calendar part is the card, not a file.
+            if opened.invite.is_some() {
+                opened.files.retain(|file| !file.media_type.eq_ignore_ascii_case("text/calendar"));
+            }
+        }
         Ok(opened)
+    }
+
+    /// Answers the invitation of message `id` with `answer` at once (`invite.answer`), then reads the cards of the
+    /// thread again: the answer shows on its card. A refusal shows as the notice.
+    pub fn answer_invite(&mut self, mailbox: &mut Mailbox, id: u64, answer: Rsvp) {
+        match mailbox.run("invite.answer", &json!({ "id": id, "answer": answer.id() })) {
+            Ok(_) => {
+                self.changing.remove(&id);
+                self.notice = Some(tr!("Your answer is on its way.").to_owned());
+                mailbox.refresh();
+                self.refresh_invites(mailbox);
+            }
+            Err(error) => self.notice = Some(error.to_string()),
+        }
+    }
+
+    /// Offers the three answers again on the card of message `id`, or no longer.
+    pub fn change_answer(&mut self, id: u64) {
+        if !self.changing.remove(&id) {
+            self.changing.insert(id);
+        }
+    }
+
+    /// Whether the card of message `id` offers the answers again.
+    #[must_use]
+    pub fn changing(&self, id: u64) -> bool {
+        self.changing.contains(&id)
+    }
+
+    /// Takes the event the cancellation in message `id` is about out of the calendar (`invite.remove`), with a toast
+    /// and Undo, and reads the cards of the thread again.
+    pub fn remove_invite(&mut self, mailbox: &mut Mailbox, id: u64) {
+        match mailbox.event_act("invite.remove", &json!({ "id": id }), tr!("Removed from your calendar")) {
+            Ok(_) => self.refresh_invites(mailbox),
+            Err(error) => self.notice = Some(error.to_string()),
+        }
+    }
+
+    /// Reads the cards of the thread's messages again: an answer, a new version or an undo changes them.
+    pub fn refresh_invites(&mut self, mailbox: &mut Mailbox) {
+        for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()).filter(|opened| opened.invite.is_some()) {
+            opened.invite = invite(mailbox, opened.id);
+        }
     }
 
     /// Lays out the HTML of message `id` with the consent that now holds, and asks for the pictures it names: the

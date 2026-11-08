@@ -393,3 +393,69 @@ fn an_attached_message_type_other_than_message_global_is_refused() {
     let bytes = MessageBuilder::new().attach(Attachment::new("fwd.eml", "message/global", b"hi".to_vec())).build().unwrap();
     assert_eq!(parse(&bytes).unwrap().attachments()[0].decoded().unwrap().as_ref(), b"hi");
 }
+
+#[test]
+fn the_checks_tell_what_the_builder_takes() {
+    use crate::{is_media_type, is_message_id};
+    for id in ["<a.1@example.org>", "a.1@example.org", " <x@[192.0.2.1]> "] {
+        assert!(is_message_id(id), "{id}");
+        assert!(MessageBuilder::new().reference(id).build().is_ok(), "{id}");
+    }
+    for id in ["", "no-at-sign", "a b@example.org", "<a@example.org>\r\nBcc: x@example.org", "é@example.org", &format!("{}@x", "a".repeat(250))] {
+        assert!(!is_message_id(id), "{id}");
+        assert!(MessageBuilder::new().reference(id).build().is_err(), "{id}");
+    }
+    for media in ["image/png", "Application/PDF", "message/global"] {
+        assert!(is_media_type(media), "{media}");
+    }
+    for media in ["", "image", "multipart/mixed", "message/rfc822", "text/plain; charset=utf-8", "a/b\r\nX: y"] {
+        assert!(!is_media_type(media), "{media}");
+        assert!(MessageBuilder::new().attach(Attachment::new("a", media, Vec::new())).build().is_err(), "{media}");
+    }
+}
+
+/// An iMIP answer (RFC 6047): the text and the calendar object as `multipart/alternative`, the object's part
+/// `text/calendar` with its method.
+#[test]
+fn a_calendar_part_goes_beside_the_text_with_its_method() {
+    let calendar = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:lunch@example.org\r\nSUMMARY:Ebéd\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let bytes = MessageBuilder::new().from(anna()).text("Going.\n").calendar("REPLY", calendar).build().unwrap();
+    assert_lines(&bytes);
+    let message = parse(&bytes).unwrap();
+    assert!(message.content_type().is("multipart", "alternative"), "{:?}", message.content_type());
+    let Body::Multipart(multipart) = message.body() else { panic!("not a multipart") };
+    let [text, part] = multipart.parts() else { panic!("{} parts", multipart.parts().len()) };
+    assert!(text.content_type().is("text", "plain"));
+    assert!(part.content_type().is("text", "calendar"));
+    assert_eq!((part.content_type().param("method"), part.content_type().param("charset")), (Some("REPLY"), Some("utf-8")));
+    assert_eq!(part.text().unwrap(), calendar);
+    // An HTML body joins the alternatives before it; an attachment puts them all in a `multipart/mixed`.
+    let bytes = MessageBuilder::new()
+        .text("Going.")
+        .html("<p>Going.</p>")
+        .calendar("REQUEST", calendar)
+        .attach(Attachment::new("a.txt", "text/plain", b"a".to_vec()))
+        .build()
+        .unwrap();
+    let message = parse(&bytes).unwrap();
+    assert!(message.content_type().is("multipart", "mixed"));
+    let Body::Multipart(mixed) = message.body() else { panic!("not a multipart") };
+    let Body::Multipart(alternative) = mixed.parts()[0].body() else { panic!("no alternative") };
+    let kinds: Vec<String> = alternative.parts().iter().map(|part| part.content_type().essence()).collect();
+    assert_eq!(kinds, ["text/plain", "text/html", "text/calendar"]);
+    // The calendar alone is the whole body.
+    let message =
+        parse(&MessageBuilder::new().calendar("CANCEL", calendar).build().unwrap()).unwrap().content_type().param("method").map(str::to_owned);
+    assert_eq!(message.as_deref(), Some("CANCEL"));
+}
+
+#[test]
+fn a_calendar_method_must_be_a_token() {
+    for method in ["", "RE PLY", "REPLY\r\nBcc: evil@example.org", "REPLY;x=1", "RÉPLY"] {
+        assert_eq!(
+            MessageBuilder::new().text("x").calendar(method, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n").build(),
+            Err(MimeError::BadHeader("calendar method")),
+            "{method:?}"
+        );
+    }
+}

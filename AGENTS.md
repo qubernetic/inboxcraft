@@ -7,7 +7,7 @@ InboxCraft is owned and maintained by Qubernetic. In this file, "the project own
 or "the person" means whoever the mailbox belongs to. This file is for people as much as for agents. `CLAUDE.md` is a
 link to this file.
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 ## Start every session here
 1. Read `plan/STATUS.md` (current milestone, next task), then the task in `plan/execution-plan.md`. `plan/` is
@@ -71,7 +71,8 @@ invented.
 
 - **Everything is a command:** user-visible behaviour is a `CommandSpec` in `crates/engine/src/cmd/*.rs`. Menus,
   shortcuts, the command palette, CLI, control channel and MCP all dispatch by id through `Session::run`.
-  Programmatic calls never open dialogs.
+  Programmatic calls never open dialogs. Each module lists its commands in `COMMANDS` and the parameter names they
+  read in `FIELDS`, so a new command edits only its own module.
 - The engine does no network I/O: it emits jobs and applies events; `net` runs them on worker threads.
 - Layering is enforced by `cargo xtask layers`; register every new crate in `xtask/src/layers.rs`.
 - UI text goes through the i18n macros; command ids, CLI and MCP never see translated text.
@@ -79,7 +80,7 @@ invented.
 
 ## Quality gates
 - Before every commit: `just ci` (= `cargo xtask ci` in the container, natively with `AGENT_HORDE=1`; see
-  `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, spdx, test-files,
+  `docs/development.md`): fmt, clippy `-D warnings`, tests, doctests, assets, changes, spdx, test-files,
   layers, flatpak-sources-check, wasm, deny, and the coverage floors in `.config/coverage.toml`
   (`cargo xtask cov --check`).
 - The dev Flatpak keeps building: a `Cargo.lock` change commits the output of `just flatpak-sources` with it, and a
@@ -97,8 +98,11 @@ invented.
 
 ## Running and looking at the app
 - `just build`, then `just run-sample` runs the container-built app on the host with the sample mailbox;
-  `just run -- --sample --control 7981` adds the control channel, driven with JSON-line control requests
-  (`docs/control-protocol.md`).
+  `just run` (the owner's mailbox) serves the control channel on a socket in `$XDG_RUNTIME_DIR`, which
+  `inboxcraft-cli` without `--store` drives with JSON-line requests (`docs/control-protocol.md`).
+- `inboxcraft-cli [--store <dir>] --json <command> [<params>]` runs a `safe` command by id, in the running app or with
+  `--store` headless on a local store, and refuses `owner` and `never` commands (`docs/cli.md`);
+  `inboxcraft-cli [--store <dir>] mcp` serves the read-only MCP tools over stdio (`docs/mcp.md`).
 - Headless screenshots: `just shot` runs `cargo run -p inboxcraft-ui-egui --example ui_shot -- <script.jsonl>`
   (default script `crates/ui-egui/shots.jsonl`, pictures in `docs/images/`).
 - The look's source of truth is the FigCraft design file `docs/design/inboxcraft.figcraft`; `docs/design.md` puts
@@ -112,11 +116,16 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 
 ## Roadmap and docs
 - Specs, plans and decisions are private in `plan/`; never quote them in commits or PRs beyond a task id.
-- When work lands, update `ROADMAP.md` (progress log), `docs/gaps.md` and the `## [Unreleased]` section of
-  `CHANGELOG.md` (Keep a Changelog: Added, Changed, Deprecated, Removed, Fixed, Security; issue numbers).
+- When work lands, record it in a change fragment, `changes/<issue>.md`, never straight in the files it goes to:
+  the `CHANGELOG.md` lines (Keep a Changelog: Added, Changed, Deprecated, Removed, Fixed, Security; issue numbers),
+  the `ROADMAP.md` progress line, new `docs/gaps.md` lines and the revision rows of the docs you touch.
+  `cargo xtask changes` checks the fragments in `just ci`; `cargo xtask changes --fold` writes them in when an epic
+  or a release closes. Editing or removing an existing gaps line stays a direct edit. Format: `docs/development.md`,
+  "Change fragments".
 - Releases: `release/<version>` from `develop` → bump with `cargo xtask version set` → PR to `main` → tag
   `v<version>` → GitHub Release from the CHANGELOG section → back-merge `main` into `develop`.
-- Every doc has a status line at the top and a `## Revision history` table at the bottom; bump both when you touch it.
+- Every doc has a status line at the top and a `## Revision history` table at the bottom; when you touch a doc, its
+  revision row goes into your change fragment and the fold bumps both.
 - British spelling (licence as a noun, colour, behaviour). Plain words, numbers, honest limits, no marketing.
 
 ## Revision history
@@ -131,3 +140,7 @@ only their own `contributors/people.toml` entry. Never hand-edit `contributors/c
 | 2026-11-05 | minor | CI: a draft starts no job (#68) |
 | 2026-11-05 | minor | CI: `flatpak` runs on a PR only when its inputs change (#68) |
 | 2026-11-06 | minor | The FigCraft design file is the look's source of truth (#96) |
+| 2026-11-08 | minor | Change fragments instead of direct CHANGELOG, ROADMAP and gaps edits; per-module command lists (#111) |
+| 2026-11-08 | minor | The headless CLI (#140) |
+| 2026-11-08 | minor | `inboxcraft-cli mcp` (#141) |
+| 2026-11-08 | minor | The control channel is a socket in `$XDG_RUNTIME_DIR`; the CLI and MCP run in the app without `--store` (#142) |

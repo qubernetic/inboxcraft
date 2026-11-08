@@ -4,8 +4,8 @@
 //! The in-process fake server frame for tests.
 //!
 //! Dev-only: a dev-dependency of any crate, a normal dependency of none (`cargo xtask layers` enforces it, and that
-//! `testkit` never depends on `proto`). The [`imap`] module is the fake IMAP server; the fake SMTP and CalDAV
-//! servers of later slices follow.
+//! `testkit` never depends on `proto` or `dav`). The [`imap`] module is the fake IMAP server, the [`smtp`] module the
+//! fake SMTP submission server and the [`dav`] module the fake CalDAV server.
 //!
 //! - [`Script`] is what the server does: lines to send, lines to expect, and the faults of [`Fault`] (drop, delay,
 //!   garbage).
@@ -18,6 +18,9 @@
 //!   valid chain met by a client whose [`Clock`] is far off.
 //! - [`TestClient`] drives a server and reports each failure with its own [`ErrorKind`]. It stands in for the real
 //!   client until `net` exists; later slices drive `net` against the same servers.
+//!
+//! The [`store`] module writes the fixture store: a small invented mailbox on disk, for tests that open a store the
+//! way the apps do.
 //!
 //! The [`live`] module is the harness of the opt-in live tests the owner runs by hand on two throwaway test
 //! accounts (`just it-live`); without their credentials, and always in the agent sandbox and in CI, they skip.
@@ -47,7 +50,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod base64;
 mod client;
+pub mod dav;
 mod deflate;
 mod error;
 pub mod imap;
@@ -56,6 +61,8 @@ pub mod live;
 mod pki;
 mod script;
 mod server;
+pub mod smtp;
+pub mod store;
 mod wire;
 
 pub use client::{ClientError, ErrorKind, TestClient};

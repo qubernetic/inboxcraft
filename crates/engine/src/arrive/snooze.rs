@@ -1,0 +1,93 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The snooze stage, and a snoozed message's way there and back.
+//!
+//! A snoozed message lives in the account's `InboxCraft/Snoozed`, in a copy that carries the time it comes back in
+//! InboxCraft's own header field ([`SNOOZED_UNTIL`]) as the first field, so another InboxCraft on the same account
+//! sees it; a new snooze replaces the field on top rather than adding one. The stage reads the field (only the first
+//! field of the header counts, see `inboxcraft_net::envelope`) of mail that arrives in that folder: a message another InboxCraft snoozed gets its time and its
+//! schedule entry here too. At the time ([`back`]) the message comes back to the inbox, unread, marked as returned and
+//! listed as if it arrived then.
+
+use inboxcraft_model::{Due, Folder, Message, MessageState, Role, SNOOZED_UNTIL, ScheduleId, Scheduled};
+use inboxcraft_store::{Change, Storage};
+use inboxcraft_time::{MailDate, Offset, Timestamp, Zone};
+
+use super::Arrival;
+use crate::EngineError;
+use crate::act::{self, Effects, Mover};
+use crate::session::State;
+use crate::sync::Plan;
+
+/// The stage: a message that arrives in the snoozed folder with a time in [`SNOOZED_UNTIL`] is snoozed until then.
+pub(crate) fn stage(arrival: &Arrival<'_>, message: &Message, plan: &mut Plan) -> Result<(), EngineError> {
+    if arrival.role != Some(Role::Snoozed) {
+        return Ok(());
+    }
+    let Some(until) = message.summary().envelope().snoozed_until() else { return Ok(()) };
+    let id = ScheduleId::new(plan.state.next_schedule);
+    plan.state.next_schedule = plan.state.next_schedule.saturating_add(1);
+    plan.change(Change::SetMessageState(message.id(), MessageState { snoozed_until: Some(until), ..MessageState::default() }));
+    plan.change(Change::PutScheduled(Scheduled { id, due: until, what: Due::Unsnooze(message.id()) }));
+    Ok(())
+}
+
+/// `raw` with [`SNOOZED_UNTIL`] on top, saying `until` in UTC, in place of the ones an earlier snooze put there;
+/// `None` for a time no RFC 5322 date can say.
+pub(crate) fn with_field(raw: &[u8], until: Timestamp) -> Option<Vec<u8>> {
+    let date = MailDate::new(until, Zone::Fixed(Offset::UTC))?;
+    let mut copy = format!("{SNOOZED_UNTIL}: {date}\r\n").into_bytes();
+    copy.extend_from_slice(without_fields_on_top(raw));
+    Some(copy)
+}
+
+/// `raw` past the [`SNOOZED_UNTIL`] fields at its top, each with its folded lines.
+fn without_fields_on_top(raw: &[u8]) -> &[u8] {
+    let mut rest = raw;
+    while rest.get(..SNOOZED_UNTIL.len()).is_some_and(|name| name.eq_ignore_ascii_case(SNOOZED_UNTIL.as_bytes()))
+        && rest.get(SNOOZED_UNTIL.len()) == Some(&b':')
+    {
+        rest = past_line(rest);
+        while rest.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            rest = past_line(rest);
+        }
+    }
+    rest
+}
+
+/// `raw` past its first line and the LF that ends it; empty when no LF does.
+fn past_line(raw: &[u8]) -> &[u8] {
+    match raw.iter().position(|byte| *byte == b'\n') {
+        Some(end) => raw.get(end.saturating_add(1)..).unwrap_or_default(),
+        None => &[],
+    }
+}
+
+/// The folder of `message`'s account with `role`, if it has one.
+pub(crate) fn role_folder(store: &dyn Storage, state: &State, message: &Message, role: Role) -> Result<Option<Folder>, EngineError> {
+    match state.accounts.get(&message.account()).and_then(|held| held.roles.folder(role)) {
+        Some(id) => act::folder(store, message.account(), id),
+        None => Ok(None),
+    }
+}
+
+/// Whether `message` is in its account's snoozed folder.
+pub(crate) fn is_snoozed(state: &State, message: &Message) -> bool {
+    state.accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder())) == Some(Role::Snoozed)
+}
+
+/// Brings `message` back to its account's inbox, unread, moved by `mover`: the changes and jobs into `effects`, and the
+/// inbox it went to back (`None` when the account has none, and it stays where it is, unread).
+pub(crate) fn back(store: &dyn Storage, state: &State, message: &Message, mover: &mut Mover, effects: &mut Effects) -> Result<Option<Folder>, EngineError> {
+    let message = act::mark_seen(store, state, message.clone(), false, effects)?;
+    let Some(inbox) = role_folder(store, state, &message, Role::Inbox)? else { return Ok(None) };
+    if let Some(moved) = mover.relocate(store, state, &message, &inbox)? {
+        effects.extend(moved);
+    }
+    Ok(Some(inbox))
+}
+
+#[cfg(test)]
+#[path = "snooze_tests.rs"]
+mod tests;

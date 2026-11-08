@@ -92,7 +92,12 @@ pub(crate) fn date(message: &Message) -> Option<Timestamp> {
 
 /// The order of a list: newest first, undated last, then the higher id first.
 pub(crate) fn order(message: &Message) -> (bool, Reverse<Option<Timestamp>>, Reverse<MessageId>) {
-    let date = date(message);
+    order_at(message, None)
+}
+
+/// As [`order`], for a message that came back from a snooze at `returned`: listed as if it arrived then.
+pub(crate) fn order_at(message: &Message, returned: Option<Timestamp>) -> (bool, Reverse<Option<Timestamp>>, Reverse<MessageId>) {
+    let date = date(message).max(returned);
     (date.is_none(), Reverse(date), Reverse(message.id()))
 }
 

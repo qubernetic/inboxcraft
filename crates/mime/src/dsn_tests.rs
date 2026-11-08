@@ -301,3 +301,74 @@ fn a_header_error_in_a_report_is_an_error() {
     let long = format!("Reporting-MTA: dns; mx\r\n\r\nX: {}\r\n", "a".repeat(crate::MAX_FIELD_BYTES));
     assert_eq!(DeliveryStatus::parse(long.as_bytes()), Err(MimeError::FieldTooLong { limit: crate::MAX_FIELD_BYTES }));
 }
+
+/// A report about the message `<returned.1@example.org>`, its third part of `media_type` with `headers`.
+fn returned(media_type: &str, headers: &[&str]) -> Vec<u8> {
+    let mut lines = vec![
+        "From: mailer-daemon@mx.example.org",
+        "Content-Type: multipart/report; report-type=delivery-status; boundary=r",
+        "",
+        "--r",
+        "Content-Type: message/delivery-status",
+        "",
+        "Final-Recipient: rfc822; bela@example.net",
+        "Action: failed",
+        "Status: 5.1.1",
+        "",
+        "--r",
+    ];
+    let content_type = format!("Content-Type: {media_type}");
+    lines.push(&content_type);
+    lines.push("");
+    lines.extend(headers);
+    lines.push("--r--");
+    eml(&lines)
+}
+
+#[test]
+fn a_report_names_the_message_it_is_about_by_its_returned_header() {
+    let headers = ["Subject: Hello", "Message-ID:", " <returned.1@example.org>", "From: anna@example.org", ""];
+    for media_type in ["text/rfc822-headers", "message/rfc822-headers", "message/global-headers", "message/rfc822", "message/global"] {
+        let bytes = returned(media_type, &headers);
+        assert_eq!(parse(&bytes).unwrap().reported_message_id().as_deref(), Some("<returned.1@example.org>"), "{media_type}");
+    }
+    // The whole message, its body after the header.
+    let whole = returned("message/rfc822", &["Message-ID: <returned.1@example.org>", "", "Hello"]);
+    assert_eq!(parse(&whole).unwrap().reported_message_id().as_deref(), Some("<returned.1@example.org>"));
+    // The fixture's returned header has no Message-ID.
+    assert_eq!(parse(&bounce()).unwrap().reported_message_id(), None);
+}
+
+#[test]
+fn a_report_without_a_returned_header_names_no_message() {
+    // Another media type in the third place.
+    let other = returned("text/plain", &["Message-ID: <returned.1@example.org>", ""]);
+    assert_eq!(parse(&other).unwrap().reported_message_id(), None);
+    // No report at all.
+    assert_eq!(parse(b"Message-ID: <x@example.org>\r\n\r\nbody").unwrap().reported_message_id(), None);
+    // A multipart that is no report.
+    let mixed = eml(&[
+        "Content-Type: multipart/mixed; boundary=r",
+        "",
+        "--r",
+        "Content-Type: text/rfc822-headers",
+        "",
+        "Message-ID: <x@example.org>",
+        "--r--",
+    ]);
+    assert_eq!(parse(&mixed).unwrap().reported_message_id(), None);
+    // A returned header that cannot be read.
+    let broken = returned("text/rfc822-headers", &["Content-Transfer-Encoding: base64", "not a header line", ""]);
+    assert_eq!(parse(&broken).unwrap().reported_message_id(), None);
+    let encoded = eml(&[
+        "Content-Type: multipart/report; report-type=delivery-status; boundary=r",
+        "",
+        "--r",
+        "Content-Type: text/rfc822-headers",
+        "Content-Transfer-Encoding: base64",
+        "",
+        "!!!",
+        "--r--",
+    ]);
+    assert_eq!(parse(&encoded).unwrap().reported_message_id(), None);
+}

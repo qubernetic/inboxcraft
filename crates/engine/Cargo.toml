@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+inboxcraft-ical = { workspace = true }
 inboxcraft-mime = { workspace = true }
 inboxcraft-model = { workspace = true }
 inboxcraft-store = { workspace = true }
@@ -17,7 +18,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+inboxcraft-testkit = { workspace = true }
 proptest = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

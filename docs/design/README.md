@@ -1,6 +1,6 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app: the design system, the screens and the main flows, made
 in [FigCraft](https://getartcraft.com/apps/figcraft). **It is the source of truth for the look.**
@@ -49,13 +49,14 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-Nothing at the moment: the text gradient, the dark accent, the outline group icons and the inset rows are in
-`docs/design.md` and `theme.rs` (#104).
+- The "Settings · notifications and triage" screen also draws Screener, Undo send and "When a message leaves the
+  list" on one page. The app keeps Screener on the Triage page and Undo send on the Sending page, and has no choice
+  of what shows after a message leaves the list yet (#139).
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui
   premultiplies colours.
-- Screens for features not built yet (triage, writing, calendar, settings) show the intended behaviour from the plan
+- Screens for features not built yet (triage, writing, settings) show the intended behaviour from the plan
   and `docs/design.md`; they show the intended layout. The composer's place is still being designed: the file shows it in place of the
   reader and in a window of its own.
 - Each flow is also a prototype flow on the full-size screens (a click goes to the next step). Steps on different
@@ -73,3 +74,7 @@ Nothing at the moment: the text gradient, the dark accent, the outline group ico
 | 2026-11-06 | major | The file is the source of truth for the look; its changes not yet in the code are listed (#96) |
 | 2026-11-06 | minor | The window frame page and the new app icon on the cover; every listed change is in the code (#104) |
 | 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the folder pane has no Add account (#104) |
+| 2026-11-08 | minor | The notifications screen's other rows live on the Triage and Sending pages (#139) |
+| 2026-11-08 | minor | The calendar's views are built; the event editor and invitations are not yet (#147) |
+| 2026-11-08 | minor | The event editor is built (#148) |
+| 2026-11-08 | minor | The invitation screen is built (#149) |

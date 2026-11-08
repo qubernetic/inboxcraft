@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-07 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-08 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -79,28 +79,59 @@ behind `inboxcraft` (`--sample` for the invented sample mailbox, `--help`) open 
 `just run-sample` (or `inboxcraft --sample`, or the Flatpak's "Open the Sample Mailbox") opens two invented
 accounts with a few dozen invented messages on `example.org`. Nothing connects anywhere: the sample lives in memory,
 is built afresh at every start, starts no account worker and asks for no password. The only files its window writes
-are the ones the owner asks for: an attachment saved, and the appearance choices. In it the owner can try:
+are the ones the owner asks for: an attachment saved, the appearance choices and the inbox view. In it the owner can
+try:
 
 - the folder pane, the unified views, narrowing to one account, opening a folder, and the search;
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
-- the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and moves it to its
-  account's Archive, R marks it read or unread, Delete moves it to Trash. A row that leaves the list slides out; a
-  toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was;
+- the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
+  in its account's Archive ("Show done" over the list shows it there again, dimmed), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+  toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
+  slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  Ctrl+Z after it walks back through the earlier acts;
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, preset, typeface, icons, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
+- the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
+  a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is
+  refused, with the reason in the error banner: the sample's accounts have no submission server, so the outbox, the
+  countdown toast of Undo send and Schedule show only with an account that can send (`ui_shot`'s `"outbox"` pictures
+  them); "Undo send" on the Sending page sets the hold all the same. Reply, Reply all
+  and Forward under the open message start the composer filled in. Templates at the composer's foot stays disabled:
+  the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
+- the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
+  Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
+  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
+  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
+  list, simple list) and each account's grouping. Each act has a toast with Undo.
+- done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
+  same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
+  lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.
+- the calendar (the rail's Calendar, Ctrl+2): three invented calendars (Personal, Studio, Choir) with events around
+  the current week: overlapping ones on today, repeating ones, all-day blocks over several days and a ferry in the
+  Azores' zone, whose details label the event's own time. Day, Week, Month and Agenda, the steps and the mini month
+  move through them; a calendar's box hides its events. New event, and Edit and Delete under a picked event's
+  details, make, change and delete events with a toast whose Undo takes it back; editing the allotment work party,
+  which has a guest, asks whether to tell them.
+- invitations: the `ui_shot` line `"invitations": true` (and the card's tests) add Odile's invitation of Mira to lunch
+  and the update that moves it (`sample::invitations`) to the inbox, where they are in the Invitations group. The
+  update's card says what changed and what was answered before; Going is refused there, as the sample refuses every
+  send, and works on an account with a submission server.
 
-Without `--sample` the hover actions are hidden and their keys do nothing, until the commands that act on a real
-mailbox exist. The sample's own command, `sample.mail.set`, is refused in any other session.
+The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
+`mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
+change also goes to the server. The sample's own
+command, `sample.mail.set`, is refused in any other session.
 
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
-| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
+| `cargo xtask ci` | every gate below, in this order: `cargo fmt --check`, clippy with `-D warnings`, `spdx`, `test-files`, `assets`, `changes`, `layers`, `flatpak-sources-check`, doctests, `cov --check` (the one test run, nextest profile `ci`, `.config/nextest.toml`), `wasm`, `cargo deny check`, `stats` |
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
 | `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
+| `cargo xtask changes` | every change fragment in `changes/` is well formed (see "Change fragments"); `--fold` writes them into the documents and deletes them, and is not part of `ci` |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
 | `cargo xtask wasm` | the standalone and layer 0 to 5 crates, all but `net`, build for `wasm32-unknown-unknown` (one `cargo build`) |
@@ -124,7 +155,7 @@ included) and fails on:
   `store` -> `model`, `net` -> `proto` and `net` -> `dav`);
 - a standalone crate with any workspace dependency;
 - `testkit` as a normal or build dependency (dev-dependencies only);
-- `testkit` with any dependency on `proto` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
+- `testkit` with any dependency on `proto` or `dav` (`TESTKIT_NEVER`): a fake server never uses the parser it tests;
 - a UI crate (`egui`, `eframe`, `winit`, `egui_kittest`, `rfd`) anywhere but layer 6 and the apps;
 - a network crate (`NETWORK_CRATES`: `rustls`, `tokio-rustls`, `native-tls`, `openssl`, `socket2`, `mio`, `hyper`,
   `reqwest`, `ureq`, `oauth2` and the like) anywhere but `net`, `testkit` and the apps;
@@ -149,6 +180,12 @@ the JUnit report of profile `ci` to `target/nextest/ci/junit.xml` in the root, w
 builds in. Otherwise it prints one line per crate (lines, covered,
 cover, floor) and the workspace total. `just cov` runs it; `just cov --check` and `just ci` also fail below a floor.
 `lcov.info` stays in the root for the Codecov upload; a stale one is removed before the run.
+
+The run sets `CARGO_INCREMENTAL=1`, whatever the caller's environment, so CI (which sets 0 for the job) measures
+what a local run measures. Without incremental compilation rustc inlines small functions across crates, and every
+test binary that links a crate but never calls such a function carries an empty coverage record of it. llvm-cov
+keeps the first record of a function in the order of the binaries' names, so a line the tests run could count as
+uncovered only because a binary that sorts earlier links its crate.
 
 The floors live in one file, `.config/coverage.toml`:
 
@@ -175,6 +212,54 @@ fails when the project coverage drops by more than 1 point against the base bran
 `threshold: 1%`); `codecov/patch` fails when less than 80 % of the changed lines are covered. Both are statuses on
 the PR; the in-repo floors stay the gate `just ci` checks.
 
+### Change fragments
+A change does not edit `CHANGELOG.md`, the `ROADMAP.md` progress log, the new lines of `docs/gaps.md` or the
+revision tables of the documents it touches. It records them in `changes/<issue>.md`, so changes that are worked on
+side by side do not conflict in those files. Editing or removing an existing `docs/gaps.md` line, and the text of a
+document, stay direct edits; the status line of a document changed that way is left alone, the fold dates it from
+the fragment's revision row. `cargo xtask changes --fold` (`just changes --fold`) writes every fragment into the
+documents and deletes it; whoever closes an epic or a release runs it.
+
+```markdown
+# 111
+
+## Changelog
+### Added
+- `cargo xtask changes`: the change fragments, checked in `cargo xtask ci`; a long line goes on
+  indented by two spaces (#111)
+
+## Roadmap
+- Change fragments and one command list per engine module (#111)
+
+## Gaps
+- A new rough edge, worded as in `docs/gaps.md` (#111).
+
+## Revisions
+- ROADMAP.md | minor | Progress log: change fragments (#111)
+- docs/gaps.md | minor | The new rough edge (#111)
+- AGENTS.md | minor | Change fragments instead of direct edits (#111)
+```
+
+- The file is named after its issue: `changes/111.md`, no leading zeros. Nothing else lives in `changes/`.
+- An optional `# ` title on the first line. Then the sections `## Changelog`, `## Roadmap`, `## Gaps` and
+  `## Revisions`, each at most once and only when it has an entry.
+- Changelog entries go under a Keep a Changelog kind: `### Added`, `### Changed`, `### Deprecated`, `### Removed`,
+  `### Fixed` or `### Security`, each at most once.
+- An entry starts with `- `; a line indented by two spaces goes on with the entry above it. A revision is one line,
+  `- <doc> | <change> | <summary>`, the change `major`, `minor` or `patch`.
+- Every entry names its issue as `#<issue>`. A Roadmap line and a revision summary contain no `|`. No tabs or other
+  control characters.
+- Roadmap lines need a `ROADMAP.md` revision, Gaps lines a `docs/gaps.md` one. The document of a revision is a
+  Markdown file in the workspace with a `## Revision history` table and a `**Last updated:** ... · **Change:** ...`
+  status line.
+
+`cargo xtask changes` names each problem with its file and line; `ci` fails on any. The fold dates everything today
+in UTC and goes by issue number: each Changelog entry joins the end of its kind in `## [Unreleased]` (a missing kind
+is added in Keep a Changelog order), each Roadmap line becomes a row at the end of the progress log (continuation
+lines joined), each Gaps line joins the end of "Known rough edges", each revision becomes a row at the end of its
+document's revision table, and the status line of that document takes the date and the largest change. A malformed
+fragment, or a document without its section, makes the fold write nothing.
+
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
 checkout and without a network during the build. After the first setup, `git pull && just flatpak` updates the
@@ -185,7 +270,7 @@ installed app, and it starts from the desktop's menu like any other: the entry o
 |---|---|
 | `io.github.qubernetic.inboxcraft.yml` | the manifest: the freedesktop 25.08 runtime with the `rust-stable` SDK extension, the build commands and the permissions |
 | `cargo-sources.json` | every crate of `Cargo.lock` as a download with its checksum, unpacked into a vendor folder for the offline build |
-| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, with the sample mailbox as its second action |
+| `io.github.qubernetic.inboxcraft.desktop` | the menu entry, one main window, with the sample mailbox and Quit as its actions |
 | `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
 
 The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
@@ -194,8 +279,10 @@ file and the code differ.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
-GPU, the Secret Service for passwords and tokens, desktop notifications, and the Downloads folder, where Save puts
-attachments (under a new name, never over a file). The Background portal needs no permission. No other folder of
+GPU, the Secret Service for passwords and tokens, the panel's StatusNotifierWatcher for the tray icon, and the
+Downloads folder, where Save puts attachments (under a new name, never over a file). The Background and notification
+portals need no permission, nor does the socket a later start reaches the running one through (it is in
+the app's own data folder). No other folder of
 yours is open to the app: everything it keeps lives in `~/.var/app/io.github.qubernetic.inboxcraft/`. A test fails
 when a permission has no comment above it, or when the manifest opens a folder other than Downloads.
 
@@ -243,6 +330,10 @@ locally.
 The owner alone runs opt-in live tests, by hand, on two throwaway test accounts. Agents write and maintain these
 tests but never run them and never hold credentials for any account; every other test uses the in-process fake
 servers and `example.org` addresses.
+
+The desktop app's D-Bus tests (the tray, the Background portal) start a `dbus-daemon` of their own with a fake panel
+or portal on it, so they never reach the desktop's session bus; where `dbus-daemon` is not installed they print a
+note and pass without running.
 
 - **Where:** `crates/testkit/tests/live.rs` (the harness) and `crates/net/tests/live.rs`: both accounts sign in and
   list their folders; the `live-imap` round trip (sign-in, folder list, run folder, APPEND of an invented message,
@@ -345,7 +436,8 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
   green `push` run whose ref is `refs/heads/develop`, `refs/heads/main` or `refs/heads/epic/*` and that did not
   create the branch (`!github.event.created`) prunes `target/` and saves it with `actions/cache/save`; a
   `pull_request` or `workflow_dispatch` run and the push that creates a branch never write it. Who may push to or
-  create those branches is set by the repository's rulesets, not by the workflow. The job sets `CARGO_INCREMENTAL=0`.
+  create those branches is set by the repository's rulesets, not by the workflow. The job sets `CARGO_INCREMENTAL=0`;
+  the coverage run alone builds incrementally (see "The coverage gate").
 - **The prune is an allow list.** `cargo xtask cache-prune` keeps only cargo's marker files and the `deps`, `build`
   and `.fingerprint` folders of `target/<profile>/` and `target/<triple>/<profile>/`, and deletes in those folders
   every entry named after a package or target of this workspace (`[lib]<name>-<16 hex digits>[.<ext>]`, hyphen and
@@ -383,14 +475,23 @@ cargo-fuzz needs nightly Rust: the toolchain is pinned by date in the workflow. 
 kept as the `fuzz-artifacts` artifact; it becomes a regression test. With no targets the job passes. GitHub runs a
 schedule only from the default branch, `main`, so the nightly run starts with the first release.
 
-`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A
-new parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it
-runs with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15),
-`charset_decode` and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn`
-(#18), `imap_client` (#20), `testkit_imap` (#23), the fake IMAP server's own command reader, `net_envelope`
-(#25), the envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns`
-(#28): a server's certificate, an autoconfig file, and DNS answers and resolver configurations, and
-`html_display` (#29), the safe HTML display.
+`fuzz/` is a Cargo workspace of its own, so libFuzzer and the nightly toolchain never reach the main workspace. A new
+parser adds its target as `fuzz/fuzz_targets/<name>.rs` and a `[[bin]]` entry in `fuzz/Cargo.toml`; locally it runs
+with `cargo +nightly fuzz run <name>` from the repository root. The targets are `rfc5322_date` (#15), `charset_decode`
+and `rfc2047_words` (#16), `model_values` (#17), `mime_message`, `mime_headers` and `mime_dsn` (#18), `imap_client`
+(#20), `smtp_client` (#117), the SMTP client and its reply parser, `testkit_imap` (#23), the fake IMAP server's own
+command reader, `testkit_smtp` (#118), the fake SMTP server's own command reader and session, `net_envelope` (#25), the
+envelope of a header block, `engine_params` (#27), and `net_certificate`, `net_autoconfig` and `net_dns` (#28): a
+server's certificate, an autoconfig file, and DNS answers and resolver configurations, and `html_display` (#29), the
+safe HTML display, `ui_reader`, the reader's picture decoder and quote splitter, and `ui_typed_time` (#129), a time
+typed into the time picker, `ui_keymap` (#130), the keys' file and a key written as text, `mcp_lines` (#141), the MCP
+server's input, `control_lines` (#142), the control channel's request and answer lines, and `ical_calendar` and
+`ical_rule` (#143): a calendar object read, written, read again and expanded over a day, and a recurrence rule read,
+written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the DAV XML and multistatus readers, the
+CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
+and XML readers and session, and `engine_invite` (#149): any bytes kept as a message's body, and as an invitation's
+calendar part, read into its invitation mark and card, answered and removed, and `engine_alerts` (#150): any bytes
+a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.
@@ -453,3 +554,25 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-06 | minor | `cargo xtask cache-prune` (#79) |
 | 2026-11-06 | minor | CI: the cache prune is `cargo xtask cache-prune`, an allow list; prune and save only on a push that creates no branch; the key follows the runner image and `.cargo/config.toml` (#79) |
 | 2026-11-07 | minor | The coverage gate: what Codecov checks, its ignore list kept equal to the gate's excludes (#109) |
+| 2026-11-08 | minor | Change fragments and the `changes` gate (#111) |
+| 2026-11-08 | minor | The fuzz target `smtp_client` (#117) |
+| 2026-11-08 | minor | The fuzz target `testkit_smtp` (#118) |
+| 2026-11-08 | minor | The `ui_typed_time` fuzz target, and `ui_reader` in the list (#129) |
+| 2026-11-08 | minor | The `ui_keymap` fuzz target (#130) |
+| 2026-11-08 | minor | The acts on the sample work on a real account too (#131) |
+| 2026-11-08 | minor | The composer on the sample mailbox (#132) |
+| 2026-11-08 | patch | Reply, forward and templates on the sample mailbox (#133) |
+| 2026-11-08 | minor | The screener and the grouped inbox on the sample mailbox (#134) |
+| 2026-11-08 | minor | Done, park, pin, snooze and reminders on the sample mailbox (#135) |
+| 2026-11-08 | minor | The sample cannot send, so the outbox and Schedule show only in pictures; Undo send on the Sending page (#136) |
+| 2026-11-08 | minor | The tray's Flatpak permission, the desktop file's Quit action, the private bus of the D-Bus tests (#137) |
+| 2026-11-08 | minor | The Flatpak no longer talks to the notification server: notifications go through the portal (#138) |
+| 2026-11-08 | minor | The coverage run builds incrementally, and why (#140) |
+| 2026-11-08 | minor | The `mcp_lines` fuzz target (#141) |
+| 2026-11-08 | minor | The `control_lines` fuzz target (#142) |
+| 2026-11-08 | minor | The fuzz targets `ical_calendar` and `ical_rule` (#143) |
+| 2026-11-08 | minor | `TESTKIT_NEVER` takes `dav`; the fuzz targets `dav_xml`, `dav_client` and `testkit_dav` (#144) |
+| 2026-11-08 | minor | The calendar on the sample mailbox (#147) |
+| 2026-11-08 | minor | Making, changing and deleting events on the sample (#148) |
+| 2026-11-08 | minor | The sample's invitations and the fuzz target `engine_invite` (#149) |
+| 2026-11-08 | minor | The fuzz target `engine_alerts` (#150) |

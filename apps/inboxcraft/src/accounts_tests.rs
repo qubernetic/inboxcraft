@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use std::collections::BTreeMap;
 use std::net::TcpListener;
 use std::num::NonZeroU16;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,7 +9,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security, Server, StepStatus,
+    Account, AccountId, CalendarJob, CalendarReport, CheckStep, EmailAddress, ErrorKind, Event, EventKind, Host, Job, JobId, JobKind, Security,
+    Server, StepStatus,
 };
 use inboxcraft_net::detect::{Candidate, Proposal as Found, Source as Where};
 use inboxcraft_net::{Connector, Credentials, Password, TlsSettings, Trust, WorkerSettings};
@@ -16,14 +18,78 @@ use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::onboard::{self, Keychain};
 use inboxcraft_ui_egui::workers::Workers;
 
-use super::{NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
+use super::{Entries, NetWorkers, OsKeychain, SERVICE, described, detect, entry_name, proposal};
 
 const SECRET: &str = "maple-Harbour-42-lantern";
 
 #[test]
-fn every_password_sits_under_the_app_id_by_account() {
+fn every_password_sits_under_the_app_id_by_store_and_account() {
     assert_eq!(SERVICE, "io.github.qubernetic.inboxcraft");
-    assert_eq!(entry_name(7), "account-7");
+    assert_eq!(entry_name("0a1b", 7), "account-0a1b-7");
+}
+
+/// A credential store in memory that records what was asked of it.
+#[derive(Default)]
+struct Recording(Mutex<BTreeMap<String, String>>);
+
+impl Recording {
+    fn names(&self) -> Vec<String> {
+        self.0.lock().unwrap().keys().cloned().collect()
+    }
+}
+
+impl Entries for Recording {
+    fn set(&self, name: &str, password: &str) -> Result<(), String> {
+        self.0.lock().unwrap().insert(name.to_owned(), password.to_owned());
+        Ok(())
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        self.0.lock().unwrap().get(name).cloned()
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.0.lock().unwrap().remove(name);
+        Ok(())
+    }
+}
+
+/// Account 1 of the store in `dir`, its password kept through a keychain bound to that store over `entries`.
+fn add_in(dir: &std::path::Path, entries: &Arc<Recording>, password: &str) -> OsKeychain {
+    let opened = crate::store::open_store(dir).unwrap();
+    let keychain = OsKeychain::over(&opened.id, Arc::clone(entries) as Arc<dyn Entries>);
+    keychain.store(1, password).unwrap();
+    keychain
+}
+
+#[test]
+fn two_stores_on_one_computer_keep_their_passwords_apart() {
+    // The Flatpak and a build of its own, or another XDG_DATA_HOME: both number their accounts from 1.
+    let entries = Arc::new(Recording::default());
+    let (one, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let first = add_in(one.path(), &entries, SECRET);
+    let second = add_in(other.path(), &entries, "another-password");
+    let names = entries.names();
+    assert_eq!(names.len(), 2, "two entries, not one overwritten: {names:?}");
+    let kept = |keychain: &OsKeychain| entries.get(&keychain.entry(1));
+    assert_eq!(kept(&first).as_deref(), Some(SECRET));
+    assert_eq!(kept(&second).as_deref(), Some("another-password"));
+    assert!(Credentials::password(&first, &account(993)).is_some(), "a worker reads its own store's entry");
+    first.forget(1).unwrap();
+    assert!(Credentials::password(&first, &account(993)).is_none());
+    assert_eq!(kept(&second).as_deref(), Some("another-password"), "forgetting in one store leaves the other's");
+    let again = add_in(one.path(), &entries, SECRET);
+    assert_eq!(again.entry(1), first.entry(1), "a store keeps its id, so its entries, between runs");
+    assert_eq!(entries.names().len(), 2);
+}
+
+#[test]
+fn an_entry_not_bound_to_the_store_is_never_read() {
+    // Left by an older build, which named the entry by the account alone.
+    let entries = Arc::new(Recording::default());
+    entries.set("account-1", SECRET).unwrap();
+    let keychain = OsKeychain::over("0a1b", Arc::clone(&entries) as Arc<dyn Entries>);
+    assert!(Credentials::password(&keychain, &account(993)).is_none());
 }
 
 #[test]
@@ -65,7 +131,7 @@ fn without_a_credential_store_nothing_is_kept_and_no_password_comes_back() {
         return;
     }
     let none = "no credential store is running (Secret Service, Keychain or Credential Manager)";
-    let keychain = OsKeychain;
+    let keychain = OsKeychain::new("0a1b");
     assert_eq!(keychain.store(7, SECRET), Err(none.to_owned()));
     assert_eq!(keychain.forget(7), Err(none.to_owned()));
     let account = account(993);
@@ -158,7 +224,12 @@ fn a_check_runs_on_the_accounts_worker_and_its_steps_wake_the_window() {
         .collect();
     assert_eq!(steps.first(), Some(&(CheckStep::Dns, StepStatus::Passed)), "{steps:?}");
     assert_eq!(steps.get(1), Some(&(CheckStep::Tcp, StepStatus::Failed(ErrorKind::ConnectionRefused))), "{steps:?}");
-    assert!(steps.iter().all(|(step, status)| *step < CheckStep::Tls || matches!(status, StepStatus::Skipped | StepStatus::NotBuilt)), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .all(|(step, status)| *step < CheckStep::Tls || matches!(status, StepStatus::Skipped | StepStatus::NotSet | StepStatus::NotBuilt)),
+        "{steps:?}"
+    );
     assert!(woken.load(Ordering::SeqCst) >= steps.len());
     // The account is gone: its worker stops, off the window's thread, and the next job starts another.
     workers.keep(&[]);
@@ -211,4 +282,35 @@ fn once_the_window_is_gone_the_events_stop_waking_it() {
     }
     assert_eq!(Arc::strong_count(&wakes), 1, "the event thread ended");
     assert_eq!(wakes.load(Ordering::SeqCst), 1, "no step after the first woke the window that is gone");
+}
+
+/// The kind of the calendar failure of job `id` among `events`, if one came.
+fn calendar_failure(events: &[Event], id: u64) -> Option<ErrorKind> {
+    events.iter().find_map(|event| match &event.kind {
+        EventKind::Calendar(CalendarReport::Failed { kind, .. }) if event.job == Some(JobId::new(id)) => Some(*kind),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_worker_starts_afresh_when_its_accounts_servers_change() {
+    let tls = TlsSettings::new(Trust::Platform, Arc::new(SystemClock::new()));
+    let mut workers = NetWorkers::new(WorkerSettings::new(Connector::new(tls)), Arc::new(NoPassword), None);
+    let before = account(closed_port());
+    let discover =
+        |id: u64, url: Option<&str>| Job::new(JobId::new(id), before.id(), JobKind::Calendar(CalendarJob::Discover { url: url.map(str::to_owned) }));
+    workers.send(&before, discover(1, None));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 1).is_some());
+    assert_eq!(calendar_failure(&events, 1), Some(ErrorKind::NoCalendarServer));
+    // The address set: the next job reaches a worker that holds it, and only the password is missing.
+    let url = format!("https://127.0.0.1:{}/", closed_port());
+    let after = before.clone().with_caldav(Some(&url)).unwrap();
+    workers.send(&after, discover(2, Some(&url)));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 2).is_some());
+    assert_eq!(calendar_failure(&events, 2), Some(ErrorKind::CredentialMissing));
+    // Another address: the worker of the one before is gone, so a job for the old address is refused.
+    let moved = after.clone().with_caldav(Some("https://127.0.0.2/")).unwrap();
+    workers.send(&moved, discover(3, Some(&url)));
+    let events = wait_for(&mut workers, |events| calendar_failure(events, 3).is_some());
+    assert_eq!(calendar_failure(&events, 3), Some(ErrorKind::OtherServer));
 }

@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU16;
 
-use super::{Account, AccountError, Host, Security, Server};
+use super::{Account, AccountError, Host, Security, Server, Template};
 use crate::{AccountId, EmailAddress};
 
 fn host(text: &str) -> Host {
@@ -131,4 +131,138 @@ fn a_broken_username_is_an_error() {
 fn account_errors_read_as_sentences() {
     assert_eq!(AccountError::BadHost.to_string(), "the server name is not a host name or an IP address");
     assert_eq!(AccountError::BadUsername.to_string(), "the user name is empty, too long or holds a control character");
+}
+
+#[test]
+fn a_signature_keeps_its_lines_and_loses_other_control_characters() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert_eq!(account.signature(), None);
+    let signed = account.clone().with_signature(Some("Anna\r\nExample Ltd.\t\u{1b}[2J\0\n"));
+    assert_eq!(signed.signature(), Some("Anna\nExample Ltd.\t[2J"));
+    for blank in ["", " \n\r\n\t", "\0"] {
+        assert_eq!(account.clone().with_signature(Some(blank)).signature(), None, "{blank:?}");
+    }
+    let long = "é".repeat(Account::MAX_SIGNATURE_CHARS + 5);
+    assert_eq!(account.clone().with_signature(Some(&long)).signature().map(|text| text.chars().count()), Some(Account::MAX_SIGNATURE_CHARS));
+    let json = serde_json::to_string(&signed).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), signed);
+    // A record written before signatures reads back without one.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+}
+
+#[test]
+fn the_grouped_inbox_is_on_until_the_owner_turns_it_off() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert!(account.grouped());
+    let plain = account.clone().with_grouped(false);
+    assert!(!plain.grouped());
+    let json = serde_json::to_string(&plain).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), plain);
+    // A record written before the grouped inbox reads back with it on.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert!(serde_json::from_str::<Account>(old).unwrap().grouped());
+}
+
+#[test]
+fn a_calendar_server_is_an_https_url_or_none() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert_eq!(account.caldav(), None);
+    for url in [
+        "https://dav.example.org",
+        "HTTPS://dav.example.org/",
+        "https://dav.example.org:8443/dav/",
+        "https://dav_1.example.org/",
+        "https://[2001:db8::1]:8443/",
+        "https://[::1]",
+    ] {
+        assert_eq!(account.clone().with_caldav(Some(url)).unwrap().caldav(), Some(url), "{url}");
+    }
+    assert_eq!(account.clone().with_caldav(Some(" https://dav.example.org/ ")).unwrap().caldav(), Some("https://dav.example.org/"));
+    assert_eq!(account.clone().with_caldav(Some("  ")).unwrap().caldav(), None);
+    let long = format!("https://dav.example.org/{}", "a".repeat(Account::MAX_CALDAV_LEN));
+    for url in [
+        "http://dav.example.org/",
+        "dav.example.org",
+        "https://",
+        "https:///dav",
+        "https://ada:pw@dav.example.org/",
+        "https://dav.example.org/a b",
+        "https://dav.example.org/\r\nX: y",
+        "https://dav\\example.org/",
+        "https://dav%2Eexample.org/",
+        "https://däv.example.org/",
+        "https://:443/",
+        "https://dav.example.org:dav/",
+        "https://dav.example.org:0/",
+        "https://dav.example.org:65536/",
+        "https://dav.example.org:+443/",
+        "https://[]/",
+        "https://[::1/",
+        "https://[::1]x/",
+        "https://[zz]/",
+        // A token typed into the query or the fragment would be repeated in answers and logs.
+        "https://dav.example.org/?token=x",
+        "https://dav.example.org/#x",
+        "https://dav.example.org?x",
+        long.as_str(),
+    ] {
+        assert_eq!(account.clone().with_caldav(Some(url)), Err(AccountError::BadCalendarUrl), "{url}");
+    }
+    let set = account.clone().with_caldav(Some("https://dav.example.org/")).unwrap();
+    let json = serde_json::to_string(&set).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), set);
+    let clear = json.replace("https://dav.example.org/", "http://dav.example.org/");
+    assert!(serde_json::from_str::<Account>(&clear).is_err());
+    // A record written before calendars reads back without one.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+    assert_eq!(AccountError::BadCalendarUrl.to_string(), "the calendar address is not an https URL");
+}
+
+#[test]
+fn a_template_is_cleaned_like_a_signature_and_needs_a_name() {
+    let template = Template::new(" Thanks\t\n", "Thank you,\r\n {first_name}\0", "Hi {first_name},\r\n\u{1b}thanks for {?what}.\n").unwrap();
+    assert_eq!(
+        (template.name(), template.subject(), template.text()),
+        ("Thanks", "Thank you, {first_name}", "Hi {first_name},\nthanks for {?what}.\n")
+    );
+    for blank in ["", " \t", "\0\n"] {
+        assert_eq!(Template::new(blank, "", "text"), None, "{blank:?}");
+    }
+    let long = Template::new(&"n".repeat(500), &"s".repeat(5_000), &"é".repeat(Template::MAX_TEXT_CHARS + 5)).unwrap();
+    assert_eq!(
+        (long.name().chars().count(), long.subject().chars().count(), long.text().chars().count()),
+        (Template::MAX_NAME_CHARS, Template::MAX_SUBJECT_CHARS, Template::MAX_TEXT_CHARS)
+    );
+}
+
+#[test]
+fn an_account_keeps_its_templates_once_by_name() {
+    let imap = Server::new(host("imap.example.org"), port(993), Security::Tls);
+    let address = EmailAddress::new("anna@example.org").unwrap();
+    let account = Account::new(AccountId::new(1), "Work", address, "anna", imap).unwrap();
+    assert!(account.templates().is_empty());
+    let thanks = Template::new("Thanks", "", "Thank you!").unwrap();
+    let again = Template::new("THANKS", "", "Thanks again").unwrap();
+    let later = Template::new("Later", "Re", "Later.").unwrap();
+    let kept = account.clone().with_templates(vec![thanks.clone(), again, later.clone()]);
+    assert_eq!(kept.templates(), [thanks.clone(), later.clone()]);
+    assert_eq!(kept.template("thanks"), Some(&thanks));
+    assert_eq!(kept.template("nope"), None);
+    let many = (0..Account::MAX_TEMPLATES + 3).map(|n| Template::new(&format!("t{n}"), "", "x").unwrap()).collect();
+    assert_eq!(account.clone().with_templates(many).templates().len(), Account::MAX_TEMPLATES);
+    let json = serde_json::to_string(&kept).unwrap();
+    assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), kept);
+    // A record written before templates reads back without any, and a template without a name is dropped.
+    let old = r#"{"id":1,"label":"Work","address":"anna@example.org","display_name":null,"username":"anna","imap":{"host":"imap.example.org","port":993,"security":"Tls"},"submission":null}"#;
+    assert_eq!(serde_json::from_str::<Account>(old).unwrap(), account);
+    let unnamed = old.replace("null}", r#"null,"templates":[{"name":" ","subject":"","text":"x"},{"name":"Later","subject":"Re","text":"Later."}]}"#);
+    assert_eq!(serde_json::from_str::<Account>(&unnamed).unwrap().templates(), [later]);
 }

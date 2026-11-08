@@ -217,11 +217,11 @@ fn after_a_refused_password_only_a_check_by_the_owner_signs_in() -> Result {
     for _ in 0..3 {
         let check = run.job(JobKind::Check { by_owner: false })?;
         let statuses = check_statuses(&mut run, check)?;
-        assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::NeedsOwner, StepStatus::NotBuilt, StepStatus::NotBuilt]);
+        assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::NeedsOwner, StepStatus::NotSet, StepStatus::NotSet]);
     }
     let check = run.job(JobKind::Check { by_owner: true })?;
     let statuses = check_statuses(&mut run, check)?;
-    assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::Failed(ErrorKind::LoginRefused), StepStatus::NotBuilt, StepStatus::NotBuilt]);
+    assert_eq!(statuses, [passed, passed, passed, passed, StepStatus::Failed(ErrorKind::LoginRefused), StepStatus::NotSet, StepStatus::NotSet]);
     run.worker.stop();
     let (transcript, _ended) = run.fake.finish_with_transcript();
     assert_eq!(transcript.received().iter().filter(|line| line.contains("AUTHENTICATE")).count(), 2);

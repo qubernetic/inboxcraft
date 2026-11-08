@@ -8,7 +8,7 @@
 //! over `net`, which read each password from the OS credential store; the sample and the tests give [`NoWorkers`],
 //! which runs nothing.
 
-use inboxcraft_model::{Account, AccountId, CheckStep, Event, EventKind, Job, JobKind, StepReport, StepStatus};
+use inboxcraft_model::{Account, AccountId, CheckStep, ErrorKind, Event, EventKind, Job, JobKind, StepReport, StepStatus};
 
 /// The `net` workers, one per account.
 pub trait Workers: Send {
@@ -24,13 +24,16 @@ pub trait Workers: Send {
 
 /// Workers that connect nowhere and answer each Check job from a script: the steps given, with the account's server
 /// and `issuer` on the certificate step; the other built steps skipped (or left pending with
-/// [`Scripted::unfinished`]), the steps not built yet as such. Every other job is only written down. For the
-/// `ui_shot` pictures and the tests.
+/// [`Scripted::unfinished`]), the steps not built yet as such. A Send job is refused with the reply of
+/// [`Scripted::refusing`], if it was given. Every other job is only written down. For the `ui_shot` pictures and the
+/// tests.
 #[derive(Debug, Default, Clone)]
 pub struct Scripted {
     steps: Vec<(CheckStep, StepStatus)>,
     issuer: Option<String>,
     unfinished: bool,
+    /// The submission server's reply to every send.
+    refusal: Option<String>,
     /// Every job handed over, by account, in order.
     pub sent: Vec<(AccountId, JobKind)>,
     /// What [`Workers::keep`] was last told.
@@ -49,6 +52,16 @@ impl Scripted {
     #[must_use]
     pub fn passing() -> Self {
         Self::answering(&CheckStep::ALL.into_iter().filter(|step| step.is_built()).map(|step| (step, StepStatus::Passed)).collect::<Vec<_>>())
+            .without(CheckStep::SmtpLogin)
+            .without(CheckStep::CaldavDiscovery)
+    }
+
+    /// The same workers, answering `step` as a worker would on its own: an account without a submission server has no
+    /// SMTP sign-in to pass, one without a CalDAV address no calendars to find.
+    #[must_use]
+    pub fn without(mut self, step: CheckStep) -> Self {
+        self.steps.retain(|(scripted, _)| *scripted != step);
+        self
     }
 
     /// The same workers, reporting only the scripted steps: the check stays running.
@@ -57,11 +70,22 @@ impl Scripted {
         self.unfinished = true;
         self
     }
+
+    /// The same workers, the submission server refusing every send with `reply` (`550 5.1.1 No such user`).
+    #[must_use]
+    pub fn refusing(mut self, reply: &str) -> Self {
+        self.refusal = Some(reply.to_owned());
+        self
+    }
 }
 
 impl Workers for Scripted {
     fn send(&mut self, account: &Account, job: Job) {
         self.sent.push((account.id(), job.kind.clone()));
+        if let (JobKind::Send { draft, .. }, Some(reply)) = (&job.kind, &self.refusal) {
+            let refused = EventKind::SendFailed { draft: *draft, kind: ErrorKind::MessageRefused, reply: Some(reply.clone()) };
+            self.events.push(Event::new(account.id(), Some(job.id), refused));
+        }
         if !matches!(job.kind, JobKind::Check { .. }) {
             return;
         }
@@ -70,6 +94,8 @@ impl Workers for Scripted {
             let status = match self.steps.iter().find(|(scripted, _)| *scripted == step) {
                 Some((_, status)) => *status,
                 None if self.unfinished => continue,
+                None if step == CheckStep::SmtpLogin && account.submission().is_none() => StepStatus::NotSet,
+                None if step == CheckStep::CaldavDiscovery && account.caldav().is_none() => StepStatus::NotSet,
                 None if step.is_built() => StepStatus::Skipped,
                 None => StepStatus::NotBuilt,
             };

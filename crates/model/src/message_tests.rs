@@ -3,8 +3,8 @@
 
 use inboxcraft_time::Timestamp;
 
-use super::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Summary};
-use crate::{AccountId, Address, EmailAddress, Flag, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid};
+use super::{Envelope, MAX_ADDRESSES, MAX_PREVIEW_CHARS, MAX_REFERENCES, MAX_SUBJECT_CHARS, Message, MessageRef, Moving, Summary};
+use crate::{AccountId, Address, EmailAddress, Flag, Flags, FolderId, MessageId, ModSeq, ThreadId, Uid, UidValidity};
 
 fn address(text: &str) -> Address {
     Address::new(None, EmailAddress::new(text).unwrap())
@@ -70,6 +70,19 @@ fn an_envelope_holds_the_header_fields() {
     assert_eq!(envelope.references(), [reference("m1@example.org"), reference("m2@example.org")]);
     let json = serde_json::to_string(&envelope).unwrap();
     assert_eq!(serde_json::from_str::<Envelope>(&json).unwrap(), envelope);
+}
+
+#[test]
+fn an_envelope_keeps_the_time_a_snooze_ends() {
+    let until = Timestamp::from_unix(1_800_000_000, 0);
+    let envelope = Envelope::new("Later").with_snoozed_until(until);
+    assert_eq!(envelope.snoozed_until(), until);
+    assert_eq!(Envelope::new("Now").snoozed_until(), None);
+    let json = serde_json::to_string(&envelope).unwrap();
+    assert_eq!(serde_json::from_str::<Envelope>(&json).unwrap(), envelope);
+    let older = serde_json::to_string(&Envelope::new("Now")).unwrap().replace(",\"snoozed_until\":null", "");
+    assert!(!older.contains("snoozed_until"), "{older}");
+    assert_eq!(serde_json::from_str::<Envelope>(&older).unwrap().snoozed_until(), None, "an envelope stored before reads back");
 }
 
 #[test]
@@ -147,4 +160,25 @@ fn a_message_is_a_summary_with_our_ids() {
     assert_eq!(threaded.thread(), Some(ThreadId::new(5)));
     let json = serde_json::to_string(&threaded).unwrap();
     assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), threaded);
+}
+
+#[test]
+fn a_moved_message_keeps_where_the_server_has_it_until_the_answer_comes() {
+    let message = Message::new(MessageId::new(7), AccountId::new(1), FolderId::new(3), summary());
+    assert_eq!(message.moving(), None);
+    let json = serde_json::to_string(&message).unwrap();
+    assert!(!json.contains("moving"), "a settled message is stored as before: {json}");
+    let place = Moving { folder: FolderId::new(2), uid_validity: UidValidity::new(7).unwrap(), uid: Uid::new(42).unwrap(), flags: Flags::default() };
+    let moving = message.clone().with_moving(Some(place.clone()));
+    assert_eq!(moving.moving(), Some(&place));
+    let json = serde_json::to_string(&moving).unwrap();
+    assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), moving);
+    assert_eq!(moving.with_moving(None), message);
+}
+
+#[test]
+fn a_summary_takes_another_uid() {
+    let other = summary().with_uid(Uid::new(43).unwrap());
+    assert_eq!(other.uid(), Uid::new(43).unwrap());
+    assert_eq!(other.with_uid(Uid::new(42).unwrap()), summary());
 }

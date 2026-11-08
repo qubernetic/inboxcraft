@@ -7,8 +7,13 @@
 //! The connection opens at the first job and again after a failure that ended it. Jobs wait in an offline queue
 //! while there is no connection; a failure the network or the server may get over (no route, a refused or dropped
 //! connection, a timeout, a server that broke the protocol) is reported, and the worker tries again after a
-//! [`Backoff`] wait that doubles up to its cap, keeping the queue. A job that was running when its connection ended
-//! is reported failed and not run again: a job that breaks the connection every time cannot hold the queue up.
+//! [`Backoff`] wait that doubles up to its cap, keeping the queue. A read job that was running when its connection
+//! ended is reported failed and not run again. A write job (an act of the owner) that a dropped or timed-out
+//! connection cut off goes back to the head of the queue and runs again after the reconnect, at most
+//! [`WRITE_TRIES`] times in all, so a job that breaks the connection every time cannot hold the queue up; the write
+//! path ends in the same state run once or twice (see `write`). A move on a server without MOVE is the one write that
+//! does not run again, as its fallback may have copied the messages already. Any other failure of a write is
+//! reported, and the engine takes the act back.
 //!
 //! An Idle job names the folder to watch between jobs: the worker resyncs it, then waits in IDLE (or polls a server
 //! without IDLE) until a job comes or the server tells of a change, which brings another resync. A connection that
@@ -23,11 +28,23 @@
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
 //!
+//! After each sign-in the worker tells what the server can do as far as the engine chooses by it
+//! ([`EventKind::Abilities`]): whether it removes only the messages named.
+//!
 //! A Check job runs at once on a connection of its own, also while the worker is offline, backing off or halted: it
 //! reports each step of the account check (see [`crate::check_account`]) under the job's id. After a refused or
 //! unanswered sign-in (the worker halted for it, or the last check's sign-in ended so), a check the owner did not
 //! start stops before the sign-in with [`inboxcraft_model::StepStatus::NeedsOwner`]: an agent that checks in a loop
-//! cannot send the password again and lock the account at the provider.
+//! cannot send the password again and lock the account at the provider. The submission server is held the same way on
+//! its own: after it refused the password or left it unanswered, in a check or a send, a check the owner did not start
+//! reports the SMTP step as [`inboxcraft_model::StepStatus::NeedsOwner`] and sends it nothing, while its IMAP steps
+//! run; a sign-in there that passes, in an owner's check or a send, ends the hold. A send is the owner's own act, so
+//! it signs in.
+//!
+//! A calendar job runs at once too, on an HTTPS connection of its own (see `dav`), and answers with one
+//! [`EventKind::Calendar`]. After the CalDAV server refused the password, or the IMAP server did, calendar jobs fail
+//! with the same kind and send nothing, and a check the owner did not start reports the CalDAV step as needing the
+//! owner; an owner's check that finds the calendars ends the hold.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -37,16 +54,21 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use inboxcraft_model::{
-    Account, AccountId, CheckStep, ConnectionState, ErrorKind, Event, EventKind, FolderId, FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
+    Account, AccountId, CalendarJob, CalendarReport, CheckStep, ConnectionState, DraftId, EmailAddress, ErrorKind, Event, EventKind, FolderId,
+    FolderPath, FolderState, Job, JobId, JobKind, StepStatus,
 };
 
 use crate::backoff::{Backoff, whole_seconds};
 use crate::sync::{self, SyncConfig};
 use crate::watch::{self, WatchConfig};
 use crate::{CheckTarget, Connector, ImapConnection, NetError, Password, check_account};
+use crate::{dav, smtp, write};
 
 /// The most jobs the offline queue holds by default.
 pub const MAX_QUEUED: usize = 1_000;
+
+/// How often a write job is run when its connection drops or times out under it each time.
+pub const WRITE_TRIES: u32 = 3;
 
 /// Where the worker gets an account's password: the OS credential store in the app, a fixed one in tests.
 pub trait Credentials: Send + Sync {
@@ -165,6 +187,8 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         out: Out { account: account.id(), events, listening: true, reported: None, states: HashMap::new() },
         connection: None,
         halted: None,
+        submission_halted: None,
+        calendar_halted: None,
         pending: VecDeque::new(),
         open: true,
         attempt: 0,
@@ -172,6 +196,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         stale: false,
         idle_refused: false,
         sign_in_lost: false,
+        tries: HashMap::new(),
     };
     while run.turn(queue) {}
     if let Some(open) = run.connection {
@@ -240,6 +265,10 @@ struct Run<'a> {
     connection: Option<ImapConnection>,
     /// Why the worker stopped trying for good.
     halted: Option<NetError>,
+    /// The submission server's last sign-in was refused or went unanswered: only the owner signs in there again.
+    submission_halted: Option<ErrorKind>,
+    /// The CalDAV server refused the password: only the owner's check sends it there again.
+    calendar_halted: Option<ErrorKind>,
     /// The offline queue: jobs taken from the channel and not run yet.
     pending: VecDeque<Job>,
     /// The engine can still send jobs.
@@ -255,6 +284,8 @@ struct Run<'a> {
     idle_refused: bool,
     /// A sign-in went unanswered since the last one that succeeded: the next one that does halts the tries.
     sign_in_lost: bool,
+    /// The write jobs a dropped connection cut off, with how often that happened.
+    tries: HashMap<JobId, u32>,
 }
 
 impl Run<'_> {
@@ -272,12 +303,16 @@ impl Run<'_> {
         if !self.open && (self.pending.is_empty() || self.connection.is_none()) {
             return false;
         }
+        // A check or a send ran on a connection of its own: nothing needs this one.
+        if self.pending.is_empty() && self.watch.is_none() {
+            return self.out.listening;
+        }
         if let Some(error) = self.halted.clone() {
             self.fail_pending(&error);
             self.watch = None;
         } else if self.connection.is_some() || self.connect(queue) {
             match self.pending.pop_front() {
-                Some(job) => self.run(&job),
+                Some(job) => self.run(job),
                 None => self.watch(queue),
             }
         }
@@ -304,6 +339,10 @@ impl Run<'_> {
     fn take(&mut self, job: Job) {
         if let JobKind::Check { by_owner } = job.kind {
             self.check(job.id, by_owner);
+        } else if let JobKind::Send { draft, from, recipients, raw } = &job.kind {
+            self.send(job.id, *draft, from, recipients, raw);
+        } else if let JobKind::Calendar(calendar) = &job.kind {
+            self.calendar(job.id, calendar);
         } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
@@ -312,18 +351,29 @@ impl Run<'_> {
     }
 
     /// Runs a check; it signs in only when the owner started it or the worker has not halted for a refused or
-    /// unanswered sign-in. A check whose sign-in ends so halts the worker like its own would; one that signs in ends
-    /// such a halt, as the password works again.
+    /// unanswered sign-in, and the same for the submission server on its own. A check whose sign-in ends so halts the
+    /// worker like its own would; one that signs in ends such a halt, as the password works again.
     fn check(&mut self, job: JobId, by_owner: bool) {
         let refused = self.halted.as_ref().is_some_and(|error| refuses_the_password(error.kind()));
-        let target = CheckTarget::of(self.account);
-        let target = if refused && !by_owner { target.held() } else { target };
+        let mut target = CheckTarget::of(self.account);
+        if refused && !by_owner {
+            target = target.held();
+        }
+        if self.submission_halted.is_some() && !by_owner {
+            target = target.held_submission();
+        }
+        if self.calendar_halted.is_some() && !by_owner {
+            target = target.held_calendar();
+        }
         let (account, credentials) = (self.account, self.credentials);
-        let mut signed_in = None;
+        let (mut signed_in, mut submitted, mut found) = (None, None, None);
         let out = &mut self.out;
         check_account(&target, &self.settings.connector, &mut || credentials.password(account), &mut |report| {
-            if report.step() == CheckStep::ImapLogin {
-                signed_in = Some(report.status());
+            match report.step() {
+                CheckStep::ImapLogin => signed_in = Some(report.status()),
+                CheckStep::SmtpLogin => submitted = Some(report.status()),
+                CheckStep::CaldavDiscovery => found = Some(report.status()),
+                _ => {}
             }
             out.say(Some(job), EventKind::CheckStep(report));
         });
@@ -334,6 +384,55 @@ impl Run<'_> {
             }
             _ => {}
         }
+        match submitted {
+            Some(StepStatus::Passed) => self.submission_halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.submission_halted = Some(kind),
+            _ => {}
+        }
+        match found {
+            Some(StepStatus::Passed) => self.calendar_halted = None,
+            Some(StepStatus::Failed(kind)) if refuses_the_password(kind) => self.calendar_halted = Some(kind),
+            _ => {}
+        }
+    }
+
+    /// Runs a calendar job on an HTTPS connection of its own, at once: it needs no IMAP connection. After the
+    /// password was refused, here or by the IMAP server, nothing goes to the CalDAV server until the owner checks the
+    /// account or the engine starts a new worker.
+    fn calendar(&mut self, job: JobId, calendar: &CalendarJob) {
+        let held = self.halted.as_ref().map(NetError::kind).filter(|kind| refuses_the_password(*kind)).or(self.calendar_halted);
+        let done = match held {
+            Some(kind) => Err(NetError::new(kind, "the password was refused; only the owner's check sends it again")),
+            None => dav::run(self.account, &self.settings.connector, self.credentials, calendar),
+        };
+        let report = done.unwrap_or_else(|error| {
+            if held.is_none() && refuses_the_password(error.kind()) {
+                self.calendar_halted = Some(error.kind());
+            }
+            CalendarReport::Failed { calendar: calendar.calendar(), kind: error.kind() }
+        });
+        self.out.say(Some(job), EventKind::Calendar(report));
+    }
+
+    /// Sends a message on a submission connection of its own, at once: it needs no IMAP connection. After the
+    /// password was refused or went unanswered, nothing is sent until the engine starts a new worker.
+    fn send(&mut self, job: JobId, draft: DraftId, from: &EmailAddress, recipients: &[EmailAddress], raw: &[u8]) {
+        let halted = self.halted.as_ref().filter(|error| refuses_the_password(error.kind()));
+        let sent = match halted {
+            Some(error) => Err(error.clone()),
+            None => smtp::submit(self.account, &self.settings.connector, self.credentials, from, recipients, raw),
+        };
+        match &sent {
+            Ok(_) => self.submission_halted = None,
+            Err(error) if halted.is_none() && refuses_the_password(error.kind()) => self.submission_halted = Some(error.kind()),
+            Err(_) => {}
+        }
+        let kind = match sent {
+            Ok(Ok(_)) => EventKind::Sent { draft },
+            Ok(Err(refusal)) => EventKind::SendFailed { draft, kind: ErrorKind::MessageRefused, reply: Some(smtp::reply(&refusal)) },
+            Err(error) => EventKind::SendFailed { draft, kind: error.kind(), reply: None },
+        };
+        self.out.say(Some(job), kind);
     }
 
     fn fail_pending(&mut self, error: &NetError) {
@@ -348,11 +447,13 @@ impl Run<'_> {
         self.out.report(ConnectionState::Connecting);
         let error = match sign_in(self.account, self.settings, self.credentials) {
             Ok(open) => {
+                let uid_expunge = write::uid_expunge(&open);
                 self.connection = Some(open);
                 self.stale = self.watch.is_some();
                 self.idle_refused = false;
                 self.sign_in_lost = false;
                 self.out.report(ConnectionState::Online);
+                self.out.say(None, EventKind::Abilities { uid_expunge });
                 return true;
             }
             Err(error) => error,
@@ -405,9 +506,9 @@ impl Run<'_> {
         }
     }
 
-    /// Runs `job` on the connection; a failure that ends the connection drops it. An Idle job only names the folder
-    /// to watch.
-    fn run(&mut self, job: &Job) {
+    /// Runs `job` on the connection; a failure that ends the connection drops it, and puts a write job that may run
+    /// again back at the head of the queue. An Idle job only names the folder to watch.
+    fn run(&mut self, job: Job) {
         if let JobKind::Idle { folder, path } = &job.kind {
             self.watch = Some(Watch { job: job.id, folder: *folder, path: path.clone() });
             self.stale = true;
@@ -417,15 +518,25 @@ impl Run<'_> {
         self.out.report(ConnectionState::Online);
         // The job may open another folder: IDLE must open the watched one again.
         self.stale |= self.watch.is_some();
+        let rerun = job.kind.writes() && write::may_run_again(open, &job.kind);
         let now = self.settings.connector.tls().clock().now();
         let out = &mut self.out;
-        match sync::run(open, job, &self.settings.sync, now, &mut |event| out.emit(event)) {
+        let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
+        let tried = self.tries.remove(&job.id).unwrap_or(0).saturating_add(1);
+        match done {
             Ok(()) => self.attempt = 0,
             Err(error) => {
-                out.failed(job, &error);
+                let again = rerun && error.kind().is_retryable() && tried < WRITE_TRIES;
+                if !again {
+                    self.out.failed(&job, &error);
+                }
                 if error.ends_connection() {
                     self.connection = None;
-                    out.report(ConnectionState::Offline);
+                    self.out.report(ConnectionState::Offline);
+                }
+                if again {
+                    self.tries.insert(job.id, tried);
+                    self.pending.push_front(job);
                 }
             }
         }

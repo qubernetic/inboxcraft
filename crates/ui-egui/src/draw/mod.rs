@@ -9,9 +9,10 @@
 //! opens the settings sheet over the window; Escape, its close button or the rail's Mail button leave it, and an
 //! account being added with it.
 //!
-//! On the sample mailbox the hover actions and their keys (D Done, R read or unread, Delete) act on the hovered or
-//! selected row; a row that leaves the list slides out first. A toast then says what was done, with Undo and its key
-//! (Ctrl+Z) for [`TOAST_SECONDS`]. While a text field has the focus the keys are the field's.
+//! The hover actions, the reader's toolbar and their keys (D Done, A Archive, R read or unread, S flag, Delete) act on
+//! the hovered or selected message, on a real account as on the sample; a row that leaves the list slides out first.
+//! A toast then says what was done, with Undo and its key (Ctrl+Z) for [`TOAST_SECONDS`]; after it Ctrl+Z walks back
+//! through the engine's history one act at a time. While a text field has the focus the keys are the field's.
 //!
 //! Each frame the window hands the engine's jobs to the `net` workers and applies their events
 //! ([`Mailbox::pump`]), so the steps of an account check show as they come.
@@ -21,13 +22,27 @@
 //!
 //! The look comes from the session's appearance choices (the `ui.*.set` commands, from the window or from outside).
 //! A frame that finds them changed installs them and hands them to the window's [`Keep`], so they are there again
-//! after a restart; [`InboxApp::with_keep`] reads them back at the start.
+//! after a restart; [`InboxApp::with_keep`] reads them back at the start. The keys are kept the same way.
+//!
+//! Every action of the window has an id ([`keymap::actions`]) and runs through [`InboxApp::run_action`]: from its
+//! key, from the rail and from the command palette (Ctrl+K), which lists them all. The rail's Calendar shows the
+//! calendar screen ([`Screen::Calendar`]), drawn in `calendar/`, in the place of the mail. A change to an event made
+//! there shows the same toast, and Undo or Ctrl+Z reads the calendar again.
+//!
+//! A message sent from the composer waits in the outbox for the hold: a toast counts the seconds down, and its Undo
+//! (or Ctrl+Z) takes the send back and opens the draft again as it was. The outbox's rows take a send back the same
+//! way, open a refused draft or send it again. A send whose time passed while InboxCraft was not running says so in a
+//! toast once it went.
 
 mod accounts;
+mod calendar;
+mod compose;
 mod frame;
+mod invite;
 mod list;
 mod onboard;
 mod paint;
+mod palette;
 mod pane;
 mod reader;
 mod settings;
@@ -36,19 +51,24 @@ use std::sync::Arc;
 
 use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
 use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb, WindowFrame};
+use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
+use crate::calendar::Calendar;
 use crate::component::toast::{self, Toast};
+use crate::compose::Composer;
+use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
 use crate::glass::{self, Layers};
 use crate::gradient;
 use crate::iconset::IconSet;
-use crate::keep::{Keep, NoKeep};
-use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Mailbox, Place};
+use crate::keep::{Keep, NoKeep, Triage};
+use crate::keymap::{self, Captured, Keymap};
+use crate::mailbox::{Act, Mailbox, Pile, Place};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
+use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::settings::{Section, Settings};
@@ -65,6 +85,33 @@ const WELCOME_WIDTH: f32 = 640.0;
 /// How long the toast after an act shows, in seconds; its Undo works until then.
 pub const TOAST_SECONDS: f64 = 6.0;
 
+/// The screen the window shows beside the rail.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Screen {
+    /// The folders, the list and the reader.
+    #[default]
+    Mail,
+    /// The calendar.
+    Calendar,
+}
+
+/// The keys of a frame.
+struct Keys {
+    /// The actions whose keys were pressed.
+    ran: Vec<&'static str>,
+    escape: bool,
+    down: bool,
+    up: bool,
+    /// Whether the mail's own keys rest.
+    typing: bool,
+    /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
+    quiet: bool,
+}
+
+/// The acts on a row, which run on the selected message.
+const ROW_ACTS: [(&str, Act); 5] =
+    [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
+
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
     mailbox: Mailbox,
@@ -80,6 +127,21 @@ pub struct InboxApp {
     kept: Appearance,
     /// Which key runs which action.
     keymap: Keymap,
+    /// The keys the keep holds.
+    kept_keys: Keymap,
+    /// The triage choices the keep holds.
+    kept_triage: Triage,
+    /// The notification choices the keep holds; `None` for the sample, which keeps none: its accounts are not the
+    /// owner's.
+    kept_notify: Option<NotifySettings>,
+    /// The app's side of running without a window, when it has one.
+    desk: Option<Box<dyn Desk>>,
+    /// The screen shown beside the rail.
+    screen: Screen,
+    /// The calendar screen.
+    calendar: Calendar,
+    /// The command palette.
+    palette: Palette,
     onboarding: Onboarding,
     /// The appearance settings page.
     settings: Settings,
@@ -92,6 +154,16 @@ pub struct InboxApp {
     own_frame: bool,
     /// The frame the window was last told to show.
     frame_applied: Option<WindowFrame>,
+    /// The message being written, in the reader's place or floating.
+    composer: Option<Composer>,
+    /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
+    notice: Option<(String, Option<f64>)>,
+    /// The time picker opens over the open message in the next frame, with this text typed.
+    picker: Option<String>,
+    /// The draft whose send the countdown toast shows, while it waits for its hold.
+    sending: Option<u64>,
+    /// The composer's send-later picker opens in the next frame.
+    later_picker: bool,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -117,6 +189,25 @@ fn around(left: f32, right: f32, gap: f32) -> Frame {
     Frame::new().inner_margin(Margin { left: side(left), right: side(right), top: side(gap), bottom: side(gap) })
 }
 
+/// One card in the middle of the window, as tall as what `add` draws in it; what `add` gave.
+fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Layers, mut add: impl FnMut(&mut Ui) -> R) -> R {
+    let s = theme.spacing;
+    CentralPanel::no_frame()
+        .frame(around(s.gap, s.gap, s.gap))
+        .show(ui, |ui| {
+            let room = ui.max_rect();
+            let pad = s.xl * 2.0;
+            let width = WELCOME_WIDTH.min(room.width());
+            let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
+            let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
+            add(&mut sizing);
+            let height = (sizing.min_rect().height() + 2.0 * pad).min(room.height());
+            let card = Rect::from_center_size(room.center(), egui::vec2(width, height));
+            ui.scope_builder(UiBuilder::new().max_rect(card).layout(Layout::top_down(Align::Center)), |ui| layers.card(ui, margin(pad), add)).inner
+        })
+        .inner
+}
+
 impl InboxApp {
     /// The window's content over `mailbox`; it fetches no remote picture and saves no attachment.
     #[must_use]
@@ -138,6 +229,13 @@ impl InboxApp {
             keep: Box::new(NoKeep),
             kept: Appearance::default(),
             keymap: Keymap::default(),
+            kept_keys: Keymap::default(),
+            kept_triage: Triage::default(),
+            kept_notify: None,
+            desk: None,
+            screen: Screen::default(),
+            calendar: Calendar::default(),
+            palette: Palette::default(),
             onboarding: Onboarding::default(),
             settings: Settings::default(),
             can_add: false,
@@ -145,6 +243,11 @@ impl InboxApp {
             toast: None,
             own_frame: false,
             frame_applied: None,
+            composer: None,
+            notice: None,
+            picker: None,
+            sending: None,
+            later_picker: false,
         }
     }
 
@@ -158,8 +261,8 @@ impl InboxApp {
         self
     }
 
-    /// The same window, keeping the appearance choices in `keep`: the ones kept there from an earlier run are the
-    /// session's from now on, and every change is kept there from the frame it shows in.
+    /// The same window, keeping the appearance choices and the keys in `keep`: the ones kept there from an earlier run
+    /// are the window's from now on, and every change is kept there from the frame it shows in.
     #[must_use]
     pub fn with_keep(mut self, keep: Box<dyn Keep>) -> Self {
         if let Some(kept) = keep.load() {
@@ -168,8 +271,404 @@ impl InboxApp {
         } else {
             self.kept = *self.mailbox.appearance();
         }
+        if let Some(keys) = keep.load_keys() {
+            self.keymap = keys;
+        }
+        self.kept_keys = self.keymap.clone();
+        let sample = self.mailbox.is_sample();
+        match keep.load_triage() {
+            Some(kept) => {
+                // The sample window takes the look of the inbox, never the screener's mode of the owner's mail.
+                if !sample {
+                    self.mailbox.restore_screener(kept.screener);
+                }
+                self.mailbox.set_inbox_view(kept.view);
+                self.mailbox.restore_pins(kept.keep_pins);
+                if let Some(hold) = kept.hold {
+                    self.mailbox.restore_hold(hold);
+                }
+                self.kept_triage = Triage { hold: Some(self.mailbox.hold_seconds()), ..kept };
+            }
+            None => {
+                let screener = if sample { Triage::default().screener } else { self.mailbox.screener_mode() };
+                self.kept_triage = Triage {
+                    screener,
+                    view: self.mailbox.inbox_view(),
+                    keep_pins: self.mailbox.pins_outlast_done(),
+                    hold: Some(self.mailbox.hold_seconds()),
+                };
+            }
+        }
+        if !sample {
+            // What was kept stands as kept, so a level the session left out is dropped from the file at the next frame.
+            self.kept_notify = Some(match keep.load_notify() {
+                Some(kept) => {
+                    self.mailbox.restore_notify(kept.clone());
+                    kept
+                }
+                None => self.mailbox.notify_settings().clone(),
+            });
+        }
         self.keep = keep;
         self
+    }
+
+    /// The same window, showing and changing on the Notifications page what `desk` lets the owner choose: running in
+    /// the background and starting with the computer.
+    #[must_use]
+    pub fn with_desk(mut self, desk: Box<dyn Desk>) -> Self {
+        self.set_desk(desk);
+        self
+    }
+
+    /// Shows and changes what `desk` lets the owner choose from now on, as [`InboxApp::with_desk`].
+    pub fn set_desk(&mut self, desk: Box<dyn Desk>) {
+        self.desk = Some(desk);
+    }
+
+    /// Keeps the notification choices when they changed; the sample keeps none.
+    fn keep_notify(&mut self) {
+        let Some(kept) = self.kept_notify.as_ref() else { return };
+        let now = self.mailbox.notify_settings();
+        if now == kept {
+            return;
+        }
+        // Tried once per change: the next change tries again.
+        let now = now.clone();
+        let stored = self.keep.store_notify(&now);
+        self.kept_notify = Some(now);
+        if let Err(error) = stored {
+            self.mailbox.fail(UiError::Keep(error));
+        }
+    }
+
+    /// What the desk says this frame.
+    fn desk_view(&self) -> settings::DeskView {
+        self.desk.as_ref().map_or_else(settings::DeskView::default, |desk| settings::DeskView {
+            background: desk.background(),
+            login: desk.login(),
+            asking: desk.asking(),
+        })
+    }
+
+    /// Takes the desk's answer on starting with the computer, when it came: a refusal is a note on the open sheet, or
+    /// in the error banner once the sheet is closed.
+    fn hear_desk(&mut self) {
+        let Some(answer) = self.desk.as_mut().and_then(|desk| desk.answer()) else { return };
+        match answer {
+            Ok(()) => self.settings.set_login_note(None),
+            Err(why) if self.settings.is_open() => self.settings.set_login_note(Some(tr!("Not changed: {why}.", why = why))),
+            Err(why) => self.mailbox.fail(UiError::Desk(why)),
+        }
+    }
+
+    /// Runs in the background from now on, or not: turning it off also stops starting with the computer, whose start
+    /// opens no window.
+    fn set_background(&mut self, on: bool) {
+        let Some(desk) = self.desk.as_mut() else { return };
+        if let Err(why) = desk.set_background(on) {
+            self.mailbox.fail(UiError::Desk(why));
+            return;
+        }
+        if !on && desk.login() == Some(true) {
+            desk.set_login(false);
+        }
+    }
+
+    /// Asks to start with the computer, or no longer.
+    fn set_login(&mut self, on: bool) {
+        if let Some(desk) = self.desk.as_mut() {
+            self.settings.set_login_note(None);
+            desk.set_login(on);
+        }
+    }
+
+    /// The triage and sending choices to keep: the inbox view, whether a pin outlasts done, the hold before a send
+    /// goes, and the screener's mode but on the sample, which keeps the one kept.
+    fn triage(&self) -> Triage {
+        let screener = if self.mailbox.is_sample() { self.kept_triage.screener } else { self.mailbox.screener_mode() };
+        Triage { screener, view: self.mailbox.inbox_view(), keep_pins: self.mailbox.pins_outlast_done(), hold: Some(self.mailbox.hold_seconds()) }
+    }
+
+    /// Keeps the triage choices when they changed.
+    fn keep_triage(&mut self) {
+        let triage = self.triage();
+        if triage == self.kept_triage {
+            return;
+        }
+        // Tried once per change: the next change tries again.
+        self.kept_triage = triage;
+        if let Err(error) = self.keep.store_triage(&triage) {
+            self.mailbox.fail(UiError::Keep(error));
+        }
+    }
+
+    /// The screen shown beside the rail.
+    #[must_use]
+    pub fn screen(&self) -> Screen {
+        self.screen
+    }
+
+    /// The calendar screen.
+    #[must_use]
+    pub fn calendar(&self) -> &Calendar {
+        &self.calendar
+    }
+
+    /// The command palette.
+    #[must_use]
+    pub fn palette(&self) -> &Palette {
+        &self.palette
+    }
+
+    /// The command palette, to type in from outside (the `ui_shot` scripts, later the control channel).
+    pub fn palette_mut(&mut self) -> &mut Palette {
+        &mut self.palette
+    }
+
+    /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
+    fn row_act(&self, action: &str) -> Option<(u64, Act)> {
+        let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
+        let (_, act) = ROW_ACTS.into_iter().find(|(id, _)| *id == action)?;
+        let act = match act {
+            Act::Read if row.seen => Act::Unread,
+            Act::Flag if row.flagged => Act::Unflag,
+            Act::Done if row.done => Act::Undone,
+            act => act,
+        };
+        Some((row.id, act))
+    }
+
+    /// Whether the action `id` can run now: an act on a row needs a selected message, Undo an act in the history, the
+    /// reader's full width an open message; an id the window does not know never runs.
+    #[must_use]
+    pub fn can_run(&self, id: &str) -> bool {
+        match id {
+            keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
+            keymap::UNDO => self.mailbox.can_undo(),
+            keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
+            keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
+            keymap::SEND => self.docked(),
+            _ => keymap::action(id).is_some(),
+        }
+    }
+
+    /// Runs the action `id` of [`keymap::actions`], as its key, the rail or the palette do; an action that cannot run
+    /// now ([`InboxApp::can_run`]) does nothing.
+    pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
+        if !self.can_run(id) {
+            return;
+        }
+        match id {
+            keymap::PALETTE => {
+                self.close_settings();
+                self.palette.open();
+            }
+            keymap::FIND => {
+                self.show_mail();
+                self.reader.set_full_width(false);
+                ctx.memory_mut(|memory| memory.request_focus(list::search_id()));
+            }
+            keymap::MAIL => {
+                self.show_mail();
+                if matches!(self.mailbox.place(), Place::View(Role::Sent) | Place::Later(_)) {
+                    self.mailbox.open(Place::View(Role::Inbox));
+                }
+            }
+            keymap::SENT => {
+                self.show_mail();
+                self.mailbox.open(Place::View(Role::Sent));
+                self.search.clear();
+            }
+            keymap::LATER => {
+                self.show_mail();
+                if !matches!(self.mailbox.place(), Place::Later(_)) {
+                    self.mailbox.open(Place::Later(Pile::Pins));
+                }
+                self.search.clear();
+            }
+            keymap::SNOOZE => self.open_picker(""),
+            keymap::CALENDAR => self.show_calendar(),
+            keymap::COMPOSE => {
+                self.compose();
+                ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
+            }
+            keymap::SEND => self.send_composer(),
+            keymap::SETTINGS => {
+                if !self.settings.is_open() {
+                    self.open_settings();
+                }
+            }
+            keymap::SHORTCUTS => self.open_shortcuts(),
+            keymap::UNDO => self.undo(),
+            keymap::FULL_WIDTH => {
+                self.show_mail();
+                let full = !self.reader.full_width();
+                self.reader.set_full_width(full);
+            }
+            keymap::LIGHT => self.set_mode(ModePreference::Light),
+            keymap::DARK => self.set_mode(ModePreference::Dark),
+            keymap::SYSTEM_MODE => self.set_mode(ModePreference::System),
+            keymap::MOTION => {
+                let reduce = !self.reduce_motion();
+                self.set_reduce_motion(reduce);
+            }
+            _ => {
+                if let Some((row, act)) = self.row_act(id) {
+                    self.mailbox.start(row, act);
+                }
+            }
+        }
+    }
+
+    /// Opens the time picker over the open message in the next frame, `typed` in its field: Snooze, or "Remind me if no
+    /// reply" for a message the owner sent. The presets still ahead are read now.
+    pub fn open_picker(&mut self, typed: &str) {
+        self.mailbox.load_presets();
+        self.picker = Some(typed.to_owned());
+    }
+
+    /// Opens the composer's send-later picker in the next frame, its presets read now (the `ui_shot` scripts).
+    pub fn open_send_later(&mut self) {
+        self.mailbox.load_presets();
+        self.later_picker = true;
+    }
+
+    /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn, and the composer's
+    /// send-later picker asked for by [`InboxApp::open_send_later`].
+    fn show_picker(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.later_picker) {
+            egui::Popup::open_id(ctx, compose::later_popup());
+        }
+        let Some(typed) = self.picker.take() else { return };
+        let mut state = crate::component::time_picker::TimePicker::default();
+        state.set_typed(&typed);
+        ctx.data_mut(|data| data.insert_temp(reader::picker_id(), state));
+        egui::Popup::open_id(ctx, reader::picker_popup());
+    }
+
+    /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
+    pub fn show_calendar(&mut self) {
+        self.close_settings();
+        self.screen = Screen::Calendar;
+        self.calendar.refresh(&mut self.mailbox);
+    }
+
+    /// Shows the calendar screen on the occurrence of event `id` at `start`, picked, as a click on its alert asks.
+    pub fn open_event(&mut self, id: u64, start: inboxcraft_time::Timestamp) {
+        self.show_calendar();
+        self.calendar.open_event(&mut self.mailbox, id, start);
+    }
+
+    /// The calendar screen, to pick a view or a day from outside (the `ui_shot` scripts).
+    pub fn calendar_mut(&mut self) -> (&mut Calendar, &mut Mailbox) {
+        (&mut self.calendar, &mut self.mailbox)
+    }
+
+    /// Applies what was pressed on the calendar screen.
+    fn apply_calendar(&mut self, asked: Vec<calendar::Asked>) {
+        let (calendar, mailbox) = (&mut self.calendar, &mut self.mailbox);
+        for asked in asked {
+            match asked {
+                calendar::Asked::View(view) => calendar.set_view(mailbox, view),
+                calendar::Asked::Step(forward) => calendar.step(mailbox, forward),
+                calendar::Asked::Today => calendar.go_today(mailbox),
+                calendar::Asked::Month(forward) => calendar.step_month(forward),
+                calendar::Asked::Go(day) => calendar.go_to(mailbox, day),
+                calendar::Asked::Open(day) => calendar.open_day(mailbox, day),
+                calendar::Asked::Toggle(id) => calendar.toggle(id),
+                calendar::Asked::Pick(picked) => calendar.pick(picked),
+                calendar::Asked::New => calendar.new_event(),
+                calendar::Asked::Edit => calendar.edit_picked(),
+                calendar::Asked::Delete => calendar.delete_picked(mailbox),
+                calendar::Asked::Save => calendar.save(mailbox),
+                calendar::Asked::Cancel => calendar.close_editor(),
+            }
+        }
+    }
+
+    /// Opens the settings sheet on Shortcuts, closing the add-account form.
+    pub fn open_shortcuts(&mut self) {
+        self.onboarding.close();
+        self.settings.open_at(Section::Shortcuts, self.mailbox.appearance());
+    }
+
+    /// Shows the mail, leaving the settings sheet and the calendar.
+    fn show_mail(&mut self) {
+        self.close_settings();
+        self.screen = Screen::Mail;
+    }
+
+    /// Gives the action waiting on the Shortcuts page the key pressed in this frame, taking it from the action that had
+    /// it, or stops the wait on Escape. The press reaches nothing else.
+    fn capture_key(&mut self, ctx: &egui::Context) {
+        let Some(waiting) = self.settings.capturing() else { return };
+        match keymap::captured(ctx) {
+            Some(Captured::Cancel) => self.settings.captured(None),
+            Some(Captured::Key(shortcut)) => {
+                let had = self.keymap.action_of(shortcut).filter(|other| *other != waiting).and_then(keymap::action);
+                self.keymap.bind(waiting, shortcut);
+                let note =
+                    had.map(|had| tr!("{key} was the key of {action}; it has none now.", key = ctx.format_shortcut(&shortcut), action = had.name));
+                self.settings.captured(note);
+            }
+            None => {}
+        }
+    }
+
+    /// The keys of the frame, read before its drawing. While the Shortcuts page waits for a key or the palette is open,
+    /// the keys are theirs; the settings sheet, the palette and the calendar lie over the list or in its place, so the
+    /// mail's keys (the arrows, the acts on a row) rest while they show.
+    fn keys(&mut self, ctx: &egui::Context) -> Keys {
+        let held = self.settings.capturing().is_some() || self.palette.is_open();
+        self.capture_key(ctx);
+        let focused = ctx.memory(|memory| memory.focused().is_some());
+        // The composer in the reader's place hides the selected message: the keys that act on it rest.
+        let quiet = focused || held || self.settings.is_open() || self.docked();
+        let typing = quiet || self.screen == Screen::Calendar;
+        if held {
+            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
+        }
+        let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
+        let (escape, down, up) =
+            ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
+        Keys { ran, escape, down, up, typing, quiet }
+    }
+
+    /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
+    /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
+    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
+    fn pressed(&self, ctx: &egui::Context, quiet: bool) -> Vec<&'static str> {
+        let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
+        keymap::actions()
+            .into_iter()
+            .map(|action| action.id)
+            .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
+            .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
+            .filter(|id| {
+                let bare = self.keymap.shortcut(id).is_some_and(|key| {
+                    let held = key.modifiers;
+                    !(held.command || held.ctrl || held.mac_cmd || held.alt)
+                });
+                !(quiet && bare) && self.keymap.pressed(ctx, id)
+            })
+            .collect()
+    }
+
+    /// Keeps the keys when they changed.
+    fn keep_keys(&mut self) {
+        if self.keymap == self.kept_keys {
+            return;
+        }
+        match self.keep.store_keys(&self.keymap) {
+            Ok(()) => self.kept_keys = self.keymap.clone(),
+            Err(error) => {
+                // Tried once per change: the next change tries again.
+                self.kept_keys = self.keymap.clone();
+                self.mailbox.fail(UiError::Keep(error));
+            }
+        }
     }
 
     /// Whether the window offers to add an account.
@@ -227,17 +726,40 @@ impl InboxApp {
         }
     }
 
+    /// Asks `ctx` for a frame when the engine next has something to do ([`Mailbox::due_in`]): an idle window draws
+    /// none of its own, and the engine only ticks as the window pumps. eframe runs [`InboxApp::ui`] for a shown window
+    /// and only its logic for a hidden one, so both call this.
+    pub fn wake_when_due(&mut self, ctx: &egui::Context) {
+        if let Some(left) = self.mailbox.due_in() {
+            ctx.request_repaint_after(left);
+        }
+    }
+
     /// Hands the engine's jobs to the workers and applies their events; the check's steps are read again when
     /// anything changed. Whether anything changed.
     pub fn pump(&mut self) -> bool {
         let changed = self.mailbox.pump(&mut *self.workers);
+        let late = self.mailbox.take_late();
+        match late.as_slice() {
+            [] => {}
+            [subject] => {
+                let subject = if subject.is_empty() { tr!("(no subject)") } else { subject.as_str() };
+                self.say(&tr!("Sent late, InboxCraft was not running at its time: {subject}", subject = subject));
+            }
+            more => self.say(&tr!("Sent {count} messages late: InboxCraft was not running at their time", count = more.len())),
+        }
         if changed {
             self.onboarding.load(&mut self.mailbox);
+            if self.screen == Screen::Calendar {
+                self.calendar.refresh(&mut self.mailbox);
+            }
+            self.reader.refresh_invites(&mut self.mailbox);
         }
         changed
     }
 
-    /// For the window's end: removes the passwords of the accounts added in it from the credential store.
+    /// For the end of a window over a store that is not kept: removes the passwords of the accounts added in it from
+    /// the credential store. A window over a kept store does not call it; a password stays until its account goes.
     pub fn on_exit(&mut self) {
         self.onboarding.forget_passwords();
     }
@@ -255,10 +777,16 @@ impl InboxApp {
         (&mut self.reader, &mut self.mailbox)
     }
 
-    /// Opens the selected message in the reader, or closes it, when the selection changed.
+    /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
+    /// the composer has the reader's place sends the composer to its floating panel.
     fn sync(&mut self) {
         if self.reader.open_id() != self.mailbox.selected() {
             let selected = self.mailbox.selected();
+            if selected.is_some()
+                && let Some(composer) = &mut self.composer
+            {
+                composer.set_floating(true);
+            }
             self.reader.open(&mut self.mailbox, selected);
             self.hover = None;
         }
@@ -286,6 +814,291 @@ impl InboxApp {
     #[must_use]
     pub fn search_text(&self) -> &str {
         &self.search
+    }
+
+    /// The message being written, if there is one.
+    #[must_use]
+    pub fn composer(&self) -> Option<&Composer> {
+        self.composer.as_ref()
+    }
+
+    /// The message being written and the mailbox, to fill it in from outside (the `ui_shot` scripts, later the
+    /// control channel).
+    pub fn composer_mut(&mut self) -> (Option<&mut Composer>, &mut Mailbox) {
+        (self.composer.as_mut(), &mut self.mailbox)
+    }
+
+    /// Whether the composer has the reader's place.
+    fn docked(&self) -> bool {
+        self.screen == Screen::Mail && self.composer.as_ref().is_some_and(|composer| !composer.floating())
+    }
+
+    /// Writes a new message in the reader's place (`compose.new`), or brings back the one being written: there is one
+    /// at a time.
+    pub fn compose(&mut self) {
+        self.show_mail();
+        self.reader.set_full_width(false);
+        if let Some(composer) = &mut self.composer {
+            composer.set_floating(false);
+            return;
+        }
+        match Composer::start(&mut self.mailbox) {
+            Ok(composer) => self.composer = Some(composer),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Writes a reply to the message `id`, a reply to all or a forward of it, in the reader's place, the engine having
+    /// filled it in; whether it opened. A draft being written is closed first and kept; one the engine does not take
+    /// stays open, and no reply starts.
+    pub fn answer(&mut self, id: u64, answer: crate::compose::Answer) -> bool {
+        if self.composer.is_some() {
+            self.close_composer();
+            if self.composer.is_some() {
+                return false;
+            }
+        }
+        self.show_mail();
+        self.reader.set_full_width(false);
+        match Composer::answer(&mut self.mailbox, id, answer) {
+            Ok(composer) => {
+                self.composer = Some(composer);
+                true
+            }
+            Err(error) => {
+                self.mailbox.fail(error);
+                false
+            }
+        }
+    }
+
+    /// Closes the composer, its draft kept with what was typed in a recipient line as a chip. A draft the engine does
+    /// not take leaves the composer open with everything in it.
+    pub fn close_composer(&mut self) {
+        let Some(composer) = &mut self.composer else { return };
+        match composer.close(&mut self.mailbox) {
+            Ok(()) => {
+                self.composer = None;
+                self.say(tr!("Draft saved"));
+            }
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Sends the message being written: after the hold, the countdown toast showing (`mail.send`), or at the time
+    /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
+    /// refuses.
+    pub fn send_composer(&mut self) {
+        let Some(composer) = &mut self.composer else { return };
+        let (draft, later) = (composer.draft(), composer.later());
+        match composer.send(&mut self.mailbox) {
+            Ok(Some(at)) => {
+                self.composer = None;
+                if later.is_some() {
+                    let when = crate::component::typed_time::long(at, self.mailbox.now(), self.mailbox.offset());
+                    self.say(&tr!("Scheduled for {when}", when = when));
+                } else {
+                    self.sending = Some(draft);
+                }
+                // The engine holds the message now; it goes to the worker once the hold is over.
+                self.pump();
+            }
+            Ok(None) => {}
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// The draft whose send the countdown toast shows and the whole seconds left, while it waits for its hold.
+    #[must_use]
+    pub fn counting(&self) -> Option<(u64, u64)> {
+        let draft = self.sending?;
+        self.mailbox.seconds_left(draft).map(|seconds| (draft, seconds))
+    }
+
+    /// Takes the waiting send of `draft` back (`mail.unsend`) and opens its draft again as it was, in the reader's place;
+    /// the draft being written is closed first and kept. One the engine does not take back stays, saying why.
+    pub fn unsend(&mut self, draft: u64) {
+        if self.sending == Some(draft) {
+            self.sending = None;
+        }
+        if let Err(error) = self.mailbox.unsend(draft) {
+            self.mailbox.fail(error);
+            return;
+        }
+        self.reopen(draft);
+    }
+
+    /// Opens the kept draft `draft` in the reader's place (a refused one, to change it); the draft being written is
+    /// closed first and kept, and one the engine does not take stays open instead.
+    pub fn reopen(&mut self, draft: u64) {
+        if self.composer.as_ref().is_some_and(|composer| composer.draft() == draft) {
+            return self.compose();
+        }
+        if self.composer.is_some() {
+            self.close_composer();
+            if self.composer.is_some() {
+                return;
+            }
+        }
+        self.show_mail();
+        self.reader.set_full_width(false);
+        match Composer::open(&mut self.mailbox, draft) {
+            Ok(composer) => self.composer = Some(composer),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Sends the refused draft `draft` again (`outbox.retry`), the countdown toast showing its hold.
+    pub fn retry(&mut self, draft: u64) {
+        match self.mailbox.retry(draft) {
+            Ok(_) => self.sending = Some(draft),
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Applies what was asked of a send in the outbox.
+    fn outbox(&mut self, draft: u64, asked: list::Outbox) {
+        match asked {
+            list::Outbox::Unsend => self.unsend(draft),
+            list::Outbox::Edit => self.reopen(draft),
+            list::Outbox::Retry => self.retry(draft),
+        }
+    }
+
+    /// Removes the draft being written here and on the server.
+    fn discard_composer(&mut self) {
+        let Some(composer) = &self.composer else { return };
+        match composer.discard(&mut self.mailbox) {
+            Ok(()) => {
+                self.composer = None;
+                self.say(tr!("Draft discarded"));
+            }
+            Err(error) => self.mailbox.fail(error),
+        }
+    }
+
+    /// Shows `text` in a toast for [`TOAST_SECONDS`].
+    fn say(&mut self, text: &str) {
+        self.notice = Some((text.to_owned(), None));
+    }
+
+    /// What the composer's last step says in its toast, while it shows.
+    #[must_use]
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_ref().map(|(text, _)| text.as_str())
+    }
+
+    /// Applies what was asked for in the composer.
+    fn apply_compose(&mut self, ctx: &egui::Context, asked: compose::Asked) {
+        use compose::Asked;
+        match asked {
+            Asked::Send => return self.send_composer(),
+            Asked::Close => return self.close_composer(),
+            Asked::Discard => return self.discard_composer(),
+            Asked::Open => return self.compose(),
+            _ => {}
+        }
+        let Some(composer) = &mut self.composer else { return };
+        let mailbox = &mut self.mailbox;
+        let result = match asked {
+            Asked::Typed(line) => composer.typed(mailbox, line),
+            Asked::Take(line) => composer.take(mailbox, line),
+            Asked::Pick(at) => {
+                if let Some(line) = composer.suggestions().0 {
+                    ctx.memory_mut(|memory| memory.request_focus(compose::field_id(line)));
+                }
+                composer.pick(mailbox, at)
+            }
+            Asked::Step(down) => {
+                composer.step(down);
+                Ok(())
+            }
+            Asked::Dismiss => {
+                composer.dismiss_suggestions();
+                Ok(())
+            }
+            Asked::Remove(line, at) => composer.remove(mailbox, line, at),
+            Asked::RemoveLast(line) => composer.remove_last(mailbox, line),
+            Asked::Edited => {
+                composer.edited();
+                Ok(())
+            }
+            Asked::Copies => {
+                composer.show_copies();
+                Ok(())
+            }
+            Asked::From(account) => composer.set_account(mailbox, account),
+            Asked::Template(at) => match composer.templates().get(at).cloned() {
+                Some(name) => composer.use_template(mailbox, &name),
+                None => Ok(()),
+            },
+            Asked::Fill => {
+                ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
+                composer.fill(mailbox)
+            }
+            Asked::Later(at) => {
+                composer.set_later(at);
+                Ok(())
+            }
+            Asked::Presets => {
+                mailbox.load_presets();
+                Ok(())
+            }
+            Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
+        };
+        if let Err(error) = result {
+            self.mailbox.fail(error);
+        }
+    }
+
+    /// The composer on a card in the reader's place; what was asked in it.
+    fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Layers, left: f32) -> Vec<compose::Asked> {
+        let (keymap, mailbox) = (&self.keymap, &self.mailbox);
+        let Some(composer) = self.composer.as_mut() else { return Vec::new() };
+        CentralPanel::no_frame()
+            .frame(around(left, theme.spacing.gap, theme.spacing.gap))
+            .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)))
+            .inner
+    }
+
+    /// Applies what was asked in the composer this frame and keeps its draft; a message `clicked` in the list takes
+    /// the reader's place, also when it was selected under the composer, which floats.
+    fn composed(&mut self, ctx: &egui::Context, clicked: bool, asked: Vec<compose::Asked>) {
+        if clicked && let Some(composer) = &mut self.composer {
+            composer.set_floating(true);
+        }
+        for asked in asked {
+            self.apply_compose(ctx, asked);
+        }
+        self.keep_draft();
+    }
+
+    /// Keeps the draft when its subject or text changed in this frame: silently, at once.
+    fn keep_draft(&mut self) {
+        if let Some(composer) = self.composer.as_mut().filter(|composer| composer.changed())
+            && let Err(error) = composer.save(&mut self.mailbox)
+        {
+            self.mailbox.fail(error);
+        }
+    }
+
+    /// The toast of the composer's last step, while no act's toast and no countdown shows.
+    fn notice_toast(&mut self, ui: &Ui, theme: &Theme) {
+        let Some((text, since)) = self.notice.clone() else { return };
+        if self.mailbox.undoable().is_some() || self.counting().is_some() {
+            return;
+        }
+        let now = ui.input(|input| input.time);
+        let since = since.unwrap_or(now);
+        let left = TOAST_SECONDS - (now - since);
+        if left <= 0.0 {
+            self.notice = None;
+            return;
+        }
+        self.notice = Some((text.clone(), Some(since)));
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None }, bottom);
     }
 
     /// The owner's appearance choices.
@@ -455,23 +1268,15 @@ impl InboxApp {
         if self.reader.poll() | self.pump() | self.onboarding.poll() {
             ui.ctx().request_repaint();
         }
-        let mut rail = pane::Rail { mail: self.keymap.pressed(ui.ctx(), keymap::MAIL), ..pane::Rail::default() };
-        let open_settings = self.keymap.pressed(ui.ctx(), keymap::SETTINGS);
-        if self.keymap.pressed(ui.ctx(), keymap::FIND) {
-            self.reader.set_full_width(false);
-            ui.memory_mut(|memory| memory.request_focus(list::search_id()));
-        }
-        let typing = ui.memory(|memory| memory.focused().is_some());
-        let (escape, down, up) =
-            ui.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
+        self.wake_when_due(ui.ctx());
+        self.show_picker(ui.ctx());
+        let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
-        // The settings sheet lies over the list: its keys do nothing to the mail.
-        let typing = typing || self.settings.is_open();
         if !typing && (down || up) {
             self.mailbox.step(down);
             stepped = true;
         }
-        let keyed = if typing || !self.mailbox.can_act() { None } else { self.keyed_act(ui.ctx()) };
+        let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
         let left_settings = escape && self.settings.is_open();
@@ -479,7 +1284,11 @@ impl InboxApp {
             self.close_settings();
         }
         let setting = self.settings.is_open();
-        let left_full = escape && !left_settings && self.reader.full_width();
+        let left_editor = escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some();
+        if left_editor {
+            self.calendar.close_editor();
+        }
+        let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
         }
@@ -494,13 +1303,17 @@ impl InboxApp {
         }
         let mut asked = pane::Asked::default();
         let mut add = false;
-        let mut searched = None;
+        let mut header = list::Header::default();
+        let mut done_all = None;
         let mut clicked = None;
         let mut acted = None;
         // The row sliding out is out when the list is not drawn.
         let mut out = true;
         let mut changed = None;
-        let full = self.reader.full_width();
+        let mut review = false;
+        let mut outboxed = None;
+        let docked = self.docked();
+        let full = self.reader.full_width() && !docked;
         // The colour fields first, then the place for the glass layers, then everything else.
         let corner = self.window_corner(ui.ctx());
         glass::backdrop_rounded(ui.painter(), &theme, ui.max_rect(), corner);
@@ -512,14 +1325,14 @@ impl InboxApp {
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, setting, adding, self.rail_place(corner, gap)))
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, gap)))
             .inner;
         self.own_frame_parts(ui, &theme, corner);
-        rail.mail |= clicked_rail.mail;
-        rail.settings = clicked_rail.settings;
-        rail.sent = clicked_rail.sent;
-        rail.search = clicked_rail.search;
-        if self.mailbox.accounts().is_empty() {
+        ran.extend(clicked_rail.actions());
+        let mut on_calendar = Vec::new();
+        if self.screen == Screen::Calendar {
+            on_calendar = self.calendar_screen(ui, &theme, &mut layers);
+        } else if self.mailbox.accounts().is_empty() {
             add = self.welcome(ui, &theme, &mut layers);
         } else if !full {
             let left;
@@ -541,10 +1354,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox)
                 })
             };
-            (searched, clicked, acted, out) = if self.reader.open_id().is_some() {
+            (header, clicked, acted, out, review, done_all, outboxed) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -557,9 +1370,12 @@ impl InboxApp {
             };
         }
         let mut drawn = reader::Drawn::default();
+        let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
-        if self.reader.open_id().is_some() {
+        if docked {
+            composed = self.composer_card(ui, &theme, &mut layers, half);
+        } else if self.screen == Screen::Mail && self.reader.open_id().is_some() {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
             drawn = CentralPanel::no_frame()
@@ -576,71 +1392,118 @@ impl InboxApp {
             self.hover = drawn.hover.take();
         }
         layers.finish(ui.painter(), &theme);
+        if self.screen == Screen::Calendar {
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, ui.max_rect()));
+        }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
         }
+        let palette = if self.palette.is_open() {
+            let runnable: Vec<&str> = keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id)).collect();
+            palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)
+        } else {
+            None
+        };
+        composed.extend(
+            self.composer
+                .as_ref()
+                .filter(|_| !docked)
+                .map(|composer| compose::floating(ui.ctx(), &theme, &self.keymap, composer, ui.max_rect()))
+                .unwrap_or_default(),
+        );
         // Every gradient of the frame is painted by now: the pictures it left out go.
         gradient::sweep(ui.ctx());
-        let undone = self.toast(ui, &theme, typing);
+        let (undone, unsent) = self.toasts(ui, &theme, quiet);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
             || stepped
             || acted.is_some()
             || undone
+            || unsent
+            || outboxed.is_some()
             || (out && leaving)
             || left_full
+            || left_editor
             || left_settings
-            || rail.mail
-            || rail.sent
-            || rail.search
-            || rail.settings
-            || open_settings
+            || !ran.is_empty()
+            || palette.is_some()
+            || clicked_rail.settings
             || changed.is_some()
             || asked.narrow.is_some()
             || asked.open.is_some()
-            || searched.is_some()
+            || header.searched.is_some()
+            || header.open.is_some()
+            || header.show_done.is_some()
+            || done_all.is_some()
+            || review
             || clicked.is_some()
             || add
+            || asked.compose
+            || !on_calendar.is_empty()
+            || !composed.is_empty()
             || !drawn.asked.is_empty();
         if busy {
             // What changed shows in the next frame.
             ui.ctx().request_repaint();
         }
-        self.act(out, acted, undone);
+        self.act(out, acted, undone, outboxed);
+        if let Some(ids) = done_all {
+            self.mailbox.done_all(&ids);
+        }
+        self.apply_calendar(on_calendar);
         for asked in drawn.asked {
             self.apply(ui, asked);
         }
         if dismiss {
             self.mailbox.dismiss_error();
         }
-        if let Some(account) = asked.narrow {
-            self.mailbox.narrow(account);
-        }
-        if let Some(place) = asked.open {
-            self.mailbox.open(place);
-            self.search.clear();
-        }
-        if let Some(query) = searched {
-            self.mailbox.search(&query);
-        }
+        self.go(&asked, header, review);
         if clicked.is_some() {
             self.mailbox.select(clicked);
         }
+        self.composed(ui.ctx(), clicked.is_some(), composed);
+        ran.extend(asked.compose.then_some(keymap::COMPOSE));
         if add {
             self.open_accounts();
         }
-        if rail.settings {
+        if clicked_rail.settings {
             if setting { self.close_settings() } else { self.open_settings() }
-        } else if open_settings && !setting {
-            self.open_settings();
         }
-        self.apply_rail(ui, &rail);
+        if let Some(asked) = palette {
+            ran.extend(self.apply_palette(asked));
+        }
+        for id in ran {
+            self.run_action(ui.ctx(), id);
+        }
         if let Some(changed) = changed {
             self.apply_settings(changed);
         }
+        self.keep_keys();
+        self.keep_triage();
+        self.keep_notify();
+        self.hear_desk();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
+    }
+
+    /// Shows what was asked for this frame: an account narrowed, a place opened in the pane or by a pill of the
+    /// header, "show done", a search, or "New senders" from Review on the screener card.
+    fn go(&mut self, asked: &pane::Asked, header: list::Header, review: bool) {
+        if let Some(account) = asked.narrow {
+            self.mailbox.narrow(account);
+        }
+        if let Some(show) = header.show_done {
+            self.mailbox.set_show_done(show);
+        }
+        let place = if review { Some(Place::Senders) } else { asked.open.or(header.open) };
+        if let Some(place) = place {
+            self.mailbox.open(place);
+            self.search.clear();
+        }
+        if let Some(query) = header.searched {
+            self.mailbox.search(&query);
+        }
     }
 
     /// The app's own frame before the panes, when it draws one: the strip right of the rail with the title and the
@@ -652,7 +1515,8 @@ impl InboxApp {
             return;
         }
         if self.mailbox.appearance().frame == WindowFrame::Strip {
-            let title = tr!("{place} · InboxCraft", place = self.mailbox.title());
+            let place = if self.screen == Screen::Calendar { tr!("Calendar").to_owned() } else { self.mailbox.title() };
+            let title = tr!("{place} · InboxCraft", place = place);
             Panel::top("window-strip")
                 .exact_size(frame::STRIP)
                 .show_separator_line(false)
@@ -686,31 +1550,23 @@ impl InboxApp {
             .default_size(s.folder_pane)
             .show_separator_line(false)
             .frame(around(s.gap, s.gap / 2.0, s.gap))
-            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.mailbox)));
+            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
         (shown.inner, s.gap / 2.0)
     }
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
     fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> bool {
-        let s = theme.spacing;
         let (keymap, can_add) = (&self.keymap, self.can_add);
-        CentralPanel::no_frame()
-            .frame(around(s.gap, s.gap, s.gap))
-            .show(ui, |ui| {
-                let room = ui.max_rect();
-                let pad = s.xl * 2.0;
-                let width = WELCOME_WIDTH.min(room.width());
-                let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
-                let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
-                list::welcome(&mut sizing, theme, keymap, can_add);
-                let height = (sizing.min_rect().height() + 2.0 * pad).min(room.height());
-                let card = Rect::from_center_size(room.center(), egui::vec2(width, height));
-                ui.scope_builder(UiBuilder::new().max_rect(card).layout(Layout::top_down(Align::Center)), |ui| {
-                    layers.card(ui, margin(pad), |ui| list::welcome(ui, theme, keymap, can_add))
-                })
-                .inner
-            })
-            .inner
+        middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
+    }
+
+    /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
+    fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> Vec<calendar::Asked> {
+        if self.calendar.is_empty() {
+            middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
+            return Vec::new();
+        }
+        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers)
     }
 
     /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,
@@ -723,7 +1579,9 @@ impl InboxApp {
     /// The settings sheet over the window; what was asked on it.
     fn settings_sheet(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<settings::Asked> {
         let reduce = self.reduce_motion();
+        let desk = self.desk_view();
         let view = settings::Sheet {
+            desk,
             keymap: &self.keymap,
             settings: &mut self.settings,
             current: self.mailbox.appearance(),
@@ -756,26 +1614,12 @@ impl InboxApp {
         }
     }
 
-    /// Applies what was asked on the rail besides the settings: Mail, Sent and Search show the mail (Mail its inbox
-    /// when Sent was open, Sent the unified Sent view), and Search puts the focus in the search field.
-    fn apply_rail(&mut self, ui: &Ui, rail: &pane::Rail) {
-        if rail.mail || rail.sent || rail.search {
-            self.close_settings();
-        }
-        if rail.mail && self.mailbox.place() == Place::View(Role::Sent) {
-            self.mailbox.open(Place::View(Role::Inbox));
-        }
-        if rail.sent {
-            self.mailbox.open(Place::View(Role::Sent));
-        }
-        if rail.search {
-            ui.memory_mut(|memory| memory.request_focus(list::search_id()));
-        }
-    }
-
     /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its
-    /// key), and Undo when `undone`.
-    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool) {
+    /// key), Undo when `undone`, and what a button of the outbox asked of a send.
+    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool, outboxed: Option<(u64, list::Outbox)>) {
+        if let Some((draft, asked)) = outboxed {
+            self.outbox(draft, asked);
+        }
         if out {
             self.mailbox.left();
         }
@@ -783,24 +1627,76 @@ impl InboxApp {
             self.mailbox.start(id, act);
         }
         if undone {
-            self.mailbox.undo();
+            self.undo();
         }
+    }
+
+    /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
+    fn undo(&mut self) {
+        self.mailbox.undo();
+        if self.screen == Screen::Calendar {
+            self.calendar.refresh(&mut self.mailbox);
+        }
+        self.reader.refresh_invites(&mut self.mailbox);
     }
 
     /// The act whose key was pressed in this frame, on the selected row.
     fn keyed_act(&self, ctx: &egui::Context) -> Option<(u64, Act)> {
-        let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
-        let read = if row.seen { Act::Unread } else { Act::Read };
-        [(keymap::DONE, Act::Done), (keymap::READ, read), (keymap::DELETE, Act::Delete)]
-            .into_iter()
-            .find(|(action, _)| self.keymap.pressed(ctx, action))
-            .map(|(_, act)| (row.id, act))
+        let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action))?;
+        self.row_act(action)
     }
 
-    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; the act can no longer be
-    /// undone after. Whether Undo was pressed (its key works while no text field has the focus).
-    fn toast(&mut self, ui: &Ui, theme: &Theme, typing: bool) -> bool {
-        let Some(undo) = self.mailbox.undoable() else {
+    /// The toasts of the frame: the countdown while a send waits for its hold, else the act's; then the composer's
+    /// notice. Whether the act's Undo was pressed, and whether the countdown's took a send back.
+    fn toasts(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> (bool, bool) {
+        let unsent = self.send_toast(ui, theme, quiet);
+        let undone = if unsent || self.counting().is_some() { false } else { self.toast(ui, theme, quiet) };
+        self.notice_toast(ui, theme);
+        (undone, unsent)
+    }
+
+    /// The countdown toast while the message sent last waits for its hold: "Sending “subject” in 4 s", with Undo and its
+    /// key, which take the send back. It asks for a frame as each second ends. Whether Undo was pressed (its key works
+    /// while nothing is `quiet`).
+    fn send_toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
+        let Some((draft, seconds)) = self.counting() else {
+            self.sending = None;
+            return false;
+        };
+        let subject = self.mailbox.outbox().iter().find(|row| row.draft == draft).map(|row| row.subject.clone()).unwrap_or_default();
+        let text = if subject.is_empty() {
+            tr!("Sending in {seconds} s", seconds = seconds)
+        } else {
+            tr!("Sending “{subject}” in {seconds} s", subject = subject, seconds = seconds)
+        };
+        // The next whole second, when the count changes.
+        let left = self.mailbox.outbox().iter().find(|row| row.draft == draft).and_then(|row| match row.state {
+            crate::mailbox::SendState::Waiting(Some(at)) => at.duration_since(self.mailbox.now()),
+            _ => None,
+        });
+        let tick = left.map_or(std::time::Duration::from_secs(1), |left| {
+            let part = std::time::Duration::from_nanos(u64::from(left.subsec_nanos()));
+            if part.is_zero() { std::time::Duration::from_secs(1) } else { part }
+        });
+        ui.ctx().request_repaint_after(tick);
+        let mut keys = self.keymap.clone();
+        if quiet {
+            keys.unbind(keymap::UNDO);
+        }
+        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let id = egui::Id::unique("send-toast").with(draft);
+        let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO) }, bottom);
+        if undone {
+            self.unsend(draft);
+        }
+        undone
+    }
+
+    /// The toast after the last act, rising from the bottom edge, for [`TOAST_SECONDS`]; after it Ctrl+Z still takes
+    /// acts back, one at a time. Whether Undo was pressed (its key works while nothing is `quiet`: no text field has the
+    /// focus, no sheet or palette is open).
+    fn toast(&mut self, ui: &Ui, theme: &Theme, quiet: bool) -> bool {
+        let Some(undo) = self.mailbox.undoable().cloned() else {
             self.toast = None;
             return false;
         };
@@ -818,12 +1714,29 @@ impl InboxApp {
         self.toast = Some((undo.serial, since));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
         let mut keys = self.keymap.clone();
-        if typing {
+        if quiet {
             keys.unbind(keymap::UNDO);
         }
         let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
         let id = egui::Id::unique("act-toast").with(undo.serial);
-        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: undo.act.told(), undo: Some(keymap::UNDO) }, bottom)
+        toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO) }, bottom)
+    }
+
+    /// Applies what was asked for in the palette; the action to run, when one was chosen.
+    fn apply_palette(&mut self, asked: palette::Asked) -> Option<&'static str> {
+        match asked {
+            palette::Asked::Run(id) => {
+                self.palette.close();
+                return Some(id);
+            }
+            palette::Asked::Step(down) => {
+                let count = self.palette.matches().len();
+                self.palette.step(down, count);
+            }
+            palette::Asked::Typed => self.palette.typed(),
+            palette::Asked::Close => self.palette.close(),
+        }
+        None
     }
 
     /// Applies what was asked for on the settings page: each control through its `ui.*.set` command.
@@ -850,7 +1763,36 @@ impl InboxApp {
             settings::Asked::Add => self.onboarding.open(),
             settings::Asked::Back => self.onboarding.close(),
             settings::Asked::Page(asked) => self.apply_page(asked),
+            settings::Asked::Capture(action) => self.settings.capture(action),
+            settings::Asked::Unbind(action) => self.keymap.unbind(action),
+            settings::Asked::ResetKeys => {
+                self.keymap = Keymap::default();
+                self.settings.captured(None);
+            }
+            settings::Asked::Signature(account) => self.save_signature(account),
+            settings::Asked::Screener(mode) => self.mailbox.set_screener_mode(mode),
+            settings::Asked::InboxView(view) => self.mailbox.set_inbox_view(view),
+            settings::Asked::Grouped(account, grouped) => self.mailbox.set_grouped(account, grouped),
+            settings::Asked::KeepPins(keep) => self.mailbox.set_pins_outlast_done(keep),
+            settings::Asked::Hold(seconds) => self.mailbox.set_hold(seconds),
+            settings::Asked::Level(account, level) => self.mailbox.set_notify_level(account, level),
+            settings::Asked::Returns(on) => self.mailbox.set_notify_returns(on),
+            settings::Asked::Reminders(on) => self.mailbox.set_notify_reminders(on),
+            settings::Asked::Background(on) => self.set_background(on),
+            settings::Asked::Login(on) => self.set_login(on),
             settings::Asked::Close => self.close_settings(),
+        }
+    }
+
+    /// Saves the signature of `account` as typed on the Sending page (`compose.signature`); an empty one clears it.
+    fn save_signature(&mut self, account: u64) {
+        let typed = self.settings.signature(account).map(str::trim_end).filter(|typed| !typed.trim().is_empty()).map(str::to_owned);
+        match self.mailbox.run("compose.signature", &json!({ "account": account, "signature": typed })) {
+            Ok(_) => {
+                self.settings.saved_signature(account);
+                self.mailbox.refresh();
+            }
+            Err(error) => self.mailbox.fail(error),
         }
     }
 
@@ -870,6 +1812,14 @@ impl InboxApp {
 
     /// Applies what was asked for in the reader.
     fn apply(&mut self, ui: &Ui, asked: reader::Asked) {
+        if let reader::Asked::Answer(id, answer) = asked {
+            if self.answer(id, answer) {
+                // The text has the focus, or To for a forward.
+                let field = if answer == crate::compose::Answer::Forward { compose::field_id(crate::compose::Line::To) } else { compose::text_id() };
+                ui.ctx().memory_mut(|memory| memory.request_focus(field));
+            }
+            return;
+        }
         let (reader, mailbox) = (&mut self.reader, &mut self.mailbox);
         match asked {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
@@ -887,6 +1837,11 @@ impl InboxApp {
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => mailbox.start(id, act),
+            reader::Asked::Presets => mailbox.load_presets(),
+            reader::Asked::Invite(id, invite::Ask::Answer(answer)) => reader.answer_invite(mailbox, id, answer),
+            reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
+            reader::Asked::Invite(id, invite::Ask::Remove) => reader.remove_invite(mailbox, id),
+            reader::Asked::Answer(..) => {}
         }
     }
 }
@@ -895,17 +1850,35 @@ impl InboxApp {
 #[path = "appearance_tests.rs"]
 mod appearance_tests;
 #[cfg(test)]
+#[path = "compose_tests.rs"]
+mod compose_tests;
+#[cfg(test)]
 #[path = "fit_tests.rs"]
 mod fit_tests;
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod frame_tests;
 #[cfg(test)]
+#[path = "invite_tests.rs"]
+mod invite_tests;
+#[cfg(test)]
+#[path = "later_tests.rs"]
+mod later_tests;
+#[cfg(test)]
 #[path = "list_tests.rs"]
 mod list_tests;
 #[cfg(test)]
+#[path = "notify_tests.rs"]
+mod notify_tests;
+#[cfg(test)]
 #[path = "onboard_tests.rs"]
 mod onboard_tests;
+#[cfg(test)]
+#[path = "outbox_tests.rs"]
+mod outbox_tests;
+#[cfg(test)]
+#[path = "palette_tests.rs"]
+mod palette_tests;
 #[cfg(test)]
 #[path = "pane_tests.rs"]
 mod pane_tests;
@@ -913,7 +1886,16 @@ mod pane_tests;
 #[path = "reader_tests.rs"]
 mod reader_tests;
 #[cfg(test)]
+#[path = "reply_tests.rs"]
+mod reply_tests;
+#[cfg(test)]
 #[path = "settings_tests.rs"]
 mod settings_tests;
 #[cfg(test)]
+#[path = "shortcuts_tests.rs"]
+mod shortcuts_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "triage_tests.rs"]
+mod triage_tests;

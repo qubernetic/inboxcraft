@@ -19,6 +19,8 @@ fn account_list_shows_every_account_without_a_secret() {
             "label": "Account 1",
             "address": "anna@example.org",
             "display_name": null,
+            "signature": null,
+            "grouped": true,
             "username": "anna@example.org",
             "imap": { "host": "imap.example.org", "port": 993, "security": "tls" },
             "submission": null,
