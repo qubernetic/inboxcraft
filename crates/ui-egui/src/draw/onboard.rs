@@ -278,7 +278,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
     ui.add_space(theme.spacing.m);
     // The steps on a card of their own.
     let s = theme.spacing;
-    Frame::new().fill(p.surface).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l, s.m)).show(ui, |ui| {
+    Frame::new().fill(p.card).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l, s.m)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         for row in onboarding.steps() {
             step(ui, theme, row);

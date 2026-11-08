@@ -10,7 +10,6 @@ use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{Color32, Galley, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::component::button::DISABLED;
-use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::theme::{Font, Theme};
 
@@ -32,12 +31,9 @@ pub(super) fn line_height(ui: &Ui, font: Font) -> f32 {
     ui.fonts_mut(|fonts| fonts.row_height(&font.id()))
 }
 
-/// The selection over `rect`: the selection gradient from left to right.
+/// The selection over `rect`: one even tone.
 pub(super) fn selection(painter: &Painter, theme: &Theme, rect: Rect, corner: f32) {
-    let p = &theme.palette;
-    let gradient =
-        Gradient::Linear { from: pos2(0.0, 0.5), to: pos2(1.0, 0.5), stops: vec![Stop::new(0.0, p.selection), Stop::new(1.0, p.selection_end)] };
-    gradient::fill(painter, rect, corner, &gradient);
+    painter.rect_filled(rect, corner, theme.palette.selection);
 }
 
 /// The focus ring around a control that has the keyboard focus.

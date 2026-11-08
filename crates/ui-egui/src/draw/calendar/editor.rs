@@ -17,7 +17,6 @@ use crate::component::button::TextButton;
 use crate::component::pill::pill;
 use crate::component::popup;
 use crate::component::{field as field_style, margin};
-use crate::glass::Under;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
@@ -32,7 +31,7 @@ pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap,
     let corner = screen.right_top() + vec2(-s.gap * 2.0, s.gap * 7.0);
     let mut asked = Vec::new();
     Area::new(Id::unique("event-editor")).order(Order::Foreground).pivot(Align2::RIGHT_TOP).fixed_pos(corner).show(ctx, |ui| {
-        popup::panel(ui, theme, Under::Fading, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             Frame::new().inner_margin(margin(s.m, s.m)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = s.m;
                 form(ui, theme, keymap, editor, &mut asked);

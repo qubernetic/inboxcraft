@@ -44,7 +44,7 @@ use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
 use crate::component::{badge, popup};
 use crate::compose::Answer;
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, GroupKind, Mailbox};
@@ -196,7 +196,7 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     let response = button.show(ui, theme, keymap);
     let width = theme.fonts.body.size * MENU_WIDTH;
     Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             ui.label(RichText::new(tr!("Move to")).font(theme.fonts.caption.id()).color(theme.palette.muted));
             for folder in mailbox.move_targets(id) {
                 // The full path, so a folder inside another says where it is.
@@ -243,7 +243,7 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
     }
     let width = theme.fonts.body.size * PICKER_WIDTH;
     Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
             let ask = Ask { title, confirm, alert: None, presets: &presets };
             let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
@@ -300,7 +300,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
     // In the top row the window controls sit at the end of the actions' line.
     super::frame::beside(ui, theme, |ui| {
-        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+        Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = s.xs;
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
@@ -332,7 +332,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                 let width = theme.fonts.body.size * MENU_WIDTH;
                 Popup::menu(&response)
                     .frame(Frame::NONE)
-                    .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                    .show(|ui| popup::panel(ui, theme, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
             });
         });
     });
@@ -375,13 +375,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     }
 }
 
-/// A card's frame: the surface with a line round it.
+/// A card's frame: the translucent card colour with a line round it.
 fn card_frame(theme: &Theme, inner: f32) -> Frame {
-    Frame::new()
-        .fill(theme.palette.surface)
-        .stroke(Stroke::new(1.0, theme.palette.line))
-        .corner_radius(theme.spacing.card)
-        .inner_margin(margin(inner))
+    Frame::new().fill(theme.palette.card).stroke(Stroke::new(1.0, theme.palette.line)).corner_radius(theme.spacing.card).inner_margin(margin(inner))
 }
 
 /// One folded message of the thread, a card of one line: the avatar, the sender, the first words and the date; a
@@ -399,7 +395,7 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, s.card, p.surface);
+        painter.rect_filled(rect, s.card, p.card);
         if response.hovered() {
             painter.rect_filled(rect, s.card, p.hover);
         }
@@ -880,7 +876,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
     let chosen_id = egui::Id::unique("screen-into").with(id);
     let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    Frame::new().fill(p.surface).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
+    Frame::new().fill(p.card).stroke(Stroke::new(1.5, p.focus)).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = s.s;
         let title = tr!("Let {sender} in?", sender = row.sender);
@@ -932,7 +928,7 @@ fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
                 ui.set_max_width((rect.width() - s.m * 2.0 - s.s * 2.0).max(1.0));
                 ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).truncate());
             });
-            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, Under::Sharp);
+            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
             ui.painter().set(slot, Shape::Vec(shapes));
         });
 }

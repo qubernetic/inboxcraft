@@ -318,25 +318,33 @@ fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
 }
 
 #[test]
-fn the_row_text_fades_out_before_the_hover_actions() {
+fn the_hover_actions_cover_the_row_text_on_a_solid_float() {
+    /// Whether `shape` holds an opaque rectangle under `point`.
+    fn solid_under(shape: &egui::Shape, point: egui::Pos2) -> bool {
+        match shape {
+            egui::Shape::Rect(rect) => rect.fill.a() == 255 && rect.rect.contains(point),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| solid_under(shape, point)),
+            _ => false,
+        }
+    }
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
     let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
     let row = harness.get_by_label(ODILE).rect();
+    let shapes = &harness.output().shapes;
+    let float = shapes.iter().rposition(|clipped| solid_under(&clipped.shape, done.center()));
+    let float = float.expect("the float under the Done button");
     let mut seen = 0;
-    for clipped in &harness.output().shapes {
+    for (index, clipped) in shapes.iter().enumerate() {
         let egui::Shape::Text(text) = &clipped.shape else { continue };
         let rect = text.visual_bounding_rect();
-        if !(row.contains(rect.center()) || row.contains(rect.left_center())) || text.galley.job.text.chars().count() < 3 {
-            continue;
-        }
-        if text.galley.job.text.starts_with("Odile") || text.galley.job.text.starts_with("Allotment") {
+        if row.contains(rect.left_center()) && (text.galley.job.text.starts_with("Odile") || text.galley.job.text.starts_with("Allotment")) {
             seen += 1;
-            assert!(clipped.clip_rect.right() < done.left(), "{:?} reaches {} past {}", text.galley.job.text, clipped.clip_rect.right(), done.left());
+            assert!(index < float, "{:?} is drawn over the float", text.galley.job.text);
         }
     }
-    assert!(seen >= 2, "the sender and the subject were drawn faded");
+    assert!(seen >= 2, "the sender and the subject were drawn");
 }
 
 #[test]

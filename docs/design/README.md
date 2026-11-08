@@ -56,19 +56,9 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-- **Cards:** the list's and the reader's cards use the new translucent `card` token (`surface` at 62 % dark, 80 %
-  light), without a shadow, in place of the opaque `surface`.
-- **Selection:** `selection` is one even tone (the surface with 30 % dark or 16 % light of the middle stop) and
-  `selection_end` is gone. A selected pill or segment adds an edge in the full gradient and a SemiBold label; other
-  pills have no fill and a quiet `control_edge`.
-- **White on custom colours:** the text gradient may darken up to 40 % instead of 30 %. The rail gets its own stops
-  (`rail1`–`rail3`): each stop darkened only as far as white needs for 3:1, at most 25 %; otherwise the full gradient
-  with the better ink (Citrus).
 - **Controls:** Day, Week, Month and Agenda, and Show as, are segmented controls; Repeat is a select with a popup.
-- **Floats:** everything that pops up over content (menus, tooltips, popups, hover actions, toasts, the command
-  palette, the event editor) is on one solid `float` with an edge and a shadow. `float over text` and the 80 % float
-  are gone, and with them `glass::faded`'s reason for being and the `Under` choice.
-- **Events:** a tint of the account's colour (`event1`–`event6`) with the edge at full strength.
+- **Events:** the tokens `event1`–`event6` are in the palette, but the calendar does not paint with them yet: an
+  event should be a tint of the account's colour with the edge at full strength.
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui

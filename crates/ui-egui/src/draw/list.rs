@@ -5,7 +5,7 @@
 //! empty states.
 //!
 //! A row shows the sender's avatar, the sender and the date, the subject and the preview; an unread row its dot and
-//! a heavier sender and subject; the selected row the selection gradient; a row from a new sender says so after the
+//! a heavier sender and subject; the selected row the selection; a row from a new sender says so after the
 //! sender. On top of the unified inbox, while senders wait, the screener card with Review, which opens "New senders".
 //! The unified inbox shows its groups as the owner chose ([`InboxView`]): a card for each (badge, name, unread count,
 //! "Done all", the first rows and "Show all (n)"), one list with a heading for each, or the simple list without them;
@@ -27,18 +27,16 @@
 //! refused one. A sent message a delivery report says did not get through is marked "Not delivered" in its row.
 
 use std::cell::Cell;
-use std::sync::Arc;
 
 use egui::{
-    Align, Color32, Frame, Galley, Id, Key, Layout, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Id, Key, Layout, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 
 use super::paint::{focus_ring, line, line_height, selection};
 use crate::component::hover::{self, Action};
 use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
-use crate::glass::{self, Under};
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
@@ -169,16 +167,6 @@ pub(super) fn row_height(ui: &Ui, theme: &Theme) -> f32 {
     theme.spacing.s * 2.0 + first + theme.spacing.xs + second
 }
 
-/// Paints `galley` at `at`, faded out before `until` when the hover actions show.
-fn put(ui: &Ui, theme: &Theme, at: egui::Pos2, galley: Arc<Galley>, colour: Color32, until: Option<f32>) {
-    match until {
-        Some(until) => glass::faded(ui.painter(), at, &galley, colour, until, theme.spacing.xl),
-        None => {
-            ui.painter().galley(at, galley, colour);
-        }
-    }
-}
-
 /// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     // An open envelope opens an unread message; a closed one closes a read one again.
@@ -264,7 +252,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
         Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, Under::Sharp, width, |ui| {
+            popup::panel(ui, theme, width, |ui| {
                 if let Some(chosen) = group_menu(ui, theme, message.group, &message.address) {
                     acted = Some(chosen);
                     ui.close();
@@ -301,10 +289,6 @@ fn paint_row(
     } else if response.hovered() {
         ui.painter().rect_filled(rect, s.corner, p.hover);
     }
-    let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
-    let acted = shown.clicked.and_then(|index| act(message, index));
-    let until = (shown.openness > 0.0).then_some(shown.left - s.xs);
     let (first_height, second_height) = row_lines(ui, theme);
     let first = rect.top() + s.s;
     let second = first + first_height + s.xs;
@@ -325,7 +309,7 @@ fn paint_row(
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
     let date = line(ui, &[(&mailbox.row_date(message), f.caption, p.muted)], f32::INFINITY);
     let date_left = right - date.size().x;
-    put(ui, theme, pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted, until);
+    ui.painter().galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
     let mark = if message.bounced.is_some() {
         Some((tr!("Not delivered"), p.error))
     } else if message.new_sender {
@@ -342,38 +326,27 @@ fn paint_row(
         }
         None => line(ui, &[(&message.sender, sender_font, p.text)], date_left - s.m - left),
     };
-    put(ui, theme, pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text, until);
+    ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text);
     let flag_size = second_height.max(1.0);
     let marks = usize::from(message.flagged) + usize::from(message.pinned);
     let flag_room = marks as f32 * (flag_size + s.s);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let preview = format!("   {}", message.preview);
-    match until {
-        None => {
-            let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - flag_room - left);
-            ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
-            // The flag at the right end, the pin left of it.
-            let mut end = right;
-            for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.flag), (message.pinned, IconId::Pin, p.accent)] {
-                if shown {
-                    let at = Rect::from_min_size(pos2(end - flag_size, second + (second_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-                    theme.icons.paint(ui.painter(), at, icon, Style::Fill, colour);
-                    end -= flag_size + s.s;
-                }
-            }
-        }
-        // The subject and the preview fade each in their own colour.
-        Some(until) => {
-            let subject = line(ui, &[(subject, subject_font, p.text)], right - left);
-            let after = left + subject.size().x;
-            put(ui, theme, pos2(left, second + (second_height - subject.size().y) / 2.0), subject, p.text, Some(until));
-            if after < until {
-                let preview = line(ui, &[(&preview, f.preview, p.muted)], right - after);
-                put(ui, theme, pos2(after, second + (second_height - preview.size().y) / 2.0), preview, p.muted, Some(until));
-            }
+    let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - flag_room - left);
+    ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
+    // The flag at the right end, the pin left of it.
+    let mut end = right;
+    for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.flag), (message.pinned, IconId::Pin, p.accent)] {
+        if shown {
+            let at = Rect::from_min_size(pos2(end - flag_size, second + (second_height - flag_size) / 2.0), vec2(flag_size, flag_size));
+            theme.icons.paint(ui.painter(), at, icon, Style::Fill, colour);
+            end -= flag_size + s.s;
         }
     }
-    acted
+    // Last, so the solid float covers whatever of the row lies under it.
+    let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
+    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
+    shown.clicked.and_then(|index| act(message, index))
 }
 
 /// A rounded card across `ui`'s width with `add` drawn inside; `edge` rings it with the preset's gradient.
@@ -396,7 +369,7 @@ fn sheet<R>(ui: &mut Ui, theme: &Theme, edge: bool, add: impl FnOnce(&mut Ui) ->
         let width = EDGE;
         vec![gradient::filled(ui.painter(), rect, s.card, &ring), Shape::rect_filled(rect.shrink(width), s.card - width, p.surface)]
     } else {
-        vec![Shape::rect_filled(rect, s.card, p.surface), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)]
+        vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)]
     };
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
@@ -763,7 +736,7 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     let room = ui.available_rect_before_wrap();
     let content = height * count as f32 + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
-    ui.painter().rect_filled(card, s.card, p.surface);
+    ui.painter().rect_filled(card, s.card, p.card);
     ui.painter().rect_stroke(card, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
     let mut clicked = None;
