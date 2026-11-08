@@ -507,3 +507,10 @@ fn the_lists_keep_working_when_they_overflow_a_small_window() {
         harness.get_by_label(ODILE);
     }
 }
+
+#[test]
+fn a_row_without_a_preview_has_no_dot_after_its_subject() {
+    assert_eq!(super::list::after_subject(""), "");
+    assert_eq!(super::list::after_subject("  \t"), "");
+    assert_eq!(super::list::after_subject("Hi all"), "  · Hi all");
+}
