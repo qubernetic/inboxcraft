@@ -1082,6 +1082,13 @@ impl InboxApp {
         }
     }
 
+    /// Where every toast stands: its bottom edge over the window's bottom, centred on what is right of the rail.
+    fn toast_bottom(ui: &Ui, theme: &Theme) -> egui::Pos2 {
+        let window = ui.max_rect();
+        let content = window.with_min_x((window.left() + pane::rail_width(theme)).min(window.right()));
+        content.center_bottom() - egui::vec2(0.0, theme.spacing.xl + theme.spacing.xs)
+    }
+
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
     fn notice_toast(&mut self, ui: &Ui, theme: &Theme) {
         let Some((text, since)) = self.notice.clone() else { return };
@@ -1097,7 +1104,7 @@ impl InboxApp {
         }
         self.notice = Some((text.clone(), Some(since)));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None }, bottom);
     }
 
@@ -1435,6 +1442,7 @@ impl InboxApp {
             || header.searched.is_some()
             || header.open.is_some()
             || header.show_done.is_some()
+            || header.view.is_some()
             || done_all.is_some()
             || review
             || clicked.is_some()
@@ -1492,6 +1500,9 @@ impl InboxApp {
     fn go(&mut self, asked: &pane::Asked, header: list::Header, review: bool) {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
+        }
+        if let Some(view) = header.view {
+            self.mailbox.set_inbox_view(view);
         }
         if let Some(show) = header.show_done {
             self.mailbox.set_show_done(show);
@@ -1683,7 +1694,7 @@ impl InboxApp {
         if quiet {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("send-toast").with(draft);
         let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO) }, bottom);
         if undone {
@@ -1717,7 +1728,7 @@ impl InboxApp {
         if quiet {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("act-toast").with(undo.serial);
         toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO) }, bottom)
     }

@@ -184,6 +184,21 @@ fn the_screener_mode_and_the_grouping_of_an_account_change_through_the_engine() 
 }
 
 #[test]
+fn the_list_counts_unread_while_it_shows_groups_and_messages_otherwise() {
+    let mut mailbox = mailbox();
+    let unread = mailbox.messages().iter().filter(|row| !row.seen).count();
+    assert_eq!(mailbox.list_count(), format!("{unread} unread"));
+    mailbox.set_inbox_view(InboxView::Simple);
+    assert_eq!(mailbox.list_count(), format!("{} messages", mailbox.messages().len()));
+    assert!(mailbox.can_group(), "the simple list can go back to its groups");
+    let accounts: Vec<u64> = mailbox.accounts().iter().map(|account| account.id).collect();
+    for account in accounts {
+        mailbox.set_grouped(account, false);
+    }
+    assert!(!mailbox.can_group(), "no account is grouped");
+}
+
+#[test]
 fn the_inbox_view_is_cards_until_changed() {
     let mut mailbox = mailbox();
     assert_eq!(mailbox.inbox_view(), InboxView::Cards);

@@ -444,7 +444,7 @@ fn painted(harness: &Harness<'_, InboxApp>, wanted: &str) -> Option<(egui::Rect,
 }
 
 #[test]
-fn show_all_is_an_accent_link_under_the_rows_text() {
+fn show_all_is_an_accent_link_a_little_left_of_the_rows_text() {
     let harness = harness(true);
     let (text, colour) = painted(&harness, "Show all (7)").expect("Show all is drawn");
     let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
@@ -452,7 +452,8 @@ fn show_all_is_an_accent_link_under_the_rows_text() {
     let row = harness.get_by_label(ODILE).rect();
     let sender = painted(&harness, "Odile Brannock").expect("the sender is drawn").0;
     assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
-    assert!((text.left() - sender.left()).abs() <= 1.5, "Show all starts at {} where the rows' text starts, {}", text.left(), sender.left());
+    let wanted = sender.left() - theme.spacing.l;
+    assert!((text.left() - wanted).abs() <= 1.5, "Show all starts at {}, a step left of the rows' text at {}", text.left(), sender.left());
 }
 
 #[test]
@@ -468,4 +469,41 @@ fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet
         lefts.push(button.rect().left());
     }
     assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "in the design's order: {lefts:?}");
+}
+
+#[test]
+fn the_view_switch_shows_over_the_wide_inbox_and_changes_the_view() {
+    let mut harness = harness(true);
+    harness.get_by_role_and_label(Role::Button, "Simple list").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Simple);
+    harness.get_by_role_and_label(Role::Button, "Grouped").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List, "Grouped is the one list under headings");
+    harness.get_by_role_and_label(Role::Button, "Cards").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Cards);
+}
+
+#[test]
+fn the_view_switch_leaves_the_narrow_list_beside_an_open_message() {
+    let mut harness = harness(true);
+    harness.get_by_role_and_label(Role::Button, "Cards");
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "Cards").is_none());
+    harness.get_by_role_and_label(Role::Button, "Show done");
+}
+
+#[test]
+fn the_lists_keep_working_when_they_overflow_a_small_window() {
+    for showcase in [true, false] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(760.0, 260.0))
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(showcase));
+        harness.run();
+        harness.run();
+        harness.get_by_label(ODILE);
+    }
 }
