@@ -42,7 +42,7 @@ use egui::{
     Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText,
     ScrollArea, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
-use inboxcraft_html::{Block, Document, Image, ImageSource, Marker, TextKind};
+use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
 
 use super::margin;
 use crate::component::button::{self, IconButton, TextButton};
@@ -767,8 +767,69 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
 }
 
 /// Display blocks of an HTML message.
+/// How wide a picture's column asks to be while the picture is not there to measure.
+const WANTED_PICTURE: f32 = 160.0;
+
+/// About how wide a letter of running text is, as a part of the font's size: enough to size a column from the
+/// number of letters without laying the text out twice.
+const LETTER: f32 = 0.55;
+
+/// How wide `block` asks to be on one line.
+fn wanted_width(theme: &Theme, reader: &Reader, id: u64, block: &Block, depth: usize) -> f32 {
+    match block {
+        Block::Text { .. } => block.text().chars().count() as f32 * theme.fonts.body.size * LETTER,
+        Block::Rule { .. } => 0.0,
+        Block::Image { image, .. } => {
+            let key = match &image.source {
+                ImageSource::Inline(content_id) => Some(inline_key(id, content_id)),
+                ImageSource::Remote(url) => Some(url.clone()),
+                ImageSource::Blocked | ImageSource::Unsupported => None,
+            };
+            match key.as_deref().and_then(|key| reader.picture(key)) {
+                Some(PictureState::Ready(decoded)) => decoded.width as f32,
+                _ => WANTED_PICTURE,
+            }
+        }
+        Block::Table { rows, .. } if depth < MAX_DEPTH => {
+            wanted_columns(theme, reader, id, rows, depth.saturating_add(1)).iter().sum::<f32>() + theme.spacing.m
+        }
+        Block::Table { .. } => 0.0,
+    }
+}
+
+/// How wide each column of a table asks to be: its widest cell, each cell its widest block.
+fn wanted_columns(theme: &Theme, reader: &Reader, id: u64, rows: &[Vec<Cell>], depth: usize) -> Vec<f32> {
+    let mut wanted = vec![0.0_f32; rows.iter().map(Vec::len).max().unwrap_or(0)];
+    for row in rows {
+        for (cell, column) in row.iter().zip(wanted.iter_mut()) {
+            let widest = cell.blocks.iter().map(|block| wanted_width(theme, reader, id, block, depth)).fold(0.0, f32::max);
+            *column = column.max(widest);
+        }
+    }
+    wanted
+}
+
+/// The width of each column in `room`, with `gap` between them: each gets what it asks for when all fit; otherwise
+/// the narrow ones still do and the rest share what is left equally. Together they never pass `room`.
+pub(super) fn column_widths(wanted: &[f32], room: f32, gap: f32) -> Vec<f32> {
+    let count = wanted.len();
+    let mut left = (room - gap * count.saturating_sub(1) as f32).max(0.0);
+    let mut widths = vec![0.0; count];
+    let mut narrowest: Vec<(usize, f32)> = wanted.iter().copied().enumerate().collect();
+    narrowest.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (done, (column, asked)) in narrowest.into_iter().enumerate() {
+        let share = left / count.saturating_sub(done).max(1) as f32;
+        let width = asked.min(share).max(0.0);
+        if let Some(slot) = widths.get_mut(column) {
+            *slot = width;
+        }
+        left -= width;
+    }
+    widths
+}
+
 #[expect(clippy::too_many_arguments, reason = "the drawing context of one block")]
-fn blocks(
+pub(super) fn blocks(
     ui: &mut Ui,
     theme: &Theme,
     reader: &Reader,
@@ -783,7 +844,7 @@ fn blocks(
     let f = &theme.fonts;
     let quotes = reader.shows_quotes(id);
     let mut toggled = false;
-    for (index, block) in list.iter().enumerate() {
+    for block in list {
         let quote = match block {
             Block::Text { quote, .. } | Block::Rule { quote } | Block::Image { quote, .. } | Block::Table { quote, .. } => *quote,
         };
@@ -852,14 +913,21 @@ fn blocks(
                 }
                 Block::Image { image, .. } => picture(ui, theme, reader, id, image, document, textures, drawn),
                 Block::Table { rows, .. } if depth < MAX_DEPTH => {
-                    Grid::new(("table", id, depth, index)).striped(false).show(ui, |ui| {
-                        for row in rows {
-                            for cell in row {
-                                ui.vertical(|ui| blocks(ui, theme, reader, id, document, &cell.blocks, depth.saturating_add(1), textures, drawn));
+                    let gap = theme.spacing.m;
+                    let widths = column_widths(&wanted_columns(theme, reader, id, rows, depth), ui.available_width(), gap);
+                    let spacing = ui.spacing().item_spacing.x;
+                    for row in rows {
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for (cell, width) in row.iter().zip(&widths) {
+                                ui.allocate_ui_with_layout(vec2(*width, 0.0), Layout::top_down(Align::Min), |ui| {
+                                    ui.spacing_mut().item_spacing.x = spacing;
+                                    ui.set_width(*width);
+                                    blocks(ui, theme, reader, id, document, &cell.blocks, depth.saturating_add(1), textures, drawn);
+                                });
                             }
-                            ui.end_row();
-                        }
-                    });
+                        });
+                    }
                 }
                 Block::Table { .. } => {}
             });

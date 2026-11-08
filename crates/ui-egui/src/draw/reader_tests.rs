@@ -572,3 +572,47 @@ fn the_reader_keeps_to_a_narrow_window() {
     harness.get_by_role_and_label(Role::Button, "Load once");
     harness.get_by_role_and_label(Role::Button, "Always for prize-desk@example.org");
 }
+
+/// How wide and how high the text `label` comes out in a message made of `html`, in a reader 800 points wide.
+fn drawn_text(html: &str, label: &str) -> (f32, f32) {
+    let options = inboxcraft_html::Options::default();
+    let document = inboxcraft_html::display(html, &options);
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::PRESETS[0]);
+    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    let mut harness = Harness::builder().with_size(vec2(800.0, 400.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+        let mut textures = super::reader::Textures::default();
+        let mut drawn = super::reader::Drawn::default();
+        super::reader::blocks(ui, &theme, &reader, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+    });
+    harness.run();
+    let rect = harness.get_by_label(label).rect();
+    (rect.width() as f32, rect.height() as f32)
+}
+
+#[test]
+fn a_tables_text_keeps_its_line_instead_of_breaking_at_the_smallest_column() {
+    let text = "The words of the first column stay on one line";
+    let (width, height) = drawn_text(&format!("<table><tr><td>{text}</td><td>Second</td></tr></table>"), text);
+    assert!(width > 200.0, "the column came out {width} points wide");
+    assert!(height < 30.0, "the text came out {height} points high");
+}
+
+#[test]
+fn columns_that_fit_get_what_they_ask_for() {
+    assert_eq!(super::reader::column_widths(&[100.0, 50.0], 800.0, 10.0), [100.0, 50.0]);
+}
+
+#[test]
+fn a_long_column_gives_way_and_the_narrow_one_keeps_its_width() {
+    assert_eq!(super::reader::column_widths(&[2000.0, 80.0], 500.0, 20.0), [400.0, 80.0]);
+}
+
+#[test]
+fn columns_never_pass_the_room_however_little_there_is() {
+    for room in [0.0, 1.0, 37.5, 300.0] {
+        let widths = super::reader::column_widths(&[900.0, 900.0, 5.0, 0.0], room, 12.0);
+        assert!(widths.iter().all(|width| *width >= 0.0), "{widths:?}");
+        assert!(widths.iter().sum::<f32>() <= room + 0.001, "{widths:?} in {room}");
+    }
+    assert!(super::reader::column_widths(&[], 300.0, 12.0).is_empty());
+}
