@@ -109,6 +109,13 @@ pub fn shown(notice: &Notice, account: Option<&str>) -> Shown {
             buttons: Vec::new(),
             mail: false,
         },
+        Notice::SentLate { draft, subject, .. } => Shown {
+            key: format!("sent-{}", draft.get()),
+            title: tr!("Sent late: InboxCraft was not running at its time").to_owned(),
+            body: if subject.is_empty() { tr!("(no subject)").to_owned() } else { subject.clone() },
+            buttons: Vec::new(),
+            mail: false,
+        },
     }
 }
 

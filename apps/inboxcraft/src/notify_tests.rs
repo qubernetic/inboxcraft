@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use inboxcraft_engine::notify::{About, Notice};
-use inboxcraft_model::{AccountId, MessageId};
+use inboxcraft_model::{AccountId, DraftId, MessageId};
 
 use super::{Button, Click, Shown, clicked, escape, shown};
 
@@ -47,6 +47,18 @@ fn a_returned_snooze_and_a_reminder_say_what_happened() {
     assert_eq!((reminder.key.as_str(), reminder.title.as_str(), reminder.body.as_str()), ("reminder-7", "No reply yet", "Bob: Budget"));
     assert!(reminder.buttons.is_empty());
     assert_eq!(shown(&Notice::Reminder { about: about("Bob", "Budget"), missed: true }, None).title, "No reply yet, reminded late");
+}
+
+#[test]
+fn a_send_that_went_late_says_so_and_a_click_on_it_does_nothing() {
+    let late = shown(&Notice::SentLate { account: AccountId::new(1), draft: DraftId::new(4), subject: "Budget".to_owned() }, None);
+    assert_eq!(
+        (late.key.as_str(), late.title.as_str(), late.body.as_str()),
+        ("sent-4", "Sent late: InboxCraft was not running at its time", "Budget")
+    );
+    assert!(late.buttons.is_empty() && !late.mail);
+    assert_eq!(shown(&Notice::SentLate { account: AccountId::new(1), draft: DraftId::new(4), subject: String::new() }, None).body, "(no subject)");
+    assert_eq!(clicked("sent-4", "default"), None);
 }
 
 #[test]

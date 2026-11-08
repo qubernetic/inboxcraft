@@ -14,7 +14,7 @@ use inboxcraft_time::FakeClock;
 use serde_json::{Value, json};
 
 use super::compose_tests::{session_at, store as drafts_store};
-use crate::test_support::{NOW, account, at};
+use crate::test_support::{NOW, account, at, send_now};
 use crate::{AgentClass, Caller, EngineError, Session};
 
 /// The body of message 20: a text and two attachments, one of a media type the builder does not write.
@@ -203,7 +203,8 @@ fn bcc_never_leaks_into_a_reply_or_a_forward() {
 
 #[test]
 fn a_forward_quotes_the_message_inline_and_carries_its_attachments() {
-    let mut session = session();
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(store(), &clock);
     let answer = session.run("compose.forward", &json!({ "id": 20 })).unwrap();
     assert_eq!(answer["to"], json!([]));
     assert_eq!(answer["subject"], json!("Fwd: Allotment rota"));
@@ -220,7 +221,7 @@ fn a_forward_quotes_the_message_inline_and_carries_its_attachments() {
     // Sent, the message carries both attachments.
     let draft = answer["id"].as_u64().unwrap();
     session.run("compose.update", &json!({ "id": draft, "to": ["Erik <erik@example.org>"] })).unwrap();
-    session.run("mail.send", &json!({ "id": draft })).unwrap();
+    send_now(&mut session, &clock, "mail.send", draft);
     let jobs = session.take_jobs();
     let raw = jobs.iter().find_map(|job| if let JobKind::Send { raw, .. } = &job.kind { Some(raw.clone()) } else { None }).unwrap();
     let message = inboxcraft_mime::parse(&raw).unwrap();
@@ -262,10 +263,26 @@ fn a_forward_needs_the_body_and_its_send_needs_it_still() {
 }
 
 #[test]
-fn a_reply_lands_in_the_original_thread() {
-    let mut session = session();
-    let draft = session.run("compose.reply", &json!({ "id": 20 })).unwrap()["id"].as_u64().unwrap();
+fn a_forward_whose_body_goes_while_its_send_waits_is_refused_at_its_time() {
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(store(), &clock);
+    let draft = session.run("compose.forward", &json!({ "id": 20 })).unwrap()["id"].as_u64().unwrap();
+    session.run("compose.update", &json!({ "id": draft, "to": ["erik@example.org"] })).unwrap();
     session.run("mail.send", &json!({ "id": draft })).unwrap();
+    crate::test_support::change(&mut session, Change::RemoveBody(MessageId::new(20)));
+    clock.advance(std::time::Duration::from_secs(5));
+    session.tick().unwrap();
+    assert!(!session.take_jobs().iter().any(|job| matches!(job.kind, JobKind::Send { .. })));
+    let outbox = session.store().outbox().unwrap();
+    assert!(matches!(&outbox[0].state, inboxcraft_model::OutboxState::Refused { reply } if reply.contains("cannot be sent")), "{outbox:?}");
+}
+
+#[test]
+fn a_reply_lands_in_the_original_thread() {
+    let clock = FakeClock::new(at(NOW));
+    let mut session = session_at(store(), &clock);
+    let draft = session.run("compose.reply", &json!({ "id": 20 })).unwrap()["id"].as_u64().unwrap();
+    send_now(&mut session, &clock, "mail.send", draft);
     let jobs = session.take_jobs();
     let raw = jobs.iter().find_map(|job| if let JobKind::Send { raw, .. } = &job.kind { Some(raw.clone()) } else { None }).unwrap();
     let message = inboxcraft_mime::parse(&raw).unwrap();

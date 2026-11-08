@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use inboxcraft_model::{AccountId, Address, Group, Message, MessageId, Role, Screening, is_invisible_mark};
+use inboxcraft_model::{AccountId, Address, DraftId, Group, Message, MessageId, Role, Screening, is_invisible_mark};
 use inboxcraft_store::{Change, Storage};
 use serde_json::{Value, json};
 
@@ -199,6 +199,15 @@ pub enum Notice {
         /// Its time passed while InboxCraft was off or asleep.
         missed: bool,
     },
+    /// A send whose time passed while InboxCraft was off or asleep went late: at the start, or when it woke.
+    SentLate {
+        /// The account it went from.
+        account: AccountId,
+        /// Its draft, gone once the server took it.
+        draft: DraftId,
+        /// Its subject, as the owner wrote it.
+        subject: String,
+    },
 }
 
 impl Notice {
@@ -207,7 +216,7 @@ impl Notice {
     pub fn account(&self) -> AccountId {
         match self {
             Self::Mail(about) | Self::Returned { about, .. } | Self::Reminder { about, .. } => about.account,
-            Self::Mails { account, .. } => *account,
+            Self::Mails { account, .. } | Self::SentLate { account, .. } => *account,
         }
     }
 
@@ -216,7 +225,7 @@ impl Notice {
     pub fn message(&self) -> Option<MessageId> {
         match self {
             Self::Mail(about) | Self::Returned { about, .. } | Self::Reminder { about, .. } => Some(about.message),
-            Self::Mails { .. } => None,
+            Self::Mails { .. } | Self::SentLate { .. } => None,
         }
     }
 }
@@ -324,8 +333,9 @@ fn mark(message: &Message) -> String {
     }
 }
 
-/// The notices for the schedule entries that fired, as the owner's [`Settings`] want them.
-pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired]) -> Result<Vec<Notice>, EngineError> {
+/// The notices for the schedule entries that fired, as the owner's [`Settings`] want them; a send that went late,
+/// one of `sent`, is told whatever they are.
+pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired], sent: &[DraftId]) -> Result<Vec<Notice>, EngineError> {
     let mut notices = Vec::new();
     for entry in fired {
         let missed = entry.missed;
@@ -335,6 +345,9 @@ pub(crate) fn fired(store: &dyn Storage, settings: &Settings, fired: &[Fired]) -
             }
             inboxcraft_model::Due::FollowUp(id) if settings.reminders => {
                 held(store, id)?.map(|message| Notice::Reminder { about: about(&message, to_whom(&message)), missed })
+            }
+            inboxcraft_model::Due::Send(id) if missed && sent.contains(&id) => {
+                store.draft(id)?.map(|draft| Notice::SentLate { account: draft.account, draft: id, subject: draft.subject })
             }
             _ => None,
         };

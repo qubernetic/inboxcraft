@@ -105,6 +105,9 @@ mod sample_tests;
 #[path = "schedule_tests.rs"]
 mod schedule_tests;
 #[cfg(test)]
+#[path = "send_later_tests.rs"]
+mod send_later_tests;
+#[cfg(test)]
 #[path = "send_tests.rs"]
 pub(crate) mod send_tests;
 #[cfg(test)]

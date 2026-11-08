@@ -33,7 +33,8 @@ pub(crate) const PRESETS: CommandSpec = CommandSpec {
 pub(crate) const LIST: CommandSpec =
     CommandSpec { id: "schedule.list", class: Some(AgentClass::Safe), summary: "List the scheduled entries by their time", run: list };
 
-/// `schedule.cancel`: takes one entry off the schedule; what it named stays as it is.
+/// `schedule.cancel`: takes one entry off the schedule; what it named stays as it is, but a send is taken back as
+/// `mail.unsend` does, so its draft does not wait for a time that never comes.
 pub(crate) const CANCEL: CommandSpec =
     CommandSpec { id: "schedule.cancel", class: Some(AgentClass::Owner), summary: "Cancel a scheduled entry", run: cancel };
 
@@ -79,8 +80,13 @@ struct CancelParams {
 fn cancel(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: CancelParams = decode(CANCEL.id, params)?;
     let id = ScheduleId::new(params.id);
-    if !context.store().schedule()?.iter().any(|entry| entry.id == id) {
-        return Err(EngineError::NotFound { what: "schedule entry", id: params.id });
+    let entry = context.store().schedule()?.into_iter().find(|entry| entry.id == id).ok_or(EngineError::NotFound { what: "schedule entry", id: params.id })?;
+    if let Due::Send(draft) = entry.what
+        && let Some(draft) = context.store().draft(draft)?
+    {
+        let mut outcome = super::send::taken_back(context, &draft)?;
+        *outcome.value_mut() = json!({ "cancelled": params.id });
+        return Ok(outcome);
     }
     Ok(Outcome::new(json!({ "cancelled": params.id })).with_change(Change::RemoveScheduled(id)))
 }

@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 ## Layers
 <table L0–L6 + apps, the rule: a crate depends only on lower layers; enforced by `cargo xtask layers`>
@@ -288,20 +288,32 @@ that is not known, becomes a mark (`[[prompt]]`) the draft remembers in `Draft::
 subject or text, `blocks` holds `blank` and Send is refused. A mark the draft or a filled-in name holds already
 (from a quote, or a sender's name) gets a number, so the sender's words do not keep Send blocked.
 
-Sending (`cmd::send`, `engine::send`): `mail.send` (`owner`) makes a draft that nothing blocks into a message with its
-own `Message-ID` and a `Date` in the computer's offset, puts it in the outbox (`Outgoing`, state `Sending`, the
-message kept for the Sent copy) and queues a `Send` job with the envelope: the account's address and the To, Cc and
-Bcc addresses, each once. Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
+Sending (`cmd::send`, `engine::send`): `mail.send` (`owner`) puts a draft that nothing blocks in the outbox
+(`Outgoing`, state `Waiting`) with a schedule entry (`Due::Send`) at the end of the owner's hold (`Hold`, 5 to 60
+seconds, 5 by default; `send.set`, `owner`, and `send.settings`, `safe`; the front end keeps it and hands it back
+with `Session::set_send_hold`); `mail.send_later` (`owner`) does the same for a time or a preset of
+`schedule.presets`. Until then `mail.unsend` (`owner`), or `schedule.cancel` on the entry, takes the send back: the
+outbox item and the entry go, the draft was never touched and is answered as it is. A waiting draft is neither
+changed, discarded nor copied to the Drafts folder. When `Session::tick` fires the entry, the draft is made into a
+message with its own `Message-ID` and a `Date` of that moment in the computer's offset, its outbox item becomes
+`Sending` (the message kept for the Sent copy) and a `Send` job is queued with the envelope: the account's address
+and the To, Cc and Bcc addresses, each once; a draft that can no longer go then (no submission server, a forward's
+body gone) is `Refused` with why. Nothing is sent while InboxCraft is not running: a send waiting at a stop stays in
+the store, its time missed fires at the next start's first tick (late, `Fired::missed`), and the owner is told
+(`Notice::SentLate`). The window ticks from its pump (`Session::tick_if_due`, which keeps the next due time until
+something changes) and asks egui for a frame at that time (`Session::due_at`, `InboxApp::wake_when_due`), from its
+drawing and from the logic eframe runs for a hidden window, since an idle window draws no frame of its own. Bcc is in the envelope alone, never in a header. The job is not kept in the job queue: a
 send cut off may have gone, so nothing sends it again on its own. The worker sends it at once on a submission
 connection of its own (`net::SmtpConnection`, implicit TLS on 465 or STARTTLS on 587, AUTH PLAIN or LOGIN only after
 TLS, `EHLO [127.0.0.1]`), also while the IMAP connection is down, and answers `Sent` or `SendFailed` with the cause
 and the server's reply. A connection that ends after the message went and before the server answered it is
 `SendUnanswered`: the message may have gone. On `Sent` the draft and its outbox item go, its Drafts copy is removed for good and the
 message is appended to the Sent folder (`\Seen`), both kept jobs; on `SendFailed` the draft stays and its outbox
-item holds the reply (`Refused`), and `mail.send` can send it again. `outbox.list` (`safe`) shows each outbox item with
+item holds the reply (`Refused`), and `mail.send` can send it again, held again. `outbox.list` (`safe`) shows each outbox item with
 where it stands (`waiting`, `sending`, `refused`), a refusal with the server's reply, its enhanced status code
 (RFC 3463) and whether it is permanent (a `5.x.x` code, or a `5xx` reply without one); `outbox.retry` (`owner`)
-sends a refused draft again as `mail.send` does, and refuses an item that is not refused.
+sends a refused draft again as `mail.send` does, and refuses an item that is not refused; a waiting item shows the
+time it goes (`at`).
 
 Bounces (`engine::arrive::bounce`): a message whose header is a delivery report (`Signs::report`: `multipart/report`
 with `report-type=delivery-status` or `global-delivery-status`) from a sender of reports (local part `MAILER-DAEMON`
