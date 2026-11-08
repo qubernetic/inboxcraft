@@ -120,7 +120,7 @@ They mark an account's heading in the folder pane and, in the unified list, a st
 | m | 12 | inside a row; the folder pane's margin |
 | l | 16 | around a pane; the list's left and right margin |
 | xl | 24 | between groups |
-| row height | from the font | a message row: `s` above and below, the sender's line, `xs`, the subject's line; each line as high as its tallest font's own line height at the current text scale |
+| row height | from the font | a message row: `s` above and below, the sender's line, half of `xs`, the subject's line; each line as high as its tallest font's own line height at the current text scale |
 | folder pane | 240 | the folder pane's default width (it can be resized); the search field's width |
 | corner | 6 | the corner radius of fields, selections and buttons |
 | card | 14 | the corner radius of glass layers and floats |
@@ -246,10 +246,10 @@ through the motion tokens below and shows a key only from the keymap; each has a
 | Avatar (`avatar`) | A person's initials (first and last word of the name, else the address) on a round field of an avatar colour, white or the deep ink by contrast. |
 | Badge (`badge`) | An unread count in a pill of the badge colour, or a group's outline (Regular) icon in the muted colour, without a background. |
 | Hover action group (`hover`) | Icon buttons on a float at the right end of a row, fading in while the row is hovered or selected by keyboard, drawn over the row's text. |
-| Toast (`toast`) | A message on a float that rises from the bottom edge, with Undo and its key chip; the Undo key works while it shows. |
+| Toast (`toast`) | A message on a float that rises from the bottom edge, centred on what is right of the rail, with Undo as an accent word and its key chip; the Undo key works while it shows. |
 | Popup (`popup`) | A float with menu rows (icon, name, key chip; `entry` without the icon, its name in line with the others) and choice rows (`choice`: one of a few, the chosen one marked with the Done icon in the accent, a screen reader hears which), opening over the card motion. |
 | Switch (`switch`) | A round track one body line high with a knob that slides right when it is on, the track then on the selection; a screen reader hears its name and whether it is on. The settings sheet and the time picker use it. |
-| Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel, Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
+| Time picker (`time_picker`) | One picker for snooze, send later and reminders, on a float: its title, the presets still ahead (name, and the time short on the right: `17:30` today, `Sat 08:00` this week, `Fri 13 Nov` after), a preset behind hidden; a line, "Or type a time" and a field. Typed text counts as soon as it reads as a time (`typed_time`: `thu 9`, `12 nov 17:00`, `tomorrow`, `5pm`, `in 3 days`, `2h`, a day without a time at 08:00, always ahead of now), without Enter: the time it reads shows under the field with the filled Done icon in the accent, and is the time the confirm button uses, read at the same now in the same frame; text that reads as no time says so and the confirm button cannot be pressed. The alert switch (when the caller asks about one) keeps its last value from one opening to the next. Cancel (an accent word), Escape, or the primary confirm button ("Snooze", "Schedule", "Remind me"); Enter confirms a typed time too. |
 
 **Avatar colours.** Ten vivid colours (`theme::AVATARS`, the same in both modes and every preset, no teal or coral):
 royal blue, sky blue, violet, fuchsia, raspberry, crimson, orange, amber, green and lime. The colour is picked from
@@ -303,13 +303,16 @@ window asks for the next frame; once it has landed, nothing does.
   label and address and its folders, the ones with a role first and the rest by path, nested folders indented. Every
   view and folder with unread mail carries a badge with the count.
 - **Header** (top of the list): the view's or folder's name, whose mail it is (the narrowed account's address, or
-  "All accounts") and how many messages; the search field on the right, with a Clear button while it holds text.
-  Ctrl+F (Cmd+F on macOS) focuses it and Escape empties it.
+  "All accounts") and how many: the unread mail while the unified inbox shows its groups, else the messages; the
+  search field on the right, with a Clear button while it holds text. Ctrl+F (Cmd+F on macOS) focuses it and Escape
+  empties it.
 - **List**: newest first, the rows on a card (the surface colour, corner `card`, a line edge) as tall as its rows
-  or the room, scrolling inside it. One row per message: the account stripe when more than one account is shown,
-  the unread dot, the sender's avatar two lines high, the sender and the date (time today, "Yesterday", the weekday
-  in the last week, then the day and month, with the year for earlier years), the subject and the preview in muted
-  text, and the Flag icon (Fill, in the flag colour, one subject line high) for flagged mail. Unread rows show the
+  or the room, scrolling inside it; the scroll bar's room is kept only while the list overflows. One row per message:
+  the account stripe when more than one account is shown (three points wide, standing in from the row's edge, the row's
+  content further in beside it), the unread dot, the sender's avatar a little under two lines high, the sender and the
+  date (time today, "Yesterday", the weekday in the last week, then the day and month, with the year for earlier
+  years), the subject and, after a middle dot, the preview in muted text, and the Flag icon (Fill, in the flag colour,
+  on the sender's line, left of the date) for flagged mail. Unread rows show the
   dot and a heavier sender and subject; the selected row the selection, a hovered one the hover fill, both
   with the `corner` radius inside the card.
 - **Hover actions**: Done, "Mark as read" or "Mark as unread", and Delete on a float at the row's right end
@@ -361,13 +364,15 @@ window asks for the next frame; once it has landed, nothing does.
   `"view"` for the inbox view; `"put_away": true` snoozes, pins, parks and marks done some of the sample's mail,
   `"later"` opens a pile, `"show_done": true` turns "Show done" on and `"picker"` opens the time picker over the
   selected message with that text typed.
-- **Pills under the header** (the design file's Triage page): in a folder or a view, "Show done", which lists the done
+- **Pills under the header** (the design file's Triage page): over the unified inbox with groups to show, while the
+  list is wide (no message open beside it), the view switch: Grouped (the one list under headings), Simple list and
+  Cards, the same choice as the Triage settings page. In a folder or a view, "Show done", which lists the done
   mail in its old place (`mail.list` with `done`), dimmed to 55 %, with "Not done" in place of Done on its hover
   actions and on D; with it on, Done leaves the row in place, dimmed, instead of sliding it out. "Parked (n)" follows
   while mail of the place waits on the park pile and opens it. In **Later** a pill for each pile with its count:
   Snoozed (the snoozed folders, the one coming back first on top, each row dated by when it comes back), Pins
   (`pin.list`) and Parked (`park.list`); an empty pile says what it is for. Pills are left out while searching.
-- **Marks on a row**: a pinned row shows the Pin (Fill, in the accent) left of the flag on the subject's line; a row
+- **Marks on a row**: a pinned row shows the Pin (Fill, in the accent) left of the flag on the sender's line; a row
   back from a snooze says "Returned" in the accent after the sender while it is unread. A screen reader hears
   "pinned", "done" and "returned".
 - **Done all** on a group's card marks every message of the group read and done, one toast ("Marked n as done") whose
