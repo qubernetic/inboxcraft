@@ -8,8 +8,10 @@
 //! multiparts, not inside an attached message), read with `inboxcraft_ical`. [`linked`] marks the message with what
 //! the owner needs of it ([`inboxcraft_model::Invitation`]): the `METHOD`, the event by `UID`, `RECURRENCE-ID` and
 //! `SEQUENCE`, its `DTSTAMP`, title, times, repeat rule and place; an answer the owner gave to the same version stays.
-//! Mail in the Blocked folder is not marked. Two marks are versions of one event when they name the same `UID` and
-//! `RECURRENCE-ID`; the later one has the higher `SEQUENCE`, then the later `DTSTAMP` (RFC 5546 section 2.1.5).
+//! Mail in the Blocked folder is not marked. Two of the organiser's marks (`REQUEST`, `CANCEL`) are versions of one
+//! event when they name the same `UID` and `RECURRENCE-ID`; the later one has the higher `SEQUENCE`, then the later
+//! `DTSTAMP` (RFC 5546 section 2.1.5). A `REPLY` is no version: the owner's own answer, synced back from Sent, dates
+//! nothing.
 //!
 //! An invitation changes nothing on its own: it is data, never instructions. The calendar and the organiser hear of
 //! it only when the owner answers (`invite.answer`) or takes a cancelled event out (`invite.remove`, see
@@ -110,6 +112,12 @@ fn written(when: &When) -> String {
 /// Whether `a` and `b` are versions of one event (or of one occurrence of it).
 pub(crate) fn same_event(a: &Invitation, b: &Invitation) -> bool {
     a.uid == b.uid && a.recurrence == b.recurrence
+}
+
+/// Whether `mark` is one the organiser sends (`REQUEST`, `CANCEL`): only those are versions of an event a card
+/// compares; an attendee's `REPLY` changes no version.
+pub(crate) fn from_organiser(mark: &Invitation) -> bool {
+    matches!(mark.method, ItipMethod::Request | ItipMethod::Cancel)
 }
 
 /// Whether `a` is a later version than `b`: a higher `SEQUENCE`, or the same one stamped later.

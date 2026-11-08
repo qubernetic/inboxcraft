@@ -578,7 +578,8 @@ struct Card {
     mark: Invitation,
     /// The calendar object, while the body is kept.
     object: Option<inboxcraft_ical::Calendar>,
-    /// The other versions of the event in the account, each with its message.
+    /// The other versions of the event in the account, each with its message: the organiser's requests and
+    /// cancellations only, so an answer (the owner's own, synced back from Sent, or a guest's) dates nothing.
     versions: Vec<(Message, Invitation)>,
     /// The event in the owner's calendars.
     held: Option<CalendarEvent>,
@@ -661,7 +662,7 @@ fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineErro
     let account = account(context, message.account().get())?;
     let mut versions = Vec::new();
     for (id, state) in store.message_states()? {
-        let Some(other) = state.invitation.filter(|other| id != message.id() && invite::same_event(other, &mark)) else { continue };
+        let Some(other) = state.invitation.filter(|other| id != message.id() && invite::same_event(other, &mark) && invite::from_organiser(other)) else { continue };
         let other = *other;
         if let Some(held) = store.message(id)?.map(|entry| entry.message().clone()).filter(|held| held.account() == message.account()) {
             versions.push((held, other));

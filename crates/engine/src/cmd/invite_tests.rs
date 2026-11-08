@@ -418,3 +418,29 @@ fn an_event_already_in_the_calendar_is_changed_in_place() {
     let [CalendarJob::Put { event, etag, url, .. }] = sent.writes.as_slice() else { panic!("{:?}", sent.writes) };
     assert_eq!((event.get(), etag.as_deref(), url.as_str()), (9, Some("\"e1\""), format!("{WORK}from-server.ics").as_str()));
 }
+
+/// The owner's own answer, synced back from Sent, is no later version of the invitation: the card stays current and
+/// the answer can still change. A guest's reply is no version either.
+#[test]
+fn the_sent_answer_synced_back_leaves_the_invitation_current() {
+    let mut session = session();
+    let id = arrive(&mut session, 40, "i1@example.org", &object("REQUEST", "lunch@example.org", 0, REQUEST_AT, ""));
+    answer(&mut session, id, "accepted").unwrap();
+    let sent = out(&mut session);
+    session.apply(&event(EventKind::Sent { draft: sent.draft })).unwrap();
+    written(&mut session, &sent);
+    let uid = inboxcraft_model::Uid::new(7).unwrap();
+    let summary = summary(7, "Accepted: Lunch with Odile", "a1@example.org");
+    session.apply(&event(EventKind::MessagesAdded { folder: FolderId::new(2), uid_validity: validity(), messages: vec![summary] })).unwrap();
+    session.apply(&event(EventKind::BodyFetched { folder: FolderId::new(2), uid_validity: validity(), uid, raw: sent.raw.into_bytes() })).unwrap();
+    let copy = session.store().messages(FolderId::new(2)).unwrap().into_iter().find(|entry| entry.message().summary().uid() == uid).unwrap();
+    assert_eq!(show(&mut session, copy.message().id().get())["method"], json!("reply"), "the copy is marked");
+    // A guest's reply to the same event, stamped later still.
+    let guest = object("REPLY", "lunch@example.org", 0, REQUEST_AT, "").replace("DTSTAMP:20261102T080000Z", "DTSTAMP:20261106T080000Z");
+    arrive(&mut session, 41, "r1@example.org", &guest);
+    let card = show(&mut session, id);
+    assert_eq!((&card["outdated"], &card["latest"], &card["can_answer"]), (&json!(false), &Value::Null, &json!(true)), "{card}");
+    assert_eq!((&card["earlier"], &card["changes"]), (&Value::Null, &json!([])));
+    answer(&mut session, id, "tentative").unwrap();
+    assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));
+}
