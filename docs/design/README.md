@@ -49,8 +49,9 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-Nothing at the moment: the text gradient, the dark accent, the outline group icons and the inset rows are in
-`docs/design.md` and `theme.rs` (#104).
+- The "Settings · notifications and triage" screen also draws Screener, Undo send and "When a message leaves the
+  list" on one page. The app keeps Screener on the Triage page and Undo send on the Sending page, and has no choice
+  of what shows after a message leaves the list yet (#139).
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui

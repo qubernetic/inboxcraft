@@ -425,14 +425,18 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   running (`desktop::Desktop`): without a window the main thread waits for requests and pumps the workers every
   half second; a request opens a new window on the same `InboxApp` on eframe's kept event loop. `--background`
   starts that way. The sample, or a run nothing could bring a window back to (no socket, no tray), ends with its
-  window. `ui-egui` knows none of this: the app's own `eframe::App` wrapper calls `Desktop::tick` from
-  `App::logic`.
+  window, and so does the owner's when they turned "Run in the background" off: `desk::OwnerDesk` shares
+  `Desktop`'s flag and keeps the choice in `background.json` beside `appearance.json`, read at the next start.
+  `ui-egui` knows only the `ui_egui::desk::Desk` seam the Notifications page draws (`InboxApp::set_desk`): the
+  app's own `eframe::App` wrapper calls `Desktop::tick` from `App::logic`.
 - Tray (`tray`, Linux): a StatusNotifierItem over the session bus (`ksni`) with the unread count of every
   account's inbox in its tooltip, a click to show the window and a menu with Open and Quit; each is a request to
   the window, as from a later start. In the Flatpak it goes by its connection's name.
 - Autostart (`autostart`): an XDG autostart entry outside the Flatpak; inside it the Background portal
   (`RequestBackground`, over `zbus`), which each start asks again so a desktop that ends background apps lets
-  InboxCraft run, with the same entry in the app's own config folder as the record of the choice.
+  InboxCraft run, with the same entry in the app's own config folder as the record of the choice. The
+  Notifications page's "Start with the computer" changes it through `OwnerDesk`: at once outside the Flatpak; inside
+  it on a thread of its own, since the portal may ask the person, with the window woken by the answer.
 - Notifications (`notify`, Linux): `Desktop` takes the session's notices after each pump and shows them through the
   notification portal in the Flatpak or `org.freedesktop.Notifications` elsewhere (`notify::bus`, over `zbus`), with
   the body escaped where the server reads markup and the buttons (Done, Mark read) only where it shows actions. A
