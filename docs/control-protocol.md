@@ -1,6 +1,6 @@
 # The control channel
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
 
 The running app takes commands from the CLI and the MCP server through a local socket: `inboxcraft-cli mail.list`
 without `--store` runs in the app ([cli.md](cli.md)), and so do the tools of `inboxcraft-cli mcp` ([mcp.md](mcp.md)).
@@ -114,3 +114,6 @@ Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` ru
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | patch | `account.check` signs in to the servers (#119) |
+| 2026-11-08 | patch | The reply, forward and template commands over the channel (#120) |
+| 2026-11-08 | major | First version: the socket, the token and its revocation, the lines and their codes (#142) |

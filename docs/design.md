@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-06 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 InboxCraft's own look: the colours, distances and font tokens of the front end, and the rules the screens follow.
 Everything here is original. Nothing is copied, traced or recreated from another mail program (see `AGENTS.md`,
@@ -746,3 +746,15 @@ and `--out <dir>` name other places. The pairs go into the PR, not into the repo
 | 2026-11-06 | minor | A display font token (26 Bold) for the reader's subject (#104) |
 | 2026-11-06 | minor | Lucide's Fill draws no disc (#104) |
 | 2026-11-06 | minor | Accounts are added and listed on the settings sheet; the empty window is one card (#104) |
+| 2026-11-08 | minor | The switch and the time picker components; the time picker in the gallery picture (#129) |
+| 2026-11-08 | minor | The command palette, the Shortcuts page and the calendar's empty state; keys kept between runs (#130) |
+| 2026-11-08 | minor | The acts work on a real account; Move to a folder, flag and read in More; opening marks read; undo through the history (#131) |
+| 2026-11-08 | minor | The composer, its chips, suggestions and floating panel, and the Sending page (#132) |
+| 2026-11-08 | minor | Reply, reply all and forward open the composer; Templates and the blank line (#133) |
+| 2026-11-08 | minor | The screener card, New senders, the Let in card, the inbox views, the group menu and the Triage page (#134) |
+| 2026-11-08 | minor | Later on the rail, the pills under the header, the marks on a row, Done all, Snooze, Pin and the time picker in the reader, the pin switch, Done all past the undo history, Not done in the reader (#135) |
+| 2026-11-08 | minor | Undo send, send later, the outbox, the bounce mark and banner, Undo send on the Sending page, the outbox pictures (#136) |
+| 2026-11-08 | minor | The Notifications page; Notifications and Triage built on the sheet (#139) |
+| 2026-11-08 | minor | The calendar's views, side panel and details; the calendar pictures (#147) |
+| 2026-11-08 | minor | The event editor, Edit and Delete in the details, New event in the toolbar, the toast with Undo (#148) |
+| 2026-11-08 | minor | The invitation card in the reader and its pictures (#149) |

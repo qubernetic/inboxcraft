@@ -1,6 +1,6 @@
 # Contributing to InboxCraft
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-03 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
 Thank you for wanting to help. InboxCraft handles people's private mail, so how work comes in matters as much as the
 work itself.
@@ -58,3 +58,4 @@ anything that changes what leaves the person's computer.
 |---|---|---|
 | <date> | major | First version |
 | 2026-11-03 | minor | Development setup with the justfile and the dev container (#1) |
+| 2026-11-08 | minor | Change fragments instead of a direct CHANGELOG edit (#111) |

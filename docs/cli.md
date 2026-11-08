@@ -1,6 +1,6 @@
 # The command-line client
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-07 · **Change:** major
+> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** major
 
 `inboxcraft-cli` runs InboxCraft's commands by id: in the running app, through its control channel
 ([control-protocol.md](control-protocol.md)), or headless on a local store with `--store`. It is the way an agent or
@@ -97,3 +97,6 @@ The codes are stable snake_case; new ones may be added.
 ## Revision history
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-08 | major | First version: commands by id on a local store, output, errors, classes (#140) |
+| 2026-11-08 | minor | `mcp` runs the MCP server on the store over stdio, only while the app is closed or on a copy (#141) |
+| 2026-11-08 | minor | Without `--store` the CLI runs in the running app; its new error codes (#142) |

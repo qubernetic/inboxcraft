@@ -1,6 +1,6 @@
 # Development setup
 
-> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-07 · **Change:** minor
+> **Last reviewed:** 2026-11-04 · **Last updated:** 2026-11-08 · **Change:** minor
 
 InboxCraft is developed in two layers. The Rust toolchain and every check run in a container; the host only runs the
 binary the container built. The `justfile` is the one command surface over both, and a thin layer over
@@ -554,3 +554,25 @@ After a `Dockerfile` change, run `just rebuild`.
 | 2026-11-06 | minor | `cargo xtask cache-prune` (#79) |
 | 2026-11-06 | minor | CI: the cache prune is `cargo xtask cache-prune`, an allow list; prune and save only on a push that creates no branch; the key follows the runner image and `.cargo/config.toml` (#79) |
 | 2026-11-07 | minor | The coverage gate: what Codecov checks, its ignore list kept equal to the gate's excludes (#109) |
+| 2026-11-08 | minor | Change fragments and the `changes` gate (#111) |
+| 2026-11-08 | minor | The fuzz target `smtp_client` (#117) |
+| 2026-11-08 | minor | The fuzz target `testkit_smtp` (#118) |
+| 2026-11-08 | minor | The `ui_typed_time` fuzz target, and `ui_reader` in the list (#129) |
+| 2026-11-08 | minor | The `ui_keymap` fuzz target (#130) |
+| 2026-11-08 | minor | The acts on the sample work on a real account too (#131) |
+| 2026-11-08 | minor | The composer on the sample mailbox (#132) |
+| 2026-11-08 | patch | Reply, forward and templates on the sample mailbox (#133) |
+| 2026-11-08 | minor | The screener and the grouped inbox on the sample mailbox (#134) |
+| 2026-11-08 | minor | Done, park, pin, snooze and reminders on the sample mailbox (#135) |
+| 2026-11-08 | minor | The sample cannot send, so the outbox and Schedule show only in pictures; Undo send on the Sending page (#136) |
+| 2026-11-08 | minor | The tray's Flatpak permission, the desktop file's Quit action, the private bus of the D-Bus tests (#137) |
+| 2026-11-08 | minor | The Flatpak no longer talks to the notification server: notifications go through the portal (#138) |
+| 2026-11-08 | minor | The coverage run builds incrementally, and why (#140) |
+| 2026-11-08 | minor | The `mcp_lines` fuzz target (#141) |
+| 2026-11-08 | minor | The `control_lines` fuzz target (#142) |
+| 2026-11-08 | minor | The fuzz targets `ical_calendar` and `ical_rule` (#143) |
+| 2026-11-08 | minor | `TESTKIT_NEVER` takes `dav`; the fuzz targets `dav_xml`, `dav_client` and `testkit_dav` (#144) |
+| 2026-11-08 | minor | The calendar on the sample mailbox (#147) |
+| 2026-11-08 | minor | Making, changing and deleting events on the sample (#148) |
+| 2026-11-08 | minor | The sample's invitations and the fuzz target `engine_invite` (#149) |
+| 2026-11-08 | minor | The fuzz target `engine_alerts` (#150) |

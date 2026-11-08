@@ -500,3 +500,26 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-05 | minor | The window removes the session's passwords when it closes (#34) |
 | 2026-11-06 | minor | The appearance commands and where their result is kept (#86) |
 | 2026-11-06 | minor | `sample.mail.set` and the sample session (#89) |
+| 2026-11-08 | minor | The local records, the desktop store on disk and kept jobs (#113) |
+| 2026-11-08 | minor | The write jobs, the acts on mail with undo, and the arriving-mail pipeline (#114) |
+| 2026-11-08 | minor | The IMAP write path in `net` (#115) |
+| 2026-11-08 | minor | Drafts, the compose commands and the Drafts folder copy (#116) |
+| 2026-11-08 | minor | Sending: `mail.send`, the `Send` job, the submission connection and the answers (#119) |
+| 2026-11-08 | minor | Replies, forwards and templates (#120) |
+| 2026-11-08 | minor | The outbox commands and the bounce stage before the screener (#121) |
+| 2026-11-08 | minor | The scheduler, its presets and the `Offsets` hook (#122) |
+| 2026-11-08 | minor | Undo send, send later, missed sends and the window's tick (#123) |
+| 2026-11-08 | minor | The screener, the known-sender index and the `screener.*` commands (#124) |
+| 2026-11-08 | minor | The grouped inbox, its classifier and the `group.*` commands (#125) |
+| 2026-11-08 | minor | Done, park and pin, and their commands (#126) |
+| 2026-11-08 | minor | Snooze: the copy with our own header field, the stage, the return; the `Abilities` event (#127) |
+| 2026-11-08 | minor | Follow-up reminders: the commands, the stage that cancels, the notice (#128) |
+| 2026-11-08 | minor | The window no longer uses `sample.mail.set` (#131) |
+| 2026-11-08 | minor | Single instance, background mode, the tray and autostart (#137) |
+| 2026-11-08 | minor | Notifications: the notify stage, the decision table and the desktop delivery (#138) |
+| 2026-11-08 | minor | The desk seam: running in the background and starting with the computer from the window (#139) |
+| 2026-11-08 | minor | CalDAV in `dav`: discovery, sync, writes with entity tags, Basic auth over `https` only (#144) |
+| 2026-11-08 | minor | The calendar jobs in `net`: discover, sync, put and delete on an HTTPS connection of their own (#145) |
+| 2026-11-08 | minor | The calendars in the engine: reports applied, the event commands, the held delete, one write per event at a time, scheduling left to the client, the old server's answers dropped (#146) |
+| 2026-11-08 | minor | Invitations: the mark, `invite.show`, `invite.answer` and `invite.remove` (#149) |
+| 2026-11-08 | minor | Event alerts: the store's alerts, the sweep, the notice and its click (#150) |
