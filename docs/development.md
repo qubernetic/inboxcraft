@@ -111,6 +111,10 @@ try:
   move through them; a calendar's box hides its events. New event, and Edit and Delete under a picked event's
   details, make, change and delete events with a toast whose Undo takes it back; editing the allotment work party,
   which has a guest, asks whether to tell them.
+- invitations: the `ui_shot` line `"invitations": true` (and the card's tests) add Odile's invitation of Mira to lunch
+  and the update that moves it (`sample::invitations`) to the inbox, where they are in the Invitations group. The
+  update's card says what changed and what was answered before; Going is refused there, as the sample refuses every
+  send, and works on an account with a submission server.
 
 The same acts work on a real account, through the same engine commands (`mail.seen`, `mail.flag`, `mail.archive`,
 `mail.delete`, `mail.move`, `mail.open`, `screener.accept`, `screener.block`, `group.set`, `history.undo`); there the
@@ -483,7 +487,8 @@ server's input, `control_lines` (#142), the control channel's request and answer
 `ical_rule` (#143): a calendar object read, written, read again and expanded over a day, and a recurrence rule read,
 written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the DAV XML and multistatus readers, the
 CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
-and XML readers and session.
+and XML readers and session, and `engine_invite` (#149): any bytes kept as a message's body, and as an invitation's
+calendar part, read into its invitation mark and card, answered and removed.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.

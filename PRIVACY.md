@@ -30,7 +30,8 @@ and `~/Library/Application Support` on macOS. Only your own user account can rea
 - each message's own state: done, parked, pinned, snoozed or waiting for a reply, and for a message you sent that
   came back, which delivery report said so and why (the To and Cc addresses it failed for and the remote server's
   reply). That mark stays with the Sent copy after the report is deleted and cannot be cleared on its own; it goes
-  when the Sent message or its account is removed from InboxCraft;
+  when the Sent message or its account is removed from InboxCraft. For a message that carries an invitation, what
+  its calendar part says of the event (its id, version, title, times, repeat and place) and the answer you sent;
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
 A draft also has a copy on your mail server, in the account's own Drafts folder, once it has been still for ten
@@ -168,6 +169,13 @@ a banner saying how many are blocked, with "Load once" (this message, this time)
 
 Saving an attachment writes it into your Downloads folder, under a new name if a file of that name is there; it
 never overwrites a file.
+
+## Answering an invitation
+An invitation in a message changes nothing by itself. Only when you press Going, Maybe or No does InboxCraft send your
+answer, at once, from that account to the organiser the invitation names: a short message whose calendar part says the
+event's id, version, start and title, the organiser, and you with your answer. The other guests are not named in it.
+Going and Maybe put the event into the account's first calendar on your CalDAV server, No takes it out; Remove from
+calendar on a cancellation takes it out too.
 
 ## Scripts and agents
 The control channel, through which the command-line client and the MCP server reach the running app, is a socket in
