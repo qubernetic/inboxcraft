@@ -413,3 +413,49 @@ fn the_checks_tell_what_the_builder_takes() {
         assert!(MessageBuilder::new().attach(Attachment::new("a", media, Vec::new())).build().is_err(), "{media}");
     }
 }
+
+/// An iMIP answer (RFC 6047): the text and the calendar object as `multipart/alternative`, the object's part
+/// `text/calendar` with its method.
+#[test]
+fn a_calendar_part_goes_beside_the_text_with_its_method() {
+    let calendar = "BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:lunch@example.org\r\nSUMMARY:Ebéd\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let bytes = MessageBuilder::new().from(anna()).text("Going.\n").calendar("REPLY", calendar).build().unwrap();
+    assert_lines(&bytes);
+    let message = parse(&bytes).unwrap();
+    assert!(message.content_type().is("multipart", "alternative"), "{:?}", message.content_type());
+    let Body::Multipart(multipart) = message.body() else { panic!("not a multipart") };
+    let [text, part] = multipart.parts() else { panic!("{} parts", multipart.parts().len()) };
+    assert!(text.content_type().is("text", "plain"));
+    assert!(part.content_type().is("text", "calendar"));
+    assert_eq!((part.content_type().param("method"), part.content_type().param("charset")), (Some("REPLY"), Some("utf-8")));
+    assert_eq!(part.text().unwrap(), calendar);
+    // An HTML body joins the alternatives before it; an attachment puts them all in a `multipart/mixed`.
+    let bytes = MessageBuilder::new()
+        .text("Going.")
+        .html("<p>Going.</p>")
+        .calendar("REQUEST", calendar)
+        .attach(Attachment::new("a.txt", "text/plain", b"a".to_vec()))
+        .build()
+        .unwrap();
+    let message = parse(&bytes).unwrap();
+    assert!(message.content_type().is("multipart", "mixed"));
+    let Body::Multipart(mixed) = message.body() else { panic!("not a multipart") };
+    let Body::Multipart(alternative) = mixed.parts()[0].body() else { panic!("no alternative") };
+    let kinds: Vec<String> = alternative.parts().iter().map(|part| part.content_type().essence()).collect();
+    assert_eq!(kinds, ["text/plain", "text/html", "text/calendar"]);
+    // The calendar alone is the whole body.
+    let message =
+        parse(&MessageBuilder::new().calendar("CANCEL", calendar).build().unwrap()).unwrap().content_type().param("method").map(str::to_owned);
+    assert_eq!(message.as_deref(), Some("CANCEL"));
+}
+
+#[test]
+fn a_calendar_method_must_be_a_token() {
+    for method in ["", "RE PLY", "REPLY\r\nBcc: evil@example.org", "REPLY;x=1", "RÉPLY"] {
+        assert_eq!(
+            MessageBuilder::new().text("x").calendar(method, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n").build(),
+            Err(MimeError::BadHeader("calendar method")),
+            "{method:?}"
+        );
+    }
+}

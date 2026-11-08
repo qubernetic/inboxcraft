@@ -182,6 +182,9 @@ pub struct Shot {
     /// Whether the window has no account yet (and can add one) instead of the sample's.
     #[serde(default)]
     pub first: Option<bool>,
+    /// Whether the sample's inbox holds Odile's two invitations to lunch (`sample::invitations`).
+    #[serde(default)]
+    pub invitations: Option<bool>,
     /// The invented screener, groups and hover actions in the list, with keys for their actions.
     #[serde(default)]
     pub showcase: Option<bool>,
@@ -876,6 +879,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let session = if shot.first == Some(true) {
         let store = inboxcraft_store::Memory::new(inboxcraft_store::StoreConfig::default());
         inboxcraft_engine::Session::new(Box::new(store), Box::new(FakeClock::new(time))).map_err(UiError::Engine)?
+    } else if shot.invitations == Some(true) {
+        let mut store = sample::mailbox(time)?;
+        let batch = sample::invitations(time)?.into_iter().fold(inboxcraft_store::Batch::new(), inboxcraft_store::Batch::with);
+        inboxcraft_store::Storage::apply(&mut store, &batch).map_err(UiError::sample)?;
+        sample::session_over(store, Box::new(FakeClock::new(time)))?
     } else {
         sample::session(Box::new(FakeClock::new(time)))?
     };

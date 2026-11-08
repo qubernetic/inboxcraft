@@ -33,6 +33,7 @@ mod accounts;
 mod calendar;
 mod compose;
 mod frame;
+mod invite;
 mod list;
 mod onboard;
 mod paint;
@@ -610,6 +611,7 @@ impl InboxApp {
             if self.screen == Screen::Calendar {
                 self.calendar.refresh(&mut self.mailbox);
             }
+            self.reader.refresh_invites(&mut self.mailbox);
         }
         changed
     }
@@ -1411,6 +1413,7 @@ impl InboxApp {
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);
         }
+        self.reader.refresh_invites(&mut self.mailbox);
     }
 
     /// The act whose key was pressed in this frame, on the selected row.
@@ -1559,6 +1562,9 @@ impl InboxApp {
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => mailbox.start(id, act),
             reader::Asked::Presets => mailbox.load_presets(),
+            reader::Asked::Invite(id, invite::Ask::Answer(answer)) => reader.answer_invite(mailbox, id, answer),
+            reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
+            reader::Asked::Invite(id, invite::Ask::Remove) => reader.remove_invite(mailbox, id),
             reader::Asked::Answer(..) => {}
         }
     }
@@ -1576,6 +1582,9 @@ mod fit_tests;
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod frame_tests;
+#[cfg(test)]
+#[path = "invite_tests.rs"]
+mod invite_tests;
 #[cfg(test)]
 #[path = "later_tests.rs"]
 mod later_tests;

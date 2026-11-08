@@ -145,6 +145,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "engine_invite"
+path = "fuzz_targets/engine_invite.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "html_display"
 path = "fuzz_targets/html_display.rs"
 test = false

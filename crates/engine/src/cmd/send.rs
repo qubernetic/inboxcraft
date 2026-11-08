@@ -9,11 +9,12 @@
 //! Bcc recipients are in the envelope alone, never in a header. A forward takes the attachments of the message it
 //! forwards from its kept body; one whose body is gone is refused. What the worker answers lands in `crate::send`:
 //! once sent, the draft and its copy in the Drafts folder go and the message is appended to the Sent folder; a
-//! failure keeps the draft, its outbox item showing the server's reply.
+//! failure keeps the draft, its outbox item showing the server's reply. The answer to an invitation (`invite.answer`)
+//! goes out the same way, through [`sending`].
 
 use std::collections::BTreeSet;
 
-use inboxcraft_model::{Draft, DraftId, EmailAddress, JobKind, OutboxState, Outgoing};
+use inboxcraft_model::{AccountId, Draft, DraftId, EmailAddress, JobKind, OutboxState, Outgoing};
 use inboxcraft_store::Change;
 use inboxcraft_time::{MailDate, Zone};
 use serde::Deserialize;
@@ -43,9 +44,24 @@ struct SendParams {
 
 fn send(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: SendParams = decode_quietly(SEND.id, params)?;
-    let bad = |reason: &str| EngineError::bad_params(SEND.id, reason);
     let draft = context.store().draft(DraftId::new(params.id))?.ok_or(EngineError::NotFound { what: "draft", id: params.id })?;
-    if let Some(block) = draft::blocks(context.store(), &draft)?.first() {
+    let sending = sending(context, SEND.id, &draft)?;
+    Ok(Outcome::new(sending.answer).with_change(sending.outgoing).with_job(sending.account, sending.job))
+}
+
+/// What sends a draft: the answer, its outbox item and the job for its account's worker.
+pub(crate) struct Sending {
+    pub(crate) answer: Value,
+    pub(crate) outgoing: Change,
+    pub(crate) account: AccountId,
+    pub(crate) job: JobKind,
+}
+
+/// What sends `draft`, held or about to be, checked as `mail.send` checks it (`command` names it in a refusal): it can
+/// go, is not on its way already, and its account has a submission server.
+pub(crate) fn sending(context: &Context<'_>, command: &'static str, draft: &Draft) -> Result<Sending, EngineError> {
+    let bad = |reason: &str| EngineError::bad_params(command, reason);
+    if let Some(block) = draft::blocks(context.store(), draft)?.first() {
         return Err(bad(&format!("the draft cannot be sent: {block}")));
     }
     if draft::on_its_way(context.store(), draft.id)? {
@@ -61,15 +77,15 @@ fn send(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         return Err(bad("the account has no submission server"));
     }
     let now = context.now();
-    let message_id = message_id(&draft, account.address(), now);
+    let message_id = message_id(draft, account.address(), now);
     let date = MailDate::new(now, Zone::Fixed(context.offsets().offset_at(now)));
-    let attachments = reply::forwarded(context.store(), &draft)?.ok_or_else(|| bad("the message it forwards is no longer kept, so its attachments are not"))?;
-    let raw = draft::built(&account, &draft, date, Some(&message_id), &attachments).map_err(|_| bad("the draft cannot be made into a message"))?;
-    let recipients = envelope(&draft);
-    let answer = json!({ "id": params.id, "message_id": message_id, "recipients": recipients.len(), "state": "sending" });
+    let attachments = reply::forwarded(context.store(), draft)?.ok_or_else(|| bad("the message it forwards is no longer kept, so its attachments are not"))?;
+    let raw = draft::built(&account, draft, date, Some(&message_id), &attachments).map_err(|_| bad("the draft cannot be made into a message"))?;
+    let recipients = envelope(draft);
+    let answer = json!({ "id": draft.id.get(), "message_id": message_id, "recipients": recipients.len(), "state": "sending" });
     let outgoing = Outgoing { message: raw.clone(), ..Outgoing::new(draft.id, OutboxState::Sending) };
     let job = JobKind::Send { draft: draft.id, from: account.address().clone(), recipients, raw };
-    Ok(Outcome::new(answer).with_change(Change::PutOutgoing(outgoing)).with_job(account.id(), job))
+    Ok(Sending { answer, outgoing: Change::PutOutgoing(outgoing), account: account.id(), job })
 }
 
 /// The envelope's recipients: To, Cc and Bcc, each address once, in that order.

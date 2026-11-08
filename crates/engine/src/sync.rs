@@ -78,7 +78,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
         EventKind::MessagesChanged { folder, uid_validity, changes } => changed(store, &mut plan, *folder, *uid_validity, changes)?,
         EventKind::MessagesExpunged { folder, uid_validity, uids } => expunged(store, &mut plan, *folder, *uid_validity, uids)?,
         EventKind::UidValidityReset { folder, new, .. } => reset(store, &mut plan, account, *folder, *new)?,
-        EventKind::BodyFetched { folder, uid_validity, uid, raw } => fetched(store, &mut plan, *folder, *uid_validity, *uid, raw)?,
+        EventKind::BodyFetched { folder, uid_validity, uid, raw } => fetched(store, &mut plan, *folder, *uid_validity, *uid, raw, context.offsets())?,
         EventKind::FolderSynced { folder, state } => {
             let kept = current(&mut plan.state, *folder, state.uid_validity());
             if kept {
@@ -326,9 +326,18 @@ fn reset(store: &dyn Storage, plan: &mut Plan, account: AccountId, folder: Folde
     Ok(true)
 }
 
-/// A whole message: kept with its plain text for the search. A message we do not hold is dropped; for one we hold,
-/// the answer ends the fetch, and a body too large to keep is marked so it is not asked for again.
-fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity: UidValidity, uid: Uid, raw: &[u8]) -> Result<bool, EngineError> {
+/// A whole message: kept with its plain text for the search, and read for a delivery report and an invitation (whose
+/// times without a zone are on the wall clock `local`). A message we do not hold is dropped; for one we hold, the
+/// answer ends the fetch, and a body too large to keep is marked so it is not asked for again.
+fn fetched(
+    store: &dyn Storage,
+    plan: &mut Plan,
+    folder: FolderId,
+    uid_validity: UidValidity,
+    uid: Uid,
+    raw: &[u8],
+    local: &dyn inboxcraft_time::Offsets,
+) -> Result<bool, EngineError> {
     if !current(&mut plan.state, folder, uid_validity) {
         return Ok(false);
     }
@@ -338,6 +347,7 @@ fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity:
         Ok(body) => {
             plan.change(Change::PutBody(message.id(), body));
             arrive::bounce::linked(store, plan, &message, raw)?;
+            arrive::invite::linked(store, plan, &message, raw, local)?;
             // A calendar part, known only now, makes the message an invitation in the grouped inbox.
             let envelope = message.summary().envelope();
             let calendar = arrive::group::calendar(raw);

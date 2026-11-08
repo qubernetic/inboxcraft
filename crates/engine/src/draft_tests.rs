@@ -305,3 +305,28 @@ fn an_answer_naming_a_job_that_is_no_append_changes_no_draft() {
     assert_eq!(draft(&session, id).uploaded, None);
     assert!(session.take_jobs().is_empty());
 }
+
+/// An answer to an invitation carries its iTIP object as a `text/calendar` part with the object's own `METHOD`; an
+/// object that names none cannot be sent.
+#[test]
+fn a_draft_with_a_calendar_object_carries_it_with_its_method() {
+    let account = crate::test_support::account(1, "anna@example.org");
+    let reply = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Example//EN\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n";
+    let draft = Draft {
+        to: vec!["odile@example.org".to_owned()],
+        text: "Going.".to_owned(),
+        calendar: Some(reply.to_owned()),
+        ..Draft::new(DraftId::new(3), AccountId::new(1), at(NOW))
+    };
+    let raw = super::built(&account, &draft, None, None, &[]).unwrap();
+    let message = inboxcraft_mime::parse(&raw).unwrap();
+    assert!(message.content_type().is("multipart", "alternative"));
+    let inboxcraft_mime::Body::Multipart(parts) = message.body() else { panic!("not a multipart") };
+    let calendar = parts.parts().iter().find(|part| part.content_type().is("text", "calendar")).unwrap();
+    assert_eq!(calendar.content_type().param("method"), Some("REPLY"));
+    assert_eq!(calendar.text().unwrap(), reply);
+    let nameless = Draft { calendar: Some("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".to_owned()), ..draft.clone() };
+    assert!(super::built(&account, &nameless, None, None, &[]).is_err());
+    let broken = Draft { calendar: Some("not a calendar".to_owned()), ..draft };
+    assert!(super::built(&account, &broken, None, None, &[]).is_err());
+}

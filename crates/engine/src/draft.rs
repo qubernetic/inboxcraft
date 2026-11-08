@@ -222,7 +222,8 @@ fn message(account: &Account, draft: &Draft, attachments: &[Attachment]) -> Resu
 }
 
 /// `draft` of `account` as a message: From, `date`, To and Cc with the addresses that are ones, Subject,
-/// `message_id`, `In-Reply-To` and `References`, the text and `attachments`. Bcc is never in it.
+/// `message_id`, `In-Reply-To` and `References`, the text, its calendar object (with the object's `METHOD`; one that
+/// names none or cannot be read makes no message) and `attachments`. Bcc is never in it.
 pub(crate) fn built(
     account: &Account,
     draft: &Draft,
@@ -244,6 +245,10 @@ pub(crate) fn built(
     }
     for id in &draft.references {
         builder = builder.reference(id.as_str());
+    }
+    if let Some(calendar) = &draft.calendar {
+        let method = inboxcraft_ical::Calendar::parse(calendar.as_bytes()).ok().and_then(|object| object.method).unwrap_or_default();
+        builder = builder.calendar(&method, calendar);
     }
     for attachment in attachments {
         builder = builder.attach(attachment.clone());

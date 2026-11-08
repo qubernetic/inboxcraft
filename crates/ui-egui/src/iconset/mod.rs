@@ -107,11 +107,15 @@ pub enum IconId {
     Next,
     /// Globe: a time zone, the event's own beside the computer's.
     Globe,
+    /// Changed: arrows round in a circle, what a newer invitation changed.
+    Changed,
+    /// Older: a clock turning back, an invitation a later one replaced.
+    Older,
 }
 
 impl IconId {
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 45] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -155,6 +159,8 @@ impl IconId {
         Self::Previous,
         Self::Next,
         Self::Globe,
+        Self::Changed,
+        Self::Older,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -204,6 +210,8 @@ impl IconId {
             Self::Previous => 40,
             Self::Next => 41,
             Self::Globe => 42,
+            Self::Changed => 43,
+            Self::Older => 44,
         }
     }
 }

@@ -61,6 +61,8 @@ const fn point(id: IconId) -> char {
         IconId::Previous => '\u{e06e}',  // chevron-left
         IconId::Next => '\u{e06f}',      // chevron-right
         IconId::Globe => '\u{e0e8}',     // globe
+        IconId::Changed => '\u{e145}',   // refresh-cw
+        IconId::Older => '\u{e1f5}',     // history
     }
 }
 

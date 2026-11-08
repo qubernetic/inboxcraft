@@ -18,6 +18,9 @@
 //! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Under the subject, chips
 //! say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
 //!
+//! A message with an invitation shows its card over the text (see `super::invite`): the event, what changed, and
+//! Going, Maybe and No, or the answer given with a way to change it.
+//!
 //! A message the screener holds opens as a preview that decides nothing: over it a card asks "Let <sender> in?", with
 //! the groups to let them into, Accept, Accept and open, and Block.
 //!
@@ -87,6 +90,8 @@ pub(super) enum Asked {
     Answer(u64, Answer),
     /// A time picker opened: read the time presets still ahead.
     Presets,
+    /// Something asked on the invitation card of a message.
+    Invite(u64, super::invite::Ask),
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -810,6 +815,9 @@ fn message(
         header(ui, theme, mailbox, reader, opened, drawn);
         ui.add_space(theme.spacing.m);
         banner(ui, theme, reader, opened, drawn);
+        if let Some(invite) = &opened.invite {
+            super::invite::card(ui, theme, keymap, reader, invite, drawn);
+        }
         ui.add_space(theme.spacing.s);
         let say = |ui: &mut Ui, text: &str| {
             ui.label(RichText::new(text).font(theme.fonts.body.id()).color(p.muted));

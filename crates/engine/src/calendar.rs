@@ -282,7 +282,7 @@ fn url_name(url: &str) -> String {
 pub(crate) const UNDO_WINDOW: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// The product InboxCraft writes into a calendar object it makes.
-const PRODUCT: &str = "-//Qubernetic//InboxCraft//EN";
+pub(crate) const PRODUCT: &str = "-//Qubernetic//InboxCraft//EN";
 
 /// The longest event InboxCraft writes, in days.
 const MAX_DAYS: i64 = 400;
@@ -572,14 +572,14 @@ fn placed(times: Times, form: &Form, zone: &dyn Offsets, local: &dyn Offsets) ->
 
 /// `event` marked so that a CalDAV server that schedules on its own (RFC 6638) mails nobody of it: the organiser and
 /// every guest carry `SCHEDULE-AGENT=CLIENT`, the client's task, until InboxCraft sends the invitations itself.
-fn unscheduled(event: &mut Event) {
+pub(crate) fn unscheduled(event: &mut Event) {
     for person in event.attendees.iter_mut().chain(event.organizer.as_mut()) {
         person.set_param("SCHEDULE-AGENT", "CLIENT");
     }
 }
 
 /// An attendee's address without its `mailto:`.
-fn address_of(attendee: &Attendee) -> &str {
+pub(crate) fn address_of(attendee: &Attendee) -> &str {
     attendee
         .address
         .get(..7)
@@ -645,7 +645,7 @@ fn zone(calendar: &Calendar, event: &Event, start: Timestamp, end: Timestamp, lo
 }
 
 /// A guest: the address without its `mailto:`, the name and the answer.
-fn guest(attendee: &Attendee) -> Value {
+pub(crate) fn guest(attendee: &Attendee) -> Value {
     let address = address_of(attendee);
     let status = match &attendee.status {
         PartStat::NeedsAction => "needs_action",
