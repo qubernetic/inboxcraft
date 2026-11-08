@@ -1291,7 +1291,9 @@ impl InboxApp {
             self.close_settings();
         }
         let setting = self.settings.is_open();
-        let left_editor = escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some();
+        // Escape closes a list of choices open in the editor first; the list's own control takes the key.
+        let left_editor =
+            escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
         if left_editor {
             self.calendar.close_editor();
         }

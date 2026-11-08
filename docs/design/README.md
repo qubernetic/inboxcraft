@@ -56,9 +56,6 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 - **Size:** screens are 1440 × 900 points; the scenario storyboards are copies at 30 %.
 
 ## Not in the code yet
-- **Controls:** Day, Week, Month and Agenda, and Show as, are segmented controls; Repeat is a select with a popup.
-- **Events:** the tokens `event1`–`event6` are in the palette, but the calendar does not paint with them yet: an
-  event should be a tint of the account's colour with the edge at full strength.
 
 ## Limits
 - The token values come from a port of `Palette::derive`; they may differ from the app by one colour step where egui

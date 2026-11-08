@@ -17,7 +17,10 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::button::IconButton;
+use super::checkbox::checkbox;
 use super::hover::{self, Action};
+use super::segmented::segmented;
+use super::select::Select;
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, line_height, pill, popup, tooltip};
@@ -132,6 +135,16 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         pill::pill(ui, theme, tr!("All"), false);
         pill::pill(ui, theme, tr!("Unread"), true);
         pill::pill(ui, theme, tr!("Flagged"), false);
+    });
+    caption(ui, theme, tr!("Choices"));
+    ui.horizontal(|ui| {
+        let font = theme.fonts.button;
+        segmented(ui, theme, &[(0, tr!("Day"), font), (1, tr!("Week"), font), (2, tr!("Month"), font)], 1);
+        let names = [(0, tr!("Never")), (1, tr!("Daily"))];
+        Select { name: tr!("Repeat"), shown: tr!("Never"), options: &names, current: Some(0), icon: IconId::Changed, width: s.xl * 7.0 }
+            .show(ui, theme, &mut false);
+        checkbox(ui, theme, tr!("Personal"), true);
+        checkbox(ui, theme, tr!("Private"), false);
     });
     caption(ui, theme, tr!("Badges"));
     ui.horizontal(|ui| {

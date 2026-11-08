@@ -575,44 +575,55 @@ the icon sits among others at the same size.
 - **Layout**: the side panel on a card 260 points wide at the left, the view on a card beside it. Over the view a
   toolbar: the view's title in the title font ("2 – 8 November 2026", "November 2026", "Thursday 5 November 2026",
   "From today"), the Previous icon, Today and the Next icon (named after the step: "Previous week", "Next month",
-  "Earlier days"), and at the right a pill per view, Day, Week, Month and Agenda, the one shown selected, and the
-  primary New event button with the Add icon. The calendar opens on this week, on today; weeks start on Monday.
-- **Events**: an event is a block in a tint of its calendar's colour (the server's, or an account colour by the
-  calendar's place) with a 3-point bar of the colour at its left, its summary in the caption size, strong, and its
-  times under it where there is room; hovered or picked the tint deepens. Each is a button named after its summary,
-  its days and its times; a press picks it and the side panel shows its details, a second press or the details'
-  Close lets it go.
-- **Day and week**: a column per day under its short name and date ("Thu 5"; today on the selection; in the week a
-  press opens the day), a lane of blocks over whole days (all-day events and events over more than one day, in
-  lanes), then the hours, 44 points each with their labels in a 52-point gutter, scrolled to 07:00 (or the
-  earliest event) at first. Timed events sit by their minutes, side by side in equal columns where they overlap;
-  an event without length takes a quarter of an hour. A line in the accent marks the time now across today.
-- **Month**: six weeks from the Monday on or before the month's first day under the weekdays' short names; each
-  day's number is a button that opens the day (today on an accent disc, other months' days muted). Blocks over whole
-  days run across the cells of a week in lanes; under them the day's timed events, one line each with the start,
-  and "+N more" (a button to the day) when they do not all fit.
-- **Agenda**: the 30 days from the focus, each day with events under its name ("Today · Thursday 5 November"), an
-  event a row: its start, "All day" or "Until" the end, the summary and the place, and the event's own zone with its
-  start in a chip at the right when its clock differs from the computer's. "Nothing in these 30 days." when empty.
-- **Side panel**: the mini month (its name, "Month before" and "Month after", a button per day that puts the view
-  there; today on an accent disc, the days shown on the selection), "Calendars" with a box per calendar and its
-  colour dot (unticked hides its events), and the details of the picked event: the colour dot, the summary in the
+  "Earlier days"), and at the right the views Day, Week, Month and Agenda as a segmented control and the primary New
+  event button with the Add icon. The title is the title font at 110 %, on one line with the toolbar's controls, 36
+  points tall. The calendar opens on this week, on today; weeks start on Monday.
+- **Events**: an event is a block with a fill and an edge at its left in its calendar's colour at full strength. The
+  fill is the `event1`–`event6` token of the calendar's place in the list, a tint strong enough that text on it still
+  reads over every glass; a colour from the server is laid as strongly as that token lays its own. The edge is 4
+  points on a timed event in the hours and 3 elsewhere; the corners are 4 points in the hours and the agenda, 3 in
+  the lanes and the month. The summary is SemiBold caption text 10 points from the edge (8 in a lane, 5 in a month's line,
+  which is in the plain weight), and the times under it where there is room; a single line stands in the middle of
+  its block. Hovered or picked the tint deepens. Each is a button named after its summary, its days and its times; a
+  press picks it and the side panel shows its details, a second press or the details' Close lets it go.
+- **Day and week**: a column per day under its short name and date ("Thu 5"; today in SemiBold on the selection; in
+  the week a press opens the day), a lane of blocks over whole days (all-day events and events over more than one
+  day, in lanes), then the hours, 47 points each with their labels in the text colour in a 52-point gutter, scrolled
+  to 07:00 (or the earliest event) at first. Timed events sit by their minutes, side by side in equal columns where
+  they overlap; an event without length takes a quarter of an hour. A line and a dot in the text colour mark the time
+  now across today.
+- **Month**: six weeks from the Monday on or before the month's first day under the weekdays' short names in
+  SemiBold; the weeks stand 10 points apart. Each day's number is a button that opens the day (today on an accent disc
+  in bold, other months' days muted). Blocks over whole days run across the cells of a week in lanes; under them the
+  day's timed events, one line each with the start, and "+N more" (a button to the day) when they do not all fit.
+- **Agenda**: the 30 days from the focus, each day with events under its name in the heading font ("Today · Thursday 5
+  November"), an event a row: its start, "All day" or "Until" the end, the summary and the place in a bar with the
+  text in its middle, and the event's own zone with its start as plain SemiBold caption text at the right when its
+  clock differs from the computer's. Days and rows stand 10 points apart. "Nothing in these 30 days." when empty.
+- **Side panel**: the mini month (its name in the heading font, "Month before" and "Month after", a button per day
+  that puts the view there; today on an accent disc in bold, the days the week or day view shows on the selection,
+  nothing else marked in the month and agenda views; a week is 40 points tall), "Calendars" with a filled check box
+  per calendar and its colour dot (unticked hides its events), and the details of the picked event: the colour dot, the summary in the
   heading font and Close; both dates with the times ("Monday 16 November – Wednesday 18 November", "Sunday 8
   November, 08:00 – 11:00"); the event's own zone after the Globe icon, labelled, only when its clock differs from
   the computer's ("Event zone Atlantic/Azores: 07:00 – 10:00", with the dates when they differ too); the place; the
   description; the calendar, busy or free, private and the repeat ("Personal · busy · private · repeats weekly");
   and up to eight guests with their answers ("Petra Lindqvist · going"); then Edit (the Compose icon) and Delete
   (the Delete icon), secondary buttons.
-- **Event editor**: New event and Edit open it as a float 440 points wide over the view's top right, as the design
-  file's Calendar page shows it: "New event" or "Edit event" in the heading font; Title; Starts and Ends side by
-  side, typed as "2026-11-06 13:00" (a day alone, "2026-11-06", for an all-day event); the boxes All day (which
-  turns the times into their days and back) and Private; Repeat with a pill per preset (Never, Daily, Weekdays,
-  Weekly, Monthly, Yearly; Custom, selected, for a repeat the presets do not name, kept until a preset is picked);
-  Show as with Busy and Free; for a new event Calendar with a pill per calendar; Guests, addresses with commas. Only
-  an edit of an event with guests adds, on a tinted box, "Tell the 2 guests about this change?" with the radio
-  buttons Don't tell them (the default) and Send them the update. Why the last Save was refused shows over the
-  buttons in the flag colour; Cancel (secondary) and Save (primary) end it, Escape is Cancel. Each field is named by
-  its label.
+- **Event editor**: New event and Edit open it as a float 430 points wide over the view's top right, as the design
+  file's Calendar page shows it: "New event" or "Edit event" in the title font at 90 %; Title; Starts and Ends side
+  by side, typed as "2026-11-06 13:00" (a day alone, "2026-11-06", for an all-day event); the filled check boxes All
+  day (which turns the times into their days and back) and Private; Repeat as a select, filling what Show as, the
+  segmented control Busy and Free beside it, leaves: a closed field with its chevron, opening a popup on the solid
+  float with its choices Never, Daily, Weekdays, Weekly, Monthly and Yearly (the current one with a tick, the keyboard
+  on it; the others after a muted icon), and Custom, shown in the field but no choice to pick, for a repeat the
+  presets do not name, kept until a preset is picked; for a new event Calendar as a segmented control, a select where
+  the calendars do not fit side by side; Guests, addresses with commas. Labels are SemiBold captions, 6 points over
+  their fields, and a field is as tall as the select. Only an edit of an event with guests adds, on a tinted box,
+  "Tell the 2 guests about this change?" with the radio buttons Don't tell them (the default) and Send them the
+  update. Why the last Save was refused shows over the buttons in the flag colour; Cancel (secondary) and Save
+  (primary) end it. Escape closes an open list of choices first, and only then is Cancel. Each field is named by its
+  label, a select is a combo box saying its current choice.
 - **Undo**: a saved event, a saved edit and a delete show the act's toast at the window's foot ("Event added",
   "Event saved", "Event saved; the guests are told", "Event deleted") with Undo and Ctrl+Z, which take the change
   back and read the calendar again; a deleted event reaches the server only once the toast's six seconds are over.
