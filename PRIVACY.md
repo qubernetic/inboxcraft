@@ -60,7 +60,7 @@ InboxCraft on the same account brings it back at the same time:
 Beside the store, `inboxcraft/instance.lock` and `inboxcraft/instance.sock` keep a second start of InboxCraft from
 opening the same mail: the first is empty, the second is a socket through which a later start asks the running one to show its window or to quit. Only your user account can open either of them or the `inboxcraft` folder they are
 in. Neither holds anything of yours. Starting at login
-(`inboxcraft --autostart`) writes `autostart/io.github.qubernetic.inboxcraft.desktop` in your config folder, which
+(`inboxcraft --autostart`, or Start with the computer on the Notifications page) writes `autostart/io.github.qubernetic.inboxcraft.desktop` in your config folder, which
 names the program and nothing else; in the Flatpak the desktop's Background portal keeps the real entry.
 
 When new mail comes in, InboxCraft tells you with a notification on your desktop. It hands your desktop's
