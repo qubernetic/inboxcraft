@@ -436,16 +436,12 @@ time from the code as it is, not measured.
 - `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
   GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
   E1.13c (#30).
-- Glass and floats (#82): nothing in the window floats yet except egui's menus and tooltips (`float over text`);
-  the 80 % float and the text that fades before it are built and tested but first used by the hover actions
-  (E1.17). Menus and tooltips cast no shadow (egui's own shadow is a gradient outside the helper, so it is off).
-  The gradient's full strength shows nowhere yet (the navigation rail comes with E1.17); the selection gradient is
-  the only one in the list. A yellow field over a near-black background reads olive rather than amber (Citrus in
-  dark), because the fields are mixed in sRGB. Layer shadows reach under the neighbouring layer's edge by a few
-  points. A resize still rasterises the colour fields again each time the window crosses a step of 128 pixels,
-  and the selection gradient whenever the selected row changes width; layer shadows are size-free nine-slices, but
-  their edges repeat a 32-pixel strip, dither noise included. A float over sharp text casts no shadow, so a menu
-  over the reader stands out by its colour and edge alone.
+- Glass and floats (#82, #205): egui's own menus and tooltips cast no shadow (egui's own shadow is a gradient
+  outside the helper, so it is off), so they stand out by their colour and edge alone. A yellow field over a
+  near-black background reads olive rather than amber (Citrus in dark), because the fields are mixed in sRGB. Layer
+  shadows reach under the neighbouring layer's edge by a few points. A resize still rasterises the colour fields
+  again each time the window crosses a step of 128 pixels; layer shadows are size-free nine-slices, but their edges
+  repeat a 32-pixel strip, dither noise included.
 - `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
   sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
   It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).
