@@ -70,7 +70,6 @@ fn every_text_colour_meets_wcag_aa_on_the_surface_it_sits_on_for_every_preset_in
             ("text on surface", p.text, p.surface),
             ("text on field", p.text, p.field),
             ("text on selection", p.text, p.selection),
-            ("text on the selection's end", p.text, p.selection_end),
             ("muted on background", p.muted, p.background),
             ("muted on surface", p.muted, p.surface),
             ("muted on panel", p.muted, p.panel),
@@ -201,7 +200,7 @@ fn teal_or_coral(colour: Color32) -> bool {
 fn no_teal_or_coral_is_left() {
     for theme in all() {
         let p = theme.palette;
-        let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection, p.selection_end];
+        let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection];
         tokens.extend(p.accounts);
         tokens.extend(p.avatars);
         for colour in tokens {

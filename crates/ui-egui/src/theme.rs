@@ -122,10 +122,8 @@ pub struct Palette {
     pub text: Color32,
     /// Secondary text: previews, dates, addresses.
     pub muted: Color32,
-    /// The selected row or folder, and the start of the selection gradient.
+    /// The selected row, folder, pill or segment: one even tone.
     pub selection: Color32,
-    /// The end of the selection gradient.
-    pub selection_end: Color32,
     /// Links and accent text: the middle stop lightened in dark mode, darkened in light mode.
     pub accent: Color32,
     /// Text on the accent colour.
@@ -486,8 +484,8 @@ struct Neutrals {
     float: Color32,
     /// How much of the middle stop goes into the surfaces.
     tint: f32,
-    /// How much of the first and last stop goes into the selection gradient.
-    selection: [f32; 2],
+    /// How much of the middle stop goes into the selection.
+    selection: f32,
     /// How much of the middle stop goes into the badge.
     badge: f32,
     /// The opacity of a card.
@@ -508,7 +506,7 @@ const LIGHT: Neutrals = Neutrals {
     error: rgb(0xB3261E),
     float: rgb(0xFFFFFF),
     tint: 0.03,
-    selection: [0.20, 0.12],
+    selection: 0.16,
     badge: 0.16,
     card: 0.80,
     event: 0.20,
@@ -525,7 +523,7 @@ const DARK: Neutrals = Neutrals {
     error: rgb(0xF2B8B5),
     float: rgb(0x1E2330),
     tint: 0.05,
-    selection: [0.32, 0.20],
+    selection: 0.30,
     badge: 0.30,
     card: 0.62,
     event: 0.30,
@@ -648,8 +646,7 @@ impl Palette {
         let panel = mix(n.panel, middle, n.tint * 1.2);
         let surface = mix(n.surface, middle, n.tint * 0.6);
         let field = mix(n.field, middle, n.tint * 0.3);
-        let selection = mix(surface, first, n.selection[0]);
-        let selection_end = mix(surface, last, n.selection[1]);
+        let selection = mix(surface, middle, n.selection);
         let card = alpha(surface, n.card);
         let (sheer, shade) = match mode {
             Mode::Light => (mix(WHITE, middle, 0.02), mix(n.text, middle, 0.3)),
@@ -671,7 +668,7 @@ impl Palette {
         let mut backdrops = vec![background];
         backdrops.extend(colour_fields.map(|colour| over(colour, background)));
         let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
-        let mut surfaces = vec![background, panel, surface, field, selection, selection_end, float_base];
+        let mut surfaces = vec![background, panel, surface, field, selection, float_base];
         surfaces.push(over(hover, selection));
         surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind), over(hover, over(card, *behind))]));
         surfaces.extend(backdrops.iter().chain(preset.gradient.iter()).map(|behind| over(float, *behind)));
@@ -708,7 +705,6 @@ impl Palette {
             text,
             muted,
             selection,
-            selection_end,
             accent,
             on_accent: ink_on(accent),
             unread: readable(middle, &marked, 3.0, mode),

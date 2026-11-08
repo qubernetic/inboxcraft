@@ -25,6 +25,7 @@ use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
+use crate::component::pill;
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::glass::{self, Under};
@@ -303,8 +304,8 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
     ui.add_space(1.0);
 }
 
-/// Segmented choices: the options side by side in a pill, the chosen one on the selection gradient in SemiBold; each
-/// option's name in its `font`. The option pressed.
+/// Segmented choices: the options side by side in a pill with a quiet edge, the chosen one on the selection with an
+/// edge in the full gradient and in SemiBold; each option's name in its `font`. The option pressed.
 fn segmented<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T, &str, Font)], current: T) -> Option<T> {
     segmented_for(ui, theme, options, current, None)
 }
@@ -314,7 +315,7 @@ fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T,
     let p = &theme.palette;
     let s = &theme.spacing;
     let mut chosen = None;
-    Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.field_border)).corner_radius(255).inner_margin(3).show(ui, |ui| {
+    Frame::new().stroke(Stroke::new(1.0, p.control_edge)).corner_radius(255).inner_margin(3).show(ui, |ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         ui.horizontal(|ui| {
             for (option, name, font) in options {
@@ -330,7 +331,7 @@ fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &[(T,
                 if ui.is_rect_visible(rect) {
                     let round = rect.height() / 2.0;
                     if on {
-                        selection(ui.painter(), theme, rect, round);
+                        pill::selected_fill(ui.painter(), theme, rect, round);
                     } else if response.hovered() {
                         ui.painter().rect_filled(rect, round, p.hover);
                     }
