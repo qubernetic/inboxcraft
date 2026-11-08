@@ -299,10 +299,14 @@ impl InboxApp {
             }
         }
         if !sample {
-            if let Some(kept) = keep.load_notify() {
-                self.mailbox.restore_notify(kept);
-            }
-            self.kept_notify = Some(self.mailbox.notify_settings().clone());
+            // What was kept stands as kept, so a level the session left out is dropped from the file at the next frame.
+            self.kept_notify = Some(match keep.load_notify() {
+                Some(kept) => {
+                    self.mailbox.restore_notify(kept.clone());
+                    kept
+                }
+                None => self.mailbox.notify_settings().clone(),
+            });
         }
         self.keep = keep;
         self

@@ -77,8 +77,8 @@ Notifications page of the settings). The window keeps these choices in `notify.j
 config folder; the file names each account by its number only, never by its address. The sample window keeps none.
 Whether closing the window leaves InboxCraft running is kept in `background.json` beside them, and nothing else is.
 
-Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
-work still queued for it; the draft copies already in the account's Drafts folder on the server stay. What
+Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries, the
+work still queued for it and its notification choice in `notify.json`; the draft copies already in the account's Drafts folder on the server stay. What
 InboxCraft knows of senders is kept, because it is yours and not an account's: it stays until you delete the data
 folder, which removes everything in the store above.
 

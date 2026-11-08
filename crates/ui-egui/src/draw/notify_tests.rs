@@ -301,6 +301,23 @@ fn the_kept_notification_choices_come_back_and_each_change_is_kept() {
 }
 
 #[test]
+fn a_kept_level_of_an_account_not_held_is_dropped() {
+    let keep = Held::default();
+    let mut kept = NotifySettings::default();
+    kept.set_level(AccountId::new(1), Level::People);
+    kept.set_level(AccountId::new(7), Level::None);
+    *keep.notify.lock().unwrap() = Some(kept);
+    let app = real_app().with_keep(Box::new(keep.clone()));
+    assert_eq!(app.mailbox().notify_level(7), Level::All, "account 7 is not held");
+    assert_eq!(app.mailbox().notify_level(1), Level::People);
+    let mut harness = harness_of(app, egui::Theme::Light);
+    harness.run();
+    let mut held = NotifySettings::default();
+    held.set_level(AccountId::new(1), Level::People);
+    assert_eq!(*keep.stored.lock().unwrap(), [held], "the next store leaves account 7 out");
+}
+
+#[test]
 fn the_sample_neither_takes_nor_keeps_the_owner_s_notification_choices() {
     let keep = Held::default();
     let mut kept = NotifySettings::default();

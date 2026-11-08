@@ -124,6 +124,11 @@ impl Settings {
         self.levels.remove(&account);
     }
 
+    /// Keeps only the levels of the accounts `held` says yes to.
+    pub(crate) fn retain(&mut self, held: impl Fn(AccountId) -> bool) {
+        self.levels.retain(|account, _| held(*account));
+    }
+
     /// The choices as JSON, to keep.
     ///
     /// ```

@@ -122,6 +122,7 @@ fn privacy_names_what_a_notification_hands_on() {
         "its own settings for InboxCraft decide whether they show on the lock screen",
         "keeps these choices in `notify.json`",
         "names each account by its number only",
+        "the work still queued for it and its notification choice in `notify.json`",
     ] {
         assert!(privacy.contains(point), "PRIVACY.md does not say: {point}");
     }
