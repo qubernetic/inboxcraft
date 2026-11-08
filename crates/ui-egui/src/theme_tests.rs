@@ -7,7 +7,7 @@ use egui::Color32;
 
 use super::{
     AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
-    contrast, font_definitions, icon_ink_over, ink_on, ink_over, install_fonts, mix, over, preference, readable, rgb, text_gradient,
+    contrast, font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
 };
 use crate::iconset::IconSet;
 use crate::motion::MOTION;
@@ -760,17 +760,76 @@ fn ink_over_several_colours_reads_on_every_one_of_them() {
 }
 
 #[test]
-fn icon_ink_over_prefers_white_wherever_it_reaches_3_to_1() {
+fn the_rail_darkens_each_stop_as_far_as_white_needs_or_keeps_the_gradient_with_the_better_ink() {
     let white = Color32::WHITE;
-    assert_eq!(icon_ink_over(&[rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)]), white);
-    assert_eq!(icon_ink_over(&[rgb(0xFF8F00), rgb(0xFFD000)]), ink_over(&[rgb(0xFF8F00), rgb(0xFFD000)]));
-    assert_ne!(icon_ink_over(&[rgb(0xFFD000)]), white);
-    assert_eq!(icon_ink_over(&[]), ink_over(&[]));
-    for theme in all() {
-        let stops = theme.palette.gradient;
-        let ink = icon_ink_over(&stops);
+    for preset in &PRESETS {
+        let (stops, ink) = rail_stops(preset.gradient);
         let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
-        assert!(worst >= 3.0, "{} {:?}: a solid icon on the gradient at {worst}", theme.preset.id, theme.mode);
+        assert!(worst >= 3.0, "{}: icons on the rail at {worst}", preset.id);
+        if ink == white {
+            for (stop, raw) in stops.iter().zip(preset.gradient) {
+                // Darkened no further than white needs: a step lighter would not reach 3:1, unless it is untouched.
+                assert!(*stop == raw || contrast(white, mix(*stop, raw, 0.5)) < 3.2, "{}: {} from {}", preset.id, hex(*stop), hex(raw));
+                // At most 25 % darker: each channel keeps at least 75 % of the stop's.
+                assert!(u16::from(stop.r()) * 4 + 4 >= u16::from(raw.r()) * 3, "{}: at most 25 %", preset.id);
+            }
+        } else {
+            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
+            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
+        }
+    }
+    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| rail_stops(preset.gradient).1);
+    assert_eq!(ink("electric"), Some(white));
+    assert_eq!(ink("aurora"), Some(white));
+    assert_ne!(ink("citrus"), Some(white));
+    // A stop white cannot reach within 25 %: the whole rail keeps the gradient.
+    let yellow = [rgb(0x2F6BFF), rgb(0x2F6BFF), rgb(0xFFD000)];
+    assert_eq!(rail_stops(yellow), (yellow, ink_over(&yellow)));
+    for theme in all() {
+        assert_eq!((theme.palette.rail, theme.palette.rail_ink), rail_stops(theme.palette.gradient));
+    }
+}
+
+#[test]
+fn a_card_is_the_translucent_surface_and_text_reads_on_it_over_every_colour_field_hovered_or_not() {
+    for theme in all() {
+        let p = theme.palette;
+        let want = if theme.mode == Mode::Light { 204 } else { 158 };
+        assert_eq!(p.card.a(), want, "{} {:?}", theme.preset.id, theme.mode);
+        assert!(p.control_edge.a() > 0 && p.control_edge.a() < 64, "{} {:?} control edge", theme.preset.id, theme.mode);
+        for behind in backdrops(&p) {
+            let card = over(p.card, over(p.glass, behind));
+            for under in [card, over(p.hover, card)] {
+                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
+                    let ratio = contrast(ink, under);
+                    assert!(ratio >= 4.5, "{} {:?} {name} on a card over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
+                }
+            }
+        }
+        for under in [p.selection, over(p.hover, p.selection)] {
+            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
+                let ratio = contrast(ink, under);
+                assert!(ratio >= 4.5, "{} {:?} {name} on the selection: {ratio:.2}", theme.preset.id, theme.mode);
+            }
+        }
+    }
+}
+
+#[test]
+fn an_event_is_a_tint_of_its_account_and_its_text_reads_over_every_glass() {
+    for theme in all() {
+        let p = theme.palette;
+        let most = if theme.mode == Mode::Light { 51 } else { 77 };
+        for (event, account) in p.events.iter().zip(p.accounts) {
+            let [r, g, b, a] = event.to_srgba_unmultiplied();
+            assert!(a > 0 && a <= most, "{} {:?}: alpha {a}", theme.preset.id, theme.mode);
+            // Unmultiplying a faint tint moves a channel by a few steps.
+            assert!(contrast(Color32::from_rgb(r, g, b), account) < 1.1, "{} {:?}: {}", theme.preset.id, theme.mode, hex(account));
+            for behind in backdrops(&p) {
+                let ratio = contrast(p.text, over(*event, over(p.glass, behind)));
+                assert!(ratio >= 4.5, "{} {:?} text on an event over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
+            }
+        }
     }
 }
 
@@ -788,12 +847,13 @@ fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_
         let (stops, ink) = text_gradient(preset.gradient);
         if ink == WHITE {
             assert!(stops.iter().all(|stop| contrast(WHITE, *stop) >= 4.5), "{}: white reads on every stop", preset.id);
-            // No more than 30 % darker: each channel keeps at least 70 % of the stop's.
+            // No more than 40 % darker: each channel keeps at least 60 % of the stop's.
             for (stop, raw) in stops.iter().zip(preset.gradient) {
-                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 7, "{}: at most 30 %", preset.id);
+                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 6, "{}: at most 40 %", preset.id);
             }
         } else {
-            assert_eq!(stops, preset.gradient, "{}: the full gradient with the deep ink", preset.id);
+            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
+            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
         }
     }
     let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| text_gradient(preset.gradient).1);
