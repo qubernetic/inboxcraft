@@ -527,3 +527,4 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
 | 2026-11-08 | minor | The calendars in the engine: reports applied, the event commands, the held delete, one write per event at a time, scheduling left to the client, the old server's answers dropped (#146) |
 | 2026-11-08 | minor | Invitations: the mark, `invite.show`, `invite.answer` and `invite.remove` (#149) |
 | 2026-11-08 | minor | Event alerts: the store's alerts, the sweep, the notice and its click (#150) |
+| 2026-11-08 | minor | `account.update` and a new password (#214) |

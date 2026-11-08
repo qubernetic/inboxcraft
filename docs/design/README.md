@@ -85,3 +85,8 @@ Each screens page has a "Dark" column on the right with its main screens in Elec
 | 2026-11-08 | minor | The calendar's views are built; the event editor and invitations are not yet (#147) |
 | 2026-11-08 | minor | The event editor is built (#148) |
 | 2026-11-08 | minor | The invitation screen is built (#149) |
+| 2026-11-08 | minor | Translucent cards, one even selection, white on custom colours, segmented and select controls; the app's new screens and flows; a custom colour example; every float solid (#203) |
+| 2026-11-08 | minor | The Planned and Later pages: every feature still to come, the rule-based smart features, with eight more flows (#203) |
+| 2026-11-08 | minor | Cards, selection, white on custom colours and floats are in the code; the event tokens are, their painting is not (#205) |
+| 2026-11-08 | minor | Controls and events in the calendar are in the code (#206) |
+| 2026-11-08 | minor | The account form, an account's settings and the check after a change (#216) |
