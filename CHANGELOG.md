@@ -804,6 +804,13 @@ All notable changes to InboxCraft are listed here. The format follows
 - `Storage::alert`, one alert by its id; the fuzz target `engine_alerts` (#150)
 
 ### Changed
+- The README follows the brand of the design file and claims only what the code backs: the current mark, the
+  design file's Mood page as the look built towards, the list and the full-width reader in the three accent
+  presets, light and dark, the CI, fuzzing, licence, Rust and dev Flatpak badges, and the dev Flatpak as the one
+  build (#112)
+- The change fragments of the daily-use epic are folded into the docs; the README says what works today, with the
+  limits that matter for daily use, and how an agent drives InboxCraft through `inboxcraft-cli` and its MCP server;
+  `ROADMAP.md` has its stage, measured numbers and by-area table, and `docs/gaps.md` its ranked table (#151)
 - Codecov follows the in-repo coverage gate (#109): `codecov.yml` ignores the files `.config/coverage.toml` counts
   nowhere or leaves out of the workspace total (the apps' `main`, the `ui-egui` drawing code and `xtask`'s `main`),
   lets the project coverage drop by at most 1 point against the base and asks 80 % of a patch; a test in `xtask`

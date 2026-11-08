@@ -5,9 +5,19 @@
 ## Ranked
 | # | Gap | B | Evidence | Impact | Hours | Doc |
 |---|---|---|---|---|---|---|
-| 1 | <gap> | ✓ | <how we know> | <who it hurts> | <h> | |
+| 1 | The add-account form asks for no SMTP server and no CalDAV address, and nothing else the owner can reach sets them | ✓ | `onboard.rs` sends `account.add` with the IMAP fields only; `account.add` and `calendar.server` are `owner`, which the CLI refuses | An account added today cannot send and has no calendar | 4 | [Onboarding](#known-rough-edges-not-ranked) |
+| 2 | No front end hands the engine the computer's time zone: presets, send later, snooze, reminders and the calendar run in UTC | ✓ | `Session::set_offsets` has no caller | "Tomorrow 8:00" and every event are off by the UTC offset, an hour or two in Europe | 4 | |
+| 3 | The composer cannot open a draft closed earlier or left from an earlier run, and has no attachments | ✓ | `ui-egui` has no drafts list and no attach field (#132) | A reply started yesterday or a mail with a file must go through another program | 6 | |
+| 4 | Only the inbox is watched (IMAP IDLE, no NOTIFY); other folders change when the engine syncs them | | `net` watches one folder per account (#26) | Mail filed by a server rule or another device shows late | 6 | |
+| 5 | Sign-in with a password only: no OAuth (XOAUTH2, OAUTHBEARER) for IMAP, SMTP or CalDAV | | `proto` and `dav` have no OAuth (#20, #144) | Providers that require OAuth cannot be added | 12 | |
+| 6 | One message at a time: no selection of several messages | | `ui-egui` acts on the open message or the hovered row (#131) | Clearing a full inbox takes one act per message | 6 | |
+| 7 | A flag changed here overwrites one changed on another device meanwhile | | `net` sends no `UNCHANGEDSINCE` (#115) | Rarely loses a flag change made elsewhere | 3 | |
+| 8 | Repeating events change and delete as a whole series only | | no `RECURRENCE-ID` writes (#146, #148) | Moving one meeting of a series moves them all | 8 | |
+| 9 | Search looks at subject, sender and recipients only, not the body text | | the search field runs `mail.search` per field (#27) | A message is found only by its header | 6 | |
+| 10 | Tray, notifications, single instance and the control channel exist on Linux only | | no Windows or macOS code (#137, #138, #142) | InboxCraft is for Linux desktops for now | 30 | |
 
-B = blocks the next stage.
+B = blocks the next stage (beta: the owner uses InboxCraft daily on both mailboxes). Hours are estimates of agent
+time from the code as it is, not measured.
 
 ## Known rough edges (not ranked)
 - `inboxcraft-web` answers `--version` and refuses everything else (#5).
@@ -451,7 +461,9 @@ B = blocks the next stage.
 
 - Onboarding (#34):
   - The add-account form asks for IMAP only: `account.add` takes a submission server (#119), but the form does not
-    ask for one yet, so an account added in the window cannot send; CalDAV and the sending identity come with E4.2.
+    ask for one yet, so an account added in the window cannot send; nor does it ask for a CalDAV address (#145).
+    Both `account.add` and `calendar.server` are `owner` commands, which the CLI and the control channel refuse,
+    so nothing the owner can reach sets them for an account yet.
     Detect fills in its first IMAP proposal; the others are not offered to choose from.
   - The check's failure sentences and the explanation of a step that did not run are the engine's English text,
     not yet through the i18n macros.
@@ -546,8 +558,7 @@ B = blocks the next stage.
   `Original-Recipient`, marks nothing (#121).
 - A bounce mark cannot be cleared and is not undoable; it outlives its report, which it then no longer names, and
   a later delivery report for the same message about its recipients replaces the reason (#121).
-- No front end hands the session the computer's offsets, so presets and dates are in UTC there. A fired calendar
-  alert is only the `Fired` event until the event reminders act on it (#122, #123).
+- No front end hands the session the computer's offsets, so presets and dates are in UTC there (#122, #123).
 - Undo send is its own command (`mail.unsend`), not a step of `history.undo`, and a scheduled draft cannot be edited
   in place: take the send back, change the draft, schedule it again (#123).
 - A send later that can no longer go at its time (its account lost the submission server, a forward's body is gone)
@@ -608,10 +619,8 @@ B = blocks the next stage.
   keeps 100), Ctrl+Z stops quietly. A failed write the server refuses is taken back by the engine, and its toast still
   shows until it goes.
 - Composer (#132): one message at a time; a draft closed or left from an earlier run cannot be opened again in the
-  window yet (it stays in the store, `compose.list`, and goes to the account's Drafts folder once the app drives
-  `Session::tick`). Plain text only: no formatting, no attachments, no send later or undo send
-  (#136); the outbox and a refusal or bounce after Send are not shown in the window yet (#136), only the toast "Sending
-  your message". Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
+  window yet, unless the outbox hands it back (#136); it stays in the store (`compose.list`) and in the account's
+  Drafts folder. Plain text only: no formatting, no attachments. Suggestions come from the senders and recipients of the mail kept here (`mail.search`), not from an
   address book; a name that would move the address (`<`, `"`, `,`, `@`) is taken as the address alone. The engine
   takes a domain without a dot (`ansel@example`) as an address, so only a recipient with no `@`, two of them or an
   empty part is marked as none. The composer has no window of its own.
@@ -649,8 +658,6 @@ B = blocks the next stage.
   token is passed on (#137).
 - The tray's tooltip counts the unread mail of every account's inbox; the icon itself carries no count yet, and its
   menu has no entries per account (#137).
-- The app does not drive the scheduler yet (`Session::tick`), so returned snoozes and follow-up reminders, which the
-  engine turns into notices, are not shown until it does (#138).
 - No notifications outside Linux. New mail notifies also while the window is open and in front. A click on a
   notification reaches InboxCraft only while it runs (it is not D-Bus activatable), and without a window it is
   answered within half a second. A desktop that shows no actions shows no buttons and may send no click either (#138).
@@ -875,3 +882,4 @@ B = blocks the next stage.
 | 2026-11-08 | minor | The event editor: typed times, no place or zone, whole series only, guests not mailed (#148) |
 | 2026-11-08 | minor | Invitations: read from kept bodies, occurrences, methods without an answer (#149) |
 | 2026-11-08 | minor | Event reminders: no switch on the Notifications page, left-out alarms (#150) |
+| 2026-11-08 | minor | The ranked table filled for the daily-use epic; stale lines on the scheduler, alerts and the composer edited (#151) |

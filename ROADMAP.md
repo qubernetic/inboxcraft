@@ -1,6 +1,7 @@
 # InboxCraft roadmap
 
-**Stage: <pre-alpha|alpha|beta>** · next: <stage>, <what is left, in points or hours>
+**Stage: pre-alpha** · next: beta, after the three blocking gaps of [docs/gaps.md](docs/gaps.md) (about 14 hours)
+and the owner's daily use on both mailboxes (E3.11)
 
 > **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
 
@@ -9,25 +10,32 @@ The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [doc
 ## Headline numbers
 | Number | Value | Kind |
 |---|---|---|
-| Commands in the registry | <n> | measured (`cargo xtask stats`) |
-| Tests | <n> | measured |
-| Fuzz targets | <n> | measured |
-| Hours to beta | <n> Opus 5.5 agent-hours | estimated (<how>) |
+| Commands in the registry | 81 | measured (`inboxcraft-cli commands`) |
+| Tests | 3266 | measured (`cargo xtask ci`, nextest) |
+| Fuzz targets | 29 | measured (`fuzz/Cargo.toml`) |
+| Lines of Rust | 69846 code, 55671 test, in 667 files | measured (`cargo xtask stats`) |
+| Hours to beta | 14 Opus 5.5 agent-hours | estimated (the blocking gaps of docs/gaps.md; the owner's daily use not counted) |
 
 ## By area
 | Area | Ready | Hours left | Doc |
 |---|---|---|---|
-| IMAP sync (IDLE, CONDSTORE/QRESYNC, offline queue) | <%> | <h> | |
-| SMTP sending | <%> | <h> | |
-| CalDAV calendars | <%> | <h> | |
-| Account autodetect | <%> | <h> | |
-| Tray and background mode | <%> | <h> | |
-| Screener / grouped inbox / snooze / send later | <%> | <h> | |
-| Reading mail safely (HTML) | <%> | <h> | |
-| Search | <%> | <h> | |
+| IMAP sync (IDLE, CONDSTORE/QRESYNC, offline queue) | 85 % | 10 | [architecture](docs/architecture.md) |
+| SMTP sending | 75 % | 6 | |
+| CalDAV calendars | 75 % | 14 | |
+| Account autodetect | 70 % | 6 | |
+| Tray and background mode | 60 % | 30 | |
+| Screener / grouped inbox / snooze / send later | 90 % | 6 | |
+| Reading mail safely (HTML) | 90 % | 4 | |
+| Search | 40 % | 12 | |
+
+Ready and hours left are estimates from the gaps in [docs/gaps.md](docs/gaps.md). SMTP and CalDAV count the add-account
+form that does not ask for their servers; tray and background count Windows and macOS, which have none yet.
 
 ## Upcoming
-1. <item> (<hours>)
+1. The add-account form asks for the SMTP server and the CalDAV address (4)
+2. The computer's time zone handed to the engine, for presets, snooze, send later and the calendar (4)
+3. Drafts opened again in the window, and attachments in the composer (6)
+4. Beta hardening on the owner's two mailboxes (E3.11, the owner's hands-on use)
 
 ## Later ideas
 Not planned for now; the model keeps room for them.
@@ -121,6 +129,7 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | E4.5 in the window: the event editor with repeat presets, all-day, busy or free, private, the guests and the question whether to tell them, and Undo on its toast (#148) |
 | 2026-11-08 | E4.6 invitations: an invitation in mail becomes a card in the reader, answered at once with Going, Maybe or No and changed later; updates and cancellations follow the same event by `UID` and `SEQUENCE`, with the request, reply, update and cancel chain tested on invented events (#149) |
 | 2026-11-08 | E4.7 reminders: calendar alerts become desktop notifications at the alert time, on a fake clock in tests and across a change of the clock, and a click opens the event (#150) |
+| 2026-11-08 | The daily-use epic's change fragments folded into the docs; the headline numbers, the by-area table, the ranked gaps and the README's "What works today" filled (#151) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -210,3 +219,4 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | minor | Progress log: the event editor in the window (#148) |
 | 2026-11-08 | minor | Progress log: invitations answered from mail (#149) |
 | 2026-11-08 | minor | Progress log: event reminders (#150) |
+| 2026-11-08 | minor | Stage, headline numbers, by-area table and upcoming filled for the daily-use epic (#151) |
