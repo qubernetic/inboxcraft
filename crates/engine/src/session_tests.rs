@@ -149,6 +149,7 @@ fn a_store_that_cannot_be_read_fails_the_session() {
         fn calendar_events(&self, _: CalendarId) -> Result<Vec<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { broken() }
         fn calendar_event(&self, _: CalendarEventId) -> Result<Option<inboxcraft_model::CalendarEvent>, inboxcraft_store::StoreError> { broken() }
         fn alerts(&self, _: CalendarEventId) -> Result<Vec<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { broken() }
+        fn alert(&self, _: inboxcraft_model::AlertId) -> Result<Option<inboxcraft_model::Alert>, inboxcraft_store::StoreError> { broken() }
         fn stale_bodies(&self, _: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
         fn missing_bodies(&self, _: FolderId, _: inboxcraft_time::Timestamp) -> Result<Vec<MessageId>, inboxcraft_store::StoreError> { broken() }
     }

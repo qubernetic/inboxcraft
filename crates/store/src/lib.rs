@@ -48,8 +48,8 @@ pub use config::StoreConfig;
 pub use entry::Entry;
 pub use error::StoreError;
 use inboxcraft_model::{
-    Account, AccountId, Alert, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId, FolderState,
-    Job, MessageId, MessageState, Outgoing, Scheduled, Sender,
+    Account, AccountId, Alert, AlertId, Calendar, CalendarEvent, CalendarEventId, CalendarId, Draft, DraftId, EmailAddress, Folder, FolderId,
+    FolderState, Job, MessageId, MessageState, Outgoing, Scheduled, Sender,
 };
 use inboxcraft_time::Timestamp;
 pub use memory::Memory;
@@ -230,6 +230,13 @@ pub trait Storage {
     ///
     /// As [`Storage::accounts`].
     fn alerts(&self, event: CalendarEventId) -> Result<Vec<Alert>, StoreError>;
+
+    /// One alert.
+    ///
+    /// # Errors
+    ///
+    /// As [`Storage::accounts`].
+    fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError>;
 
     /// Removes the bodies that are no longer kept at `now`, as one batch; returns how many.
     ///

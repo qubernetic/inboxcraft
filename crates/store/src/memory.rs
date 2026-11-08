@@ -408,6 +408,10 @@ impl Storage for Memory {
         Ok(alerts)
     }
 
+    fn alert(&self, id: AlertId) -> Result<Option<Alert>, StoreError> {
+        Ok(self.state.alerts.get(&id).cloned())
+    }
+
     fn stale_bodies(&self, cutoff: Timestamp) -> Result<Vec<MessageId>, StoreError> {
         let cutoff = cutoff.unix_seconds();
         Ok(self.state.messages.values().filter(|held| held.body.is_some() && held.is_stale(cutoff)).map(|held| held.message.id()).collect())

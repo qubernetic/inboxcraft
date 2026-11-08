@@ -293,12 +293,14 @@ pub fn calendars_hold_events_and_alerts<S: Storage>(mut store: S) {
     assert_eq!(store.calendar_event(e(6)).unwrap(), Some(event(6, 2)));
     let ids = |store: &S, event| store.alerts(e(event)).unwrap().iter().map(|alert| alert.id.get()).collect::<Vec<_>>();
     assert_eq!(ids(&store, 4), [3, 2], "by time");
+    assert_eq!(store.alert(AlertId::new(3)).unwrap(), Some(alert(3, 4, 8)));
     let changed = CalendarEvent { etag: Some("\"5b\"".to_owned()), ..event(5, 1) };
     put(&mut store, vec![Change::PutCalendarEvent(changed.clone()), Change::SetSyncToken(c(1), None)]).unwrap();
     assert_eq!(store.calendar_event(e(5)).unwrap(), Some(changed));
     assert_eq!(store.sync_token(c(1)).unwrap(), None);
     put(&mut store, vec![Change::RemoveAlert(AlertId::new(3)), Change::RemoveAlert(AlertId::new(30))]).unwrap();
     assert_eq!(ids(&store, 4), [2]);
+    assert_eq!(store.alert(AlertId::new(3)).unwrap(), None);
     put(&mut store, vec![Change::RemoveCalendarEvent(e(4)), Change::RemoveCalendarEvent(e(40))]).unwrap();
     assert!(store.alerts(e(4)).unwrap().is_empty(), "a removed event takes its alerts");
     put(&mut store, vec![Change::RemoveCalendar(c(1)), Change::RemoveCalendar(c(10))]).unwrap();
