@@ -16,9 +16,9 @@ use inboxcraft_time::FakeClock;
 use serde_json::{Value, json};
 
 use super::compose_tests::validity;
-use super::send_tests::store as sending_store;
+use super::send_tests::{message_id, store as sending_store};
 use crate::Session;
-use crate::test_support::{NOW, address, at};
+use crate::test_support::{NOW, address, at, send_now};
 
 /// EHLO and AUTH PLAIN with the fake's user and password.
 const SIGN_IN: &[u8] = b"EHLO c.example.org\r\nAUTH PLAIN AGFkYUBleGFtcGxlLm9yZwBub3QtYS1yZWFsLXBhc3N3b3Jk\r\n";
@@ -36,21 +36,21 @@ fn store() -> Memory {
     store
 }
 
-fn session() -> Session {
-    Session::new(Box::new(store()), Box::new(FakeClock::new(at(NOW)))).unwrap()
+fn session() -> (Session, FakeClock) {
+    let clock = FakeClock::new(at(NOW));
+    (Session::new(Box::new(store()), Box::new(clock.clone())).unwrap(), clock)
 }
 
 /// A draft of account 1 to [`NOBODY`], sent: its id, its `Message-ID` and the job's envelope and message.
-fn send(session: &mut Session) -> (u64, String, Vec<String>, Vec<u8>) {
+fn send(session: &mut Session, clock: &FakeClock) -> (u64, String, Vec<String>, Vec<u8>) {
     let id = session.run("compose.new", &json!({ "account": 1 })).unwrap()["id"].as_u64().unwrap();
     session.run("compose.update", &json!({ "id": id, "to": [NOBODY], "subject": "Budget", "text": "The numbers." })).unwrap();
     session.take_jobs();
-    let answer = session.run("mail.send", &json!({ "id": id })).unwrap();
-    let message_id = answer["message_id"].as_str().unwrap().to_owned();
+    send_now(session, clock, "mail.send", id);
     let jobs = session.take_jobs();
     let [job] = jobs.as_slice() else { panic!("{jobs:?}") };
     let JobKind::Send { recipients, raw, .. } = &job.kind else { panic!("{job:?}") };
-    (id, message_id, recipients.iter().map(|address| address.as_str().to_owned()).collect(), raw.clone())
+    (id, message_id(raw), recipients.iter().map(|address| address.as_str().to_owned()).collect(), raw.clone())
 }
 
 /// What the fake answers to one submission of `raw` to `recipients`, as the worker sends it.
@@ -106,9 +106,9 @@ fn arrive(session: &mut Session, folder: u64, summary: Summary) {
 
 #[test]
 fn a_refusal_shows_on_the_outbox_item_with_the_reply_and_its_code_and_the_draft_is_kept() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let fake = FakeSmtp::new().refuse(When::rcpt(NOBODY), Reply::new(550, "5.1.1", "No such user"));
-    let (id, _, recipients, raw) = send(&mut session);
+    let (id, _, recipients, raw) = send(&mut session, &clock);
     let out = submit(&fake, &recipients, &raw);
     // The worker reports the refusal with the server's reply line, as `net` does.
     let reply = out.lines().find(|line| line.starts_with("550")).unwrap().to_owned();
@@ -126,7 +126,7 @@ fn a_refusal_shows_on_the_outbox_item_with_the_reply_and_its_code_and_the_draft_
     // Sent again by command, to a server that takes it now.
     session.run("compose.update", &json!({ "id": id, "to": ["bela@example.org"] })).unwrap();
     session.take_jobs();
-    assert_eq!(session.run("outbox.retry", &json!({ "id": id })).unwrap()["state"], json!("sending"));
+    assert_eq!(send_now(&mut session, &clock, "outbox.retry", id)["state"], json!("waiting"));
     let jobs = session.take_jobs();
     let [job] = jobs.as_slice() else { panic!("{jobs:?}") };
     let JobKind::Send { recipients, raw, .. } = &job.kind else { panic!("{job:?}") };
@@ -139,10 +139,10 @@ fn a_refusal_shows_on_the_outbox_item_with_the_reply_and_its_code_and_the_draft_
 
 #[test]
 fn the_fakes_delivery_report_marks_the_sent_message_as_failed() {
-    let mut session = session();
+    let (mut session, clock) = session();
     let imap = FakeImap::new();
     let fake = FakeSmtp::new().bounce(Bounce::new(NOBODY, &imap.postbox()));
-    let (id, message_id, recipients, raw) = send(&mut session);
+    let (id, message_id, recipients, raw) = send(&mut session, &clock);
     let out = submit(&fake, &recipients, &raw);
     assert!(out.contains("250 2.0.0 Queued as 1\r\n"), "{out}");
     session.apply(&event(EventKind::Sent { draft: DraftId::new(id) })).unwrap();

@@ -21,6 +21,7 @@ use crate::appearance::Appearance;
 use crate::draft;
 use crate::notify::{self, Notice, Settings};
 use crate::schedule::{self, Fired};
+use crate::send::Hold;
 use crate::undo::{Act, Step};
 use crate::writes::{Settled, Writes};
 use crate::{Caller, EngineError, Registry, error};
@@ -45,6 +46,8 @@ pub struct Outcome {
     notify: Option<Settings>,
     /// Whether a pin outlasts done from now on.
     pins_outlast_done: Option<bool>,
+    /// How long every send is held from now on.
+    hold: Option<Hold>,
     /// Held jobs withdrawn: their removal from the store's queue is in the batch.
     withdrawn: Vec<JobId>,
 }
@@ -78,6 +81,7 @@ impl Outcome {
             screener: None,
             notify: None,
             pins_outlast_done: None,
+            hold: None,
             withdrawn: Vec::new(),
         }
     }
@@ -171,6 +175,12 @@ impl Outcome {
         self
     }
 
+    /// The outcome holding every send for `hold` from now on.
+    pub(crate) fn with_hold(mut self, hold: Hold) -> Self {
+        self.hold = Some(hold);
+        self
+    }
+
     /// The outcome removing `account` from the store, and from what the session knows and has queued.
     pub(crate) fn with_removed(mut self, account: AccountId) -> Self {
         self.batch.push(Change::RemoveAccount(account));
@@ -260,6 +270,8 @@ pub(crate) struct State {
     pub(crate) notify: Settings,
     /// Whether done leaves a pin on (`pin.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) pins_outlast_done: bool,
+    /// How long every send is held (`send.set`); the front end keeps it on disk and hands it back at the start.
+    pub(crate) hold: Hold,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
     /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
@@ -416,6 +428,8 @@ pub struct Session {
     jobs: Vec<Job>,
     /// The jobs an earlier run left in the store's queue, for [`Session::start`].
     replay: Vec<Job>,
+    /// What [`Session::next_due`] said, until something changes (`None`: ask again).
+    due: Option<Option<Timestamp>>,
 }
 
 impl fmt::Debug for Session {
@@ -452,7 +466,7 @@ impl Session {
             store.apply(&cut)?;
         }
         let state = State::load(&*store)?;
-        Ok(Self { store, clock, offsets: Box::new(Offset::UTC), started: None, registry, state, jobs: Vec::new(), replay })
+        Ok(Self { store, clock, offsets: Box::new(Offset::UTC), started: None, registry, state, jobs: Vec::new(), replay, due: None })
     }
 
     /// A session over the invented sample mailbox in `store`, with InboxCraft's own commands: the `sample.*` commands
@@ -535,6 +549,17 @@ impl Session {
         self.state.pins_outlast_done = keep;
     }
 
+    /// How long every send is held before it goes, as `send.set` left it.
+    #[must_use]
+    pub fn send_hold(&self) -> Hold {
+        self.state.hold
+    }
+
+    /// Takes the hold kept from an earlier run.
+    pub fn set_send_hold(&mut self, hold: Hold) {
+        self.state.hold = hold;
+    }
+
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
@@ -570,7 +595,7 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done, withdrawn } = outcome;
+        let Outcome { value, batch, jobs, senders, removed, appearance, undo, screener, notify, pins_outlast_done, hold, withdrawn } = outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
             self.state.held.retain(|(_, held)| held.id != job);
@@ -611,6 +636,9 @@ impl Session {
         }
         if let Some(keep) = pins_outlast_done {
             self.state.pins_outlast_done = keep;
+        }
+        if let Some(hold) = hold {
+            self.state.hold = hold;
         }
         for account in removed {
             self.state.accounts.remove(&account);
@@ -683,7 +711,7 @@ impl Session {
         let started = self.started;
         let planned = catch_unwind(AssertUnwindSafe(|| {
             let plan = schedule::due(&context, started)?;
-            let notices = notify::fired(context.store, &context.state.notify, &plan.fired)?;
+            let notices = notify::fired(context.store, &context.state.notify, &plan.fired, &plan.sent)?;
             Ok::<_, EngineError>((plan, notices))
         }));
         let (plan, notices) = planned.map_err(|_| EngineError::Panicked("schedule"))??;
@@ -695,6 +723,28 @@ impl Session {
         let (batch, jobs) = catch_unwind(AssertUnwindSafe(|| draft::uploads(&context))).map_err(|_| EngineError::Panicked("draft"))??;
         self.commit("draft", None, &batch, jobs)?;
         Ok(plan.fired)
+    }
+
+    /// Runs [`Session::tick`] when something is due ([`Session::next_due`]), for a front end that asks every frame; the
+    /// time it next asks the store is kept until a command or an event changes something. `None` when nothing was due.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::tick`].
+    pub fn tick_if_due(&mut self) -> Result<Option<Vec<Fired>>, EngineError> {
+        let due = match self.due {
+            Some(due) => due,
+            None => {
+                let due = self.next_due()?;
+                self.due = Some(due);
+                due
+            }
+        };
+        if !due.is_some_and(|due| due <= self.clock.now()) {
+            return Ok(None);
+        }
+        self.due = None;
+        self.tick().map(Some)
     }
 
     /// When the next schedule entry, draft copy or held job is due, if any.
@@ -720,6 +770,7 @@ impl Session {
     ///
     /// A store failure, or [`EngineError::Panicked`]; the session is then as it was.
     pub fn apply(&mut self, event: &Event) -> Result<Applied, EngineError> {
+        self.due = None;
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller: Caller::Agent };
         let plan = catch_unwind(AssertUnwindSafe(|| crate::sync::plan(&context, event))).map_err(|_| EngineError::Panicked("event"))??;
         let ended = event.job.filter(|job| self.state.kept.contains(job) && ends_job(&event.kind));
@@ -759,6 +810,7 @@ impl Session {
     /// Makes `batch` with the kept jobs among `jobs` added to the store's queue, then takes `state` and queues `jobs`;
     /// nothing of it when the batch fails.
     fn commit(&mut self, what: &'static str, state: Option<State>, batch: &Batch, mut jobs: Vec<Pending>) -> Result<(), EngineError> {
+        self.due = None;
         for pending in &mut jobs {
             pending.keep &= keepable(&pending.kind);
         }

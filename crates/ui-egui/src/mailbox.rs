@@ -1154,9 +1154,16 @@ impl Mailbox {
     /// Hands the engine's queued jobs to `workers`, stops the workers of accounts that are gone, and applies the
     /// events that came back; reads everything again when an event changed something. Applying an event can queue
     /// the next jobs (the folder syncs after the folder list), so it goes round again, at most [`MAX_PUMP_ROUNDS`]
-    /// times a frame. Whether anything changed.
+    /// times a frame. First it lets the engine do what is due ([`Session::tick_if_due`]): a send whose hold is over,
+    /// a snooze that ends, a draft's copy. Whether anything changed.
     pub fn pump(&mut self, workers: &mut dyn Workers) -> bool {
-        let mut changed = false;
+        let mut changed = match self.session.tick_if_due() {
+            Ok(ticked) => ticked.is_some(),
+            Err(error) => {
+                self.error = Some(UiError::from(error).to_string());
+                false
+            }
+        };
         for _ in 0..MAX_PUMP_ROUNDS {
             if !self.pump_once(workers) {
                 break;
