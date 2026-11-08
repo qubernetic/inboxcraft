@@ -412,13 +412,18 @@ fn paint_row(
     };
     ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
-    let preview = format!("  · {}", message.preview);
+    let preview = after_subject(&message.preview);
     let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - left);
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
     // Last, so the solid float covers whatever of the row lies under it.
     let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
     let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
     shown.clicked.and_then(|index| act(message, index))
+}
+
+/// What follows a row's subject: a dot and the preview, or nothing without one.
+pub(super) fn after_subject(preview: &str) -> String {
+    if preview.trim().is_empty() { String::new() } else { format!("  · {preview}") }
 }
 
 /// A rounded card across `ui`'s width with `add` drawn inside; `edge` rings it with the preset's gradient.
