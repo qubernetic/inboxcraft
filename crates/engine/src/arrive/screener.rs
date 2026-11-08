@@ -6,8 +6,9 @@
 //! A sender is known, across the accounts, once the owner received mail from it, wrote to it or accepted it:
 //! the first sync of a folder learns the senders of the mail it holds (not of the junk, the trash, the drafts, the
 //! virtual folders or our own), every message in the sent folder learns its recipients, and mail that comes into the
-//! inbox while the screener is off learns its sender. The owner's own addresses and delivery reports
-//! (`MAILER-DAEMON`, `postmaster`) are never screened and teach nothing.
+//! inbox while the screener is off learns its sender. The owner's own addresses and delivery reports (`MAILER-DAEMON`,
+//! `postmaster`, and any message the bounce stage before this one found to be a report) are never screened and teach
+//! nothing.
 //!
 //! Later mail into the inbox from a sender neither known nor decided is, by [`ScreenerMode`]: held in our own
 //! `InboxCraft/Screener` folder (made on the server the first time), left in the inbox and marked, or let in. Mail
@@ -72,6 +73,10 @@ const REPORTERS: [&str; 2] = ["mailer-daemon", "postmaster"];
 
 /// The stage: learns the senders the owner knows and screens the inbox's new mail.
 pub(crate) fn stage(arrival: &Arrival<'_>, message: &Message, plan: &mut Plan) -> Result<(), EngineError> {
+    // A delivery report, as the bounce stage found: let in, and its sender teaches nothing.
+    if plan.reports.contains(&message.id()) {
+        return Ok(());
+    }
     let store = arrival.store;
     let accounts = store.accounts()?;
     match arrival.role {

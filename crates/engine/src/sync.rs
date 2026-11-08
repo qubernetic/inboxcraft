@@ -9,8 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use inboxcraft_model::{
-    AccountId, CheckStep, Event, EventKind, FlagChange, Folder, FolderId, FolderListing, FolderPath, JobId, JobKind, Message, Role, StepReport,
-    Summary, Uid, UidSet, UidValidity,
+    AccountId, CheckStep, Event, EventKind, FlagChange, Folder, FolderId, FolderListing, FolderPath, JobId, JobKind, Message, MessageId, Role,
+    StepReport, Summary, Uid, UidSet, UidValidity,
 };
 use inboxcraft_store::{Batch, Body, Change, Storage};
 
@@ -25,6 +25,8 @@ pub(crate) struct Plan {
     pub(crate) state: State,
     pub(crate) batch: Batch,
     pub(crate) jobs: Vec<Pending>,
+    /// The arriving messages the bounce stage found to be delivery reports, which the screener lets in.
+    pub(crate) reports: BTreeSet<MessageId>,
 }
 
 impl Plan {
@@ -34,6 +36,11 @@ impl Plan {
 
     pub(crate) fn job(&mut self, account: AccountId, kind: JobKind) {
         self.jobs.push(Pending { account, kind, message: None, keep: false, until: None });
+    }
+
+    /// A `FetchBody` job for `message`, unless one is already out.
+    pub(crate) fn fetch(&mut self, account: AccountId, kind: JobKind, message: MessageId) {
+        self.jobs.push(Pending { account, kind, message: Some(message), keep: false, until: None });
     }
 
     /// A job kept in the store's queue until its last event.
@@ -64,7 +71,7 @@ pub(crate) fn plan(context: &Context<'_>, event: &Event) -> Result<Option<Plan>,
     {
         return Ok(ended(context, event));
     }
-    let mut plan = Plan { state: context.state().clone(), batch: Batch::new(), jobs: Vec::new() };
+    let mut plan = Plan { state: context.state().clone(), batch: Batch::new(), jobs: Vec::new(), reports: BTreeSet::new() };
     let kept = match &event.kind {
         EventKind::Folders { listings } => folders(store, &mut plan, account, listings)?,
         EventKind::MessagesAdded { folder, uid_validity, messages } => added(context, &mut plan, account, *folder, *uid_validity, messages)?,
@@ -137,7 +144,7 @@ fn ended(context: &Context<'_>, event: &Event) -> Option<Plan> {
     let job = event.job.filter(|job| matches!(event.kind, EventKind::Failed { .. }) && context.state().fetching.contains_key(job))?;
     let mut state = context.state().clone();
     state.fetching.remove(&job);
-    Some(Plan { state, batch: Batch::new(), jobs: Vec::new() })
+    Some(Plan { state, batch: Batch::new(), jobs: Vec::new(), reports: BTreeSet::new() })
 }
 
 /// A step of the running check of `account`, from its job: it takes the step's place, and the last step ends the
@@ -330,6 +337,7 @@ fn fetched(store: &dyn Storage, plan: &mut Plan, folder: FolderId, uid_validity:
     match Body::new(raw.to_vec(), &plain_text(raw)) {
         Ok(body) => {
             plan.change(Change::PutBody(message.id(), body));
+            arrive::bounce::linked(store, plan, &message, raw)?;
             // A calendar part, known only now, makes the message an invitation in the grouped inbox.
             let envelope = message.summary().envelope();
             let calendar = arrive::group::calendar(raw);

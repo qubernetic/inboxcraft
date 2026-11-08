@@ -14,15 +14,17 @@ credential store.
 What InboxCraft keeps is in one folder, `inboxcraft/store` in your data folder: `%LOCALAPPDATA%` on Windows, else
 `$XDG_DATA_HOME` (in the Flatpak `~/.var/app/io.github.qubernetic.inboxcraft/data`), else `~/.local/share` on Linux
 and `~/Library/Application Support` on macOS. Only your own user account can read it. It holds:
-- your accounts' settings (with your templates), their folders and messages, the message bodies it keeps, and the
-  work it still has to do on the server;
+- your accounts' settings (with your templates), their folders and messages, the message bodies it keeps (of the
+  mail you opened, and of a delivery report that comes back to you, which it downloads at once to see which
+  message it is about), and the work it still has to do on the server;
 - your drafts, with everything you typed into them: the recipients (Bcc included), the subject and the text, and
   where each one stands in the outbox, with the server's reply if it refused one;
 - the schedule: what is to happen at a set time (a draft to send later, a snoozed message to bring back, a
   follow-up reminder, a calendar alert);
 - what InboxCraft knows of each sender address, across your accounts: that you know it, the screener's decision
   (accepted or blocked) and its group;
-- each message's own state: done, parked, pinned, snoozed or waiting for a reply;
+- each message's own state: done, parked, pinned, snoozed or waiting for a reply, and for a message you sent that
+  came back, which delivery report said so and why (the addresses it failed for and the remote server's reply);
 - your calendars, with their events as the server sent them (iCalendar text) and their alerts.
 
 A draft also has a copy on your mail server, in the account's own Drafts folder, once it has been still for ten

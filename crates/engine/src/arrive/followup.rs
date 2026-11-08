@@ -54,7 +54,7 @@ fn answers(envelope: &Envelope, id: &MessageRef) -> bool {
 }
 
 /// The state an earlier change of `plan` gives `message`, if one does.
-fn planned(plan: &Plan, message: MessageId) -> Option<MessageState> {
+pub(crate) fn planned(plan: &Plan, message: MessageId) -> Option<MessageState> {
     plan.batch.changes().iter().rev().find_map(|change| match change {
         Change::SetMessageState(id, state) if *id == message => Some(state.clone()),
         _ => None,

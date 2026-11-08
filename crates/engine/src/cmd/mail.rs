@@ -150,8 +150,14 @@ pub(super) fn row(context: &Context<'_>, grouping: &mut Grouping<'_>, accounts: 
         fields.insert("snoozed_until".into(), state.and_then(|state| state.snoozed_until).map_or(Value::Null, json::date));
         fields.insert("returned".into(), state.and_then(|state| state.returned).map_or(Value::Null, json::date));
         fields.insert("follow_up".into(), state.and_then(|state| state.follow_up).map_or(Value::Null, json::date));
+        fields.insert("bounced".into(), bounced(state));
     }
     Ok(shown)
+}
+
+/// What a delivery report said of a message the owner sent: the report and the reason, or `null`.
+fn bounced(state: Option<&MessageState>) -> Value {
+    state.and_then(|state| state.bounced.as_ref()).map_or(Value::Null, |bounce| json!({ "report": bounce.report.get(), "reason": bounce.reason }))
 }
 
 /// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the
@@ -209,6 +215,7 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
         fields.insert("in_reply_to".into(), json!(envelope.in_reply_to().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
+        fields.insert("bounced".into(), bounced(Some(&store.message_state(id)?)));
     }
     let body_error = if too_large {
         Some("too_large")
