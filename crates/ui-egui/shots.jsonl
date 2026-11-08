@@ -163,6 +163,8 @@
 {"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
 {"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "list"}
 {"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
+{"out": "docs/images/settings-notifications-light.png", "mode": "light", "size": [1400, 860], "notifications": true}
+{"out": "docs/images/settings-notifications-dark.png", "mode": "dark", "size": [1400, 860], "notifications": true}
 # Done, park, pin, snooze and follow-up (E3.3, E3.5, E3.7): Later from the rail on the snoozed pile and on the pins,
 # the inbox with "Show done" (a done message dimmed, one back from a snooze marked), the time picker of Snooze with a
 # typed time, and the reminder picker over a sent message.

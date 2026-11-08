@@ -34,9 +34,9 @@
 use std::collections::BTreeMap;
 
 use inboxcraft_engine::appearance::Appearance;
-use inboxcraft_engine::notify::Notice;
+use inboxcraft_engine::notify::{Level, Notice, Settings as NotifySettings};
 use inboxcraft_engine::{Applied, Caller, EngineError, Hold, MAX_HISTORY, MAX_LIST, ScreenerMode, Session};
-use inboxcraft_model::{Account, Role};
+use inboxcraft_model::{Account, AccountId, Role};
 use inboxcraft_time::{CivilDateTime, Clock, Offset, Timestamp, Weekday};
 use serde_json::{Value, json};
 
@@ -1988,11 +1988,53 @@ impl Mailbox {
             self.session.set_send_hold(hold);
         }
     }
+
+    /// What tells the owner: each account's level, returned snoozes and follow-up reminders.
+    #[must_use]
+    pub fn notify_settings(&self) -> &NotifySettings {
+        self.session.notify_settings()
+    }
+
+    /// Which new mail of `account` notifies the owner.
+    #[must_use]
+    pub fn notify_level(&self, account: u64) -> Level {
+        self.session.notify_settings().level(AccountId::new(account))
+    }
+
+    /// Notifies the owner of `level` of the new mail of `account` (`notify.set`); an account that is gone is refused,
+    /// in the error banner.
+    pub fn set_notify_level(&mut self, account: u64, level: Level) {
+        self.notify_set(&json!({ "account": account, "level": level.name() }));
+    }
+
+    /// Whether a snoozed message that comes back notifies the owner (`notify.set`).
+    pub fn set_notify_returns(&mut self, on: bool) {
+        self.notify_set(&json!({ "returns": on }));
+    }
+
+    /// Whether a follow-up reminder that fires notifies the owner (`notify.set`).
+    pub fn set_notify_reminders(&mut self, on: bool) {
+        self.notify_set(&json!({ "reminders": on }));
+    }
+
+    fn notify_set(&mut self, params: &Value) {
+        if let Err(error) = self.run("notify.set", params) {
+            self.fail(error);
+        }
+    }
+
+    /// Takes the notification choices kept from an earlier run.
+    pub(crate) fn restore_notify(&mut self, settings: NotifySettings) {
+        self.session.set_notify_settings(settings);
+    }
 }
 
 #[cfg(test)]
 #[path = "later_tests.rs"]
 mod later_tests;
+#[cfg(test)]
+#[path = "notify_tests.rs"]
+mod notify_tests;
 #[cfg(test)]
 #[path = "outbox_tests.rs"]
 mod outbox_tests;

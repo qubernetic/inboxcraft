@@ -38,6 +38,7 @@ use inboxcraft_ui_egui::{InboxApp, UiError, sample};
 pub mod accounts;
 pub mod autostart;
 pub mod control;
+pub mod desk;
 pub mod desktop;
 pub mod instance;
 pub mod notify;
@@ -258,6 +259,12 @@ pub fn set_autostart(
             1
         }
     }
+}
+
+/// Where the owner's choice to run in the background is kept: [`desk::FILE`] beside the appearance's file.
+#[must_use]
+pub fn background_file() -> Option<PathBuf> {
+    KeepFile::of_owner().map(|file| file.path().with_file_name(desk::FILE))
 }
 
 /// Where the owner's appearance choices are kept: the file in their config folder, or nowhere without one.

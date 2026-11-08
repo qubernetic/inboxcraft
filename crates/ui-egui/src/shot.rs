@@ -20,7 +20,9 @@
 //! (the certificate refused); the check is scripted and nothing connects; it shows on the settings sheet's Accounts
 //! page. `settings` set to `true` shows the appearance settings page, `accounts` set to `true` the Accounts page,
 //! `shortcuts` set to `true` the Shortcuts page, where `capture` names the action waiting for a key
-//! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page. `palette` opens the command palette with that text
+//! (`ui.calendar.show`), `sending` set to `true` the Sending page, `triage` set to `true` the Triage page,
+//! `notifications` set to `true` the Notifications page (Studio notifying of people only, and a desk that runs in the
+//! background and starts with the computer, [`PicturedDesk`]). `palette` opens the command palette with that text
 //! typed (`""` for the whole list), and `calendar` set to `true` shows the calendar screen (with `first`, its empty
 //! state), `calendar_view` shows it in a view (`day`, `week`, `month` or `agenda`) and `event` picks the event with
 //! that summary, whose details show in the side panel; `edit_event` opens the event editor on a `new` event or, with
@@ -152,6 +154,9 @@ pub struct Shot {
     /// Whether the settings sheet is open on Triage.
     #[serde(default)]
     pub triage: Option<bool>,
+    /// Whether the settings sheet is open on Notifications.
+    #[serde(default)]
+    pub notifications: Option<bool>,
     /// How the unified inbox shows its groups: `cards` when left out, `list` or `simple`.
     #[serde(default)]
     pub view: Option<String>,
@@ -382,6 +387,12 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         let appearance = *app.appearance();
         app.settings_mut().open_at(crate::settings::Section::Triage, &appearance);
     }
+    if shot.notifications == Some(true) {
+        app.mailbox_mut().set_notify_level(2, inboxcraft_engine::notify::Level::People);
+        app.set_desk(Box::new(PicturedDesk));
+        let appearance = *app.appearance();
+        app.settings_mut().open_at(crate::settings::Section::Notifications, &appearance);
+    }
     if shot.sending == Some(true) {
         sign(app);
         let appearance = *app.appearance();
@@ -402,6 +413,35 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         palette.set_query(text);
     }
     Ok(())
+}
+
+/// The desk of the pictures: InboxCraft runs in the background and starts with the computer, and a change changes
+/// nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PicturedDesk;
+
+impl crate::desk::Desk for PicturedDesk {
+    fn background(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn set_background(&mut self, _on: bool) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn login(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn asking(&self) -> bool {
+        false
+    }
+
+    fn set_login(&mut self, _on: bool) {}
+
+    fn answer(&mut self) -> Option<Result<(), String>> {
+        None
+    }
 }
 
 /// Signs the first account's messages with an invented signature.
@@ -547,6 +587,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.shortcuts.is_some()
         || shot.sending.is_some()
         || shot.triage.is_some()
+        || shot.notifications.is_some()
         || shot.view.is_some()
         || shot.compose.is_some()
         || shot.capture.is_some()

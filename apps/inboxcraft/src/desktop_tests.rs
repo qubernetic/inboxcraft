@@ -74,6 +74,23 @@ fn a_window_that_ends_when_closed_ends_inboxcraft() {
 }
 
 #[test]
+fn the_owner_s_choice_to_run_in_the_background_decides_what_closing_the_window_does() {
+    use std::sync::atomic::Ordering;
+
+    let (mut desktop, _send) = desktop();
+    let stays = desktop.stays();
+    assert!(stays.load(Ordering::SeqCst));
+    stays.store(false, Ordering::SeqCst);
+    let ctx = egui::Context::default();
+    tick(&mut desktop, &ctx, true);
+    assert!(desktop.is_quitting(), "turned off on the Notifications page, closing ends InboxCraft");
+    let (send, heard) = mpsc::channel::<Request>();
+    let desktop = Desktop::new(sample_app(), heard).closing_ends();
+    assert!(!desktop.stays().load(Ordering::SeqCst));
+    drop(send);
+}
+
+#[test]
 fn a_second_start_opens_the_window_again() {
     let (mut desktop, send) = desktop();
     let ctx = egui::Context::default();

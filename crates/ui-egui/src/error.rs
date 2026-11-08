@@ -20,6 +20,8 @@ pub enum UiError {
     Picture(String),
     /// The appearance choices could not be kept on disk.
     Keep(String),
+    /// Running in the background or starting with the computer could not be changed.
+    Desk(String),
     /// A command answered in a shape the front end does not read.
     Answer {
         /// The command.
@@ -44,6 +46,7 @@ impl fmt::Display for UiError {
             Self::Shot(detail) => write!(f, "ui_shot: {detail}"),
             Self::Picture(detail) => write!(f, "{detail}"),
             Self::Keep(detail) => write!(f, "the appearance could not be kept: {detail}"),
+            Self::Desk(detail) => write!(f, "{detail}"),
             Self::Answer { command, detail } => write!(f, "{command} answered in an unexpected shape: {detail}"),
         }
     }
@@ -53,7 +56,7 @@ impl std::error::Error for UiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Engine(error) => Some(error),
-            Self::Sample(_) | Self::Shot(_) | Self::Picture(_) | Self::Keep(_) | Self::Answer { .. } => None,
+            Self::Sample(_) | Self::Shot(_) | Self::Picture(_) | Self::Keep(_) | Self::Desk(_) | Self::Answer { .. } => None,
         }
     }
 }

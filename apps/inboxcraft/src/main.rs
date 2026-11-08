@@ -8,18 +8,21 @@
 //! the Background portal to let it run without a window. On Linux, what the engine has to tell the owner shows as
 //! notifications (through the notification portal in the Flatpak). The CLI and the MCP server reach it through the control
 //! channel ([`inboxcraft::control`]), with the token in the credential store. Closing the window leaves it running
-//! ([`Desktop`]); a new window opens on the same app when a later start or the tray asks for one.
+//! ([`Desktop`]) unless the owner turned that off on the Notifications page ([`OwnerDesk`], which also starts
+//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use inboxcraft::accounts::{Entries, OsEntries};
 use inboxcraft::control::Listening;
+use inboxcraft::desk::OwnerDesk;
 use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
 use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
@@ -171,13 +174,27 @@ fn owner(background: bool) -> ExitCode {
         }
     };
     let mut desktop = Desktop::new(app, heard);
+    let kept = inboxcraft::background_file();
+    // Closing the window leaves InboxCraft running unless the owner turned that off on the Notifications page.
+    desktop.stays().store(kept.as_deref().is_none_or(inboxcraft::desk::kept), Ordering::SeqCst);
     if background {
         desktop = desktop.without_window();
     }
     let (desktop, tray) = linux::desktop(desktop, &send, &wake);
     let (desktop, control) = control(desktop, &wake);
     // Closing the window ends InboxCraft when nothing could bring a window back.
-    let desktop = if reachable || tray { desktop } else { desktop.closing_ends() };
+    let comes_back = reachable || tray;
+    let mut desktop = if comes_back { desktop } else { desktop.closing_ends() };
+    let program = std::env::current_exe().unwrap_or_else(|_| "inboxcraft".into());
+    let mut desk = OwnerDesk::new(desktop.stays(), kept, inboxcraft::autostart::autostart_dir(), program);
+    if !comes_back {
+        desk = desk.without_background();
+    }
+    #[cfg(target_os = "linux")]
+    if inboxcraft::autostart::sandboxed() {
+        desk = desk.with_portal(Arc::new(linux::ask), Arc::clone(&wake));
+    }
+    desktop.app_mut().set_desk(Box::new(desk));
     drop(send);
     let ended = windows(desktop, &shown);
     drop(control);

@@ -72,8 +72,10 @@ notification service (in the Flatpak, its notification portal), which runs on yo
 
 Your desktop may keep notifications in its list until you clear it, and its own settings for InboxCraft decide
 whether they show on the lock screen. You can choose per account to be told of all new mail, of the people you know,
-or of nothing (`notify.set`); for now, that choice lasts only until InboxCraft restarts, and each start begins with
-every account told of all new mail.
+or of nothing, and whether snoozed mail that comes back and follow-up reminders tell you (`notify.set`, the
+Notifications page of the settings). The window keeps these choices in `notify.json` beside `appearance.json` in your
+config folder; the file names each account by its number only, never by its address. The sample window keeps none.
+Whether closing the window leaves InboxCraft running is kept in `background.json` beside them, and nothing else is.
 
 Removing an account ("Change settings") removes its folders, messages, drafts, calendars, schedule entries and the
 work still queued for it; the draft copies already in the account's Drafts folder on the server stay. What

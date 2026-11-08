@@ -4,7 +4,8 @@
 //! The settings sheet: whether it is open and on which page, the four colours of the custom accent as the owner types them,
 //! and what the engine said about the last ones it took; on the Shortcuts page, the text that narrows the list, the
 //! action waiting for a key and what giving the last key changed; on the Sending page, the signatures as typed until
-//! they are saved (`compose.signature`).
+//! they are saved (`compose.signature`); on the Notifications page, why the last change of starting with the computer
+//! was not done.
 //!
 //! The sheet has one open state: every way out (its Close button, Escape, a press beside it, a rail button or a key
 //! that shows another place) goes through [`Settings::close`], which forgets everything the open sheet held, so it
@@ -41,6 +42,9 @@ pub enum Section {
     Sending,
     /// The screener's mode, how the inbox shows its groups, and each account's grouping.
     Triage,
+    /// Which new mail of each account notifies, returned snoozes and reminders, running in the background and
+    /// starting with the computer.
+    Notifications,
 }
 
 /// The settings sheet.
@@ -58,6 +62,8 @@ pub struct Settings {
     keys_note: Option<String>,
     /// The signatures as typed on the Sending page, by account; an account not in it shows the one it has.
     signatures: BTreeMap<u64, String>,
+    /// Why the last change of starting with the computer was not done, on the Notifications page.
+    login_note: Option<String>,
 }
 
 /// `colour` as `#rrggbb`.
@@ -105,6 +111,18 @@ impl Settings {
         self.find.clear();
         self.keys_note = None;
         self.signatures.clear();
+        self.login_note = None;
+    }
+
+    /// Why the last change of starting with the computer was not done, while the sheet is open.
+    #[must_use]
+    pub fn login_note(&self) -> Option<&str> {
+        self.login_note.as_deref()
+    }
+
+    /// Says why the last change of starting with the computer was not done; `None` when it was.
+    pub fn set_login_note(&mut self, note: Option<String>) {
+        self.login_note = note;
     }
 
     /// The signature of `account` as typed on the Sending page, to type in: `kept`, the one it has, until it is
