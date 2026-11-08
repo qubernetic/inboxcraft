@@ -8,7 +8,6 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{item, show};
 use crate::component::tests::{builder, drew_icon, theme};
-use crate::glass::Under;
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion;
@@ -21,7 +20,7 @@ fn harness() -> Harness<'static, (Vec<&'static str>, Keymap)> {
     let mut harness = builder().build_ui_state(
         move |ui, (chosen, keymap): &mut (Vec<&'static str>, Keymap)| {
             motion::set_reduced(ui.ctx(), true);
-            let picked = show(ui.ctx(), &theme, Id::unique("menu"), pos2(40.0, 30.0), Under::Sharp, 220.0, |ui| {
+            let picked = show(ui.ctx(), &theme, Id::unique("menu"), pos2(40.0, 30.0), 220.0, |ui| {
                 let mut picked = None;
                 for (icon, name, action) in [(IconId::Snooze, "Snooze", Some("mail.snooze")), (IconId::Flag, "Flag", None)] {
                     if item(ui, &theme, keymap, icon, name, action).clicked() {
@@ -88,7 +87,7 @@ fn the_rows_stand_one_under_the_other_even_inside_a_row() {
     let theme = theme();
     let harness = builder().build_ui(move |ui| {
         ui.horizontal(|ui| {
-            super::panel(ui, &theme, Under::Fading, 200.0, |ui| {
+            super::panel(ui, &theme, 200.0, |ui| {
                 item(ui, &theme, &Keymap::default(), IconId::Snooze, "Snooze", None);
                 item(ui, &theme, &Keymap::default(), IconId::Flag, "Flag", None);
             });
@@ -103,7 +102,7 @@ fn the_rows_stand_one_under_the_other_even_inside_a_row() {
 fn choice_rows_mark_the_chosen_one_and_entries_line_up_with_items() {
     let theme = theme();
     let harness = builder().build_ui(move |ui| {
-        super::panel(ui, &theme, Under::Sharp, 220.0, |ui| {
+        super::panel(ui, &theme, 220.0, |ui| {
             item(ui, &theme, &Keymap::default(), IconId::Snooze, "Snooze", None);
             super::entry(ui, &theme, &Keymap::default(), "Full width", None);
             super::choice(ui, &theme, "Show the next message", true);

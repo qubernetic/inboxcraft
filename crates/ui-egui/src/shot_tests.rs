@@ -109,6 +109,7 @@ fn the_component_gallery_is_drawn_in_the_tokens_of_its_preset_and_mode() {
             let avatar = crate::component::avatar::colour(&theme, "odile@example.org");
             assert!(colours.contains(&avatar.to_array()), "{id} {name}: the avatars in their palette");
             assert!(colours.contains(&theme.palette.selection.to_array()), "{id} {name}: the selected pill on the selection");
+            assert!(colours.contains(&theme.palette.float.to_array()), "{id} {name}: the floats solid");
             pictures.push(picture);
         }
     }

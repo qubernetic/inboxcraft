@@ -167,12 +167,9 @@ pub struct Palette {
     pub glass_highlight: Color32,
     /// The soft shadow under glass and floats.
     pub shadow: Color32,
-    /// What floats over content that fades before it (hover actions over a row, toasts): about 80 % opaque, so a
-    /// little of the colour behind glows through.
+    /// Everything that pops up over content (menus, tooltips, popups, hover actions, toasts, the command palette, the
+    /// event editor): solid, so text under it never shows through.
     pub float: Color32,
-    /// What floats over sharp text that cannot fade (menus and tooltips over the reader): the same colour, opaque
-    /// enough that the text under it shows at no more than [`GHOST`].
-    pub float_over_text: Color32,
     /// Separators between rows.
     pub line: Color32,
     /// Laid over a hovered row.
@@ -533,9 +530,6 @@ const DARK: Neutrals = Neutrals {
 pub(crate) const SPACING: Spacing =
     Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
 
-/// The most contrast text under a float over sharp text may keep: barely there.
-pub const GHOST: f32 = 1.2;
-
 /// The font tokens at 100 %.
 const FONTS: Fonts = Fonts {
     caption: Font::sans(12.0, Weight::Regular),
@@ -660,18 +654,16 @@ impl Palette {
             Mode::Light => alpha(shade, 0.045),
             Mode::Dark => alpha(sheer, 0.06),
         };
-        let float_base = mix(n.float, middle, n.tint * 1.5);
-        let float = alpha(float_base, 0.8);
+        let float = mix(n.float, middle, n.tint * 1.5);
         let colour_fields = preset.gradient.map(|stop| alpha(stop, n.fields));
-        // What text can sit on: the opaque surfaces, glass and the cards on it (hovered or not) over the colour fields,
-        // the selection (hovered or not), and a float over the fields, the full gradient or itself.
+        // What text can sit on: the opaque surfaces, the float, the selection (hovered or not), and glass and the cards
+        // on it (hovered or not) over the colour fields.
         let mut backdrops = vec![background];
         backdrops.extend(colour_fields.map(|colour| over(colour, background)));
         let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
-        let mut surfaces = vec![background, panel, surface, field, selection, float_base];
+        let mut surfaces = vec![background, panel, surface, field, selection, float];
         surfaces.push(over(hover, selection));
         surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind), over(hover, over(card, *behind))]));
-        surfaces.extend(backdrops.iter().chain(preset.gradient.iter()).map(|behind| over(float, *behind)));
         let text = readable(mix(n.text, middle, 0.06), &surfaces, 4.5, mode);
         let muted = readable(mix(n.muted, middle, 0.08), &surfaces, 4.5, mode);
         let accent = match mode {
@@ -687,9 +679,6 @@ impl Palette {
         let accounts = [first, middle, last, preset.accent, mix(first, middle, 0.5), mix(middle, last, 0.5)]
             .map(|colour| readable(colour, &[background, panel, surface], 3.0, mode));
         let events = accounts.map(|colour| event_tint(colour, n.event, text, &glassy));
-        let mut sharp = vec![background, panel, surface];
-        sharp.extend(glassy);
-        let float_over_text = quieting(float_base, 0.8, &[text, muted, accent], &sharp);
         let (rail, rail_ink) = rail_stops(preset.gradient);
         Self {
             background,
@@ -739,7 +728,6 @@ impl Palette {
                 Mode::Dark => alpha(shade, 0.35),
             },
             float,
-            float_over_text,
             line: match mode {
                 Mode::Light => alpha(shade, 0.07),
                 Mode::Dark => alpha(sheer, 0.06),
@@ -867,8 +855,8 @@ impl Theme {
         visuals.override_text_color = Some(p.text);
         visuals.weak_text_color = Some(p.muted);
         visuals.panel_fill = p.panel;
-        // Menus, tooltips and popups float over whatever is there, the reader's sharp text too.
-        visuals.window_fill = p.float_over_text;
+        // Menus, tooltips and popups float over whatever is there, on the solid float.
+        visuals.window_fill = p.float;
         visuals.window_stroke = Stroke::new(1.0, p.field_border);
         visuals.window_corner_radius = corner;
         visuals.menu_corner_radius = corner;
@@ -957,16 +945,6 @@ fn event_tint(colour: Color32, most: f32, text: Color32, glassy: &[Color32]) -> 
     let reads = |strength: f32| glassy.iter().all(|behind| contrast(text, over(alpha(colour, strength), *behind)) >= 4.5);
     let strength = (0..steps).map(|step| most - f32::from(step) * STEP).find(|strength| reads(*strength)).unwrap_or(LEAST);
     alpha(colour, strength)
-}
-
-/// `colour` at the least opacity from `from` up that keeps every ink in `inks`, sitting on any of `on`, at no more
-/// than [`GHOST`] under it; opaque when nothing less does.
-fn quieting(colour: Color32, from: f32, inks: &[Color32], on: &[Color32]) -> Color32 {
-    const STEPS: u8 = 40;
-    (0..=STEPS)
-        .map(|step| alpha(colour, from + (1.0 - from) * f32::from(step) / f32::from(STEPS)))
-        .find(|float| on.iter().all(|behind| inks.iter().all(|ink| contrast(over(*float, *ink), over(*float, *behind)) <= GHOST)))
-        .unwrap_or(colour)
 }
 
 /// `colour`, moved towards black in light mode or white in dark mode just far enough to reach `ratio` against

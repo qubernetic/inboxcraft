@@ -28,7 +28,7 @@ use crate::component::field;
 use crate::component::pill;
 use crate::component::switch::switch;
 use crate::component::tooltip;
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{Action, Keymap};
@@ -1025,7 +1025,7 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
         // The float's shadow and edge, then solid surfaces: nothing of the window shows through the text.
-        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole, Under::Fading));
+        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole));
         ui.painter().rect_filled(whole.shrink(1.0), s.card, p.surface);
         let nav_width = NAV.min(whole.width() * 0.3);
         let left = Rect::from_min_size(whole.min, vec2(nav_width, whole.height())).shrink(1.0);

@@ -6,7 +6,7 @@
 
 use egui::{Align2, Area, Context, Id, Order, Pos2, Shape, Ui, vec2};
 
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
@@ -42,7 +42,7 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
             }
         });
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, Under::Fading);
+    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
     ui.painter().set(slot, Shape::Vec(shapes));
     undone
 }

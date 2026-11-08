@@ -44,7 +44,7 @@ use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
 use crate::component::{badge, popup};
 use crate::compose::Answer;
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, GroupKind, Mailbox};
@@ -196,7 +196,7 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     let response = button.show(ui, theme, keymap);
     let width = theme.fonts.body.size * MENU_WIDTH;
     Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             ui.label(RichText::new(tr!("Move to")).font(theme.fonts.caption.id()).color(theme.palette.muted));
             for folder in mailbox.move_targets(id) {
                 // The full path, so a folder inside another says where it is.
@@ -243,7 +243,7 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
     }
     let width = theme.fonts.body.size * PICKER_WIDTH;
     Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
             let ask = Ask { title, confirm, alert: None, presets: &presets };
             let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
@@ -332,7 +332,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                 let width = theme.fonts.body.size * MENU_WIDTH;
                 Popup::menu(&response)
                     .frame(Frame::NONE)
-                    .show(|ui| popup::panel(ui, theme, Under::Sharp, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                    .show(|ui| popup::panel(ui, theme, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
             });
         });
     });
@@ -932,7 +932,7 @@ fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
                 ui.set_max_width((rect.width() - s.m * 2.0 - s.s * 2.0).max(1.0));
                 ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).truncate());
             });
-            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, Under::Sharp);
+            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
             ui.painter().set(slot, Shape::Vec(shapes));
         });
 }

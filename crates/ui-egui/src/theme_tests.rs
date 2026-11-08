@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, BLACK, DARK, Face, Font, GHOST, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
+    AVATARS, BLACK, DARK, Face, Font, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight,
     contrast, font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
 };
 use crate::iconset::IconSet;
@@ -210,11 +210,13 @@ fn no_teal_or_coral_is_left() {
 }
 
 #[test]
-fn glass_float_and_colour_fields_are_translucent_and_the_float_about_four_fifths() {
+fn glass_cards_and_colour_fields_are_translucent_and_the_float_is_solid() {
     for theme in all() {
         let p = theme.palette;
         for (name, colour) in [
             ("glass", p.glass),
+            ("card", p.card),
+            ("control edge", p.control_edge),
             ("glass edge", p.glass_edge),
             ("window edge", p.window_edge),
             ("scrim", p.scrim),
@@ -225,7 +227,7 @@ fn glass_float_and_colour_fields_are_translucent_and_the_float_about_four_fifths
         ] {
             assert!(colour.a() < 255 && colour.a() > 0, "{} {:?} {name}: alpha {}", theme.preset.id, theme.mode, colour.a());
         }
-        assert!((195..=215).contains(&p.float.a()), "{} {:?} float alpha {}", theme.preset.id, theme.mode, p.float.a());
+        assert_eq!(p.float.a(), 255, "{} {:?} float alpha", theme.preset.id, theme.mode);
         for (index, field) in p.colour_fields.iter().enumerate() {
             assert!(field.a() > 0 && field.a() < 160, "{} {:?} colour field {index}", theme.preset.id, theme.mode);
         }
@@ -645,50 +647,36 @@ fn text_reads_on_glass_over_the_colour_fields_for_every_preset_in_both_modes() {
 }
 
 #[test]
-fn text_reads_on_a_float_over_anything_for_every_preset_in_both_modes() {
+fn text_reads_on_the_float_hovered_or_not_for_every_preset_in_both_modes() {
     for theme in all() {
         let p = theme.palette;
-        let mut behind = backdrops(&p);
-        behind.extend(p.gradient);
-        behind.extend([p.panel, p.surface]);
-        // The plain float sits only where the content under it fades; the other one over sharp text too.
-        let mut sharp = behind.clone();
-        sharp.extend([p.text, p.muted, p.accent]);
-        let floats = behind.into_iter().map(|under| (p.float, under)).chain(sharp.into_iter().map(|under| (p.float_over_text, under)));
-        for (float, under) in floats {
-            {
-                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
-                    let ratio = contrast(ink, over(float, under));
-                    assert!(ratio >= 4.5, "{} {:?} {name} on a float over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(under));
-                }
+        for under in [p.float, over(p.hover, p.float)] {
+            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
+                let ratio = contrast(ink, under);
+                assert!(ratio >= 4.5, "{} {:?} {name} on a float: {ratio:.2}", theme.preset.id, theme.mode);
             }
         }
     }
 }
 
 #[test]
-fn a_float_over_sharp_text_goes_more_opaque_until_the_text_under_it_is_quiet() {
+fn a_float_hides_whatever_lies_under_it_whatever_its_colour() {
     for theme in all() {
         let p = theme.palette;
-        assert!(p.float_over_text.a() > p.float.a(), "{} {:?}: more opaque than {}", theme.preset.id, theme.mode, p.float.a());
-        let mut surfaces = vec![p.background, p.panel, p.surface];
-        surfaces.extend(backdrops(&p).into_iter().map(|behind| over(p.glass, behind)));
-        for surface in surfaces {
-            for ink in [p.text, p.muted, p.accent] {
-                let ghost = contrast(over(p.float_over_text, ink), over(p.float_over_text, surface));
-                assert!(ghost <= GHOST, "{} {:?}: text under the float shows at {ghost:.2}", theme.preset.id, theme.mode);
-                let plain = contrast(over(p.float, ink), over(p.float, surface));
-                assert!(plain >= ghost, "the plain float hides less");
-            }
+        let mut under = backdrops(&p);
+        under.extend(p.gradient);
+        under.extend([p.panel, p.surface, p.text, p.muted, p.accent, BLACK, WHITE]);
+        for behind in under {
+            assert_eq!(over(p.float, behind), p.float, "{} {:?} over {}", theme.preset.id, theme.mode, hex(behind));
         }
     }
 }
 
 #[test]
-fn menus_and_tooltips_float_over_sharp_text_and_nothing_casts_an_egui_shadow() {
+fn menus_and_tooltips_are_on_the_solid_float_and_nothing_casts_an_egui_shadow() {
     for theme in all() {
         let visuals = theme.visuals();
-        assert_eq!(visuals.window_fill, theme.palette.float_over_text);
+        assert_eq!(visuals.window_fill, theme.palette.float);
         assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(theme.style().spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
