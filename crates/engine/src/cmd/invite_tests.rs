@@ -444,3 +444,28 @@ fn the_sent_answer_synced_back_leaves_the_invitation_current() {
     answer(&mut session, id, "tentative").unwrap();
     assert!(itip(&out(&mut session).raw).contains("PARTSTAT=TENTATIVE"));
 }
+
+/// The organiser's reminders are not the owner's: a first copy in the calendar carries none, a held copy keeps its own.
+#[test]
+fn the_organisers_reminders_stay_out_of_the_calendar() {
+    let mut session = session();
+    let alarm = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Odile says go\r\nTRIGGER:-PT2H\r\nEND:VALARM\r\n";
+    let id = arrive(&mut session, 40, "i1@example.org", &object("REQUEST", "lunch@example.org", 0, REQUEST_AT, alarm));
+    answer(&mut session, id, "accepted").unwrap();
+    let first = out(&mut session);
+    let [write] = first.writes.as_slice() else { panic!("{:?}", first.writes) };
+    let copy = put_text(write);
+    assert!(!copy.contains("VALARM") && !copy.contains("Odile says go"), "{copy}");
+    written(&mut session, &first);
+    // The owner sets a reminder of their own on the copy; a later answer keeps it, not the organiser's.
+    let in_calendar = CalendarEventId::new(show(&mut session, id)["calendar_event"].as_u64().unwrap());
+    let mut held = session.store().calendar_event(in_calendar).unwrap().unwrap();
+    let own = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Anna's own\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\nEND:VEVENT";
+    held.ical = held.ical.replacen("END:VEVENT", own, 1);
+    crate::test_support::change(&mut session, Change::PutCalendarEvent(held));
+    answer(&mut session, id, "tentative").unwrap();
+    let second = out(&mut session);
+    let [write] = second.writes.as_slice() else { panic!("{:?}", second.writes) };
+    let copy = put_text(write);
+    assert!(copy.contains("Anna's own") && !copy.contains("Odile says go"), "{copy}");
+}

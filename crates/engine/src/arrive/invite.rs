@@ -218,8 +218,9 @@ pub(crate) fn reply(calendar: &Calendar, event: &Event, owner: &Owner, answer: R
 }
 
 /// The invitation `calendar` as it goes into the owner's calendar after `answer`: no `METHOD`, the events of its
-/// `UID` with the owner's answer, the reminders the owner set on the copy held (`held`) kept, and nobody mailed by a
-/// server that schedules on its own (`SCHEDULE-AGENT=CLIENT`). `None` when it cannot be written.
+/// `UID` with the owner's answer, the reminders the owner set on the copy held (`held`) kept and the organiser's left
+/// out, and nobody mailed by a server that schedules on its own (`SCHEDULE-AGENT=CLIENT`). `None` when it cannot be
+/// written.
 pub(crate) fn copy(calendar: &Calendar, uid: &str, held: Option<&Calendar>, owner: &Owner, answer: Rsvp) -> Option<String> {
     let mut object = calendar.clone();
     object.method = None;
@@ -231,9 +232,9 @@ pub(crate) fn copy(calendar: &Calendar, uid: &str, held: Option<&Calendar>, owne
             Some(listed) => *listed = answered,
             None => event.attendees.push(answered),
         }
-        if let Some(was) = held.and_then(|held| held.events.iter().find(|was| was.uid == event.uid && was.recurrence_id == event.recurrence_id)) {
-            event.alarms.clone_from(&was.alarms);
-        }
+        // The reminders are the owner's: those on the copy held, else none.
+        let was = held.and_then(|held| held.events.iter().find(|was| was.uid == event.uid && was.recurrence_id == event.recurrence_id));
+        event.alarms = was.map(|was| was.alarms.clone()).unwrap_or_default();
         crate::calendar::unscheduled(event);
     }
     object.write().ok()

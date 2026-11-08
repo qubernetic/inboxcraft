@@ -175,7 +175,8 @@ An invitation in a message changes nothing by itself. Only when you press Going,
 answer, at once, from that account to the organiser the invitation names: a short message whose calendar part says the
 event's id, version, start and title, the organiser, and you with your answer. The other guests are not named in it.
 Going and Maybe put the event into the account's first calendar on your CalDAV server, No takes it out; Remove from
-calendar on a cancellation takes it out too.
+calendar on a cancellation takes it out too. The reminders the organiser put in the invitation stay out of your
+calendar; the ones you set on the event there are kept.
 
 ## Scripts and agents
 The control channel, through which the command-line client and the MCP server reach the running app, is a socket in
