@@ -6,7 +6,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::{
-    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, MessageState, OutboxState, Outgoing, Scheduled, Screening, Sender,
+    Alert, Bounce, Calendar, CalendarEvent, Draft, DraftCopy, Due, Group, Invitation, ItipMethod, MessageState, OutboxState, Outgoing, Rsvp,
+    Scheduled, Screening, Sender,
 };
 use crate::{AccountId, AlertId, CalendarEventId, CalendarId, DraftId, EmailAddress, FolderId, MessageId, MessageRef, ScheduleId, Uid, UidValidity};
 
@@ -34,12 +35,14 @@ fn draft() -> Draft {
         references: vec![MessageRef::new("root@example.org").unwrap(), MessageRef::new("a.1@example.org").unwrap()],
         forwards: Some(MessageId::new(5)),
         blanks: vec!["[[the date]]".to_owned()],
+        calendar: Some("BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n".to_owned()),
         ..Draft::new(DraftId::new(3), AccountId::new(1), at(1_000))
     }
 }
 
 #[test]
 fn a_new_draft_is_empty() {
+    assert_eq!(Draft::new(DraftId::new(3), AccountId::new(1), at(1_000)).calendar, None);
     let draft = Draft::new(DraftId::new(3), AccountId::new(1), at(1_000));
     assert_eq!((draft.id, draft.account, draft.saved), (DraftId::new(3), AccountId::new(1), at(1_000)));
     assert!(draft.to.is_empty() && draft.cc.is_empty() && draft.bcc.is_empty());
@@ -94,7 +97,14 @@ fn every_record_reads_back() {
         follow_up: Some(at(4_000)),
         returned: Some(at(2_000)),
         bounced: Some(Bounce { report: MessageId::new(9), reason: "bela@example.org: 550 5.1.1 The mailbox does not exist".to_owned() }),
+        invitation: Some(Box::new(invitation())),
     });
+    for method in [ItipMethod::Request, ItipMethod::Cancel, ItipMethod::Reply, ItipMethod::Other] {
+        for answer in [None, Some(Rsvp::Accepted), Some(Rsvp::Tentative), Some(Rsvp::Declined)] {
+            round_trip(&Invitation { method, answer, ..invitation() });
+        }
+    }
+    round_trip(&Invitation::new(ItipMethod::Cancel, "lunch@example.org"));
     round_trip(&Calendar {
         id: CalendarId::new(2),
         account: AccountId::new(1),
@@ -130,6 +140,27 @@ fn left_out_fields_take_their_defaults() {
     assert_eq!(outgoing, Outgoing::new(DraftId::new(3), OutboxState::Sending));
     let alert: Alert = serde_json::from_str(r#"{"id": 6, "event": 7, "at": [5000, 0]}"#).unwrap();
     assert!(!alert.dismissed);
+    let invitation: Invitation = serde_json::from_str(r#"{"method": "Request", "uid": "lunch@example.org"}"#).unwrap();
+    assert_eq!(invitation, Invitation::new(ItipMethod::Request, "lunch@example.org"));
+    let invitation: Invitation = serde_json::from_str("{}").unwrap();
+    assert_eq!(invitation, Invitation::new(ItipMethod::Other, ""));
+}
+
+/// An invitation to lunch, answered.
+fn invitation() -> Invitation {
+    Invitation {
+        recurrence: Some("20261107T110000Z".to_owned()),
+        sequence: 2,
+        stamp: Some(at(500)),
+        summary: Some("Lunch with Odile".to_owned()),
+        start: Some(at(1_000)),
+        end: Some(at(4_600)),
+        all_day: false,
+        repeat: Some("FREQ=WEEKLY".to_owned()),
+        location: Some("The Gull café".to_owned()),
+        answer: Some(Rsvp::Accepted),
+        ..Invitation::new(ItipMethod::Request, "lunch@example.org")
+    }
 }
 
 #[test]
@@ -144,6 +175,7 @@ fn a_message_state_is_empty_only_with_nothing_set() {
     assert!(MessageState::default().is_empty());
     assert!(!MessageState { pinned: true, ..MessageState::default() }.is_empty());
     assert!(!MessageState { done: Some(FolderId::new(1)), ..MessageState::default() }.is_empty());
+    assert!(!MessageState { invitation: Some(Box::new(Invitation::new(ItipMethod::Other, ""))), ..MessageState::default() }.is_empty());
 }
 
 /// Mail is private: a log or a panic message shows the shape of a draft or an event, never its words.
@@ -154,7 +186,12 @@ fn debug_shows_no_mail_text() {
         assert!(!shown.contains(private), "{private} in {shown}");
     }
     assert!(shown.contains("d3") || shown.contains("DraftId(3)"), "{shown}");
-    assert!(shown.contains("text_bytes: 29"), "{shown}");
+    assert!(shown.contains("text_bytes: 29") && shown.contains("calendar_bytes: Some(46)"), "{shown}");
+    let shown = format!("{:?}", MessageState { invitation: Some(Box::new(invitation())), ..MessageState::default() });
+    for private in ["Odile", "Gull", "lunch@"] {
+        assert!(!shown.contains(private), "{private} in {shown}");
+    }
+    assert!(shown.contains("sequence: 2") && shown.contains("Accepted"), "{shown}");
     let event = CalendarEvent {
         id: CalendarEventId::new(7),
         calendar: CalendarId::new(2),

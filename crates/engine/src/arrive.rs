@@ -11,7 +11,8 @@
 //! one's decision only in the plan.
 //!
 //! The grouped inbox's classifier lives here too (`group`), though it is no stage: a message's group is worked out
-//! when a list asks, so the owner's later choices and a body kept later count at once.
+//! when a list asks, so the owner's later choices and a body kept later count at once. Nor are invitations
+//! (`invite`): a message's invitation is read once its body is kept.
 
 use inboxcraft_model::{AccountId, FolderId, Message, Role};
 use inboxcraft_store::Storage;
@@ -53,6 +54,7 @@ macro_rules! stages {
 stages!(bounce, screener, snooze, followup, notify);
 
 pub(crate) mod group;
+pub(crate) mod invite;
 
 /// Runs every message of `messages`, which arrived as `arrival` says, through `stages` in order.
 pub(crate) fn arrived(stages: &[Stage], arrival: &Arrival<'_>, messages: &[Message], plan: &mut Plan) -> Result<(), EngineError> {

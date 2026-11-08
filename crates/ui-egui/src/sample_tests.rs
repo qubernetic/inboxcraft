@@ -5,7 +5,7 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, MESSAGES, mailbox, people, session};
+use super::{FOLDERS, INVITATIONS, MESSAGES, invitations, mailbox, people, session, session_over};
 use crate::component::avatar;
 use crate::theme::{AVATARS, Mode, PRESETS, Theme};
 
@@ -243,4 +243,27 @@ fn put_away_fills_every_pile_of_later_and_leaves_a_done_and_a_returned_message()
     assert!(mailbox.messages().iter().all(|row| row.subject != "Re: Soup recipe"), "done");
     mailbox.set_show_done(true);
     assert!(mailbox.messages().iter().any(|row| row.subject == "Re: Soup recipe" && row.done));
+}
+
+/// Odile's lunch: the first invitation, answered Going, is out of date; the update says what changed and waits for an
+/// answer, both in the Invitations group.
+#[test]
+fn the_sample_invitations_are_two_versions_of_one_lunch() {
+    let mut store = mailbox(now()).unwrap();
+    let mut batch = inboxcraft_store::Batch::new();
+    for change in invitations(now()).unwrap() {
+        batch.push(change);
+    }
+    store.apply(&batch).unwrap();
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    assert_eq!(INVITATIONS.len(), 2);
+    let first = u64::try_from(MESSAGES.len()).unwrap() + 1;
+    let update = session.run("invite.show", &json!({ "id": first + 1 })).unwrap()["invite"].clone();
+    assert_eq!((&update["outdated"], &update["answer"], &update["earlier_answer"]), (&json!(false), &Value::Null, &json!("accepted")));
+    assert_eq!((&update["changes"], &update["start"]), (&json!(["time"]), &json!("2026-11-07T12:30:00Z")));
+    let old = session.run("invite.show", &json!({ "id": first })).unwrap()["invite"].clone();
+    assert_eq!((&old["outdated"], &old["answer"]), (&json!(true), &json!("accepted")));
+    let listed = session.run("mail.list", &json!({ "account": 1, "group": "invitations" })).unwrap();
+    assert_eq!(listed["messages"].as_array().unwrap().len(), 2);
+    assert!(session.take_jobs().is_empty(), "the sample fetches nothing");
 }

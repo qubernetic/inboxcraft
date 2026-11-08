@@ -48,6 +48,7 @@ pub mod gradient;
 pub mod i18n;
 pub mod icons;
 pub mod iconset;
+pub mod invite;
 pub mod keep;
 pub mod keymap;
 pub mod mailbox;

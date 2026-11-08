@@ -60,6 +60,8 @@ const fn point(id: IconId) -> char {
         IconId::Previous => '\u{e138}',  // caret-left
         IconId::Next => '\u{e13a}',      // caret-right
         IconId::Globe => '\u{e288}',     // globe
+        IconId::Changed => '\u{e094}',   // arrows-clockwise
+        IconId::Older => '\u{e1a0}',     // clock-counter-clockwise
     }
 }
 

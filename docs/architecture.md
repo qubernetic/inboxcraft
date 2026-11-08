@@ -249,13 +249,31 @@ drops the account's calendars and every calendar write of it in the queue; a dis
 the app starts a worker afresh when an account's servers change, and a `Found` from another origin, a `Found` for an
 account without an address and an event URL outside its calendar's collection are dropped.
 
+Invitations in mail (iTIP, RFC 5546, in mail, iMIP, RFC 6047) are read once a message's body is kept: the sync hands
+the body to `arrive::invite`, which reads its first `text/calendar` part of its own with `ical` and marks the message
+(`MessageState::invitation`: the method, the event's `UID`, `RECURRENCE-ID`, `SEQUENCE` and `DTSTAMP`, the title,
+times, repeat rule and place, and the owner's answer); mail in the Blocked folder is not read, and a body kept before
+is read when its card is first asked for. Marks with the same `UID` and `RECURRENCE-ID` in one account are versions of
+one event, the later one the higher `SEQUENCE`, then the later `DTSTAMP`. `invite.show` (`safe`) gives the card: the
+version before and what changed since, whether a later version made it out of date, the answer given, the event in
+the owner's calendars by its `UID`, and whether it can be answered. `invite.answer` (`owner`) builds the owner's
+`METHOD:REPLY` (only the owner among the attendees, with `PARTSTAT`) into a draft with the iTIP object as its
+`text/calendar; method=REPLY` part beside the text (`Draft::calendar`, `MessageBuilder::calendar`), sends it at once
+with the checks `mail.send` makes but without its hold (`cmd::send::sending`; the answer is taken back by changing
+it, not by `mail.unsend`), and writes the event into the account's first calendar
+(going or maybe; a copy held, a server's own included, is changed in place and keeps its reminders) or deletes it
+(not going), without a `METHOD` and with `SCHEDULE-AGENT=CLIENT`. `invite.remove` (`owner`) deletes the event a
+cancellation is about as `event.delete` does, with its undo window. Nothing in an invitation changes the calendar on
+its own.
+
 Drafts (`engine::draft`) are kept in the store at every change, so a kill loses nothing typed. `compose.new` starts
 one from the account that last sent (the newest message in a Sent folder, else the first account) with that
 account's signature below `-- `; `compose.update` changes the fields it is given and keeps the draft at once;
 `compose.show` and `compose.list` read them; `compose.discard` removes one here and its copy on the server where
 the server named it; all
 `safe`. A draft on its way (its outbox item waits for the worker's answer) is neither changed nor discarded, so the
-answer finds it as it went. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
+answer finds it as it went; the draft of an answer to an invitation (`invite.answer`) is not changed either, so it
+cannot go elsewhere or into the Drafts folder. `compose.signature` (`owner`) sets an account's signature. Recipients are kept as typed and checked as
 `Name <address>` or a bare address: one that cannot be an address is marked with what is wrong, and it blocks Send
 (`blocks`), like a draft without a recipient. `mail.thread` lists the drafts that answer a message of the thread.
 `Session::tick` hands a draft that changed and has been still for ten seconds to its account's worker as a kept

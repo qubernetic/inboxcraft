@@ -44,6 +44,22 @@ pub(crate) const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
 /// Why a draft on its way is not changed or discarded.
 const ON_ITS_WAY: &str = "the draft is on its way";
 
+/// Why a draft that answers an invitation is not changed: its calendar part names the owner's answer, and an edit could
+/// send it elsewhere or into the Drafts folder.
+const AN_ANSWER: &str = "the draft answers an invitation: answer it again from the invitation";
+
+/// The draft `id` for `command` to change: not one on its way, nor one that answers an invitation.
+fn changeable_draft(context: &Context<'_>, command: &'static str, id: u64) -> Result<Draft, EngineError> {
+    let draft = held_draft(context, id)?;
+    if draft::on_its_way(context.store(), draft.id)? {
+        return Err(EngineError::bad_params(command, ON_ITS_WAY));
+    }
+    if draft.calendar.is_some() {
+        return Err(EngineError::bad_params(command, AN_ANSWER));
+    }
+    Ok(draft)
+}
+
 /// `compose.new`: a new draft, kept at once.
 pub(crate) const NEW: CommandSpec = CommandSpec {
     id: "compose.new",
@@ -172,10 +188,7 @@ struct TemplateParams {
 
 fn use_template(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     let params: TemplateParams = decode_quietly(TEMPLATE.id, params)?;
-    let mut draft = held_draft(context, params.id)?;
-    if draft::on_its_way(context.store(), draft.id)? {
-        return Err(EngineError::bad_params(TEMPLATE.id, ON_ITS_WAY));
-    }
+    let mut draft = changeable_draft(context, TEMPLATE.id, params.id)?;
     let account = held_account(context, draft.account.get())?;
     let template = account.template(&params.name).ok_or_else(|| EngineError::bad_params(TEMPLATE.id, "the account has no template of that name"))?;
     crate::template::apply(template, &mut draft, &account);
@@ -218,10 +231,7 @@ fn update(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     if params.text.as_ref().is_some_and(|text| text.len() > MAX_TEXT_BYTES) {
         return Err(EngineError::bad_params(UPDATE.id, "the text is too long"));
     }
-    let mut draft = held_draft(context, params.id)?;
-    if draft::on_its_way(context.store(), draft.id)? {
-        return Err(EngineError::bad_params(UPDATE.id, ON_ITS_WAY));
-    }
+    let mut draft = changeable_draft(context, UPDATE.id, params.id)?;
     let mut outcome = Outcome::new(Value::Null);
     draft.to = params.to.unwrap_or(draft.to);
     draft.cc = params.cc.unwrap_or(draft.cc);

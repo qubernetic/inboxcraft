@@ -70,6 +70,10 @@ pub struct Draft {
     /// draft cannot be sent.
     #[serde(default)]
     pub blanks: Vec<String>,
+    /// An iTIP object (RFC 5546) that goes with it as its `text/calendar` part, the answer to an invitation; its
+    /// `METHOD` names the part's `method`.
+    #[serde(default)]
+    pub calendar: Option<String>,
 }
 
 /// Where the server keeps a copy of a draft.
@@ -104,6 +108,7 @@ impl Draft {
             references: Vec::new(),
             forwards: None,
             blanks: Vec::new(),
+            calendar: None,
         }
     }
 }
@@ -124,6 +129,7 @@ impl fmt::Debug for Draft {
             .field("threaded", &(self.in_reply_to.is_some(), self.references.len()))
             .field("forwards", &self.forwards)
             .field("blanks", &self.blanks.len())
+            .field("calendar_bytes", &self.calendar.as_ref().map(String::len))
             .finish()
     }
 }
@@ -265,6 +271,9 @@ pub struct MessageState {
     /// A message the owner sent that a delivery report says did not get through.
     #[serde(default)]
     pub bounced: Option<Bounce>,
+    /// The invitation the message carries, once its body was read.
+    #[serde(default)]
+    pub invitation: Option<Box<Invitation>>,
 }
 
 /// What a delivery report says of a message the owner sent: it failed, and why.
@@ -274,6 +283,98 @@ pub struct Bounce {
     pub report: MessageId,
     /// Why: each recipient it failed for, with the remote server's reply or the status code.
     pub reason: String,
+}
+
+/// What an iTIP message (RFC 5546) does, by its `METHOD`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItipMethod {
+    /// `REQUEST`: an invitation, new or changed.
+    Request,
+    /// `CANCEL`: the event, or the owner's place in it, is off.
+    Cancel,
+    /// `REPLY`: a guest's answer.
+    Reply,
+    /// Any other method (`PUBLISH`, `COUNTER`, `REFRESH` ...), or none.
+    #[default]
+    Other,
+}
+
+/// The owner's answer to an invitation, a `PARTSTAT` of RFC 5545.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Rsvp {
+    /// Going.
+    Accepted,
+    /// Maybe.
+    Tentative,
+    /// Not going.
+    Declined,
+}
+
+/// The invitation a message carries (iMIP, RFC 6047), as its body said once it was kept: the event by `UID`,
+/// `RECURRENCE-ID` and `SEQUENCE`, what the owner sees of it, and the owner's answer. `Debug` shows no words of it.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Invitation {
+    /// What it does.
+    #[serde(default)]
+    pub method: ItipMethod,
+    /// The event's `UID`.
+    #[serde(default)]
+    pub uid: String,
+    /// The one occurrence it is about, as its `RECURRENCE-ID` writes it; `None` for the whole event.
+    #[serde(default)]
+    pub recurrence: Option<String>,
+    /// The event's `SEQUENCE`: a higher one is a later version.
+    #[serde(default)]
+    pub sequence: u32,
+    /// Its `DTSTAMP`, which orders versions of one `SEQUENCE`.
+    #[serde(default, with = "optional")]
+    pub stamp: Option<Timestamp>,
+    /// The title.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// When it starts.
+    #[serde(default, with = "optional")]
+    pub start: Option<Timestamp>,
+    /// When it ends.
+    #[serde(default, with = "optional")]
+    pub end: Option<Timestamp>,
+    /// Whole days.
+    #[serde(default)]
+    pub all_day: bool,
+    /// Its repeat rule, as its `RRULE` writes it.
+    #[serde(default)]
+    pub repeat: Option<String>,
+    /// Where.
+    #[serde(default)]
+    pub location: Option<String>,
+    /// The answer the owner sent to it.
+    #[serde(default)]
+    pub answer: Option<Rsvp>,
+}
+
+impl Invitation {
+    /// An invitation that does `method` to the event `uid`, nothing else known.
+    #[must_use]
+    pub fn new(method: ItipMethod, uid: &str) -> Self {
+        Self { method, uid: uid.to_owned(), ..Self::default() }
+    }
+}
+
+impl fmt::Debug for Invitation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Invitation")
+            .field("method", &self.method)
+            .field("uid_bytes", &self.uid.len())
+            .field("recurrence", &self.recurrence.is_some())
+            .field("sequence", &self.sequence)
+            .field("stamp", &self.stamp)
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("all_day", &self.all_day)
+            .field("repeats", &self.repeat.is_some())
+            .field("answer", &self.answer)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MessageState {

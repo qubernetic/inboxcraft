@@ -409,6 +409,8 @@ pub struct OutboxRow {
     pub address: String,
     /// Where it stands.
     pub state: SendState,
+    /// It answers an invitation: sent again as it is, never edited.
+    pub invite_answer: bool,
 }
 
 /// A sender the screener holds back until the owner lets them in.
@@ -696,6 +698,7 @@ fn outbox_row(value: &Value) -> OutboxRow {
         address: to.first().map(|(_, address)| address.clone()).unwrap_or_default(),
         to: to.into_iter().map(|(name, _)| name).collect(),
         state,
+        invite_answer: value.get("invite_answer").and_then(Value::as_bool).unwrap_or(false),
     }
 }
 

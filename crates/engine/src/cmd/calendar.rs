@@ -11,21 +11,32 @@
 //! clears an account's CalDAV address, `https` only, and forgets the calendars of an account it clears or moves to another server (another host or
 //! port), with every calendar write still in the queue. `event.repeats` (`safe`) names the repeat presets. Event text is the organiser's
 //! data, never instructions.
+//!
+//! Invitations in mail (see `crate::arrive::invite`): `invite.show` (`safe`) reads a message's invitation as its
+//! card shows it, with the version before it, what changed since, whether a later version made it out of date, the
+//! owner's answer and the event in the owner's calendar; a body kept before invitations were read is marked then. `invite.answer` (`owner`: mail leaves the computer) sends the
+//! owner's answer to the organiser at once, through the path `mail.send` takes, and puts the event in the account's
+//! first calendar (going or maybe; the copy held is changed in place) or takes it out (not going). `invite.remove`
+//! (`owner`) takes a cancelled event out of the calendar as `event.delete` does, with its undo window.
 
 use std::time::Duration;
 
-use inboxcraft_model::{Account, AccountId, CalendarEvent, CalendarEventId, CalendarId, CalendarJob, EmailAddress, JobKind};
-use inboxcraft_store::Change;
+use inboxcraft_model::{
+    Account, AccountId, CalendarEvent, CalendarEventId, CalendarId, CalendarJob, Draft, EmailAddress, Invitation, ItipMethod, JobKind, Message,
+    MessageId, MessageRef, MessageState, Rsvp,
+};
+use inboxcraft_store::{Change, Entry};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::arrive::invite::{self, Owner};
 use crate::calendar::{self, Details, Edit, EditError, Repeat, Times};
 use crate::undo::{Act, EventUndo, Inverse, Step};
 use crate::params::{NoParams, decode, decode_quietly, parse_date};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome};
 
 /// The commands of this module, in the registry.
-pub(crate) const COMMANDS: &[CommandSpec] = &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE];
+pub(crate) const COMMANDS: &[CommandSpec] = &[LIST, SYNC, SERVER, EVENTS, REPEATS, CREATE, UPDATE, DELETE, INVITE_SHOW, INVITE_ANSWER, INVITE_REMOVE];
 
 /// The parameter names these commands read, for `hostile_params_never_panic`.
 #[cfg(test)]
@@ -47,6 +58,7 @@ pub(crate) const FIELDS: &[&str] = &[
     "private",
     "guests",
     "notify",
+    "answer",
 ];
 
 /// The longest summary or location, in characters.
@@ -506,4 +518,365 @@ pub(crate) fn undo(context: &Context<'_>, command: &'static str, undo: &EventUnd
             Ok(answer(true).with_change(Change::PutCalendarEvent(was.clone())).with_withdrawn(job.id))
         }
     }
+}
+
+/// `invite.show`: a message's invitation, as its card shows it.
+pub(crate) const INVITE_SHOW: CommandSpec = CommandSpec {
+    id: "invite.show",
+    class: Some(AgentClass::Safe),
+    summary: "Read a message's invitation: the event, what changed, the answer given, and whether it can be answered",
+    run: invite_show,
+};
+
+/// `invite.answer`: answer an invitation, at once.
+pub(crate) const INVITE_ANSWER: CommandSpec = CommandSpec {
+    id: "invite.answer",
+    class: Some(AgentClass::Owner),
+    summary: "Answer an invitation: send going, maybe or not going to the organiser at once and update the calendar",
+    run: invite_answer,
+};
+
+/// `invite.remove`: take a cancelled event out of the calendar.
+pub(crate) const INVITE_REMOVE: CommandSpec = CommandSpec {
+    id: "invite.remove",
+    class: Some(AgentClass::Owner),
+    summary: "Take the event a cancellation is about out of the calendar",
+    run: invite_remove,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerParams {
+    /// The message.
+    id: u64,
+    /// `accepted`, `tentative` or `declined`.
+    answer: String,
+}
+
+/// An answer as commands write it.
+const fn answer_name(answer: Rsvp) -> &'static str {
+    match answer {
+        Rsvp::Accepted => "accepted",
+        Rsvp::Tentative => "tentative",
+        Rsvp::Declined => "declined",
+    }
+}
+
+const fn method_name(method: ItipMethod) -> &'static str {
+    match method {
+        ItipMethod::Request => "request",
+        ItipMethod::Cancel => "cancel",
+        ItipMethod::Reply => "reply",
+        ItipMethod::Other => "other",
+    }
+}
+
+/// A message's invitation with what the card needs of it.
+struct Card {
+    message: Message,
+    account: Account,
+    mark: Invitation,
+    /// The calendar object, while the body is kept.
+    object: Option<inboxcraft_ical::Calendar>,
+    /// The other versions of the event in the account, each with its message: the organiser's requests and
+    /// cancellations only, so an answer (the owner's own, synced back from Sent, or a guest's) dates nothing.
+    versions: Vec<(Message, Invitation)>,
+    /// The event in the owner's calendars.
+    held: Option<CalendarEvent>,
+    /// The mark was read just now, from a body kept before: the card keeps it.
+    fresh: bool,
+}
+
+impl Card {
+    /// The newest version, when it is another message's.
+    fn latest(&self) -> Option<&(Message, Invitation)> {
+        self.versions.iter().filter(|(_, other)| invite::later(other, &self.mark)).fold(None, |best: Option<&(Message, Invitation)>, version| match best {
+            Some(best) if !invite::later(&version.1, &best.1) => Some(best),
+            _ => Some(version),
+        })
+    }
+
+    /// The version just before this one, if any.
+    fn earlier(&self) -> Option<&(Message, Invitation)> {
+        self.versions.iter().filter(|(_, other)| invite::later(&self.mark, other)).fold(None, |best: Option<&(Message, Invitation)>, version| match best {
+            Some(best) if !invite::later(&version.1, &best.1) => Some(best),
+            _ => Some(version),
+        })
+    }
+
+    /// The last answer the owner gave to an earlier version.
+    fn earlier_answer(&self) -> Option<Rsvp> {
+        let mut answered: Vec<&Invitation> = self.versions.iter().map(|(_, other)| other).filter(|other| invite::later(&self.mark, other) && other.answer.is_some()).collect();
+        answered.sort_by_key(|other| (other.sequence, other.stamp));
+        answered.last().and_then(|other| other.answer)
+    }
+
+    /// The event the invitation is about, while the body is kept.
+    fn event(&self) -> Option<&inboxcraft_ical::Event> {
+        self.object.as_ref().and_then(invite::event)
+    }
+
+    /// Why the owner cannot answer it, or `None` when they can.
+    fn why_not(&self) -> Option<&'static str> {
+        let reason = match self.mark.method {
+            ItipMethod::Cancel => "the event is cancelled",
+            ItipMethod::Reply | ItipMethod::Other => "it asks for no answer",
+            ItipMethod::Request if self.latest().is_some() => "a later invitation came",
+            ItipMethod::Request => {
+                let Some(event) = self.event() else { return Some("the text of the message is not here yet") };
+                let Some(organizer) = &event.organizer else { return Some("it names no organiser") };
+                if Owner::of(&self.account).is(organizer) {
+                    "you organise it"
+                } else if EmailAddress::new(calendar::address_of(organizer)).is_err() {
+                    "the organiser has no mail address"
+                } else {
+                    return None;
+                }
+            }
+        };
+        Some(reason)
+    }
+
+    /// Whether the owner can take the cancelled event out of the calendar.
+    fn removable(&self) -> bool {
+        self.mark.method == ItipMethod::Cancel && self.latest().is_none() && self.mark.recurrence.is_none() && self.held.is_some()
+    }
+}
+
+/// The card of `entry`, or `None` when it carries no invitation. A kept body without a mark (kept before invitations
+/// were read) is read now, but in the Blocked folder.
+fn card(context: &Context<'_>, entry: &Entry) -> Result<Option<Card>, EngineError> {
+    let store = context.store();
+    let message = entry.message().clone();
+    let object = store.body(message.id())?.and_then(|body| invite::read(body.source()));
+    let (mark, fresh) = match store.message_state(message.id())?.invitation {
+        Some(mark) => (*mark, false),
+        None => {
+            let role = context.state().accounts.get(&message.account()).and_then(|held| held.roles.role_of(message.folder()));
+            match object.as_ref().filter(|_| role != Some(inboxcraft_model::Role::Blocked)).and_then(|object| invite::mark(object, context.offsets())) {
+                Some(mark) => (mark, true),
+                None => return Ok(None),
+            }
+        }
+    };
+    let account = account(context, message.account().get())?;
+    let mut versions = Vec::new();
+    for (id, state) in store.message_states()? {
+        let Some(other) = state.invitation.filter(|other| id != message.id() && invite::same_event(other, &mark) && invite::from_organiser(other)) else { continue };
+        let other = *other;
+        if let Some(held) = store.message(id)?.map(|entry| entry.message().clone()).filter(|held| held.account() == message.account()) {
+            versions.push((held, other));
+        }
+    }
+    let held = held_copy(context, message.account(), &mark.uid)?;
+    Ok(Some(Card { message, account, mark, object, versions, held, fresh }))
+}
+
+/// The event `uid` in the calendars of `account`: the first that holds it as its series.
+fn held_copy(context: &Context<'_>, account: AccountId, uid: &str) -> Result<Option<CalendarEvent>, EngineError> {
+    for held in context.store().calendars(account)? {
+        for event in context.store().calendar_events(held.id)? {
+            if event.ical.contains(uid) && calendar::read(&event).is_some_and(|object| calendar::master(&object).is_some_and(|master| master.uid == uid)) {
+                return Ok(Some(event));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The times and the place of a version, as the card shows them.
+fn when(mark: &Invitation, local: &dyn inboxcraft_time::Offsets) -> Value {
+    let at = |moment: Option<inboxcraft_time::Timestamp>| moment.map_or(Value::Null, crate::json::date);
+    let wall = |moment: Option<inboxcraft_time::Timestamp>| moment.map_or(Value::Null, |moment| calendar::wall(moment, local));
+    json!({
+        "summary": mark.summary,
+        "location": mark.location,
+        "start": at(mark.start),
+        "end": at(mark.end),
+        "local_start": wall(mark.start),
+        "local_end": wall(mark.end),
+        "all_day": mark.all_day,
+        "repeat": mark.repeat,
+    })
+}
+
+/// What changed from `was` to `now`: `time`, `repeat`, `place`, `title`.
+fn changes(was: &Invitation, now: &Invitation) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if (was.start, was.end, was.all_day) != (now.start, now.end, now.all_day) {
+        changed.push("time");
+    }
+    if was.repeat != now.repeat {
+        changed.push("repeat");
+    }
+    if was.location != now.location {
+        changed.push("place");
+    }
+    if was.summary != now.summary {
+        changed.push("title");
+    }
+    changed
+}
+
+fn invite_show(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: IdParams = decode(INVITE_SHOW.id, params)?;
+    let entry = context.store().message(MessageId::new(params.id))?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let Some(card) = card(context, &entry)? else { return Ok(Outcome::new(json!({ "invite": null }))) };
+    let local = context.offsets();
+    let mut shown = when(&card.mark, local);
+    let event = card.event();
+    let owner = Owner::of(&card.account);
+    let earlier = card.earlier().map(|(message, mark)| {
+        let mut earlier = when(mark, local);
+        if let Value::Object(fields) = &mut earlier {
+            fields.insert("message".into(), json!(message.id().get()));
+            let date = message.summary().received().or_else(|| message.summary().envelope().date());
+            fields.insert("date".into(), date.map_or(Value::Null, |date| calendar::wall(date, local)));
+        }
+        earlier
+    });
+    let replies = match card.mark.method {
+        ItipMethod::Reply => event.map(|event| event.attendees.iter().map(calendar::guest).collect::<Vec<_>>()).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    if let Value::Object(fields) = &mut shown {
+        fields.insert("message".into(), json!(card.message.id().get()));
+        fields.insert("method".into(), json!(method_name(card.mark.method)));
+        fields.insert("uid".into(), json!(card.mark.uid));
+        fields.insert("sequence".into(), json!(card.mark.sequence));
+        fields.insert(
+            "organizer".into(),
+            event.and_then(|event| event.organizer.as_ref()).map_or(Value::Null, |organizer| json!({ "address": calendar::address_of(organizer), "name": organizer.name })),
+        );
+        fields.insert("guests".into(), json!(event.map_or(0, |event| event.attendees.len())));
+        fields.insert("invited".into(), json!(event.is_some_and(|event| event.attendees.iter().any(|attendee| owner.is(attendee)))));
+        fields.insert("answer".into(), json!(card.mark.answer.map(answer_name)));
+        fields.insert("earlier_answer".into(), json!(card.earlier_answer().map(answer_name)));
+        fields.insert("changes".into(), json!(card.earlier().map(|(_, was)| changes(was, &card.mark)).unwrap_or_default()));
+        fields.insert("earlier".into(), earlier.unwrap_or(Value::Null));
+        fields.insert("outdated".into(), json!(card.latest().is_some()));
+        fields.insert("latest".into(), json!(card.latest().map(|(message, _)| message.id().get())));
+        fields.insert("calendar_event".into(), json!(card.held.as_ref().map(|held| held.id.get())));
+        fields.insert("can_answer".into(), json!(card.why_not().is_none()));
+        fields.insert("sendable".into(), json!(card.account.submission().is_some()));
+        fields.insert("why_not".into(), json!(card.why_not()));
+        fields.insert("can_remove".into(), json!(card.removable()));
+        fields.insert("replies".into(), Value::Array(replies));
+    }
+    let mut outcome = Outcome::new(json!({ "invite": shown }));
+    if card.fresh {
+        let state = context.store().message_state(card.message.id())?;
+        outcome = outcome.with_change(Change::SetMessageState(card.message.id(), MessageState { invitation: Some(Box::new(card.mark)), ..state }));
+    }
+    Ok(outcome)
+}
+
+/// The answer named `text`.
+fn rsvp(text: &str) -> Option<Rsvp> {
+    [Rsvp::Accepted, Rsvp::Tentative, Rsvp::Declined].into_iter().find(|answer| answer_name(*answer) == text)
+}
+
+fn invite_answer(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: AnswerParams = decode(INVITE_ANSWER.id, params)?;
+    let bad = |reason: &str| EngineError::bad_params(INVITE_ANSWER.id, reason);
+    let answer = rsvp(&params.answer).ok_or_else(|| bad("answer is accepted, tentative or declined"))?;
+    let entry = context.store().message(MessageId::new(params.id))?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let card = card(context, &entry)?.ok_or_else(|| bad("the message carries no invitation"))?;
+    if let Some(reason) = card.why_not() {
+        return Err(bad(&format!("the invitation cannot be answered: {reason}")));
+    }
+    let (Some(object), Some(event)) = (card.object.as_ref(), card.event()) else { return Err(bad("the text of the message is not here yet")) };
+    let Some(organizer) = event.organizer.as_ref().and_then(|organizer| EmailAddress::new(calendar::address_of(organizer)).ok()) else {
+        return Err(bad("the organiser has no mail address"));
+    };
+    let owner = Owner::of(&card.account);
+    let now = context.now();
+    let reply = invite::reply(object, event, &owner, answer, now, context.offsets()).ok_or_else(|| bad("the answer cannot be written"))?;
+    let envelope = card.message.summary().envelope();
+    let verb = match answer {
+        Rsvp::Accepted => "Accepted",
+        Rsvp::Tentative => "Tentative",
+        Rsvp::Declined => "Declined",
+    };
+    let title = event.summary.clone().unwrap_or_default();
+    let who = card.account.display_name().unwrap_or(card.account.address().as_str()).to_owned();
+    let text = match answer {
+        Rsvp::Accepted => format!("{who} is going: {title}"),
+        Rsvp::Tentative => format!("{who} might go: {title}"),
+        Rsvp::Declined => format!("{who} is not going: {title}"),
+    };
+    let mut references: Vec<MessageRef> = envelope.references().to_vec();
+    references.extend(envelope.message_id().cloned());
+    let draft = Draft {
+        to: vec![organizer.as_str().to_owned()],
+        subject: format!("{verb}: {title}"),
+        text,
+        answers: Some(card.message.id()),
+        in_reply_to: envelope.message_id().cloned(),
+        references,
+        // Sent at once: no copy goes to the Drafts folder.
+        synced: Some(now),
+        calendar: Some(reply),
+        ..Draft::new(crate::draft::next_id(context.state()), card.account.id(), now)
+    };
+    let sending = super::send::sending(context, INVITE_ANSWER.id, &draft)?;
+    let state = context.store().message_state(card.message.id())?;
+    let answered = MessageState { invitation: Some(Box::new(Invitation { answer: Some(answer), ..card.mark.clone() })), ..state };
+    let mut outcome = Outcome::new(Value::Null)
+        .with_change(Change::PutDraft(draft.clone()))
+        .with_change(sending.outgoing)
+        .with_job(sending.account, sending.job)
+        .with_change(Change::SetMessageState(card.message.id(), answered));
+    let in_calendar = match (answer, &card.held) {
+        (Rsvp::Declined, Some(held)) => {
+            let job = CalendarJob::Delete { calendar: held.calendar, event: held.id, url: held.href.clone(), etag: held.etag.clone() };
+            outcome = outcome.with_change(Change::RemoveCalendarEvent(held.id)).with_kept_job(card.account.id(), JobKind::Calendar(job));
+            None
+        }
+        (Rsvp::Declined, None) => None,
+        // One occurrence: its series is not ours to change from here.
+        _ if card.mark.recurrence.is_some() => card.held.as_ref().map(|held| held.id),
+        (_, Some(held)) => {
+            let ical = invite::copy(object, &card.mark.uid, calendar::read(held).as_ref(), &owner, answer).ok_or_else(|| bad("the event cannot be written"))?;
+            let job = CalendarJob::Put { calendar: held.calendar, event: held.id, url: held.href.clone(), etag: held.etag.clone(), ical: ical.clone() };
+            outcome = outcome.with_change(Change::PutCalendarEvent(CalendarEvent { ical, ..held.clone() })).with_kept_job(card.account.id(), JobKind::Calendar(job));
+            Some(held.id)
+        }
+        (_, None) => match context.store().calendars(card.account.id())?.into_iter().min_by_key(|held| held.id) {
+            Some(into) => {
+                let ical = invite::copy(object, &card.mark.uid, None, &owner, answer).ok_or_else(|| bad("the event cannot be written"))?;
+                let id = CalendarEventId::new(context.state().next_event);
+                let slash = if into.href.ends_with('/') { "" } else { "/" };
+                let href = format!("{}{slash}inboxcraft-{}-{:09}-{}.ics", into.href, now.unix_seconds(), now.subsec_nanos(), id.get());
+                let job = CalendarJob::Put { calendar: into.id, event: id, url: href.clone(), etag: None, ical: ical.clone() };
+                let event = CalendarEvent { id, calendar: into.id, href, etag: None, ical };
+                outcome = outcome.with_change(Change::PutCalendarEvent(event)).with_kept_job(card.account.id(), JobKind::Calendar(job));
+                Some(id)
+            }
+            None => None,
+        },
+    };
+    let mut answer_value = sending.answer;
+    if let Value::Object(fields) = &mut answer_value {
+        fields.insert("draft".into(), json!(draft.id.get()));
+        fields.insert("id".into(), json!(params.id));
+        fields.insert("answer".into(), json!(answer_name(answer)));
+        fields.insert("calendar_event".into(), json!(in_calendar.map(CalendarEventId::get)));
+    }
+    *outcome.value_mut() = answer_value;
+    Ok(outcome)
+}
+
+fn invite_remove(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
+    let params: IdParams = decode(INVITE_REMOVE.id, params)?;
+    let bad = |reason: &str| EngineError::bad_params(INVITE_REMOVE.id, reason);
+    let entry = context.store().message(MessageId::new(params.id))?.ok_or(EngineError::NotFound { what: "message", id: params.id })?;
+    let card = card(context, &entry)?.ok_or_else(|| bad("the message carries no invitation"))?;
+    let held = card.held.as_ref().filter(|_| card.removable()).ok_or_else(|| bad("the message cancels no event in the calendar"))?;
+    let mut outcome = (DELETE.run)(context, &json!({ "id": held.id.get() }))?;
+    if let Value::Object(fields) = outcome.value_mut() {
+        fields.insert("event".into(), json!(held.id.get()));
+        fields.insert("id".into(), json!(params.id));
+    }
+    Ok(outcome)
 }

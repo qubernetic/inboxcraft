@@ -166,7 +166,8 @@ fn bounced(store: &dyn Storage, message: &Message, state: Option<&MessageState>)
     Ok(json!({ "report": report.map(|_| bounce.report.get()), "reason": bounce.reason }))
 }
 
-/// `mail.read`: one message with its body when it is kept. Opening a message changes nothing on the server: the
+/// `mail.read`: one message with its body when it is kept, and whether it carries an invitation (`invitation`, whose
+/// card `invite.show` reads). Opening a message changes nothing on the server: the
 /// store keeps its body from now on, and a body not kept yet is fetched (`fetching` in the answer). A body the
 /// worker sent but the store could not keep is not asked for again in this session (`body_error`: `too_large`).
 pub(crate) const READ: CommandSpec = CommandSpec {
@@ -222,6 +223,8 @@ pub(super) fn read_one(context: &Context<'_>, number: u64) -> Result<Outcome, En
         fields.insert("references".into(), json!(envelope.references().iter().map(MessageRef::as_str).collect::<Vec<_>>()));
         fields.insert("body".into(), body.as_ref().map_or(Value::Null, |body| json::body(body.source())));
         fields.insert("bounced".into(), bounced(store, message, Some(&store.message_state(id)?))?);
+        // A calendar part: `invite.show` reads its card.
+        fields.insert("invitation".into(), json!(envelope.signs().calendar() || envelope.signs().calendar_type()));
     }
     let body_error = if too_large {
         Some("too_large")

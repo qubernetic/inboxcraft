@@ -491,7 +491,10 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         }
         (SendState::Refused { .. }, _) => {
             press(&mut controls, tr!("Send again"), tr!("Send “{subject}” again", subject = subject_label), true, Outbox::Retry);
-            press(&mut controls, tr!("Edit"), tr!("Edit “{subject}”", subject = subject_label), false, Outbox::Edit);
+            // An answer to an invitation changes only from the invitation.
+            if !row.invite_answer {
+                press(&mut controls, tr!("Edit"), tr!("Edit “{subject}”", subject = subject_label), false, Outbox::Edit);
+            }
         }
         (SendState::Sending, _) => {}
     }

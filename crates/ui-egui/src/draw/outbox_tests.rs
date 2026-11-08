@@ -271,3 +271,44 @@ fn a_bounced_message_is_marked_in_its_row_and_its_reader_says_why() {
         harness.get_by_label_contains("Not delivered: petra@example.org: 550 5.1.1");
     }
 }
+
+/// An answer to an invitation the server refused can be sent again, but not edited: its draft is the answer, which
+/// changes only from the invitation.
+#[test]
+fn a_refused_invitation_answer_offers_no_edit() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let clock = clock();
+        let mut store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
+        let draft = inboxcraft_model::Draft {
+            to: vec!["odile@example.org".to_owned()],
+            subject: "Accepted: Lunch with Odile".to_owned(),
+            calendar: Some("BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n".to_owned()),
+            ..inboxcraft_model::Draft::new(inboxcraft_model::DraftId::new(90), AccountId::new(1), at(0))
+        };
+        let refused = inboxcraft_model::OutboxState::Refused { reply: "550 5.1.1 No such user here".to_owned() };
+        let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
+        let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
+        let mut batch = Batch::new();
+        batch.push(Change::PutAccount(account.with_submission(Some(server))));
+        batch.push(Change::PutDraft(draft));
+        batch.push(Change::PutOutgoing(inboxcraft_model::Outgoing::new(inboxcraft_model::DraftId::new(90), refused)));
+        store.apply(&batch).unwrap();
+        let mailbox = Mailbox::new(Session::new(Box::new(store), Box::new(clock.clone())).unwrap(), Box::new(clock.clone()));
+        let mut harness = Harness::builder()
+            .with_size(vec2(1300.0, 820.0))
+            .with_theme(theme)
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+        harness.state_mut().mailbox_mut().open(Place::Outbox);
+        harness.run();
+        assert!(harness.state().mailbox().outbox().first().is_some_and(|row| row.invite_answer));
+        assert!(harness.query_by_label("Edit “Accepted: Lunch with Odile”").is_none());
+        harness.get_by_role_and_label(Role::Button, "Send “Accepted: Lunch with Odile” again").click();
+        harness.run();
+        // It goes at once: no hold, no countdown, no Undo.
+        assert_eq!(harness.state().counting(), None);
+        assert!(harness.query_by_label_contains("Sending “").is_none());
+        let state = harness.state().mailbox().outbox().first().map(|row| row.state.clone());
+        assert_eq!(state, Some(SendState::Sending));
+    }
+}

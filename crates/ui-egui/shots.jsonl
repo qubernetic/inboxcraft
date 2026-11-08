@@ -178,6 +178,12 @@
 {"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
 {"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
 {"out": "docs/images/follow-up-picker-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
+# The invitation card (E4.6): Odile's lunch moved from 11:00 to 12:30, its update with what changed and the answer
+# given before, and the first invitation as the strip a later one replaced.
+{"out": "docs/images/invite-update-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/invite-update-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/invite-outdated-light.png", "mode": "light", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
+{"out": "docs/images/invite-outdated-dark.png", "mode": "dark", "size": [1400, 860], "invitations": true, "select": "Invitation: Lunch with Odile"}
 # The outbox (E2.6, E3.6): a send counting down its hold with its toast, one scheduled and one the server refused;
 # the toast of a message just sent; the composer with a time picked, Send become Schedule, and its send-later picker;
 # a sent message a delivery report says did not get through.

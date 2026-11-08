@@ -13,8 +13,11 @@
 //! `crate::send`: once sent, the draft and its copy in the Drafts folder go and the message is appended to the Sent
 //! folder; a failure keeps the draft, its outbox item showing the server's reply. Nothing goes while the computer is
 //! off or InboxCraft is closed: a time missed then is sent at the next start, with a notice.
+//!
+//! The answer to an invitation (`invite.answer`) goes at once, through [`sending`], with no hold: it is taken back by
+//! changing the answer, not by `mail.unsend`.
 
-use inboxcraft_model::{Draft, DraftId, Due, OutboxState, Outgoing};
+use inboxcraft_model::{AccountId, Draft, DraftId, Due, JobKind, OutboxState, Outgoing};
 use inboxcraft_store::Change;
 use inboxcraft_time::Timestamp;
 use serde::Deserialize;
@@ -123,6 +126,33 @@ fn waiting(context: &Context<'_>, command: &'static str, id: u64, at: Timestamp)
         outcome = outcome.with_change(change);
     }
     Ok(outcome)
+}
+
+/// What sends a draft at once: the answer, its outbox item on its way and the job for its account's worker.
+pub(crate) struct Sending {
+    pub(crate) answer: Value,
+    pub(crate) outgoing: Change,
+    pub(crate) account: AccountId,
+    pub(crate) job: JobKind,
+}
+
+/// What sends `draft` now, with no hold, checked as `mail.send` checks it (`command` names it in a refusal): it can
+/// go, is not on its way already, and its account has a submission server.
+pub(crate) fn sending(context: &Context<'_>, command: &'static str, draft: &Draft) -> Result<Sending, EngineError> {
+    let bad = |reason: &str| EngineError::bad_params(command, reason);
+    if let Some(block) = draft::blocks(context.store(), draft)?.first() {
+        return Err(bad(&format!("the draft cannot be sent: {block}")));
+    }
+    if draft::on_its_way(context.store(), draft.id)? {
+        return Err(bad("the draft is on its way already"));
+    }
+    let ready = ready(context, draft)?.map_err(bad)?;
+    let recipients = match &ready.job {
+        JobKind::Send { recipients, .. } => recipients.len(),
+        _ => 0,
+    };
+    let answer = json!({ "id": draft.id.get(), "recipients": recipients, "state": "sending" });
+    Ok(Sending { answer, outgoing: Change::PutOutgoing(ready.outgoing), account: ready.account, job: ready.job })
 }
 
 fn unsend(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {

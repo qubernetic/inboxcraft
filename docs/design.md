@@ -610,6 +610,28 @@ the icon sits among others at the same size.
   "Event saved", "Event saved; the guests are told", "Event deleted") with Undo and Ctrl+Z, which take the change
   back and read the calendar again; a deleted event reaches the server only once the toast's six seconds are over.
 
+## Invitation card
+A message that carries an invitation (iMIP) shows a card between its header and its text, as the design file's
+"Invitation in a message" draws it, and its calendar part is no file tile:
+- **Head**: a date tile on the accent's text gradient (the month in three capitals in the caption size, the day of
+  the month in the title size, named by the event's time for a screen reader), the event's title in the heading
+  font and under it, muted, when and where ("Saturday 7 November · 12:30 – 13:30 · The Gull café").
+- **Changed**: on a panel-tinted chip with the Changed icon (arrows in a circle), strong, what a newer version changed
+  since the one before: "Changed: time 11:00 → 12:30", "place The Gull café → Harbour Kitchen", "title", "repeat".
+- **Answers**: Going (primary, the Done icon), Maybe and No (secondary), and in the caption, muted, "Your answer goes
+  to odile@example.org at once." A press sends the answer at once and the reader's notice says "Your answer is on its
+  way."; the card then says "You answered Going." with Change answer (secondary), which offers the three again with
+  Keep my answer. An invitation that cannot be answered says why in the caption ("This invitation cannot be
+  answered: you organise it.").
+- **Cancelled**: "Odile Brannock cancelled this event." and Remove from calendar (secondary, the Delete icon) while
+  the event is in the calendar, with the toast "Removed from your calendar" and Undo; else "It is not in your
+  calendar."
+- **A guest's answer**: a line per guest ("Béla is not going."). Any other calendar message: "This calendar message
+  asks for no answer."
+- **Versions**: under the card a strip on the panel tint at 75 % with the Older icon (a clock turning back) tells of
+  the version before: "Out of date: the invitation from Monday showed 11:00. You answered Going." The card of a
+  version a later one replaced is only such a strip: "Out of date: a later invitation replaces this one."
+
 ## Appearance settings
 - **Where**: the settings button (the Settings icon, "Appearance settings") sits at the foot of the navigation rail
   and shows as active while the sheet is open; Ctrl+Comma opens it too, on Appearance, and the rail's Mail button
@@ -653,7 +675,9 @@ the calendar's empty state (`calendar-empty-<mode>.png`, `"first"` and `"calenda
 sample's three calendars (`calendar-week-<mode>.png` with the ferry's zone in the details,
 `calendar-month-<mode>.png` with a trip over three days picked, `calendar-agenda-<mode>.png`, `calendar-day-<mode>.png`;
 `"calendar_view"` and `"event"`) and the event editor (`event-new-<mode>.png`, `event-edit-<mode>.png` with the
-question to the guests, `"edit_event"`; `event-deleted-<mode>.png` with the toast, `"delete_event"`) are drawn in
+question to the guests, `"edit_event"`; `event-deleted-<mode>.png` with the toast, `"delete_event"`) and the
+invitation card over the sample's invitations (`"invitations"`: `invite-update-<mode>.png`, the update with what
+changed and the answer given before, `invite-outdated-<mode>.png`, the first invitation as the strip) are drawn in
 light and dark, and so are the
 composer (`"compose"`: `compose-new-<mode>.png`, `compose-written-<mode>.png`, `compose-bad-address-<mode>.png`,
 `compose-suggest-<mode>.png`, `compose-floating-<mode>.png` with a message opened over it, `compose-reply-<mode>.png`
