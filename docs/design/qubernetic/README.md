@@ -13,25 +13,36 @@ Made in [FigCraft](https://getartcraft.com/apps/figcraft). Every person, address
 
 ## What is in it now
 
-| Page | Picture | Holds |
-|---|---|---|
-| Cover | [`cover.png`](cover.png) | The title page |
-| Foundations | [`foundations.png`](foundations.png) | Colour in dark and light with the contrast of every pair, type, spacing, shape, icons, focus and keys, the wording rules, motion in three levels, the character field |
-| Components | [`components.png`](components.png) | 58 components as FigCraft components with variants, every state in dark and light |
-| App icon | [`app-icon.png`](app-icon.png) | The InboxCraft mark: its three drawings by size, the size ladder, the mark in the command line, the tray and the app icon, the wordmark and lockups, clear space and minimum sizes |
+| Page | Holds |
+|---|---|
+| Cover | The title page |
+| Foundations | Colour in dark and light with the contrast of every pair, six account colours, type, spacing, shape, icons, focus and keys, the wording rules, motion in three levels, the character field |
+| Components | 63 components as FigCraft components with variants, every state in dark and light |
+| App icon | The InboxCraft mark: its three drawings by size, the size ladder, the mark in the command line, the tray and the app icon, the wordmark and lockups, clear space and minimum sizes |
+| Frame | The window: the command line with its result lists, the index with one to six accounts and forty folders, the status line with every state and notice, the own and the system window frame |
+| Home | The brief of the day with counts, agenda and drafts; nothing to do, overflowing counts, the first run, everything failing at once |
+| Mail | The inbox in its three views (Grouped, Smart, List) with empty, no match, show done and a row leaving; the screener card, New senders in the three screener modes, Later, Outbox, search, Sent, a folder, Drafts, the welcome screen; long text and counts |
+| Reader | The reader with its facts, why line and content bar; the states when the text is not there, the five picture states, link status, a conversation, a held sender, full width, the reader in its own window |
+| Messages | Eight kinds of mail in the fitted and the plain text view: mailing list, marketing, receipt, forge, pictures, newsletter, invitation, bounce; the original opened in the browser from a cleaned copy |
+| Composer | The composer docked, as a floating panel and in its own window, ten states each; long text, Cc and Bcc, attachments (planned) |
+| Calendar | Week, day, month and agenda with overlapping events, the all-day lane, the now line and zones; the side panel, event details, the empty calendar, the sync control |
+| Sizes | The same screens at 1100 and 800 wide and at 130 % text, with the breakpoints written as rules |
 
-The pictures are whole pages, rendered with `figcraft-cli render`. The Components page is larger than the renderer's
-limit of 16 384 pixels, so its picture is scaled down; open the file to read it at full size.
+Every state is drawn in dark and in light, and the screens are built from instances of the components. The file is
+checked when it is built: every listed state is present (1 382 named frames), every text and edge colour pair
+reaches its WCAG contrast, and no edge misses the line it belongs to by a pixel.
 
-Still to come: the frame and the main screens (Home, mail, reader, composer, calendar) at three window widths, then
-every popup, setting, surface outside the window, missing and planned feature, and motion.
+This folder holds no pictures of the pages: rendered pages are tens of megabytes and change with every build. Open
+the file in FigCraft to see them.
+
+Still to come: every popup, setting, surface outside the window, missing and planned feature, and motion.
 
 ## Typefaces and the mark
 
 The file names IBM Plex Mono, IBM Plex Sans and Audiowide (all under the SIL Open Font Licence) and embeds no font
 file. FigCraft shows only installed typefaces, so install the three before opening it.
 
-The InboxCraft mark and wordmark and the Qubernetic mark shown in the file and in its pictures are trademarks of
+The InboxCraft mark and wordmark and the Qubernetic mark shown in the file are trademarks of
 Qubernetic. They are not under the MIT or Apache licence of the rest of this repository; see `NOTICE`.
 
 ## Revision history
