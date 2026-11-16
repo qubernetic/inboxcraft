@@ -7,6 +7,9 @@ InboxCraft is a clean-room mail and calendar program. It is not affiliated with,
 Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
 corresponds to) are trademarks of their owners.
 
+The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic. They are not licensed under
+the MIT License or the Apache License; they appear in this repository to show the product's own identity.
+
 Portions adapted from other projects
 ------------------------------------
 Each source below is MIT OR Apache-2.0. What was taken, from which commit, and how it was changed is listed in
