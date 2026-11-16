@@ -10,7 +10,7 @@ use egui::{Area, Frame, Id, Key, Modifiers, Order, Rect, Role, ScrollArea, Sense
 
 use crate::component::field;
 use crate::component::{control_side, cut, galley, margin};
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::iconset::Style;
 use crate::keymap::{Action, Keymap};
 use crate::palette::{MAX_CHARS, Palette};
@@ -158,9 +158,7 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
             });
             ui.add_space(s.xs);
         });
-        let rect = inner.response.rect;
-        let mut shapes = glass::float_shapes(ui.painter(), theme, rect, Under::Fading);
-        shapes.push(Shape::rect_filled(rect.shrink(1.0), s.card, p.surface));
+        let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
         ui.painter().set(slot, Shape::Vec(shapes));
     });
     asked

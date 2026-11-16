@@ -32,7 +32,6 @@ use crate::component::popup;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
 use crate::compose::{Chip, Composer, Line};
-use crate::glass::Under;
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::Mailbox;
@@ -138,7 +137,7 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
     }
     let width = theme.fonts.body.size * PICKER;
     Popup::menu(&response).id(later_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
             let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets };
             let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
@@ -298,7 +297,7 @@ fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2
         return;
     }
     let width = theme.fonts.body.size * MENU;
-    let rect = popup::show(ctx, theme, suggestions_id(), at, Under::Sharp, width, |ui| {
+    let rect = popup::show(ctx, theme, suggestions_id(), at, width, |ui| {
         for (index, person) in found.iter().enumerate() {
             if popup::choice(ui, theme, &person.shown(), composer.highlighted() == Some(index)).clicked() {
                 asked.push(Asked::Pick(index));
@@ -331,7 +330,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         theme.icons.paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
         super::paint::focus_ring(ui, theme, &response);
         Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, Under::Sharp, body * MENU, |ui| {
+            popup::panel(ui, theme, body * MENU, |ui| {
                 for choice in mailbox.accounts() {
                     let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
                     if popup::choice(ui, theme, &text, choice.id == account.id).clicked() && choice.id != account.id {
@@ -355,7 +354,7 @@ fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, a
     }
     let response = button.show(ui, theme, keymap);
     Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, Under::Sharp, theme.fonts.body.size * MENU, |ui| {
+        popup::panel(ui, theme, theme.fonts.body.size * MENU, |ui| {
             ui.label(RichText::new(tr!("Put in a template")).font(theme.fonts.caption.id()).color(theme.palette.muted));
             for (at, name) in composer.templates().iter().enumerate() {
                 if popup::entry(ui, theme, keymap, name, None).clicked() {
@@ -529,7 +528,7 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, comp
     let width = theme.fonts.body.size * FLOATING;
     let corner = screen.right_bottom() - vec2(s.gap * 2.0, s.gap * 2.0);
     Area::new(Id::unique("compose-floating")).order(Order::Foreground).pivot(Align2::RIGHT_BOTTOM).fixed_pos(corner).show(ctx, |ui| {
-        popup::panel(ui, theme, Under::Fading, width, |ui| {
+        popup::panel(ui, theme, width, |ui| {
             ui.horizontal(|ui| {
                 let title = composer.title();
                 let open = tr!("Open the draft {title}", title = title);

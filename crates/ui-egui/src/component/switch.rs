@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The switch: a round track with a knob that slides to the right when it is on, the track then on the selection
-//! gradient. The knob moves over the hover token.
+//! The switch: a round track with a knob that slides to the right when it is on, the track then on the selection.
+//! The knob moves over the hover token.
 
 use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
-use crate::gradient::{self, Gradient, Stop};
 use crate::motion;
 use crate::theme::Theme;
 
@@ -21,16 +20,7 @@ pub fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let round = rect.height() / 2.0;
-        if on {
-            let across = Gradient::Linear {
-                from: pos2(0.0, 0.5),
-                to: pos2(1.0, 0.5),
-                stops: vec![Stop::new(0.0, p.selection), Stop::new(1.0, p.selection_end)],
-            };
-            gradient::fill(painter, rect, round, &across);
-        } else {
-            painter.rect_filled(rect, round, p.field);
-        }
+        painter.rect_filled(rect, round, if on { p.selection } else { p.field });
         painter.rect_stroke(rect, round, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
         let at = motion::toggle(ui.ctx(), response.id.with("knob"), on, theme.motion.hover_fade);
         let x = rect.left() + round + (rect.width() - 2.0 * round) * at;

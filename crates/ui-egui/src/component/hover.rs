@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The hover action group: icon buttons on a float at the right end of a row, fading in over the hover token while
-//! the row is hovered or selected by keyboard, and out again after. The row's text fades out before the group
-//! ([`crate::glass::faded`] up to [`Shown::left`]), so no letter shows through it or touches its edge.
+//! the row is hovered or selected by keyboard, and out again after. The group is drawn after the row's text, and the
+//! float is solid, so no letter shows through it.
 
 use egui::{Align, Id, Layout, Rect, Shape, Ui, UiBuilder, vec2};
 
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
@@ -34,7 +34,7 @@ pub struct Action<'a> {
 pub struct Shown {
     /// The action pressed, by its place in the list.
     pub clicked: Option<usize>,
-    /// Where the row's text must have faded out by: the group's left edge, or the row's right edge when hidden.
+    /// The group's left edge, or the row's right edge when hidden.
     pub left: f32,
     /// How far the group has faded in, 0 to 1.
     pub openness: f32,
@@ -60,7 +60,7 @@ pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, row: Rect, s
     let mut child = ui.new_child(UiBuilder::new().id_salt(id).max_rect(group).layout(Layout::left_to_right(Align::Center)));
     child.multiply_opacity(openness);
     let slot = child.painter().add(Shape::Noop);
-    let shapes = glass::float_shapes(child.painter(), theme, group, Under::Fading);
+    let shapes = glass::float_shapes(child.painter(), theme, group);
     child.painter().set(slot, Shape::Vec(shapes));
     child.add_space(theme.spacing.xs);
     child.spacing_mut().item_spacing.x = theme.spacing.xs;

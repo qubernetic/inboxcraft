@@ -76,6 +76,17 @@ pub struct Editor {
     notify: bool,
     /// Why the last save was refused.
     problem: Option<String>,
+    /// The list of choices open in the form, when one is.
+    menu: Option<Menu>,
+}
+
+/// A list of choices of the form that opens over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    /// Repeat's choices.
+    Repeat,
+    /// The calendars, where they do not fit side by side.
+    Calendar,
 }
 
 impl Editor {
@@ -94,7 +105,7 @@ impl Editor {
             repeat: REPEATS[0].to_owned(),
             guests: String::new(),
         };
-        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None }
+        Self { id: None, was: form.clone(), form, choices, notify: false, problem: None, menu: None }
     }
 
     /// The occurrence `event` to edit: its times as the screen shows them.
@@ -113,7 +124,18 @@ impl Editor {
             repeat: event.repeat.clone().unwrap_or_else(|| REPEATS[0].to_owned()),
             guests: addresses.join(", "),
         };
-        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None }
+        Self { id: Some(event.id), was: form.clone(), form, choices: Vec::new(), notify: false, problem: None, menu: None }
+    }
+
+    /// The list of choices open in the form, when one is.
+    #[must_use]
+    pub fn menu(&self) -> Option<Menu> {
+        self.menu
+    }
+
+    /// Opens a list of choices, or with `None` closes the one open.
+    pub fn set_menu(&mut self, menu: Option<Menu>) {
+        self.menu = menu;
     }
 
     /// The event edited; `None` for a new one.

@@ -16,6 +16,11 @@
 //! owner can check again, or change the settings, which removes the account and its password and opens the form
 //! again with everything but the password kept.
 //!
+//! An account that is already there has the same form, from the Accounts page, without Detect and with a "New password"
+//! field that starts empty: empty keeps the stored password, and a typed one replaces it the same way the add form
+//! stores one, for the worker's next sign-in. The old password is never read: the [`Keychain`] has no way to. A changed server
+//! or user name, or a new password, runs the owner's check, and the form says first where the sign-in goes.
+//!
 //! The password lives in a [`Secret`]: no `Display`, a `Debug` that hides it, and its bytes overwritten when it is
 //! cleared or dropped. It never goes into a command's parameters, an answer, an error or the store.
 
@@ -25,6 +30,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
+use inboxcraft_model::Account;
 use serde_json::{Value, json};
 
 use crate::UiError;
@@ -83,11 +89,29 @@ impl Security {
         }
     }
 
+    /// The usual submission (SMTP) port.
+    #[must_use]
+    pub const fn submission_port(self) -> u16 {
+        match self {
+            Self::Tls => 465,
+            Self::StartTls => 587,
+        }
+    }
+
     /// The name `account.add` reads.
     const fn param(self) -> &'static str {
         match self {
             Self::Tls => "tls",
             Self::StartTls => "start_tls",
+        }
+    }
+
+    /// The security `account.list` names.
+    fn from_param(text: &str) -> Option<Self> {
+        match text {
+            "tls" => Some(Self::Tls),
+            "start_tls" | "starttls" => Some(Self::StartTls),
+            _ => None,
         }
     }
 
@@ -158,6 +182,8 @@ pub struct Suggestion {
 pub struct Proposal {
     /// IMAP servers, the best first.
     pub imap: Vec<Suggestion>,
+    /// Submission (SMTP) servers, the best first.
+    pub submission: Vec<Suggestion>,
     /// Every DNS query and URL asked, in order: what left the computer.
     pub asked: Vec<String>,
     /// The lookups that failed, each with its cause.
@@ -354,11 +380,64 @@ pub struct Form {
     pub port: String,
     /// The encryption.
     pub security: Option<Security>,
+    /// The outgoing (SMTP) server; none when empty.
+    pub smtp_host: String,
+    /// The outgoing port; the usual one for the encryption when empty.
+    pub smtp_port: String,
+    /// The outgoing server's encryption.
+    pub smtp_security: Option<Security>,
+    /// The CalDAV address; none when empty.
+    pub caldav: String,
     /// Detect asks Mozilla's ISPDB too, which tells Mozilla the domain.
     pub ispdb: bool,
 }
 
+/// The servers a form names, as the commands read them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Servers {
+    imap: Value,
+    submission: Option<Value>,
+}
+
+/// `{host, port, security}` of a server the form names, `None` for an empty host; the usual port when none was typed.
+fn server(host: &str, port: &str, security: Option<Security>, usual: fn(Security) -> u16) -> Result<Option<Value>, String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return Ok(None);
+    }
+    let security = security.unwrap_or(Security::Tls);
+    let port = match port.trim() {
+        "" => usual(security),
+        text => text.parse::<u16>().ok().filter(|port| *port > 0).ok_or_else(|| tr!("The port is a number from 1 to 65535.").to_owned())?,
+    };
+    Ok(Some(json!({ "host": host, "port": port, "security": security.param() })))
+}
+
+/// Trimmed `text`, `None` when that leaves nothing.
+fn optional(text: &str) -> Option<String> {
+    Some(text.trim().to_owned()).filter(|text| !text.is_empty())
+}
+
+/// `host:port` of a server the commands read.
+fn where_to(server: &Value) -> String {
+    let host = server.get("host").and_then(Value::as_str).unwrap_or_default();
+    match server.get("port").and_then(Value::as_u64) {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    }
+}
+
 impl Form {
+    fn servers(&self) -> Result<Servers, String> {
+        let imap = server(&self.host, &self.port, self.security, Security::imap_port)?
+            .ok_or_else(|| tr!("Enter the IMAP server, or use Detect.").to_owned())?;
+        let submission = server(&self.smtp_host, &self.smtp_port, self.smtp_security, Security::submission_port)?;
+        if !Account::takes_caldav(&self.caldav) {
+            return Err(tr!("The CalDAV address starts with https:// and holds no user name.").to_owned());
+        }
+        Ok(Servers { imap, submission })
+    }
+
     /// The parameters of `account.add`: everything but the password.
     ///
     /// # Errors
@@ -372,24 +451,56 @@ impl Form {
         if self.password.is_empty() {
             return Err(tr!("Enter the password.").to_owned());
         }
-        let host = self.host.trim();
-        if host.is_empty() {
-            return Err(tr!("Enter the IMAP server, or use Detect.").to_owned());
-        }
-        let security = self.security.unwrap_or(Security::Tls);
-        let port = match self.port.trim() {
-            "" => security.imap_port(),
-            text => text.parse::<u16>().ok().filter(|port| *port > 0).ok_or_else(|| tr!("The port is a number from 1 to 65535.").to_owned())?,
-        };
-        let optional = |text: &str| Some(text.trim().to_owned()).filter(|text| !text.is_empty());
+        let Servers { imap, submission } = self.servers()?;
         Ok(json!({
             "address": address,
             "label": optional(&self.label),
             "display_name": optional(&self.display_name),
             "username": optional(&self.username),
-            "imap": { "host": host, "port": port, "security": security.param() },
+            "imap": imap,
+            "submission": submission,
         }))
     }
+
+    /// The parameters of `account.update` for the account `id`: everything but the password. An empty name for the
+    /// account or user name means the address, as in the add form.
+    fn update_params(&self, id: u64, dry_run: bool, recheck: bool) -> Result<Value, String> {
+        let Servers { imap, submission } = self.servers()?;
+        let username = optional(&self.username).unwrap_or_else(|| self.address.trim().to_owned());
+        Ok(json!({
+            "account": id,
+            "label": self.label.trim(),
+            "display_name": optional(&self.display_name),
+            "username": username,
+            "imap": imap,
+            "submission": submission,
+            "dry_run": dry_run,
+            "recheck": recheck,
+        }))
+    }
+}
+
+/// What the account being edited held when its form opened, to see what the owner changed.
+#[derive(Debug, Clone)]
+struct Held {
+    label: String,
+    display_name: String,
+    username: String,
+    servers: Option<Servers>,
+    caldav: String,
+}
+
+/// What the owner changed in the form of the account being edited.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Changes {
+    /// Anything `account.update` writes.
+    settings: bool,
+    /// Where or as whom it signs in.
+    sign_in: bool,
+    /// The CalDAV address.
+    caldav: bool,
+    /// Where the password would newly go, `host:port` or the CalDAV address.
+    goes_to: Vec<String>,
 }
 
 /// How a step of the check stands.
@@ -468,7 +579,9 @@ pub enum Stage {
     Closed,
     /// The form.
     Form,
-    /// The account was added and is being checked, or was checked.
+    /// The form of an account already there.
+    Edit(u64),
+    /// The account was added or changed and is being checked, or was checked.
     Checking(u64),
 }
 
@@ -488,6 +601,8 @@ pub enum Outcome {
 pub struct Found {
     /// Where the server in the form came from; `None` when nothing was found.
     pub source: Option<Source>,
+    /// The outgoing server in the form and where it came from, when Detect found one.
+    pub outgoing: Option<(String, Source)>,
     /// What Detect asked: what left the computer.
     pub asked: Vec<String>,
     /// The lookups that failed.
@@ -507,6 +622,9 @@ pub struct Onboarding {
     /// The accounts whose password this window put into the credential store and has not removed yet.
     stored: BTreeSet<u64>,
     detect: Box<dyn Detect>,
+    /// The account being edited as it stood: set from [`Onboarding::edit`] until [`Onboarding::close`], through the
+    /// check a save starts, so "Change settings" comes back here and removes nothing.
+    held: Option<Held>,
 }
 
 impl fmt::Debug for Onboarding {
@@ -536,6 +654,7 @@ impl Onboarding {
             keychain,
             stored: BTreeSet::new(),
             detect,
+            held: None,
         }
     }
 
@@ -545,14 +664,199 @@ impl Onboarding {
         self.found = None;
         self.error = None;
         self.steps.clear();
+        self.held = None;
         self.stage = Stage::Form;
     }
 
-    /// Closes onboarding; a password typed and not used is forgotten. An added account stays.
+    /// Closes onboarding; a password typed and not used is forgotten. An added account stays, and an edited one
+    /// stays as it was unless it was saved.
     pub fn close(&mut self) {
         self.form.password.clear();
         self.detecting = false;
+        self.held = None;
         self.stage = Stage::Closed;
+    }
+
+    /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
+    /// it: the field starts empty, and an empty field keeps the stored one.
+    pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
+        self.error = None;
+        let answer = match mailbox.run("account.list", &json!({})) {
+            Ok(answer) => answer,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+        let accounts = answer.get("accounts").and_then(Value::as_array).cloned().unwrap_or_default();
+        let Some(account) = accounts.iter().find(|account| account.get("id").and_then(Value::as_u64) == Some(id)) else {
+            self.error = Some(UiError::Answer { command: "account.list", detail: "no such account".to_owned() }.to_string());
+            return;
+        };
+        let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_owned();
+        let port = |server: Option<&Value>| {
+            server.and_then(|server| server.get("port")).and_then(Value::as_u64).map(|port| port.to_string()).unwrap_or_default()
+        };
+        let security =
+            |server: Option<&Value>| server.and_then(|server| server.get("security")).and_then(Value::as_str).and_then(Security::from_param);
+        let (imap, submission) = (account.get("imap"), account.get("submission").filter(|server| !server.is_null()));
+        self.form = Form {
+            address: text(account.get("address")),
+            label: text(account.get("label")),
+            display_name: text(account.get("display_name")),
+            username: text(account.get("username")),
+            password: Secret::default(),
+            host: text(imap.and_then(|server| server.get("host"))),
+            port: port(imap),
+            security: security(imap),
+            smtp_host: text(submission.and_then(|server| server.get("host"))),
+            smtp_port: port(submission),
+            smtp_security: security(submission),
+            caldav: text(account.get("caldav")),
+            ispdb: false,
+        };
+        self.held = Some(Held {
+            label: self.form.label.clone(),
+            display_name: self.form.display_name.clone(),
+            username: self.form.username.clone(),
+            servers: self.form.servers().ok(),
+            caldav: self.form.caldav.trim().to_owned(),
+        });
+        self.found = None;
+        self.steps.clear();
+        self.stage = Stage::Edit(id);
+    }
+
+    /// What the owner changed in the form against the account as it stood.
+    fn changes(&self) -> Changes {
+        let Some(held) = &self.held else { return Changes::default() };
+        let now = self.form.servers().ok();
+        let caldav = self.form.caldav.trim();
+        let username = self.form.username.trim() != held.username.trim();
+        let moved_imap = now.as_ref().map(|servers| &servers.imap) != held.servers.as_ref().map(|servers| &servers.imap);
+        let moved_submission = now.as_ref().map(|servers| &servers.submission) != held.servers.as_ref().map(|servers| &servers.submission);
+        let caldav_changed = caldav != held.caldav;
+        let sign_in = username || moved_imap || moved_submission;
+        let mut goes_to = Vec::new();
+        if let Some(servers) = &now {
+            if moved_imap {
+                goes_to.push(where_to(&servers.imap));
+            }
+            if let Some(submission) = servers.submission.as_ref().filter(|_| moved_submission) {
+                goes_to.push(where_to(submission));
+            }
+        }
+        if caldav_changed && !caldav.is_empty() {
+            goes_to.push(caldav.to_owned());
+        }
+        let named = self.form.label.trim() != held.label.trim() || self.form.display_name.trim() != held.display_name.trim();
+        Changes { settings: named || sign_in, sign_in, caldav: caldav_changed, goes_to }
+    }
+
+    /// Whether saving the form starts the account's check: a server or the user name changed, or a new password was typed.
+    #[must_use]
+    pub fn save_checks(&self) -> bool {
+        let changes = self.changes();
+        changes.sign_in || changes.caldav || !self.form.password.is_empty()
+    }
+
+    /// What the form says before it is saved: which server the sign-in will go to, when it goes anywhere new.
+    #[must_use]
+    pub fn sign_in_note(&self) -> Option<String> {
+        let goes_to = self.changes().goes_to;
+        let new_password = !self.form.password.is_empty();
+        if !goes_to.is_empty() {
+            let servers = shown(&goes_to.join(", "));
+            return Some(if new_password {
+                tr!("Saving signs in to {servers} with the new password, to check them.", servers = servers)
+            } else {
+                tr!("Saving signs in to {servers} with your stored password, to check them.", servers = servers)
+            });
+        }
+        if !new_password {
+            return None;
+        }
+        let imap = self.form.servers().ok().map(|servers| where_to(&servers.imap))?;
+        Some(tr!("Saving signs in to {server} with the new password.", server = shown(&imap)))
+    }
+
+    /// Saves the account being edited: the settings through `account.update` and `calendar.server`, and a typed new
+    /// password into the credential store, under the account's id, replacing the old one. The worker reads it at its
+    /// next sign-in. The commands are validated before the password goes in, so a form that is refused replaces
+    /// nothing. When the sign-in moved or the password is new, the owner's check starts and shows next; otherwise the
+    /// form closes. A check still running is left to end first, or it would read the password as it was.
+    pub fn save(&mut self, mailbox: &mut Mailbox) {
+        let Stage::Edit(id) = self.stage else { return };
+        let changes = self.changes();
+        let password = !self.form.password.is_empty();
+        if !changes.settings && !changes.caldav && !password {
+            self.close();
+            return;
+        }
+        let checks = changes.sign_in || changes.caldav || password;
+        if checks && self.check_running(mailbox, id) {
+            self.error = Some(tr!("A check of this account is still running. Wait for it to end, then save.").to_owned());
+            return;
+        }
+        let recheck = (changes.caldav || password) && !changes.sign_in;
+        let (dry, params) = match (self.form.update_params(id, true, recheck), self.form.update_params(id, false, recheck)) {
+            (Ok(dry), Ok(params)) => (dry, params),
+            (Err(error), _) | (_, Err(error)) => {
+                self.error = Some(error);
+                return;
+            }
+        };
+        if let Err(error) = mailbox.run("account.update", &dry) {
+            self.error = Some(error.to_string());
+            return;
+        }
+        if password {
+            let stored = self.keychain.store(id, self.form.password.expose());
+            self.form.password.clear();
+            if let Err(refused) = stored {
+                self.error = Some(tr!(
+                    "The system's credential store did not take the new password, so nothing was changed: {reason}",
+                    reason = shown(&refused)
+                ));
+                return;
+            }
+            self.stored.insert(id);
+        }
+        self.error = None;
+        if let Err(error) = mailbox.run("account.update", &params) {
+            self.error = Some(if password {
+                tr!("The new password was stored, but the settings were not saved: {reason}", reason = error.to_string())
+            } else {
+                error.to_string()
+            });
+            mailbox.refresh();
+            return;
+        }
+        if changes.caldav
+            && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": optional(&self.form.caldav) }))
+        {
+            self.error = Some(error.to_string());
+        }
+        mailbox.refresh();
+        if checks {
+            self.stage = Stage::Checking(id);
+            self.load(mailbox);
+        } else if self.error.is_none() {
+            self.close();
+        }
+    }
+
+    /// Whether a check of the account `id` runs now.
+    fn check_running(&self, mailbox: &mut Mailbox, id: u64) -> bool {
+        let Ok(answer) = mailbox.run("account.list", &json!({})) else { return false };
+        answer
+            .get("accounts")
+            .and_then(Value::as_array)
+            .and_then(|accounts| accounts.iter().find(|account| account.get("id").and_then(Value::as_u64) == Some(id)))
+            .and_then(|account| account.get("check"))
+            .and_then(|check| check.get("running"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// Where the owner is.
@@ -631,8 +935,14 @@ impl Onboarding {
             self.form.username = shown(&best.username);
             best.source
         });
+        let outgoing = proposal.submission.first().map(|best| {
+            self.form.smtp_host = shown(&best.host);
+            self.form.smtp_port = best.port.to_string();
+            self.form.smtp_security = Some(best.security);
+            (shown(&best.host), best.source)
+        });
         let clean = |lines: Vec<String>| lines.iter().map(|line| shown(line)).collect();
-        self.found = Some(Found { source, asked: clean(proposal.asked), failed: clean(proposal.failed) });
+        self.found = Some(Found { source, outgoing, asked: clean(proposal.asked), failed: clean(proposal.failed) });
         true
     }
 
@@ -671,6 +981,12 @@ impl Onboarding {
         }
         self.stored.insert(id);
         self.error = None;
+        // Checked by the form, so this answers an error only when the store fails; the check goes on without it.
+        if let Some(url) = optional(&self.form.caldav)
+            && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": url }))
+        {
+            self.error = Some(error.to_string());
+        }
         self.stage = Stage::Checking(id);
         mailbox.refresh();
         self.load(mailbox);
@@ -708,9 +1024,13 @@ impl Onboarding {
     }
 
     /// Removes the added account and its password, and opens the form again with its settings; the password has to
-    /// be typed again.
+    /// be typed again. An account that was edited is not removed: its form opens again as it now stands.
     pub fn change(&mut self, mailbox: &mut Mailbox) {
         let Stage::Checking(id) = self.stage else { return };
+        if self.held.is_some() {
+            self.edit(mailbox, id);
+            return;
+        }
         let removed = mailbox.run("account.remove", &json!({ "account": id }));
         let forgotten = self.keychain.forget(id);
         if forgotten.is_ok() {

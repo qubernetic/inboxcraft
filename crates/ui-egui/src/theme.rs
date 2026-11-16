@@ -108,20 +108,22 @@ pub struct Palette {
     pub background: Color32,
     /// The folder pane, buttons and the bars.
     pub panel: Color32,
-    /// The message list.
+    /// The opaque base of the cards and sheets.
     pub surface: Color32,
+    /// The list's and the reader's cards: the surface, translucent, so the colour fields show through; no shadow.
+    pub card: Color32,
     /// Inside text fields.
     pub field: Color32,
     /// The edge of a text field.
     pub field_border: Color32,
+    /// The quiet edge of a control that is not selected: a pill, a segmented control.
+    pub control_edge: Color32,
     /// Text.
     pub text: Color32,
     /// Secondary text: previews, dates, addresses.
     pub muted: Color32,
-    /// The selected row or folder, and the start of the selection gradient.
+    /// The selected row, folder, pill or segment: one even tone.
     pub selection: Color32,
-    /// The end of the selection gradient.
-    pub selection_end: Color32,
     /// Links and accent text: the middle stop lightened in dark mode, darkened in light mode.
     pub accent: Color32,
     /// Text on the accent colour.
@@ -146,6 +148,10 @@ pub struct Palette {
     pub on_close: Color32,
     /// The preset's gradient at full strength (the navigation rail, the primary button, group badges).
     pub gradient: [Color32; 3],
+    /// The navigation rail's stops ([`rail_stops`]): the gradient, darkened only as far as white icons need.
+    pub rail: [Color32; 3],
+    /// The icons on [`Palette::rail`].
+    pub rail_ink: Color32,
     /// The dark ink for text on the gradient where white does not read ([`ink_on`] picks).
     pub ink: Color32,
     /// A glass layer over the colour fields: translucent.
@@ -161,12 +167,9 @@ pub struct Palette {
     pub glass_highlight: Color32,
     /// The soft shadow under glass and floats.
     pub shadow: Color32,
-    /// What floats over content that fades before it (hover actions over a row, toasts): about 80 % opaque, so a
-    /// little of the colour behind glows through.
+    /// Everything that pops up over content (menus, tooltips, popups, hover actions, toasts, the command palette, the
+    /// event editor): solid, so text under it never shows through.
     pub float: Color32,
-    /// What floats over sharp text that cannot fade (menus and tooltips over the reader): the same colour, opaque
-    /// enough that the text under it shows at no more than [`GHOST`].
-    pub float_over_text: Color32,
     /// Separators between rows.
     pub line: Color32,
     /// Laid over a hovered row.
@@ -175,6 +178,9 @@ pub struct Palette {
     pub colour_fields: [Color32; 3],
     /// One colour per account, so the unified list shows where a message lives.
     pub accounts: [Color32; 6],
+    /// An event's fill, one per account: a tint of the account's colour, as strong as text on it still reads over
+    /// every glass. Its edge is the account's colour at full strength.
+    pub events: [Color32; 6],
     /// The avatar colours: vivid, one picked per address ([`crate::component::avatar`]); white or the deep ink
     /// reads on each.
     pub avatars: [Color32; 10],
@@ -475,10 +481,14 @@ struct Neutrals {
     float: Color32,
     /// How much of the middle stop goes into the surfaces.
     tint: f32,
-    /// How much of the first and last stop goes into the selection gradient.
-    selection: [f32; 2],
+    /// How much of the middle stop goes into the selection.
+    selection: f32,
     /// How much of the middle stop goes into the badge.
     badge: f32,
+    /// The opacity of a card.
+    card: f32,
+    /// The opacity of an event's tint, at most.
+    event: f32,
     /// The opacity of the colour fields.
     fields: f32,
 }
@@ -493,8 +503,10 @@ const LIGHT: Neutrals = Neutrals {
     error: rgb(0xB3261E),
     float: rgb(0xFFFFFF),
     tint: 0.03,
-    selection: [0.20, 0.12],
+    selection: 0.16,
     badge: 0.16,
+    card: 0.80,
+    event: 0.20,
     fields: 0.30,
 };
 
@@ -508,16 +520,15 @@ const DARK: Neutrals = Neutrals {
     error: rgb(0xF2B8B5),
     float: rgb(0x1E2330),
     tint: 0.05,
-    selection: [0.32, 0.20],
+    selection: 0.30,
     badge: 0.30,
+    card: 0.62,
+    event: 0.30,
     fields: 0.34,
 };
 
 pub(crate) const SPACING: Spacing =
     Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
-
-/// The most contrast text under a float over sharp text may keep: barely there.
-pub const GHOST: f32 = 1.2;
 
 /// The font tokens at 100 %.
 const FONTS: Fonts = Fonts {
@@ -629,8 +640,8 @@ impl Palette {
         let panel = mix(n.panel, middle, n.tint * 1.2);
         let surface = mix(n.surface, middle, n.tint * 0.6);
         let field = mix(n.field, middle, n.tint * 0.3);
-        let selection = mix(surface, first, n.selection[0]);
-        let selection_end = mix(surface, last, n.selection[1]);
+        let selection = mix(surface, middle, n.selection);
+        let card = alpha(surface, n.card);
         let (sheer, shade) = match mode {
             Mode::Light => (mix(WHITE, middle, 0.02), mix(n.text, middle, 0.3)),
             Mode::Dark => (mix(WHITE, middle, 0.1), BLACK),
@@ -643,17 +654,19 @@ impl Palette {
             Mode::Light => alpha(shade, 0.045),
             Mode::Dark => alpha(sheer, 0.06),
         };
-        let float_base = mix(n.float, middle, n.tint * 1.5);
-        let float = alpha(float_base, 0.8);
+        let float = mix(n.float, middle, n.tint * 1.5);
         let colour_fields = preset.gradient.map(|stop| alpha(stop, n.fields));
-        // What text can sit on: the opaque surfaces, glass (hovered or not) over the colour fields, and a float over
-        // the fields, the full gradient or itself.
+        // What text can sit on: the opaque surfaces, the float, the selection (hovered or not), and glass and the cards
+        // on it (hovered or not) over the colour fields.
         let mut backdrops = vec![background];
         backdrops.extend(colour_fields.map(|colour| over(colour, background)));
         let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
-        let mut surfaces = vec![background, panel, surface, field, selection, selection_end, float_base];
-        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind)]));
-        surfaces.extend(backdrops.iter().chain(preset.gradient.iter()).map(|behind| over(float, *behind)));
+        let mut surfaces = vec![background, panel, surface, field, selection, float];
+        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind)]));
+        // The focus ring needs only 3:1 and is not text: a hovered card or selection does not darken it.
+        let ringed = surfaces.clone();
+        surfaces.push(over(hover, selection));
+        surfaces.extend(glassy.iter().map(|behind| over(hover, over(card, *behind))));
         let text = readable(mix(n.text, middle, 0.06), &surfaces, 4.5, mode);
         let muted = readable(mix(n.muted, middle, 0.08), &surfaces, 4.5, mode);
         let accent = match mode {
@@ -668,24 +681,27 @@ impl Palette {
         let error = readable(n.error, &surfaces, 4.5, mode);
         let accounts = [first, middle, last, preset.accent, mix(first, middle, 0.5), mix(middle, last, 0.5)]
             .map(|colour| readable(colour, &[background, panel, surface], 3.0, mode));
-        let mut sharp = vec![background, panel, surface];
-        sharp.extend(glassy);
-        let float_over_text = quieting(float_base, 0.8, &[text, muted, accent], &sharp);
+        let events = accounts.map(|colour| event_tint(colour, n.event, text, &glassy));
+        let (rail, rail_ink) = rail_stops(preset.gradient);
         Self {
             background,
             panel,
             surface,
+            card,
             field,
             field_border: readable(mix(muted, surface, 0.3), &[background, panel, surface, field], 3.0, mode),
+            control_edge: match mode {
+                Mode::Light => alpha(shade, 0.18),
+                Mode::Dark => alpha(sheer, 0.18),
+            },
             text,
             muted,
             selection,
-            selection_end,
             accent,
             on_accent: ink_on(accent),
             unread: readable(middle, &marked, 3.0, mode),
             flag: readable(last, &marked, 4.5, mode),
-            focus: readable(first, &surfaces, 3.0, mode),
+            focus: readable(first, &ringed, 3.0, mode),
             badge,
             on_badge: readable(accent, &[badge], 4.5, mode),
             error,
@@ -693,6 +709,8 @@ impl Palette {
             close: CLOSE,
             on_close: ink_on(CLOSE),
             gradient: preset.gradient,
+            rail,
+            rail_ink,
             ink: DEEP_INK,
             glass,
             glass_edge: match mode {
@@ -713,7 +731,6 @@ impl Palette {
                 Mode::Dark => alpha(shade, 0.35),
             },
             float,
-            float_over_text,
             line: match mode {
                 Mode::Light => alpha(shade, 0.07),
                 Mode::Dark => alpha(sheer, 0.06),
@@ -721,6 +738,7 @@ impl Palette {
             hover,
             colour_fields,
             accounts,
+            events,
             avatars: AVATARS,
         }
     }
@@ -840,8 +858,8 @@ impl Theme {
         visuals.override_text_color = Some(p.text);
         visuals.weak_text_color = Some(p.muted);
         visuals.panel_fill = p.panel;
-        // Menus, tooltips and popups float over whatever is there, the reader's sharp text too.
-        visuals.window_fill = p.float_over_text;
+        // Menus, tooltips and popups float over whatever is there, on the solid float.
+        visuals.window_fill = p.float;
         visuals.window_stroke = Stroke::new(1.0, p.field_border);
         visuals.window_corner_radius = corner;
         visuals.menu_corner_radius = corner;
@@ -920,14 +938,16 @@ pub fn over(top: Color32, under: Color32) -> Color32 {
     Color32::from_rgb(channel(top.r(), under.r()), channel(top.g(), under.g()), channel(top.b(), under.b()))
 }
 
-/// `colour` at the least opacity from `from` up that keeps every ink in `inks`, sitting on any of `on`, at no more
-/// than [`GHOST`] under it; opaque when nothing less does.
-fn quieting(colour: Color32, from: f32, inks: &[Color32], on: &[Color32]) -> Color32 {
-    const STEPS: u8 = 40;
-    (0..=STEPS)
-        .map(|step| alpha(colour, from + (1.0 - from) * f32::from(step) / f32::from(STEPS)))
-        .find(|float| on.iter().all(|behind| inks.iter().all(|ink| contrast(over(*float, *ink), over(*float, *behind)) <= GHOST)))
-        .unwrap_or(colour)
+/// The tint of an event in the account colour `colour`: at `most` opacity, less in steps of 2 % while `text` would
+/// not read on it at 4.5:1 over one of `glassy`, and never below 4 %.
+fn event_tint(colour: Color32, most: f32, text: Color32, glassy: &[Color32]) -> Color32 {
+    const STEP: f32 = 0.02;
+    const LEAST: f32 = 0.04;
+    // A dozen or so steps: the clamp keeps the cast inside u8.
+    let steps = ((most - LEAST) / STEP).round().clamp(0.0, 255.0) as u8;
+    let reads = |strength: f32| glassy.iter().all(|behind| contrast(text, over(alpha(colour, strength), *behind)) >= 4.5);
+    let strength = (0..steps).map(|step| most - f32::from(step) * STEP).find(|strength| reads(*strength)).unwrap_or(LEAST);
+    alpha(colour, strength)
 }
 
 /// `colour`, moved towards black in light mode or white in dark mode just far enough to reach `ratio` against
@@ -959,17 +979,32 @@ pub fn rail_avatar(stops: [Color32; 3]) -> (Color32, Color32) {
 }
 
 /// The gradient text sits on (a primary button, a chip) and its ink: the stops darkened together in steps of 2 % until
-/// white reads at 4.5:1 on every one, as long as that takes no more than 30 % (Electric 14 %, Aurora 30 %); otherwise
-/// the stops unchanged with the deep ink (Citrus). Icons on the rail keep the full gradient.
+/// white reads at 4.5:1 on every one, as long as that takes no more than 40 % (Electric 14 %, Aurora 30 %); otherwise
+/// the stops unchanged with the ink that reads better across them (Citrus).
 #[must_use]
 pub fn text_gradient(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
-    // 15 steps of 2 %: at most 30 %.
+    // 20 steps of 2 %: at most 40 %.
     const STEP: f32 = 0.02;
-    const STEPS: u8 = 15;
+    const STEPS: u8 = 20;
     (0..=STEPS)
         .map(|step| stops.map(|stop| mix(stop, BLACK, f32::from(step) * STEP)))
         .find(|darkened| darkened.iter().all(|stop| contrast(WHITE, *stop) >= 4.5))
-        .map_or((stops, DEEP_INK), |darkened| (darkened, WHITE))
+        .map_or((stops, ink_over(&stops)), |darkened| (darkened, WHITE))
+}
+
+/// The rail's stops and the ink for its icons: each stop darkened on its own, in steps of 2 %, only as far as white
+/// needs for 3:1 (WCAG AA for a graphical object) at that place, as long as no stop takes more than 25 %; otherwise
+/// the stops unchanged with the ink that reads better across them (Citrus).
+#[must_use]
+pub fn rail_stops(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
+    // 12 steps of 2 %: the last one within 25 %.
+    const STEP: f32 = 0.02;
+    const STEPS: u8 = 12;
+    let darkened = stops.map(|stop| (0..=STEPS).map(|step| mix(stop, BLACK, f32::from(step) * STEP)).find(|colour| contrast(WHITE, *colour) >= 3.0));
+    match darkened {
+        [Some(first), Some(middle), Some(last)] => ([first, middle, last], WHITE),
+        _ => (stops, ink_over(&stops)),
+    }
 }
 
 /// The ink for an icon or text that runs across every colour in `behind` (a gradient's stops): white or the deep
@@ -978,14 +1013,6 @@ pub fn text_gradient(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
 pub fn ink_over(behind: &[Color32]) -> Color32 {
     let worst = |ink: Color32| behind.iter().map(|colour| contrast(ink, *colour)).fold(f32::INFINITY, f32::min);
     if worst(WHITE) >= worst(DEEP_INK) { WHITE } else { DEEP_INK }
-}
-
-/// The ink for a solid icon across every colour in `behind` (a gradient's stops): white wherever white reaches 3:1
-/// (WCAG AA for a graphical object) on every one, otherwise [`ink_over`]. The WCAG 2 ratio rates dark ink on
-/// saturated blue and violet higher than the eye reads it, so white wins wherever it is good enough.
-#[must_use]
-pub fn icon_ink_over(behind: &[Color32]) -> Color32 {
-    if !behind.is_empty() && behind.iter().all(|colour| contrast(WHITE, *colour) >= 3.0) { WHITE } else { ink_over(behind) }
 }
 
 /// The colour the owner typed as `#rrggbb` or `rrggbb`, space around it dropped; `None` for anything else.

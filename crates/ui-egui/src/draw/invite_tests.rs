@@ -231,3 +231,15 @@ fn an_invitation_the_owner_organises_cannot_be_answered() {
     assert!(shows(&harness, "This invitation cannot be answered: you organise it."));
     assert!(!button(&harness, "Going"));
 }
+
+#[test]
+fn a_generated_body_gives_way_to_the_card_and_a_written_one_stays() {
+    let mut harness = sample_harness();
+    open(&mut harness, "Updated invitation: Lunch with Odile");
+    assert!(!shows(&harness, "Odile Brannock invites you to Lunch with Odile at The Gull café."), "the card says it all");
+    assert!(!button(&harness, "Reply"), "and stands for the message");
+    let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
+    open(&mut harness, "Invitation: Board game night");
+    assert!(shows(&harness, "See the calendar part."), "a body with more to say stays readable");
+    assert!(button(&harness, "Reply"));
+}

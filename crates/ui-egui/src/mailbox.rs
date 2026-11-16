@@ -1822,6 +1822,23 @@ impl Mailbox {
         }
     }
 
+    /// What the list's subtitle counts: the unread mail while the unified inbox shows its groups, else the messages.
+    #[must_use]
+    pub fn list_count(&self) -> String {
+        if self.groups().is_empty() {
+            let count = self.messages.len();
+            return if count == 1 { tr!("1 message").to_owned() } else { tr!("{count} messages", count = count) };
+        }
+        tr!("{count} unread", count = self.messages.iter().filter(|row| !row.seen).count())
+    }
+
+    /// Whether the unified inbox has groups to show, whichever view it is in now: an account is grouped, or the
+    /// showcase brings its own.
+    #[must_use]
+    pub fn can_group(&self) -> bool {
+        !self.showcase.groups.is_empty() || self.accounts.iter().any(|account| account.grouped)
+    }
+
     /// The row's date as the list shows it.
     #[must_use]
     pub fn when(&self, row: &MessageRow) -> String {

@@ -9,7 +9,7 @@
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
-use crate::glass::{self, Layers, Under};
+use crate::glass::{self, Layers};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::sample;
@@ -17,7 +17,10 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::button::IconButton;
+use super::checkbox::checkbox;
 use super::hover::{self, Action};
+use super::segmented::segmented;
+use super::select::Select;
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, line_height, pill, popup, tooltip};
@@ -94,23 +97,23 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     toast::panel(ui, theme, keymap, &Toast { text: tr!("Marked as done"), undo: Some("ui.undo") });
 }
 
-/// A row of the list with its hover actions shown and its text faded before them.
+/// A row of the list with its hover actions shown over its text.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = line_height(ui, theme.fonts.sender) + s.m * 2.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, s.corner, p.surface);
+    ui.painter().rect_filled(rect, s.corner, p.card);
     ui.painter().rect_filled(rect, s.corner, p.hover);
     let actions = [
         Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let shown = hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
     let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.sender, p.text, f32::INFINITY);
     let at = pos2(rect.left() + s.m, rect.center().y - text.size().y / 2.0);
-    glass::faded(ui.painter(), at, &text, p.text, shown.left - s.xs, s.xl);
+    ui.painter().galley(at, text, p.text);
+    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
 }
 
 /// The right column: buttons, pills, badges, a row with hover actions, a tooltip and a popup.
@@ -133,6 +136,16 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         pill::pill(ui, theme, tr!("Unread"), true);
         pill::pill(ui, theme, tr!("Flagged"), false);
     });
+    caption(ui, theme, tr!("Choices"));
+    ui.horizontal(|ui| {
+        let font = theme.fonts.button;
+        segmented(ui, theme, &[(0, tr!("Day"), font), (1, tr!("Week"), font), (2, tr!("Month"), font)], 1);
+        let names = [(0, tr!("Never")), (1, tr!("Daily"))];
+        Select { name: tr!("Repeat"), shown: tr!("Never"), options: &names, current: Some(0), icon: IconId::Changed, width: s.xl * 7.0 }
+            .show(ui, theme, &mut false);
+        checkbox(ui, theme, tr!("Personal"), true);
+        checkbox(ui, theme, tr!("Private"), false);
+    });
     caption(ui, theme, tr!("Badges"));
     ui.horizontal(|ui| {
         let side = line_height(ui, theme.fonts.heading) * 1.6;
@@ -149,7 +162,7 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| tooltip::bubble(ui, theme, keymap, tr!("Search"), Some(crate::keymap::FIND)));
         ui.add_space(s.l);
-        popup::panel(ui, theme, Under::Sharp, 220.0, |ui| {
+        popup::panel(ui, theme, 220.0, |ui| {
             popup::item(ui, theme, keymap, IconId::Snooze, tr!("Snooze"), Some("mail.snooze"));
             popup::item(ui, theme, keymap, IconId::Move, tr!("Move to a folder"), Some("mail.move"));
             popup::item(ui, theme, keymap, IconId::Flag, tr!("Flag"), None);
@@ -177,7 +190,7 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
         .clone()
     });
     caption(ui, theme, tr!("Time picker"));
-    popup::panel(ui, theme, Under::Sharp, 320.0, |ui| time_picker::show(ui, theme, &mut state, &ask, now(), Offset::UTC));
+    popup::panel(ui, theme, 320.0, |ui| time_picker::show(ui, theme, &mut state, &ask, now(), Offset::UTC));
     ui.data_mut(|data| data.insert_temp(id, state));
 }
 

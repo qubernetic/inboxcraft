@@ -130,6 +130,9 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | E4.6 invitations: an invitation in mail becomes a card in the reader, answered at once with Going, Maybe or No and changed later; updates and cancellations follow the same event by `UID` and `SEQUENCE`, with the request, reply, update and cancel chain tested on invented events (#149) |
 | 2026-11-08 | E4.7 reminders: calendar alerts become desktop notifications at the alert time, on a fake clock in tests and across a change of the clock, and a click opens the event (#150) |
 | 2026-11-08 | The daily-use epic's change fragments folded into the docs; the headline numbers, the by-area table, the ranked gaps and the README's "What works today" filled (#151) |
+| 2026-11-08 | The theme and glass code follow the newest design file (#205) |
+| 2026-11-08 | The calendar's controls, event colours and event editor follow the design file (#206) |
+| 2026-11-08 | See and edit an account's servers, with SMTP and CalDAV in the add-account form (#214) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -220,3 +223,6 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | minor | Progress log: invitations answered from mail (#149) |
 | 2026-11-08 | minor | Progress log: event reminders (#150) |
 | 2026-11-08 | minor | Stage, headline numbers, by-area table and upcoming filled for the daily-use epic (#151) |
+| 2026-11-08 | minor | Progress log: the theme and glass code follow the newest design file (#205) |
+| 2026-11-08 | minor | Progress log: the calendar's controls, event colours and event editor (#206) |
+| 2026-11-08 | minor | Progress log: an account's servers, seen and edited (#214) |

@@ -26,6 +26,8 @@
 //!   the IMAP sign-in, the SMTP sign-in; CalDAV listed as not built yet). The steps land as the worker reports them and
 //!   `account.list` shows them, each with its cause and an English sentence; while a check of the account runs, another
 //!   one starts nothing.
+//! - `account.update` (`owner`): an account's names, user name and servers; a change of where it signs in starts the
+//!   owner's check, and the sync again when it signs in. Never with a password.
 //! - `account.add` and `account.remove` (`owner`): an account from the settings the owner entered or saw, never with
 //!   a password (the front end keeps it in the OS credential store under the account's id), with the owner's first
 //!   check queued; a new account's first check that signs in starts its sync. Removing drops the account's mail,

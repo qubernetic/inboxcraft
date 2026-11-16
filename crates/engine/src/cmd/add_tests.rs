@@ -22,6 +22,131 @@ fn listed(session: &mut Session, id: u64) -> Value {
     accounts.into_iter().find(|account| account["id"] == json!(id)).unwrap()
 }
 
+/// Account 3, added and its first check out of the queue.
+fn with_added() -> Session {
+    let mut session = session();
+    session.run("account.add", &params()).unwrap();
+    session.take_jobs();
+    session
+}
+
+#[test]
+fn an_update_changes_what_it_names_and_keeps_the_rest() {
+    let mut session = with_added();
+    let answer = session.run("account.update", &json!({ "account": 3, "label": "Garden", "display_name": null })).unwrap();
+    assert_eq!(answer["account"]["label"], json!("Garden"));
+    assert_eq!(answer["started"], json!(false), "a new name sends no password anywhere");
+    assert!(session.take_jobs().is_empty());
+    let account = listed(&mut session, 3);
+    assert_eq!(account["label"], json!("Garden"));
+    assert_eq!(account["display_name"], Value::Null);
+    assert_eq!(account["username"], json!("carol"));
+    assert_eq!(account["imap"]["port"], json!(143));
+}
+
+#[test]
+fn an_update_that_moves_the_sign_in_checks_it_again_as_the_owners() {
+    for change in [
+        json!({ "imap": { "host": "other.example.org", "port": 143, "security": "starttls" } }),
+        json!({ "imap": { "host": "imap.example.org", "port": 1143, "security": "starttls" } }),
+        json!({ "imap": { "host": "imap.example.org", "port": 143, "security": "tls" } }),
+        json!({ "submission": { "host": "smtp.example.org", "security": "tls" } }),
+        json!({ "username": "carol2" }),
+    ] {
+        let mut session = with_added();
+        let mut params = change.clone();
+        params["account"] = json!(3);
+        let answer = session.run("account.update", &params).unwrap();
+        assert_eq!(answer["started"], json!(true), "{change}");
+        let jobs = session.take_jobs();
+        assert_eq!(jobs.len(), 1, "{change}");
+        assert_eq!((jobs[0].account, &jobs[0].kind), (AccountId::new(3), &JobKind::Check { by_owner: true }), "{change}");
+        assert_eq!(listed(&mut session, 3)["check"]["running"], json!(true), "{change}");
+    }
+}
+
+#[test]
+fn the_submission_server_is_set_on_its_usual_port_and_cleared_with_null() {
+    let mut session = with_added();
+    session.run("account.update", &json!({ "account": 3, "submission": { "host": "smtp.example.org", "security": "tls" } })).unwrap();
+    assert_eq!(listed(&mut session, 3)["submission"], json!({ "host": "smtp.example.org", "port": 465, "security": "tls" }));
+    session.take_jobs();
+    session.run("account.update", &json!({ "account": 3, "submission": null })).unwrap();
+    assert_eq!(listed(&mut session, 3)["submission"], Value::Null);
+}
+
+#[test]
+fn a_dry_run_changes_nothing_and_starts_nothing() {
+    let mut session = with_added();
+    let before = listed(&mut session, 3);
+    let answer = session.run("account.update", &json!({ "account": 3, "username": "new", "dry_run": true })).unwrap();
+    assert_eq!(answer["started"], json!(false));
+    assert!(session.take_jobs().is_empty());
+    assert_eq!(listed(&mut session, 3), before);
+}
+
+#[test]
+fn an_update_is_validated_like_an_add_and_says_nothing_of_what_it_was_given() {
+    let mut session = with_added();
+    for bad in [
+        json!({ "account": 3, "imap": { "host": "evil\r\nA1 LOGIN", "security": "tls" } }),
+        json!({ "account": 3, "username": "carol\r\nA1 LOGIN" }),
+        json!({ "account": 3, "username": "" }),
+        json!({ "account": 3, "imap": { "host": "imap.example.org", "security": "none" } }),
+        json!({ "account": 3, "password": "tulip-Meadow-7-quartz" }),
+    ] {
+        let error = session.run("account.update", &bad).unwrap_err().to_string();
+        assert!(!error.contains("tulip") && !error.contains("LOGIN"), "{error}");
+    }
+    assert!(session.take_jobs().is_empty());
+    let unknown = session.run("account.update", &json!({ "account": 99, "label": "x" })).unwrap_err().to_string();
+    assert!(unknown.contains("99"), "{unknown}");
+}
+
+#[test]
+fn a_recheck_asks_the_owners_check_and_its_sign_in_starts_the_sync_again() {
+    use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
+    let mut session = session();
+    let answer = session.run("account.update", &json!({ "account": 1, "recheck": true })).unwrap();
+    assert_eq!(answer["started"], json!(true));
+    let jobs = session.take_jobs();
+    assert_eq!(jobs.iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::Check { by_owner: true }]);
+    // A refused sign-in starts nothing, and the next check that signs in still does.
+    step(&mut session, 1, jobs[0].id, CheckStep::ImapLogin, StepStatus::Failed(ErrorKind::LoginRefused));
+    step(&mut session, 1, jobs[0].id, CheckStep::CaldavDiscovery, StepStatus::NotSet);
+    assert!(session.take_jobs().is_empty());
+    session.run("account.check", &json!({ "account": 1 })).unwrap();
+    let job = session.take_jobs()[0].id;
+    step(&mut session, 1, job, CheckStep::ImapLogin, StepStatus::Passed);
+    step(&mut session, 1, job, CheckStep::CaldavDiscovery, StepStatus::NotSet);
+    assert_eq!(session.take_jobs().iter().map(|job| job.kind.clone()).collect::<Vec<_>>(), [JobKind::SyncFolderList]);
+    // Once only: the next check of an account with folders is an ordinary one.
+    session.run("account.check", &json!({ "account": 1 })).unwrap();
+    let job = session.take_jobs()[0].id;
+    step(&mut session, 1, job, CheckStep::ImapLogin, StepStatus::Passed);
+    assert!(session.take_jobs().is_empty());
+}
+
+#[test]
+fn an_update_cannot_become_another_account() {
+    let mut session = with_added();
+    session
+        .run("account.add", &json!({ "address": "dan@example.org", "username": "dan", "imap": { "host": "imap.example.org", "security": "tls" } }))
+        .unwrap();
+    let error = session.run("account.update", &json!({ "account": 3, "username": "dan" })).unwrap_err().to_string();
+    assert!(error.contains("already there"), "{error}");
+    // Its own settings again are no clash.
+    session.run("account.update", &json!({ "account": 3, "username": "carol" })).unwrap();
+}
+
+#[test]
+fn an_agent_may_not_update_an_account() {
+    let mut session = with_added();
+    let error = session.run_as(Caller::Agent, "account.update", &json!({ "account": 3, "label": "x" })).unwrap_err().to_string();
+    assert!(error.contains("owner"), "{error}");
+    assert!(session.take_jobs().is_empty());
+}
+
 #[test]
 fn an_added_account_gets_the_next_id_and_its_first_check_by_the_owner() {
     let mut session = session();

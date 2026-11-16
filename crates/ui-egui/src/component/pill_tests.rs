@@ -59,6 +59,25 @@ fn rects(output: &egui::FullOutput) -> Vec<(egui::Color32, egui::Color32)> {
 }
 
 #[test]
+fn a_selected_pill_is_one_even_tone_and_another_has_no_fill_and_a_quiet_edge() {
+    let theme = theme();
+    let palette = theme.palette;
+    let draw = |selected: bool| {
+        let mut harness = builder().build_ui(move |ui| {
+            pill(ui, &theme, "Unread", selected);
+        });
+        harness.run();
+        rects(harness.output())
+    };
+    let plain = draw(false);
+    assert!(plain.iter().any(|(_, stroke)| *stroke == palette.control_edge), "{plain:?}");
+    assert!(plain.iter().all(|(fill, _)| *fill != palette.panel && *fill != palette.selection), "{plain:?}");
+    let chosen = draw(true);
+    assert!(chosen.iter().any(|(fill, _)| *fill == palette.selection), "{chosen:?}");
+    assert!(chosen.iter().all(|(_, stroke)| *stroke != palette.control_edge), "{chosen:?}");
+}
+
+#[test]
 fn a_hovered_pill_fades_its_hover_in_and_a_focused_one_shows_its_ring() {
     let theme = theme();
     let palette = theme.palette;

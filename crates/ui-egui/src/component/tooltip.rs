@@ -8,7 +8,7 @@
 
 use egui::{Frame, Response, Shape, Tooltip, Ui};
 
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
@@ -50,7 +50,7 @@ fn noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option
             ui.label(galley(ui, note, theme.fonts.caption, theme.palette.muted));
         }
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, Under::Sharp);
+    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
     ui.painter().set(slot, Shape::Vec(shapes));
 }
 

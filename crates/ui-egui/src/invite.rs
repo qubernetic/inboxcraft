@@ -69,6 +69,42 @@ impl Rsvp {
     }
 }
 
+/// The longest body [`Invite::restates`] reads, in bytes.
+const MAX_RESTATED: usize = 1024;
+
+/// The words a generated invitation line adds to what the card says.
+const SMALL_WORDS: [&str; 24] = [
+    "a",
+    "an",
+    "and",
+    "at",
+    "by",
+    "event",
+    "for",
+    "from",
+    "has",
+    "have",
+    "in",
+    "invitation",
+    "invited",
+    "invites",
+    "is",
+    "meeting",
+    "of",
+    "on",
+    "the",
+    "to",
+    "updated",
+    "was",
+    "with",
+    "you",
+];
+
+/// The words of `text`, in lower case.
+fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_lowercase)
+}
+
 /// One version of the event: its title, place and times.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Version {
@@ -309,6 +345,19 @@ impl Invite {
     #[must_use]
     pub fn answered(&self) -> Option<String> {
         self.answer.map(|answer| tr!("You answered {answer}.", answer = answer.text()))
+    }
+
+    /// Whether `body` only says again what the card says: its words are all the card's or the small words of a
+    /// generated line such as "Odile invites you to Lunch at The Gull café". Anything else the organiser wrote keeps
+    /// the body on screen, as does anything too long to be such a line.
+    #[must_use]
+    pub fn restates(&self, body: &str) -> bool {
+        if body.len() > MAX_RESTATED {
+            return false;
+        }
+        let said = format!("{} {} {} {}", self.event.summary, self.event.location, self.event.when(), self.organizer.as_deref().unwrap_or_default());
+        let said: Vec<String> = words(&said).collect();
+        words(body).all(|word| said.contains(&word) || SMALL_WORDS.contains(&word.as_str()))
     }
 
     /// What a guest's answer says: `Béla is going.`

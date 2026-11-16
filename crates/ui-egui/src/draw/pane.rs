@@ -18,12 +18,12 @@ use crate::keymap::{self, Keymap};
 use inboxcraft_model::Role as FolderRole;
 
 use crate::mailbox::{Mailbox, Place, role_text};
-use crate::theme::{Font, Theme, icon_ink_over, rail_avatar};
+use crate::theme::{Font, Theme, rail_avatar};
 use crate::tr;
 
-/// The ink of the rail's icons: white where it reaches 3:1 on every stop of the gradient, otherwise the deep ink.
+/// The ink of the rail's icons: white on the rail's own stops, or the better ink where those are the full gradient.
 pub(super) fn rail_ink(theme: &Theme) -> Color32 {
-    icon_ink_over(&theme.palette.gradient)
+    theme.palette.rail_ink
 }
 
 /// The side of the rail's buttons and its mark, in points: the rail keeps its size at every text scale, so the
@@ -113,7 +113,7 @@ pub(super) fn rail(
     let corner = place.corner;
     let s = &theme.spacing;
     let rect = ui.max_rect();
-    let [first, middle, last] = theme.palette.gradient;
+    let [first, middle, last] = theme.palette.rail;
     let gradient = Gradient::Linear {
         from: pos2(0.5, 0.0),
         to: pos2(0.5, 1.0),

@@ -3,7 +3,7 @@
 
 //! The calendar screen: the side panel on a card at the left (the mini month, the calendars with a box each, and the
 //! details of the picked event), and the view on a card beside it, under a toolbar with the view's title, the steps
-//! back, to today and on, and a pill per view. Without a calendar one card in the window's middle says there are none
+//! back, to today and on, and the views as a segmented control. Without a calendar one card in the window's middle says there are none
 //! yet and what will show here.
 //!
 //! The day and week views lay the hours out under a lane of blocks over whole days (`hours`), the month view the six
@@ -19,21 +19,33 @@ mod hours;
 mod month;
 mod side;
 
-use egui::{Align, CentralPanel, Color32, Layout, Panel, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{
+    Align, CentralPanel, Color32, CornerRadius, Layout, Panel, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2,
+};
 
 use super::paint::{line, line_height};
 use super::{around, margin};
 use crate::calendar::{Calendar, Day, EventRow, Picked, View};
 use crate::component::button::{IconButton, TextButton};
-use crate::component::pill::pill;
+use crate::component::corner;
+use crate::component::segmented::segmented;
 use crate::glass::Layers;
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
-use crate::theme::{Font, Theme};
+use crate::theme::{Face, Font, Theme, Weight};
 use crate::tr;
 
-/// The width of the side panel, in points.
-const SIDE_WIDTH: f32 = 260.0;
+/// The width of the side panel with the gaps around its card, in points: the card is 240 wide as the design draws it.
+const SIDE_WIDTH: f32 = 255.0;
+
+/// Between the toolbar and the view, in points.
+const UNDER_TOOLBAR: f32 = 10.0;
+
+/// The toolbar's height, in points: everything in it is centred on one line.
+const TOOLBAR: f32 = 36.0;
+
+/// The room over the toolbar, in points.
+const OVER_TOOLBAR: i8 = 14;
 
 /// What was pressed on the calendar screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,11 +101,12 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
         .exact_size(SIDE_WIDTH)
         .show_separator_line(false)
         .frame(around(s.gap, s.gap / 2.0, s.gap))
-        .show(ui, |ui| layers.card(ui, margin(s.m), |ui| side::show(ui, theme, keymap, calendar, &mut asked)));
+        .show(ui, |ui| layers.card(ui, margin(s.l), |ui| side::show(ui, theme, keymap, calendar, &mut asked)));
     CentralPanel::no_frame().frame(around(s.gap / 2.0, s.gap, s.gap)).show(ui, |ui| {
-        layers.card(ui, margin(s.l), |ui| {
+        let room = egui::Margin { top: OVER_TOOLBAR, ..margin(s.l) };
+        layers.card(ui, room, |ui| {
             toolbar(ui, theme, keymap, calendar, &mut asked);
-            ui.add_space(s.m);
+            ui.add_space(UNDER_TOOLBAR);
             match calendar.view() {
                 View::Day => hours::show(ui, theme, calendar, 1, &mut asked),
                 View::Week => hours::show(ui, theme, calendar, 7, &mut asked),
@@ -105,7 +118,8 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
     asked
 }
 
-/// The toolbar over the view: its title, the steps back, to today and on, and the views' pills at the right.
+/// The toolbar over the view: its title, the steps back, to today and on, and the views as a segmented control and
+/// New event at the right.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let (back, on) = match calendar.view() {
@@ -114,9 +128,14 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         View::Month => (tr!("Previous month"), tr!("Next month")),
         View::Agenda => (tr!("Earlier days"), tr!("Later days")),
     };
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(calendar.title()).font(theme.fonts.title.id()).color(p.text));
-        ui.add_space(theme.spacing.m);
+    let font = theme.fonts.button;
+    let views = View::ALL.map(|view| (view, view.text(), font));
+    let title = Font { size: theme.fonts.title.size * 1.1, ..theme.fonts.title };
+    let row = vec2(ui.available_width(), TOOLBAR);
+    ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_height(TOOLBAR);
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.label(RichText::new(calendar.title()).font(title.id()).color(p.text));
         if IconButton::new(IconId::Previous, back).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Step(false));
         }
@@ -130,11 +149,8 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
             if TextButton::new(tr!("New event")).primary().icon(IconId::Add).show(ui, theme, keymap).clicked() {
                 asked.push(Asked::New);
             }
-            ui.add_space(theme.spacing.s);
-            for view in View::ALL.into_iter().rev() {
-                if pill(ui, theme, view.text(), calendar.view() == view).clicked() {
-                    asked.push(Asked::View(view));
-                }
+            if let Some(view) = segmented(ui, theme, &views, calendar.view()) {
+                asked.push(Asked::View(view));
             }
         });
     });
@@ -145,68 +161,122 @@ pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calend
     calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, screen)).unwrap_or_default()
 }
 
-/// The colour of calendar `id`: the server's, or one of the accounts' colours by its place in the list.
-fn tint(theme: &Theme, calendar: &Calendar, id: u64) -> Color32 {
-    match calendar.calendar(id).and_then(|row| row.colour) {
-        Some([r, g, b]) => Color32::from_rgb(r, g, b),
-        None => {
-            let colours = &theme.palette.accounts;
-            colours.get(calendar.index_of(id) % colours.len()).copied().unwrap_or(theme.palette.accent)
+/// An event's fill and its edge at full strength, for a calendar with the colour `server` gave it, if any, at `place`
+/// in the list: the edge is the server's colour or one of the accounts' by place, the fill the event token of the place
+/// or, for a server's colour, that colour laid as strongly as the token lays its own.
+fn colours(theme: &Theme, server: Option<[u8; 3]>, place: usize) -> (Color32, Color32) {
+    let p = &theme.palette;
+    let token = p.events.get(place % p.events.len()).copied().unwrap_or(p.selection);
+    let edge = p.accounts.get(place % p.accounts.len()).copied().unwrap_or(p.accent);
+    match server {
+        Some([r, g, b]) => {
+            let edge = Color32::from_rgb(r, g, b);
+            (edge.gamma_multiply(f32::from(token.a()) / 255.0), edge)
         }
+        None => (token, edge),
     }
 }
 
-/// The caption size in the strong weight: an event's summary.
+/// The colours of the events of calendar `id`.
+fn calendar_colours(theme: &Theme, calendar: &Calendar, id: u64) -> (Color32, Color32) {
+    colours(theme, calendar.calendar(id).and_then(|row| row.colour), calendar.index_of(id))
+}
+
+/// The colour of calendar `id` at full strength: its dot.
+fn tint(theme: &Theme, calendar: &Calendar, id: u64) -> Color32 {
+    calendar_colours(theme, calendar, id).1
+}
+
+/// `theme`'s caption in the SemiBold weight: an event's summary.
 fn caption_strong(theme: &Theme) -> Font {
-    Font { size: theme.fonts.caption.size, ..theme.fonts.strong }
+    Font { face: Face::Sans(Weight::SemiBold), ..theme.fonts.caption }
+}
+
+/// The caption in the Bold weight: today's number.
+fn caption_bold(theme: &Theme) -> Font {
+    Font { face: Face::Sans(Weight::Bold), ..theme.fonts.caption }
+}
+
+/// How a block is drawn where it shows, as the design draws each place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// A timed event in the hours: a wide edge, its text at the top.
+    Timed,
+    /// An event over whole days, in a lane.
+    Band,
+    /// A line in a month's cell, in plain weight.
+    Chip,
+    /// A row of the agenda.
+    Row,
+}
+
+impl Shape {
+    /// The width of the edge, the room from it to the text, and the corner, in points.
+    fn metrics(self) -> (f32, f32, f32) {
+        match self {
+            Self::Timed => (4.0, 10.0, 4.0),
+            Self::Band => (3.0, 8.0, 3.0),
+            Self::Chip => (3.0, 5.0, 3.0),
+            Self::Row => (3.0, 10.0, 4.0),
+        }
+    }
 }
 
 /// What an event's block says: its first line, and a second one while there is room.
 struct Text<'a> {
     title: &'a str,
     detail: Option<&'a str>,
+    shape: Shape,
 }
 
-/// An event drawn over `rect`: a tint of its calendar's colour with a bar of it on the left and its `text`; a button
-/// named after the event, selected while it is picked. `salt` tells apart the places one event shows in. A press
-/// picks it, or lets it go when it was picked.
+/// An event drawn over `rect`: a tint of its calendar's colour with an edge of it at full strength on the left and its
+/// `text`; a button named after the event, selected while it is picked. `salt` tells apart the places one event shows
+/// in. A press picks it, or lets it go when it was picked.
 fn block(ui: &mut Ui, theme: &Theme, calendar: &Calendar, event: &EventRow, rect: Rect, text: &Text<'_>, salt: i64) -> Option<Asked> {
     let picked = calendar.picked().is_some_and(|picked| picked.key() == event.key());
     let id = ui.scope_id().with(("calendar-event", event.id, event.start, salt));
     let response = ui.interact(rect, id, Sense::click());
     response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, event.spoken()));
     if ui.is_rect_visible(rect) {
-        paint_block(ui, theme, tint(theme, calendar, event.calendar), rect, &response, picked, text);
+        paint_block(ui, theme, calendar_colours(theme, calendar, event.calendar), rect, &response, picked, text);
     }
     response.clicked().then(|| Asked::Pick(if picked { None } else { Some(event.key()) }))
 }
 
-fn paint_block(ui: &Ui, theme: &Theme, colour: Color32, rect: Rect, response: &Response, picked: bool, text: &Text<'_>) {
+fn paint_block(ui: &Ui, theme: &Theme, (fill, edge): (Color32, Color32), rect: Rect, response: &Response, picked: bool, text: &Text<'_>) {
     let p = &theme.palette;
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let strength = if picked {
-        0.45
+    let (edge_width, pad, round) = text.shape.metrics();
+    painter.rect_filled(rect, round, fill);
+    let deeper = if picked {
+        0.27
     } else if response.hovered() {
-        0.3
+        0.12
     } else {
-        0.18
+        0.0
     };
-    let corner = 4.0;
-    painter.rect_filled(rect, corner, colour.gamma_multiply(strength));
-    painter.rect_filled(Rect::from_min_size(rect.min, vec2(3.0_f32.min(rect.width()), rect.height())), corner, colour);
-    let pad = 6.0;
-    let width = (rect.width() - pad - 2.0).max(1.0);
-    let title = line(ui, &[(text.title, caption_strong(theme), p.text)], width);
+    if deeper > 0.0 {
+        painter.rect_filled(rect, round, edge.gamma_multiply(deeper));
+    }
+    let round_left = CornerRadius { nw: corner(round).nw, sw: corner(round).sw, ne: 0, se: 0 };
+    painter.rect_filled(Rect::from_min_size(rect.min, vec2(edge_width.min(rect.width()), rect.height())), round_left, edge);
+    let left = rect.left() + edge_width + pad;
+    let width = (rect.right() - left - 2.0).max(1.0);
+    let font = if text.shape == Shape::Chip { theme.fonts.caption } else { caption_strong(theme) };
+    let title = line(ui, &[(text.title, font, p.text)], width);
     let height = title.size().y;
-    painter.galley(pos2(rect.left() + pad, rect.top() + 2.0), title, p.text);
-    if let Some(detail) = text.detail
-        && rect.height() >= height * 2.0 + 4.0
-    {
-        let detail = line(ui, &[(detail, theme.fonts.caption, p.muted)], width);
-        painter.galley(pos2(rect.left() + pad, rect.top() + 2.0 + height), detail, p.muted);
+    if let Some(detail) = text.detail {
+        let top = rect.top() + 6.0;
+        painter.galley(pos2(left, top), title, p.text);
+        if rect.height() >= height * 2.0 + 8.0 {
+            let detail = line(ui, &[(detail, theme.fonts.caption, p.muted)], width);
+            painter.galley(pos2(left, top + height + 2.0), detail, p.muted);
+        }
+    } else {
+        painter.galley(pos2(left, rect.center().y - height / 2.0), title, p.text);
     }
     if response.has_focus() {
-        painter.rect_stroke(rect.shrink(1.0), corner, Stroke::new(2.0, p.focus), StrokeKind::Inside);
+        painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
     }
 }
 

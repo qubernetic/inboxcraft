@@ -231,3 +231,15 @@ fn an_unavailable_text_button_takes_no_press() {
     harness.run();
     assert_eq!(harness.state(), &[0, 0, 0]);
 }
+
+#[test]
+fn a_danger_button_is_filled_with_the_error_colour_and_reads_on_it() {
+    let theme = theme();
+    let mut harness = builder().build_ui(move |ui| {
+        TextButton::new("Block").danger().show(ui, &theme, &Keymap::default());
+    });
+    harness.run();
+    let colours = text_colours(harness.output());
+    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.on_error));
+    harness.get_by_role_and_label(Role::Button, "Block");
+}

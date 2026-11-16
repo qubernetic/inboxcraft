@@ -83,6 +83,11 @@ fn a_held_message_opens_as_a_preview_that_asks_whether_to_let_the_sender_in() {
     harness.get_by_label("Let Harbour Swim Club in?");
     harness.get_by_label("Preview · nothing is accepted yet");
     assert!(harness.query_by_label("In People").is_none(), "held mail is in no group yet");
+    harness.get_by_label("club@example.org · first mail 06:00 · 1 message waiting");
+    harness.get_by_label("Winter swim at the harbour steps");
+    assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none(), "the preview has no Reply");
+    assert!(harness.query_by_role_and_label(Role::Button, "Snooze").is_none(), "the sender stands in place of the toolbar");
+    harness.get_by_role_and_label(Role::Button, "Details");
     for name in ["People", "Updates", "Newsletters", "Invitations", "Accept", "Accept and open", "Block"] {
         harness.get_by_role_and_label(Role::Button, name);
     }
@@ -289,4 +294,22 @@ fn a_triage_choice_that_cannot_be_kept_shows_why_once() {
     harness.run();
     assert_eq!(keep.stored.lock().unwrap().len(), 1, "tried once per change");
     assert!(harness.state().mailbox().error().is_some_and(|error| error.contains("the disk is full")));
+}
+
+#[test]
+fn new_senders_offers_the_screener_mode_under_the_list() {
+    let mut harness = previewing();
+    assert_eq!(harness.get_by_role_and_label(Role::Button, "Before the inbox").accesskit_node().toggled(), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::Button, "Inside, marked").click();
+    harness.run();
+    assert_eq!(harness.state().mailbox().screener_mode(), ScreenerMode::Inside);
+}
+
+#[test]
+fn the_held_header_keeps_to_a_narrow_window() {
+    let mut harness = previewing();
+    harness.set_size(vec2(420.0, 420.0));
+    harness.run();
+    harness.get_by_label("Let Harbour Swim Club in?");
+    harness.get_by_role_and_label(Role::Button, "Block");
 }

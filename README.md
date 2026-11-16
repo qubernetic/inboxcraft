@@ -24,8 +24,7 @@ from people, and mail can be sent later or snoozed. Calendars come from your own
 InboxCraft server, no account and no telemetry.
 
 > **Status: pre-alpha (0.1.0, not released).** It reads, writes and sends mail over IMAP and SMTP with the triage
-> below, and shows and edits CalDAV calendars. The add-account form does not ask for the SMTP and CalDAV servers
-> yet, so an account added today reads and triages mail but cannot send, and has no calendar. It signs in with a
+> below, and shows and edits CalDAV calendars. It signs in with a
 > password only (no OAuth) and runs on Linux only. It is for developers and testers, not for daily use yet. The full picture, with what is missing, is in
 > [ROADMAP.md](ROADMAP.md) and [docs/gaps.md](docs/gaps.md).
 

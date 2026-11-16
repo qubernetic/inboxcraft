@@ -2,21 +2,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The popup: a float with menu rows (an icon, a name and the key chip) and choice rows (one of a few, the chosen one
-//! marked), opening over the card motion token. Over sharp text (a menu over the reader) it goes more opaque; over
-//! content that fades it is the frosted float.
+//! marked), opening over the card motion token.
 
 use egui::{Align2, Area, Context, Id, Order, Pos2, Rect, Response, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
-use crate::glass::{self, Under};
+use crate::glass;
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{control_side, cut, galley, margin};
+use super::{control_side, cut, galley, margin, tick};
 
-/// Draws a float of `width` points over `under` into `ui` with `add` drawing its content.
-pub fn panel<R>(ui: &mut Ui, theme: &Theme, under: Under, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+/// Draws a float of `width` points into `ui` with `add` drawing its content.
+pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let slot = ui.painter().add(Shape::Noop);
     let width = if width.is_finite() { width.clamp(1.0, 2048.0) } else { 1.0 };
     let inner = egui::Frame::new().inner_margin(margin(theme.spacing.xs, theme.spacing.xs)).show(ui, |ui| {
@@ -27,13 +26,13 @@ pub fn panel<R>(ui: &mut Ui, theme: &Theme, under: Under, width: f32, add: impl 
         })
         .inner
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect, under);
+    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
 }
 
 /// Shows the popup `id` with its top left corner at `anchor`, opening into place; what `add` gave.
-pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, under: Under, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let opened = motion::appear(ctx, id, theme.motion.card);
     let at = anchor - vec2(0.0, theme.spacing.xs * (1.0 - opened));
     Area::new(id)
@@ -43,7 +42,7 @@ pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, under: Under,
         .fade_in(false)
         .show(ctx, |ui| {
             ui.multiply_opacity(opened);
-            panel(ui, theme, under, width, add)
+            panel(ui, theme, width, add)
         })
         .inner
 }
@@ -61,6 +60,12 @@ pub fn entry(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Op
 /// A choice row: `name`, marked with the Done icon when it is the one `chosen`; clicked when picked.
 pub fn choice(ui: &mut Ui, theme: &Theme, name: &str, chosen: bool) -> Response {
     row(ui, theme, &Keymap::empty(), chosen.then_some(IconId::Done), name, None, Some(chosen))
+}
+
+/// A choice row with an `icon` in the muted colour, which a plain tick takes the place of when it is the one
+/// `chosen`: the rows of a select.
+pub fn option(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, chosen: bool) -> Response {
+    row(ui, theme, &Keymap::empty(), (!chosen).then_some(icon), name, None, Some(chosen))
 }
 
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: &str, action: Option<&str>, chosen: Option<bool>) -> Response {
@@ -81,9 +86,12 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
         }
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s + side / 2.0, rect.center().y), vec2(side, side));
-        if let Some(icon) = icon {
-            let colour = if chosen.is_some() { p.accent } else { p.text };
-            theme.icons.paint(painter, icon_rect, icon, Style::Regular, colour);
+        match (icon, chosen) {
+            (Some(icon), Some(false)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.muted),
+            (Some(icon), Some(true)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.accent),
+            (Some(icon), None) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.text),
+            (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
+            (None, _) => {}
         }
         let mut right = rect.right() - s.s;
         if let Some(chip) = action.and_then(|action| keymap.chip(ui.ctx(), action)) {

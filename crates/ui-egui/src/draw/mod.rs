@@ -1082,6 +1082,13 @@ impl InboxApp {
         }
     }
 
+    /// Where every toast stands: its bottom edge over the window's bottom, centred on what is right of the rail.
+    fn toast_bottom(ui: &Ui, theme: &Theme) -> egui::Pos2 {
+        let window = ui.max_rect();
+        let content = window.with_min_x((window.left() + pane::rail_width(theme)).min(window.right()));
+        content.center_bottom() - egui::vec2(0.0, theme.spacing.xl + theme.spacing.xs)
+    }
+
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
     fn notice_toast(&mut self, ui: &Ui, theme: &Theme) {
         let Some((text, since)) = self.notice.clone() else { return };
@@ -1097,7 +1104,7 @@ impl InboxApp {
         }
         self.notice = Some((text.clone(), Some(since)));
         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         toast::show(ui.ctx(), theme, &self.keymap, egui::Id::unique("compose-toast"), &Toast { text: &text, undo: None }, bottom);
     }
 
@@ -1284,7 +1291,9 @@ impl InboxApp {
             self.close_settings();
         }
         let setting = self.settings.is_open();
-        let left_editor = escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some();
+        // Escape closes a list of choices open in the editor first; the list's own control takes the key.
+        let left_editor =
+            escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
         if left_editor {
             self.calendar.close_editor();
         }
@@ -1312,6 +1321,7 @@ impl InboxApp {
         let mut changed = None;
         let mut review = false;
         let mut outboxed = None;
+        let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // The colour fields first, then the place for the glass layers, then everything else.
@@ -1354,10 +1364,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox)
+                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1422,6 +1432,7 @@ impl InboxApp {
             || undone
             || unsent
             || outboxed.is_some()
+            || screener_mode.is_some()
             || (out && leaving)
             || left_full
             || left_editor
@@ -1435,6 +1446,7 @@ impl InboxApp {
             || header.searched.is_some()
             || header.open.is_some()
             || header.show_done.is_some()
+            || header.view.is_some()
             || done_all.is_some()
             || review
             || clicked.is_some()
@@ -1447,7 +1459,7 @@ impl InboxApp {
             // What changed shows in the next frame.
             ui.ctx().request_repaint();
         }
-        self.act(out, acted, undone, outboxed);
+        self.act(out, acted, undone, outboxed, screener_mode);
         if let Some(ids) = done_all {
             self.mailbox.done_all(&ids);
         }
@@ -1492,6 +1504,9 @@ impl InboxApp {
     fn go(&mut self, asked: &pane::Asked, header: list::Header, review: bool) {
         if let Some(account) = asked.narrow {
             self.mailbox.narrow(account);
+        }
+        if let Some(view) = header.view {
+            self.mailbox.set_inbox_view(view);
         }
         if let Some(show) = header.show_done {
             self.mailbox.set_show_done(show);
@@ -1616,7 +1631,17 @@ impl InboxApp {
 
     /// Applies the acts of the frame: the sliding row's once it is `out`, the one `acted` (a hover action or its
     /// key), Undo when `undone`, and what a button of the outbox asked of a send.
-    fn act(&mut self, out: bool, acted: Option<(u64, Act)>, undone: bool, outboxed: Option<(u64, list::Outbox)>) {
+    fn act(
+        &mut self,
+        out: bool,
+        acted: Option<(u64, Act)>,
+        undone: bool,
+        outboxed: Option<(u64, list::Outbox)>,
+        mode: Option<inboxcraft_engine::ScreenerMode>,
+    ) {
+        if let Some(mode) = mode {
+            self.mailbox.set_screener_mode(mode);
+        }
         if let Some((draft, asked)) = outboxed {
             self.outbox(draft, asked);
         }
@@ -1683,7 +1708,7 @@ impl InboxApp {
         if quiet {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("send-toast").with(draft);
         let undone = toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &text, undo: Some(keymap::UNDO) }, bottom);
         if undone {
@@ -1717,7 +1742,7 @@ impl InboxApp {
         if quiet {
             keys.unbind(keymap::UNDO);
         }
-        let bottom = ui.max_rect().center_bottom() - egui::vec2(0.0, theme.spacing.xl);
+        let bottom = Self::toast_bottom(ui, theme);
         let id = egui::Id::unique("act-toast").with(undo.serial);
         toast::show(ui.ctx(), theme, &keys, id, &Toast { text: &undo.text, undo: undo.undoable.then_some(keymap::UNDO) }, bottom)
     }
@@ -1761,6 +1786,7 @@ impl InboxApp {
                 self.settings.show(section);
             }
             settings::Asked::Add => self.onboarding.open(),
+            settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
             settings::Asked::Back => self.onboarding.close(),
             settings::Asked::Page(asked) => self.apply_page(asked),
             settings::Asked::Capture(action) => self.settings.capture(action),
@@ -1802,6 +1828,7 @@ impl InboxApp {
         match asked {
             onboard::Asked::Detect => onboarding.detect(),
             onboard::Asked::Add => onboarding.add(mailbox),
+            onboard::Asked::Save => onboarding.save(mailbox),
             onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
