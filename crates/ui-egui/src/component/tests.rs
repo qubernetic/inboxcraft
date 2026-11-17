@@ -125,7 +125,7 @@ const AROUND: f32 = 4.0;
 struct Recorded {
     layers: Vec<(LayerId, Vec<ClippedShape>)>,
     widgets: Vec<(NodeId, LayerId)>,
-    dashed: Vec<(LayerId, Rect, Color32)>,
+    dashed: Vec<(LayerId, Rect, Color32, f32)>,
 }
 
 fn recorded_id() -> Id {
@@ -278,12 +278,21 @@ pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint
     let layer =
         recorded.widgets.iter().find(|(widget, _)| *widget == id).map(|(_, layer)| *layer).unwrap_or_else(|| panic!("{label}: no widget rect"));
     let list: Vec<&ClippedShape> = recorded.layers.iter().filter(|(of, _)| *of == layer).flat_map(|(_, shapes)| shapes.iter()).collect();
-    let dashes: Vec<(Rect, Color32)> =
-        recorded.dashed.iter().filter(|(of, rect, _)| *of == layer && grown.contains_rect(*rect)).map(|(_, rect, colour)| (*rect, *colour)).collect();
+    let dashes: Vec<(Rect, Color32, f32)> = recorded
+        .dashed
+        .iter()
+        .filter(|(of, rect, ..)| *of == layer && grown.contains_rect(*rect))
+        .map(|(_, rect, colour, radius)| (*rect, *colour, *radius))
+        .collect();
+    // The pieces a dashed edge is drawn from: rects and arc rings of its colour lying in its box.
     let in_dash = |shape: &Shape| match shape {
         Shape::LineSegment { points, stroke } => dashes
             .iter()
-            .any(|(rect, colour)| stroke.color == *colour && rect.expand(0.5).contains(points[0]) && rect.expand(0.5).contains(points[1])),
+            .any(|(rect, colour, _)| stroke.color == *colour && rect.expand(0.5).contains(points[0]) && rect.expand(0.5).contains(points[1])),
+        Shape::Rect(piece) => dashes.iter().any(|(rect, colour, _)| piece.fill == *colour && rect.expand(0.01).contains_rect(piece.rect)),
+        Shape::Path(piece) => {
+            dashes.iter().any(|(rect, colour, _)| piece.fill == *colour && piece.points.iter().all(|at| rect.expand(0.01).contains(*at)))
+        }
         _ => false,
     };
     let (mut grounds, mut shapes) = (Vec::new(), Vec::new());
@@ -323,8 +332,8 @@ pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint
             }
         }
     }
-    for (rect, colour) in dashes {
-        let look = Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, colour)), stroke_kind: StrokeKind::Inside, radius: 0.0, dashed: true };
+    for (rect, colour, radius) in dashes {
+        let look = Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, colour)), stroke_kind: StrokeKind::Inside, radius, dashed: true };
         shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped: false, overflows: false, look });
     }
     let Some(ground) = grounds.last().copied() else {

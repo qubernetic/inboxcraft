@@ -62,7 +62,7 @@ impl Chip {
     pub(crate) fn paint(self, painter: &egui::Painter, at: egui::Pos2) {
         let rect = egui::Rect::from_min_size(at, self.size);
         if self.state == ChipState::Disabled {
-            paint::dashed(painter, rect, self.edge);
+            paint::dashed_round(painter, rect, self.edge, f32::from(RADIUS));
         } else {
             painter.rect(rect, RADIUS, self.fill, Stroke::new(1.0, self.edge), StrokeKind::Inside);
         }

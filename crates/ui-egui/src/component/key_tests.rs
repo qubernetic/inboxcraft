@@ -63,7 +63,8 @@ fn a_key_chip_looks_as_its_sheet_says_in_every_state() {
             let font = theme.fonts.key;
             assert_eq!(look.texts, vec![(key.to_owned(), ink, font.id().family.to_string(), font.size)], "{at}");
             assert!(!look.overflows, "{at}");
-            assert!(look.radius <= 2.0, "{at}");
+            // Every chip has the sheet's radius 2, the dashed ones too.
+            assert_eq!(look.radius, 2.0, "{at}");
         }
     }
 }

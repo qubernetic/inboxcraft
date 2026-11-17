@@ -293,7 +293,7 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
 /// The edges [`dashed`] painted in one pass, `(pass, [(layer, rect, colour)])`; a later pass starts the list afresh,
 /// so it never holds more than one frame's edges. Tests read it to tell a dashed edge from plain hairlines.
 #[derive(Clone, Default)]
-pub(crate) struct DashedEdges(pub u64, pub Vec<(egui::LayerId, Rect, Color32)>);
+pub(crate) struct DashedEdges(pub u64, pub Vec<(egui::LayerId, Rect, Color32, f32)>);
 
 /// Where [`DashedEdges`] lives in the context's memory.
 pub(crate) fn dashed_edges_id() -> egui::Id {
@@ -303,15 +303,85 @@ pub(crate) fn dashed_edges_id() -> egui::Id {
 /// The dash and the gap of a [`dashed`] edge, in points.
 const DASH: f32 = 2.0;
 
-/// Paints a dashed edge around `rect`, inside it: a 1 px line in `colour`, dashes 2 on and 2 off, square corners.
-/// The edge is noted for the pass in [`DashedEdges`].
+/// One piece of the outline a dashed edge follows: a straight run from `from` to `to`, or a quarter arc round
+/// `centre` from angle `start` (radians, clockwise on screen) over a quarter turn.
+#[derive(Debug, Clone, Copy)]
+enum Run {
+    Line { from: Pos2, to: Pos2 },
+    Arc { centre: Pos2, start: f32 },
+}
+
+/// Paints a dashed edge around `rect`, inside it: a 1 px line in `colour`, dashes 2 on and 2 off along one path
+/// clockwise from the top left (after the corner's arc), the phase carried round the corners; square corners.
 pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
-    let inner = rect.shrink(0.5);
-    let corners = [inner.left_top(), inner.right_top(), inner.right_bottom(), inner.left_bottom(), inner.left_top()];
-    for pair in corners.windows(2) {
-        if let [a, b] = pair {
-            painter.extend(Shape::dashed_line(&[*a, *b], Stroke::new(1.0, colour), DASH, DASH));
+    dashed_round(painter, rect, colour, 0.0);
+}
+
+/// [`dashed`] with corners of `radius`. The path runs along the box's own edge and the line lies 1 px inside it, so
+/// a box on whole pixels has its straight dashes on whole pixels; an arc is filled as a ring and anti-aliased.
+pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radius: f32) {
+    let r = if radius.is_finite() { radius.clamp(0.0, rect.width().min(rect.height()) / 2.0) } else { 0.0 };
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let (x0, y0, x1, y1) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let runs = [
+        Run::Line { from: pos2(x0 + r, y0), to: pos2(x1 - r, y0) },
+        Run::Arc { centre: pos2(x1 - r, y0 + r), start: -quarter },
+        Run::Line { from: pos2(x1, y0 + r), to: pos2(x1, y1 - r) },
+        Run::Arc { centre: pos2(x1 - r, y1 - r), start: 0.0 },
+        Run::Line { from: pos2(x1 - r, y1), to: pos2(x0 + r, y1) },
+        Run::Arc { centre: pos2(x0 + r, y1 - r), start: quarter },
+        Run::Line { from: pos2(x0, y1 - r), to: pos2(x0, y0 + r) },
+        Run::Arc { centre: pos2(x0 + r, y0 + r), start: 2.0 * quarter },
+    ];
+    let length = |run: &Run| match run {
+        Run::Line { from, to } => from.distance(*to),
+        Run::Arc { .. } => quarter * r,
+    };
+    // The straight dashes as plain triangles: a box on whole pixels fills whole pixels and nothing beside them.
+    let mut straight = egui::epaint::Mesh::default();
+    let mut start = 0.0_f32;
+    for run in &runs {
+        let long = length(run);
+        if long <= 0.0 {
+            continue;
         }
+        // The dashes [4k, 4k + 2] of the whole path that fall on this run, counted, never summed.
+        let first = (start / (2.0 * DASH)).floor().max(0.0) as usize;
+        let last = ((start + long) / (2.0 * DASH)).ceil().clamp(0.0, 4096.0) as usize;
+        for k in first..=last {
+            let on = k as f32 * 2.0 * DASH;
+            let (a, b) = ((on - start).max(0.0), (on + DASH - start).min(long));
+            if b <= a {
+                continue;
+            }
+            match *run {
+                Run::Line { from, to } => {
+                    let along = (to - from) / long;
+                    // Inward: the outline runs clockwise, so the inside lies to its right on screen.
+                    let inward = vec2(-along.y, along.x);
+                    let (p, q) = (from + along * a, from + along * b);
+                    straight.add_colored_rect(Rect::from_two_pos(p, q + inward), colour);
+                }
+                Run::Arc { centre, start: angle } => {
+                    let (from_angle, to_angle) = (angle + a / r, angle + b / r);
+                    let steps = (((to_angle - from_angle) / 0.15).ceil() as usize).clamp(1, 16);
+                    let at = |i: usize, radius: f32| {
+                        let t = from_angle + (to_angle - from_angle) * i as f32 / steps as f32;
+                        centre + vec2(t.cos(), t.sin()) * radius
+                    };
+                    let mut points: Vec<Pos2> = (0..=steps).map(|i| at(i, r)).collect();
+                    points.extend((0..=steps).rev().map(|i| at(i, (r - 1.0).max(0.0))));
+                    painter.add(Shape::convex_polygon(points, colour, Stroke::NONE));
+                }
+            }
+        }
+        start += long;
+    }
+    if !straight.is_empty() {
+        painter.add(Shape::mesh(straight));
     }
     let pass = painter.ctx().cumulative_pass_nr();
     let layer = painter.layer_id();
@@ -320,7 +390,7 @@ pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
         if edges.0 != pass {
             *edges = DashedEdges(pass, Vec::new());
         }
-        edges.1.push((layer, rect, colour));
+        edges.1.push((layer, rect, colour, r));
     });
 }
 

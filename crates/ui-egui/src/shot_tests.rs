@@ -589,3 +589,68 @@ fn a_low_floats_shadow_fades_evenly_along_the_diagonals_from_its_corners() {
         }
     }
 }
+
+/// The picture of a dashed edge round `rect` in `colour` with corners of `radius`, on the light ground.
+fn dashed_picture(rect: Rect, colour: Color32, radius: f32) -> Picture {
+    super::paint(egui::vec2(80.0, 50.0), 1.0, Mode::Light, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius)).unwrap()
+}
+
+/// Whether the design's dashed edge is on at pixel `(x, y)` of a `w` by `h` box: one path clockwise from the top
+/// left corner along the box's edge, dashes 2 on and 2 off, the phase carried round the corners, 1 px inside.
+fn dash_on(x: usize, y: usize, w: usize, h: usize) -> bool {
+    let on = |s: usize| s % 4 < 2;
+    let mut sides = Vec::new();
+    if y == 0 {
+        sides.push(x);
+    }
+    if x == w - 1 {
+        sides.push(w + y);
+    }
+    if y == h - 1 {
+        sides.push(w + h + (w - 1 - x));
+    }
+    if x == 0 {
+        sides.push(2 * w + h + (h - 1 - y));
+    }
+    sides.into_iter().any(on)
+}
+
+#[test]
+fn a_dashed_edge_is_2_on_2_off_clockwise_on_whole_pixels() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for (w, h) in [(40, 20), (41, 19), (17, 20), (56, 32)] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w as f32, h as f32));
+        let picture = dashed_picture(rect, colour, 0.0);
+        let ground = picture.pixel(2, 2);
+        let mut wrong = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                let want = if edge && dash_on(x, y, w, h) { Some(colour) } else { ground };
+                let got = picture.pixel(10 + x, 10 + y);
+                if got != want {
+                    wrong.push((x, y, got));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{w} × {h}: {} pixels wrong, e.g. {:?}", wrong.len(), &wrong[..wrong.len().min(6)]);
+        for x in [9, 10 + w] {
+            assert_eq!(picture.pixel(x, 15), ground, "{w} × {h}: nothing outside");
+        }
+    }
+}
+
+#[test]
+fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(17.0, 20.0));
+    let picture = dashed_picture(rect, colour, 2.0);
+    let ground = picture.pixel(2, 2);
+    // The top's straight part starts 2 in, at the path's start: on, on, off, off.
+    let top: Vec<_> = (12..18).map(|x| picture.pixel(x, 10)).collect();
+    assert_eq!(top, vec![Some(colour), Some(colour), ground, ground, Some(colour), Some(colour)], "{top:?}");
+    // The corner pixel itself is only partly covered, as a round corner's is.
+    for (x, y) in [(10, 10), (26, 10), (26, 29), (10, 29)] {
+        assert_ne!(picture.pixel(x, y), Some(colour), "corner {x}, {y}");
+    }
+}
