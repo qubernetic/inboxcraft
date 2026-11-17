@@ -129,8 +129,13 @@ fn inset(theme: &Theme) -> f32 {
 /// hold fewer ([`text_field_limited`]).
 pub const MAX_LINE: usize = 4096;
 
-/// The most bytes a field of several lines holds: 1 MiB.
-pub const MAX_TEXT: usize = 1 << 20;
+/// The most bytes a field of several lines holds unless its caller names more ([`multiline_field_holding`]): 64 KiB,
+/// so that a frame with a screen reader stays within its budget (egui gives every glyph to AccessKit every frame).
+pub const MAX_TEXT: usize = 64 << 10;
+
+/// The most bytes the composer's message text holds ([`plain_text`]): 1 MiB. A frame costs more near it with a screen
+/// reader, but a long message is worth more than a quick frame.
+pub const MAX_BODY: usize = 1 << 20;
 
 /// What a field holds at most.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,8 +174,21 @@ impl Cap {
     fn sentence(self) -> String {
         match self {
             Self::Chars(most) => tr!("Too long: this field holds at most {count} characters, and nothing was added.", count = most),
-            Self::Bytes(_) => tr!("Too long: this text holds at most 1 MiB, and nothing was added.").to_owned(),
+            Self::Bytes(most) => tr!("Too long: this text holds at most {size}, and nothing was added.", size = bytes(most)),
         }
+    }
+}
+
+/// `most` bytes in words: "64 KiB", "1 MiB", else "n bytes".
+fn bytes(most: usize) -> String {
+    const KIB: usize = 1 << 10;
+    const MIB: usize = 1 << 20;
+    if most >= MIB && most % MIB == 0 {
+        format!("{} MiB", most / MIB)
+    } else if most >= KIB && most % KIB == 0 {
+        format!("{} KiB", most / KIB)
+    } else {
+        format!("{most} bytes")
     }
 }
 
@@ -670,13 +688,24 @@ fn margin_of(outer: Rect, inner: Rect) -> Margin {
 
 /// A field of several lines filling the width `ui` offers: its label, a box that grows with its text from 96 to 240
 /// high and then scrolls, its scroll bar 12 wide inside the right edge, and the error under it; otherwise as
-/// [`text_field`]. Enter starts a new line.
+/// [`text_field`]. Enter starts a new line. It holds at most [`MAX_TEXT`] bytes; what would pass them is refused whole,
+/// and the line under it says so. A text already longer opens whole and can be edited down.
 pub fn multiline_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>) -> Response {
-    multiline_with(ui, theme, id, text, field, None)
+    multiline_inner(ui, theme, id, text, field, MAX_TEXT, None)
+}
+
+/// [`multiline_field`] that holds at most `most` bytes, more or less than [`MAX_TEXT`].
+pub fn multiline_field_holding(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, most: usize) -> Response {
+    multiline_inner(ui, theme, id, text, field, most, None)
 }
 
 /// [`multiline_field`] drawn in `shown`: a board of the gallery.
 pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
+    multiline_inner(ui, theme, id, text, field, MAX_TEXT, shown)
+}
+
+/// The field of several lines, holding at most `holds` bytes, drawn in `shown`.
+fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, holds: usize, shown: Option<Shown>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field * 2.0) } else { theme.boxes().field * 2.0 };
@@ -691,7 +720,7 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = s.s2;
         label_row(ui, theme, field.label, width);
-        let cap = Cap::Bytes(MAX_TEXT);
+        let cap = Cap::Bytes(holds);
         let said = guard(ui, id, text, cap, true);
         let refusal = said.map(|_| cap.sentence());
         let bring = said == Some(Refusal::Fresh) && field.error.is_none();
@@ -807,8 +836,9 @@ pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &
 }
 
 /// A plain edit of several lines without a box, `rows` rows high at least and laid out by `layouter`: the composer's
-/// message text until the composer is restyled. `name` is its screen-reader name. It holds at most [`MAX_TEXT`]; what
-/// would pass it is refused whole, and a line over the text says so.
+/// message text until the composer is restyled. `name` is its screen-reader name. It holds at most [`MAX_BODY`]; what
+/// would pass it is refused whole, and a line over the text says so, brought into view. A text already longer (a draft
+/// from the store) opens whole and can be edited down.
 pub fn plain_text(
     ui: &mut Ui,
     id: Id,
@@ -818,7 +848,7 @@ pub fn plain_text(
     name: &str,
     theme: &Theme,
 ) -> Response {
-    let cap = Cap::Bytes(MAX_TEXT);
+    let cap = Cap::Bytes(MAX_BODY);
     // Said over the text, where it shows however long the text is.
     let said = guard(ui, id, text, cap, true);
     if said.is_some() {

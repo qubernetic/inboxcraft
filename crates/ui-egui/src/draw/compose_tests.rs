@@ -350,7 +350,7 @@ fn a_recipient_that_is_not_an_address_is_named_under_its_line() {
 fn a_refused_paste_is_said_in_view_and_forgotten_when_the_composer_closes() {
     let mut harness = composing(egui::Theme::Light);
     type_into(&mut harness, "Message text", "We meet at the plot at ten.");
-    harness.event(egui::Event::Paste("x".repeat(crate::component::field::MAX_TEXT + 1)));
+    harness.event(egui::Event::Paste("x".repeat(crate::component::field::MAX_BODY + 1)));
     harness.run();
     let too_long = |harness: &Harness<'static, InboxApp>| harness.query_all(egui_kittest::kittest::by().label_contains("Too long")).count();
     assert_eq!(too_long(&harness), 1, "the composer says why the paste went nowhere");
@@ -360,4 +360,28 @@ fn a_refused_paste_is_said_in_view_and_forgotten_when_the_composer_closes() {
     harness.get_by_role_and_label(Role::Button, "New message").click();
     harness.run();
     assert_eq!(too_long(&harness), 0, "a new composer says nothing of the last one's paste");
+}
+
+#[test]
+fn a_draft_over_the_cap_opens_whole_and_is_edited_down_and_kept() {
+    let mut harness = composing(egui::Theme::Light);
+    let over = format!("{}.", "x".repeat(crate::component::field::MAX_BODY * 2));
+    if let (Some(composer), _) = harness.state_mut().composer_mut() {
+        *composer.text_mut() = over.clone();
+    }
+    harness.run();
+    assert_eq!(harness.state().composer().unwrap().text(), over, "opened whole");
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Message text").focus();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::CTRL, Key::End);
+    harness.run();
+    harness.event(egui::Event::Text("y".to_owned()));
+    harness.run();
+    assert_eq!(harness.state().composer().unwrap().text(), over, "it grows no further");
+    harness.key_press(Key::Backspace);
+    harness.run();
+    let shorter = &over[..over.len() - 1];
+    assert_eq!(harness.state().composer().unwrap().text(), shorter, "it is edited down");
+    let id = harness.state().composer().unwrap().draft();
+    assert_eq!(kept(&mut harness, id)["text"].as_str().map(str::len), Some(shorter.len()), "and kept as it now is");
 }

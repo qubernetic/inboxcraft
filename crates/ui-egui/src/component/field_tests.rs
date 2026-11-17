@@ -374,7 +374,8 @@ fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
 /// The most a field of `kind` holds, and whether that counts bytes (else characters).
 fn cap_of(kind: Kind) -> (usize, bool) {
     match kind {
-        Kind::Many | Kind::PlainText => (super::MAX_TEXT, true),
+        Kind::Many => (super::MAX_TEXT, true),
+        Kind::PlainText => (super::MAX_BODY, true),
         Kind::Password => (super::MAX_SECRET, false),
         Kind::Typed => (crate::component::typed_time::MAX_TYPED, false),
         _ => (super::MAX_LINE, false),
@@ -456,7 +457,7 @@ fn bidi_controls_ime_and_a_stale_selection_never_panic() {
 #[test]
 fn a_draft_of_1_mib_at_rest_is_laid_out_once() {
     let text: String = (0..(1 << 20) / 32).map(|n| format!("Line {n:>8} of a long draft..\n")).collect();
-    assert!(text.len() <= super::MAX_TEXT);
+    assert!(text.len() <= super::MAX_BODY);
     let mut harness = field_of(Kind::Many, &text);
     harness.step();
     let galley = |harness: &Harness<'static, String>| {
@@ -1061,7 +1062,7 @@ fn the_too_long_line_is_brought_into_view_when_it_appears() {
     harness.run_ok();
     assert!(harness.get_by_label("Message text").rect().top() < -1000.0, "the page scrolled to the caret at the end");
     assert!(too_long_at(&harness).is_none());
-    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_BODY)));
     harness.run_ok();
     let Some(line) = too_long_at(&harness) else { panic!("the sentence is painted, so in view") };
     assert!(line.top() >= 0.0 && line.bottom() <= 160.0, "{line:?} in the page's view");
@@ -1070,14 +1071,14 @@ fn the_too_long_line_is_brought_into_view_when_it_appears() {
 #[test]
 fn the_too_long_line_goes_when_the_text_changes_from_outside_or_the_field_goes() {
     let mut harness = body_in_a_page(3);
-    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_BODY)));
     harness.run_ok();
     assert!(too_long_at(&harness).is_some());
     // The text replaced from outside (a chip taken, a template used).
     harness.state_mut().0 = "Short.".to_owned();
     harness.run_ok();
     assert!(too_long_at(&harness).is_none(), "the sentence went with the text it was about");
-    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_BODY)));
     harness.run_ok();
     assert!(too_long_at(&harness).is_some());
     // The field not drawn for a frame (the composer closed), then drawn again with the same id.
@@ -1086,4 +1087,87 @@ fn the_too_long_line_goes_when_the_text_changes_from_outside_or_the_field_goes()
     harness.state_mut().1 = true;
     harness.run_ok();
     assert!(too_long_at(&harness).is_none(), "a field drawn afresh says nothing it refused before");
+}
+
+#[test]
+fn a_multiline_field_holds_64_kib_unless_its_caller_names_more() {
+    assert_eq!(super::MAX_TEXT, 64 << 10);
+    assert_eq!(super::MAX_BODY, 1 << 20);
+    let theme = theme();
+    let most = 256 << 10;
+    let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
+        move |ui, text: &mut String| {
+            super::multiline_field_holding(ui, &theme, egui::Id::unique("larger"), text, &Field::new("Hostile", "hint"), most);
+        },
+        String::new(),
+    );
+    harness.run_ok();
+    harness.get_by_label("Hostile").focus();
+    harness.run_ok();
+    harness.event(egui::Event::Paste("y".repeat(most)));
+    harness.run_ok();
+    assert_eq!(harness.state().len(), most, "the caller's cap holds");
+    harness.event(egui::Event::Paste("z".to_owned()));
+    harness.run_ok();
+    assert_eq!(harness.state().len(), most);
+    let Some(said) = drawn(&harness).into_iter().find(|text| text.text.starts_with("Too long")) else { panic!("the field says why") };
+    assert!(said.text.contains("256 KiB"), "{}", said.text);
+}
+
+/// The message text alone, without the composer around it: what a frame costs at rest and typing a character a
+/// frame, for texts of 16 KiB to 1 MiB, without AccessKit and with it. A timing, not a check: run it in a release
+/// build (`cargo nextest run --release -p inboxcraft-ui-egui --run-ignored only -E 'test(/a_frame_of_the_message_text/)'
+/// --no-capture`). The composer's own cost is `ui_bench --compose`.
+#[test]
+#[ignore = "a timing; run by hand in a release build"]
+fn a_frame_of_the_message_text_costs() {
+    let theme = theme();
+    let clock = inboxcraft_time::SystemClock::new();
+    let line = "We meet at the plot at ten; bring gloves, the long rake and something to drink.\n";
+    for accesskit in [false, true] {
+        for kib in [16, 64, 256, 1024] {
+            for typing in [false, true] {
+                let size = (kib << 10).min(super::MAX_BODY - 4096);
+                let mut text = line.repeat(size / line.len() + 1);
+                text.truncate(size);
+                let ctx = egui::Context::default();
+                if accesskit {
+                    ctx.enable_accesskit();
+                }
+                let id = egui::Id::unique("body");
+                ctx.memory_mut(|memory| memory.request_focus(id));
+                let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 800.0));
+                let mut times = Vec::new();
+                for frame in 0..330_usize {
+                    let events = if typing && frame >= 30 { vec![egui::Event::Text("a".to_owned())] } else { Vec::new() };
+                    let input = egui::RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), events, ..Default::default() };
+                    let started = inboxcraft_time::Clock::monotonic(&clock);
+                    let output = ctx.run_ui(input, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, width: f32| {
+                                let mut job =
+                                    egui::text::LayoutJob::single_section(text.as_str().to_owned(), theme.fonts.body.format(theme.palette.ink));
+                                job.wrap.max_width = width;
+                                ui.fonts_mut(|fonts| fonts.layout_job(job))
+                            };
+                            super::plain_text(ui, id, &mut text, 3, &mut layouter, "Message text", &theme);
+                        });
+                    });
+                    drop(ctx.tessellate(output.shapes, output.pixels_per_point));
+                    if frame >= 30 {
+                        times.push(inboxcraft_time::Clock::monotonic(&clock).saturating_sub(started).as_secs_f64() * 1000.0);
+                    }
+                }
+                times.sort_by(f64::total_cmp);
+                let at = |share: f64| times.get((share * (times.len() - 1) as f64).round() as usize).copied().unwrap_or(0.0);
+                eprintln!(
+                    "message text {kib:>4} KiB {:<6} accesskit {accesskit:<5}: median {:>7.3} ms, p95 {:>7.3} ms, {} bytes",
+                    if typing { "typing" } else { "rest" },
+                    at(0.5),
+                    at(0.95),
+                    text.len()
+                );
+            }
+        }
+    }
 }
