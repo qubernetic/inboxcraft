@@ -156,19 +156,42 @@ fn a_running_mark_goes_round_one_dot_each_125_ms() {
 #[test]
 fn a_running_bar_asks_for_a_timed_repaint_and_a_done_one_rests() {
     let theme = Theme::new(Mode::Light, TextScale::default());
-    for state in [ProgressState::Running(0.3), ProgressState::Done, ProgressState::Failed(0.3)] {
-        let mut harness = builder().with_size(vec2(400.0, 80.0)).build_ui(move |ui| {
-            motion::set_reduced(ui.ctx(), false);
-            stage(ui, theme.palette.surface, |ui| progress(ui, &theme, &Keymap::default(), "syncing", state, "30 %"));
-        });
-        harness.run_steps(4);
-        let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(Duration::MAX);
-        match state {
-            ProgressState::Running(_) => {
-                assert!(delay >= Duration::from_millis(100) && delay <= Duration::from_millis(125), "a timed repaint, never at once: {delay:?}");
+    for reduced in [false, true] {
+        for state in [ProgressState::Running(0.3), ProgressState::Done, ProgressState::Failed(0.3)] {
+            let mut harness = builder().with_size(vec2(400.0, 80.0)).build_ui(move |ui| {
+                motion::set_reduced(ui.ctx(), reduced);
+                stage(ui, theme.palette.surface, |ui| progress(ui, &theme, &Keymap::default(), "syncing", state, "30 %"));
+            });
+            harness.run_steps(4);
+            let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(Duration::MAX);
+            match state {
+                ProgressState::Running(_) => assert!(
+                    delay >= Duration::from_millis(100) && delay <= Duration::from_millis(125),
+                    "reduced {reduced}: a timed repaint, never at once: {delay:?}"
+                ),
+                _ => assert!(crate::component::tests::rests(&mut harness, 4), "reduced {reduced}: {state:?} rests: {delay:?}"),
             }
-            _ => assert!(crate::component::tests::rests(&mut harness, 4), "{state:?} rests: {delay:?}"),
         }
+    }
+}
+
+#[test]
+fn a_failed_bar_breaks_where_the_work_stopped_on_the_painted_cells() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for (fraction, painted_bar) in [
+        (0.0, "[×         ]"),
+        (0.05, "[×         ]"),
+        (0.54, "[=====×    ]"),
+        (0.99, "[=========×]"),
+        (1.0, "[=========×]"),
+        (f32::NAN, "[×         ]"),
+        (-3.0, "[×         ]"),
+        (7.0, "[=========×]"),
+    ] {
+        let harness = line(theme, "sync failed", ProgressState::Failed(fraction), "open log", true);
+        let paint = painted(&harness, "sync failed");
+        let bar = texts(&paint).into_iter().find(|text| text.1.starts_with('[')).map(|text| (text.1, text.2));
+        assert_eq!(bar, Some((painted_bar.to_owned(), theme.palette.minus)), "{fraction}");
     }
 }
 

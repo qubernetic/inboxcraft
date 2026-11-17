@@ -293,3 +293,82 @@ fn actions_that_do_not_fit_their_line_give_way_from_the_end() {
         }
     }
 }
+
+#[test]
+fn the_actions_follow_their_row_in_the_tab_order() {
+    use egui::{WidgetInfo, accesskit::Role as Kind};
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().with_size(vec2(520.0, 200.0)).build_ui(move |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        for index in 0..2 {
+            let row = crate::component::row::row(
+                ui,
+                &theme,
+                Id::unique("tab-row").with(index),
+                56.0,
+                crate::component::row::RowGround::Surface,
+                false,
+                false,
+            );
+            let name = format!("Row {index}");
+            row.response.widget_info(|| WidgetInfo::labeled(Kind::Button, true, &name));
+            let line =
+                Rect::from_min_max(egui::pos2(row.rect.center().x, row.rect.top() + 7.0), egui::pos2(row.rect.right() - 16.0, row.rect.top() + 29.0));
+            // The first row is the keyed one (the list's selected row while the keyboard works it): its group shows.
+            actions(ui, &theme, &Keymap::default(), Id::unique("tab-acts").with(index), line, index == 0, &sheet(Some("Not yet")));
+            row.finish(ui, &theme);
+        }
+    });
+    harness.run();
+    harness.get_by_label("Row 0").focus();
+    harness.run();
+    assert!(harness.query_by_label("Done").is_some(), "the focused row shows its group");
+    let mut order = Vec::new();
+    for _ in 0..5 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.query_all_by_role(Kind::Button).find(|node| node.accesskit_node().is_focused());
+        order.push(focused.and_then(|node| node.accesskit_node().label()).unwrap_or_default());
+    }
+    // Snooze cannot run, so Tab passes it.
+    assert_eq!(order, ["Done", "Mark as read", "Delete", "Row 1", "Row 0"], "{order:?}");
+}
+
+#[test]
+fn at_130_percent_the_actions_scale_and_stand_on_whole_pixels() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    let p = theme.palette;
+    // A line with room for the scaled group, its left at a half point so the group's own rounding shows.
+    let harness = staged(
+        theme,
+        |p| p.stage,
+        vec2(420.0, 120.0),
+        |ui, theme| {
+            ui.add_space(0.5);
+            let (_, line) = ui.allocate_space(vec2(330.5, theme.boxes().strip));
+            actions_with(ui, theme, &Keymap::default(), Id::unique("scaled"), line, true, &sheet(None), Some((0, State::Hover)));
+        },
+    );
+    let mut right: Option<f32> = None;
+    for (name, key, _) in SHEET {
+        let rect = harness.get_by_label(name).rect();
+        let at = format!("{name} {rect:?}");
+        assert_eq!(rect.height(), theme.boxes().strip, "{at}");
+        for edge in [rect.left(), rect.right(), rect.top(), rect.bottom()] {
+            assert_eq!(edge, edge.round(), "every edge on a whole pixel: {at}");
+        }
+        if let Some(right) = right {
+            assert_eq!(rect.left() - right, 4.0, "{at}");
+        }
+        right = Some(rect.right());
+        let look = action_look(&painted(&harness, name), rect);
+        let chip = look.chip.clone().unwrap_or_else(|| panic!("{at}: no chip"));
+        assert_eq!(chip.0, key, "{at}");
+        assert_eq!(chip.3.height(), theme.boxes().chip, "the scaled chip: {at}");
+        assert_eq!(chip.3.min.x, rect.left() + 4.0 + theme.mark_side() + 4.0, "{at}");
+        assert_eq!((chip.3.right(), chip.3.min.y), (rect.right() - 4.0, chip.3.min.y.round()), "{at}");
+        if name == "Done" {
+            assert_eq!(look.edge, Some(p.muted), "{at}");
+        }
+    }
+}
