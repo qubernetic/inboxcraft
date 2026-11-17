@@ -14,7 +14,7 @@ use crate::draw::paint::Panes;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::sample;
-use crate::theme::Theme;
+use crate::theme::{TextScale, Theme};
 use crate::tr;
 
 use super::Shown;
@@ -24,6 +24,7 @@ use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
 use super::segmented::{self, segmented};
 use super::select::Select;
+use super::slider;
 use super::soon::{soon, soon_tag};
 use super::switch::{self, SwitchState, switch};
 use super::tag::{TagKind, tag};
@@ -47,7 +48,7 @@ const TOP: f32 = 660.0;
 const BOARDS: f32 = 960.0;
 
 /// The height of the boards of the toggles and choices, under the other boards, in points.
-const CONTROLS: f32 = 760.0;
+const CONTROLS: f32 = 860.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -578,11 +579,39 @@ fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The slider's board: default (on 110 %), hover, focus, dragging (from 110 % towards 120 %), disabled, and at rest on
+/// 90 %, 100 % and 130 %.
+fn sliders(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Slider"));
+    let at = |index: usize| TextScale::ALL.get(index).copied().unwrap_or_default();
+    let states = [
+        (tr!("default"), at(2), Some(Shown::Rest), None),
+        (tr!("hover"), at(2), Some(Shown::Hover), None),
+        (tr!("focus"), at(2), Some(Shown::Focus), None),
+        (tr!("dragging"), at(2), Some(Shown::Pressed), Some(at(3))),
+        (tr!("disabled"), at(2), None, None),
+        (tr!("at-90"), at(0), Some(Shown::Rest), None),
+        (tr!("at-100"), at(1), Some(Shown::Rest), None),
+        (tr!("at-130"), at(4), Some(Shown::Rest), None),
+    ];
+    // Two to a row: three are wider than the column.
+    for pair in states.chunks(2) {
+        cells(ui, theme, |ui| {
+            for (state, current, shown, towards) in pair {
+                cell(ui, theme, state, |ui| {
+                    ui.add_enabled_ui(shown.is_some(), |ui| slider::text_size_with(ui, theme, *current, *shown, *towards));
+                });
+            }
+        });
+    }
+}
+
 /// The toggles' column of boards.
 fn controls_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     checkboxes(ui, theme);
     radios(ui, theme);
     switches(ui, theme, keymap);
+    sliders(ui, theme);
 }
 
 /// The segmented control's board: default, hover (the second option), focus, pressed (the second option), disabled,

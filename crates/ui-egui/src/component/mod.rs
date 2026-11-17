@@ -7,7 +7,7 @@
 //! - [`card`]: a rounded card with a header that opens and closes it (grouped inbox groups, the screener, messages).
 //! - [`button`]: an icon button with its tooltip, active or disabled.
 //! - [`field`]: the search pill and the margin of a form field.
-//! - [`pill`]: a round, selectable chip (filters).
+//! - [`pill`]: a square filter chip, on or off.
 //! - [`segmented`]: a few choices side by side in one track, one of them on the selection.
 //! - [`select`]: a closed field with the choice in it and a popup of the choices.
 //! - [`checkbox`]: a filled check box and a radio button.
@@ -20,7 +20,8 @@
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
-//! - [`switch`]: a track with a knob, on or off.
+//! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
+//! - [`slider`]: the text size on five ticks, 90 % to 130 %.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
 //!
@@ -40,6 +41,7 @@ pub mod pill;
 pub mod popup;
 pub mod segmented;
 pub mod select;
+pub mod slider;
 pub mod soon;
 pub mod switch;
 pub mod tag;

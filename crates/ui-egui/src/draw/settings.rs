@@ -14,8 +14,8 @@
 //! choose closes the page.
 
 use egui::{
-    Align, Area, Frame, Id, Key, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Area, Frame, Id, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
@@ -26,6 +26,7 @@ use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
 use crate::component::segmented::{segmented, segmented_for};
+use crate::component::slider;
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::draw::paint::{self, FloatEdge};
@@ -48,9 +49,6 @@ const TEXT_MIN: f32 = 240.0;
 
 /// A window on a window-frame card, in points.
 const THUMB: [f32; 2] = [84.0, 52.0];
-
-/// The slider's track, in points.
-const TRACK: [f32; 2] = [200.0, 6.0];
 
 /// What the owner asked for on the sheet this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,55 +306,6 @@ fn thumb(painter: &Painter, theme: &Theme, rect: Rect, frame: WindowFrame) {
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
 }
 
-/// The text size as a slider over the steps from 90 % to 130 %, a small and a large A at its ends and the size after
-/// it. A press or a drag sets the step under the pointer; the arrow keys move it one step.
-fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
-    let p = &theme.palette;
-    let steps = TextScale::ALL;
-    let last = steps.len().saturating_sub(1).max(1);
-    let index = steps.iter().position(|step| *step == now).unwrap_or(1);
-    ui.label(RichText::new("A").font(theme.fonts.caption.id()).color(p.muted));
-    let knob = 16.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(TRACK[0], knob), Sense::click_and_drag());
-    let name = tr!("Text size");
-    response.widget_info(|| WidgetInfo::slider(true, f64::from(now.percent()), name));
-    let mut wanted = None;
-    if response.clicked() || response.dragged() {
-        response.request_focus();
-        if let Some(at) = response.interact_pointer_pos() {
-            let t = ((at.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            // The nearest step; the cast is of a small index.
-            wanted = Some((t * last as f32).round() as usize);
-        }
-    }
-    if response.has_focus() {
-        let (left, right) = ui.input(|input| (input.key_pressed(Key::ArrowLeft), input.key_pressed(Key::ArrowRight)));
-        if left {
-            wanted = Some(index.saturating_sub(1));
-        } else if right {
-            wanted = Some((index + 1).min(last));
-        }
-    }
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        let track = Rect::from_center_size(rect.center(), vec2(TRACK[0], TRACK[1]));
-        painter.rect_filled(track, 0.0, p.stage);
-        // An index of five steps.
-        let x = track.left() + track.width() * index as f32 / last as f32;
-        let done = Rect::from_min_max(track.min, pos2(x.max(track.left() + TRACK[1]), track.bottom()));
-        painter.rect_filled(done, 0.0, p.cyan);
-        let knob_rect = Rect::from_center_size(pos2(x, rect.center().y), vec2(knob, knob));
-        painter.rect_filled(knob_rect, 0.0, p.term);
-        painter.rect_stroke(knob_rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-        if response.has_focus() {
-            painter.rect_stroke(knob_rect.expand(2.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Outside);
-        }
-    }
-    ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
-    ui.label(theme.fonts.mono.rich(&tr!("{percent} %", percent = now.percent())).color(p.ink));
-    wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
-}
-
 /// The rows of the Appearance page; what was asked for.
 fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
@@ -376,7 +325,7 @@ fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Optio
     });
     let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
     row(ui, theme, tr!("Text size"), &[tr!("90 % to 130 %. Rows and toolbars follow the font.")], &mut |ui| {
-        if let Some(scale) = text_size(ui, theme, now) {
+        if let Some(scale) = slider::text_size(ui, theme, now) {
             asked = Some(Asked::Scale(scale));
         }
     });
