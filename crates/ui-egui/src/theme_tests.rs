@@ -947,9 +947,20 @@ fn words(code: &str, name: &str) -> Vec<usize> {
 /// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
 /// is not one).
 fn raw_widgets(code: &str) -> Vec<(usize, String)> {
-    const METHODS: [&str; 9] =
-        ["button", "small_button", "checkbox", "radio", "radio_value", "selectable_label", "selectable_value", "toggle_value", "separator"];
-    const TYPES: [&str; 6] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton"];
+    const METHODS: [&str; 11] = [
+        "button",
+        "small_button",
+        "checkbox",
+        "radio",
+        "radio_value",
+        "selectable_label",
+        "selectable_value",
+        "toggle_value",
+        "separator",
+        "text_edit_singleline",
+        "text_edit_multiline",
+    ];
+    const TYPES: [&str; 7] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton", "TextEdit"];
     let mut found = Vec::new();
     for method in METHODS {
         for call in [format!(".{method}("), format!("Ui::{method}(")] {
@@ -1074,6 +1085,10 @@ fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
     assert!(scan("WidgetInfo::labeled(Role::ComboBox, true, name); egui::PointerButton::Primary").is_empty());
     assert!(scan("(TextStyle::Button, f.button.id())").is_empty());
     assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
+    // Text: views write in the fields of `component::field`.
+    assert_eq!(scan("ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint));"), ["TextEdit"]);
+    assert_eq!(scan("ui.text_edit_singleline(&mut text); ui . text_edit_multiline ( &mut more );"), [".text_edit_singleline(", ".text_edit_multiline("]);
+    assert!(scan("if let Some(state) = egui::text_edit::TextEditState::load(ctx, id) {}").is_empty());
 }
 
 #[test]
