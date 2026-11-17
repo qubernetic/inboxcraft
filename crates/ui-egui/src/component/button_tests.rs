@@ -852,6 +852,8 @@ fn a_press_during_a_hover_fade_shows_the_pressed_look_in_that_frame() {
     for mode in [Mode::Dark, Mode::Light] {
         let theme = Theme::new(mode, TextScale::default());
         let (_, held) = text_button_in(mode, TextScale::default(), "Send", Shown::Pressed, toned("Send", Tone::Primary, TextState::Pressed));
+        let (_, rest) = text_button_in(mode, TextScale::default(), "Send", Shown::Rest, toned("Send", Tone::Primary, TextState::Default));
+        let (_, hover) = text_button_in(mode, TextScale::default(), "Send", Shown::Hover, toned("Send", Tone::Primary, TextState::Hover));
         let mut harness = staged_motion(
             theme,
             false,
@@ -866,6 +868,10 @@ fn a_press_during_a_hover_fade_shows_the_pressed_look_in_that_frame() {
         for _ in 0..3 {
             harness.step();
         }
+        // The frame before the press is mid-fade: neither the rest nor the hover look yet.
+        let before = own(&painted(&harness, "Send"), harness.get_by_label("Send").rect());
+        assert_ne!(before.fill, rest.fill, "{mode:?}: the fade has begun");
+        assert_ne!(before.fill, hover.fill, "{mode:?}: the fade has not ended");
         harness.drag_at(centre);
         harness.step();
         let rect = harness.get_by_label("Send").rect();
