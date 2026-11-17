@@ -863,6 +863,7 @@ fn rows(ui: &mut Ui, theme: &Theme) {
                         let text = cut(ui, "Teodor Vasquez", theme.fonts.body, p.ink, 300.0);
                         let at = drawn.rect.left_top() + vec2(34.0, 7.0);
                         ui.painter().galley(at, text, p.ink);
+                        drawn.finish(ui, theme);
                     });
                 });
             }
