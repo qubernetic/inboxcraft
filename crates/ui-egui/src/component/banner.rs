@@ -11,6 +11,7 @@
 
 use egui::{Align, Layout, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
@@ -57,18 +58,53 @@ const LINK_GAP: f32 = 16.0;
 
 /// A banner of `kind` across `ui`'s width saying `text`, with `links` under it; the id of the link pressed.
 pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, text: &str, links: &[BannerLink<'_>]) -> Option<String> {
+    banner_in(ui, theme, keymap, kind, text, links, Ground::Boxed).0
+}
+
+/// What a banner paints under its words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ground {
+    /// Its `panel` fill in a 1 px edge of its kind's colour: a banner on its own.
+    Boxed,
+    /// Nothing: the caller paints the ground and the edges (the window's error banner, whose edges are the window's
+    /// lines and whose corner is the window's).
+    Bare,
+}
+
+/// The label of `kind`, as the sheet writes it (in capitals when drawn), and its edge's and label's colours.
+fn look(theme: &Theme, kind: BannerKind) -> (&'static str, egui::Color32, egui::Color32) {
     let p = &theme.palette;
-    let f = &theme.fonts;
-    let (word, edge, ink) = match kind {
+    match kind {
         BannerKind::RemotePictures => (tr!("Pictures"), p.line, p.warn),
         BannerKind::Bounce => (tr!("Not delivered"), p.minus, p.minus),
         BannerKind::Error | BannerKind::Failing => (tr!("Error"), p.minus, p.minus),
         BannerKind::Notice => (tr!("Note"), p.panel_line, p.muted),
         BannerKind::Careful => (tr!("Careful"), p.minus, p.minus),
-    };
+    }
+}
+
+/// The name a screen reader hears for a banner of `kind` saying `text`: its label, then its words made plain.
+pub(crate) fn spoken(theme: &Theme, kind: BannerKind, text: &str) -> String {
+    format!("{}: {}", look(theme, kind).0, super::spoken(text))
+}
+
+/// [`banner`] on `ground`: the id of the link pressed and the banner's rect. The banner is a group named by
+/// [`spoken`]; its words are a label of their own, named by the words.
+pub(crate) fn banner_in(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    kind: BannerKind,
+    text: &str,
+    links: &[BannerLink<'_>],
+    ground: Ground,
+) -> (Option<String>, Rect) {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let (word, edge, ink) = look(theme, kind);
     let width = ui.available_width().max(1.0);
     let label = super::galley(ui, word, f.label, ink);
-    let label_width = label.size().x.ceil();
+    let label_width = paint::run_box(label.size().x);
     let left = PAD_X + label_width + PAD_X;
     let room = (width - left - PAD_X).max(1.0);
     let words = words(ui, theme, &super::plain(text), room);
@@ -79,17 +115,24 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
     // edge lies on whole pixels at every text scale.
     let high = (PAD_Y + column.max(f.caption.line) + PAD_Y).ceil();
     let (_, rect) = ui.allocate_space(vec2(width, high));
-    let response = ui.interact(rect, ui.scope_id().with("banner").with(text), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(text)));
+    let id = ui.scope_id().with("banner").with(text);
+    let response = ui.interact(rect, id, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Group, true, spoken(theme, kind, text)));
+    let words_at = pos2(rect.left() + left, rect.top() + PAD_Y);
+    let words_rect = Rect::from_min_size(words_at, vec2(paint::run_box(words.size().x), words_high));
+    let said = ui.interact(words_rect, id.with("words"), Sense::hover());
+    said.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(text)));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect(rect, 0.0, p.panel, Stroke::new(1.0, edge), StrokeKind::Inside);
+        if ground == Ground::Boxed {
+            painter.rect(rect, 0.0, p.panel, Stroke::new(1.0, edge), StrokeKind::Inside);
+        }
         let label_top = (rect.top() + PAD_Y + (f.caption.line - label.size().y) / 2.0).round();
-        painter.galley(pos2(rect.left() + PAD_X, label_top), label, ink);
-        painter.galley(pos2(rect.left() + left, rect.top() + PAD_Y), words, p.ink);
+        paint::run_at(painter, pos2(rect.left() + PAD_X, label_top), label, ink);
+        paint::run_at(painter, words_at, words, p.ink);
     }
     if links.is_empty() {
-        return None;
+        return (None, rect);
     }
     let row = Rect::from_min_size(pos2(rect.left() + left, rect.top() + PAD_Y + words_high + UNDER), vec2(room, link_high));
     let mut child = ui.new_child(UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)));
@@ -111,7 +154,7 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
             pressed = Some(link.id.to_owned());
         }
     }
-    pressed
+    (pressed, rect)
 }
 
 /// The most characters of a banner's words laid out: far more than a line of 640 shows.

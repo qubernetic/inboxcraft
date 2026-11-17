@@ -399,7 +399,7 @@ fn an_error_shows_in_a_banner_until_dismissed() {
     harness.run();
     let error = harness.state().mailbox().error().unwrap().to_owned();
     harness.get_by_label(&error);
-    harness.get_by_label("Dismiss").click();
+    harness.get_by_label("dismiss").click();
     harness.run();
     assert_eq!(harness.state().mailbox().error(), None);
 }
@@ -704,11 +704,48 @@ fn the_error_banner_s_dismiss_is_a_link_that_enter_presses() {
     harness.state_mut().mailbox_mut().open(Place::Folder(4242));
     harness.run();
     assert!(harness.state().mailbox().error().is_some());
-    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.get_by_role_and_label(Role::Button, "dismiss").focus();
     harness.run();
     harness.key_press(Key::Enter);
     harness.run();
     assert_eq!(harness.state().mailbox().error(), None);
+}
+
+#[test]
+fn the_error_banner_s_dismiss_is_pressed_by_space_as_well() {
+    let mut harness = harness();
+    harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "dismiss").focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert_eq!(harness.state().mailbox().error(), None);
+}
+
+#[test]
+fn the_error_banner_carries_the_sheets_error_label_in_minus() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_theme(if mode == Mode::Dark { egui::Theme::Dark } else { egui::Theme::Light })
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+        harness.run();
+        harness.run();
+        let error = harness.state().mailbox().error().unwrap().to_owned();
+        let banner = harness.get_by_role_and_label(Role::Group, &format!("Error: {error}")).rect();
+        let words = harness.get_by_label(&error).rect();
+        let label = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.job.text == "ERROR" && banner.contains(text.pos) => Some(text.clone()),
+            _ => None,
+        });
+        let label = label.unwrap_or_else(|| panic!("{mode:?}: no ERROR label in {banner:?}"));
+        let colour = label.galley.job.sections.first().map(|section| section.format.color);
+        assert!(colour == Some(theme.palette.minus) || label.override_text_color == Some(theme.palette.minus), "{mode:?}");
+        assert!(label.galley.rect.translate(label.pos.to_vec2()).right() < words.left(), "{mode:?}: the label before the words");
+    }
 }
 
 /// The physical rows that long level lines in `colours` cover between `from` and `to` (points) in the last frame of
@@ -758,10 +795,17 @@ fn one_line_stands_between_the_error_banner_and_the_panes_under_it() {
         harness.run();
         let error = harness.state().mailbox().error().unwrap().to_owned();
         let text = harness.get_by_label(&error).rect();
-        // The sheet's padding: 12 at the sides (from the window's left, where the rail starts).
+        // The sheet's padding: 12 at the sides (from the window's left, where the rail starts), the ERROR label there,
+        // the words 12 right of it.
         let window = rail_right(&harness, &theme) - super::pane::rail_width(&theme);
-        assert!((text.left() - window - 12.0).abs() < 0.01, "{ppp}: {text:?} in a window from {window}");
-        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let label = harness.output().shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(shape) if shape.galley.job.text == "ERROR" => Some(shape.galley.rect.translate(shape.pos.to_vec2())),
+            _ => None,
+        });
+        let label = label.unwrap_or_else(|| panic!("{ppp}: no ERROR label"));
+        assert!((label.left() - window - 12.0).abs() < 0.01, "{ppp}: the label {label:?} in a window from {window}");
+        assert!((text.left() - (label.left() + crate::draw::paint::run_box(label.width()) + 12.0)).abs() < 0.01, "{ppp}: {text:?} after {label:?}");
+        let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
         let rows = level_line_rows(&harness, &[p.line, p.minus], dismiss.bottom(), dismiss.bottom() + 16.0);
         assert_eq!(rows.len(), wide, "{ppp}: one line between the banner and the panes: {rows:?}");
     }
@@ -816,7 +860,7 @@ fn the_line_under_the_error_banner_is_its_minus_edge() {
         harness.state_mut().mailbox_mut().open(Place::Folder(4242));
         harness.run();
         harness.run();
-        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
         let (from, to) = (dismiss.bottom(), dismiss.bottom() + 16.0);
         assert_eq!(level_line_rows(&harness, &[p.minus], from, to).len(), wide, "{ppp}: the sheet's minus edge all round");
         assert!(level_line_rows(&harness, &[p.line], from, to).is_empty(), "{ppp}: and no pane line beside it");

@@ -51,14 +51,14 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder, pos2};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, Ui, UiBuilder, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
-use crate::component::button;
+use crate::component::banner::{self, BannerKind, BannerLink};
 use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
@@ -1525,12 +1525,13 @@ impl InboxApp {
             (true, true) => egui::CornerRadius { nw: 0, ne: round, sw: 0, se: 0 },
             (true, false) => egui::CornerRadius::ZERO,
         };
-        let ground = Frame::new().fill(p.panel).corner_radius(corners).inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 });
+        // The banner component in its `Error` kind on the window's ground: it pads itself (8 above and below, 12 at the
+        // sides) and draws its ERROR label, words and link; the ground's corner and the edges are the window's, here.
+        let ground = Frame::new().fill(p.panel).corner_radius(corners);
         let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
-                dismiss = button::link_sized(ui, theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
-            });
+            let links = [BannerLink { name: tr!("dismiss"), id: "dismiss" }];
+            let (pressed, _) = banner::banner_in(ui, theme, &self.keymap, BannerKind::Error, error, &links, banner::Ground::Bare);
+            dismiss = pressed.as_deref() == Some("dismiss");
         });
         let r = shown.response.rect;
         let painter = ui.painter();

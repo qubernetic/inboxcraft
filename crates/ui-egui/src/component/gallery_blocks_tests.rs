@@ -63,8 +63,9 @@ fn the_boards_of_the_blocks_page_stand_on_bg_with_every_set() {
         for title in ["Row", "Hover actions", "Banner", "Empty state", "Progress", "Settings row", "Check step", "Facts"] {
             assert!(harness.query_all_by_label(title).count() >= 1, "{mode:?}: the {title} board");
         }
-        let banner = "This message did not arrive: 550 5.1.1 The address ansel@example.org does not exist.";
-        assert_eq!(painted(&harness, banner).ground, Some(theme.palette.bg), "{mode:?}");
+        let words = "This message did not arrive: 550 5.1.1 The address ansel@example.org does not exist.";
+        let banner = crate::component::banner::spoken(&theme, crate::component::banner::BannerKind::Bounce, words);
+        assert_eq!(painted(&harness, &banner).ground, Some(theme.palette.bg), "{mode:?}");
         assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the settings row's unavailable state");
     }
 }

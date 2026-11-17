@@ -82,9 +82,10 @@ fn a_banner_looks_as_its_sheet_says_in_every_state() {
         let p = theme.palette;
         for (index, (kind, label, text, links, height)) in STATES.iter().enumerate() {
             let harness = harness(theme, index);
-            let node = harness.get_by_label(text);
+            let name = super::spoken(&theme, *kind, text);
+            let node = harness.get_by_label(&name);
             let rect = node.rect();
-            let paint = painted(&harness, text);
+            let paint = painted(&harness, &name);
             let at = format!("{mode:?} {kind:?}: {paint:#?}");
             assert_eq!(rect.size(), vec2(640.0, *height), "{at}");
             let look = own(&paint, rect);
@@ -188,7 +189,7 @@ fn hostile_texts() -> Vec<&'static str> {
 fn hostile_words_keep_the_banner_at_its_sheet_size_cut_once_at_a_character() {
     for text in hostile_texts() {
         let harness = bounce(text, "open the report");
-        let name = crate::component::spoken(text);
+        let name = super::spoken(&Theme::new(Mode::Dark, TextScale::default()), BannerKind::Bounce, text);
         let rect = harness.get_by_label(&name).rect();
         assert_eq!(rect.size(), vec2(640.0, 54.0), "{:?}…: the sheet's box", text.chars().take(12).collect::<String>());
         let paint = painted(&harness, &name);
@@ -216,7 +217,7 @@ fn no_bidi_control_reaches_a_name_and_a_long_link_name_is_cut() {
     let link_words: &'static str = Box::leak(format!("always for \u{2066}{}@example.org\u{2069} \u{202E}", "a".repeat(300)).into_boxed_str());
     for text in hostile_texts() {
         let harness = bounce(text, link_words);
-        let name = crate::component::spoken(text);
+        let name = super::spoken(&Theme::new(Mode::Dark, TextScale::default()), BannerKind::Bounce, text);
         let banner = harness.get_by_label(&name);
         let rect = banner.rect();
         let names: Vec<String> = harness.root().children_recursive().filter_map(|node| node.accesskit_node().label()).collect();
@@ -236,7 +237,7 @@ fn no_bidi_control_reaches_a_name_and_a_long_link_name_is_cut() {
 fn a_banner_is_as_high_as_its_lines_at_130_percent() {
     let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
     let harness = harness(theme, 4);
-    let rect = harness.get_by_label(STATES[4].2).rect();
+    let rect = harness.get_by_label(&super::spoken(&theme, STATES[4].0, STATES[4].2)).rect();
     assert_eq!(rect.height(), (8.0 + theme.fonts.caption.line + 8.0).ceil(), "whole points: {rect:?}");
 }
 
