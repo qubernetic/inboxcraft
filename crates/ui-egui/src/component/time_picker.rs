@@ -224,7 +224,8 @@ pub(crate) fn show_with(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask:
             );
             job.wrap.max_width = ui.available_width().max(1.0);
             let text = ui.painter().layout_job(job);
-            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
+            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
             solid(ui).galley(rect.min, text, p.muted);
         }
         state.chosen(now, offset)

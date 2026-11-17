@@ -26,21 +26,17 @@ fn the_gallery_shows_every_component_in_both_modes() {
     {
         for mode in [Mode::Light, Mode::Dark] {
             let harness = harness(Theme::new(mode, TextScale::default()));
-            for name in ["Screener: 3 new senders", "Unpin", "Unread", "People", "Marked as done", "Move to a folder"] {
+            for name in ["Newsletters", "Screener: 3 new senders", "Unpin", "Unread", "People", "Marked as done", "Move to a folder"] {
                 harness.get_by_label(name);
             }
-            // The card, and a mailbox of the popup panel's board.
-            assert!(harness.query_all_by_label("Newsletters").count() >= 1);
             // The archive button itself: its two tooltips on the tooltip board carry the name too.
             harness.get_by_role_and_label(Role::Button, "Archive");
             assert!(harness.query_all_by_label("Done").count() >= 2, "the button and the hover action");
             for name in ["Snooze until", "Later today, 17:30", "Tomorrow morning, Sat 08:00", "Thursday 12 November, 09:00"] {
-                // The picker's time read shows on the typed time's board too.
-                assert!(harness.query_all_by_label(name).count() >= 1, "{name}");
+                harness.get_by_label(name);
             }
             assert!(harness.query_by_label_contains("This morning").is_none(), "a preset behind is hidden");
-            // The picker's alert switch, and the one on the time picker's board.
-            assert!(harness.query_all_by_role_and_label(Role::Switch, "Notify me when it comes back").count() >= 1);
+            harness.get_by_role_and_label(Role::Switch, "Notify me when it comes back");
             harness.get_by_label("Ctrl F");
             harness.get_by_label("Ctrl Z");
             for (name, _) in sample::people() {

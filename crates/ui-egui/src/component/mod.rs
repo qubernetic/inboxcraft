@@ -29,7 +29,8 @@
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
 //!
-//! [`gallery`] draws every one of them on one page for `ui_shot`.
+//! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
+//! second.
 
 pub mod avatar;
 pub mod badge;
@@ -38,6 +39,7 @@ pub mod card;
 pub mod checkbox;
 pub mod field;
 pub mod gallery;
+pub mod gallery_fields;
 pub mod hover;
 pub mod icon;
 pub mod key;

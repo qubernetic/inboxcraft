@@ -831,3 +831,14 @@ fn an_icon_sits_in_its_box_as_the_board_draws_it() {
     assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
     assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
 }
+
+#[test]
+fn the_fields_page_of_the_gallery_is_its_own_picture() {
+    let picture = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "fields"}"#)).unwrap();
+    let size = crate::component::gallery_fields::size();
+    assert_eq!((picture.width as f32, picture.height as f32), (size.x, size.y));
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "other"}"#)).unwrap_err();
+    assert!(error.to_string().contains("no page"), "{error}");
+    let error = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "page": "fields"}"#)).unwrap_err();
+    assert!(error.to_string().contains("component gallery"), "{error}");
+}

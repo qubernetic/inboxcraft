@@ -41,7 +41,8 @@
 //! motion on.
 //! `icons` set to `true` draws every icon
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
-//! the components ([`crate::component::gallery`]). The typeface and the icons are fixed, so a script that names a
+//! the components ([`crate::component::gallery`]), with `page` `fields` its page of fields, pickers and menus
+//! ([`crate::component::gallery_fields`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
@@ -211,6 +212,9 @@ pub struct Shot {
     /// The gallery of the components instead of the window.
     #[serde(default)]
     pub components: Option<bool>,
+    /// The gallery's page with `components`: `fields` for the fields, pickers and menus; the first page when left out.
+    #[serde(default)]
+    pub page: Option<String>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -616,14 +620,20 @@ fn component_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
     no_window(shot, "the component gallery")?;
     let theme = Theme::new(mode, TextScale::default());
     let keymap = gallery::keymap();
+    type Page = fn(&mut egui::Ui, &Theme, &crate::keymap::Keymap);
+    let (size, draw): (egui::Vec2, Page) = match shot.page.as_deref() {
+        None => (gallery::size(), gallery::page),
+        Some("fields") => (crate::component::gallery_fields::size(), crate::component::gallery_fields::page),
+        Some(other) => return Err(bad(format!("{}: the gallery has no page {other:?}", shot.out))),
+    };
     let mut fonts = true;
-    paint(gallery::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+    paint(size, shot.scale.unwrap_or(1.0), mode, |ui| {
         if std::mem::take(&mut fonts) {
             theme::install_fonts(ui.ctx());
             // The app's own style, so the boards' text is drawn as the app draws it (coverage, hinting).
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
-        gallery::page(ui, &theme, &keymap);
+        draw(ui, &theme, &keymap);
     })
 }
 
@@ -961,6 +971,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     };
     if shot.components == Some(true) {
         return component_gallery(shot, mode);
+    }
+    if shot.page.is_some() {
+        return Err(bad(format!("{}: a page is a page of the component gallery", shot.out)));
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
