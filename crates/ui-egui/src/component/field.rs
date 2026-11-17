@@ -220,13 +220,16 @@ fn paint_box(painter: &Painter, rect: Rect, fill: Option<Color32>, edge: Color32
     }
 }
 
-/// The label over a field, `width` wide: its height (0 with no label).
+/// The label over a field, `width` wide, wrapped when it is longer (at a large text size); nothing with no label.
 fn label_row(ui: &mut Ui, theme: &Theme, label: &str, width: f32) {
     if label.is_empty() {
         return;
     }
-    let text = galley(ui, label, theme.fonts.label, theme.palette.muted);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, theme.fonts.label.line), Sense::hover());
+    let font = theme.fonts.label;
+    let mut job = LayoutJob::single_section(font.text(label), font.format(theme.palette.muted));
+    job.wrap = TextWrapping { max_width: width.max(1.0), ..TextWrapping::default() };
+    let text = ui.painter().layout_job(job);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, text.size().y.max(font.line)), Sense::hover());
     if ui.is_rect_visible(rect) {
         super::solid(ui).galley(rect.min, text, theme.palette.muted);
     }
