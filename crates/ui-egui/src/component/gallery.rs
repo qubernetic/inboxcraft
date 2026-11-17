@@ -1035,6 +1035,38 @@ fn fields_middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.push_id("password-field", |ui| password_fields(ui, theme));
     ui.push_id("popup-panel", |ui| popup_panels(ui, theme, keymap));
     ui.push_id("menu-item", |ui| menu_items(ui, theme, keymap));
+    ui.push_id("menu-choice", |ui| menu_choices(ui, theme));
+}
+
+/// The menu choice's board: off, on, hover, unavailable with its reason; and pressed off and on, which the sheet does
+/// not draw.
+fn menu_choices(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Menu choice"));
+    let week = tr!("Every week");
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("off"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, week, false, None, None);
+        });
+        field_cell(ui, theme, tr!("on"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, week, true, None, None);
+        });
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("hover"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, week, false, None, Some(Shown::Hover));
+        });
+        field_cell(ui, theme, tr!("unavailable"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, tr!("Every month"), false, Some(tr!("not synced")), None);
+        });
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("pressed"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, week, false, None, Some(Shown::Pressed));
+        });
+        field_cell(ui, theme, tr!("on-pressed"), 240.0, |ui| {
+            popup::menu_choice_with(ui, theme, week, true, None, Some(Shown::Pressed));
+        });
+    });
 }
 
 /// The fields' right column of boards.

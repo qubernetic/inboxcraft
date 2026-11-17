@@ -575,3 +575,63 @@ fn an_unavailable_menu_item_takes_no_press() {
     harness.run();
     assert_eq!(crate::component::tests::own(&crate::component::tests::painted(&harness, "Move to…"), harness.get_by_label("Move to…").rect()).fill, None);
 }
+
+#[test]
+fn a_menu_choice_looks_as_its_sheet_says_in_every_state() {
+    use crate::component::Shown;
+    use crate::component::field::tests::{drawn, one};
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for state in ["off", "on", "hover", "unavailable"] {
+            let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
+            let name = if state == "unavailable" { "Every month" } else { "Every week" };
+            let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), move |ui, theme| {
+                ui.vertical(|ui| {
+                    ui.set_width(240.0);
+                    let reason = (state == "unavailable").then_some("not synced");
+                    super::menu_choice_with(ui, theme, name, state == "on", reason, None);
+                });
+            });
+            if state == "hover" {
+                crate::component::tests::bring(&mut harness, name, Shown::Hover);
+            }
+            let node = harness.get_by_label(name);
+            let rect = node.rect();
+            assert_eq!(node.accesskit_node().role(), Role::MenuItemRadio);
+            assert_eq!(node.accesskit_node().is_disabled(), state == "unavailable");
+            let look = crate::component::tests::own(&crate::component::tests::painted(&harness, name), rect);
+            let at = format!("{mode:?} {state}: {look:#?}");
+            assert_eq!(rect.size(), egui::vec2(240.0, 32.0), "{at}");
+            assert_eq!(look.fill, (state == "hover").then_some(p.stage), "{at}");
+            assert_eq!(look.edge, None, "{at}");
+            let tick: Vec<_> = drawn(&harness).into_iter().filter(|text| text.text == super::CHECK.to_string()).collect();
+            if state == "on" {
+                assert!(tick.len() == 1 && (tick[0].rect.center() - (rect.min + egui::vec2(20.0, 16.0))).length() < 1.0 && tick[0].colour == p.cyan_text, "{at} {tick:?}");
+            } else {
+                assert!(tick.is_empty(), "{at}");
+            }
+            let label = one(&harness, name);
+            let ink = if state == "unavailable" { p.muted } else { p.ink };
+            assert_eq!((label.rect.min, label.colour, label.size, label.row), (rect.min + egui::vec2(36.0, 5.0), ink, 14.0, 22.0), "{at}");
+            if state == "unavailable" {
+                let reason = one(&harness, "not synced");
+                assert!((reason.rect.right() - (rect.left() + 228.0)).abs() < 0.5 && reason.rect.top() == rect.top() + 8.0, "{at} {reason:?}");
+                assert_eq!((reason.colour, reason.family.as_str(), reason.size), (p.muted, "Monospace", 11.0), "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn enter_and_space_press_a_menu_choice_as_the_pointer_does() {
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        held(mode, "Every week", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_choice(ui, theme, "Every week", false, true);
+        });
+        held(mode, "Every month", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_choice(ui, theme, "Every month", true, true);
+        });
+    }
+}

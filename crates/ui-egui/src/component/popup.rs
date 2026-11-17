@@ -529,7 +529,7 @@ pub(crate) fn suggestion_row_with(ui: &mut Ui, theme: &Theme, name: &str, addres
     let text = cut(ui, name, theme.fonts.body, ink, most);
     let name_width = text.size().x;
     painter.galley(pos2(left, mid - text.size().y / 2.0), text, ink);
-    let start = left + name_width + s.s2;
+    let start = (left + name_width).round() + s.s2;
     if right - start > 1.0 && !address.is_empty() {
         let muted = arriving(theme, p.muted, shown);
         let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
