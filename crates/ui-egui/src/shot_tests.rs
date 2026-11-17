@@ -831,3 +831,22 @@ fn an_icon_sits_in_its_box_as_the_board_draws_it() {
     assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
     assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
 }
+
+#[test]
+fn a_click_presses_before_the_picture_and_what_it_opens_is_drawn() {
+    // A button that paints its ground cyan once it has been pressed.
+    let pressed = std::cell::Cell::new(false);
+    let picture = super::paint_pointed(vec2(120.0, 60.0), 1.0, Mode::Dark, super::Pointer { rest: None, click: Some(pos2(30.0, 20.0)) }, |ui| {
+        let button = ui.put(Rect::from_min_size(pos2(10.0, 10.0), vec2(60.0, 20.0)), egui::Button::new("Press"));
+        if button.clicked() {
+            pressed.set(true);
+        }
+        if pressed.get() {
+            ui.painter().rect_filled(Rect::from_min_size(pos2(80.0, 40.0), vec2(20.0, 10.0)), 0.0, Color32::from_rgb(0, 200, 255));
+        }
+    })
+    .unwrap();
+    assert!(pressed.get(), "the press reached the button");
+    assert_eq!(picture.pixel(90, 45), Some(Color32::from_rgb(0, 200, 255)), "what the press opened is in the picture");
+    assert!(shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "click": [1, 1]}"#)).is_err(), "the gallery has no window");
+}
