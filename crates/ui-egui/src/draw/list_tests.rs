@@ -611,3 +611,20 @@ fn a_pointer_press_on_done_beside_the_reader_marks_the_message_done() {
     harness.get_by_label("Marked as done");
     assert!(harness.query_by_label(ODILE).is_none(), "the row has left the inbox");
 }
+
+#[test]
+fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_yet() {
+    let mut harness = harness(true);
+    harness.get_by_label(ODILE).hover();
+    harness.run();
+    let row = harness.get_by_label(ODILE).rect();
+    let width = |harness: &Harness<'static, InboxApp>, name: &str| {
+        harness
+            .query_all_by_role_and_label(Role::Button, name)
+            .map(|node| node.rect())
+            .find(|rect| row.contains(rect.center()))
+            .map(|rect| rect.width())
+    };
+    // Its icon and its dashed one-letter chip, as wide as Done with its own.
+    assert_eq!(width(&harness, "Snooze"), width(&harness, "Done"));
+}

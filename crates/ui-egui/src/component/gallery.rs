@@ -622,7 +622,7 @@ fn sliders(ui: &mut Ui, theme: &Theme) {
         (tr!("at-130"), at(4), Some(Shown::Rest), None),
     ];
     // Two to a row: three are wider than the column.
-    for pair in states.chunks(1) {
+    for pair in states.chunks(2) {
         cells(ui, theme, |ui| {
             for (state, current, shown, towards) in pair {
                 cell(ui, theme, state, |ui| {

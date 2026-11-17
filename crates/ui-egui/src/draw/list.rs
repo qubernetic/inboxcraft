@@ -230,7 +230,8 @@ fn actions(message: &MessageRow) -> [Action<'static>; 4] {
         Action { icon: IconId::Done, name: done, action: Some(keymap::DONE), unavailable: None },
         Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
-        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: None, unavailable: Some(tr!("Open the message to snooze it")) },
+        // Its key shows dashed, as the sheet's unavailable Snooze; an unavailable action offers no key and runs nothing.
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: Some(tr!("Open the message to snooze it")) },
     ]
 }
 
