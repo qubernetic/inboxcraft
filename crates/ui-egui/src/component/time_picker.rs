@@ -129,7 +129,7 @@ fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if hover > 0.0 {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let time = galley(ui, time, theme.fonts.caption, p.muted);
         let right = rect.right() - s.s3 - time.size().x;

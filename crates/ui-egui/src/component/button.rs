@@ -96,7 +96,8 @@ impl<'a> IconButton<'a> {
             if self.active {
                 painter.rect_filled(rect, 0.0, p.stage);
             } else if hover > 0.0 {
-                painter.rect_filled(rect, 0.0, p.grid);
+                // The rail's buttons (drawn in its ink) stand on the `panel`; every other on a `surface`.
+                painter.rect_filled(rect, 0.0, if self.ink.is_some() { p.grid } else { p.stage });
             }
             let (style, colour) = match (self.ink, self.active) {
                 (Some(ink), active) => (if active { Style::Fill } else { Style::Regular }, ink),
@@ -223,7 +224,7 @@ impl<'a> TextButton<'a> {
                 Tone::Quiet => {}
             }
             if hover > 0.0 && matches!(self.tone, Tone::Quiet | Tone::Secondary) {
-                painter.rect_filled(rect, round, p.grid);
+                painter.rect_filled(rect, round, p.stage);
             }
             let left = rect.center().x - (galley.size().x + lead) / 2.0;
             if let Some(icon) = self.icon {
@@ -274,7 +275,7 @@ pub fn link(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str) -> Response
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
     if ui.is_rect_visible(rect) {
         if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, p.grid);
+            ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         if response.has_focus() {
             ui.painter().rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);

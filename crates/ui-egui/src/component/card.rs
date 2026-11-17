@@ -60,7 +60,7 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
     if hover > 0.0 {
         let round = egui::CornerRadius { nw: super::corner(0.0).nw, ne: super::corner(0.0).ne, sw: 0, se: 0 };
         let round = if openness > 0.0 { round } else { super::corner(0.0) };
-        shapes.push(Shape::rect_filled(header_rect, round, p.grid));
+        shapes.push(Shape::rect_filled(header_rect, round, p.stage));
     }
     shapes.push(Shape::galley(text_at, text, p.ink));
     if header.has_focus() {

@@ -88,7 +88,7 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
             if on {
                 pill::selected_fill(ui.painter(), theme, rect);
             } else if hover > 0.0 {
-                ui.painter().rect_filled(rect, round, p.grid);
+                ui.painter().rect_filled(rect, round, p.stage);
             }
             let pad = if squeezed { s.s1 } else { s.s3 };
             // A point more than the name needs, so that rounding never cuts a name that fits.

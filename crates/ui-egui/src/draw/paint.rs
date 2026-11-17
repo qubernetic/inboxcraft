@@ -173,7 +173,7 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
         if row.selected {
             selection(ui.painter(), theme, rect, 0.0);
         } else if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, p.grid);
+            ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
         let mut left = rect.left() + s.s2 + f32::from(depth) * s.s3;

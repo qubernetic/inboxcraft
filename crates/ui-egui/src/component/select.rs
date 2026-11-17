@@ -95,7 +95,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         painter.rect_filled(rect, 0.0, p.term);
         let hover = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
         if hover > 0.0 {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);

@@ -49,7 +49,7 @@ fn row(ui: &mut Ui, theme: &Theme, role: Role, name: &str, on: bool) -> (Respons
 fn hover(ui: &Ui, theme: &Theme, response: &Response, mark: egui::Rect, round: f32) {
     let shown = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
     if shown > 0.0 {
-        ui.painter().rect_filled(mark, round, theme.palette.grid);
+        ui.painter().rect_filled(mark, round, theme.palette.stage);
     }
 }
 
@@ -60,7 +60,7 @@ pub fn checkbox(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
         let p = &theme.palette;
         let painter = ui.painter();
         if on {
-            painter.rect_filled(mark, CORNER, p.cyan_text);
+            painter.rect_filled(mark, CORNER, p.cyan);
             tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.on_cyan);
         } else {
             painter.rect_filled(mark, CORNER, p.term);

@@ -35,7 +35,7 @@ pub fn pill(ui: &mut Ui, theme: &Theme, text: &str, selected: bool) -> Response 
             selected_fill(painter, theme, rect);
         } else {
             if hover > 0.0 {
-                painter.rect_filled(rect, round, p.grid);
+                painter.rect_filled(rect, round, p.stage);
             }
             painter.rect_stroke(rect, round, Stroke::new(1.0, p.muted), StrokeKind::Inside);
         }

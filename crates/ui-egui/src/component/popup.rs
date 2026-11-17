@@ -82,7 +82,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if hover > 0.0 {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));

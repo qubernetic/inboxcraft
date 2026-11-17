@@ -116,3 +116,38 @@ fn choice_rows_mark_the_chosen_one_and_entries_line_up_with_items() {
     assert_eq!(harness.get_by_label("Full width").accesskit_node().role(), Role::MenuItem);
     assert!(drew_icon(harness.output(), IconId::Done, Style::Regular), "the chosen one is marked");
 }
+
+#[test]
+fn a_hovered_row_of_a_float_is_the_stage_and_shows_in_dark_mode() {
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
+    let p = theme.palette;
+    let keymap = Keymap::default();
+    let mut harness = builder().with_theme(egui::Theme::Dark).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        show(ui.ctx(), &theme, Id::unique("menu"), pos2(40.0, 30.0), 220.0, |ui| {
+            item(ui, &theme, &keymap, IconId::Snooze, "Snooze", None);
+            item(ui, &theme, &keymap, IconId::Flag, "Flag", None);
+        });
+    });
+    harness.run();
+    let row = harness.get_by_label("Snooze").rect().center();
+    harness.hover_at(row);
+    harness.run();
+    let fills: Vec<egui::Color32> = harness
+        .output()
+        .shapes
+        .iter()
+        .flat_map(|clipped| match &clipped.shape {
+            egui::Shape::Vec(inner) => inner.clone(),
+            other => vec![other.clone()],
+        })
+        .filter_map(|shape| match shape {
+            egui::Shape::Rect(rect) if rect.rect.contains(row) && rect.blur_width == 0.0 => Some(rect.fill),
+            _ => None,
+        })
+        .collect();
+    assert!(fills.contains(&p.surface), "the float's ground: {fills:?}");
+    assert!(fills.contains(&p.stage), "the hovered row is the stage: {fills:?}");
+    assert!(!fills.contains(&p.grid), "{fills:?}");
+    assert!(crate::theme::contrast(p.stage, p.surface) >= 1.15);
+}

@@ -116,11 +116,11 @@ fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: 
         p.muted
     };
     if day == today {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.cyan_text);
+        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.cyan);
     } else if shown {
         selection(ui.painter(), theme, spot, spot.height() / 2.0);
     } else if response.hovered() {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.grid);
+        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.stage);
     }
     let font = if day == today { caption_bold(theme) } else { theme.fonts.caption };
     let galley = line(ui, &[(&day.date().to_string(), font, colour)], spot.width() + 8.0);

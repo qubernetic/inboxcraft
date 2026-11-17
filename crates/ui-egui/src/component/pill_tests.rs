@@ -85,7 +85,7 @@ fn a_hovered_pill_fades_its_hover_in_and_a_focused_one_shows_its_ring() {
         pill(ui, &theme, "Unread", false);
     });
     harness.run();
-    let hover_fill = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(fill, _)| *fill == palette.grid);
+    let hover_fill = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(fill, _)| *fill == palette.stage);
     let ring = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(_, stroke)| *stroke == palette.cyan_edge);
     assert!(!hover_fill(&harness) && !ring(&harness));
     harness.get_by_label("Unread").hover();

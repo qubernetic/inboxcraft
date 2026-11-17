@@ -65,7 +65,7 @@ fn control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Control) -> Respo
         let lit = response.hovered() || response.has_focus();
         let ink = if lit && which == Control::Close { p.bg } else { p.ink };
         if lit {
-            let fill = if which == Control::Close { p.minus } else { p.grid };
+            let fill = if which == Control::Close { p.minus } else { p.stage };
             // A little smaller than the control, so the fill keeps clear of the strip's edges and the window's corner.
             ui.painter().rect_filled(rect.shrink2(vec2(HOVER_INSET, HOVER_INSET)), 0.0, fill);
         }

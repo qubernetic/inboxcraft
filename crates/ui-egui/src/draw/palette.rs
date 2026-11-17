@@ -53,7 +53,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: boo
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if picked || response.hovered() {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let ink = if run { p.ink } else { p.muted };
         let side = theme.fonts.body.size * 1.2;

@@ -291,7 +291,7 @@ fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], pain
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if response.hovered() {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let stroke = Stroke::new(1.0, if on { p.cyan_edge } else { p.line });
         painter.rect_stroke(rect, 0.0, stroke, StrokeKind::Inside);

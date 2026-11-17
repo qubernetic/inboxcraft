@@ -38,7 +38,7 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
         return pressed;
     }
     if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, p.grid);
+        ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     focus_ring(ui, theme, &response);
     let painter = ui.painter();
@@ -87,7 +87,7 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
     response.widget_info(|| WidgetInfo::labeled(Role::Link, true, tr!("Back to the accounts")));
     if ui.is_rect_visible(rect) {
         if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, p.grid);
+            ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
         theme.icons.paint(ui.painter(), at, IconId::Back, Style::Regular, p.cyan_text);

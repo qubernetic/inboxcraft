@@ -489,7 +489,7 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, p.surface);
         if response.hovered() {
-            painter.rect_filled(rect, 0.0, p.grid);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
         let face = Rect::from_min_size(pos2(rect.left() + s.s3, rect.center().y - side / 2.0), vec2(side, side));

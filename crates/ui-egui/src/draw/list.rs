@@ -356,7 +356,7 @@ fn paint_row(
     if selected {
         selection(ui.painter(), theme, rect, 0.0);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, p.grid);
+        ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     let (first_height, second_height) = row_lines(ui, theme);
     let first = rect.top() + s.s2;

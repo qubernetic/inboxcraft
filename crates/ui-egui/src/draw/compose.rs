@@ -323,7 +323,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         let spoken = tr!("From {sender}", sender = sender);
         response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, &spoken));
         if response.hovered() {
-            ui.painter().rect_filled(rect.expand(2.0), 0.0, p.grid);
+            ui.painter().rect_filled(rect.expand(2.0), 0.0, p.stage);
         }
         ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));

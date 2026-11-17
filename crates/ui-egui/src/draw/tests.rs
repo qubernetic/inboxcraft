@@ -17,7 +17,7 @@ use super::InboxApp;
 use crate::iconset::{IconId, IconSet, Style};
 use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
-use crate::theme::{Mode, ModePreference, TextScale, Theme};
+use crate::theme::{Mode, ModePreference, TextScale, Theme, contrast};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -521,4 +521,30 @@ fn the_window_is_flat() {
         let panes = shapes.iter().filter(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == surface)).count();
         assert!(panes >= 3, "{theme:?}: the folder pane, the list and the reader are flat panes: {panes}");
     }
+}
+
+/// Whether a flat rect in `fill` covers `at` in the last frame.
+fn filled_at(harness: &Harness<'static, InboxApp>, at: egui::Pos2, fill: egui::Color32) -> bool {
+    flat(&harness.output().shapes).iter().any(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == fill && rect.rect.contains(at)))
+}
+
+#[test]
+fn a_hovered_row_takes_the_fill_of_its_ground() {
+    let mut harness = harness_with(sample_app(), egui::Theme::Dark);
+    let p = Theme::new(Mode::Dark, TextScale::default()).palette;
+    assert!(contrast(p.stage, p.surface) >= 1.15, "hover on a pane shows: {}", contrast(p.stage, p.surface));
+    assert!(contrast(p.grid, p.panel) >= 1.05, "hover on the panel shows: {}", contrast(p.grid, p.panel));
+    // A list row stands on a pane's `surface`: its hover is the `stage`.
+    let row = harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread").rect().center();
+    assert!(!filled_at(&harness, row, p.stage), "not hovered yet");
+    harness.hover_at(row);
+    harness.run();
+    assert!(filled_at(&harness, row, p.stage), "a hovered list row is the stage");
+    assert!(!filled_at(&harness, row, p.grid));
+    // A rail button stands on the `panel`: its hover is the `grid`.
+    let calendar = harness.get_by_role_and_label(Role::Button, "Calendar").rect().center();
+    harness.hover_at(calendar);
+    harness.run();
+    assert!(filled_at(&harness, calendar, p.grid), "a hovered rail button is the grid");
+    assert!(!filled_at(&harness, calendar, p.stage));
 }

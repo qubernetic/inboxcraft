@@ -104,7 +104,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let height = line_height(ui, theme.fonts.sender) + s.s3 * 2.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, p.surface);
-    ui.painter().rect_filled(rect, 0.0, p.grid);
+    ui.painter().rect_filled(rect, 0.0, p.stage);
     let actions = [
         Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },

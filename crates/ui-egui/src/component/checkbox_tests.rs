@@ -64,3 +64,27 @@ fn the_name_is_cut_in_too_little_room_and_the_box_keeps_its_size() {
     let long = harness.get_by_role_and_label(Role::CheckBox, "A calendar with a very long name indeed").rect();
     assert!(long.width() <= 61.0 && long.height() >= 18.0, "{long:?}");
 }
+
+#[test]
+fn a_ticked_box_is_the_cyan_fill_with_the_tick_in_on_cyan_in_light_mode() {
+    let theme = theme();
+    assert_eq!(theme.mode, crate::theme::Mode::Light);
+    let p = theme.palette;
+    let mut harness = builder().build_ui(move |ui| {
+        checkbox(ui, &theme, "Personal", true);
+    });
+    harness.run();
+    let mut fills = Vec::new();
+    let mut lines = Vec::new();
+    for clipped in &harness.output().shapes {
+        match &clipped.shape {
+            egui::Shape::Rect(rect) => fills.push(rect.fill),
+            egui::Shape::Path(path) => lines.push(path.stroke.color.clone()),
+            _ => {}
+        }
+    }
+    assert!(fills.contains(&p.cyan), "{fills:?}");
+    assert!(!fills.contains(&p.cyan_text), "the accent as a fill is cyan: {fills:?}");
+    assert!(lines.contains(&egui::epaint::ColorMode::Solid(p.on_cyan)), "{lines:?}");
+    assert!(crate::theme::contrast(p.on_cyan, p.cyan) >= 4.5);
+}

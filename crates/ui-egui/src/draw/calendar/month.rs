@@ -187,9 +187,9 @@ fn day_number(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, grid: &
     let response = ui.interact(spot, ui.scope_id().with(("calendar-number", day)), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, day::long(day)));
     if today {
-        ui.painter().rect_filled(spot, side / 2.0, p.cyan_text);
+        ui.painter().rect_filled(spot, side / 2.0, p.cyan);
     } else if response.hovered() {
-        ui.painter().rect_filled(spot, side / 2.0, p.grid);
+        ui.painter().rect_filled(spot, side / 2.0, p.stage);
     }
     let at = if today { spot.center() - galley.size() / 2.0 } else { pos2(spot.left() + 1.0, spot.center().y - galley.size().y / 2.0) };
     ui.painter().galley(at, galley, colour);
