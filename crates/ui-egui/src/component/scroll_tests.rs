@@ -117,7 +117,6 @@ fn a_scroll_thumb_never_covers_the_content_nor_its_focus_edge() {
     let strip = strip(inner);
     assert!(strip.left() >= inner.right() - 0.01, "{inner:?} {strip:?}");
     assert!(fills(&harness, strip).iter().all(|(rect, _)| !rect.intersects(inner.shrink(0.01))));
-    let _ = pos2(0.0, 0.0);
 }
 
 #[test]
@@ -129,5 +128,77 @@ fn a_scroll_bar_rests_after_the_pointer_leaves_at_every_level_of_motion() {
         harness.run();
         harness.hover_at(pos2(1.0, 1.0));
         assert!(rests(&mut harness, 16), "reduced {reduced}: no repaint at rest");
+    }
+}
+
+/// A harness whose area is 96 high over content as high as its state's first value; the second is the area's inner
+/// rect.
+fn growing(mode: Mode) -> Harness<'static, (f32, Rect)> {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = builder().with_size(vec2(220.0, 160.0)).build_ui_state(
+        move |ui, (high, inner): &mut (f32, Rect)| {
+            motion::set_reduced(ui.ctx(), true);
+            ui.spacing_mut().scroll = style(&theme);
+            stage(ui, theme.palette.surface, |ui| {
+                let area = ScrollArea::vertical().id_salt("scroll-growing").max_height(AREA).auto_shrink([false, true]);
+                let output = show(ui, &theme, area, |ui| {
+                    ui.allocate_exact_size(vec2(ui.available_width(), *high), egui::Sense::hover());
+                });
+                *inner = output.inner_rect;
+            });
+        },
+        (AREA / 2.0, Rect::NOTHING),
+    );
+    harness.run();
+    harness
+}
+
+/// The bar's fills in the last frame: those of `colours` inside the 12 points right of `room`'s content edge or over
+/// the content, `(rect, fill)`.
+fn bar_fills(harness: &Harness<'static, (f32, Rect)>, room: Rect, colours: [Color32; 3]) -> Vec<(Rect, Color32)> {
+    let wide = Rect::from_x_y_ranges(room.left()..=room.right() + 12.0, room.y_range());
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        let mut stack = vec![&clipped.shape];
+        while let Some(shape) = stack.pop() {
+            match shape {
+                Shape::Vec(shapes) => stack.extend(shapes.iter()),
+                Shape::Rect(rect) if colours.contains(&rect.fill) && wide.expand(0.01).contains_rect(rect.rect) => found.push((rect.rect, rect.fill)),
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn no_frame_paints_the_bar_over_the_content_when_it_starts_or_stops_overflowing() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let colours = [p.muted, p.stage, p.ink];
+        let mut harness = growing(mode);
+        let fits = harness.state().1;
+        assert!(bar_fills(&harness, fits, colours).is_empty(), "{mode:?}: no bar while it fits");
+
+        harness.state_mut().0 = AREA * 3.0;
+        for frame in 0..4 {
+            harness.step();
+            let inner = harness.state().1;
+            let over: Vec<_> = bar_fills(&harness, fits, colours).into_iter().filter(|(rect, _)| rect.intersects(inner.shrink(0.01))).collect();
+            assert!(over.is_empty(), "{mode:?} frame {frame} of overflow: the bar over the content {inner:?}: {over:?}");
+        }
+        harness.run();
+        let inner = harness.state().1;
+        assert_eq!(bar_fills(&harness, fits, colours).len(), 1, "{mode:?}: the thumb beside the content {inner:?}");
+
+        harness.state_mut().0 = AREA / 2.0;
+        for frame in 0..4 {
+            harness.step();
+            let inner = harness.state().1;
+            let over: Vec<_> = bar_fills(&harness, fits, colours).into_iter().filter(|(rect, _)| rect.intersects(inner.shrink(0.01))).collect();
+            assert!(over.is_empty(), "{mode:?} frame {frame} after overflow: {over:?}");
+        }
+        harness.run();
+        assert!(bar_fills(&harness, fits, colours).is_empty(), "{mode:?}: no bar once it fits again");
     }
 }

@@ -81,10 +81,16 @@ pub fn paint(painter: &Painter, theme: &Theme, strip: Rect, thumb: Rangef, bar: 
 }
 
 /// Paints the vertical bar of the area `output` came from, as egui placed it this frame (nothing when it showed
-/// none): the strip egui senses, the thumb where egui's drag puts it.
+/// none, or showed it over the content): the strip egui senses, the thumb where egui's drag puts it. Only the
+/// vertical bar: a horizontal one is not painted.
 pub fn bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>) {
     let id = output.id.with(1);
     let Some(strip) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).map(|widget| widget.rect)) else { return };
+    // egui starts showing a bar a frame before it gives it room beside the content: until the strip stands clear of
+    // the content, nothing is painted, so no frame has the bar over a row.
+    if strip.left() < output.inner_rect.right() - 0.01 {
+        return;
+    }
     let (inner, content) = (output.inner_rect.height(), output.content_size.y);
     let length = strip.height();
     if !(content > inner && inner > 0.0 && length > 0.0 && content.is_finite()) {
