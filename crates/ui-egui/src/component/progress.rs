@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use egui::{Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
@@ -118,10 +119,11 @@ pub(crate) fn progress_with(
     let bar = super::galley(ui, &bar(state), font, bar_ink);
     let failed = matches!(state, ProgressState::Failed(_));
     let note_galley = (!failed).then(|| super::galley(ui, &super::plain(note), font, p.muted));
-    let link_width = if failed { super::galley(ui, note, font, p.cyan_text).size().x.ceil() } else { 0.0 };
-    let mark_width = dot.as_ref().map_or(RING, |dot| dot.size().x.ceil().max(DOT_MARK));
-    let (words_width, bar_width) = (words.size().x.ceil(), bar.size().x.ceil());
-    let note_width = note_galley.as_ref().map_or(link_width, |note| note.size().x.ceil());
+    let link_width = if failed { paint::run_box(super::galley(ui, note, font, p.cyan_text).size().x) } else { 0.0 };
+    // Each run in a text box hugging it, as the design lays them out ([`paint::run_box`]).
+    let mark_width = dot.as_ref().map_or(RING, |dot| paint::run_box(dot.size().x).max(DOT_MARK));
+    let (words_width, bar_width) = (paint::run_box(words.size().x), paint::run_box(bar.size().x));
+    let note_width = note_galley.as_ref().map_or(link_width, |note| paint::run_box(note.size().x));
     let width = mark_width + GAP + words_width + GAP + bar_width + GAP + note_width;
     let high = theme.boxes().strip;
     let (_, rect) = ui.allocate_space(vec2(width, high));
@@ -133,8 +135,9 @@ pub(crate) fn progress_with(
         let painter = ui.painter();
         match dot {
             Some(dot) => {
-                let left = (x + (mark_width - dot.size().x) / 2.0).round();
-                painter.galley(pos2(left, text_top), dot, p.warn);
+                // The dot's run centred in the sheet's 11 point box.
+                let at = Rect::from_min_size(pos2(x, text_top), vec2(mark_width, font.line));
+                paint::run_centred(painter, at, dot, p.warn);
             }
             None => {
                 let ring = pos2(x, (rect.center().y - RING / 2.0).round());
