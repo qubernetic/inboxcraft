@@ -238,8 +238,7 @@ fn the_sending_page_sets_how_long_a_send_is_held() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let clock = clock();
         let mut harness = sending(&clock, theme);
-        let appearance = *harness.state().appearance();
-        harness.state_mut().settings_mut().open_at(crate::settings::Section::Sending, &appearance);
+        harness.state_mut().settings_mut().open_at(crate::settings::Section::Sending);
         harness.run();
         harness.get_by_label("Undo send");
         let toggled = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled();

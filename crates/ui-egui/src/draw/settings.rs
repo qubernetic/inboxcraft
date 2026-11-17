@@ -10,15 +10,15 @@
 //! with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
 //! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
-//! accent presets and the window frame, the custom accent's colour fields, a slider for the text size and a switch
-//! for "Reduce motion"; a preview in the look the controls choose closes the page.
+//! window frame, a slider for the text size and a switch for "Reduce motion"; a preview in the look the controls
+//! choose closes the page.
 
 use egui::{
     Align, Area, Frame, Id, Key, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
     UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
@@ -28,14 +28,13 @@ use crate::component::field;
 use crate::component::segmented::{segmented, segmented_for};
 use crate::component::switch::switch;
 use crate::component::tooltip;
-use crate::glass;
-use crate::gradient::{self, Gradient, Stop};
+use crate::draw::paint::{self, FloatEdge};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{Action, Keymap};
 use crate::mailbox::{InboxView, Mailbox};
 use crate::onboard::Onboarding;
-use crate::settings::{MAX_CHARS, Section, Settings};
-use crate::theme::{Face, Font, Look, PRESETS, Preset, TextScale, Theme, Weight};
+use crate::settings::{Section, Settings};
+use crate::theme::{Face, Font, TextScale, Theme, Weight};
 use crate::tr;
 
 /// The sheet's size where the window has room for it, in points.
@@ -47,9 +46,6 @@ const NAV: f32 = 240.0;
 /// The narrowest a row's name and note get beside its control, in points; narrower, the control goes under them.
 const TEXT_MIN: f32 = 240.0;
 
-/// A swatch on an accent card, in points.
-const SWATCH: [f32; 2] = [72.0, 40.0];
-
 /// A window on a window-frame card, in points.
 const THUMB: [f32; 2] = [84.0, 52.0];
 
@@ -60,8 +56,6 @@ const TRACK: [f32; 2] = [200.0, 6.0];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
     Mode(ThemeMode),
-    Preset(&'static str),
-    Custom([String; 4]),
     Font(Typeface),
     Icons(Icons),
     Scale(TextScale),
@@ -142,16 +136,6 @@ fn mode_name(mode: ThemeMode) -> &'static str {
     }
 }
 
-/// The name of a shipped preset; the id for one this front end does not name.
-fn preset_name(id: &'static str) -> &'static str {
-    match id {
-        "electric" => tr!("Electric"),
-        "aurora" => tr!("Aurora"),
-        "citrus" => tr!("Citrus"),
-        _ => id,
-    }
-}
-
 /// The name of a typeface, as it is written.
 fn font_name(typeface: Typeface) -> &'static str {
     match typeface {
@@ -222,17 +206,6 @@ pub(super) fn screener_name(mode: ScreenerMode) -> &'static str {
     }
 }
 
-/// `stops` from the top left to the bottom right.
-fn diagonal(stops: [egui::Color32; 3]) -> Gradient {
-    let [first, middle, last] = stops;
-    Gradient::Linear { from: pos2(0.0, 0.0), to: pos2(1.0, 1.0), stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)] }
-}
-
-/// Whether `a` and `b` have the same colours, whatever they are called.
-fn same_colours(a: &Preset, b: &Preset) -> bool {
-    a.gradient == b.gradient && a.accent == b.accent
-}
-
 /// `font` in the SemiBold weight.
 fn semibold(font: Font) -> Font {
     Font { face: Face::Sans(Weight::SemiBold), ..font }
@@ -245,7 +218,7 @@ fn note(ui: &mut Ui, theme: &Theme, text: &str) {
 /// A row's name and note.
 fn texts(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str]) {
     ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(RichText::new(title).font(semibold(theme.fonts.body).id()).color(theme.palette.text));
+    ui.label(RichText::new(title).font(semibold(theme.fonts.body).id()).color(theme.palette.ink));
     for text in notes {
         note(ui, theme, text);
     }
@@ -266,9 +239,9 @@ fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes:
     ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
         let side = line_height(ui, theme.fonts.body) * 1.2;
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), rect, icon, Style::Regular, theme.palette.accent);
-        ui.add_space(theme.spacing.xs);
-        let used = side + theme.spacing.xs + ui.spacing().item_spacing.x * 2.0;
+        theme.icons.paint(ui.painter(), rect, icon, Style::Regular, theme.palette.cyan_text);
+        ui.add_space(theme.spacing.s1);
+        let used = side + theme.spacing.s1 + ui.spacing().item_spacing.x * 2.0;
         ui.vertical(|ui| {
             ui.set_width((width - used).max(1.0));
             texts(ui, theme, title, notes);
@@ -279,16 +252,16 @@ fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes:
 /// A row as [`row`] draws it, with an `icon` before its name.
 pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes: &[&str], control: &mut dyn FnMut(&mut Ui)) {
     let s = &theme.spacing;
-    ui.add_space(s.l);
+    ui.add_space(s.s4);
     let width = ui.available_width();
     let mut sizing = ui
         .new_child(UiBuilder::new().max_rect(ui.available_rect_before_wrap()).layout(Layout::left_to_right(Align::Center)).sizing_pass().invisible());
     control(&mut sizing);
     let need = sizing.min_rect().width();
-    let room = width - need - s.l;
+    let room = width - need - s.s4;
     if room < TEXT_MIN {
         heading(ui, theme, icon, title, notes, width);
-        ui.add_space(s.xs);
+        ui.add_space(s.s1);
         ui.horizontal_wrapped(|ui| control(ui));
     } else {
         ui.horizontal(|ui| {
@@ -300,7 +273,7 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
             control(ui);
         });
     }
-    ui.add_space(s.m);
+    ui.add_space(s.s3);
     let y = ui.cursor().top();
     ui.painter().hline(ui.max_rect().x_range(), y, Stroke::new(1.0, theme.palette.line));
     ui.add_space(1.0);
@@ -311,117 +284,47 @@ fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], pain
     let p = &theme.palette;
     let s = &theme.spacing;
     let caption = semibold(theme.fonts.caption);
-    let galley = line(ui, &[(name, caption, p.text)], f32::INFINITY);
-    let size = vec2(swatch[0].max(galley.size().x) + s.s * 2.0, s.s + swatch[1] + s.xs + galley.size().y + s.s);
+    let galley = line(ui, &[(name, caption, p.ink)], f32::INFINITY);
+    let size = vec2(swatch[0].max(galley.size().x) + s.s2 * 2.0, s.s2 + swatch[1] + s.s1 + galley.size().y + s.s2);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, name));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if response.hovered() {
-            painter.rect_filled(rect, s.m, p.hover);
+            painter.rect_filled(rect, 0.0, p.grid);
         }
-        let stroke = if on { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.m, stroke, StrokeKind::Inside);
-        let picture = Rect::from_min_size(pos2(rect.center().x - swatch[0] / 2.0, rect.top() + s.s), vec2(swatch[0], swatch[1]));
+        let stroke = Stroke::new(1.0, if on { p.cyan_edge } else { p.line });
+        painter.rect_stroke(rect, 0.0, stroke, StrokeKind::Inside);
+        let picture = Rect::from_min_size(pos2(rect.center().x - swatch[0] / 2.0, rect.top() + s.s2), vec2(swatch[0], swatch[1]));
         paint(painter, picture);
-        painter.galley(pos2(rect.center().x - galley.size().x / 2.0, picture.bottom() + s.xs), galley, p.text);
+        painter.galley(pos2(rect.center().x - galley.size().x / 2.0, picture.bottom() + s.s1), galley, p.ink);
         focus_ring(ui, theme, &response);
     }
     response
 }
 
-/// The accent cards: each preset's gradient, and Custom with a plus. Custom takes the colours of the fields, when they
-/// are colours.
-fn accents(ui: &mut Ui, theme: &Theme, settings: &Settings, current: &Appearance) -> Option<Asked> {
-    let p = &theme.palette;
-    let chosen = match current.accent {
-        Accent::Preset(id) => id,
-        Accent::Custom(_) => "custom",
-    };
-    let mut asked = None;
-    for preset in &PRESETS {
-        let gradient = diagonal(preset.gradient);
-        if card(ui, theme, preset_name(preset.id), chosen == preset.id, SWATCH, |painter, rect| gradient::fill(painter, rect, 8.0, &gradient))
-            .clicked()
-        {
-            asked = Some(Asked::Preset(preset.id));
-        }
-    }
-    let custom = card(ui, theme, tr!("Custom"), chosen == "custom", SWATCH, |painter, rect| {
-        painter.rect_filled(rect, 8.0, p.panel);
-        let side = rect.height() * 0.45;
-        theme.icons.paint(painter, Rect::from_center_size(rect.center(), vec2(side, side)), IconId::Add, Style::Regular, p.muted);
-    });
-    if custom.clicked() {
-        asked = settings.custom().map(Asked::Custom);
-    }
-    asked
-}
-
-/// The four colour fields of the custom accent, each with a picker; whether "Use these colours" was pressed.
-fn custom(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings) -> Option<Asked> {
-    let names = [tr!("Gradient start"), tr!("Gradient middle"), tr!("Gradient end"), tr!("Accent")];
-    egui::Grid::new("custom-accent").num_columns(3).spacing(vec2(theme.spacing.m, theme.spacing.s)).show(ui, |ui| {
-        for (field, name) in settings.colours_mut().iter_mut().zip(names) {
-            let label = ui.label(name);
-            let mut picked = crate::settings::colour(field).unwrap_or(theme.palette.muted);
-            if ui.color_edit_button_srgba(&mut picked).labelled_by(label.id).changed() {
-                *field = crate::settings::hex(picked);
-            }
-            let edit = TextEdit::singleline(field)
-                .char_limit(MAX_CHARS)
-                .margin(crate::component::field::margin(theme))
-                .desired_width(theme.spacing.xl * 4.0)
-                .font(theme.fonts.mono.id());
-            let _ = ui.add(edit).labelled_by(label.id);
-            ui.end_row();
-        }
-    });
-    let custom = settings.custom();
-    if custom.is_none() {
-        note(ui, theme, tr!("Write each colour as # and six hex digits, like #2f6bff."));
-    }
-    if let Some(text) = settings.note() {
-        note(ui, theme, text);
-    }
-    ui.add_space(theme.spacing.xs);
-    let pressed =
-        ui.add_enabled_ui(custom.is_some(), |ui| TextButton::new(tr!("Use these colours")).primary().show(ui, theme, keymap)).inner.clicked();
-    custom.filter(|_| pressed).map(Asked::Custom)
-}
-
 /// A small window as `frame` draws it: the desktop's bar, or the window controls in the top row or on a strip.
 fn thumb(painter: &Painter, theme: &Theme, rect: Rect, frame: WindowFrame) {
     let p = &theme.palette;
-    painter.rect_filled(rect, 6.0, p.background);
+    painter.rect_filled(rect, 0.0, p.bg);
     let bar = if frame == WindowFrame::System { 9.0 } else { 0.0 };
     if bar > 0.0 {
-        painter.rect_filled(Rect::from_min_size(rect.min, vec2(rect.width(), bar)), egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, p.muted);
+        painter.rect_filled(Rect::from_min_size(rect.min, vec2(rect.width(), bar)), 0.0, p.muted);
     }
     let rail = Rect::from_min_size(pos2(rect.left(), rect.top() + bar), vec2(9.0, rect.height() - bar));
-    let [first, middle, last] = p.gradient;
-    let down = Gradient::Linear {
-        from: pos2(0.5, 0.0),
-        to: pos2(0.5, 1.0),
-        stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-    };
-    let round = if bar > 0.0 {
-        egui::CornerRadius { sw: 6, ..egui::CornerRadius::ZERO }
-    } else {
-        egui::CornerRadius { nw: 6, sw: 6, ..egui::CornerRadius::ZERO }
-    };
-    gradient::fill(painter, rail, round, &down);
+    painter.rect_filled(rail, 0.0, p.panel);
+    painter.vline(rail.right() - 0.5, rail.y_range(), Stroke::new(1.0, p.line));
     let top = rect.top() + bar + if frame == WindowFrame::Strip { 9.0 } else { 3.0 };
     for (x, w) in [(12.0, 22.0), (37.0, 44.0)] {
-        painter.rect_filled(Rect::from_min_max(pos2(rect.left() + x, top), pos2(rect.left() + x + w, rect.bottom() - 3.0)), 2.0, p.surface);
+        painter.rect_filled(Rect::from_min_max(pos2(rect.left() + x, top), pos2(rect.left() + x + w, rect.bottom() - 3.0)), 0.0, p.surface);
     }
     if frame != WindowFrame::System {
         let y = if frame == WindowFrame::Strip { rect.top() + 3.5 } else { top + 3.5 };
         for i in 0..3_u8 {
-            painter.circle_filled(pos2(rect.right() - 7.5 - f32::from(i) * 5.0, y), 1.5, p.text);
+            painter.circle_filled(pos2(rect.right() - 7.5 - f32::from(i) * 5.0, y), 1.5, p.ink);
         }
     }
-    painter.rect_stroke(rect, 6.0, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
 }
 
 /// The text size as a slider over the steps from 90 % to 130 %, a small and a large A at its ends and the size after
@@ -456,30 +359,25 @@ fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let track = Rect::from_center_size(rect.center(), vec2(TRACK[0], TRACK[1]));
-        painter.rect_filled(track, TRACK[1] / 2.0, p.panel);
+        painter.rect_filled(track, 0.0, p.stage);
         // An index of five steps.
         let x = track.left() + track.width() * index as f32 / last as f32;
         let done = Rect::from_min_max(track.min, pos2(x.max(track.left() + TRACK[1]), track.bottom()));
-        let [first, middle, last_stop] = p.gradient;
-        let across = Gradient::Linear {
-            from: pos2(0.0, 0.5),
-            to: pos2(1.0, 0.5),
-            stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last_stop)],
-        };
-        gradient::fill(painter, done, TRACK[1] / 2.0, &across);
-        painter.circle_filled(pos2(x, rect.center().y), knob / 2.0, p.field);
-        painter.circle_stroke(pos2(x, rect.center().y), knob / 2.0, Stroke::new(1.0, p.field_border));
+        painter.rect_filled(done, 0.0, p.cyan);
+        let knob_rect = Rect::from_center_size(pos2(x, rect.center().y), vec2(knob, knob));
+        painter.rect_filled(knob_rect, 0.0, p.term);
+        painter.rect_stroke(knob_rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
         if response.has_focus() {
-            painter.circle_stroke(pos2(x, rect.center().y), knob / 2.0 + 2.0, Stroke::new(2.0, p.focus));
+            painter.rect_stroke(knob_rect.expand(2.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Outside);
         }
     }
     ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
-    ui.label(RichText::new(tr!("{percent} %", percent = now.percent())).font(semibold(theme.fonts.body).id()).color(p.text));
+    ui.label(RichText::new(tr!("{percent} %", percent = now.percent())).font(semibold(theme.fonts.body).id()).color(p.ink));
     wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
 }
 
 /// The rows of the Appearance page; what was asked for.
-fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
     let modes = ThemeMode::ALL.map(|mode| (mode, mode_name(mode), f.button));
@@ -488,26 +386,6 @@ fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, cu
             asked = Some(Asked::Mode(mode));
         }
     });
-    let accent_note =
-        tr!("Three gradient stops and an accent. A custom set that misses the contrast rules is nudged in lightness, and you are told.");
-    row(ui, theme, tr!("Accent"), &[accent_note], &mut |ui| {
-        if let Some(chosen) = accents(ui, theme, settings, current) {
-            asked = Some(chosen);
-        }
-    });
-    // The custom accent's fields, while it is in use or the colours typed differ from those in use.
-    let editing =
-        matches!(current.accent, Accent::Custom(_)) || settings.draft().is_none_or(|draft| !same_colours(&draft, &Preset::of(&current.accent)));
-    if editing {
-        ui.add_space(theme.spacing.s);
-        let about = tr!("Three colours for the gradient and one for links and accent text; the preview shows them as you type.");
-        texts(ui, theme, tr!("Custom accent"), &[about]);
-        ui.add_space(theme.spacing.xs);
-        asked = asked.or(custom(ui, theme, keymap, settings));
-        ui.add_space(theme.spacing.s);
-        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
-        ui.add_space(1.0);
-    }
     // Each typeface's name is written in it.
     let faces = Typeface::ALL.map(|typeface| (typeface, font_name(typeface), Font { typeface, ..f.button }));
     row(ui, theme, tr!("Typeface"), &[], &mut |ui| {
@@ -553,41 +431,41 @@ fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, 
     let f = &theme.fonts;
     let first = line_height(ui, f.sender_unread).max(line_height(ui, f.caption));
     let second = line_height(ui, f.subject);
-    let height = first + second + s.s * 1.5;
+    let height = first + second + s.s2 * 1.5;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
     let painter = ui.painter();
     if selected {
-        selection(painter, theme, rect, s.corner);
+        selection(painter, theme, rect, 0.0);
     }
-    let side = (first + second).min(height - s.s);
-    let face = Rect::from_min_size(pos2(rect.left() + s.m + s.xs, rect.center().y - side / 2.0), vec2(side, side));
+    let side = (first + second).min(height - s.s2);
+    let face = Rect::from_min_size(pos2(rect.left() + s.s3 + s.s1, rect.center().y - side / 2.0), vec2(side, side));
     avatar::paint(painter, theme, face, sender.0, sender.1);
     if unread {
-        painter.circle_filled(pos2(rect.left() + s.s, rect.center().y), 3.5, p.unread);
+        painter.circle_filled(pos2(rect.left() + s.s2, rect.center().y), 3.5, p.cyan_edge);
     }
-    let left = face.right() + s.m;
+    let left = face.right() + s.s3;
     let time = line(ui, &[(time, f.caption, p.muted)], rect.width());
-    let right = rect.right() - s.m;
-    let top = rect.top() + s.s * 0.75;
+    let right = rect.right() - s.s3;
+    let top = rect.top() + s.s2 * 0.75;
     painter.galley(pos2(right - time.size().x, top + (first - time.size().y) / 2.0), time.clone(), p.muted);
     let sender_font = if unread { f.sender_unread } else { f.sender };
-    let name = line(ui, &[(sender.0, sender_font, p.text)], (right - time.size().x - s.s - left).max(1.0));
-    painter.galley(pos2(left, top + (first - name.size().y) / 2.0), name, p.text);
-    let subject = line(ui, &[(subject, if unread { f.subject_unread } else { f.subject }, p.text)], (right - left).max(1.0));
-    painter.galley(pos2(left, top + first), subject, p.text);
+    let name = line(ui, &[(sender.0, sender_font, p.ink)], (right - time.size().x - s.s2 - left).max(1.0));
+    painter.galley(pos2(left, top + (first - name.size().y) / 2.0), name, p.ink);
+    let subject = line(ui, &[(subject, if unread { f.subject_unread } else { f.subject }, p.ink)], (right - left).max(1.0));
+    painter.galley(pos2(left, top + first), subject, p.ink);
 }
 
 /// The preview: two rows of the list, the first one selected, in `theme`.
 fn preview(ui: &mut Ui, theme: &Theme) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    ui.add_space(s.m);
+    ui.add_space(s.s3);
     ui.label(RichText::new(tr!("Preview")).font(semibold(theme.fonts.caption).id()).color(p.muted));
-    ui.add_space(s.xs);
-    Frame::new().fill(p.background).stroke(Stroke::new(1.0, p.glass_edge)).corner_radius(s.card).inner_margin(s.s).show(ui, |ui| {
+    ui.add_space(s.s1);
+    Frame::new().fill(p.bg).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s2).show(ui, |ui| {
         ui.set_width(ui.available_width());
         preview_row(ui, theme, ("Odile Brannock", "odile@example.org"), tr!("Allotment rota for November"), "08:35", true, true);
         preview_row(ui, theme, ("Teodor Lisk", "teodor@example.org"), tr!("Photos from the coast walk"), tr!("Yesterday"), false, false);
@@ -598,8 +476,8 @@ fn preview(ui: &mut Ui, theme: &Theme) {
 /// say so. The section pressed.
 fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<Section> {
     ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(RichText::new(tr!("Settings")).font(theme.fonts.title.id()).color(theme.palette.text));
-    ui.add_space(theme.spacing.s);
+    ui.label(RichText::new(tr!("Settings")).font(theme.fonts.title.id()).color(theme.palette.ink));
+    ui.add_space(theme.spacing.s2);
     let mut pressed = None;
     for (icon, name, section) in sections() {
         let row = NavRow {
@@ -630,7 +508,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
     let section = view.settings.section();
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(section_name(section)).font(theme.fonts.title.id()).color(theme.palette.text));
+            ui.label(RichText::new(section_name(section)).font(theme.fonts.title.id()).color(theme.palette.ink));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked() {
                     asked = Some(Asked::Close);
@@ -638,9 +516,9 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
             });
         });
     });
-    ui.add_space(theme.spacing.s);
+    ui.add_space(theme.spacing.s2);
     let on_page = match section {
-        Section::Appearance => appearance(ui, theme, keymap, view.settings, view.current, view.reduce),
+        Section::Appearance => appearance(ui, theme, view.current, view.reduce),
         Section::Accounts => super::accounts::page(ui, theme, keymap, view.mailbox, view.onboarding, view.can_add),
         Section::Shortcuts => shortcuts(ui, theme, keymap, view.settings),
         Section::Sending => sending(ui, theme, keymap, view.settings, view.mailbox),
@@ -651,18 +529,12 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
 }
 
 /// The Appearance page under its title: the rows and the preview, scrolling.
-fn appearance(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, current: &Appearance, reduce: bool) -> Option<Asked> {
+fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
-    let shown = match settings.draft() {
-        Some(draft) if matches!(current.accent, Accent::Custom(_)) || !same_colours(&draft, &Preset::of(&current.accent)) => {
-            Theme::of(theme.mode, &Look { preset: draft, text_scale: theme.text_scale, typeface: theme.typeface, icons: theme.icons })
-        }
-        _ => *theme,
-    };
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
-        asked = rows(ui, theme, keymap, settings, current, reduce);
-        preview(ui, &shown);
+        ui.set_max_width(ui.available_width() - theme.spacing.s3);
+        asked = rows(ui, theme, current, reduce);
+        preview(ui, theme);
     });
     asked
 }
@@ -671,16 +543,16 @@ fn appearance(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settin
 fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let ink = if waits { p.accent } else { p.text };
+    let ink = if waits { p.cyan_text } else { p.ink };
     let galley = line(ui, &[(shown, theme.fonts.caption, ink)], f32::INFINITY);
-    let size = galley.size() + vec2(s.s * 2.0, s.xs * 2.0);
+    let size = galley.size() + vec2(s.s2 * 2.0, s.s1 * 2.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, s.corner, if response.hovered() { p.hover } else { p.panel });
-        let edge = if waits { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
+        painter.rect_filled(rect, 0.0, if response.hovered() { p.grid } else { p.panel });
+        let edge = if waits { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+        painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
         focus_ring(ui, theme, &response);
     }
@@ -712,11 +584,11 @@ fn key_control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, wai
 /// One action of the Shortcuts page: its name, and its key at the right end; a line under it.
 fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
     let s = &theme.spacing;
-    let height = line_height(ui, theme.fonts.body) + s.m * 2.0;
+    let height = line_height(ui, theme.fonts.body) + s.s3 * 2.0;
     let asked = ui
         .allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_height(height);
-            ui.label(RichText::new(action.name).font(theme.fonts.body.id()).color(theme.palette.text));
+            ui.label(RichText::new(action.name).font(theme.fonts.body.id()).color(theme.palette.ink));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| key_control(ui, theme, keymap, action, waits)).inner
         })
         .inner;
@@ -731,7 +603,7 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     let s = &theme.spacing;
     let mut asked = None;
     note(ui, theme, tr!("Every action can have a key. One key runs one action: giving a key takes it from the action that had it."));
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     ui.horizontal(|ui| {
         let width = (ui.available_width() * 0.6).max(1.0);
         let find = field::search(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), tr!("Find a command"), width);
@@ -743,15 +615,15 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
         });
     });
     if let Some(text) = settings.keys_note() {
-        ui.add_space(s.xs);
+        ui.add_space(s.s1);
         note(ui, theme, text);
     }
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - s.m);
+        ui.set_max_width(ui.available_width() - s.s3);
         if list.is_empty() {
-            ui.add_space(s.l);
+            ui.add_space(s.s4);
             note(ui, theme, &tr!("No command matches “{text}”.", text = settings.find()));
         }
         for action in &list {
@@ -772,7 +644,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
     let s = &theme.spacing;
     let mut asked = None;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - s.m);
+        ui.set_max_width(ui.available_width() - s.s3);
         let hold = mailbox.hold_seconds();
         let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
         let holds: Vec<(u8, &str, Font)> = HOLDS.iter().zip(&labels).map(|(seconds, label)| (*seconds, label.as_str(), theme.fonts.button)).collect();
@@ -782,27 +654,27 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
                 asked = Some(Asked::Hold(seconds));
             }
         });
-        ui.add_space(s.l);
+        ui.add_space(s.s4);
         note(
             ui,
             theme,
             tr!("A signature goes under “-- ” at the end of every new message from its account. The drafts already started keep theirs."),
         );
         if mailbox.accounts().is_empty() {
-            ui.add_space(s.l);
+            ui.add_space(s.s4);
             note(ui, theme, tr!("Add an account first: a signature belongs to the account it is sent from."));
         }
         for account in mailbox.accounts() {
-            ui.add_space(s.l);
+            ui.add_space(s.s4);
             heading(ui, theme, Some(IconId::At), &account.label, &[&account.address], ui.available_width());
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             let label = tr!("Signature of {account}", account = account.label);
             let typed = settings.signature_mut(account.id, &account.signature);
             let edit = TextEdit::multiline(typed).id(Id::unique("signature").with(account.id)).desired_rows(3).desired_width(ui.available_width());
             let field = ui.add(edit);
             ui.ctx().accesskit_node_builder(field.id, |node| node.set_label(&label));
             let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             let save = tr!("Save the signature of {account}", account = account.label);
             let button = TextButton::new(tr!("Save"));
             let response = if changed { button.show(ui, theme, keymap) } else { button.unavailable(tr!("Nothing changed")).show(ui, theme, keymap) };
@@ -810,7 +682,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             if changed && response.clicked() {
                 asked = Some(Asked::Signature(account.id));
             }
-            ui.add_space(s.m);
+            ui.add_space(s.s3);
             ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
             ui.add_space(1.0);
         }
@@ -824,7 +696,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
+        ui.set_max_width(ui.available_width() - theme.spacing.s3);
         let modes = ScreenerMode::ALL.map(|mode| (mode, screener_name(mode), f.button));
         let screener_notes = [
             tr!("The first mail of a sender you have not let in yet waits in New senders, shows in the inbox marked, or comes in as any other."),
@@ -850,7 +722,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             }
         });
         if !mailbox.accounts().is_empty() {
-            ui.add_space(theme.spacing.xl);
+            ui.add_space(theme.spacing.s6);
             let note =
                 tr!("Each account's inbox in People, Updates, Newsletters and Invitations, sorted by InboxCraft or by your choice for a sender.");
             texts(ui, theme, tr!("Grouped inbox"), &[note]);
@@ -875,7 +747,7 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
     let mut asked = None;
     let f = &theme.fonts;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        ui.set_max_width(ui.available_width() - theme.spacing.m);
+        ui.set_max_width(ui.available_width() - theme.spacing.s3);
         note(
             ui,
             theme,
@@ -887,7 +759,7 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
             tr!("A notification shows who the mail is from and its subject; your desktop may keep it in its list and show it on the lock screen."),
         );
         if mailbox.accounts().is_empty() {
-            ui.add_space(theme.spacing.l);
+            ui.add_space(theme.spacing.s4);
             note(ui, theme, tr!("Add an account first: each account chooses which of its new mail notifies you."));
         }
         let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
@@ -956,7 +828,7 @@ fn in_the_background(ui: &mut Ui, theme: &Theme, settings: &Settings, desk: Desk
 
 /// The sheet's place in `screen`: its size where there is room, and two gaps from each edge where there is not.
 fn place(theme: &Theme, screen: Rect) -> Rect {
-    let least = theme.spacing.gap * 2.0;
+    let least = theme.spacing.s2 * 2.0;
     let margin = vec2(((screen.width() - SHEET[0]) / 2.0).max(least), ((screen.height() - SHEET[1]) / 2.0).max(least));
     screen.shrink2(margin)
 }
@@ -984,20 +856,19 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
         // The float's shadow and edge, then solid surfaces: nothing of the window shows through the text.
-        ui.painter().extend(glass::float_shapes(ui.painter(), theme, whole));
-        ui.painter().rect_filled(whole.shrink(1.0), s.card, p.surface);
+        paint::float(ui.painter(), theme, whole, FloatEdge::Keyboard);
+        ui.painter().rect_filled(whole.shrink(1.0), 0.0, p.surface);
         let nav_width = NAV.min(whole.width() * 0.3);
         let left = Rect::from_min_size(whole.min, vec2(nav_width, whole.height())).shrink(1.0);
-        let round = s.card.clamp(0.0, 255.0) as u8;
-        ui.painter().rect_filled(left, egui::CornerRadius { nw: round, sw: round, ne: 0, se: 0 }, p.panel);
-        let inner = left.shrink2(vec2(s.m, s.l));
+        ui.painter().rect_filled(left, 0.0, p.panel);
+        let inner = left.shrink2(vec2(s.s3, s.s4));
         let shown = view.settings.section();
         let pressed =
             ui.scope_builder(UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, view.keymap, shown)).inner;
         if let Some(section) = pressed {
             asked = Some(Asked::Section(section));
         }
-        let body = Rect::from_min_max(pos2(whole.left() + nav_width, whole.top()), whole.max).shrink2(vec2(s.xl + s.xs, s.l + s.xs));
+        let body = Rect::from_min_max(pos2(whole.left() + nav_width, whole.top()), whole.max).shrink2(vec2(s.s6 + s.s1, s.s4 + s.s1));
         ui.scope_builder(UiBuilder::new().max_rect(body).layout(Layout::top_down(Align::Min)), |ui| {
             if let Some(on_page) = page(ui, theme, &mut view) {
                 asked = Some(on_page);

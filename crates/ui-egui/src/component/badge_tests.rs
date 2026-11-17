@@ -7,7 +7,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use super::{count, group, group_ink};
 use crate::component::tests::{builder, drew_icon, theme};
 use crate::iconset::{IconId, Style};
-use crate::theme::{Mode, PRESETS, Theme, contrast};
+use crate::theme::{Mode, TextScale, Theme, contrast};
 
 #[test]
 fn a_count_badge_ends_at_its_right_edge_and_grows_with_its_number() {
@@ -40,12 +40,12 @@ fn a_group_badge_is_a_named_picture_with_the_outline_icon() {
 
 #[test]
 fn the_group_badge_s_icon_is_the_muted_colour_and_reads_on_the_card() {
-    for preset in &PRESETS {
+    {
         for mode in [Mode::Light, Mode::Dark] {
-            let theme = Theme::new(mode, preset);
+            let theme = Theme::new(mode, TextScale::default());
             let ink = group_ink(&theme);
-            assert_eq!(ink, theme.palette.muted, "{} {mode:?}", preset.id);
-            assert!(contrast(ink, theme.palette.surface) >= 3.0, "{} {mode:?}", preset.id);
+            assert_eq!(ink, theme.palette.muted, "{mode:?}");
+            assert!(contrast(ink, theme.palette.surface) >= 3.0, "{mode:?}");
         }
     }
 }

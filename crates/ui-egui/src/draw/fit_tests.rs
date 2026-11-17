@@ -177,7 +177,7 @@ fn the_settings_fit_a_narrow_window() {
 #[test]
 fn the_fit_check_finds_text_that_does_not_fit() {
     let mut harness = Harness::builder().with_size(vec2(400.0, 200.0)).build_ui(|ui| {
-        let font = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::Preset::default()).fonts.body.id();
+        let font = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default()).fonts.body.id();
         let painter = ui.painter();
         let colour = ui.visuals().text_color();
         painter.text(egui::pos2(10.0, 10.0), egui::Align2::LEFT_TOP, "one text", font.clone(), colour);

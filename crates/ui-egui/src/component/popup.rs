@@ -6,7 +6,7 @@
 
 use egui::{Align2, Area, Context, Id, Order, Pos2, Rect, Response, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
-use crate::glass;
+use crate::draw::paint::{self, FloatEdge};
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion;
@@ -18,15 +18,15 @@ use super::{control_side, cut, galley, margin, tick};
 pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let slot = ui.painter().add(Shape::Noop);
     let width = if width.is_finite() { width.clamp(1.0, 2048.0) } else { 1.0 };
-    let inner = egui::Frame::new().inner_margin(margin(theme.spacing.xs, theme.spacing.xs)).show(ui, |ui| {
+    let inner = egui::Frame::new().inner_margin(margin(theme.spacing.s1, theme.spacing.s1)).show(ui, |ui| {
         ui.vertical(|ui| {
-            ui.set_width((width - theme.spacing.xs * 2.0).max(1.0));
+            ui.set_width((width - theme.spacing.s1 * 2.0).max(1.0));
             ui.spacing_mut().item_spacing.y = 0.0;
             add(ui)
         })
         .inner
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
+    let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Keyboard);
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
 }
@@ -34,7 +34,7 @@ pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui
 /// Shows the popup `id` with its top left corner at `anchor`, opening into place; what `add` gave.
 pub fn show<R>(ctx: &Context, theme: &Theme, id: Id, anchor: Pos2, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let opened = motion::appear(ctx, id, theme.motion.card);
-    let at = anchor - vec2(0.0, theme.spacing.xs * (1.0 - opened));
+    let at = anchor - vec2(0.0, theme.spacing.s1 * (1.0 - opened));
     Area::new(id)
         .order(Order::Foreground)
         .pivot(Align2::LEFT_TOP)
@@ -82,27 +82,27 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if hover > 0.0 {
-            painter.rect_filled(rect, s.corner, p.hover.gamma_multiply(hover));
+            painter.rect_filled(rect, 0.0, p.grid);
         }
         let side = theme.fonts.body.size * 1.2;
-        let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s + side / 2.0, rect.center().y), vec2(side, side));
+        let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
         match (icon, chosen) {
             (Some(icon), Some(false)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.muted),
-            (Some(icon), Some(true)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.accent),
-            (Some(icon), None) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.text),
+            (Some(icon), Some(true)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.cyan_text),
+            (Some(icon), None) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.ink),
             (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
             (None, _) => {}
         }
-        let mut right = rect.right() - s.s;
+        let mut right = rect.right() - s.s2;
         if let Some(chip) = action.and_then(|action| keymap.chip(ui.ctx(), action)) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);
             right -= chip.size().x;
             painter.galley(pos2(right, rect.center().y - chip.size().y / 2.0), chip, p.muted);
-            right -= s.l;
+            right -= s.s4;
         }
-        let left = icon_rect.right() + s.s;
-        let text = cut(ui, name, theme.fonts.body, p.text, right - left);
-        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
+        let left = icon_rect.right() + s.s2;
+        let text = cut(ui, name, theme.fonts.body, p.ink, right - left);
+        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
     }
     response
 }

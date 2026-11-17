@@ -211,18 +211,18 @@ fn a_day_of_the_month_or_the_mini_month_opens_its_days() {
 }
 
 #[test]
-fn an_event_is_a_tint_of_the_token_with_its_colour_at_full_strength_on_the_edge() {
+fn an_event_is_on_the_stage_with_its_colour_on_the_edge() {
     use super::colours;
-    use crate::theme::{Mode, Preset, Theme};
+    use crate::theme::{Mode, TextScale, Theme};
 
-    let theme = Theme::new(Mode::Light, &Preset::default());
+    let theme = Theme::new(Mode::Light, TextScale::default());
     let p = &theme.palette;
-    assert_eq!(colours(&theme, None, 1), (p.events[1], p.accounts[1]), "without a colour from the server, the tokens of the place");
-    assert_eq!(colours(&theme, None, 7), (p.events[1], p.accounts[1]), "the places go round");
+    assert_eq!(colours(&theme, None, 1), (p.stage, p.accounts[1]), "without a colour from the server, the account colour of the place");
+    assert_eq!(colours(&theme, None, 7), (p.stage, p.accounts[1]), "the places go round");
     let [r, g, b] = [200, 40, 120];
     let (fill, edge) = colours(&theme, Some([r, g, b]), 0);
     assert_eq!(edge, egui::Color32::from_rgb(r, g, b), "the server's colour at full strength");
-    assert!((i32::from(fill.a()) - i32::from(p.events[0].a())).abs() <= 1, "the fill as strong as the token: {fill:?}");
+    assert_eq!(fill, p.stage, "never a tinted fill");
 }
 
 #[test]

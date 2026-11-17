@@ -7,7 +7,7 @@ use egui::{Color32, Rect, pos2, vec2};
 
 use super::{BACK_OPACITY, IconId, IconSet, Style};
 use crate::shot::{self, Picture};
-use crate::theme::{self, IconFont, Mode, Preset, Theme};
+use crate::theme::{self, IconFont, Mode, TextScale, Theme};
 
 const STYLES: [Style; 3] = [Style::Regular, Style::Fill, Style::Duotone];
 
@@ -90,7 +90,7 @@ fn the_owner_s_icon_choice_names_its_set() {
 #[test]
 fn the_theme_draws_phosphor_by_default() {
     assert_eq!(IconSet::default(), IconSet::Phosphor);
-    assert_eq!(Theme::new(Mode::Light, &Preset::default()).icons, IconSet::Phosphor);
+    assert_eq!(Theme::new(Mode::Light, TextScale::default()).icons, IconSet::Phosphor);
 }
 
 /// `id` in `style` painted black into a `side` point square, at 2 pixels a point.

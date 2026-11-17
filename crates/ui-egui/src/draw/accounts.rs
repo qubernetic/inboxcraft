@@ -29,7 +29,7 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
     let f = &theme.fonts;
     let tall = line_height(ui, f.strong).max(line_height(ui, f.body));
     let face = tall * 1.4;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), face + s.s * 1.5), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), face + s.s2 * 1.5), Sense::click());
     let response = response.on_hover_cursor(CursorIcon::PointingHand);
     let spoken = tr!("{name}, {address}", name = row.label, address = row.address);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &spoken));
@@ -38,20 +38,20 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
         return pressed;
     }
     if response.hovered() {
-        ui.painter().rect_filled(rect, s.corner, p.hover);
+        ui.painter().rect_filled(rect, 0.0, p.grid);
     }
     focus_ring(ui, theme, &response);
     let painter = ui.painter();
     let mid = rect.center().y;
-    painter.circle_filled(pos2(rect.left() + s.s, mid), 4.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
-    let picture = Rect::from_min_size(pos2(rect.left() + s.s * 2.0, mid - face / 2.0), vec2(face, face));
+    painter.circle_filled(pos2(rect.left() + s.s2, mid), 4.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
+    let picture = Rect::from_min_size(pos2(rect.left() + s.s2 * 2.0, mid - face / 2.0), vec2(face, face));
     avatar::paint(painter, theme, picture, &row.label, &row.address);
-    let left = picture.right() + s.m;
+    let left = picture.right() + s.s3;
     let room = (rect.right() - left).max(1.0);
-    let name = line(ui, &[(row.label.as_str(), f.strong, p.text)], room);
-    let after = left + name.size().x + s.s;
+    let name = line(ui, &[(row.label.as_str(), f.strong, p.ink)], room);
+    let after = left + name.size().x + s.s2;
     let address = line(ui, &[(row.address.as_str(), f.body, p.muted)], (rect.right() - after).max(1.0));
-    painter.galley(pos2(left, mid - name.size().y / 2.0), name, p.text);
+    painter.galley(pos2(left, mid - name.size().y / 2.0), name, p.ink);
     painter.galley(pos2(after, mid - address.size().y / 2.0), address, p.muted);
     pressed
 }
@@ -60,16 +60,16 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
 fn none_yet(ui: &mut Ui, theme: &Theme) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    ui.add_space(s.m);
-    Frame::new().stroke(Stroke::new(1.0, p.field_border)).corner_radius(s.card).inner_margin(s.xl).show(ui, |ui| {
+    ui.add_space(s.s3);
+    Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s6).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.vertical_centered(|ui| {
             let side = line_height(ui, theme.fonts.body) * 2.4;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.accent);
-            ui.add_space(s.s);
-            ui.label(RichText::new(tr!("Your accounts show up here")).font(theme.fonts.heading.id()).color(p.text));
-            ui.add_space(s.xs);
+            theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
+            ui.add_space(s.s2);
+            ui.label(RichText::new(tr!("Your accounts show up here")).font(theme.fonts.heading.id()).color(p.ink));
+            ui.add_space(s.s1);
             let about = tr!("IMAP for the mail. Detect proposes the servers from the address; nothing is sent until you have seen them.");
             ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
         });
@@ -81,17 +81,17 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
     let p = &theme.palette;
     let s = &theme.spacing;
     let name = tr!("Accounts");
-    let galley = line(ui, &[(name, theme.fonts.button, p.accent)], f32::INFINITY);
+    let galley = line(ui, &[(name, theme.fonts.button, p.cyan_text)], f32::INFINITY);
     let icon = theme.fonts.body.size * 1.1;
-    let (rect, response) = ui.allocate_exact_size(vec2(icon + s.xs + galley.size().x + s.s, galley.size().y + s.xs * 2.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(icon + s.s1 + galley.size().x + s.s2, galley.size().y + s.s1 * 2.0), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Link, true, tr!("Back to the accounts")));
     if ui.is_rect_visible(rect) {
         if response.hovered() {
-            ui.painter().rect_filled(rect, s.corner, p.hover);
+            ui.painter().rect_filled(rect, 0.0, p.grid);
         }
         let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
-        theme.icons.paint(ui.painter(), at, IconId::Back, Style::Regular, p.accent);
-        ui.painter().galley(pos2(at.right() + s.xs, rect.center().y - galley.size().y / 2.0), galley, p.accent);
+        theme.icons.paint(ui.painter(), at, IconId::Back, Style::Regular, p.cyan_text);
+        ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
         focus_ring(ui, theme, &response);
     }
     response.clicked()
@@ -101,7 +101,7 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
 pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding, can_add: bool) -> Option<Asked> {
     if onboarding.stage() != Stage::Closed {
         let went_back = back(ui, theme);
-        ui.add_space(theme.spacing.s);
+        ui.add_space(theme.spacing.s2);
         let asked = onboard::show(ui, theme, keymap, mailbox, onboarding).map(Asked::Page);
         return if went_back { Some(Asked::Back) } else { asked };
     }
@@ -127,7 +127,7 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
         return asked;
     }
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
     ui.with_layout(Layout::top_down(Align::Min), |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for row in accounts {

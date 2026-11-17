@@ -155,7 +155,7 @@ fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compose
                 asked.push(Asked::Later(None));
                 ui.close();
             }
-            ui.add_space(theme.spacing.xs);
+            ui.add_space(theme.spacing.s1);
             let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
             ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
         });
@@ -176,24 +176,24 @@ fn chip_height(ui: &Ui, theme: &Theme) -> f32 {
 
 /// A rule under a line.
 fn rule(ui: &mut Ui, theme: &Theme) {
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
     ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, theme.palette.line));
-    ui.add_space(theme.spacing.xs + 1.0);
+    ui.add_space(theme.spacing.s1 + 1.0);
 }
 
 /// A recipient's chip with its remove button; whether that was pressed.
 fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let (fill, ink, edge) = if chip.ok { (p.panel, p.text, p.field_border) } else { (p.error, p.on_error, p.error) };
+    let (fill, ink, edge) = if chip.ok { (p.panel, p.ink, p.line) } else { (p.minus, p.bg, p.minus) };
     let side = line_height(ui, theme.fonts.body) * 1.2;
     let shown = chip.shown();
     let mut removed = false;
     Frame::new().fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(255).inner_margin(egui::Margin::symmetric(3, 2)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.xs;
+            ui.spacing_mut().item_spacing.x = s.s1;
             let galley = line(ui, &[(&shown, theme.fonts.body, ink)], f32::INFINITY);
-            let (rect, response) = ui.allocate_exact_size(vec2(side + s.xs + galley.size().x, side), Sense::hover());
+            let (rect, response) = ui.allocate_exact_size(vec2(side + s.s1 + galley.size().x, side), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, chip.spoken()));
             let mark = Rect::from_min_size(rect.min, vec2(side, side));
             if chip.ok {
@@ -201,7 +201,7 @@ fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
             } else {
                 theme.icons.paint(ui.painter(), mark.shrink(1.0), IconId::Junk, Style::Regular, ink);
             }
-            ui.painter().galley(egui::pos2(mark.right() + s.xs, rect.center().y - galley.size().y / 2.0), galley, ink);
+            ui.painter().galley(egui::pos2(mark.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, ink);
             let remove = tr!("Remove {recipient}", recipient = shown);
             removed = IconButton::new(IconId::Close, &remove).ink(ink).side(side).show(ui, theme, keymap).clicked();
         });
@@ -234,7 +234,7 @@ fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Compos
         let link = copies.then(|| line_width(ui, theme, tr!("Cc  Bcc")));
         let room = ui.available_width() - link.unwrap_or(0.0);
         ui.allocate_ui_with_layout(vec2(room.max(1.0), 0.0), Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-            ui.spacing_mut().item_spacing = vec2(theme.spacing.xs, theme.spacing.xs);
+            ui.spacing_mut().item_spacing = vec2(theme.spacing.s1, theme.spacing.s1);
             for (at, shown) in composer.chips(line).to_vec().iter().enumerate() {
                 if chip(ui, theme, keymap, shown) {
                     asked.push(Asked::Remove(line, at));
@@ -287,7 +287,7 @@ fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Compos
 
 /// The width of `text` as a link, with its margins.
 fn line_width(ui: &Ui, theme: &Theme, text: &str) -> f32 {
-    line(ui, &[(text, theme.fonts.caption, theme.palette.accent)], f32::INFINITY).size().x + theme.spacing.m * 2.0
+    line(ui, &[(text, theme.fonts.caption, theme.palette.cyan_text)], f32::INFINITY).size().x + theme.spacing.s3 * 2.0
 }
 
 /// The people offered under a recipient field, the highlighted one marked.
@@ -305,7 +305,7 @@ fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2
         }
         ui.min_rect()
     });
-    ctx.data_mut(|data| data.insert_temp(suggestions_id(), rect.expand(theme.spacing.xs)));
+    ctx.data_mut(|data| data.insert_temp(suggestions_id(), rect.expand(theme.spacing.s1)));
 }
 
 /// The From line: the account as a button that opens the accounts' menu, its label at the right end.
@@ -317,15 +317,15 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         name(ui, theme, tr!("From"), body * NAMES, 0.0);
         let sender =
             if account.name.is_empty() { account.address.clone() } else { tr!("{name} <{address}>", name = account.name, address = account.address) };
-        let galley = line(ui, &[(&sender, theme.fonts.body, p.text)], ui.available_width() * 0.7);
+        let galley = line(ui, &[(&sender, theme.fonts.body, p.ink)], ui.available_width() * 0.7);
         let caret = line_height(ui, theme.fonts.body) * 0.8;
-        let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + theme.spacing.xs + caret, galley.size().y.max(caret)), Sense::click());
+        let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + theme.spacing.s1 + caret, galley.size().y.max(caret)), Sense::click());
         let spoken = tr!("From {sender}", sender = sender);
         response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, &spoken));
         if response.hovered() {
-            ui.painter().rect_filled(rect.expand(2.0), theme.spacing.corner, p.hover);
+            ui.painter().rect_filled(rect.expand(2.0), 0.0, p.grid);
         }
-        ui.painter().galley(rect.left_top(), galley, p.text);
+        ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
         theme.icons.paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
         super::paint::focus_ring(ui, theme, &response);
@@ -369,10 +369,10 @@ fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, a
 fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, asked: &mut Vec<Asked>) {
     let Some(prompt) = composer.blank() else { return };
     let p = &theme.palette;
-    Frame::new().fill(p.panel).corner_radius(theme.spacing.corner).inner_margin(super::margin(theme.spacing.s)).show(ui, |ui| {
+    Frame::new().fill(p.panel).corner_radius(0.0).inner_margin(super::margin(theme.spacing.s2)).show(ui, |ui| {
         ui.horizontal(|ui| {
             let fill = TextButton::new(tr!("Fill in")).secondary();
-            let room = (ui.available_width() - line_width(ui, theme, tr!("Fill in")) - theme.spacing.l).max(1.0);
+            let room = (ui.available_width() - line_width(ui, theme, tr!("Fill in")) - theme.spacing.s4).max(1.0);
             let spoken = tr!("Fill in \"{blank}\"", blank = prompt);
             let edit = TextEdit::singleline(composer.filling_mut()).id(blank_id()).hint_text(&spoken).desired_width(room);
             let response = ui.add(edit);
@@ -385,14 +385,14 @@ fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, a
             }
         });
     });
-    ui.add_space(theme.spacing.s);
+    ui.add_space(theme.spacing.s2);
 }
 
 /// The text laid out with the marks of the open blanks on the accent's tint, so they stand out.
 fn marked(ui: &Ui, theme: &Theme, marks: &[String], text: &str, width: f32) -> std::sync::Arc<egui::Galley> {
     let p = &theme.palette;
-    let plain = TextFormat::simple(theme.fonts.body.id(), p.text);
-    let mark = TextFormat { background: p.accent.gamma_multiply(0.25), color: p.text, ..plain.clone() };
+    let plain = TextFormat::simple(theme.fonts.body.id(), p.ink);
+    let mark = TextFormat { background: p.cyan_muted, color: p.ink, ..plain.clone() };
     let mut job = LayoutJob::default();
     job.wrap.max_width = width;
     let mut rest = text;
@@ -448,10 +448,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
                 }
             }
             if let Some(problem) = problem {
-                ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.text));
+                ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
                 let side = line_height(ui, theme.fonts.caption);
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.error);
+                theme.icons.paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.minus);
             }
         });
     });
@@ -462,11 +462,11 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let s = &theme.spacing;
     let p = &theme.palette;
     let mut asked = Vec::new();
-    Frame::new().inner_margin(super::margin(s.l)).show(ui, |ui| {
+    Frame::new().inner_margin(super::margin(s.s4)).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         super::frame::beside(ui, theme, |ui| {
             ui.horizontal(|ui| {
-                ui.add(egui::Label::new(RichText::new(composer.title()).font(theme.fonts.title.id()).color(p.text)).truncate());
+                ui.add(egui::Label::new(RichText::new(composer.title()).font(theme.fonts.title.id()).color(p.ink)).truncate());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if IconButton::new(IconId::Close, tr!("Close; the draft is kept")).show(ui, theme, keymap).clicked() {
                         asked.push(Asked::Close);
@@ -474,7 +474,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                 });
             });
         });
-        ui.add_space(s.s);
+        ui.add_space(s.s2);
         from(ui, theme, mailbox, composer, &mut asked);
         rule(ui, theme);
         let lines: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
@@ -494,7 +494,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         rule(ui, theme);
         let side = crate::component::control_side(ui, theme);
         // The toolbar, and the line asking for a blank while one is left.
-        let foot = side + s.m + if composer.blank().is_some() { side + s.s * 4.0 } else { 0.0 };
+        let foot = side + s.s3 + if composer.blank().is_some() { side + s.s2 * 4.0 } else { 0.0 };
         let height = (ui.available_height() - foot).max(line_height(ui, theme.fonts.body) * 3.0);
         let rows = (height / line_height(ui, theme.fonts.body)).floor().max(3.0);
         let marks = composer.blanks().to_vec();
@@ -513,7 +513,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
                 asked.push(Asked::Edited);
             }
         });
-        ui.add_space(s.s);
+        ui.add_space(s.s2);
         blank(ui, theme, keymap, composer, &mut asked);
         toolbar(ui, theme, keymap, mailbox, composer, &mut asked);
     });
@@ -526,14 +526,14 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, comp
     let s = &theme.spacing;
     let mut asked = Vec::new();
     let width = theme.fonts.body.size * FLOATING;
-    let corner = screen.right_bottom() - vec2(s.gap * 2.0, s.gap * 2.0);
+    let corner = screen.right_bottom() - vec2(s.s2 * 2.0, s.s2 * 2.0);
     Area::new(Id::unique("compose-floating")).order(Order::Foreground).pivot(Align2::RIGHT_BOTTOM).fixed_pos(corner).show(ctx, |ui| {
         popup::panel(ui, theme, width, |ui| {
             ui.horizontal(|ui| {
                 let title = composer.title();
                 let open = tr!("Open the draft {title}", title = title);
                 let side = crate::component::control_side(ui, theme);
-                let room = (ui.available_width() - side - s.xs).max(1.0);
+                let room = (ui.available_width() - side - s.s1).max(1.0);
                 let response = ui.allocate_ui_with_layout(vec2(room, side), Layout::top_down(Align::Min), |ui| {
                     popup::item(ui, theme, keymap, IconId::Compose, &title, Some(keymap::COMPOSE))
                 });

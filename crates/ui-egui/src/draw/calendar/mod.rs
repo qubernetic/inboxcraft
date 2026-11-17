@@ -29,7 +29,7 @@ use crate::calendar::{Calendar, Day, EventRow, Picked, View};
 use crate::component::button::{IconButton, TextButton};
 use crate::component::corner;
 use crate::component::segmented::segmented;
-use crate::glass::Layers;
+use crate::draw::paint::Panes;
 use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::theme::{Face, Font, Theme, Weight};
@@ -84,26 +84,26 @@ pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
     let s = &theme.spacing;
     let side = line_height(ui, theme.fonts.body) * 3.6;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    theme.icons.paint(ui.painter(), rect, IconId::Calendar, Style::Duotone, p.accent);
-    ui.add_space(s.m);
-    ui.label(RichText::new(tr!("No calendars yet")).font(theme.fonts.title.id()).color(p.text));
-    ui.add_space(s.xs);
+    theme.icons.paint(ui.painter(), rect, IconId::Calendar, Style::Duotone, p.cyan_text);
+    ui.add_space(s.s3);
+    ui.label(RichText::new(tr!("No calendars yet")).font(theme.fonts.title.id()).color(p.ink));
+    ui.add_space(s.s1);
     let about = tr!("The calendars of your accounts show here, by day, week, month and agenda, once an account has a CalDAV address.");
     ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
 }
 
 /// The calendar screen with its calendars: the side panel and the view; what was pressed.
-pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Layers) -> Vec<Asked> {
+pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Panes) -> Vec<Asked> {
     let s = theme.spacing;
     let mut asked = Vec::new();
     Panel::left("calendar-side")
         .resizable(false)
         .exact_size(SIDE_WIDTH)
         .show_separator_line(false)
-        .frame(around(s.gap, s.gap / 2.0, s.gap))
-        .show(ui, |ui| layers.card(ui, margin(s.l), |ui| side::show(ui, theme, keymap, calendar, &mut asked)));
-    CentralPanel::no_frame().frame(around(s.gap / 2.0, s.gap, s.gap)).show(ui, |ui| {
-        let room = egui::Margin { top: OVER_TOOLBAR, ..margin(s.l) };
+        .frame(around(0.0, 0.0, 0.0))
+        .show(ui, |ui| layers.card(ui, margin(s.s4), |ui| side::show(ui, theme, keymap, calendar, &mut asked)));
+    CentralPanel::no_frame().frame(around(0.0, 0.0, 0.0)).show(ui, |ui| {
+        let room = egui::Margin { top: OVER_TOOLBAR, ..margin(s.s4) };
         layers.card(ui, room, |ui| {
             toolbar(ui, theme, keymap, calendar, &mut asked);
             ui.add_space(UNDER_TOOLBAR);
@@ -135,7 +135,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
     ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_height(TOOLBAR);
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.label(RichText::new(calendar.title()).font(title.id()).color(p.text));
+        ui.label(RichText::new(calendar.title()).font(title.id()).color(p.ink));
         if IconButton::new(IconId::Previous, back).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Step(false));
         }
@@ -161,19 +161,14 @@ pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calend
     calendar.editor_mut().map(|editor| editor::show(ctx, theme, keymap, editor, screen)).unwrap_or_default()
 }
 
-/// An event's fill and its edge at full strength, for a calendar with the colour `server` gave it, if any, at `place`
-/// in the list: the edge is the server's colour or one of the accounts' by place, the fill the event token of the place
-/// or, for a server's colour, that colour laid as strongly as the token lays its own.
+/// An event's fill and its edge, for a calendar with the colour `server` gave it, if any, at `place` in the list: the
+/// fill is the `stage`, the edge the server's colour or one of the accounts' by place.
 fn colours(theme: &Theme, server: Option<[u8; 3]>, place: usize) -> (Color32, Color32) {
     let p = &theme.palette;
-    let token = p.events.get(place % p.events.len()).copied().unwrap_or(p.selection);
-    let edge = p.accounts.get(place % p.accounts.len()).copied().unwrap_or(p.accent);
+    let edge = p.accounts.get(place % p.accounts.len()).copied().unwrap_or(p.muted);
     match server {
-        Some([r, g, b]) => {
-            let edge = Color32::from_rgb(r, g, b);
-            (edge.gamma_multiply(f32::from(token.a()) / 255.0), edge)
-        }
-        None => (token, edge),
+        Some([r, g, b]) => (p.stage, Color32::from_rgb(r, g, b)),
+        None => (p.stage, edge),
     }
 }
 
@@ -214,10 +209,10 @@ impl Shape {
     /// The width of the edge, the room from it to the text, and the corner, in points.
     fn metrics(self) -> (f32, f32, f32) {
         match self {
-            Self::Timed => (4.0, 10.0, 4.0),
-            Self::Band => (3.0, 8.0, 3.0),
-            Self::Chip => (3.0, 5.0, 3.0),
-            Self::Row => (3.0, 10.0, 4.0),
+            Self::Timed => (3.0, 10.0, 0.0),
+            Self::Band => (3.0, 8.0, 0.0),
+            Self::Chip => (3.0, 5.0, 0.0),
+            Self::Row => (3.0, 10.0, 0.0),
         }
     }
 }
@@ -229,8 +224,7 @@ struct Text<'a> {
     shape: Shape,
 }
 
-/// An event drawn over `rect`: a tint of its calendar's colour with an edge of it at full strength on the left and its
-/// `text`; a button named after the event, selected while it is picked. `salt` tells apart the places one event shows
+/// An event drawn over `rect`: the `stage` with an edge in its calendar's colour on the left and its `text`; a button named after the event, selected while it is picked. `salt` tells apart the places one event shows
 /// in. A press picks it, or lets it go when it was picked.
 fn block(ui: &mut Ui, theme: &Theme, calendar: &Calendar, event: &EventRow, rect: Rect, text: &Text<'_>, salt: i64) -> Option<Asked> {
     let picked = calendar.picked().is_some_and(|picked| picked.key() == event.key());
@@ -247,36 +241,29 @@ fn paint_block(ui: &Ui, theme: &Theme, (fill, edge): (Color32, Color32), rect: R
     let p = &theme.palette;
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let (edge_width, pad, round) = text.shape.metrics();
-    painter.rect_filled(rect, round, fill);
-    let deeper = if picked {
-        0.27
-    } else if response.hovered() {
-        0.12
-    } else {
-        0.0
-    };
-    if deeper > 0.0 {
-        painter.rect_filled(rect, round, edge.gamma_multiply(deeper));
+    painter.rect_filled(rect, round, if picked { p.cyan_muted } else { fill });
+    if response.hovered() && !picked {
+        painter.rect_stroke(rect, round, Stroke::new(1.0, p.line), StrokeKind::Inside);
     }
     let round_left = CornerRadius { nw: corner(round).nw, sw: corner(round).sw, ne: 0, se: 0 };
     painter.rect_filled(Rect::from_min_size(rect.min, vec2(edge_width.min(rect.width()), rect.height())), round_left, edge);
     let left = rect.left() + edge_width + pad;
     let width = (rect.right() - left - 2.0).max(1.0);
     let font = if text.shape == Shape::Chip { theme.fonts.caption } else { caption_strong(theme) };
-    let title = line(ui, &[(text.title, font, p.text)], width);
+    let title = line(ui, &[(text.title, font, p.ink)], width);
     let height = title.size().y;
     if let Some(detail) = text.detail {
         let top = rect.top() + 6.0;
-        painter.galley(pos2(left, top), title, p.text);
+        painter.galley(pos2(left, top), title, p.ink);
         if rect.height() >= height * 2.0 + 8.0 {
             let detail = line(ui, &[(detail, theme.fonts.caption, p.muted)], width);
             painter.galley(pos2(left, top + height + 2.0), detail, p.muted);
         }
     } else {
-        painter.galley(pos2(left, rect.center().y - height / 2.0), title, p.text);
+        painter.galley(pos2(left, rect.center().y - height / 2.0), title, p.ink);
     }
     if response.has_focus() {
-        painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
+        painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
     }
 }
 

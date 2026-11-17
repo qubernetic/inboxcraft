@@ -6,19 +6,368 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    AVATARS, BLACK, DARK, Face, Font, Look, Mode, ModePreference, PRESETS, Palette, Preset, TextScale, Theme, Typeface, WHITE, Weight, contrast,
-    font_definitions, ink_on, ink_over, install_fonts, mix, over, preference, rail_stops, readable, rgb, text_gradient,
+    FLOAT_SHADOW, Face, Font, Look, Mode, ModePreference, Palette, TextScale, Theme, Typeface, Weight, contrast, font_definitions, install_fonts,
+    mix, over, preference,
 };
 use crate::iconset::IconSet;
 use crate::motion::MOTION;
 
-/// Every preset in both modes.
+/// Both modes.
 fn all() -> Vec<Theme> {
-    PRESETS.iter().flat_map(|preset| [Theme::new(Mode::Light, preset), Theme::new(Mode::Dark, preset)]).collect()
+    [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default())).to_vec()
 }
 
 fn hex(colour: Color32) -> String {
-    format!("#{:02x}{:02x}{:02x}", colour.r(), colour.g(), colour.b())
+    let [r, g, b, a] = colour.to_srgba_unmultiplied();
+    format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+}
+
+/// The token named `name` (`acct1` to `acct6` for the account colours), as the design file names it.
+fn token(p: &Palette, name: &str) -> Option<Color32> {
+    Some(match name {
+        "bg" => p.bg,
+        "surface" => p.surface,
+        "panel" => p.panel,
+        "term" => p.term,
+        "line" => p.line,
+        "panel_line" => p.panel_line,
+        "grid" => p.grid,
+        "stage" => p.stage,
+        "ink" => p.ink,
+        "muted" => p.muted,
+        "dim" => p.dim,
+        "faint" => p.faint,
+        "cyan" => p.cyan,
+        "on_cyan" => p.on_cyan,
+        "cyan_text" => p.cyan_text,
+        "cyan_edge" => p.cyan_edge,
+        "cyan_muted" => p.cyan_muted,
+        "minus" => p.minus,
+        "plus" => p.plus,
+        "warn" => p.warn,
+        "scrim" => p.scrim,
+        _ => {
+            let n: usize = name.strip_prefix("acct")?.parse().ok()?;
+            *p.accounts.get(n.checked_sub(1)?)?
+        }
+    })
+}
+
+/// `#rrggbbaa` as a colour.
+fn rgba(value: u32) -> Color32 {
+    let [r, g, b, a] = value.to_be_bytes();
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+/// The design file's table, "Colour": token, dark, light, as `#rrggbbaa`.
+const TOKENS: [(&str, u32, u32); 27] = [
+    ("bg", 0x0E0F10FF, 0xF5F5F2FF),
+    ("surface", 0x151617FF, 0xFFFFFFFF),
+    ("panel", 0x101112FF, 0xF5F5F2FF),
+    ("term", 0x0A0B0CFF, 0xFFFFFFFF),
+    ("line", 0x2A2D2FFF, 0xD6D7D3FF),
+    ("panel_line", 0x202224FF, 0xE2E3DFFF),
+    ("grid", 0x17191AFF, 0xECECE8FF),
+    ("stage", 0x212427FF, 0xDEDFDBFF),
+    ("ink", 0xD4D4D4FF, 0x191919FF),
+    ("muted", 0x8B9196FF, 0x5A6065FF),
+    ("dim", 0x4A4F53FF, 0x9EA3A6FF),
+    ("faint", 0x2B2E30FF, 0xCFD1CDFF),
+    ("cyan", 0x22A8E0FF, 0x22A8E0FF),
+    ("on_cyan", 0x0E0F10FF, 0x0E0F10FF),
+    ("cyan_text", 0x22A8E0FF, 0x075E88FF),
+    ("cyan_edge", 0x22A8E0FF, 0x0B79ADFF),
+    ("cyan_muted", 0x00354CFF, 0xD3EEF9FF),
+    ("minus", 0xC98080FF, 0x9A3A36FF),
+    ("plus", 0x6AB26BFF, 0x246628FF),
+    ("warn", 0xEEC448FF, 0x6E5400FF),
+    ("scrim", 0x00000099, 0x19191955),
+    ("acct1", 0x9DAF19FF, 0x778224FF),
+    ("acct2", 0xA359B9FF, 0xB54ED5FF),
+    ("acct3", 0xC05928FF, 0xD84F05FF),
+    ("acct4", 0x547FFAFF, 0x163E8BFF),
+    ("acct5", 0xF55BB8FF, 0x7C1457FF),
+    ("acct6", 0x64DABFFF, 0x368977FF),
+];
+
+#[test]
+fn the_tokens_are_the_design_file_s_values() {
+    for (name, dark, light) in TOKENS {
+        for (mode, want) in [(Mode::Dark, dark), (Mode::Light, light)] {
+            let got = token(Palette::of(mode), name);
+            assert_eq!(got, Some(rgba(want)), "{mode:?} {name}: {:?} for #{want:08x}", got.map(hex));
+        }
+    }
+    assert_eq!(Theme::new(Mode::Dark, TextScale::default()).palette, Palette::of(Mode::Dark));
+    assert_eq!(Theme::new(Mode::Light, TextScale::default()).palette, Palette::of(Mode::Light));
+    assert_eq!(token(Palette::of(Mode::Dark), "acct7"), None);
+}
+
+/// The pairs the design file checks in each mode: text on a ground at 4.5:1, an edge or mark that carries meaning at
+/// 3:1. Exempt and not listed: `line`, `panel_line` and `faint` (structure and decoration) and `dim` (decoration).
+const PAIRS: [(&str, &str, f32); 71] = [
+    ("ink", "bg", 4.5),
+    ("ink", "surface", 4.5),
+    ("ink", "panel", 4.5),
+    ("ink", "term", 4.5),
+    ("ink", "grid", 4.5),
+    ("ink", "stage", 4.5),
+    ("muted", "bg", 4.5),
+    ("muted", "surface", 4.5),
+    ("muted", "panel", 4.5),
+    ("muted", "term", 4.5),
+    ("muted", "grid", 4.5),
+    ("muted", "stage", 4.5),
+    ("cyan_text", "bg", 4.5),
+    ("cyan_text", "surface", 4.5),
+    ("cyan_text", "panel", 4.5),
+    ("cyan_text", "term", 4.5),
+    ("cyan_text", "grid", 4.5),
+    ("cyan_text", "stage", 4.5),
+    ("minus", "bg", 4.5),
+    ("minus", "surface", 4.5),
+    ("minus", "panel", 4.5),
+    ("minus", "term", 4.5),
+    ("minus", "grid", 4.5),
+    ("minus", "stage", 4.5),
+    ("plus", "bg", 4.5),
+    ("plus", "surface", 4.5),
+    ("plus", "panel", 4.5),
+    ("plus", "term", 4.5),
+    ("plus", "grid", 4.5),
+    ("plus", "stage", 4.5),
+    ("warn", "bg", 4.5),
+    ("warn", "surface", 4.5),
+    ("warn", "panel", 4.5),
+    ("warn", "term", 4.5),
+    ("warn", "grid", 4.5),
+    ("warn", "stage", 4.5),
+    ("on_cyan", "cyan", 4.5),
+    ("cyan_edge", "bg", 3.0),
+    ("cyan_edge", "surface", 3.0),
+    ("cyan_edge", "panel", 3.0),
+    ("cyan_edge", "term", 3.0),
+    ("cyan_edge", "stage", 3.0),
+    ("acct1", "bg", 3.0),
+    ("acct1", "surface", 3.0),
+    ("acct1", "panel", 3.0),
+    ("acct1", "stage", 3.0),
+    ("acct2", "bg", 3.0),
+    ("acct2", "surface", 3.0),
+    ("acct2", "panel", 3.0),
+    ("acct2", "stage", 3.0),
+    ("acct3", "bg", 3.0),
+    ("acct3", "surface", 3.0),
+    ("acct3", "panel", 3.0),
+    ("acct3", "stage", 3.0),
+    ("acct4", "bg", 3.0),
+    ("acct4", "surface", 3.0),
+    ("acct4", "panel", 3.0),
+    ("acct4", "stage", 3.0),
+    ("acct5", "bg", 3.0),
+    ("acct5", "surface", 3.0),
+    ("acct5", "panel", 3.0),
+    ("acct5", "stage", 3.0),
+    ("acct6", "bg", 3.0),
+    ("acct6", "surface", 3.0),
+    ("acct6", "panel", 3.0),
+    ("acct6", "stage", 3.0),
+    // The "coming soon" mark: its words and its dashed edge, checked as a pair of its own.
+    ("muted", "bg", 4.5),
+    ("muted", "surface", 4.5),
+    ("muted", "panel", 4.5),
+    ("muted", "term", 4.5),
+    ("muted", "stage", 4.5),
+];
+
+#[test]
+fn every_checked_pair_meets_its_ratio() {
+    let modes = [Mode::Dark, Mode::Light];
+    assert_eq!(PAIRS.len() * modes.len(), 142, "the design file checks 142 pairs over the two modes");
+    for mode in modes {
+        let p = Palette::of(mode);
+        for (text, ground, need) in PAIRS {
+            let (Some(a), Some(b)) = (token(p, text), token(p, ground)) else { panic!("{text} on {ground}: no such token") };
+            let ratio = contrast(a, b);
+            assert!(ratio >= need, "{mode:?} {text} on {ground}: {ratio:.2} < {need}");
+        }
+    }
+}
+
+#[test]
+fn the_exempt_tokens_are_never_a_text_colour() {
+    for exempt in ["line", "panel_line", "faint", "dim"] {
+        assert!(PAIRS.iter().all(|(text, _, _)| *text != exempt), "{exempt} is decoration, never checked as text");
+    }
+}
+
+#[test]
+fn the_accent_is_no_account_colour() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Palette::of(mode);
+        for (index, account) in p.accounts.iter().enumerate() {
+            for accent in [p.cyan, p.cyan_text, p.cyan_edge] {
+                assert_ne!(*account, accent, "{mode:?} account {index}");
+            }
+        }
+    }
+}
+
+#[test]
+fn sizes_scale_with_text_and_distances_do_not() {
+    let large = TextScale::from_percent(130).unwrap();
+    let theme = Theme::new(Mode::Dark, large);
+    assert_eq!(theme.size(32.0), 42.0);
+    assert_eq!(theme.size(36.0), 46.0);
+    assert_eq!(theme.size(26.0), 34.0);
+    assert_eq!(theme.size(34.0), 44.0);
+    assert_eq!(theme.size(16.0), 20.0);
+    assert_eq!(theme.spacing.s4, 16.0);
+    let s = theme.spacing;
+    assert_eq!([s.s1, s.s2, s.s3, s.s4, s.s6, s.s10], [4.0, 8.0, 12.0, 16.0, 24.0, 40.0]);
+    assert_eq!(theme.spacing, Theme::new(Mode::Dark, TextScale::default()).spacing);
+    let z = theme.sizes;
+    assert_eq!(
+        [z.button, z.field, z.menu_row, z.mail_row, z.group_head, z.chip, z.list, z.scrollbar],
+        [32.0, 36.0, 32.0, 56.0, 32.0, 20.0, 440.0, 12.0]
+    );
+    assert_eq!(z.avatar, [24.0, 32.0, 40.0]);
+    assert_eq!(Theme::new(Mode::Light, TextScale::default()).size(32.0), 32.0);
+}
+
+#[test]
+fn the_float_shadow_is_the_one_shadow() {
+    assert_eq!(FLOAT_SHADOW.offset, [0, 12]);
+    assert_eq!(FLOAT_SHADOW.blur, 32);
+    assert_eq!(FLOAT_SHADOW.spread, 0);
+    assert_eq!(FLOAT_SHADOW.color, Color32::from_black_alpha(102), "black at 40 %");
+}
+
+#[test]
+fn account_colours_repeat_from_the_seventh() {
+    for theme in all() {
+        let colours = theme.palette.accounts;
+        assert_eq!(theme.account_colour(0), colours[0]);
+        assert_eq!(theme.account_colour(5), colours[5]);
+        assert_eq!(theme.account_colour(6), colours[0], "wraps around");
+        assert_eq!(theme.account_colour(u64::MAX), colours[(u64::MAX % 6) as usize]);
+    }
+}
+
+#[test]
+fn the_visuals_follow_the_tokens_flat_and_square() {
+    for theme in all() {
+        let p = theme.palette;
+        let visuals = theme.visuals();
+        assert_eq!(visuals.dark_mode, theme.mode == Mode::Dark);
+        assert_eq!(visuals.panel_fill, p.bg);
+        assert_eq!(visuals.window_fill, p.surface);
+        assert_eq!(visuals.extreme_bg_color, p.term);
+        assert_eq!(visuals.selection.bg_fill, p.cyan_muted);
+        assert_eq!(visuals.hyperlink_color, p.cyan_text);
+        assert_eq!(visuals.override_text_color, Some(p.ink));
+        assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
+        assert_eq!(visuals.window_corner_radius, egui::CornerRadius::ZERO);
+        assert_eq!(visuals.menu_corner_radius, egui::CornerRadius::ZERO);
+        let w = &visuals.widgets;
+        for state in [w.noninteractive, w.inactive, w.hovered, w.active, w.open] {
+            assert_eq!(state.corner_radius, egui::CornerRadius::ZERO);
+            assert_eq!(state.bg_stroke.color, p.line);
+        }
+        let style = theme.style();
+        assert_eq!(style.spacing.item_spacing.y, theme.spacing.s1);
+        assert_eq!(style.spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
+        assert!(style.spacing.scroll.floating_width >= 4.0);
+        assert!(style.spacing.scroll.bar_width > style.spacing.scroll.floating_width, "wider under the pointer");
+        for (style_of, font) in [
+            (egui::TextStyle::Small, theme.fonts.caption),
+            (egui::TextStyle::Body, theme.fonts.body),
+            (egui::TextStyle::Button, theme.fonts.button),
+            (egui::TextStyle::Heading, theme.fonts.heading),
+            (egui::TextStyle::Monospace, theme.fonts.mono),
+        ] {
+            assert_eq!(style.text_styles.get(&style_of), Some(&font.id()), "{style_of:?}");
+        }
+    }
+}
+
+#[test]
+fn a_look_takes_the_owner_s_choices() {
+    use inboxcraft_engine::appearance::{Accent, Appearance, Icons};
+    let appearance =
+        Appearance { accent: Accent::Preset("aurora"), font: Typeface::Inter, icons: Icons::Lucide, text_scale: 110, ..Appearance::default() };
+    let look = Look::of(&appearance);
+    assert_eq!(look.typeface, Typeface::Inter);
+    assert_eq!(look.icons, IconSet::Lucide);
+    assert_eq!(look.text_scale.percent(), 110);
+    let theme = Theme::of(Mode::Dark, &look);
+    assert_eq!((theme.typeface, theme.icons, theme.text_scale), (Typeface::Inter, IconSet::Lucide, look.text_scale));
+    assert_eq!(theme.palette, Palette::of(Mode::Dark), "the accent the engine keeps changes no colour");
+    assert_eq!(Look::of(&Appearance::default()), Look::default());
+    assert_eq!(Look::of(&Appearance { text_scale: 95, ..Appearance::default() }).text_scale, TextScale::default());
+}
+
+#[test]
+fn mode_of_reads_the_context_and_apply_installs_both_modes() {
+    let ctx = egui::Context::default();
+    let large = TextScale::from_percent(130).unwrap();
+    let look = Look { text_scale: large, ..Look::default() };
+    Theme::apply(&ctx, &look);
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Palette::of(Mode::Light).bg);
+    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Palette::of(Mode::Dark).bg);
+    let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
+    assert_eq!(body, Some(Theme::new(Mode::Dark, large).fonts.body.size));
+    ctx.set_theme(egui::Theme::Dark);
+    assert_eq!(Mode::of(&ctx), Mode::Dark);
+    assert_eq!(Theme::current(&ctx, &look), Theme::new(Mode::Dark, large));
+    ctx.set_theme(egui::Theme::Light);
+    assert_eq!(Mode::of(&ctx), Mode::Light);
+    assert_eq!(Theme::current(&ctx, &Look::default()), Theme::new(Mode::Light, TextScale::default()));
+}
+
+/// Whether `line` paints a gradient, a blur or a translucent fill of its own: a mesh, texture coordinates, a blurred
+/// rect, a gradient, or a colour made translucent in code.
+fn paints_a_gradient_or_a_blur(line: &str) -> bool {
+    ["Mesh", "new_uv", "with_blur_width", "Gradient", "gamma_multiply(", "linear_multiply(", "from_black_alpha(", "from_white_alpha("]
+        .iter()
+        .any(|word| line.contains(word))
+}
+
+#[test]
+fn the_gradient_check_finds_meshes_blurs_and_washes() {
+    assert!(paints_a_gradient_or_a_blur("let mut mesh = Mesh::default();"));
+    assert!(paints_a_gradient_or_a_blur("shape.with_blur_width(8.0)"));
+    assert!(paints_a_gradient_or_a_blur("let fill = Gradient::Linear { .. };"));
+    assert!(paints_a_gradient_or_a_blur("painter.rect_filled(rect, 0.0, p.stage.gamma_multiply(hover));"));
+    assert!(!paints_a_gradient_or_a_blur("painter.rect_filled(rect, 0.0, p.stage);"));
+}
+
+#[test]
+fn no_code_paints_a_gradient_or_a_blur() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter, the picture rasteriser, the app icon (its own mark,
+    // until it is drawn again) and the icon set's duotone weight are allowed.
+    let src = root.join("src");
+    let allowed =
+        [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs"), src.join("icons.rs"), src.join("iconset").join("mod.rs")];
+    let mut found = Vec::new();
+    for file in files.iter().filter(|file| !allowed.contains(file)) {
+        let text = std::fs::read_to_string(file).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or_default();
+            if paints_a_gradient_or_a_blur(code) {
+                found.push(format!("{}:{}: {}", file.strip_prefix(root).unwrap().display(), index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "flat fills only:\n{}", found.join("\n"));
 }
 
 #[test]
@@ -27,24 +376,6 @@ fn contrast_of_black_on_white_is_21_and_of_a_colour_on_itself_is_1() {
     assert!((contrast(Color32::WHITE, Color32::BLACK) - 21.0).abs() < 0.01);
     let grey = Color32::from_rgb(120, 120, 120);
     assert!((contrast(grey, grey) - 1.0).abs() < 0.001);
-}
-
-#[test]
-fn the_three_presets_are_one_table_entry_each_with_the_owners_colours() {
-    let ids: Vec<&str> = PRESETS.iter().map(|preset| preset.id).collect();
-    assert_eq!(ids, ["electric", "aurora", "citrus"]);
-    let electric = Preset::named("electric").unwrap();
-    assert_eq!(electric.gradient.map(hex), ["#2f6bff", "#8a3ffc", "#ff2d95"]);
-    assert_eq!(hex(electric.accent), "#ffd60a");
-    let aurora = Preset::named("aurora").unwrap();
-    assert_eq!(aurora.gradient.map(hex), ["#9b5cff", "#ff2bd6", "#ff8a00"]);
-    assert_eq!(hex(aurora.accent), "#00e5ff");
-    let citrus = Preset::named("citrus").unwrap();
-    assert_eq!(citrus.gradient.map(hex), ["#ff2e63", "#ff8f00", "#ffd000"]);
-    assert_eq!(hex(citrus.accent), "#3d5afe");
-    assert_eq!(Preset::default(), *electric, "Electric is the default");
-    assert_eq!(Preset::named("teal"), None);
-    assert_eq!(Preset::named("Electric"), None, "ids are lower case");
 }
 
 #[test]
@@ -61,123 +392,6 @@ fn the_mode_preference_is_system_by_default_and_maps_onto_egui() {
 }
 
 #[test]
-fn every_text_colour_meets_wcag_aa_on_the_surface_it_sits_on_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, text, background) in [
-            ("text on background", p.text, p.background),
-            ("text on panel", p.text, p.panel),
-            ("text on surface", p.text, p.surface),
-            ("text on field", p.text, p.field),
-            ("text on selection", p.text, p.selection),
-            ("muted on background", p.muted, p.background),
-            ("muted on surface", p.muted, p.surface),
-            ("muted on panel", p.muted, p.panel),
-            ("muted on selection", p.muted, p.selection),
-            ("accent text on background", p.accent, p.background),
-            ("accent text on surface", p.accent, p.surface),
-            ("accent text on panel", p.accent, p.panel),
-            ("accent text on selection", p.accent, p.selection),
-            ("text on accent", p.on_accent, p.accent),
-            ("badge text on badge", p.on_badge, p.badge),
-            ("error text on error", p.on_error, p.error),
-            ("error text on surface", p.error, p.surface),
-            ("error text on panel", p.error, p.panel),
-            ("flag text on surface", p.flag, p.surface),
-        ] {
-            let ratio = contrast(text, background);
-            assert!(ratio >= 4.5, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
-fn controls_and_markers_meet_three_to_one_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, colour, background) in [
-            ("unread marker on surface", p.unread, p.surface),
-            ("unread marker on selection", p.unread, p.selection),
-            ("flag on surface", p.flag, p.surface),
-            ("flag on selection", p.flag, p.selection),
-            ("focus ring on surface", p.focus, p.surface),
-            ("focus ring on panel", p.focus, p.panel),
-            ("focus ring on background", p.focus, p.background),
-            ("field border on surface", p.field_border, p.surface),
-            ("field border on field", p.field_border, p.field),
-        ] {
-            let ratio = contrast(colour, background);
-            assert!(ratio >= 3.0, "{} {:?} {name}: {ratio:.2}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
-fn text_on_a_gradient_picks_white_or_dark_ink_by_contrast() {
-    assert_eq!(ink_on(Color32::from_rgb(0x20, 0x20, 0x60)), Color32::WHITE);
-    assert_ne!(ink_on(Color32::from_rgb(0xff, 0xd0, 0x00)), Color32::WHITE, "dark ink on yellow");
-    for theme in all() {
-        for step in 0..=32 {
-            let at = step as f32 / 32.0;
-            let behind = theme.gradient_at(at);
-            let ink = ink_on(behind);
-            let other = if ink == Color32::WHITE { theme.palette.ink } else { Color32::WHITE };
-            assert!(contrast(ink, behind) >= contrast(other, behind), "{} at {at}: the better ink", theme.preset.id);
-            assert!(contrast(ink, behind) >= 4.5, "{} {:?} ink on the gradient at {at}: {:.2}", theme.preset.id, theme.mode, contrast(ink, behind));
-        }
-    }
-    // Citrus's yellow end: white would not do.
-    let citrus = Theme::new(Mode::Light, Preset::named("citrus").unwrap());
-    assert!(contrast(Color32::WHITE, citrus.gradient_at(1.0)) < 4.5);
-    assert_ne!(ink_on(citrus.gradient_at(1.0)), Color32::WHITE);
-}
-
-#[test]
-fn the_gradient_runs_through_the_three_stops() {
-    for theme in all() {
-        let [first, middle, last] = theme.preset.gradient;
-        assert_eq!(theme.gradient_at(0.0), first);
-        assert_eq!(theme.gradient_at(0.5), middle);
-        assert_eq!(theme.gradient_at(1.0), last);
-        assert_eq!(theme.gradient_at(-3.0), first, "clamped");
-        assert_eq!(theme.gradient_at(f32::NAN), first, "nonsense starts at the start");
-        assert_eq!(theme.gradient_at(7.0), last, "clamped");
-        assert_eq!(theme.palette.gradient, theme.preset.gradient, "the gradient token is the preset at full strength");
-    }
-}
-
-#[test]
-fn light_mode_accent_text_is_the_middle_stop_darkened_and_dark_mode_the_middle_stop_lightened() {
-    for preset in &PRESETS {
-        let light = Theme::new(Mode::Light, preset).palette;
-        let middle = preset.gradient[1];
-        assert!(light.accent != middle && light.accent != preset.accent, "{}: darkened, not the raw colour", preset.id);
-        let channels = |c: Color32| u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b());
-        assert!(channels(light.accent) < channels(middle), "{}: darker than the middle stop", preset.id);
-        let dark = Theme::new(Mode::Dark, preset).palette;
-        // Dark mode takes the middle stop mixed 30 % with white (lightened further where it would not read), never
-        // the preset's separate accent, which stays an account colour.
-        assert_ne!(dark.accent, preset.accent, "{}: not the separate accent", preset.id);
-        assert!(channels(dark.accent) >= channels(mix(middle, WHITE, 0.3)), "{}: at least the lightened stop", preset.id);
-        assert!(channels(dark.accent) > channels(middle), "{}: lighter than the middle stop", preset.id);
-    }
-}
-
-#[test]
-fn readable_moves_a_colour_only_as_far_as_it_must() {
-    let white = Color32::WHITE;
-    let already = Color32::from_rgb(0x20, 0x20, 0x20);
-    assert_eq!(readable(already, &[white], 4.5, Mode::Light), already);
-    let yellow = Color32::from_rgb(0xff, 0xd0, 0x00);
-    let darkened = readable(yellow, &[white], 4.5, Mode::Light);
-    assert!(contrast(darkened, white) >= 4.5);
-    assert!(contrast(darkened, white) < 6.0, "not darker than needed: {:.2}", contrast(darkened, white));
-    let lightened = readable(Color32::from_rgb(0x3d, 0x5a, 0xfe), &[Color32::BLACK], 7.0, Mode::Dark);
-    assert!(contrast(lightened, Color32::BLACK) >= 7.0);
-    assert_eq!(readable(yellow, &[], 4.5, Mode::Light), yellow, "nothing to sit on");
-}
-
-#[test]
 fn mix_runs_from_one_colour_to_the_other() {
     let (a, b) = (Color32::from_rgb(0, 100, 200), Color32::from_rgb(200, 0, 100));
     assert_eq!(mix(a, b, 0.0), a);
@@ -187,103 +401,9 @@ fn mix_runs_from_one_colour_to_the_other() {
     assert_eq!(mix(a, b, f32::NAN), a);
 }
 
-/// Teal: blue-green with more green than blue (the old `#1d6a64` and `#6cc4ba`); the presets' cyans have more blue.
-/// Coral: a soft orange-pink (the old `#f0a06a`).
-fn teal_or_coral(colour: Color32) -> bool {
-    let (r, g, b) = (i32::from(colour.r()), i32::from(colour.g()), i32::from(colour.b()));
-    let teal = g > r + 40 && b > r + 20 && g >= b;
-    let coral = r > 200 && r - g > 50 && (100..190).contains(&g) && (70..160).contains(&b);
-    teal || coral
-}
-
-#[test]
-fn no_teal_or_coral_is_left() {
-    for theme in all() {
-        let p = theme.palette;
-        let mut tokens = vec![p.accent, p.unread, p.flag, p.focus, p.badge, p.selection];
-        tokens.extend(p.accounts);
-        tokens.extend(p.avatars);
-        for colour in tokens {
-            assert!(!teal_or_coral(colour), "{} {:?}: {} is teal or coral", theme.preset.id, theme.mode, hex(colour));
-        }
-    }
-}
-
-#[test]
-fn glass_cards_and_colour_fields_are_translucent_and_the_float_is_solid() {
-    for theme in all() {
-        let p = theme.palette;
-        for (name, colour) in [
-            ("glass", p.glass),
-            ("card", p.card),
-            ("control edge", p.control_edge),
-            ("glass edge", p.glass_edge),
-            ("window edge", p.window_edge),
-            ("scrim", p.scrim),
-            ("glass highlight", p.glass_highlight),
-            ("shadow", p.shadow),
-            ("line", p.line),
-            ("hover", p.hover),
-        ] {
-            assert!(colour.a() < 255 && colour.a() > 0, "{} {:?} {name}: alpha {}", theme.preset.id, theme.mode, colour.a());
-        }
-        assert_eq!(p.float.a(), 255, "{} {:?} float alpha", theme.preset.id, theme.mode);
-        for (index, field) in p.colour_fields.iter().enumerate() {
-            assert!(field.a() > 0 && field.a() < 160, "{} {:?} colour field {index}", theme.preset.id, theme.mode);
-        }
-    }
-}
-
-#[test]
-fn account_colours_are_distinct_and_visible_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let colours = theme.palette.accounts;
-        for (index, colour) in colours.iter().enumerate() {
-            assert!(contrast(*colour, theme.palette.surface) >= 3.0, "{} {:?} account colour {index}", theme.preset.id, theme.mode);
-            assert!(
-                colours.iter().skip(index + 1).all(|other| other != colour),
-                "{} {:?} account colour {index} repeats",
-                theme.preset.id,
-                theme.mode
-            );
-        }
-        assert_eq!(theme.account_colour(0), colours[0]);
-        assert_eq!(theme.account_colour(colours.len() as u64), colours[0], "wraps around");
-        assert_eq!(theme.account_colour(u64::MAX), colours[(u64::MAX % colours.len() as u64) as usize]);
-    }
-}
-
-#[test]
-fn every_preset_gives_its_own_colours_and_the_modes_differ() {
-    for mode in [Mode::Light, Mode::Dark] {
-        let palettes: Vec<_> = PRESETS.iter().map(|preset| Theme::new(mode, preset).palette).collect();
-        for (index, palette) in palettes.iter().enumerate() {
-            for other in palettes.iter().skip(index + 1) {
-                assert_ne!(palette.accent, other.accent, "{mode:?}");
-                assert_ne!(palette.selection, other.selection, "{mode:?}");
-                assert_ne!(palette.background, other.background, "{mode:?}: the surfaces carry a trace of the preset");
-            }
-        }
-    }
-    for preset in &PRESETS {
-        assert_ne!(Theme::new(Mode::Light, preset).palette, Theme::new(Mode::Dark, preset).palette);
-    }
-}
-
-#[test]
-fn the_type_grows_and_the_spacing_is_positive() {
-    for theme in all() {
-        let f = theme.fonts;
-        assert!(0.0 < f.caption.size && f.caption.size < f.body.size && f.body.size < f.heading.size && f.heading.size < f.title.size, "{f:?}");
-        let s = theme.spacing;
-        assert!(0.0 < s.xs && s.xs < s.s && s.s < s.m && s.m < s.l && s.l < s.xl, "{s:?}");
-        assert!(s.folder_pane > 0.0 && s.corner > 0.0);
-    }
-}
-
 #[test]
 fn sender_and_subject_are_strong_the_preview_plain_and_unread_heavier() {
-    let f = Theme::new(Mode::Light, &Preset::default()).fonts;
+    let f = Theme::new(Mode::Light, TextScale::default()).fonts;
     assert_eq!(f.preview.face, Face::Sans(Weight::Regular));
     assert_eq!(f.body.face, Face::Sans(Weight::Regular));
     for (read, unread) in [(f.sender, f.sender_unread), (f.subject, f.subject_unread)] {
@@ -310,7 +430,7 @@ fn the_text_scale_runs_from_90_to_130_percent_in_steps_of_10() {
 
 #[test]
 fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
-    let base = Theme::new(Mode::Dark, &Preset::default());
+    let base = Theme::new(Mode::Dark, TextScale::default());
     assert_eq!(base.text_scale, TextScale::default());
     for scale in TextScale::ALL {
         let theme = base.with_text_scale(scale);
@@ -336,7 +456,7 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
 fn every_font_token_names_a_family_its_typeface_defines() {
     let definitions = font_definitions();
     for (typeface, prefix) in [(Typeface::Figtree, "Figtree-"), (Typeface::Inter, "Inter-")] {
-        let theme = Theme::new(Mode::Light, &Preset::default()).with_typeface(typeface);
+        let theme = Theme::new(Mode::Light, TextScale::default()).with_typeface(typeface);
         assert_eq!(theme.typeface, typeface);
         for font in theme.fonts.all() {
             let id = font.id();
@@ -354,7 +474,7 @@ fn every_font_token_names_a_family_its_typeface_defines() {
 
 #[test]
 fn the_typeface_and_the_text_scale_change_independently() {
-    let base = Theme::new(Mode::Dark, &Preset::default());
+    let base = Theme::new(Mode::Dark, TextScale::default());
     let large = TextScale::from_percent(130).unwrap();
     let both = base.with_text_scale(large).with_typeface(Typeface::Inter);
     assert_eq!(both, base.with_typeface(Typeface::Inter).with_text_scale(large));
@@ -373,54 +493,6 @@ fn inter_draws_with_its_own_shapes() {
         ctx.fonts_mut(|fonts| "Budget for 2026".chars().map(|c| fonts.glyph_width(&font.id(), c)).sum::<f32>())
     };
     assert!((width(Typeface::Inter) - width(Typeface::Figtree)).abs() > 0.5, "Inter is a face of its own");
-}
-
-#[test]
-fn a_look_takes_the_owner_s_choices() {
-    use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Rgb};
-    let custom = CustomAccent { gradient: [Rgb(1, 2, 3), Rgb(4, 5, 6), Rgb(7, 8, 9)], accent: Rgb(0xff, 0xd6, 0x0a) };
-    let appearance =
-        Appearance { accent: Accent::Custom(custom), font: Typeface::Inter, icons: Icons::Lucide, text_scale: 110, ..Appearance::default() };
-    let look = Look::of(&appearance);
-    assert_eq!(look.preset.id, "custom");
-    assert_eq!(look.preset.gradient, [rgb(0x010203), rgb(0x040506), rgb(0x070809)]);
-    assert_eq!(look.preset.accent, rgb(0xffd60a));
-    assert_eq!(look.typeface, Typeface::Inter);
-    assert_eq!(look.icons, IconSet::Lucide);
-    assert_eq!(look.text_scale.percent(), 110);
-    let theme = Theme::of(Mode::Dark, &look);
-    assert_eq!((theme.typeface, theme.icons, theme.text_scale), (Typeface::Inter, IconSet::Lucide, look.text_scale));
-    assert_eq!(Look::of(&Appearance::default()), Look::default());
-    assert_eq!(Preset::of(&Accent::Preset("aurora")), *Preset::named("aurora").unwrap());
-    assert_eq!(Preset::of(&Accent::Preset("gone")), Preset::default(), "an id this front end does not ship is Electric");
-    assert_eq!(Look::of(&Appearance { text_scale: 95, ..Appearance::default() }).text_scale, TextScale::default());
-}
-
-#[test]
-fn the_engine_s_dark_surface_is_the_lightest_dark_neutral_and_every_preset_id_is_shipped() {
-    use inboxcraft_engine::appearance::{DARK_SURFACE, PRESETS as PRESET_IDS, Rgb};
-    let Rgb(r, g, b) = DARK_SURFACE;
-    assert_eq!(Color32::from_rgb(r, g, b), DARK.float);
-    for neutral in [DARK.background, DARK.panel, DARK.surface, DARK.field] {
-        assert!(contrast(neutral, BLACK) <= contrast(DARK.float, BLACK), "{}", hex(neutral));
-    }
-    assert_eq!(PRESET_IDS.to_vec(), PRESETS.iter().map(|preset| preset.id).collect::<Vec<_>>());
-}
-
-#[test]
-fn a_custom_accent_the_engine_nudged_reads_in_dark_mode_for_any_gradient() {
-    use inboxcraft_engine::appearance::{Accent, CustomAccent, Rgb};
-    for gradient in [[Rgb(0, 0, 0); 3], [Rgb(255, 255, 255); 3], [Rgb(0xff, 0xd0, 0), Rgb(0, 0xe5, 0xff), Rgb(0x3d, 0x5a, 0xfe)]] {
-        let custom = CustomAccent { gradient, accent: Rgb(0x30, 0x10, 0x60) }.readable();
-        let preset = Preset::of(&Accent::Custom(custom));
-        for mode in [Mode::Light, Mode::Dark] {
-            let p = Theme::new(mode, &preset).palette;
-            for behind in [p.background, p.panel, p.surface] {
-                assert!(contrast(p.accent, behind) >= 4.5, "{mode:?} {}", hex(p.accent));
-                assert!(contrast(p.text, behind) >= 4.5, "{mode:?}");
-            }
-        }
-    }
 }
 
 #[test]
@@ -453,50 +525,6 @@ fn install_fonts_puts_figtree_into_the_context() {
     let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular), typeface: Typeface::Figtree };
     let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
     assert!(width(bold) > width(regular), "the bold weight is its own face");
-}
-
-#[test]
-fn the_visuals_follow_the_tokens() {
-    for theme in all() {
-        let visuals = theme.visuals();
-        assert_eq!(visuals.dark_mode, theme.mode == Mode::Dark);
-        assert_eq!(visuals.panel_fill, theme.palette.panel);
-        assert_eq!(visuals.extreme_bg_color, theme.palette.field);
-        assert_eq!(visuals.selection.bg_fill, theme.palette.selection);
-        assert_eq!(visuals.hyperlink_color, theme.palette.accent);
-        assert_eq!(visuals.override_text_color, Some(theme.palette.text));
-        assert_eq!(visuals.widgets.hovered.bg_stroke.color, theme.palette.focus);
-        let style = theme.style();
-        assert_eq!(style.spacing.item_spacing.y, theme.spacing.xs);
-        for (style_of, token) in [
-            (egui::TextStyle::Small, theme.fonts.caption),
-            (egui::TextStyle::Body, theme.fonts.body),
-            (egui::TextStyle::Button, theme.fonts.button),
-            (egui::TextStyle::Heading, theme.fonts.heading),
-            (egui::TextStyle::Monospace, theme.fonts.mono),
-        ] {
-            assert_eq!(style.text_styles.get(&style_of), Some(&token.id()), "{style_of:?}");
-        }
-    }
-}
-
-#[test]
-fn mode_of_reads_the_context_and_apply_installs_both_modes_of_the_preset() {
-    let ctx = egui::Context::default();
-    let aurora = Preset::named("aurora").unwrap();
-    let large = TextScale::from_percent(130).unwrap();
-    let look = Look { preset: *aurora, text_scale: large, ..Look::default() };
-    Theme::apply(&ctx, &look);
-    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, aurora).palette.panel);
-    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, aurora).palette.panel);
-    let body = ctx.style_of(egui::Theme::Dark).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
-    assert_eq!(body, Some(Theme::new(Mode::Dark, aurora).with_text_scale(large).fonts.body.size));
-    ctx.set_theme(egui::Theme::Dark);
-    assert_eq!(Mode::of(&ctx), Mode::Dark);
-    assert_eq!(Theme::current(&ctx, &look), Theme::new(Mode::Dark, aurora).with_text_scale(large));
-    ctx.set_theme(egui::Theme::Light);
-    assert_eq!(Mode::of(&ctx), Mode::Light);
-    assert_eq!(Theme::current(&ctx, &Look { preset: *aurora, ..Look::default() }), Theme::new(Mode::Light, aurora));
 }
 
 /// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a
@@ -582,14 +610,6 @@ fn the_colour_check_finds_literals_and_named_colours() {
 }
 
 #[test]
-fn the_old_teal_and_coral_would_be_caught() {
-    for old in [0x1D6A64, 0x6CC4BA, 0xF0A06A] {
-        let colour = Color32::from_rgb((old >> 16) as u8, (old >> 8) as u8, old as u8);
-        assert!(teal_or_coral(colour), "{}", hex(colour));
-    }
-}
-
-#[test]
 fn no_colour_constant_outside_the_token_code() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
@@ -624,260 +644,10 @@ fn over_lays_a_translucent_colour_on_an_opaque_one() {
     assert_eq!(over(Color32::from_rgb(1, 2, 3), under), Color32::from_rgb(1, 2, 3));
 }
 
-/// What the window shows behind a layer: the base, and each colour field at its centre.
-fn backdrops(p: &Palette) -> Vec<Color32> {
-    let mut found = vec![p.background];
-    found.extend(p.colour_fields.map(|field| over(field, p.background)));
-    found
-}
-
-#[test]
-fn text_reads_on_glass_over_the_colour_fields_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for behind in backdrops(&p) {
-            for glass in [over(p.glass, behind), over(p.hover, over(p.glass, behind))] {
-                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
-                    let ratio = contrast(ink, glass);
-                    assert!(ratio >= 4.5, "{} {:?} {name} on glass over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn text_reads_on_the_float_hovered_or_not_for_every_preset_in_both_modes() {
-    for theme in all() {
-        let p = theme.palette;
-        for under in [p.float, over(p.hover, p.float)] {
-            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
-                let ratio = contrast(ink, under);
-                assert!(ratio >= 4.5, "{} {:?} {name} on a float: {ratio:.2}", theme.preset.id, theme.mode);
-            }
-        }
-    }
-}
-
-#[test]
-fn a_float_hides_whatever_lies_under_it_whatever_its_colour() {
-    for theme in all() {
-        let p = theme.palette;
-        let mut under = backdrops(&p);
-        under.extend(p.gradient);
-        under.extend([p.panel, p.surface, p.text, p.muted, p.accent, BLACK, WHITE]);
-        for behind in under {
-            assert_eq!(over(p.float, behind), p.float, "{} {:?} over {}", theme.preset.id, theme.mode, hex(behind));
-        }
-    }
-}
-
-#[test]
-fn menus_and_tooltips_are_on_the_solid_float_and_nothing_casts_an_egui_shadow() {
-    for theme in all() {
-        let visuals = theme.visuals();
-        assert_eq!(visuals.window_fill, theme.palette.float);
-        assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
-        assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
-        assert_eq!(theme.style().spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
-        let s = theme.spacing;
-        assert!(s.card > s.corner, "glass layers are rounder than fields");
-        assert!(s.shadow > 0.0 && s.gap > 0.0);
-    }
-}
-
-/// Hue in degrees, saturation and value (HSV) of `colour`, each 0 to 1 but the hue.
-fn hsv(colour: Color32) -> (f32, f32, f32) {
-    let [r, g, b] = [colour.r(), colour.g(), colour.b()].map(|c| f32::from(c) / 255.0);
-    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
-    let span = high - low;
-    let hue = if span == 0.0 {
-        0.0
-    } else if high == r {
-        60.0 * ((g - b) / span).rem_euclid(6.0)
-    } else if high == g {
-        60.0 * ((b - r) / span + 2.0)
-    } else {
-        60.0 * ((r - g) / span + 4.0)
-    };
-    (hue, if high == 0.0 { 0.0 } else { span / high }, high)
-}
-
-#[test]
-fn the_avatar_palette_is_vivid_distinct_and_free_of_teal_and_coral() {
-    assert!(AVATARS.len() >= 8);
-    for colour in AVATARS {
-        let (hue, saturation, value) = hsv(colour);
-        assert!(saturation >= 0.7 && value >= 0.6, "{} is not vivid: {saturation} {value}", hex(colour));
-        assert!(!(150.0..=200.0).contains(&hue), "{} is teal: {hue}", hex(colour));
-        assert!(!teal_or_coral(colour), "{}", hex(colour));
-    }
-    for (index, one) in AVATARS.iter().enumerate() {
-        for other in AVATARS.iter().skip(index + 1) {
-            let distance: i32 =
-                [(one.r(), other.r()), (one.g(), other.g()), (one.b(), other.b())].iter().map(|(a, b)| (i32::from(*a) - i32::from(*b)).abs()).sum();
-            assert!(distance >= 90, "{} and {} are too alike", hex(*one), hex(*other));
-        }
-    }
-    for theme in all() {
-        assert_eq!(theme.palette.avatars, AVATARS, "{} {:?}", theme.preset.id, theme.mode);
-    }
-}
-
-#[test]
-fn every_avatar_colour_passes_wcag_aa_with_its_initials_in_both_modes() {
-    for theme in all() {
-        for colour in theme.palette.avatars {
-            let ratio = contrast(ink_on(colour), colour);
-            assert!(ratio >= 4.5, "{} {:?}: initials on {} at {ratio}", theme.preset.id, theme.mode, hex(colour));
-        }
-    }
-}
-
-#[test]
-fn ink_over_several_colours_reads_on_every_one_of_them() {
-    for theme in all() {
-        let stops = theme.palette.gradient;
-        let ink = ink_over(&stops);
-        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
-        assert!(worst >= 3.0, "{}: an icon on the gradient at {worst}", theme.preset.id);
-        assert_eq!(ink_over(&[stops[0]]), ink_on(stops[0]));
-    }
-    assert_eq!(ink_over(&[]), ink_on(Color32::TRANSPARENT));
-}
-
-#[test]
-fn the_rail_darkens_each_stop_as_far_as_white_needs_or_keeps_the_gradient_with_the_better_ink() {
-    let white = Color32::WHITE;
-    for preset in &PRESETS {
-        let (stops, ink) = rail_stops(preset.gradient);
-        let worst = stops.iter().map(|stop| contrast(ink, *stop)).fold(f32::INFINITY, f32::min);
-        assert!(worst >= 3.0, "{}: icons on the rail at {worst}", preset.id);
-        if ink == white {
-            for (stop, raw) in stops.iter().zip(preset.gradient) {
-                // Darkened no further than white needs: a step lighter would not reach 3:1, unless it is untouched.
-                assert!(*stop == raw || contrast(white, mix(*stop, raw, 0.5)) < 3.2, "{}: {} from {}", preset.id, hex(*stop), hex(raw));
-                // At most 25 % darker: each channel keeps at least 75 % of the stop's.
-                assert!(u16::from(stop.r()) * 4 + 4 >= u16::from(raw.r()) * 3, "{}: at most 25 %", preset.id);
-            }
-        } else {
-            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
-            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
-        }
-    }
-    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| rail_stops(preset.gradient).1);
-    assert_eq!(ink("electric"), Some(white));
-    assert_eq!(ink("aurora"), Some(white));
-    assert_ne!(ink("citrus"), Some(white));
-    // A stop white cannot reach within 25 %: the whole rail keeps the gradient.
-    let yellow = [rgb(0x2F6BFF), rgb(0x2F6BFF), rgb(0xFFD000)];
-    assert_eq!(rail_stops(yellow), (yellow, ink_over(&yellow)));
-    for theme in all() {
-        assert_eq!((theme.palette.rail, theme.palette.rail_ink), rail_stops(theme.palette.gradient));
-    }
-}
-
-#[test]
-fn a_card_is_the_translucent_surface_and_text_reads_on_it_over_every_colour_field_hovered_or_not() {
-    for theme in all() {
-        let p = theme.palette;
-        let want = if theme.mode == Mode::Light { 204 } else { 158 };
-        assert_eq!(p.card.a(), want, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(p.control_edge.a() > 0 && p.control_edge.a() < 64, "{} {:?} control edge", theme.preset.id, theme.mode);
-        for behind in backdrops(&p) {
-            let card = over(p.card, over(p.glass, behind));
-            for under in [card, over(p.hover, card)] {
-                for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent), ("error", p.error)] {
-                    let ratio = contrast(ink, under);
-                    assert!(ratio >= 4.5, "{} {:?} {name} on a card over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-                }
-            }
-        }
-        for under in [p.selection, over(p.hover, p.selection)] {
-            for (name, ink) in [("text", p.text), ("muted", p.muted), ("accent", p.accent)] {
-                let ratio = contrast(ink, under);
-                assert!(ratio >= 4.5, "{} {:?} {name} on the selection: {ratio:.2}", theme.preset.id, theme.mode);
-            }
-        }
-    }
-}
-
-#[test]
-fn an_event_is_a_tint_of_its_account_and_its_text_reads_over_every_glass() {
-    for theme in all() {
-        let p = theme.palette;
-        let most = if theme.mode == Mode::Light { 51 } else { 77 };
-        for (event, account) in p.events.iter().zip(p.accounts) {
-            let [r, g, b, a] = event.to_srgba_unmultiplied();
-            assert!(a > 0 && a <= most, "{} {:?}: alpha {a}", theme.preset.id, theme.mode);
-            // Unmultiplying a faint tint moves a channel by a few steps.
-            assert!(contrast(Color32::from_rgb(r, g, b), account) < 1.1, "{} {:?}: {}", theme.preset.id, theme.mode, hex(account));
-            for behind in backdrops(&p) {
-                let ratio = contrast(p.text, over(*event, over(p.glass, behind)));
-                assert!(ratio >= 4.5, "{} {:?} text on an event over {}: {ratio:.2}", theme.preset.id, theme.mode, hex(behind));
-            }
-        }
-    }
-}
-
 #[test]
 fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
     for theme in all() {
         assert_eq!(theme.motion, MOTION);
         assert_eq!(theme.style().animation_time, MOTION.tooltip);
-    }
-}
-
-#[test]
-fn the_text_gradient_darkens_the_stops_until_white_reads_or_keeps_them_with_the_deep_ink() {
-    for preset in &PRESETS {
-        let (stops, ink) = text_gradient(preset.gradient);
-        if ink == WHITE {
-            assert!(stops.iter().all(|stop| contrast(WHITE, *stop) >= 4.5), "{}: white reads on every stop", preset.id);
-            // No more than 40 % darker: each channel keeps at least 60 % of the stop's.
-            for (stop, raw) in stops.iter().zip(preset.gradient) {
-                assert!(u16::from(stop.r()) * 10 + 10 >= u16::from(raw.r()) * 6, "{}: at most 40 %", preset.id);
-            }
-        } else {
-            assert_eq!(stops, preset.gradient, "{}: the full gradient with the better ink", preset.id);
-            assert_eq!(ink, ink_over(&preset.gradient), "{}", preset.id);
-        }
-    }
-    let ink = |id: &str| PRESETS.iter().find(|preset| preset.id == id).map(|preset| text_gradient(preset.gradient).1);
-    assert_eq!(ink("electric"), Some(WHITE));
-    assert_eq!(ink("aurora"), Some(WHITE));
-    assert_ne!(ink("citrus"), Some(WHITE));
-}
-
-#[test]
-fn the_rail_avatar_s_initials_read_on_its_disc() {
-    for preset in &PRESETS {
-        let (disc, ink) = super::rail_avatar(preset.gradient);
-        assert!(contrast(ink, disc) >= 4.5, "{}", preset.id);
-    }
-}
-
-#[test]
-fn close_is_a_plain_red_with_white_on_it_in_every_preset_and_mode() {
-    for theme in all() {
-        let p = theme.palette;
-        assert!(p.close.r() > 180 && p.close.g() < 80 && p.close.b() < 80, "{} {:?}: {}", theme.preset.id, theme.mode, hex(p.close));
-        assert_eq!(p.on_close, Color32::WHITE, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(contrast(p.on_close, p.close) >= 4.5, "{} {:?}", theme.preset.id, theme.mode);
-        assert!(!teal_or_coral(p.close));
-    }
-}
-
-#[test]
-fn the_scroll_bar_is_wide_enough_to_see_and_its_ends_are_round() {
-    for theme in all() {
-        let style = theme.style();
-        let scroll = &style.spacing.scroll;
-        assert!(scroll.floating_width >= 4.0, "{} {:?}: {} at rest", theme.preset.id, theme.mode, scroll.floating_width);
-        assert!(scroll.bar_width > scroll.floating_width, "{} {:?}: wider under the pointer", theme.preset.id, theme.mode);
-        let w = &style.visuals.widgets;
-        for corner in [w.noninteractive, w.inactive, w.hovered, w.active].map(|visuals| visuals.corner_radius) {
-            assert!(f32::from(corner.nw) >= scroll.bar_width / 2.0, "{} {:?}: {corner:?} leaves the ends square", theme.preset.id, theme.mode);
-        }
     }
 }

@@ -341,7 +341,7 @@ pub fn sheet(painter: &Painter, theme: &Theme) {
     let size = sheet_size();
     painter.rect_filled(Rect::from_min_size(pos2(0.0, 0.0), size), 0.0, p.panel);
     let margin = SHEET_CELL / 2.0;
-    let rows = SHEET_ROWS.iter().map(|style| (*style, SHEET_ICON, if *style == Style::Regular { p.text } else { p.accent }));
+    let rows = SHEET_ROWS.iter().map(|style| (*style, SHEET_ICON, if *style == Style::Regular { p.ink } else { p.cyan_text }));
     let small = std::iter::once((Style::Regular, theme.fonts.body.size, p.muted));
     for (row, (style, side, colour)) in rows.chain(small).enumerate() {
         for (column, id) in IconId::ALL.into_iter().enumerate() {

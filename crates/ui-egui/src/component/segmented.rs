@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Segmented choices: a few options side by side in one fully rounded track with a quiet edge, the chosen one on the
-//! selection with an edge in the full gradient and in SemiBold. Each option is a button of its own for a screen
+//! Segmented choices: a few options side by side in one square track with a `muted` edge, the chosen one on the
+//! `stage` fill and in SemiBold. Each option is a button of its own for a screen
 //! reader, selected or not. An option keeps its width whichever is chosen. Where the room is too small the options
 //! share it equally and their names are cut, so the track never runs out of its place.
 
@@ -32,7 +32,7 @@ fn chrome(count: usize) -> f32 {
 
 /// An option's width at its full name: the name in SemiBold, so that it does not change when the option is chosen.
 fn natural<T>(ui: &Ui, theme: &Theme, (_, name, font): &(T, &str, Font)) -> f32 {
-    galley(ui, name, semibold(*font), theme.palette.text).size().x + theme.spacing.m * 2.0
+    galley(ui, name, semibold(*font), theme.palette.ink).size().x + theme.spacing.s3 * 2.0
 }
 
 /// The width the options take with their full names, in points.
@@ -59,12 +59,12 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
     let squeezed = full > room + 0.5;
     let shared = ((room - chrome(options.len())) / options.len() as f32).max(1.0);
     let tallest = options.iter().map(|(_, _, font)| line_height(ui, *font)).fold(0.0, f32::max);
-    let high = tallest + s.s + 2.0;
+    let high = tallest + s.s2 + 2.0;
     let size = vec2(if squeezed { room.max(1.0) } else { full }, high + TRACK * 2.0);
     let (track, response) = ui.allocate_exact_size(size, Sense::hover());
     let visible = ui.is_rect_visible(track);
     if visible {
-        ui.painter().rect_stroke(track, track.height() / 2.0, Stroke::new(1.0, p.control_edge), StrokeKind::Inside);
+        ui.painter().rect_stroke(track, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
     }
     let mut chosen = None;
     let mut left = track.left() + TRACK;
@@ -84,18 +84,18 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
         let lit = segment.hovered() || segment.has_focus();
         let hover = motion::toggle(ui.ctx(), id.with("hover"), lit && !on, theme.motion.hover_fade);
         if visible {
-            let round = rect.height() / 2.0;
+            let round = 0.0;
             if on {
-                pill::selected_fill(ui.painter(), theme, rect, round);
+                pill::selected_fill(ui.painter(), theme, rect);
             } else if hover > 0.0 {
-                ui.painter().rect_filled(rect, round, p.hover.gamma_multiply(hover));
+                ui.painter().rect_filled(rect, round, p.grid);
             }
-            let pad = if squeezed { s.xs } else { s.m };
+            let pad = if squeezed { s.s1 } else { s.s3 };
             // A point more than the name needs, so that rounding never cuts a name that fits.
-            let text = cut(ui, name, if on { semibold(*font) } else { *font }, p.text, wide - pad * 2.0 + 1.0);
-            ui.painter().galley(rect.center() - text.size() / 2.0, text, p.text);
+            let text = cut(ui, name, if on { semibold(*font) } else { *font }, p.ink, wide - pad * 2.0 + 1.0);
+            ui.painter().galley(rect.center() - text.size() / 2.0, text, p.ink);
             if segment.has_focus() {
-                ui.painter().rect_stroke(rect.shrink(1.0), round, Stroke::new(2.0, p.focus), StrokeKind::Inside);
+                ui.painter().rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }
         }
         if segment.clicked() {

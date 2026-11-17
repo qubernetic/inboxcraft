@@ -121,7 +121,7 @@ impl TimePicker {
 fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme) + s.xs;
+    let height = control_side(ui, theme) + s.s1;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, tr!("{name}, {time}", name = name, time = time)));
     let lit = response.hovered() || response.has_focus();
@@ -129,16 +129,16 @@ fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if hover > 0.0 {
-            painter.rect_filled(rect, s.corner, p.hover.gamma_multiply(hover));
+            painter.rect_filled(rect, 0.0, p.grid);
         }
         let time = galley(ui, time, theme.fonts.caption, p.muted);
-        let right = rect.right() - s.m - time.size().x;
+        let right = rect.right() - s.s3 - time.size().x;
         painter.galley(pos2(right, rect.center().y - time.size().y / 2.0), time, p.muted);
-        let left = rect.left() + s.m;
-        let text = cut(ui, name, theme.fonts.body, p.text, right - s.m - left);
-        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
+        let left = rect.left() + s.s3;
+        let text = cut(ui, name, theme.fonts.body, p.ink, right - s.s3 - left);
+        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
         if response.has_focus() {
-            painter.rect_stroke(rect, s.corner, Stroke::new(2.0, p.focus), StrokeKind::Inside);
+            painter.rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Inside);
         }
     }
     response
@@ -149,13 +149,13 @@ fn reading(ui: &mut Ui, theme: &Theme, chosen: Option<Timestamp>, now: Timestamp
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.xs;
+        ui.spacing_mut().item_spacing.x = s.s1;
         match chosen {
             Some(at) => {
                 let side = line_height(ui, theme.fonts.caption);
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Done, Style::Fill, p.accent);
-                ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.accent));
+                theme.icons.paint(ui.painter(), rect, IconId::Done, Style::Fill, p.cyan_text);
+                ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.cyan_text));
             }
             None => {
                 ui.label(galley(ui, tr!("Not a time yet: try thu 9, 12 nov or in 3 days"), theme.fonts.caption, p.muted));
@@ -171,10 +171,10 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
     let s = &theme.spacing;
     let keys = Keymap::empty();
     let mut picked = Picked::Open;
-    Frame::new().inner_margin(margin(s.s, s.s)).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = s.xs;
-        ui.label(galley(ui, ask.title, theme.fonts.strong, p.text));
-        ui.add_space(s.xs);
+    Frame::new().inner_margin(margin(s.s2, s.s2)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = s.s1;
+        ui.label(galley(ui, ask.title, theme.fonts.strong, p.ink));
+        ui.add_space(s.s1);
         for preset in ask.presets.iter().filter(|preset| preset.at > now) {
             if preset_row(ui, theme, preset.name, &short(preset.at, now, offset)).clicked() {
                 picked = Picked::At { at: preset.at, alert: false };
@@ -184,11 +184,11 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         ui.painter().rect_filled(line, 0.0, p.line);
         let caption = ui.label(galley(ui, tr!("Or type a time"), theme.fonts.caption, p.muted));
         let id = ui.make_persistent_id("time-picker-typed");
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(ui, theme) + s.s), Sense::hover());
-        let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        ui.painter().rect_filled(rect, s.corner, p.field);
-        ui.painter().rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
-        let inner = rect.shrink2(vec2(s.s, 0.0));
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(ui, theme) + s.s2), Sense::hover());
+        let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+        ui.painter().rect_filled(rect, 0.0, p.term);
+        ui.painter().rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        let inner = rect.shrink2(vec2(s.s2, 0.0));
         let edit = TextEdit::singleline(&mut state.typed)
             .id(id)
             .char_limit(MAX_TYPED)
@@ -206,7 +206,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         }
         if let Some(name) = ask.alert {
             ui.horizontal(|ui| {
-                ui.label(galley(ui, name, theme.fonts.body, p.text));
+                ui.label(galley(ui, name, theme.fonts.body, p.ink));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if switch(ui, theme, name, state.alert).clicked() {
                         state.alert = !state.alert;
@@ -214,10 +214,10 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
                 });
             });
         }
-        ui.add_space(s.xs);
+        ui.add_space(s.s1);
         let row = vec2(ui.available_width(), control_side(ui, theme));
         ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             let confirm = match chosen {
                 Some(_) => TextButton::new(ask.confirm).primary(),
                 None => TextButton::new(ask.confirm).primary().unavailable(tr!("Pick a time above or type one first")),

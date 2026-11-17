@@ -12,8 +12,8 @@
 //! - [`select`]: a closed field with the choice in it and a popup of the choices.
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
-//! - [`avatar`]: a person's initials on a colour picked from their address.
-//! - [`badge`]: an unread count, or a group's icon on the preset's gradient.
+//! - [`avatar`]: a person's initials, `muted` on a `stage` square.
+//! - [`badge`]: an unread count, or a group's outline icon.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
@@ -54,7 +54,7 @@ pub(crate) fn line_height(ui: &Ui, font: Font) -> f32 {
 /// The side of a control (an icon button, a pill's height): a line of button text and a little room.
 #[must_use]
 pub fn control_side(ui: &Ui, theme: &Theme) -> f32 {
-    line_height(ui, theme.fonts.button) + theme.spacing.s * 1.5
+    line_height(ui, theme.fonts.button) + theme.spacing.s2 * 1.5
 }
 
 /// `text` in `font` and `colour`, on one line.

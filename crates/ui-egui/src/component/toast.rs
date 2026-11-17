@@ -6,7 +6,7 @@
 
 use egui::{Align2, Area, Context, Id, Order, Pos2, Shape, Ui, vec2};
 
-use crate::glass;
+use crate::draw::paint::{self, FloatEdge};
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
@@ -30,11 +30,11 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
     let slot = ui.painter().add(Shape::Noop);
     let mut undone = false;
     // Undo's own room makes the line taller, so the float's margin gives that back.
-    let air = if toast.undo.is_some() { s.xs } else { s.s };
-    let inner = egui::Frame::new().inner_margin(margin(s.l, air)).show(ui, |ui| {
+    let air = if toast.undo.is_some() { s.s1 } else { s.s2 };
+    let inner = egui::Frame::new().inner_margin(margin(s.s4, air)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
-            ui.label(galley(ui, toast.text, theme.fonts.body, p.text));
+            ui.spacing_mut().item_spacing.x = s.s2;
+            ui.label(galley(ui, toast.text, theme.fonts.body, p.ink));
             if let Some(action) = toast.undo {
                 let undo = button::link(ui, theme, keymap, tr!("Undo"));
                 undone = undo.clicked() || keymap.pressed(ui.ctx(), action);
@@ -44,7 +44,7 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
             }
         });
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
+    let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Quiet);
     ui.painter().set(slot, Shape::Vec(shapes));
     undone
 }
@@ -52,7 +52,7 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
 /// Shows the toast `id` with its bottom edge centred on `bottom`, rising into place; whether Undo was pressed.
 pub fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, id: Id, toast: &Toast<'_>, bottom: Pos2) -> bool {
     let risen = motion::appear(ctx, id, theme.motion.toast);
-    let at = bottom + vec2(0.0, theme.spacing.xl * (1.0 - risen));
+    let at = bottom + vec2(0.0, theme.spacing.s6 * (1.0 - risen));
     Area::new(id)
         .order(Order::Foreground)
         .pivot(Align2::CENTER_BOTTOM)

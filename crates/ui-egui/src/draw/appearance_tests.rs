@@ -17,7 +17,7 @@ use crate::keep::{FILE, Keep, KeepFile};
 use crate::mailbox::Mailbox;
 use crate::motion;
 use crate::sample;
-use crate::theme::{Look, Mode, ModePreference, Preset, TextScale, Theme};
+use crate::theme::{Look, Mode, ModePreference, TextScale, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -57,7 +57,6 @@ fn every_choice_persists_across_a_restart() {
     let app = restarted.state();
     assert_eq!(*app.appearance(), chosen);
     assert_eq!(app.mode(), ModePreference::Dark);
-    assert_eq!(app.preset(), *Preset::named("aurora").unwrap());
     assert_eq!(app.typeface(), Typeface::Inter);
     assert_eq!(app.icons(), IconSet::Lucide);
     assert_eq!(app.text_scale(), TextScale::from_percent(120).unwrap());
@@ -71,19 +70,17 @@ fn every_choice_persists_across_a_restart() {
 }
 
 #[test]
-fn a_custom_accent_persists_as_the_engine_nudged_it() {
+fn an_accent_the_engine_keeps_changes_no_colour() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join(FILE);
     let mut harness = window(&file);
-    let answer = run(&mut harness, "ui.accent.set", json!({ "custom": ["#2f6bff", "#8a3ffc", "#ff2d95", "#3a1d8c"] }));
-    assert_eq!(answer["nudged"], json!(true));
-    let Accent::Custom(nudged) = harness.state().appearance().accent else { panic!("custom") };
-    assert_eq!(harness.state().preset().id, "custom");
+    run(&mut harness, "ui.accent.set", json!({ "custom": ["#2f6bff", "#8a3ffc", "#ff2d95", "#3a1d8c"] }));
+    let Accent::Custom(kept) = harness.state().appearance().accent else { panic!("custom") };
     drop(harness);
     let restarted = window(&file);
-    assert_eq!(restarted.state().appearance().accent, Accent::Custom(nudged));
-    let dark = Theme::new(Mode::Dark, &restarted.state().preset());
-    assert_eq!(restarted.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, dark.palette.panel);
+    assert_eq!(restarted.state().appearance().accent, Accent::Custom(kept));
+    let dark = Theme::new(Mode::Dark, TextScale::default()).style();
+    assert_eq!(restarted.ctx.style_of(egui::Theme::Dark).visuals, dark.visuals, "one palette, whatever the accent");
 }
 
 #[test]
@@ -93,7 +90,6 @@ fn the_window_s_own_setters_run_the_commands_and_are_kept_too() {
     let mut harness = window(&file);
     let app = harness.state_mut();
     app.set_mode(ModePreference::Light);
-    app.set_preset(*Preset::named("citrus").unwrap());
     app.set_typeface(Typeface::Inter);
     app.set_icons(Icons::Lucide);
     app.set_text_scale(TextScale::from_percent(90).unwrap());
@@ -101,14 +97,8 @@ fn the_window_s_own_setters_run_the_commands_and_are_kept_too() {
     harness.run();
     let kept = KeepFile::new(file.clone()).load().unwrap();
     assert_eq!(kept, *harness.state().appearance());
-    assert_eq!(kept.accent, Accent::Preset("citrus"));
     assert_eq!(kept.motion, Motion::Full);
     assert_eq!(kept.text_scale, 90);
-    // A preset that is not shipped goes through as four custom colours.
-    let own = Preset { id: "mine", ..*Preset::named("citrus").unwrap() };
-    harness.state_mut().set_preset(own);
-    harness.run();
-    assert!(matches!(harness.state().appearance().accent, Accent::Custom(_)));
 }
 
 #[test]

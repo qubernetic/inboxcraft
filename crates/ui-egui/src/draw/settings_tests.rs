@@ -7,7 +7,7 @@ use egui::accesskit::{Role, Toggled};
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::{Accent, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Icons, Motion, ThemeMode, Typeface, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -101,9 +101,7 @@ fn every_control_runs_its_command() {
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
     assert!(selected(&harness, "Dark"));
 
-    assert_eq!(press(&mut harness, "Aurora"), "ui.accent.set");
-    assert_eq!(harness.state().appearance().accent, Accent::Preset("aurora"));
-    assert!(selected(&harness, "Aurora"));
+    assert!(harness.query_by_label("Aurora").is_none(), "one palette: no accent to choose");
 
     assert_eq!(press(&mut harness, "Inter"), "ui.font.set");
     assert_eq!(harness.state().appearance().font, Typeface::Inter);
@@ -129,68 +127,7 @@ fn every_control_runs_its_command() {
     assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
     assert_eq!(harness.state().appearance().motion, Motion::Reduce);
     assert_eq!(harness.get_by_role_and_label(Role::Switch, "Reduce motion").accesskit_node().toggled(), Some(Toggled::True));
-
-    // Custom takes the colours in use as its own and opens their fields.
-    assert!(harness.query_by_label("Gradient start").is_none(), "no fields while a preset is in use");
-    assert_eq!(press(&mut harness, "Custom"), "ui.accent.set");
-    for (label, colour) in [("Gradient start", "#102030"), ("Gradient middle", "#405060"), ("Gradient end", "#708090"), ("Accent", "#ffd60a")] {
-        let field = harness.get_by_role_and_label(Role::TextInput, label);
-        field.click();
-        harness.run();
-        harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
-        harness.get_by_role_and_label(Role::TextInput, label).type_text(colour);
-        harness.run();
-    }
-    assert_eq!(press(&mut harness, "Use these colours"), "ui.accent.set");
-    let Accent::Custom(custom) = harness.state().appearance().accent else { panic!("a custom accent") };
-    assert_eq!(custom.hex(), ["#102030", "#405060", "#708090", "#ffd60a"].map(str::to_owned));
-    assert!(selected(&harness, "Custom"));
-}
-
-#[test]
-fn an_accent_the_engine_made_lighter_says_so_and_shows_the_colour_it_uses() {
-    let mut harness = opened();
-    harness.state_mut().settings_mut().colours_mut()[3] = "#3a1d8c".to_owned();
-    harness.run();
-    assert_eq!(press(&mut harness, "Use these colours"), "ui.accent.set");
-    let Accent::Custom(custom) = harness.state().appearance().accent else { panic!("a custom accent") };
-    assert_ne!(custom.accent.hex(), "#3a1d8c");
-    assert_eq!(harness.state().settings().colours()[3], custom.accent.hex(), "the field shows the colour in use");
-    let note = harness.state().settings().note().unwrap().to_owned();
-    assert!(note.contains("#3a1d8c") && note.contains(&custom.accent.hex()), "{note}");
-    harness.get_by_label(&note);
-}
-
-#[test]
-fn the_custom_card_takes_the_typed_colours_and_the_preview_shows_them_first() {
-    let mut harness = opened();
-    let typed = ["#00a86b", "#0077ff", "#7a00ff", "#ffe066"];
-    for (field, colour) in harness.state_mut().settings_mut().colours_mut().iter_mut().zip(typed) {
-        *field = colour.to_owned();
-    }
-    harness.run();
-    assert_eq!(harness.state().appearance().accent, Accent::default(), "typing changes only the preview");
-    assert_eq!(harness.state().settings().draft().unwrap().gradient[0], egui::Color32::from_rgb(0x00, 0xa8, 0x6b));
-    assert_eq!(press(&mut harness, "Custom"), "ui.accent.set");
-    let Accent::Custom(custom) = harness.state().appearance().accent else { panic!("a custom accent") };
-    assert_eq!(custom.hex(), typed.map(str::to_owned));
-}
-
-#[test]
-fn colours_that_are_not_rrggbb_run_nothing_and_say_how_to_write_them() {
-    let mut harness = opened();
-    harness.state_mut().settings_mut().colours_mut()[1] = "blue; DROP".to_owned();
-    harness.run();
-    assert!(harness.state().settings().draft().is_none());
-    harness.get_by_label("Write each colour as # and six hex digits, like #2f6bff.");
-    let before = harness.state().mailbox().last_run();
-    harness.get_by_role_and_label(Role::Button, "Use these colours").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().last_run(), before, "a disabled button runs nothing");
-    harness.get_by_role_and_label(Role::Button, "Custom").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().last_run(), before, "nor does Custom");
-    assert_eq!(harness.state().appearance().accent, Accent::default());
+    assert!(harness.query_by_label("Custom").is_none());
 }
 
 #[test]

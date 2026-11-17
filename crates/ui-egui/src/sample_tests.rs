@@ -7,7 +7,6 @@ use serde_json::{Value, json};
 
 use super::{FOLDERS, INVITATIONS, MESSAGES, invitations, mailbox, people, session, session_over};
 use crate::component::avatar;
-use crate::theme::{AVATARS, Mode, PRESETS, Theme};
 
 /// 2026-11-05T09:00:00Z.
 fn now() -> Timestamp {
@@ -174,20 +173,15 @@ fn the_sample_draws_its_remote_pictures_and_asks_nobody() {
 }
 
 #[test]
-fn everyone_who_writes_or_is_written_to_has_an_avatar_from_the_avatar_palette() {
+fn everyone_who_writes_or_is_written_to_has_initials_for_an_avatar() {
     let people = people();
     for sample in MESSAGES {
         for person in [sample.from, sample.to] {
             assert!(people.contains(&(person.name, person.address)), "{} is in people()", person.address);
         }
     }
-    for preset in &PRESETS {
-        for mode in [Mode::Light, Mode::Dark] {
-            let theme = Theme::new(mode, preset);
-            for (name, address) in &people {
-                assert!(AVATARS.contains(&avatar::colour(&theme, address)), "{name}");
-            }
-        }
+    for (name, address) in &people {
+        assert_ne!(avatar::initials(name, address), "?", "{name}: initials for the avatar");
     }
 }
 

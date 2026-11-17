@@ -12,7 +12,7 @@
 //! {"out": "docs/images/list-dark.png", "mode": "dark", "narrow": 2, "open": {"role": "inbox"}, "search": "logo"}
 //! ```
 //!
-//! `mode` is `light` or `dark`, `preset` the accent preset (`electric` when left out, `aurora`, `citrus`), `size` the window in points (1200 by 760 when left out), `scale` the pixels per
+//! `mode` is `light` or `dark`, `size` the window in points (1200 by 760 when left out), `scale` the pixels per
 //! point (1 to 4, 1 when left out), `text_scale` the text scale in per cent (90 to 130 in steps of 10, 100 when left
 //! out), `narrow` an account id, `open` a `role` or a `folder` id, `search` the text in
 //! the search field and `select` the subject of the row to select. `onboard` shows the add-account page over the
@@ -40,7 +40,7 @@
 //! Updates, `accept_open`, `block`, or `newsletters` for its sender's group), so the toast shows; `slide` set to `true` catches a `done`, `archive` or `delete` row sliding out instead, four frames in with
 //! motion on.
 //! `icons` set to `true` draws every icon of
-//! the set in every style in the preset's colours instead of the window, `components` set to `true` the gallery of
+//! the set in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
 //! the components ([`crate::component::gallery`]). `font` is the typeface (`figtree` when left out, `inter`) and
 //! `icon_set` the icon set (`phosphor` when left out, `lucide`), for the window, the gallery and the icon sheet alike;
 //! `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
@@ -71,7 +71,7 @@ use crate::compose::Line;
 use crate::mailbox::{Act, GroupKind, InboxView, Mailbox, Pile, Place};
 use crate::onboard::{Keychain, Proposal, Proposed, Secret, Security, Source, Suggestion};
 use crate::save::NoSave;
-use crate::theme::{self, Look, Mode, Preset, TextScale, Theme};
+use crate::theme::{self, Look, Mode, TextScale, Theme};
 use crate::workers::Scripted;
 use crate::{InboxApp, UiError, iconset, motion, sample};
 
@@ -99,9 +99,6 @@ pub struct Shot {
     pub out: String,
     /// `light` or `dark`.
     pub mode: String,
-    /// The accent preset's id; Electric when left out.
-    #[serde(default)]
-    pub preset: Option<String>,
     /// The window in points.
     #[serde(default)]
     pub size: Option<[f32; 2]>,
@@ -391,19 +388,16 @@ fn places(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         calendar(app, shot)?;
     }
     if shot.triage == Some(true) {
-        let appearance = *app.appearance();
-        app.settings_mut().open_at(crate::settings::Section::Triage, &appearance);
+        app.settings_mut().open_at(crate::settings::Section::Triage);
     }
     if shot.notifications == Some(true) {
         app.mailbox_mut().set_notify_level(2, inboxcraft_engine::notify::Level::People);
         app.set_desk(Box::new(PicturedDesk));
-        let appearance = *app.appearance();
-        app.settings_mut().open_at(crate::settings::Section::Notifications, &appearance);
+        app.settings_mut().open_at(crate::settings::Section::Notifications);
     }
     if shot.sending == Some(true) {
         sign(app);
-        let appearance = *app.appearance();
-        app.settings_mut().open_at(crate::settings::Section::Sending, &appearance);
+        app.settings_mut().open_at(crate::settings::Section::Sending);
     }
     if shot.shortcuts == Some(true) {
         app.open_shortcuts();
@@ -962,16 +956,12 @@ fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, mut 
 ///
 /// # Errors
 ///
-/// [`UiError::Shot`] for a mode, preset, role, row or size the shot names wrongly; the errors of [`render`].
+/// [`UiError::Shot`] for a mode, role, row or size the shot names wrongly; the errors of [`render`].
 pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     let mode = match shot.mode.as_str() {
         "light" => Mode::Light,
         "dark" => Mode::Dark,
         other => return Err(bad(format!("{}: mode {other:?} is not light or dark", shot.out))),
-    };
-    let preset = match shot.preset.as_deref() {
-        None => Preset::default(),
-        Some(id) => *Preset::named(id).ok_or_else(|| bad(format!("{}: no preset {id:?}", shot.out)))?,
     };
     let typeface = match shot.font.as_deref() {
         None => Typeface::default(),
@@ -981,7 +971,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         None => Icons::default(),
         Some(id) => Icons::named(id).ok_or_else(|| bad(format!("{}: icon set {id:?} is not phosphor or lucide", shot.out)))?,
     };
-    let look = Look { preset, typeface, icons: iconset::IconSet::of(icons), ..Look::default() };
+    let look = Look { typeface, icons: iconset::IconSet::of(icons), ..Look::default() };
     if shot.components == Some(true) {
         return component_gallery(shot, mode, &look);
     }
@@ -1009,7 +999,6 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.first == Some(true) {
         app = app.with_accounts(Arc::new(Pictured), Box::new(Proposed::new(pictured_proposal())), Box::new(Scripted::passing()));
     }
-    app.set_preset(preset);
     app.set_typeface(typeface);
     app.set_icons(icons);
     app.set_reduce_motion(true);

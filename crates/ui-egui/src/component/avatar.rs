@@ -1,27 +1,15 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! An avatar: a person's initials on a round field of colour. The colour comes from the theme's avatar palette and
-//! is picked from the address alone (case and surrounding spaces aside), so one person always has one colour, on
-//! every screen and in every session. The initials are white or the deep ink, whichever reads on the colour.
+//! An avatar: a person's initials in `muted` on a `stage` square with corners of 2 px. Every person's avatar has the
+//! same colours: colour belongs to accounts, never to people.
 
-use egui::{Color32, Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, vec2};
+use egui::{Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, vec2};
 
-use crate::theme::{Font, Theme, ink_on};
+use crate::theme::{Font, Theme};
 
-/// A stable 64-bit hash of `text` (FNV-1a), the same on every platform and in every version.
-fn hash(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
-}
-
-/// The avatar colour of `address`.
-#[must_use]
-pub fn colour(theme: &Theme, address: &str) -> Color32 {
-    let colours = &theme.palette.avatars;
-    let len = u64::try_from(colours.len()).unwrap_or(1).max(1);
-    let index = hash(&address.trim().to_lowercase()) % len;
-    usize::try_from(index).ok().and_then(|at| colours.get(at)).copied().unwrap_or(theme.palette.accent)
-}
+/// The corner radius of an avatar square: one of the two things that are not square.
+pub const CORNER: f32 = 2.0;
 
 /// The first letter or digit of `word`, upper case.
 fn letter(word: &str) -> Option<String> {
@@ -41,15 +29,15 @@ pub fn initials(name: &str, address: &str) -> String {
     letters.or_else(|| letter(address.split('@').next().unwrap_or_default())).unwrap_or_else(|| "?".to_owned())
 }
 
-/// Paints the avatar of `name` and `address` into the circle inside `rect`.
+/// Paints the avatar of `name` and `address` into the square inside `rect`.
 pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: &str) {
     let side = rect.width().min(rect.height());
     if !side.is_finite() || side <= 0.0 {
         return;
     }
-    let fill = colour(theme, address);
-    painter.circle_filled(rect.center(), side / 2.0, fill);
-    let ink = ink_on(fill);
+    let p = theme.palette;
+    painter.rect_filled(Rect::from_center_size(rect.center(), vec2(side, side)), CORNER, p.stage);
+    let ink = p.muted;
     let font = Font { size: side * 0.4, ..theme.fonts.strong };
     let galley = painter.layout_no_wrap(initials(name, address), font.id(), ink);
     painter.galley(rect.center() - galley.size() / 2.0, galley, ink);

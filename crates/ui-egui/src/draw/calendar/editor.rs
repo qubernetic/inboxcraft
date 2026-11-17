@@ -43,12 +43,12 @@ const FIELD_MARGIN: Margin = Margin { left: 10, right: 10, top: 9, bottom: 9 };
 /// The editor over the top right of `screen`; what was pressed in it.
 pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, screen: Rect) -> Vec<Asked> {
     let s = &theme.spacing;
-    let width = WIDTH.min((screen.width() - s.gap * 4.0).max(1.0));
-    let corner = screen.right_top() + vec2(-(s.gap + s.l), s.gap * 6.0 + s.xs + 3.0);
+    let width = WIDTH.min((screen.width() - s.s2 * 4.0).max(1.0));
+    let corner = screen.right_top() + vec2(-(s.s2 + s.s4), s.s2 * 6.0 + s.s1 + 3.0);
     let mut asked = Vec::new();
     Area::new(Id::unique("event-editor")).order(Order::Foreground).pivot(Align2::RIGHT_TOP).fixed_pos(corner).show(ctx, |ui| {
         popup::panel(ui, theme, width, |ui| {
-            Frame::new().inner_margin(margin(s.m, s.m)).show(ui, |ui| {
+            Frame::new().inner_margin(margin(s.s3, s.s3)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = ROWS;
                 form(ui, theme, keymap, editor, &mut asked);
             });
@@ -106,7 +106,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     let s = &theme.spacing;
     let width = ui.available_width();
     let title = Font { size: theme.fonts.title.size * 0.9, ..theme.fonts.title };
-    ui.label(RichText::new(editor.title()).font(title.id()).color(p.text));
+    ui.label(RichText::new(editor.title()).font(title.id()).color(p.ink));
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     {
         let form = editor.form_mut();
@@ -120,7 +120,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         });
     }
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.l;
+        ui.spacing_mut().item_spacing.x = s.s4;
         let all_day = editor.form().all_day;
         if checkbox(ui, theme, tr!("All day"), all_day).clicked() {
             editor.set_all_day(!all_day);
@@ -139,10 +139,10 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
         notify(ui, theme, editor);
     }
     if let Some(problem) = editor.problem() {
-        ui.add(egui::Label::new(RichText::new(problem).font(theme.fonts.caption.id()).color(p.flag)).wrap());
+        ui.add(egui::Label::new(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink)).wrap());
     }
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = s.s;
+        ui.spacing_mut().item_spacing.x = s.s2;
         if TextButton::new(tr!("Save")).primary().show(ui, theme, keymap).clicked() {
             asked.push(Asked::Save);
         }
@@ -223,13 +223,13 @@ fn calendar_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) 
 fn notify(ui: &mut Ui, theme: &Theme, editor: &mut Editor) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    Frame::new().fill(p.hover).corner_radius(10).inner_margin(margin(s.m, s.m)).show(ui, |ui| {
+    Frame::new().fill(p.grid).corner_radius(10).inner_margin(margin(s.s3, s.s3)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = s.s;
-        ui.label(RichText::new(editor.notify_question()).font(theme.fonts.body.id()).color(p.text));
+        ui.spacing_mut().item_spacing.y = s.s2;
+        ui.label(RichText::new(editor.notify_question()).font(theme.fonts.body.id()).color(p.ink));
         let notify = editor.notify();
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.l;
+            ui.spacing_mut().item_spacing.x = s.s4;
             if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
                 editor.set_notify(false);
             }

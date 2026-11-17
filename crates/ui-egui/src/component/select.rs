@@ -87,30 +87,29 @@ impl<T: Copy + PartialEq> Select<'_, T> {
 
     fn paint_field(&self, ui: &Ui, theme: &Theme, response: &Response) {
         let p = &theme.palette;
-        let s = &theme.spacing;
         let rect = response.rect;
         if !ui.is_rect_visible(rect) {
             return;
         }
         let painter = ui.painter();
-        painter.rect_filled(rect, s.corner, p.field);
+        painter.rect_filled(rect, 0.0, p.term);
         let hover = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
         if hover > 0.0 {
-            painter.rect_filled(rect, s.corner, p.hover.gamma_multiply(hover));
+            painter.rect_filled(rect, 0.0, p.grid);
         }
-        let edge = if response.has_focus() { Stroke::new(2.0, p.focus) } else { Stroke::new(1.0, p.field_border) };
-        painter.rect_stroke(rect, s.corner, edge, StrokeKind::Inside);
+        let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+        painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         let caret = Rect::from_center_size(pos2(rect.right() - SIDES - CARET / 2.0, rect.center().y), vec2(CARET, CARET));
         theme.icons.paint(painter, caret, IconId::Caret, Style::Regular, p.muted);
-        let text = cut(ui, self.shown, theme.fonts.body, p.text, caret.left() - rect.left() - SIDES * 2.0);
-        painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.text);
+        let text = cut(ui, self.shown, theme.fonts.body, p.ink, caret.left() - rect.left() - SIDES * 2.0);
+        painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.ink);
     }
 
     /// The popup over the field at `rect`; where it is and the choice taken in it. `opened_now` gives the current
     /// choice, or else the first, the keyboard focus.
     fn popup(&self, ui: &Ui, theme: &Theme, id: Id, rect: Rect, opened_now: bool) -> (Rect, Option<T>) {
         let ctx = ui.ctx().clone();
-        let anchor = rect.left_top() + vec2(0.0, theme.spacing.s);
+        let anchor = rect.left_top() + vec2(0.0, theme.spacing.s2);
         let most = (ctx.content_rect().height() * MOST).max(rect.height());
         popup::show(&ctx, theme, id.with("popup"), anchor, POPUP.min(rect.width()), |ui| {
             let mut taken = None;

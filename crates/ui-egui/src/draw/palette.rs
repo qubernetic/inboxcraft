@@ -10,7 +10,7 @@ use egui::{Area, Frame, Id, Key, Modifiers, Order, Rect, Role, ScrollArea, Sense
 
 use crate::component::field;
 use crate::component::{control_side, cut, galley, margin};
-use crate::glass;
+use crate::draw::paint::{self, FloatEdge};
 use crate::iconset::Style;
 use crate::keymap::{Action, Keymap};
 use crate::palette::{MAX_CHARS, Palette};
@@ -53,20 +53,20 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: boo
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if picked || response.hovered() {
-            painter.rect_filled(rect, s.corner, p.hover);
+            painter.rect_filled(rect, 0.0, p.grid);
         }
-        let ink = if run { p.text } else { p.muted };
+        let ink = if run { p.ink } else { p.muted };
         let side = theme.fonts.body.size * 1.2;
-        let icon = Rect::from_center_size(pos2(rect.left() + s.s + side / 2.0, rect.center().y), vec2(side, side));
+        let icon = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
         theme.icons.paint(painter, icon, action.icon, Style::Regular, ink);
-        let mut right = rect.right() - s.s;
+        let mut right = rect.right() - s.s2;
         if let Some(chip) = keymap.chip(ui.ctx(), action.id) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);
             right -= chip.size().x;
             painter.galley(pos2(right, rect.center().y - chip.size().y / 2.0), chip, p.muted);
-            right -= s.l;
+            right -= s.s4;
         }
-        let left = icon.right() + s.s;
+        let left = icon.right() + s.s2;
         let name = cut(ui, action.name, theme.fonts.body, ink, right - left);
         painter.galley(pos2(left, rect.center().y - name.size().y / 2.0), name, ink);
     }
@@ -112,18 +112,18 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
     if beside {
         asked = Some(Asked::Close);
     }
-    let width = WIDTH.min(screen.width() - s.gap * 2.0).max(1.0);
-    let top = screen.top() + (screen.height() * 0.12).max(s.gap);
+    let width = WIDTH.min(screen.width() - s.s2 * 2.0).max(1.0);
+    let top = screen.top() + (screen.height() * 0.12).max(s.s2);
     let at = pos2(screen.center().x - width / 2.0, top);
     Area::new(Id::unique("palette")).order(Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         // The float's shadow and edge, then a solid surface: nothing of the list shows through the names.
         let slot = ui.painter().add(Shape::Noop);
-        let inner = Frame::new().inner_margin(margin(s.xs, s.xs)).show(ui, |ui| {
-            ui.set_width((width - s.xs * 2.0).max(1.0));
+        let inner = Frame::new().inner_margin(margin(s.s1, s.s1)).show(ui, |ui| {
+            ui.set_width((width - s.s1 * 2.0).max(1.0));
             ui.spacing_mut().item_spacing.y = 0.0;
             let (_, response) = ui.allocate_exact_size(vec2(ui.available_width(), 0.0), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Command palette")));
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             let typed = field::search(ui, theme, field_id(), palette.query_mut(), tr!("Type a command"), ui.available_width());
             ui.ctx().accesskit_node_builder(typed.id, |node| node.set_label(tr!("Command")));
             if !typed.has_focus() {
@@ -134,10 +134,10 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
                 *palette.query_mut() = cut;
                 asked = asked.or(Some(Asked::Typed));
             }
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             let edge = ui.cursor().top();
             ui.painter().hline(ui.max_rect().x_range(), edge, egui::Stroke::new(1.0, p.line));
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             if matches.is_empty() {
                 let none = tr!("No command matches “{text}”.", text = palette.query());
                 ui.label(egui::RichText::new(none).font(theme.fonts.body.id()).color(p.muted));
@@ -151,14 +151,14 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
                     }
                 });
             }
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             ui.horizontal(|ui| {
-                ui.add_space(s.s);
+                ui.add_space(s.s2);
                 ui.label(egui::RichText::new(tr!("↑↓ to move · Enter to run · Esc to close")).font(theme.fonts.caption.id()).color(p.muted));
             });
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
         });
-        let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
+        let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Keyboard);
         ui.painter().set(slot, Shape::Vec(shapes));
     });
     asked

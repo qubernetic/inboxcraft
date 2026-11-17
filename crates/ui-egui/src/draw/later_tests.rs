@@ -10,7 +10,6 @@ use egui::accesskit::{Role, Toggled};
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::Appearance;
 use inboxcraft_model::Role as FolderRole;
 use inboxcraft_time::{FakeClock, Timestamp};
 
@@ -303,7 +302,7 @@ fn done_all_on_a_group_card_files_the_group() {
 #[test]
 fn the_triage_page_keeps_pins_on_done_mail_by_a_switch() {
     let mut app = app();
-    app.settings_mut().open_at(Section::Triage, &Appearance::default());
+    app.settings_mut().open_at(Section::Triage);
     let mut harness = harness_of(app);
     let node = harness.get_by_role_and_label(Role::Switch, "Keep pins on done mail");
     assert_eq!(node.accesskit_node().toggled(), Some(Toggled::False));

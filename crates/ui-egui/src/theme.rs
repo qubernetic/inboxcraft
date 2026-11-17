@@ -1,25 +1,24 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! InboxCraft's own look: the colour tokens, spacing and font tokens (`docs/design.md`).
+//! InboxCraft's own look: the colour tokens, distances, sizes and font tokens (`docs/design.md`).
 //!
-//! Every colour on screen is a token of a [`Palette`], and every token is derived from two choices: the mode (light
-//! or dark) and the accent [`Preset`] (three gradient stops and an accent). Adding a preset is adding one entry to
-//! [`PRESETS`]. Text tokens are moved in lightness until they meet WCAG AA (4.5:1) on every surface they sit on, and
-//! markers and control edges until they meet 3:1; the tests check this for every preset in both modes. This file is
-//! the only place that names a colour; a test refuses colour constants anywhere else in the crate.
+//! Every colour on screen is a token of a [`Palette`]: one fixed table in two modes, dark and light ([`Palette::of`]),
+//! with the values of the design file. Text tokens reach 4.5:1 on every ground they stand on, and the edges and marks
+//! that carry meaning 3:1; the tests check every pair. This file is the only place that names a colour; a test refuses
+//! colour constants anywhere else in the crate. Two values are translucent: [`Palette::scrim`] and [`FLOAT_SHADOW`].
 //!
 //! Every text style is a font token of [`Fonts`]: a weight of the [`Typeface`] the owner chose (Figtree, replacing
 //! egui's Ubuntu Light, or Inter; both bundled) or the monospaced face, at a size the [`TextScale`] multiplies. The icon
 //! fonts are [`IconFont`]s. This file is also the only place that names a font.
 //!
 //! The owner's choices arrive as the engine's [`Appearance`] (the `ui.*.set` commands); [`Look`] is what of it the
-//! tokens need, and [`Preset::of`] turns a preset id or four custom colours into a preset.
+//! tokens need.
 
 use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
 
-use inboxcraft_engine::appearance::{Accent, Appearance, Rgb};
+use inboxcraft_engine::appearance::Appearance;
 pub use inboxcraft_engine::appearance::{ThemeMode as ModePreference, Typeface};
 
 use crate::iconset::IconSet;
@@ -28,9 +27,9 @@ use crate::motion::{self, MOTION, Motion};
 /// Light or dark: the mode shown now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Dark text on light surfaces.
+    /// Dark text on light grounds.
     Light,
-    /// Light text on dark surfaces.
+    /// Light text on dark grounds.
     Dark,
 }
 
@@ -55,161 +54,174 @@ pub fn preference(choice: ModePreference) -> egui::ThemePreference {
     }
 }
 
-/// An accent preset: three gradient stops and an accent, from which every colour token is derived.
+/// The colour tokens of one mode (`docs/design.md`, "Colour"). A view names tokens, never colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Preset {
-    /// The stable id (`electric` ...), for commands and settings; `custom` for the owner's own colours.
-    pub id: &'static str,
-    /// The gradient, first to last stop, at full strength.
-    pub gradient: [Color32; 3],
-    /// The accent: one account colour.
-    pub accent: Color32,
+pub struct Palette {
+    /// The window.
+    pub bg: Color32,
+    /// Panes that hold content; what floats (menus, dialogs).
+    pub surface: Color32,
+    /// The index column, the command line's bar, the status line.
+    pub panel: Color32,
+    /// The command field, text fields, code, the composer's body.
+    pub term: Color32,
+    /// Structural hairlines: pane edges, control boxes, tags.
+    pub line: Color32,
+    /// Quieter hairlines inside a pane, between rows.
+    pub panel_line: Color32,
+    /// Hover on `bg` and `panel`.
+    pub grid: Color32,
+    /// Hover on `surface` and in floats; the current row; the chosen segment; avatars.
+    pub stage: Color32,
+    /// Text.
+    pub ink: Color32,
+    /// Secondary text, icons, key hints, placeholders, disabled text, edges with a meaning.
+    pub muted: Color32,
+    /// Decoration only: separators, inactive index numbers, a disabled control's glyph.
+    pub dim: Color32,
+    /// The background characters.
+    pub faint: Color32,
+    /// The accent as a fill, only under [`Palette::on_cyan`] text.
+    pub cyan: Color32,
+    /// Text on a cyan fill.
+    pub on_cyan: Color32,
+    /// The accent as text: section numbers, links, counts, the prompt.
+    pub cyan_text: Color32,
+    /// The accent as an edge or small mark: focus, the 2 px bar, the unread square, the caret, the now line.
+    pub cyan_edge: Color32,
+    /// Accent wash: selected text, a badge's ground.
+    pub cyan_muted: Color32,
+    /// Errors, removed, delete.
+    pub minus: Color32,
+    /// Passed, added.
+    pub plus: Color32,
+    /// Waiting, snoozed.
+    pub warn: Color32,
+    /// Behind a dialog: translucent.
+    pub scrim: Color32,
+    /// One bar colour per account, repeating from the seventh ([`Theme::account_colour`]).
+    pub accounts: [Color32; 6],
 }
 
-const ELECTRIC: Preset = Preset { id: "electric", gradient: [rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)], accent: rgb(0xFFD60A) };
+/// The dark mode's tokens.
+pub(crate) const DARK: Palette = Palette {
+    bg: rgb(0x0E0F10),
+    surface: rgb(0x151617),
+    panel: rgb(0x101112),
+    term: rgb(0x0A0B0C),
+    line: rgb(0x2A2D2F),
+    panel_line: rgb(0x202224),
+    grid: rgb(0x17191A),
+    stage: rgb(0x212427),
+    ink: rgb(0xD4D4D4),
+    muted: rgb(0x8B9196),
+    dim: rgb(0x4A4F53),
+    faint: rgb(0x2B2E30),
+    cyan: rgb(0x22A8E0),
+    on_cyan: rgb(0x0E0F10),
+    cyan_text: rgb(0x22A8E0),
+    cyan_edge: rgb(0x22A8E0),
+    cyan_muted: rgb(0x00354C),
+    minus: rgb(0xC98080),
+    plus: rgb(0x6AB26B),
+    warn: rgb(0xEEC448),
+    scrim: Color32::from_rgba_unmultiplied_const(0x00, 0x00, 0x00, 0x99),
+    accounts: [rgb(0x9DAF19), rgb(0xA359B9), rgb(0xC05928), rgb(0x547FFA), rgb(0xF55BB8), rgb(0x64DABF)],
+};
 
-/// The presets InboxCraft ships, the default first.
-pub const PRESETS: [Preset; 3] = [
-    ELECTRIC,
-    Preset { id: "aurora", gradient: [rgb(0x9B5CFF), rgb(0xFF2BD6), rgb(0xFF8A00)], accent: rgb(0x00E5FF) },
-    Preset { id: "citrus", gradient: [rgb(0xFF2E63), rgb(0xFF8F00), rgb(0xFFD000)], accent: rgb(0x3D5AFE) },
-];
+/// The light mode's tokens.
+pub(crate) const LIGHT: Palette = Palette {
+    bg: rgb(0xF5F5F2),
+    surface: rgb(0xFFFFFF),
+    panel: rgb(0xF5F5F2),
+    term: rgb(0xFFFFFF),
+    line: rgb(0xD6D7D3),
+    panel_line: rgb(0xE2E3DF),
+    grid: rgb(0xECECE8),
+    stage: rgb(0xDEDFDB),
+    ink: rgb(0x191919),
+    muted: rgb(0x5A6065),
+    dim: rgb(0x9EA3A6),
+    faint: rgb(0xCFD1CD),
+    cyan: rgb(0x22A8E0),
+    on_cyan: rgb(0x0E0F10),
+    cyan_text: rgb(0x075E88),
+    cyan_edge: rgb(0x0B79AD),
+    cyan_muted: rgb(0xD3EEF9),
+    minus: rgb(0x9A3A36),
+    plus: rgb(0x246628),
+    warn: rgb(0x6E5400),
+    scrim: Color32::from_rgba_unmultiplied_const(0x19, 0x19, 0x19, 0x55),
+    accounts: [rgb(0x778224), rgb(0xB54ED5), rgb(0xD84F05), rgb(0x163E8B), rgb(0x7C1457), rgb(0x368977)],
+};
 
-impl Preset {
-    /// The shipped preset with this id.
+impl Palette {
+    /// The tokens of `mode`.
     #[must_use]
-    pub fn named(id: &str) -> Option<&'static Self> {
-        PRESETS.iter().find(|preset| preset.id == id)
-    }
-
-    /// The preset of `accent`: a shipped one by id (Electric for an id this front end does not ship), or `custom`
-    /// with the owner's four colours.
-    #[must_use]
-    pub fn of(accent: &Accent) -> Self {
-        let colour = |Rgb(r, g, b): Rgb| Color32::from_rgb(r, g, b);
-        match accent {
-            Accent::Preset(id) => Self::named(id).copied().unwrap_or_default(),
-            Accent::Custom(custom) => Self { id: "custom", gradient: custom.gradient.map(colour), accent: colour(custom.accent) },
+    pub const fn of(mode: Mode) -> &'static Palette {
+        match mode {
+            Mode::Dark => &DARK,
+            Mode::Light => &LIGHT,
         }
     }
 }
 
-impl Default for Preset {
-    /// Electric.
-    fn default() -> Self {
-        ELECTRIC
-    }
-}
-
-/// The colour tokens of one mode and preset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Palette {
-    /// Behind everything; the reader and hovered rows.
-    pub background: Color32,
-    /// The folder pane, buttons and the bars.
-    pub panel: Color32,
-    /// The opaque base of the cards and sheets.
-    pub surface: Color32,
-    /// The list's and the reader's cards: the surface, translucent, so the colour fields show through; no shadow.
-    pub card: Color32,
-    /// Inside text fields.
-    pub field: Color32,
-    /// The edge of a text field.
-    pub field_border: Color32,
-    /// The quiet edge of a control that is not selected: a pill, a segmented control.
-    pub control_edge: Color32,
-    /// Text.
-    pub text: Color32,
-    /// Secondary text: previews, dates, addresses.
-    pub muted: Color32,
-    /// The selected row, folder, pill or segment: one even tone.
-    pub selection: Color32,
-    /// Links and accent text: the middle stop lightened in dark mode, darkened in light mode.
-    pub accent: Color32,
-    /// Text on the accent colour.
-    pub on_accent: Color32,
-    /// The unread marker.
-    pub unread: Color32,
-    /// The flag marker of a flagged message, and text that asks for a second look.
-    pub flag: Color32,
-    /// The keyboard focus ring.
-    pub focus: Color32,
-    /// The unread count badge.
-    pub badge: Color32,
-    /// Text on the badge.
-    pub on_badge: Color32,
-    /// The error banner and error text.
-    pub error: Color32,
-    /// Text on the error banner.
-    pub on_error: Color32,
-    /// Behind the window's Close control under the pointer: the plain red most desktops use there, in both modes.
-    pub close: Color32,
-    /// The cross on [`Palette::close`].
-    pub on_close: Color32,
-    /// The preset's gradient at full strength (the navigation rail, the primary button, group badges).
-    pub gradient: [Color32; 3],
-    /// The navigation rail's stops ([`rail_stops`]): the gradient, darkened only as far as white icons need.
-    pub rail: [Color32; 3],
-    /// The icons on [`Palette::rail`].
-    pub rail_ink: Color32,
-    /// The dark ink for text on the gradient where white does not read ([`ink_on`] picks).
-    pub ink: Color32,
-    /// A glass layer over the colour fields: translucent.
-    pub glass: Color32,
-    /// The edge of a glass layer.
-    pub glass_edge: Color32,
-    /// Over the window behind a sheet (the settings): a light shade, so the window shows through dimmed.
-    pub scrim: Color32,
-    /// The outline of a window whose frame the app draws: about as strong as the desktops' own, so the window stands
-    /// apart from what lies behind it.
-    pub window_edge: Color32,
-    /// The light top edge of a glass layer.
-    pub glass_highlight: Color32,
-    /// The soft shadow under glass and floats.
-    pub shadow: Color32,
-    /// Everything that pops up over content (menus, tooltips, popups, hover actions, toasts, the command palette, the
-    /// event editor): solid, so text under it never shows through.
-    pub float: Color32,
-    /// Separators between rows.
-    pub line: Color32,
-    /// Laid over a hovered row.
-    pub hover: Color32,
-    /// The large soft colour fields painted once behind the window, one per stop.
-    pub colour_fields: [Color32; 3],
-    /// One colour per account, so the unified list shows where a message lives.
-    pub accounts: [Color32; 6],
-    /// An event's fill, one per account: a tint of the account's colour, as strong as text on it still reads over
-    /// every glass. Its edge is the account's colour at full strength.
-    pub events: [Color32; 6],
-    /// The avatar colours: vivid, one picked per address ([`crate::component::avatar`]); white or the deep ink
-    /// reads on each.
-    pub avatars: [Color32; 10],
-}
-
-/// Distances in points.
+/// The distances, six steps on a 4 px grid (`docs/design.md`, "Distances"). They do not grow with the text.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spacing {
-    /// Between lines that belong together.
-    pub xs: f32,
-    /// Between items.
-    pub s: f32,
-    /// Inside a row.
-    pub m: f32,
-    /// Around a pane.
-    pub l: f32,
-    /// Between groups.
-    pub xl: f32,
-    /// The default width of the folder pane.
-    pub folder_pane: f32,
-    /// The corner radius of fields, badges and selections.
-    pub corner: f32,
-    /// The corner radius of glass layers and floats.
-    pub card: f32,
-    /// How far the soft shadow of a glass layer or a float reaches.
-    pub shadow: f32,
-    /// The colour fields that show between two glass layers.
-    pub gap: f32,
+    /// 4: between an icon or key chip and its word.
+    pub s1: f32,
+    /// 8: between the parts of one control; between a label and its number.
+    pub s2: f32,
+    /// 12: padding inside a control; between a row's columns.
+    pub s3: f32,
+    /// 16: padding of a pane; the left edge of every row.
+    pub s4: f32,
+    /// 24: between sections.
+    pub s6: f32,
+    /// 40: the margin of a page such as Home.
+    pub s10: f32,
 }
+
+pub(crate) const SPACING: Spacing = Spacing { s1: 4.0, s2: 8.0, s3: 12.0, s4: 16.0, s6: 24.0, s10: 40.0 };
+
+/// The fixed sizes at 100 % text ([`Theme::size`] scales them with the text).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sizes {
+    /// A button's and a segmented control's height.
+    pub button: f32,
+    /// A field's and a select's height.
+    pub field: f32,
+    /// A menu row's height.
+    pub menu_row: f32,
+    /// A mail row's height.
+    pub mail_row: f32,
+    /// A group head's height.
+    pub group_head: f32,
+    /// A key chip's and a tag's height.
+    pub chip: f32,
+    /// The avatar's sides: small, middle, large.
+    pub avatar: [f32; 3],
+    /// The mail list's width.
+    pub list: f32,
+    /// The scroll bar's width.
+    pub scrollbar: f32,
+}
+
+pub(crate) const SIZES: Sizes = Sizes {
+    button: 32.0,
+    field: 36.0,
+    menu_row: 32.0,
+    mail_row: 56.0,
+    group_head: 32.0,
+    chip: 20.0,
+    avatar: [24.0, 32.0, 40.0],
+    list: 440.0,
+    scrollbar: 12.0,
+};
+
+/// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
+pub const FLOAT_SHADOW: Shadow = Shadow { offset: [0, 12], blur: 32, spread: 0, color: Color32::from_rgba_premultiplied(0, 0, 0, 102) };
 
 /// A weight of the typeface, lightest first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -392,17 +404,17 @@ impl Default for TextScale {
     }
 }
 
-/// The whole look of one mode and preset.
+/// The whole look of one mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     /// Which mode this is.
     pub mode: Mode,
-    /// The preset its colours come from.
-    pub preset: Preset,
     /// Its colours.
-    pub palette: Palette,
+    pub palette: &'static Palette,
     /// Its distances.
     pub spacing: Spacing,
+    /// Its fixed sizes at 100 % ([`Theme::size`] scales one).
+    pub sizes: Sizes,
     /// The text scale its fonts are at.
     pub text_scale: TextScale,
     /// The typeface its fonts are in.
@@ -415,45 +427,15 @@ pub struct Theme {
     pub motion: Motion,
 }
 
-/// The red behind Close, the same in every preset and mode.
-const CLOSE: Color32 = rgb(0xD92D20);
-
 const fn rgb(hex: u32) -> Color32 {
     // The masks keep each value in 0..=255, so the casts lose nothing.
     Color32::from_rgb(((hex >> 16) & 0xff) as u8, ((hex >> 8) & 0xff) as u8, (hex & 0xff) as u8)
 }
 
-/// `colour` at `alpha` (0 to 1) opacity.
-fn alpha(colour: Color32, alpha: f32) -> Color32 {
-    // Clamped to 0..=255 before the cast.
-    let alpha = if alpha.is_nan() { 0.0 } else { (alpha.clamp(0.0, 1.0) * 255.0).round() };
-    Color32::from_rgba_unmultiplied(colour.r(), colour.g(), colour.b(), alpha as u8)
-}
-
-const WHITE: Color32 = rgb(0xFFFFFF);
-const BLACK: Color32 = rgb(0x000000);
-
-/// The dark ink on the gradient: dark enough that white or it reads at 4.5:1 on any colour.
-const DEEP_INK: Color32 = rgb(0x05060A);
-
-/// The avatar colours, the same in both modes: vivid, no teal or coral, far enough apart to tell people apart.
-pub const AVATARS: [Color32; 10] = [
-    rgb(0x2F5BEA),
-    rgb(0x0A84FF),
-    rgb(0x7B3FF2),
-    rgb(0xC026D3),
-    rgb(0xE3218F),
-    rgb(0xD62839),
-    rgb(0xF06A00),
-    rgb(0xF5C400),
-    rgb(0x3DA62B),
-    rgb(0x7CB518),
-];
-
 /// The tint a picture is drawn with: none.
-pub const NO_TINT: Color32 = WHITE;
+pub const NO_TINT: Color32 = rgb(0xFFFFFF);
 
-/// The app icon's own colours (`icons.rs`), the same in every mode and preset so the desktop shows one icon.
+/// The app icon's own colours (`icons.rs`), the same in every mode so the desktop shows one icon.
 pub(crate) mod app_icon {
     use egui::Color32;
 
@@ -463,72 +445,11 @@ pub(crate) mod app_icon {
     pub(crate) const TILE: Color32 = rgb(0xFFFFFF);
     /// The tile's edge: the deep ink at 16 %, so the white tile holds its shape on a light background.
     pub(crate) const EDGE: Color32 = Color32::from_rgba_premultiplied(1, 1, 2, 41);
-    /// The Electric gradient of the mark, first to last stop.
+    /// The gradient of the mark, first to last stop.
     pub(crate) const GRADIENT: [Color32; 3] = [rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)];
     /// Where the gradient starts and ends on the icon's square, in units.
     pub(crate) const GRADIENT_LINE: [[f32; 2]; 2] = [[48.0, 60.0], [208.0, 200.0]];
 }
-
-/// The neutral starting points of one mode, before the preset tints them.
-struct Neutrals {
-    background: Color32,
-    panel: Color32,
-    surface: Color32,
-    field: Color32,
-    text: Color32,
-    muted: Color32,
-    error: Color32,
-    float: Color32,
-    /// How much of the middle stop goes into the surfaces.
-    tint: f32,
-    /// How much of the middle stop goes into the selection.
-    selection: f32,
-    /// How much of the middle stop goes into the badge.
-    badge: f32,
-    /// The opacity of a card.
-    card: f32,
-    /// The opacity of an event's tint, at most.
-    event: f32,
-    /// The opacity of the colour fields.
-    fields: f32,
-}
-
-const LIGHT: Neutrals = Neutrals {
-    background: rgb(0xF3F5F9),
-    panel: rgb(0xEBEEF3),
-    surface: rgb(0xFBFCFD),
-    field: rgb(0xFFFFFF),
-    text: rgb(0x161A22),
-    muted: rgb(0x5D6676),
-    error: rgb(0xB3261E),
-    float: rgb(0xFFFFFF),
-    tint: 0.03,
-    selection: 0.16,
-    badge: 0.16,
-    card: 0.80,
-    event: 0.20,
-    fields: 0.30,
-};
-
-const DARK: Neutrals = Neutrals {
-    background: rgb(0x0D1016),
-    panel: rgb(0x141821),
-    surface: rgb(0x10131A),
-    field: rgb(0x090B10),
-    text: rgb(0xEEF1F6),
-    muted: rgb(0x9AA3B2),
-    error: rgb(0xF2B8B5),
-    float: rgb(0x1E2330),
-    tint: 0.05,
-    selection: 0.30,
-    badge: 0.30,
-    card: 0.62,
-    event: 0.30,
-    fields: 0.34,
-};
-
-pub(crate) const SPACING: Spacing =
-    Spacing { xs: 4.0, s: 8.0, m: 12.0, l: 16.0, xl: 24.0, folder_pane: 240.0, corner: 6.0, card: 14.0, shadow: 18.0, gap: 10.0 };
 
 /// The font tokens at 100 %.
 const FONTS: Fonts = Fonts {
@@ -628,128 +549,9 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
 
-impl Palette {
-    /// Every token of `mode` from `preset`.
-    fn derive(mode: Mode, preset: &Preset) -> Self {
-        let n = match mode {
-            Mode::Light => &LIGHT,
-            Mode::Dark => &DARK,
-        };
-        let [first, middle, last] = preset.gradient;
-        let background = mix(n.background, middle, n.tint);
-        let panel = mix(n.panel, middle, n.tint * 1.2);
-        let surface = mix(n.surface, middle, n.tint * 0.6);
-        let field = mix(n.field, middle, n.tint * 0.3);
-        let selection = mix(surface, middle, n.selection);
-        let card = alpha(surface, n.card);
-        let (sheer, shade) = match mode {
-            Mode::Light => (mix(WHITE, middle, 0.02), mix(n.text, middle, 0.3)),
-            Mode::Dark => (mix(WHITE, middle, 0.1), BLACK),
-        };
-        let glass = match mode {
-            Mode::Light => alpha(sheer, 0.72),
-            Mode::Dark => alpha(sheer, 0.055),
-        };
-        let hover = match mode {
-            Mode::Light => alpha(shade, 0.045),
-            Mode::Dark => alpha(sheer, 0.06),
-        };
-        let float = mix(n.float, middle, n.tint * 1.5);
-        let colour_fields = preset.gradient.map(|stop| alpha(stop, n.fields));
-        // What text can sit on: the opaque surfaces, the float, the selection (hovered or not), and glass and the cards
-        // on it (hovered or not) over the colour fields.
-        let mut backdrops = vec![background];
-        backdrops.extend(colour_fields.map(|colour| over(colour, background)));
-        let glassy: Vec<Color32> = backdrops.iter().map(|behind| over(glass, *behind)).collect();
-        let mut surfaces = vec![background, panel, surface, field, selection, float];
-        surfaces.extend(glassy.iter().flat_map(|behind| [*behind, over(hover, *behind), over(card, *behind)]));
-        // The focus ring needs only 3:1 and is not text: a hovered card or selection does not darken it.
-        let ringed = surfaces.clone();
-        surfaces.push(over(hover, selection));
-        surfaces.extend(glassy.iter().map(|behind| over(hover, over(card, *behind))));
-        let text = readable(mix(n.text, middle, 0.06), &surfaces, 4.5, mode);
-        let muted = readable(mix(n.muted, middle, 0.08), &surfaces, 4.5, mode);
-        let accent = match mode {
-            // The middle stop mixed with black: even a yellow-orange reads on white.
-            Mode::Light => readable(mix(middle, BLACK, 0.38), &surfaces, 4.5, mode),
-            // The middle stop mixed 30 % with white: it stays in the gradient's family (the preset's separate
-            // accent stays an account colour).
-            Mode::Dark => readable(mix(middle, WHITE, 0.3), &surfaces, 4.5, mode),
-        };
-        let marked = [background, panel, surface, selection];
-        let badge = mix(panel, middle, n.badge);
-        let error = readable(n.error, &surfaces, 4.5, mode);
-        let accounts = [first, middle, last, preset.accent, mix(first, middle, 0.5), mix(middle, last, 0.5)]
-            .map(|colour| readable(colour, &[background, panel, surface], 3.0, mode));
-        let events = accounts.map(|colour| event_tint(colour, n.event, text, &glassy));
-        let (rail, rail_ink) = rail_stops(preset.gradient);
-        Self {
-            background,
-            panel,
-            surface,
-            card,
-            field,
-            field_border: readable(mix(muted, surface, 0.3), &[background, panel, surface, field], 3.0, mode),
-            control_edge: match mode {
-                Mode::Light => alpha(shade, 0.18),
-                Mode::Dark => alpha(sheer, 0.18),
-            },
-            text,
-            muted,
-            selection,
-            accent,
-            on_accent: ink_on(accent),
-            unread: readable(middle, &marked, 3.0, mode),
-            flag: readable(last, &marked, 4.5, mode),
-            focus: readable(first, &ringed, 3.0, mode),
-            badge,
-            on_badge: readable(accent, &[badge], 4.5, mode),
-            error,
-            on_error: ink_on(error),
-            close: CLOSE,
-            on_close: ink_on(CLOSE),
-            gradient: preset.gradient,
-            rail,
-            rail_ink,
-            ink: DEEP_INK,
-            glass,
-            glass_edge: match mode {
-                Mode::Light => alpha(shade, 0.08),
-                Mode::Dark => alpha(sheer, 0.09),
-            },
-            scrim: alpha(shade, 0.25),
-            window_edge: match mode {
-                Mode::Light => alpha(shade, 0.24),
-                Mode::Dark => alpha(sheer, 0.16),
-            },
-            glass_highlight: match mode {
-                Mode::Light => alpha(sheer, 0.9),
-                Mode::Dark => alpha(sheer, 0.07),
-            },
-            shadow: match mode {
-                Mode::Light => alpha(shade, 0.10),
-                Mode::Dark => alpha(shade, 0.35),
-            },
-            float,
-            line: match mode {
-                Mode::Light => alpha(shade, 0.07),
-                Mode::Dark => alpha(sheer, 0.06),
-            },
-            hover,
-            colour_fields,
-            accounts,
-            events,
-            avatars: AVATARS,
-        }
-    }
-}
-
-/// What the tokens take from the owner's choices besides the mode: the preset, the text scale, the typeface and the
-/// icon set.
+/// What the tokens take from the owner's choices besides the mode: the text scale, the typeface and the icon set.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Look {
-    /// The colours.
-    pub preset: Preset,
     /// The text scale.
     pub text_scale: TextScale,
     /// The typeface.
@@ -763,7 +565,6 @@ impl Look {
     #[must_use]
     pub fn of(appearance: &Appearance) -> Self {
         Self {
-            preset: Preset::of(&appearance.accent),
             text_scale: TextScale::from_percent(appearance.text_scale).unwrap_or_default(),
             typeface: appearance.font,
             icons: IconSet::of(appearance.icons),
@@ -772,15 +573,15 @@ impl Look {
 }
 
 impl Theme {
-    /// The look of `mode` with the colours of `preset`, in Figtree at 100 % with Phosphor icons.
+    /// The look of `mode` at `text_scale`, in Figtree with Phosphor icons.
     #[must_use]
-    pub fn new(mode: Mode, preset: &Preset) -> Self {
-        let (text_scale, typeface) = (TextScale::default(), Typeface::default());
+    pub fn new(mode: Mode, text_scale: TextScale) -> Self {
+        let typeface = Typeface::default();
         Self {
             mode,
-            preset: *preset,
-            palette: Palette::derive(mode, preset),
+            palette: Palette::of(mode),
             spacing: SPACING,
+            sizes: SIZES,
             text_scale,
             typeface,
             fonts: Fonts::of(typeface, text_scale),
@@ -792,7 +593,7 @@ impl Theme {
     /// The look of `mode` with everything else from `look`.
     #[must_use]
     pub fn of(mode: Mode, look: &Look) -> Self {
-        Self::new(mode, &look.preset).with_text_scale(look.text_scale).with_typeface(look.typeface).with_icons(look.icons)
+        Self::new(mode, look.text_scale).with_typeface(look.typeface).with_icons(look.icons)
     }
 
     /// The same look with every font token at `scale`.
@@ -825,71 +626,63 @@ impl Theme {
         ctx.set_style_of(egui::Theme::Dark, Self::of(Mode::Dark, look).style());
     }
 
-    /// The colour of the account with this index, repeating after the last.
+    /// The colour of the account with this index, counted from 0, repeating after the sixth.
     #[must_use]
     pub fn account_colour(&self, index: u64) -> Color32 {
         let colours = &self.palette.accounts;
         let len = u64::try_from(colours.len()).unwrap_or(1).max(1);
-        usize::try_from(index % len).ok().and_then(|at| colours.get(at)).copied().unwrap_or(self.palette.accent)
+        usize::try_from(index % len).ok().and_then(|at| colours.get(at)).copied().unwrap_or(self.palette.muted)
     }
 
-    /// The preset's gradient at `at` (0 the first stop, 0.5 the middle, 1 the last).
+    /// The fixed size `px` (at 100 %) at the text scale, to the nearest even pixel.
     #[must_use]
-    pub fn gradient_at(&self, at: f32) -> Color32 {
-        let [first, middle, last] = self.palette.gradient;
-        let at = if at.is_nan() { 0.0 } else { at.clamp(0.0, 1.0) };
-        if at < 0.5 { mix(first, middle, at * 2.0) } else { mix(middle, last, (at - 0.5) * 2.0) }
+    pub fn size(&self, px: f32) -> f32 {
+        (px * self.text_scale.factor() / 2.0).round() * 2.0
     }
 
-    fn corner(&self) -> CornerRadius {
-        // A few points; the clamp keeps the cast inside u8.
-        CornerRadius::same(self.spacing.corner.clamp(0.0, 255.0) as u8)
-    }
-
-    /// egui's colours for this theme.
+    /// egui's colours for this theme: flat, square, no shadow of egui's own.
     #[must_use]
     pub fn visuals(&self) -> Visuals {
-        let p = &self.palette;
+        let p = self.palette;
         let mut visuals = match self.mode {
             Mode::Light => Visuals::light(),
             Mode::Dark => Visuals::dark(),
         };
-        let corner = self.corner();
-        visuals.override_text_color = Some(p.text);
+        let square = CornerRadius::ZERO;
+        visuals.override_text_color = Some(p.ink);
         visuals.weak_text_color = Some(p.muted);
-        visuals.panel_fill = p.panel;
-        // Menus, tooltips and popups float over whatever is there, on the solid float.
-        visuals.window_fill = p.float;
-        visuals.window_stroke = Stroke::new(1.0, p.field_border);
-        visuals.window_corner_radius = corner;
-        visuals.menu_corner_radius = corner;
+        visuals.panel_fill = p.bg;
+        // Menus, tooltips and popups float over whatever is there, on the solid surface.
+        visuals.window_fill = p.surface;
+        visuals.window_stroke = Stroke::new(1.0, p.line);
+        visuals.window_corner_radius = square;
+        visuals.menu_corner_radius = square;
         visuals.window_shadow = Shadow::NONE;
         visuals.popup_shadow = Shadow::NONE;
-        visuals.extreme_bg_color = p.field;
-        visuals.text_edit_bg_color = Some(p.field);
-        visuals.faint_bg_color = p.background;
-        visuals.code_bg_color = p.background;
-        visuals.hyperlink_color = p.accent;
-        visuals.error_fg_color = p.error;
-        visuals.warn_fg_color = p.flag;
-        visuals.selection.bg_fill = p.selection;
-        visuals.selection.stroke = Stroke::new(1.0, p.text);
+        visuals.extreme_bg_color = p.term;
+        visuals.text_edit_bg_color = Some(p.term);
+        visuals.faint_bg_color = p.panel;
+        visuals.code_bg_color = p.term;
+        visuals.hyperlink_color = p.cyan_text;
+        visuals.error_fg_color = p.minus;
+        visuals.warn_fg_color = p.warn;
+        visuals.selection.bg_fill = p.cyan_muted;
+        visuals.selection.stroke = Stroke::new(1.0, p.ink);
         let widgets = &mut visuals.widgets;
-        for (state, fill, edge) in [
-            (&mut widgets.noninteractive, p.panel, p.field_border),
-            (&mut widgets.inactive, p.panel, p.field_border),
-            (&mut widgets.hovered, p.selection, p.focus),
-            (&mut widgets.active, p.selection, p.focus),
-            (&mut widgets.open, p.selection, p.field_border),
+        for (state, fill) in [
+            (&mut widgets.noninteractive, p.bg),
+            (&mut widgets.inactive, p.surface),
+            (&mut widgets.hovered, p.stage),
+            (&mut widgets.active, p.stage),
+            (&mut widgets.open, p.stage),
         ] {
             state.bg_fill = fill;
             state.weak_bg_fill = fill;
-            state.bg_stroke = Stroke::new(1.0, edge);
-            state.fg_stroke = Stroke::new(1.0, p.text);
-            state.corner_radius = corner;
+            state.bg_stroke = Stroke::new(1.0, p.line);
+            state.fg_stroke = Stroke::new(1.0, p.ink);
+            state.corner_radius = square;
             state.expansion = 0.0;
         }
-        widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.selection);
         visuals
     }
 
@@ -899,14 +692,14 @@ impl Theme {
         let s = &self.spacing;
         let f = &self.fonts;
         let mut style = Style { visuals: self.visuals(), ..Style::default() };
-        style.spacing.item_spacing = vec2(s.s, s.xs);
-        style.spacing.button_padding = vec2(s.s, s.xs);
+        style.spacing.item_spacing = vec2(s.s2, s.s1);
+        style.spacing.button_padding = vec2(s.s2, s.s1);
         style.spacing.window_margin = egui::Margin::same(12);
         // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
         style.spacing.scroll.fade.strength = 0.0;
-        // A bar wide enough to see at rest and wider under the pointer; the widgets' corner rounds both its ends.
+        // A bar wide enough to see at rest and the full width under the pointer; square, like everything.
         style.spacing.scroll.floating_width = 5.0;
-        style.spacing.scroll.bar_width = 9.0;
+        style.spacing.scroll.bar_width = self.sizes.scrollbar;
         motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),
@@ -936,91 +729,6 @@ pub fn over(top: Color32, under: Color32) -> Color32 {
     let keep = 255 - u16::from(top.a());
     let channel = |t: u8, u: u8| u8::try_from((u16::from(t) + (u16::from(u) * keep + 127) / 255).min(255)).unwrap_or(u8::MAX);
     Color32::from_rgb(channel(top.r(), under.r()), channel(top.g(), under.g()), channel(top.b(), under.b()))
-}
-
-/// The tint of an event in the account colour `colour`: at `most` opacity, less in steps of 2 % while `text` would
-/// not read on it at 4.5:1 over one of `glassy`, and never below 4 %.
-fn event_tint(colour: Color32, most: f32, text: Color32, glassy: &[Color32]) -> Color32 {
-    const STEP: f32 = 0.02;
-    const LEAST: f32 = 0.04;
-    // A dozen or so steps: the clamp keeps the cast inside u8.
-    let steps = ((most - LEAST) / STEP).round().clamp(0.0, 255.0) as u8;
-    let reads = |strength: f32| glassy.iter().all(|behind| contrast(text, over(alpha(colour, strength), *behind)) >= 4.5);
-    let strength = (0..steps).map(|step| most - f32::from(step) * STEP).find(|strength| reads(*strength)).unwrap_or(LEAST);
-    alpha(colour, strength)
-}
-
-/// `colour`, moved towards black in light mode or white in dark mode just far enough to reach `ratio` against
-/// every colour in `on`.
-#[must_use]
-pub fn readable(colour: Color32, on: &[Color32], ratio: f32, mode: Mode) -> Color32 {
-    let towards = match mode {
-        Mode::Light => BLACK,
-        Mode::Dark => WHITE,
-    };
-    const STEPS: u8 = 40;
-    (0..=STEPS)
-        .map(|step| mix(colour, towards, f32::from(step) / f32::from(STEPS)))
-        .find(|candidate| on.iter().all(|behind| contrast(*candidate, *behind) >= ratio))
-        .unwrap_or(towards)
-}
-
-/// The ink for text on `behind`: white or the deep ink, whichever has more contrast.
-#[must_use]
-pub fn ink_on(behind: Color32) -> Color32 {
-    if contrast(WHITE, behind) >= contrast(DEEP_INK, behind) { WHITE } else { DEEP_INK }
-}
-
-/// The owner's avatar on the rail: a white disc, and the preset's middle stop darkened until it reads on it at 4.5:1.
-#[must_use]
-pub fn rail_avatar(stops: [Color32; 3]) -> (Color32, Color32) {
-    let [_, middle, _] = stops;
-    (WHITE, readable(middle, &[WHITE], 4.5, Mode::Light))
-}
-
-/// The gradient text sits on (a primary button, a chip) and its ink: the stops darkened together in steps of 2 % until
-/// white reads at 4.5:1 on every one, as long as that takes no more than 40 % (Electric 14 %, Aurora 30 %); otherwise
-/// the stops unchanged with the ink that reads better across them (Citrus).
-#[must_use]
-pub fn text_gradient(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
-    // 20 steps of 2 %: at most 40 %.
-    const STEP: f32 = 0.02;
-    const STEPS: u8 = 20;
-    (0..=STEPS)
-        .map(|step| stops.map(|stop| mix(stop, BLACK, f32::from(step) * STEP)))
-        .find(|darkened| darkened.iter().all(|stop| contrast(WHITE, *stop) >= 4.5))
-        .map_or((stops, ink_over(&stops)), |darkened| (darkened, WHITE))
-}
-
-/// The rail's stops and the ink for its icons: each stop darkened on its own, in steps of 2 %, only as far as white
-/// needs for 3:1 (WCAG AA for a graphical object) at that place, as long as no stop takes more than 25 %; otherwise
-/// the stops unchanged with the ink that reads better across them (Citrus).
-#[must_use]
-pub fn rail_stops(stops: [Color32; 3]) -> ([Color32; 3], Color32) {
-    // 12 steps of 2 %: the last one within 25 %.
-    const STEP: f32 = 0.02;
-    const STEPS: u8 = 12;
-    let darkened = stops.map(|stop| (0..=STEPS).map(|step| mix(stop, BLACK, f32::from(step) * STEP)).find(|colour| contrast(WHITE, *colour) >= 3.0));
-    match darkened {
-        [Some(first), Some(middle), Some(last)] => ([first, middle, last], WHITE),
-        _ => (stops, ink_over(&stops)),
-    }
-}
-
-/// The ink for an icon or text that runs across every colour in `behind` (a gradient's stops): white or the deep
-/// ink, whichever reads better on the colour it reads worst on.
-#[must_use]
-pub fn ink_over(behind: &[Color32]) -> Color32 {
-    let worst = |ink: Color32| behind.iter().map(|colour| contrast(ink, *colour)).fold(f32::INFINITY, f32::min);
-    if worst(WHITE) >= worst(DEEP_INK) { WHITE } else { DEEP_INK }
-}
-
-/// The colour the owner typed as `#rrggbb` or `rrggbb`, space around it dropped; `None` for anything else.
-#[must_use]
-pub fn typed(text: &str) -> Option<Color32> {
-    let text = text.trim();
-    let Rgb(r, g, b) = if text.starts_with('#') { Rgb::from_hex(text)? } else { Rgb::from_hex(&format!("#{text}"))? };
-    Some(Color32::from_rgb(r, g, b))
 }
 
 /// The WCAG contrast ratio of two colours, 1 to 21 (alpha is ignored).

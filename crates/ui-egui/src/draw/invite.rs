@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The invitation card over a message's text (`crate::invite`), as the design's "Invitation in a message" draws it:
-//! a date tile on the accent gradient, the title, when and where, and a line in the error colour that says what
-//! changed since the version before. The card waiting for an answer has a gradient edge, a cancelled one a red edge.
+//! a date tile on the cyan fill, the title, when and where, and a line in the error colour that says what changed
+//! since the version before. The card waiting for an answer has a `cyan_edge`, a cancelled one a `minus` edge.
 //! Then by what the invitation does:
 //!
 //! - an invitation: Going, Maybe and No, and to whom the answer goes at once; once answered, the answer and Change
@@ -19,12 +19,11 @@ use egui::{Frame, Layout, RichText, Sense, Shape, Stroke, StrokeKind, Ui, Widget
 use super::margin;
 use super::reader::{Asked, Drawn};
 use crate::component::button::TextButton;
-use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::invite::{Invite, Method, Rsvp};
 use crate::keymap::Keymap;
 use crate::reader::Reader;
-use crate::theme::{Font, Theme, text_gradient};
+use crate::theme::{Font, Theme};
 use crate::tr;
 
 /// What the owner asked on a card.
@@ -41,16 +40,16 @@ pub(crate) enum Ask {
 /// How faint the strip of a version a later one replaced is.
 const FAINT: f32 = 0.75;
 
-/// The width of a card's coloured edge.
-const EDGE: f32 = 1.5;
+/// The width of a card's coloured edge: a hairline, like every edge.
+const EDGE: f32 = 1.0;
 
 /// The edge of a card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Edge {
     /// The hairline of any card.
     Line,
-    /// The preset's gradient: the owner is asked something.
-    Gradient,
+    /// The accent's edge: the owner is asked something.
+    Asks,
     /// The error colour: the event is off.
     Error,
 }
@@ -60,35 +59,29 @@ pub(super) fn edged<R>(ui: &mut Ui, theme: &Theme, edge: Edge, add: impl FnOnce(
     let p = &theme.palette;
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
-    let inner = Frame::new().inner_margin(margin(s.l)).show(ui, |ui| {
+    let inner = Frame::new().inner_margin(margin(s.s4)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
     });
     let rect = inner.response.rect;
     let shapes = match edge {
-        Edge::Line => vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)],
-        Edge::Gradient => {
-            let [first, middle, last] = p.gradient;
-            let ring = Gradient::Linear {
-                from: pos2(0.0, 0.0),
-                to: pos2(1.0, 1.0),
-                stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-            };
-            vec![gradient::filled(ui.painter(), rect, s.card, &ring), Shape::rect_filled(rect.shrink(EDGE), s.card - EDGE, p.surface)]
+        Edge::Line => vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside)],
+        Edge::Asks => {
+            vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(EDGE, p.cyan_edge), StrokeKind::Inside)]
         }
         Edge::Error => {
-            vec![Shape::rect_filled(rect, s.card, p.surface), Shape::rect_stroke(rect, s.card, Stroke::new(EDGE, p.error), StrokeKind::Inside)]
+            vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(EDGE, p.minus), StrokeKind::Inside)]
         }
     };
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
 }
 
-/// The edge of `invite`'s card: the gradient while an answer is wanted, red when the event is off.
+/// The edge of `invite`'s card: the accent's while an answer is wanted, `minus` when the event is off.
 fn edge(reader: &Reader, invite: &Invite) -> Edge {
     match invite.method {
         Method::Cancel => Edge::Error,
-        Method::Request if invite.can_answer && (invite.answer.is_none() || reader.changing(invite.message)) => Edge::Gradient,
+        Method::Request if invite.can_answer && (invite.answer.is_none() || reader.changing(invite.message)) => Edge::Asks,
         Method::Request | Method::Reply | Method::Other => Edge::Line,
     }
 }
@@ -104,7 +97,7 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
         return;
     }
     edged(ui, theme, edge(reader, invite), |ui| {
-        ui.spacing_mut().item_spacing.y = theme.spacing.m;
+        ui.spacing_mut().item_spacing.y = theme.spacing.s3;
         head(ui, theme, invite);
         if let Some(changed) = invite.changed() {
             chip(ui, theme, IconId::Changed, &changed);
@@ -121,14 +114,14 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
         }
     });
     if let Some(line) = invite.earlier_line() {
-        ui.add_space(theme.spacing.s);
+        ui.add_space(theme.spacing.s2);
         strip(ui, theme, &line);
     }
 }
 
 /// A line of text that wraps, muted or not.
 fn say(ui: &mut Ui, theme: &Theme, text: &str, font: Font, muted: bool) {
-    let colour = if muted { theme.palette.muted } else { theme.palette.text };
+    let colour = if muted { theme.palette.muted } else { theme.palette.ink };
     ui.add(egui::Label::new(RichText::new(text).font(font.id()).color(colour)).wrap());
 }
 
@@ -138,22 +131,17 @@ fn head(ui: &mut Ui, theme: &Theme, invite: &Invite) {
     let f = &theme.fonts;
     let s = &theme.spacing;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.m;
+        ui.spacing_mut().item_spacing.x = s.s3;
         let month_font = Font { face: f.strong.face, ..f.caption };
         let month_line = super::paint::line_height(ui, month_font);
         let day_line = super::paint::line_height(ui, f.title);
-        let height = month_line + day_line + s.s * 2.0;
+        let height = month_line + day_line + s.s2 * 2.0;
         let (rect, response) = ui.allocate_exact_size(vec2(height * 0.9, height), Sense::hover());
         let spoken = invite.event.when();
         response.widget_info(|| WidgetInfo::labeled(egui::Role::Image, true, &spoken));
         if ui.is_rect_visible(rect) {
-            let ([first, middle, last], ink) = text_gradient(p.gradient);
-            let fill = Gradient::Linear {
-                from: pos2(0.0, 0.0),
-                to: pos2(1.0, 1.0),
-                stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-            };
-            gradient::fill(ui.painter(), rect, s.card * 0.75, &fill);
+            let ink = p.on_cyan;
+            ui.painter().rect_filled(rect, 0.0, p.cyan);
             let month = super::paint::line(ui, &[(&invite.month(), month_font, ink)], f32::INFINITY);
             let day = super::paint::line(ui, &[(&invite.day(), f.title, ink)], f32::INFINITY);
             let top = rect.center().y - (month.size().y + day.size().y) / 2.0;
@@ -162,12 +150,12 @@ fn head(ui: &mut Ui, theme: &Theme, invite: &Invite) {
             ui.painter().galley(pos2(rect.center().x - day.size().x / 2.0, below), day, ink);
         }
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = s.xs;
+            ui.spacing_mut().item_spacing.y = s.s1;
             let title = if invite.event.summary.is_empty() { tr!("(no title)").to_owned() } else { invite.event.summary.clone() };
-            ui.add(egui::Label::new(RichText::new(title).font(f.title.id()).color(p.text)).wrap());
+            ui.add(egui::Label::new(RichText::new(title).font(f.title.id()).color(p.ink)).wrap());
             let line = invite.line();
             if !line.is_empty() {
-                ui.add(egui::Label::new(RichText::new(line).font(f.body.id()).color(p.text)).wrap());
+                ui.add(egui::Label::new(RichText::new(line).font(f.body.id()).color(p.ink)).wrap());
             }
         });
     });
@@ -178,13 +166,13 @@ fn chip(ui: &mut Ui, theme: &Theme, id: IconId, text: &str) {
     let p = &theme.palette;
     let s = &theme.spacing;
     let font = Font { face: theme.fonts.strong.face, ..theme.fonts.caption };
-    Frame::new().fill(p.panel).corner_radius(s.corner).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+    Frame::new().fill(p.panel).corner_radius(0.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             let side = super::paint::line_height(ui, font);
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, id, Style::Regular, p.error);
-            ui.add(egui::Label::new(RichText::new(text).font(font.id()).color(p.error)).wrap());
+            theme.icons.paint(ui.painter(), rect, id, Style::Regular, p.minus);
+            ui.add(egui::Label::new(RichText::new(text).font(font.id()).color(p.minus)).wrap());
         });
     });
 }
@@ -202,10 +190,10 @@ fn strip(ui: &mut Ui, theme: &Theme, text: &str) {
     let s = &theme.spacing;
     ui.scope(|ui| {
         ui.multiply_opacity(FAINT);
-        Frame::new().fill(p.panel).corner_radius(s.card).inner_margin(margin(s.m)).show(ui, |ui| {
+        Frame::new().fill(p.panel).corner_radius(0.0).inner_margin(margin(s.s3)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = s.s;
+                ui.spacing_mut().item_spacing.x = s.s2;
                 icon(ui, theme, IconId::Older);
                 say(ui, theme, text, theme.fonts.caption, true);
             });
@@ -228,7 +216,7 @@ fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, invite:
     let changing = reader.changing(invite.message);
     if let Some(answered) = invite.answered().filter(|_| !changing) {
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             say(ui, theme, &answered, theme.fonts.body, false);
             if TextButton::new(tr!("Change answer")).secondary().show(ui, theme, keymap).clicked() {
                 ask(drawn, Ask::Change);
@@ -237,7 +225,7 @@ fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, invite:
         return;
     }
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = s.s;
+        ui.spacing_mut().item_spacing.x = s.s2;
         for answer in Rsvp::ALL {
             let button = TextButton::new(answer.text());
             let button = if answer == Rsvp::Going { button.primary().icon(IconId::Done) } else { button.secondary() };

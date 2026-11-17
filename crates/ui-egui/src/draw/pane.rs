@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The navigation rail and the folder pane. The rail runs the preset's gradient at full strength down the window's
-//! left edge, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds New message,
+//! The navigation rail and the folder pane. The rail runs down the window's left edge on the flat `panel`, a hairline
+//! beside it, with the app's mark and the views at its top and the appearance settings and the owner at its foot; the folder pane holds New message,
 //! the account picker, the unified views, the Outbox while anything is in it (its badge how many), and each account's
 //! folders with their unread badges.
 
@@ -12,18 +12,17 @@ use super::Screen;
 use super::paint::{NavRow, line_height, nav_row};
 use crate::component::avatar;
 use crate::component::button::IconButton;
-use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use inboxcraft_model::Role as FolderRole;
 
 use crate::mailbox::{Mailbox, Place, role_text};
-use crate::theme::{Font, Theme, rail_avatar};
+use crate::theme::{Font, Theme};
 use crate::tr;
 
-/// The ink of the rail's icons: white on the rail's own stops, or the better ink where those are the full gradient.
+/// The ink of the rail's icons on its flat panel.
 pub(super) fn rail_ink(theme: &Theme) -> Color32 {
-    theme.palette.rail_ink
+    theme.palette.muted
 }
 
 /// The side of the rail's buttons and its mark, in points: the rail keeps its size at every text scale, so the
@@ -32,7 +31,7 @@ const RAIL_TILE: f32 = 40.0;
 
 /// The rail's width: a tile and room on either side.
 pub(super) fn rail_width(theme: &Theme) -> f32 {
-    RAIL_TILE + theme.spacing.m * 2.0
+    RAIL_TILE + theme.spacing.s3 * 2.0
 }
 
 /// What the person asked for on the rail this frame.
@@ -61,28 +60,25 @@ impl Rail {
     }
 }
 
-/// The app's mark at the rail's top: the mail icon on a tile of the ink, faint.
+/// The app's mark at the rail's top: the mail icon on a `stage` tile.
 fn mark(ui: &mut Ui, theme: &Theme, ink: Color32) {
     let side = RAIL_TILE;
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, "InboxCraft"));
-    ui.painter().rect_filled(rect, side * 0.25, ink.gamma_multiply(MARK_TILE));
+    ui.painter().rect_filled(rect, 0.0, theme.palette.stage);
     let icon = side * 0.5;
     theme.icons.paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Mail, Style::Fill, ink);
 }
 
-/// How strong the ink is in the tile under the app's mark.
-const MARK_TILE: f32 = 0.22;
-
-/// The owner's avatar at the rail's foot: the first account's initials on a white disc, in the middle stop.
+/// The owner's avatar at the rail's foot: the first account's initials, `muted` on a `stage` square.
 fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
     let Some(account) = mailbox.accounts().first() else { return };
     let side = RAIL_TILE * 0.9;
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     let spoken = tr!("Signed in as {address}", address = account.address);
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &spoken));
-    let (disc, ink) = rail_avatar(theme.palette.gradient);
-    ui.painter().circle_filled(rect.center(), side / 2.0, disc);
+    let ink = theme.palette.muted;
+    ui.painter().rect_filled(rect, avatar::CORNER, theme.palette.stage);
     let font = Font { size: side * 0.36, ..theme.fonts.strong };
     let galley = ui.painter().layout_no_wrap(avatar::initials("", &account.address), font.id(), ink);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
@@ -113,13 +109,8 @@ pub(super) fn rail(
     let corner = place.corner;
     let s = &theme.spacing;
     let rect = ui.max_rect();
-    let [first, middle, last] = theme.palette.rail;
-    let gradient = Gradient::Linear {
-        from: pos2(0.5, 0.0),
-        to: pos2(0.5, 1.0),
-        stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-    };
-    gradient::fill(ui.painter(), rect, super::frame::left_corners(corner), &gradient);
+    ui.painter().rect_filled(rect, super::frame::left_corners(corner), theme.palette.panel);
+    super::paint::hairline(ui.painter(), rect.right_top() - vec2(1.0, 0.0), rect.right_bottom() - vec2(1.0, 0.0), theme.palette.line);
     let ink = rail_ink(theme);
     let not_yet = tr!("Not available yet");
     let tile = RAIL_TILE;
@@ -129,11 +120,11 @@ pub(super) fn rail(
     let in_later = mail_shown && matches!(mailbox.place(), Place::Later(_));
     let mut asked = Rail::default();
     ui.vertical_centered(|ui| {
-        ui.spacing_mut().item_spacing.y = s.s;
+        ui.spacing_mut().item_spacing.y = s.s2;
         // The mark's top lines up with the cards'.
         ui.add_space((place.top - (ui.cursor().top() - rect.top())).max(0.0));
         mark(ui, theme, ink);
-        ui.add_space(s.m);
+        ui.add_space(s.s3);
         IconButton::new(IconId::Home, tr!("Start")).unavailable(not_yet).ink(ink).side(tile).show(ui, theme, keymap);
         asked.mail = IconButton::new(IconId::Inbox, tr!("Mail"))
             .action(keymap::MAIL)
@@ -161,8 +152,8 @@ pub(super) fn rail(
         asked.search = IconButton::new(IconId::Search, tr!("Search mail")).action(keymap::FIND).ink(ink).side(tile).show(ui, theme, keymap).clicked();
     });
     ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.y = s.s;
-        ui.add_space(s.m);
+        ui.spacing_mut().item_spacing.y = s.s2;
+        ui.add_space(s.s3);
         owner(ui, theme, mailbox);
         asked.settings = IconButton::new(IconId::Settings, tr!("Appearance settings"))
             .action(keymap::SETTINGS)
@@ -202,10 +193,10 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
     let ink = theme.palette.muted;
     // A field, not a button: the field colour at rest.
     let visuals = &mut ui.visuals_mut().widgets;
-    visuals.inactive.weak_bg_fill = theme.palette.field;
-    visuals.inactive.bg_fill = theme.palette.field;
+    visuals.inactive.weak_bg_fill = theme.palette.term;
+    visuals.inactive.bg_fill = theme.palette.term;
     let response = ComboBox::from_id_salt("account-picker")
-        .selected_text(RichText::new(current).font(theme.fonts.body.id()).color(theme.palette.text))
+        .selected_text(RichText::new(current).font(theme.fonts.body.id()).color(theme.palette.ink))
         .width(width)
         .icon(move |ui, rect, _, _| {
             // A chevron pointing down, drawn in lines like the icons.
@@ -232,9 +223,9 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
 
 /// A section's heading: small capitals in the muted colour.
 fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
-    ui.add_space(theme.spacing.m);
+    ui.add_space(theme.spacing.s3);
     ui.label(RichText::new(text.to_uppercase()).font(theme.fonts.caption.id()).color(theme.palette.muted).extra_letter_spacing(0.6));
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
 }
 
 /// The icon of a folder of `role` (a plain folder without one).
@@ -255,9 +246,9 @@ fn folder_icon(role: Option<FolderRole>) -> IconId {
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     let mut asked = Asked::default();
     let p = &theme.palette;
-    ui.add_space(theme.spacing.s);
+    ui.add_space(theme.spacing.s2);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.text));
+        ui.label(RichText::new("InboxCraft").font(theme.fonts.title.id()).color(p.ink));
         if !mailbox.accounts().is_empty() {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 asked.compose = IconButton::new(IconId::Compose, tr!("New message")).action(keymap::COMPOSE).show(ui, theme, keymap).clicked();
@@ -265,7 +256,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     });
     if !mailbox.accounts().is_empty() {
-        ui.add_space(theme.spacing.s);
+        ui.add_space(theme.spacing.s2);
         ui.scope(|ui| account_picker(ui, theme, mailbox, &mut asked));
     }
     if mailbox.accounts().is_empty() {
@@ -308,19 +299,19 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         }
         for account in mailbox.accounts().iter().filter(|account| mailbox.narrowed().is_none_or(|id| id == account.id)) {
-            ui.add_space(theme.spacing.m);
+            ui.add_space(theme.spacing.s3);
             let colour = theme.account_colour(u64::try_from(account.index).unwrap_or(0));
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = theme.spacing.xs;
+                ui.spacing_mut().item_spacing.x = theme.spacing.s1;
                 let (dot, _) = ui.allocate_exact_size(vec2(10.0, line_height(ui, theme.fonts.strong)), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, colour);
-                ui.label(RichText::new(&account.label).font(theme.fonts.strong.id()).color(p.text));
+                ui.label(RichText::new(&account.label).font(theme.fonts.strong.id()).color(p.ink));
             });
             ui.horizontal(|ui| {
-                ui.add_space(10.0 + theme.spacing.xs);
+                ui.add_space(10.0 + theme.spacing.s1);
                 ui.label(RichText::new(&account.address).font(theme.fonts.caption.id()).color(p.muted));
             });
-            ui.add_space(theme.spacing.xs);
+            ui.add_space(theme.spacing.s1);
             // The unified views above hold every account's inbox, sent mail and the like: an account lists only the
             // folders of its own.
             for folder in mailbox.folders_of(account.id).iter().filter(|folder| folder.role.is_none()) {

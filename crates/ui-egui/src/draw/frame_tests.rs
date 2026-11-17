@@ -187,7 +187,7 @@ fn the_strip_s_window_controls_sit_in_its_middle_as_far_from_its_top_as_close_is
     assert!((close.top() - right).abs() <= 0.5, "Close: {} above, {right} to the window's edge", close.top());
     // Close's hover fill, a little inside the control, ends where the cards end: one gap from the window's edge.
     let fill_to_edge = right + super::frame::HOVER_INSET;
-    assert!((fill_to_edge - crate::theme::SPACING.gap).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge");
+    assert!((fill_to_edge - crate::theme::SPACING.s2).abs() <= 0.5, "Close's fill ends {fill_to_edge} from the edge");
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn whole_window(frame: WindowFrame) -> Harness<'static, InboxApp> {
 
 #[test]
 fn the_rail_s_mark_starts_where_the_cards_start_in_every_frame() {
-    let gap = crate::theme::SPACING.gap;
+    let gap = crate::theme::SPACING.s2;
     for (frame, cards) in [(WindowFrame::Strip, super::frame::STRIP + gap), (WindowFrame::TopRow, gap), (WindowFrame::System, gap)] {
         let harness = whole_window(frame);
         let mark = harness.get_by_role_and_label(Role::Image, "InboxCraft").rect();

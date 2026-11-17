@@ -8,7 +8,7 @@ use egui::epaint::{ClippedPrimitive, Mesh, Primitive, TextureId, Vertex, WHITE_U
 use egui::{Color32, ColorImage, Rect, TextureOptions, pos2, vec2};
 
 use super::{Canvas, Open, Picture, Shot, Texture, apply_textures, fill, parse_script, render, shoot};
-use crate::theme::{Mode, PRESETS, Preset, Theme, contrast, over};
+use crate::theme::{Mode, TextScale, Theme};
 
 fn shot(json: &str) -> Shot {
     parse_script(json).unwrap().remove(0)
@@ -35,20 +35,17 @@ fn a_bad_line_is_named() {
 }
 
 #[test]
-fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
-    for preset in &PRESETS {
+fn the_sample_window_is_drawn_in_the_tokens_of_each_mode() {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "size": [1000, 700]}}"#))).unwrap();
+            let id = "flat";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "size": [1000, 700]}}"#))).unwrap();
             assert_eq!((picture.width(), picture.height()), (1000, 700));
-            let palette = Theme::new(mode, preset).palette;
-            // Below the list's rows: its glass over the colour fields (rasterised for 1024 by 768).
-            let theme = Theme::new(mode, preset);
-            let [r, g, b, _] = crate::glass::fields(&theme).colour_at(pos2(980.5, 686.5), vec2(1024.0, 768.0)).map(|c| (c * 255.0).round() as u8);
-            let expected = over(palette.glass, Color32::from_rgb(r, g, b));
-            let glass = picture.pixel(980, 686).unwrap();
-            assert!(contrast(glass, expected) < 1.03, "{id} {name}: glass over the fields below the list: {glass:?} {expected:?}");
+            let palette = Theme::new(mode, TextScale::default()).palette;
+            // Below the list's rows: the flat surface of its pane.
+            let pane = picture.pixel(980, 686).unwrap();
+            assert_eq!(pane, palette.surface, "{name}: the pane below the list is the flat surface");
             let mut colours = std::collections::BTreeSet::new();
             for y in (0..700).step_by(7) {
                 for x in (0..1000).step_by(7) {
@@ -56,19 +53,19 @@ fn the_sample_window_is_drawn_in_the_tokens_of_each_preset_in_each_mode() {
                 }
             }
             assert!(colours.len() > 20, "{id} {name}: text and markers were drawn, not just the panels ({} colours)", colours.len());
-            assert!(colours.contains(&palette.text.to_array()), "{id} {name}: text in the text colour");
+            assert!(colours.contains(&palette.ink.to_array()), "{id} {name}: text in the text colour");
         }
     }
 }
 
 #[test]
-fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_preset() {
-    for preset in &PRESETS {
+fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_mode() {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "icons": true}}"#))).unwrap();
-            let palette = Theme::new(mode, preset).palette;
+            let id = "icons";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "icons": true}}"#))).unwrap();
+            let palette = Theme::new(mode, TextScale::default()).palette;
             assert_eq!(picture.pixel(0, 0), Some(palette.panel), "{id} {name}: the sheet is on the panel");
             let mut colours = std::collections::BTreeSet::new();
             for y in 0..picture.height() {
@@ -76,7 +73,7 @@ fn an_icon_sheet_shows_every_icon_of_the_set_in_the_tokens_of_its_preset() {
                     colours.insert(picture.pixel(x, y).unwrap().to_array());
                 }
             }
-            for (token, colour) in [("text", palette.text), ("accent", palette.accent)] {
+            for (token, colour) in [("text", palette.ink), ("accent", palette.cyan_text)] {
                 assert!(colours.contains(&colour.to_array()), "{id} {name}: icons in the {token} colour");
             }
         }
@@ -90,31 +87,29 @@ fn an_icon_sheet_is_not_a_window() {
 }
 
 #[test]
-fn the_component_gallery_is_drawn_in_the_tokens_of_its_preset_and_mode() {
+fn the_component_gallery_is_drawn_in_the_tokens_of_its_mode() {
     let mut pictures = Vec::new();
-    for preset in &PRESETS {
+    {
         for mode in [Mode::Light, Mode::Dark] {
             let name = if mode == Mode::Light { "light" } else { "dark" };
-            let id = preset.id;
-            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "preset": "{id}", "components": true}}"#))).unwrap();
+            let id = "gallery";
+            let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "components": true}}"#))).unwrap();
             let size = crate::component::gallery::size();
             assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
-            let theme = Theme::new(mode, preset);
+            let theme = Theme::new(mode, TextScale::default());
             let mut colours = std::collections::BTreeSet::new();
             for y in 0..picture.height() {
                 for x in 0..picture.width() {
                     colours.insert(picture.pixel(x, y).unwrap().to_array());
                 }
             }
-            let avatar = crate::component::avatar::colour(&theme, "odile@example.org");
-            assert!(colours.contains(&avatar.to_array()), "{id} {name}: the avatars in their palette");
-            assert!(colours.contains(&theme.palette.selection.to_array()), "{id} {name}: the selected pill on the selection");
-            assert!(colours.contains(&theme.palette.float.to_array()), "{id} {name}: the floats solid");
+            assert!(colours.contains(&theme.palette.stage.to_array()), "{id} {name}: the selected pill on the selection");
+            assert!(colours.contains(&theme.palette.surface.to_array()), "{id} {name}: the floats solid");
             pictures.push(picture);
         }
     }
     for (index, one) in pictures.iter().enumerate() {
-        assert!(pictures.iter().skip(index + 1).all(|other| other != one), "every preset and mode looks its own");
+        assert!(pictures.iter().skip(index + 1).all(|other| other != one), "each mode looks its own");
     }
 }
 
@@ -127,13 +122,9 @@ fn the_component_gallery_is_not_a_window_nor_an_icon_sheet() {
 }
 
 #[test]
-fn a_shot_without_a_preset_is_electric() {
-    let picture = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400]}"#)).unwrap();
-    let electric = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "electric", "size": [600, 400]}"#)).unwrap();
-    let citrus = shoot(&shot(r#"{"out": "x.png", "mode": "light", "preset": "citrus", "size": [600, 400]}"#)).unwrap();
-    assert_eq!(picture, electric);
-    assert_ne!(picture.pixel(4, 390), citrus.pixel(4, 390));
-    assert_eq!(Preset::default().id, "electric");
+fn a_script_naming_a_preset_is_refused() {
+    let error = parse_script(r#"{"out":"x.png","preset":"aurora"}"#).unwrap_err().to_string();
+    assert!(error.contains("preset"), "{error}");
 }
 
 #[test]
@@ -241,7 +232,6 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
 fn a_shot_that_names_something_wrong_is_refused() {
     for (json, says) in [
         (r#"{"out": "x.png", "mode": "sepia"}"#, "sepia"),
-        (r#"{"out": "x.png", "mode": "light", "preset": "teal"}"#, "no preset \"teal\""),
         (r#"{"out": "x.png", "mode": "light", "open": {"role": "attic"}}"#, "attic"),
         (r#"{"out": "x.png", "mode": "light", "select": "No such subject"}"#, "No such subject"),
         (r#"{"out": "x.png", "mode": "light", "select": "Your bike is due for a service", "pictures": "maybe"}"#, "maybe"),

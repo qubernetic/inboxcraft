@@ -20,13 +20,13 @@ pub fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let round = rect.height() / 2.0;
-        painter.rect_filled(rect, round, if on { p.selection } else { p.field });
-        painter.rect_stroke(rect, round, Stroke::new(1.0, p.field_border), StrokeKind::Inside);
+        painter.rect_filled(rect, round, if on { p.stage } else { p.term });
+        painter.rect_stroke(rect, round, Stroke::new(1.0, p.line), StrokeKind::Inside);
         let at = motion::toggle(ui.ctx(), response.id.with("knob"), on, theme.motion.hover_fade);
         let x = rect.left() + round + (rect.width() - 2.0 * round) * at;
-        painter.circle_filled(pos2(x, rect.center().y), round - 2.0, if on { p.accent } else { p.muted });
+        painter.circle_filled(pos2(x, rect.center().y), round - 2.0, if on { p.cyan_text } else { p.muted });
         if response.has_focus() {
-            painter.rect_stroke(rect.expand(2.0), round + 2.0, Stroke::new(2.0, p.focus), StrokeKind::Outside);
+            painter.rect_stroke(rect.expand(2.0), round + 2.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);
         }
     }
     response
