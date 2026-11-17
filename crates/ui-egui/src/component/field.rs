@@ -210,6 +210,23 @@ struct Refused {
     seen: u64,
 }
 
+/// What [`guard`] knows of a text as a frame's events reach its edit in order. It reads the text and the stored
+/// selection once, then keeps them true or on the safe side after every event the edit acts on: an edit it lets
+/// through sets the new size and an empty selection; a key, a pointer press, a cut or a screen reader's action on the
+/// field may move the selection, so the selection counts as empty (select-all as the whole text); an undo or a redo
+/// may make the text any size it held, so the size is unknown and nothing that adds to it is taken for the rest of the
+/// frame. `now` never falls below the text's true size, and `selected` never rises above the true selection's, so
+/// what `guard` takes cannot carry the text past its cap.
+#[derive(Debug, Clone, Copy)]
+struct Sizes {
+    /// The text's size, in the cap's unit: exact, or the most it can be.
+    now: usize,
+    /// The selection an insert would replace, in the cap's unit: exact, or the least it can be.
+    selected: usize,
+    /// Whether `now` is known; false after an undo or a redo in this frame.
+    known: bool,
+}
+
 /// Whether a field has something refused to say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Refusal {
@@ -233,8 +250,15 @@ fn guard(ui: &Ui, id: Id, text: &str, cap: Cap, lines: bool) -> Option<Refusal> 
     let pass = ui.ctx().cumulative_pass_nr();
     let mut refused = false;
     ui.input_mut(|input| {
-        // The text's size and its selection's, measured once when an edit asks for it.
-        let mut sizes: Option<(usize, usize)> = None;
+        // What the text holds as the frame's events reach the edit one after another, measured once when an event asks
+        // for it: the text's size, the selection's, and whether the size is still known.
+        let mut sizes: Option<Sizes> = None;
+        let sized = |sizes: &mut Option<Sizes>| {
+            *sizes.get_or_insert_with(|| {
+                let selected = selection.map_or(0, |range| cap.span(text, range.primary.index.0, range.secondary.index.0));
+                Sizes { now: cap.measure(text), selected, known: true }
+            })
+        };
         let events = std::mem::take(&mut input.events);
         input.events = events
             .into_iter()
@@ -252,24 +276,48 @@ fn guard(ui: &Ui, id: Id, text: &str, cap: Cap, lines: bool) -> Option<Refusal> 
                     Event::AccessKitActionRequest(request) if request.target_node == target => match (&request.action, &request.data) {
                         (Action::SetValue, Some(ActionData::Value(value))) => (&**value, true, false),
                         (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => (&**value, false, false),
-                        _ => return Some(event),
+                        // Any other action on the field may move its selection.
+                        _ => {
+                            let was = sized(&mut sizes);
+                            sizes = Some(Sizes { selected: 0, ..was });
+                            return Some(event);
+                        }
                     },
+                    // A key the edit acts on before what follows: it may move the selection or change the text, so
+                    // what was read at the frame's start no longer holds (see `Sizes`).
+                    Event::Key { key, pressed: true, modifiers, .. } if focused => {
+                        let was = sized(&mut sizes);
+                        sizes = Some(if modifiers.matches_logically(Modifiers::COMMAND) && *key == Key::A {
+                            Sizes { selected: was.now, ..was }
+                        } else if modifiers.command && matches!(key, Key::Z | Key::Y) {
+                            Sizes { selected: 0, known: false, ..was }
+                        } else {
+                            Sizes { selected: 0, ..was }
+                        });
+                        return Some(event);
+                    }
+                    // A press may move the caret or start a selection; a cut only shortens the text.
+                    Event::PointerButton { pressed: true, .. } | Event::Cut if focused => {
+                        let was = sized(&mut sizes);
+                        sizes = Some(Sizes { selected: 0, ..was });
+                        return Some(event);
+                    }
                     _ => return Some(event),
                 };
-                let (now, selected) = *sizes.get_or_insert_with(|| {
-                    let selected = selection.map_or(0, |range| cap.span(text, range.primary.index.0, range.secondary.index.0));
-                    (cap.measure(text), selected)
-                });
-                let after = if whole { cap.measure(insert) } else { now.saturating_sub(selected).saturating_add(cap.measure(insert)) };
-                if after > cap.most() && after > now {
+                let Sizes { now, selected, known } = sized(&mut sizes);
+                let added = cap.measure(insert);
+                let after = if whole { added } else { now.saturating_sub(selected).saturating_add(added) };
+                // With the size unknown (an undo or a redo earlier in this frame), anything that adds may pass the cap.
+                let grows = if whole { after > now || !known } else { added > selected || !known };
+                if grows && (after > cap.most() || !known) {
                     refused = true;
                     // A refused commit still ends the composition: an empty one takes its text out of the field.
                     return commit.then(|| {
-                        sizes = Some((now.saturating_sub(selected), 0));
+                        sizes = Some(Sizes { now: now.saturating_sub(selected), selected: 0, known });
                         Event::Ime(ImeEvent::Commit(String::new()))
                     });
                 }
-                sizes = Some((after, 0));
+                sizes = Some(Sizes { now: after, selected: 0, known: known || whole });
                 Some(event)
             })
             .collect();

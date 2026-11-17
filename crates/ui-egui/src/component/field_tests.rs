@@ -1184,3 +1184,133 @@ fn a_frame_of_the_message_text_costs() {
         }
     }
 }
+
+/// The kinds the one-frame cap tests run over: a line, a password and both kinds of several lines.
+const ONE_FRAME: [Kind; 4] = [Kind::Text, Kind::Password, Kind::Many, Kind::PlainText];
+
+/// The field of `kind` filled to its cap with "y", the caret at its end.
+fn at_the_cap(kind: Kind) -> (Harness<'static, String>, usize) {
+    let (most, _) = cap_of(kind);
+    let mut harness = field_of(kind, "");
+    harness.event(egui::Event::Paste("y".repeat(most)));
+    harness.run_ok();
+    assert_eq!(harness.state().len(), most, "{kind:?}: filled to the cap");
+    (harness, most)
+}
+
+/// `key` pressed and let go with `modifiers`.
+fn press(key: egui::Key, modifiers: egui::Modifiers) -> [egui::Event; 2] {
+    [true, false].map(|pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers })
+}
+
+/// `events` in ONE frame (kittest's queue gives every event a frame of its own), then the field settles.
+fn one_frame(harness: &mut Harness<'static, String>, events: Vec<egui::Event>) {
+    harness.input_mut().events.extend(events);
+    harness.step();
+    harness.run_ok();
+}
+
+/// After a frame that tried to grow a text at its cap with "z": the text is at most its cap, nothing of the "z" was cut
+/// in (all of it or none), and when none went in the field says why.
+fn held(harness: &Harness<'static, String>, kind: Kind, most: usize, tried: usize, case: &str) {
+    let text = harness.state();
+    let z = text.matches('z').count();
+    assert!(text.len() <= most, "{kind:?} {case}: {} past the cap {most}", text.len());
+    assert!(z == 0 || z == tried, "{kind:?} {case}: {z} of {tried} went in, cut silently");
+    assert!(z > 0 || says_too_long(harness), "{kind:?} {case}: the field says why");
+}
+
+const A: egui::Key = egui::Key::A;
+
+#[test]
+fn a_selection_moved_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap() {
+    use egui::{Event, Key, Modifiers};
+    for kind in ONE_FRAME {
+        for collapse in [Key::ArrowRight, Key::End] {
+            let (mut harness, most) = at_the_cap(kind);
+            // The whole text selected in a frame of its own: the field holds a selection of all of it.
+            one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
+            // Then, in one frame: select all, collapse the selection, paste as much as the cap.
+            let mut events: Vec<Event> = press(A, Modifiers::COMMAND).into();
+            events.extend(press(collapse, Modifiers::NONE));
+            events.push(Event::Paste("z".repeat(most)));
+            one_frame(&mut harness, events);
+            held(&harness, kind, most, most, &format!("{collapse:?}"));
+        }
+    }
+}
+
+#[test]
+fn a_pointer_press_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap() {
+    use egui::{Event, Modifiers, PointerButton};
+    for kind in ONE_FRAME {
+        let (mut harness, most) = at_the_cap(kind);
+        one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
+        // A point of the field in the window (a long text's node reaches far above and below it).
+        let rect = harness.get_by_label(kind_name(kind)).rect();
+        let at = pos2(rect.center().x, rect.top().max(0.0) + 10.0);
+        let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        // A press and its release in the frame of the paste: a click that puts the caret down.
+        one_frame(&mut harness, vec![Event::PointerMoved(at), button(true), button(false), Event::Paste("z".repeat(most))]);
+        held(&harness, kind, most, most, "pointer click");
+        // And a press alone.
+        let (mut harness, most) = at_the_cap(kind);
+        one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
+        one_frame(&mut harness, vec![Event::PointerMoved(at), button(true), Event::Paste("z".repeat(most))]);
+        one_frame(&mut harness, vec![button(false)]);
+        held(&harness, kind, most, most, "pointer press");
+    }
+}
+
+#[test]
+fn undo_or_redo_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap() {
+    use egui::{Event, Key, Modifiers};
+    for kind in ONE_FRAME {
+        // Undo: everything deleted, then in one frame Ctrl Z brings it back and a paste follows.
+        let (mut harness, most) = at_the_cap(kind);
+        one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
+        one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
+        let mut events: Vec<Event> = press(Key::Z, Modifiers::COMMAND).into();
+        events.push(Event::Paste("z".repeat(most)));
+        one_frame(&mut harness, events);
+        held(&harness, kind, most, most, "Ctrl Z");
+        // Redo: the paste undone, then in one frame Ctrl Y brings it back and a paste follows.
+        let (mut harness, most) = at_the_cap(kind);
+        one_frame(&mut harness, press(Key::Z, Modifiers::COMMAND).into());
+        let mut events: Vec<Event> = press(Key::Y, Modifiers::COMMAND).into();
+        events.push(Event::Paste("z".repeat(most)));
+        one_frame(&mut harness, events);
+        held(&harness, kind, most, most, "Ctrl Y");
+    }
+}
+
+#[test]
+fn a_character_typed_after_a_collapsed_selection_at_the_cap_is_refused() {
+    use egui::{Event, Key, Modifiers};
+    for kind in ONE_FRAME {
+        let (mut harness, most) = at_the_cap(kind);
+        one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+        one_frame(&mut harness, press(Key::ArrowLeft, Modifiers::SHIFT).into());
+        let mut events: Vec<Event> = press(Key::ArrowRight, Modifiers::NONE).into();
+        events.push(Event::Text("z".to_owned()));
+        one_frame(&mut harness, events);
+        held(&harness, kind, most, 1, "ArrowRight, typed");
+        assert_eq!(harness.state().len(), most, "{kind:?}");
+    }
+}
+
+#[test]
+fn in_one_frame_select_all_and_a_shorter_paste_replace_and_deleting_at_the_cap_works() {
+    use egui::{Event, Key, Modifiers};
+    for kind in ONE_FRAME {
+        let (mut harness, most) = at_the_cap(kind);
+        let mut events: Vec<Event> = press(A, Modifiers::COMMAND).into();
+        events.push(Event::Paste("w".repeat(10)));
+        one_frame(&mut harness, events);
+        assert_eq!(harness.state(), &"w".repeat(10), "{kind:?}: the selection is replaced");
+        assert!(!says_too_long(&harness), "{kind:?}");
+        let (mut harness, _) = at_the_cap(kind);
+        one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
+        assert_eq!(harness.state().len(), most - 1, "{kind:?}: deleting at the cap is taken");
+    }
+}
