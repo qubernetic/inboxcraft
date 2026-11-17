@@ -13,15 +13,18 @@ use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, 
 use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
-/// `galley` with every row moved onto the design's baseline when egui's rounding left it more than a quarter of a
-/// pixel off: a text box of the design puts its baseline half the leading (line height less the face's ascent and
-/// descent) under its top, plus the ascent, a fraction of a pixel included. egui puts it on the nearest whole pixel,
-/// rounding a half up, so a caption (Plex Sans 12/18, baseline 13.5 under its top) stood half a pixel low. The row is
-/// moved by the rest; its glyphs keep their pixels and the painter samples them between two rows of pixels, as the
-/// design's renderer covers a baseline that falls between them. A row of glyphs of more than one line height is left.
+/// `galley` with every row's baseline on the whole pixel nearest the design's, one half way between two pixels going to
+/// the upper one. A text box of the design puts its baseline half the leading (line height less the face's ascent and
+/// descent) under its top, plus the ascent, a fraction of a pixel included, and a row's top is the line heights over
+/// it. egui puts a baseline and a row's top on whole pixels too, but rounds a half down the page, where the hinting it
+/// draws with sets the letters a little lower still: a caption (Plex Sans 12/18, its baseline 13.5 under its top) stood
+/// 0.6 to 0.7 px low; on 13 it stands 0.3 to 0.4 px high. A run's second row at 125 % stood 0.6 px off.
+///
+/// Whole pixels only: egui draws a glyph's pixels on whole pixel rows, and a glyph put between two (sampled between
+/// texels) loses its top row, since the font atlas keeps no clear texel over its first row of glyphs. A row of glyphs
+/// of more than one line height is left as egui lays it out.
 pub(crate) fn on_baseline(galley: Arc<Galley>) -> Arc<Galley> {
     let ppp = if galley.pixels_per_point.is_finite() && galley.pixels_per_point > 0.0 { galley.pixels_per_point } else { 1.0 };
-    // Each row's exact top is the line heights of the rows over it; egui rounds every row's top as well.
     let mut top = 0.0_f32;
     let mut shifts = Vec::with_capacity(galley.rows.len());
     for row in &galley.rows {
@@ -31,11 +34,13 @@ pub(crate) fn on_baseline(galley: Arc<Galley>) -> Arc<Galley> {
             Some(glyph) if even => {
                 let exact =
                     top + glyph.font_face_ascent + 0.5 * (glyph.line_height - glyph.font_height) + 0.5 * (glyph.font_height - glyph.font_face_height);
-                exact - (row.pos.y + glyph.pos.y)
+                // The nearest whole pixel, a half going up.
+                let nearest = (exact * ppp - 0.5).ceil() / ppp;
+                ((nearest - (row.pos.y + glyph.pos.y)) * ppp).round() / ppp
             }
             _ => 0.0,
         };
-        shifts.push(if off.is_finite() && (off * ppp).abs() > 0.25 + 1e-3 { off } else { 0.0 });
+        shifts.push(if off.is_finite() { off } else { 0.0 });
         top += match first {
             Some(glyph) if even => glyph.line_height,
             _ => row.size.y,

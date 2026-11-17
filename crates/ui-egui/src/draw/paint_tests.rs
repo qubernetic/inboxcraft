@@ -664,9 +664,10 @@ fn every_row_of_a_wrapped_run_stands_where_the_design_puts_it() {
 }
 
 /// The baselines of `font`'s rows as [`crate::component::galley`] and [`crate::component::wrapped`] lay them out at
-/// `ppp`, against the top of their galley, and the design's: half the leading (the line height less the face's ascent
+/// `ppp`, against the top of their galley, with the design's top of each row (the line heights over it), and the
+/// design's baseline against a row's top: half the leading (the line height less the face's ascent
 /// and descent) over the ascent.
-fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<f32>, f32) {
+fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<(f32, f32)>, f32) {
     let ctx = egui::Context::default();
     ctx.set_pixels_per_point(ppp);
     crate::theme::install_fonts(&ctx);
@@ -679,7 +680,7 @@ fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<f32>, f32) {
             got = [one, two]
                 .iter()
                 .flat_map(|galley| galley.rows.iter().enumerate().map(|(index, row)| (index, row.pos.y, row.glyphs.first().map(|g| g.pos.y))))
-                .filter_map(|(index, top, glyph)| glyph.map(|y| top + y - index as f32 * font.line))
+                .filter_map(|(index, top, glyph)| glyph.map(|y| (top + y, index as f32 * font.line)))
                 .collect();
         });
         output.textures_delta.clear();
@@ -689,8 +690,9 @@ fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<f32>, f32) {
 }
 
 #[test]
-fn every_line_of_text_stands_within_a_quarter_pixel_of_the_designs_baseline() {
-    // The caption (Plex Sans 12/18) has its baseline on a half pixel, 13.5 under its top; egui rounds it to 14.
+fn every_line_of_text_stands_on_the_whole_pixel_nearest_the_designs_baseline() {
+    // The caption (Plex Sans 12/18) has its baseline on a half pixel, 13.5 under its top: egui rounded it down the page
+    // to 14, where hinting sets the letters lower still; it goes on 13. A run's second row at 125 % stood 0.625 px off.
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let f = theme.fonts;
     for (name, font) in [
@@ -710,9 +712,13 @@ fn every_line_of_text_stands_within_a_quarter_pixel_of_the_designs_baseline() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
             let (got, design) = baselines(font, ppp);
             assert!(got.len() >= 3, "{name}: one row and a wrapped run");
-            for baseline in got {
-                assert!(((baseline - design) * ppp).abs() <= 0.25 + 1e-3, "{name} at {ppp}: the baseline at {baseline}, the design's at {design}");
+            for (baseline, top) in got {
+                assert!(((baseline * ppp) - (baseline * ppp).round()).abs() < 1e-3, "{name} at {ppp}: on a whole pixel: {baseline}");
+                let off = (top + design - baseline) * ppp;
+                assert!(off > -0.5 + 1e-3 && off <= 0.5 + 1e-3, "{name} at {ppp}: the baseline at {baseline}, the design's at {top} + {design}");
             }
         }
     }
+    let (got, _) = baselines(f.caption, 1.0);
+    assert!(got.iter().all(|(baseline, top)| baseline - top == 13.0), "the caption's baseline 13 under its top: {got:?}");
 }
