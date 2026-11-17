@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! `ui_bench`: how long the sample window takes to build a frame, over the sample mailbox grown to 10 000 invented
-//! messages. Three scenes of 300 frames each: the inbox at rest, the inbox scrolling 40 points a frame, and the
-//! reader open on an HTML message. The inbox shows as the grouped list (`--view list`, every listed row laid out in
-//! one scroll area) unless `--view cards` or `--view simple` asks otherwise; the cards' few rows do not scroll, and
-//! the list lists at most the engine's `MAX_LIST` (1 000) of the 10 000. A frame is the window's `ui` and the tessellation of what it painted, on the CPU;
+//! messages, of which the list shows the engine's `MAX_LIST` (1 000). Four scenes of 300 frames each:
+//! `inbox-default-rest` (the inbox in the view a new owner sees, today the cards), `inbox-list-rest` and
+//! `inbox-list-scroll` (the grouped list, every listed row laid out, scrolling 40 points a frame: the stress case)
+//! and `reader-html` (the reader open on an HTML message beside the default view). A frame is the window's `ui` and the tessellation of what it painted, on the CPU;
 //! nothing is drawn on a GPU. Per scene it prints the median and the 95th percentile in milliseconds, the shapes and
 //! the list rows the last frame built, and the budget's verdict: p95 at most 4 ms, or with `--pinned` (run under
 //! `taskset -c 0` by `just bench-ui`) at most 16.6 ms, one frame at 60 Hz. A scene that misses either is a miss. It
@@ -13,12 +13,13 @@
 //! are never mixed up. The verdict never fails the run.
 //!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- [--pinned] [--view cards|list|simple]]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned]
 //! ```
 
 use std::process::ExitCode;
 
 use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, Pos2, RawInput, Rect, Shape, TouchPhase, Vec2, pos2, vec2};
+use inboxcraft_engine::MAX_LIST;
 use inboxcraft_time::{Clock, FakeClock, SystemClock, Timestamp};
 use inboxcraft_ui_egui::mailbox::{InboxView, Mailbox};
 use inboxcraft_ui_egui::save::NoSave;
@@ -43,22 +44,36 @@ const TIME: i64 = 1_793_869_200;
 /// The HTML message the reader opens.
 const HTML_SUBJECT: &str = "Your bike is due for a service";
 
-/// A scene: its name and what it does before and in each frame.
-#[derive(Clone, Copy)]
+/// A scene: what it shows and what it does in each frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Scene {
-    Rest,
-    Scroll,
-    Reader,
+    /// The inbox in the view a new owner sees (today the cards), left alone.
+    DefaultRest,
+    /// The inbox as the grouped list, every listed row laid out: the stress case, left alone.
+    ListRest,
+    /// The grouped list scrolling 40 points a frame.
+    ListScroll,
+    /// The reader open on an HTML message, the inbox in the default view beside it.
+    ReaderHtml,
 }
 
 impl Scene {
-    const ALL: [Self; 3] = [Self::Rest, Self::Scroll, Self::Reader];
+    const ALL: [Self; 4] = [Self::DefaultRest, Self::ListRest, Self::ListScroll, Self::ReaderHtml];
 
     fn name(self) -> &'static str {
         match self {
-            Self::Rest => "inbox at rest",
-            Self::Scroll => "inbox scrolling 40 pt a frame",
-            Self::Reader => "reader on an HTML message",
+            Self::DefaultRest => "inbox-default-rest",
+            Self::ListRest => "inbox-list-rest",
+            Self::ListScroll => "inbox-list-scroll",
+            Self::ReaderHtml => "reader-html",
+        }
+    }
+
+    /// The inbox view it sets; `None` keeps the default.
+    fn view(self) -> Option<InboxView> {
+        match self {
+            Self::ListRest | Self::ListScroll => Some(InboxView::List),
+            Self::DefaultRest | Self::ReaderHtml => None,
         }
     }
 }
@@ -79,8 +94,8 @@ fn count(shape: &Shape) -> usize {
     }
 }
 
-/// The sample window over the grown mailbox in `view`, reduced motion on, as `scene` starts.
-fn app(scene: Scene, view: InboxView) -> Result<InboxApp, UiError> {
+/// The sample window over the grown mailbox, reduced motion on, as `scene` starts.
+fn app(scene: Scene) -> Result<InboxApp, UiError> {
     let time = Timestamp::from_unix(TIME, 0).ok_or_else(|| UiError::Shot("no time".to_owned()))?;
     let clock = FakeClock::new(time);
     let store = sample::grown(time, MESSAGES)?;
@@ -88,8 +103,10 @@ fn app(scene: Scene, view: InboxView) -> Result<InboxApp, UiError> {
     let mailbox = Mailbox::new(session, Box::new(clock));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_reduce_motion(true);
-    app.mailbox_mut().set_inbox_view(view);
-    if let Scene::Reader = scene {
+    if let Some(view) = scene.view() {
+        app.mailbox_mut().set_inbox_view(view);
+    }
+    if scene == Scene::ReaderHtml {
         let id = app.mailbox().messages().iter().find(|row| row.subject == HTML_SUBJECT).map(|row| row.id);
         let Some(id) = id else { return Err(UiError::Shot(format!("no row {HTML_SUBJECT:?}"))) };
         app.mailbox_mut().select(Some(id));
@@ -109,8 +126,8 @@ fn percentile(values: &[f64], share: f64) -> f64 {
 }
 
 /// Runs `scene` for its warm-up and [`FRAMES`] frames.
-fn measure(scene: Scene, view: InboxView) -> Result<Measured, UiError> {
-    let mut app = app(scene, view)?;
+fn measure(scene: Scene) -> Result<Measured, UiError> {
+    let mut app = app(scene)?;
     let ctx = egui::Context::default();
     let screen = Rect::from_min_size(Pos2::ZERO, WINDOW);
     // Over the list, left of the reader and right of the folders.
@@ -120,7 +137,7 @@ fn measure(scene: Scene, view: InboxView) -> Result<Measured, UiError> {
     let (mut shapes, mut rows) = (0, None);
     for frame in 0..WARM_UP + FRAMES {
         let mut events = vec![Event::PointerMoved(over_list)];
-        if let (Scene::Scroll, true) = (scene, frame >= WARM_UP) {
+        if scene == Scene::ListScroll && frame >= WARM_UP {
             events.push(Event::MouseWheel {
                 unit: MouseWheelUnit::Point,
                 delta: vec2(0.0, -SCROLL),
@@ -165,25 +182,33 @@ fn governor() -> String {
 
 fn main() -> ExitCode {
     let pinned = std::env::args().any(|arg| arg == "--pinned");
-    let name = std::env::args().skip_while(|arg| arg != "--view").nth(1).unwrap_or_else(|| "list".to_owned());
-    let Some(view) = InboxView::named(&name) else {
-        eprintln!("ui_bench: view {name:?} is not cards, list or simple");
-        return ExitCode::from(2);
+    let (label, budget) = if pinned { ("pinned to core 0", PINNED_BUDGET_MS) } else { ("every core free", BUDGET_MS) };
+    let listed = match app(Scene::DefaultRest) {
+        Ok(app) => app.mailbox().messages().len(),
+        Err(error) => {
+            eprintln!("ui_bench: {error}");
+            return ExitCode::FAILURE;
+        }
     };
-    let (label, budget) = if pinned { ("pinned to one core", PINNED_BUDGET_MS) } else { ("every core free", BUDGET_MS) };
     let (model, cores) = cpu();
-    println!("ui_bench, {label}: {MESSAGES} messages, the inbox as {name}, {FRAMES} frames a scene, window {} x {} pt", WINDOW.x, WINDOW.y);
+    let governor = governor();
+    println!("ui_bench, {label}: {FRAMES} frames a scene, window {} x {} pt", WINDOW.x, WINDOW.y);
+    println!("mailbox: {MESSAGES} messages held, {listed} listed (the engine lists at most {MAX_LIST})");
     println!("cpu: {model}");
     println!("cores: {cores}");
-    println!("governor: {}", governor());
+    if pinned {
+        println!("governor: {governor} (the run pins the core, not the clock: the governor is left as it is)");
+    } else {
+        println!("governor: {governor}");
+    }
     let clock = SystemClock::new();
     for scene in Scene::ALL {
-        match measure(scene, view) {
+        match measure(scene) {
             Ok(measured) => {
                 let rows = measured.rows_built.map_or_else(|| "n/a".to_owned(), |rows| rows.to_string());
                 let verdict = if measured.p95_ms <= budget { "PASS" } else { "MISS" };
                 println!(
-                    "{:<30} median_ms {:>8.3}  p95_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
+                    "{:<20} median_ms {:>8.3}  p95_ms {:>8.3}  shapes {:>6}  rows_built {:>6}  p95 <= {budget} ms: {verdict}",
                     scene.name(),
                     measured.median_ms,
                     measured.p95_ms,

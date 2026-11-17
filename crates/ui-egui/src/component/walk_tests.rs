@@ -8,7 +8,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 
 use super::gallery::{keymap, page, size};
-use super::tests::{builder, keyboard_walk, painted, rests};
+use super::tests::{Look, builder, keyboard_walk, painted, rests};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -49,10 +49,31 @@ fn the_gallery_rests() {
 #[test]
 fn painted_finds_the_shapes_of_a_control() {
     let harness = gallery(true);
-    let shapes = painted(&harness, "Unread");
-    assert!(shapes.iter().any(|shape| shape.fill.a() > 0), "the chosen pill is filled: {shapes:?}");
+    let paint = painted(&harness, "Unread");
     let rect = harness.get_by_label("Unread").rect();
-    assert!(shapes.iter().all(|shape| rect.expand(1.0).contains_rect(shape.rect)), "{shapes:?} outside {rect:?}");
+    let fill = paint.rects().find_map(|shape| match shape.look {
+        Look::Rect { fill, radius, .. } if shape.inside && fill.a() > 0 => Some((fill, radius)),
+        _ => None,
+    });
+    let (fill, radius) = fill.unwrap_or_else(|| panic!("the chosen pill is filled: {paint:?}"));
+    assert!(radius.abs() < f32::EPSILON, "the pill is square");
+    assert!(paint.ground.is_some_and(|ground| ground != fill), "the pill stands out from its card: {paint:?}");
+    let muted = Theme::new(Mode::Light, TextScale::default()).palette.muted;
+    let edge = painted(&harness, "Flagged");
+    assert!(
+        edge.rects().any(|shape| shape.inside
+            && shape.look
+                == Look::Rect {
+                    fill: egui::Color32::TRANSPARENT,
+                    stroke: Some((1.0, muted)),
+                    stroke_kind: egui::StrokeKind::Inside,
+                    radius: 0.0,
+                    dashed: false
+                }),
+        "an unchosen pill has a 1 px muted edge inside: {edge:#?}"
+    );
+    assert!(paint.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, .. } if text == "Unread")), "{paint:?}");
+    assert!(paint.shapes.iter().all(|shape| rect.expand(4.0).contains_rect(shape.rect)), "{paint:?} outside {rect:?}");
 }
 
 #[test]
@@ -82,32 +103,87 @@ fn a_page_that_asks_for_every_frame_does_not_rest() {
     assert!(rests(&mut harness, 8));
 }
 
-#[test]
-fn painted_reads_fills_strokes_corners_and_dashes() {
-    let harness = builder().with_size(egui::vec2(300.0, 200.0)).build_ui(|ui| {
-        // Something else on the page, so the harness's own background is wider than the box.
-        ui.label("A line wider than the box beside it, for the page around it");
+/// A page of drawn widgets for the painted tests: "Box" on a grey ground with a ring 3 points out, a shadow, a
+/// caption, a half-clipped mark and a toast-like area over it; "Dashed" drawn with `paint::dashed`; "Plain" boxed
+/// by four plain hairlines.
+fn drawn() -> Harness<'static> {
+    let mut harness = builder().with_size(egui::vec2(400.0, 300.0)).build_ui(|ui| {
+        let painter = ui.painter().clone();
+        painter.rect_filled(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0)), 0.0, egui::Color32::GRAY);
         let (rect, response) = ui.allocate_exact_size(egui::vec2(120.0, 40.0), egui::Sense::click());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Box"));
-        let colour = egui::Color32::from_rgb(10, 20, 30);
-        ui.painter().rect(rect, 6.0, colour, egui::Stroke::new(1.0, egui::Color32::RED), egui::StrokeKind::Inside);
-        let y = rect.center().y;
-        ui.painter().extend(egui::Shape::dashed_line(
-            &[egui::pos2(rect.left() + 4.0, y), egui::pos2(rect.right() - 4.0, y)],
-            egui::Stroke::new(1.0, egui::Color32::BLUE),
-            4.0,
-            4.0,
-        ));
-        ui.painter().circle_filled(rect.center(), 5.0, egui::Color32::GREEN);
-        ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(250.0, 150.0), egui::vec2(10.0, 10.0)), 0.0, egui::Color32::RED);
+        let shadow = egui::Shadow { offset: [0, 4], blur: 12, spread: 2, color: egui::Color32::BLACK };
+        painter.add(shadow.as_shape(rect, 6.0));
+        painter.rect(rect, 6.0, egui::Color32::from_rgb(10, 20, 30), egui::Stroke::new(1.0, egui::Color32::RED), egui::StrokeKind::Inside);
+        painter.rect_stroke(rect.expand(2.0), 8.0, egui::Stroke::new(1.0, egui::Color32::YELLOW), egui::StrokeKind::Outside);
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Caption", egui::FontId::proportional(14.0), egui::Color32::WHITE);
+        let half = egui::Rect::from_min_max(rect.min, egui::pos2(rect.center().x, rect.max.y));
+        painter.with_clip_rect(half).rect_filled(egui::Rect::from_center_size(rect.center(), egui::vec2(20.0, 10.0)), 0.0, egui::Color32::GREEN);
+        egui::Area::new(egui::Id::unique("over-the-box")).fixed_pos(rect.min).show(ui.ctx(), |ui| {
+            ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(30.0, 30.0)), 0.0, egui::Color32::BLUE);
+        });
+        ui.add_space(20.0);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(80.0, 30.0), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Dashed"));
+        crate::draw::paint::dashed(ui.painter(), rect, egui::Color32::LIGHT_BLUE);
+        ui.add_space(20.0);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(80.0, 30.0), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Plain"));
+        let stroke = egui::Stroke::new(1.0, egui::Color32::LIGHT_BLUE);
+        let r = rect.shrink(0.5);
+        for (a, b) in
+            [(r.left_top(), r.right_top()), (r.right_top(), r.right_bottom()), (r.right_bottom(), r.left_bottom()), (r.left_bottom(), r.left_top())]
+        {
+            ui.painter().line_segment([a, b], stroke);
+        }
     });
-    let shapes = painted(&harness, "Box");
-    assert_eq!(shapes.len(), 3, "{shapes:#?}");
-    assert_eq!(shapes[0].fill, egui::Color32::from_rgb(10, 20, 30));
-    assert!((shapes[0].radius - 6.0).abs() < f32::EPSILON);
-    assert_eq!(shapes[0].stroke, Some((1.0, egui::Color32::RED, false)));
-    assert_eq!(shapes[1].stroke.map(|(_, colour, dashed)| (colour, dashed)), Some((egui::Color32::BLUE, true)));
-    assert!(shapes[1].rect.width() > 100.0, "the dashes are one shape: {:?}", shapes[1]);
-    assert_eq!(shapes[2].fill, egui::Color32::GREEN);
-    assert!((shapes[2].radius - 5.0).abs() < f32::EPSILON);
+    harness.run();
+    harness
+}
+
+#[test]
+fn painted_reads_ground_fill_stroke_ring_shadow_text_and_clip_from_the_widgets_layer() {
+    let harness = drawn();
+    let paint = painted(&harness, "Box");
+    assert_eq!(paint.ground, Some(egui::Color32::GRAY));
+    let rects: Vec<_> = paint.rects().collect();
+    assert_eq!(rects.len(), 3, "box, ring and the clipped mark; the area over it is another layer's: {paint:#?}");
+    assert_eq!(
+        rects[0].look,
+        Look::Rect {
+            fill: egui::Color32::from_rgb(10, 20, 30),
+            stroke: Some((1.0, egui::Color32::RED)),
+            stroke_kind: egui::StrokeKind::Inside,
+            radius: 6.0,
+            dashed: false
+        }
+    );
+    assert!(rects[0].inside && !rects[0].clipped);
+    assert!(!rects[1].inside, "the ring stands outside the box");
+    assert!(matches!(rects[1].look, Look::Rect { stroke: Some((_, egui::Color32::YELLOW)), stroke_kind: egui::StrokeKind::Outside, .. }));
+    assert!(rects[2].clipped && rects[2].inside, "{:?}", rects[2]);
+    let shadow = paint
+        .shapes
+        .iter()
+        .find_map(|shape| if let Look::Shadow { offset, blur, spread, colour } = shape.look { Some((offset, blur, spread, colour)) } else { None });
+    assert_eq!(shadow, Some((egui::vec2(0.0, 4.0), 12.0, 2.0, egui::Color32::BLACK)));
+    let text = paint.shapes.iter().find_map(|shape| match &shape.look {
+        Look::Text { text, colour, family, size, row_height } => Some((text.clone(), *colour, family.clone(), *size, *row_height)),
+        _ => None,
+    });
+    let (text, colour, family, size, row_height) = text.unwrap();
+    assert_eq!((text.as_str(), colour, family.as_str(), size), ("Caption", egui::Color32::WHITE, "Proportional", 14.0));
+    assert!(row_height > 0.0);
+}
+
+#[test]
+fn painted_calls_dashed_only_what_paint_dashed_drew() {
+    let harness = drawn();
+    let dashed = painted(&harness, "Dashed");
+    assert_eq!(dashed.shapes.len(), 1, "{dashed:#?}");
+    assert!(matches!(dashed.shapes[0].look, Look::Rect { stroke: Some((1.0, egui::Color32::LIGHT_BLUE)), dashed: true, .. }));
+    assert_eq!(dashed.shapes[0].rect, harness.get_by_label("Dashed").rect());
+    let plain = painted(&harness, "Plain");
+    assert_eq!(plain.shapes.len(), 4, "{plain:#?}");
+    assert!(plain.shapes.iter().all(|shape| matches!(shape.look, Look::Rect { dashed: false, .. })));
 }

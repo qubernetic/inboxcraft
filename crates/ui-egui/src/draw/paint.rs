@@ -187,6 +187,41 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
     response
 }
 
+/// The edges [`dashed`] painted in one pass, `(pass, [(layer, rect, colour)])`; a later pass starts the list afresh,
+/// so it never holds more than one frame's edges. Tests read it to tell a dashed edge from plain hairlines.
+#[derive(Clone, Default)]
+pub(crate) struct DashedEdges(pub u64, pub Vec<(egui::LayerId, Rect, Color32)>);
+
+/// Where [`DashedEdges`] lives in the context's memory.
+pub(crate) fn dashed_edges_id() -> egui::Id {
+    egui::Id::unique("paint-dashed-edges")
+}
+
+/// The dash and the gap of a [`dashed`] edge, in points.
+const DASH: f32 = 2.0;
+
+/// Paints a dashed edge around `rect`, inside it: a 1 px line in `colour`, dashes 2 on and 2 off, square corners.
+/// The edge is noted for the pass in [`DashedEdges`].
+#[cfg_attr(not(test), expect(dead_code, reason = "the component tasks draw their dashed edges through it"))]
+pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
+    let inner = rect.shrink(0.5);
+    let corners = [inner.left_top(), inner.right_top(), inner.right_bottom(), inner.left_bottom(), inner.left_top()];
+    for pair in corners.windows(2) {
+        if let [a, b] = pair {
+            painter.extend(Shape::dashed_line(&[*a, *b], Stroke::new(1.0, colour), DASH, DASH));
+        }
+    }
+    let pass = painter.ctx().cumulative_pass_nr();
+    let layer = painter.layer_id();
+    painter.ctx().data_mut(|data| {
+        let edges = data.get_temp_mut_or_default::<DashedEdges>(dashed_edges_id());
+        if edges.0 != pass {
+            *edges = DashedEdges(pass, Vec::new());
+        }
+        edges.1.push((layer, rect, colour));
+    });
+}
+
 #[cfg(test)]
 #[path = "paint_tests.rs"]
 mod tests;

@@ -6,8 +6,9 @@
 use std::time::Duration;
 
 use egui::accesskit::{self, NodeId};
+use egui::epaint::{ClippedShape, TextShape};
 use egui::epaint::{ColorMode, PathStroke};
-use egui::{Color32, Context, Id, Key, RawInput, Rect, Shape, Stroke, pos2, vec2};
+use egui::{Color32, Context, Id, Key, LayerId, RawInput, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -15,14 +16,22 @@ use super::card::card;
 use super::hover::{self, Action};
 use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
+use crate::draw::paint::{DashedEdges, dashed_edges_id};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion::{self, tests::FRAME};
 use crate::theme::{Mode, TextScale, Theme, install_fonts};
 
-/// A harness whose context has the bundled fonts from its first frame, stepping a frame at a time.
+/// The context setup of [`builder`]: the bundled fonts, and the paint recorded for [`painted`].
+fn setup(ctx: &Context) {
+    install_fonts(ctx);
+    record_layers(ctx);
+}
+
+/// A harness whose context has the bundled fonts from its first frame and records its paint, stepping a frame at a
+/// time.
 pub(super) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
-    egui_kittest::Harness::<State>::builder().with_context_setup(install_fonts).with_step_dt(FRAME as f32).with_max_steps(60)
+    egui_kittest::Harness::<State>::builder().with_context_setup(setup).with_step_dt(FRAME as f32).with_max_steps(60)
 }
 
 /// Tooltips at once, wherever the pointer is.
@@ -55,14 +64,89 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     })
 }
 
-/// One shape painted inside a widget: where, its fill, its stroke `(width, colour, dashed)` and its corner radius
-/// (the largest corner; a circle's radius).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// What one shape painted for a widget looks like.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Look {
+    /// A rect, or a circle, ellipse, path or line read as one: its fill, its stroke `(width, colour)` and where the
+    /// stroke lies, its corner radius (the largest corner; a circle's radius; 0 for paths and lines), and whether it
+    /// is an edge [`paint::dashed`](crate::draw::paint::dashed) drew.
+    Rect { fill: Color32, stroke: Option<(f32, Color32)>, stroke_kind: StrokeKind, radius: f32, dashed: bool },
+    /// Text: its colour, its font family's name (`Proportional`, `Monospace` or the name given), its size and the
+    /// height of its first row, which is the style's line height.
+    Text { text: String, colour: Color32, family: String, size: f32, row_height: f32 },
+    /// A shadow (a rect with a blur): where it lies against the widget's own rect (`offset` of the centres, `spread`
+    /// of the half widths), its blur and colour.
+    Shadow { offset: Vec2, blur: f32, spread: f32, colour: Color32 },
+}
+
+/// One shape painted for a widget: its rect, whether it lies inside the widget's own rect (`false`: in the 4 points
+/// around it, where a focus ring stands), whether its clip rect cuts it, and its look.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Painted {
     pub rect: Rect,
-    pub fill: Color32,
-    pub stroke: Option<(f32, Color32, bool)>,
-    pub radius: f32,
+    pub inside: bool,
+    pub clipped: bool,
+    pub look: Look,
+}
+
+/// What [`painted`] found for a widget: the fill it stands on (`ground`) and its own shapes in paint order.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Paint {
+    pub ground: Option<Color32>,
+    pub shapes: Vec<Painted>,
+}
+
+impl Paint {
+    /// The rect looks, `(rect, look)`, in paint order.
+    pub(crate) fn rects(&self) -> impl Iterator<Item = &Painted> {
+        self.shapes.iter().filter(|shape| matches!(shape.look, Look::Rect { .. }))
+    }
+}
+
+/// How far around a widget its shapes may lie: a focus ring stands 3 points out (2 clear and its 1 px line).
+const AROUND: f32 = 4.0;
+
+/// One frame's paint as [`record_layers`] keeps it: each layer's shapes in paint order, each widget's layer by its
+/// AccessKit id, and the edges [`paint::dashed`](crate::draw::paint::dashed) drew.
+#[derive(Clone, Default)]
+struct Recorded {
+    layers: Vec<(LayerId, Vec<ClippedShape>)>,
+    widgets: Vec<(NodeId, LayerId)>,
+    dashed: Vec<(LayerId, Rect, Color32)>,
+}
+
+fn recorded_id() -> Id {
+    Id::unique("component-tests-recorded-paint")
+}
+
+/// Keeps, at the end of every pass of `ctx`, what each layer painted, for [`painted`]. [`builder`] does it; another
+/// harness calls it in its context setup.
+pub(crate) fn record_layers(ctx: &Context) {
+    ctx.on_end_pass(
+        "component-tests-record",
+        std::sync::Arc::new(|ui: &mut egui::Ui| {
+            let ctx = ui.ctx().clone();
+            let widgets: Vec<(NodeId, LayerId)> = ctx.viewport(|viewport| {
+                viewport.this_pass.widgets.layers().flat_map(|(layer, rects)| rects.iter().map(|rect| (rect.id.accesskit_id(), *layer))).collect()
+            });
+            let mut layer_ids: Vec<LayerId> = ctx.memory(|memory| memory.areas().visible_layer_ids().into_iter().collect());
+            for layer in widgets.iter().map(|(_, layer)| *layer).chain([LayerId::background()]) {
+                if !layer_ids.contains(&layer) {
+                    layer_ids.push(layer);
+                }
+            }
+            let layers = ctx.graphics(|graphics| {
+                layer_ids.iter().filter_map(|layer| graphics.get(*layer).map(|list| (*layer, list.all_entries().cloned().collect()))).collect()
+            });
+            let pass = ctx.cumulative_pass_nr();
+            let dashed = ctx
+                .data(|data| data.get_temp::<DashedEdges>(dashed_edges_id()))
+                .filter(|edges| edges.0 == pass)
+                .map(|edges| edges.1)
+                .unwrap_or_default();
+            ctx.data_mut(|data| data.insert_temp(recorded_id(), Recorded { layers, widgets, dashed }));
+        }),
+    );
 }
 
 /// The shapes of `shape` flattened, nested `Shape::Vec`s opened.
@@ -86,81 +170,130 @@ fn shown_path_stroke(stroke: &PathStroke) -> Option<(f32, Color32)> {
     }
 }
 
-/// A shape as [`Painted`], when it is one this helper reads (rects, circles, ellipses, paths, lines); text, meshes
-/// and callbacks are left out.
-fn as_painted(shape: &Shape) -> Option<Painted> {
-    let painted = |rect, fill, stroke: Option<(f32, Color32)>, radius| Painted { rect, fill, stroke: stroke.map(|(w, c)| (w, c, false)), radius };
+/// The colour text is drawn in: the override, else the first section's colour, else the painter's fallback.
+fn text_colour(text: &TextShape) -> Color32 {
+    let section = text.galley.job.sections.first().map(|section| section.format.color).filter(|colour| *colour != Color32::PLACEHOLDER);
+    text.override_text_color.or(section).unwrap_or(text.fallback_color)
+}
+
+/// A shape's rect and look, against the widget's own rect `own`; `None` for meshes, callbacks and what shows nothing.
+fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
+    let flat = |fill: Color32, stroke: Option<(f32, Color32)>, stroke_kind, radius| {
+        (fill.a() > 0 || stroke.is_some()).then_some(Look::Rect { fill, stroke, stroke_kind, radius, dashed: false })
+    };
     match shape {
+        Shape::Rect(rect) if rect.blur_width > 0.0 => {
+            let shadow = rect.rect;
+            let offset = shadow.center() - own.center();
+            let spread = (shadow.width() - own.width()) / 2.0;
+            Some((shadow, Look::Shadow { offset, blur: rect.blur_width, spread, colour: rect.fill }))
+        }
         Shape::Rect(rect) => {
-            let radius = rect.corner_radius;
-            let largest = f32::from(radius.nw.max(radius.ne).max(radius.sw).max(radius.se));
-            Some(painted(rect.rect, rect.fill, shown_stroke(rect.stroke), largest))
+            let corner = rect.corner_radius;
+            let largest = f32::from(corner.nw.max(corner.ne).max(corner.sw).max(corner.se));
+            flat(rect.fill, shown_stroke(rect.stroke), rect.stroke_kind, largest).map(|look| (rect.rect, look))
         }
         Shape::Circle(circle) => {
             let rect = Rect::from_center_size(circle.center, vec2(circle.radius * 2.0, circle.radius * 2.0));
-            Some(painted(rect, circle.fill, shown_stroke(circle.stroke), circle.radius))
+            flat(circle.fill, shown_stroke(circle.stroke), StrokeKind::Middle, circle.radius).map(|look| (rect, look))
         }
         Shape::Ellipse(ellipse) => {
             let rect = Rect::from_center_size(ellipse.center, ellipse.radius * 2.0);
-            Some(painted(rect, ellipse.fill, shown_stroke(ellipse.stroke), ellipse.radius.min_elem()))
+            flat(ellipse.fill, shown_stroke(ellipse.stroke), StrokeKind::Middle, ellipse.radius.min_elem()).map(|look| (rect, look))
         }
         Shape::Path(path) => {
-            let rect = Rect::from_points(&path.points);
-            Some(painted(rect, path.fill, shown_path_stroke(&path.stroke), 0.0))
+            flat(path.fill, shown_path_stroke(&path.stroke), StrokeKind::Middle, 0.0).map(|look| (Rect::from_points(&path.points), look))
         }
         Shape::LineSegment { points, stroke } => {
-            Some(painted(Rect::from_two_pos(points[0], points[1]), Color32::TRANSPARENT, shown_stroke(*stroke), 0.0))
+            flat(Color32::TRANSPARENT, shown_stroke(*stroke), StrokeKind::Middle, 0.0).map(|look| (Rect::from_two_pos(points[0], points[1]), look))
+        }
+        Shape::Text(text) => {
+            let font = text.galley.job.sections.first().map(|section| section.format.font_id.clone()).unwrap_or_default();
+            let row_height = text.galley.rows.first().map_or(0.0, |row| row.rect().height());
+            let look = Look::Text {
+                text: text.galley.job.text.clone(),
+                colour: text_colour(text),
+                family: font.family.to_string(),
+                size: font.size,
+                row_height,
+            };
+            Some((text.galley.rect.translate(text.pos.to_vec2()), look))
         }
         _ => None,
     }
 }
 
-/// The line segments of `shapes` that run on with the same stroke, a gap between each and the next (as
-/// `Shape::dashed_line` paints them), merged into one dashed [`Painted`]; every other shape as it is.
-fn merge_dashes(shapes: Vec<(&Shape, Painted)>) -> Vec<Painted> {
-    let mut out: Vec<Painted> = Vec::new();
-    // Where the last segment kept ended, and its stroke.
-    let mut last_end: Option<(egui::Pos2, Stroke)> = None;
-    for (shape, painted) in shapes {
-        if painted.fill.a() == 0 && painted.stroke.is_none() {
-            last_end = None;
-            continue;
-        }
-        let Shape::LineSegment { points, stroke } = shape else {
-            last_end = None;
-            out.push(painted);
-            continue;
-        };
-        let runs_on = last_end.is_some_and(|(end, before)| before == *stroke && end.distance(points[0]) > 0.01);
-        match out.last_mut() {
-            Some(previous) if runs_on => {
-                previous.rect = previous.rect.union(painted.rect);
-                if let Some(stroke) = previous.stroke.as_mut() {
-                    stroke.2 = true;
-                }
-            }
-            _ => out.push(painted),
-        }
-        last_end = Some((points[1], *stroke));
-    }
-    out
-}
-
-/// The shapes the last frame painted inside the widget labelled `label` (its AccessKit rect, a point of slack for
-/// strokes): fills and strokes that show, in paint order. Text is not among them; a run of dashes is one shape.
+/// What the last frame painted for the widget labelled `label`, read from its own layer only (a popup, tooltip or
+/// toast over it is not its paint):
+/// - `shapes`: the shapes inside its AccessKit rect grown by 4 points, in paint order, each marked `inside` its own
+///   rect or not (a focus ring is not), and `clipped` when its clip rect cuts it; shapes clipped away wholly are left
+///   out. A shadow is kept when its centre lies in the widget's rect, however far its blur reaches.
+/// - `ground`: the fill of the last shape before the widget's first one whose rect strictly holds the grown rect
+///   (the parent it stands on); such shapes are not in `shapes`.
+///
+/// The line segments of an edge [`paint::dashed`](crate::draw::paint::dashed) drew are one shape with
+/// `dashed: true`; nothing else is ever dashed. A harness whose only content is the widget paints its own background
+/// in exactly the widget's rect, which then shows as an inside fill.
 ///
 /// # Panics
 ///
-/// When no widget or more than one has `label`.
-pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Vec<Painted> {
-    let rect = harness.get_by_label(label).rect().expand(1.0);
-    let mut flat = Vec::new();
-    harness.output().shapes.iter().for_each(|clipped| leaves(&clipped.shape, &mut flat));
-    let inside = flat
-        .into_iter()
-        .filter_map(|shape| as_painted(shape).map(|painted| (shape, painted)))
-        .filter(|(_, painted)| rect.contains_rect(painted.rect));
-    merge_dashes(inside.collect())
+/// When no widget or more than one has `label`, or the harness does not [`record_layers`] (build it with
+/// [`builder`]).
+pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint {
+    let node = harness.get_by_label(label);
+    let own = node.rect();
+    let grown = own.expand(AROUND);
+    let id = node.accesskit_node().locate().0;
+    let recorded = harness
+        .ctx
+        .data(|data| data.get_temp::<Recorded>(recorded_id()))
+        .unwrap_or_else(|| panic!("the harness records no layers: build it with component::tests::builder"));
+    let layer =
+        recorded.widgets.iter().find(|(widget, _)| *widget == id).map(|(_, layer)| *layer).unwrap_or_else(|| panic!("{label}: no widget rect"));
+    let list: Vec<&ClippedShape> = recorded.layers.iter().filter(|(of, _)| *of == layer).flat_map(|(_, shapes)| shapes.iter()).collect();
+    let dashes: Vec<(Rect, Color32)> =
+        recorded.dashed.iter().filter(|(of, rect, _)| *of == layer && grown.contains_rect(*rect)).map(|(_, rect, colour)| (*rect, *colour)).collect();
+    let in_dash = |shape: &Shape| match shape {
+        Shape::LineSegment { points, stroke } => dashes
+            .iter()
+            .any(|(rect, colour)| stroke.color == *colour && rect.expand(0.5).contains(points[0]) && rect.expand(0.5).contains(points[1])),
+        _ => false,
+    };
+    let (mut grounds, mut shapes) = (Vec::new(), Vec::new());
+    for clipped in list {
+        let mut flat = Vec::new();
+        leaves(&clipped.shape, &mut flat);
+        for shape in flat {
+            if in_dash(shape) {
+                continue;
+            }
+            let Some((rect, look)) = read(shape, own) else { continue };
+            let visible = clipped.clip_rect.intersect(rect);
+            let thin = rect.width() == 0.0 || rect.height() == 0.0;
+            if !(visible.is_positive() || (thin && clipped.clip_rect.expand(0.5).contains_rect(rect))) {
+                continue;
+            }
+            let clipped = !clipped.clip_rect.expand(0.01).contains_rect(rect);
+            let shadow = matches!(look, Look::Shadow { .. }) && own.contains(rect.center());
+            if !shadow && rect.contains_rect(grown) && rect != grown {
+                if let Look::Rect { fill, .. } = look
+                    && shapes.is_empty()
+                    && fill.a() > 0
+                {
+                    grounds.push(fill);
+                }
+                continue;
+            }
+            if shadow || grown.contains_rect(rect) {
+                shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, look });
+            }
+        }
+    }
+    for (rect, colour) in dashes {
+        let look = Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, colour)), stroke_kind: StrokeKind::Inside, radius: 0.0, dashed: true };
+        shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped: false, look });
+    }
+    Paint { ground: grounds.last().copied(), shapes }
 }
 
 /// The node focused in the harness's AccessKit tree.
