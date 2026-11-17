@@ -114,8 +114,7 @@ fn chip_rules_enter_a_comma_a_highlighted_suggestion_backspace_and_remove() {
     type_into(&mut harness, "To", "ansel.example.org,");
     assert_eq!(chips(&harness, Line::To), ["teodor@example.org", "ansel.example.org"], "a comma ends a recipient");
     harness.get_by_role_and_label(Role::ListItem, "ansel.example.org, not an address");
-    // Under the To line and beside Send.
-    assert_eq!(harness.query_all_by_label("ansel.example.org is not an address").count(), 2);
+    harness.get_by_label("ansel.example.org is not an address");
     assert!(harness.get_by_role_and_label(Role::Button, "Send").accesskit_node().is_disabled(), "an impossible address blocks Send");
 
     type_into(&mut harness, "To", "odi");
@@ -342,7 +341,7 @@ fn a_recipient_that_is_not_an_address_is_named_under_its_line() {
     type_into(&mut harness, "To", "ansel.example.org,");
     let line = harness.get_by_role_and_label(Role::TextInput, "To").rect();
     let under: Vec<egui::Rect> = harness.query_all_by_label("ansel.example.org is not an address").map(|node| node.rect()).collect();
-    assert_eq!(under.len(), 2, "under the line and beside Send: {under:?}");
+    assert_eq!(under.len(), 1, "under the line only, not again beside Send: {under:?}");
     assert!(under.iter().any(|rect| rect.top() > line.bottom() && rect.top() < line.bottom() + 24.0), "{under:?} under {line:?}");
 }
 

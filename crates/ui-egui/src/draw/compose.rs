@@ -415,8 +415,8 @@ fn send_label(mailbox: &Mailbox, composer: &Composer) -> (String, Option<String>
     }
 }
 
-/// The toolbar at the foot: Discard and Templates, then why Send is blocked, Send and the caret of send later at the
-/// right end.
+/// The toolbar at the foot: Discard and Templates, then why Send is blocked (unless a recipient line says it), Send and
+/// the caret of send later at the right end.
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     ui.horizontal(|ui| {
@@ -438,7 +438,11 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
                     }
                 }
             }
-            if let Some(problem) = problem {
+            // A recipient that is not an address is named under its line (the sheet's place), so not again here; Send's
+            // tooltip still says why it cannot go.
+            let shown: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
+            let said_under = shown.iter().flat_map(|line| composer.chips(*line)).any(|chip| !chip.ok);
+            if let Some(problem) = problem.filter(|_| !said_under) {
                 ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
                 let side = theme.fonts.caption.line;
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
