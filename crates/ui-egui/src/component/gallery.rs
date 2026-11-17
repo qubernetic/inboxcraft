@@ -1042,11 +1042,38 @@ fn progresses(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The check step's board: its eight states in the sheet's order, with the design board's words.
+fn check_steps(ui: &mut Ui, theme: &Theme) {
+    use super::check_step::{StepState, check_step};
+    title(ui, theme, tr!("Check step"));
+    let smtp = "smtp.example.org:465 · TLS";
+    let states = [
+        (tr!("waiting"), StepState::Waiting, "SMTP", smtp, tr!("waiting")),
+        (tr!("running"), StepState::Running, "SMTP", smtp, "0.2 s …"),
+        (tr!("passed"), StepState::Passed, "IMAP", tr!("sign-in, 6 folders, IDLE CONDSTORE QRESYNC MOVE"), "0.6 s"),
+        (tr!("failed"), StepState::Failed, "IMAP", tr!("sign-in"), "1.2 s"),
+        (tr!("skipped"), StepState::Skipped, "SMTP", smtp, tr!("skipped")),
+        (tr!("not-run"), StepState::NotRun, tr!("Clock"), tr!("compared with the server's"), tr!("not run")),
+        (tr!("no-server"), StepState::NoServer, "CalDAV", tr!("calendars"), tr!("no server set")),
+        (tr!("not-built"), StepState::NotBuilt, tr!("Push"), tr!("new mail without asking"), tr!("not built yet")),
+    ];
+    for (state, stands, step, detail, note) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(560.0);
+                let message = (stands == StepState::Failed).then_some("refused: [AUTHENTICATIONFAILED] Invalid credentials.");
+                check_step(ui, theme, step, detail, note, stands, message);
+            });
+        });
+    }
+}
+
 /// The right column of the shared rows and blocks.
 fn blocks_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     hover_actions(ui, theme, keymap);
     empty_states(ui, theme, keymap);
     progresses(ui, theme, keymap);
+    check_steps(ui, theme);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
