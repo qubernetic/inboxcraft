@@ -198,34 +198,73 @@ pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, wi
     ui.painter().layout_job(job)
 }
 
-/// `text` with every control character (a NUL, a line break, a tab) put as a space and every bidi format character
-/// left out: text from outside drawn as plain words, never as layout. egui applies the bidi algorithm, so an override
-/// in a mail's words would turn round what follows it; the words' own direction (Hebrew, Arabic) still shows.
+/// `text` with every control character (a NUL, a line break, a tab) put as a space and every explicit bidi embedding,
+/// override and isolate left out: text from outside drawn as plain words, never as layout. egui applies the bidi
+/// algorithm, so an override in a mail's words would turn round what follows it. The direction marks (U+200E, U+200F,
+/// U+061C) stay: they only settle where brackets and digits of a right-to-left name fall, and the words' own direction
+/// (Hebrew, Arabic) still shows.
 pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
-    if text.chars().any(|c| c.is_control() || bidi_control(c)) {
-        std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_control(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect())
+    if text.chars().any(|c| c.is_control() || bidi_override(c)) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_override(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect())
     } else {
         std::borrow::Cow::Borrowed(text)
     }
 }
 
-/// `text` cut after `most` characters, between characters, and whether it was: a bound on what one line lays out, so a
-/// mail's 10 000 combining marks (which take no width and so are never cut by the line) cost no more than a line.
+/// `text` cut after at most `most` characters, between grapheme clusters (a letter with its marks, an emoji sequence
+/// is never split), and whether it was: a bound on what one line lays out, so a mail's 10 000 combining marks (which
+/// take no width and so are never cut by the line) cost no more than a line. One cluster longer than `most` is left out
+/// whole.
 pub(crate) fn capped(text: &str, most: usize) -> (&str, bool) {
-    match text.char_indices().nth(most) {
-        Some((at, _)) => (text.get(..at).unwrap_or_default(), true),
-        None => (text, false),
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let mut chars = 0_usize;
+    for (at, grapheme) in text.grapheme_indices(true) {
+        chars = chars.saturating_add(grapheme.chars().count());
+        if chars > most {
+            return (text.get(..at).unwrap_or_default(), true);
+        }
     }
+    (text, false)
 }
 
-/// Whether `c` is a bidi format character: an embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069) or
-/// a direction mark (U+200E, U+200F, U+061C).
-fn bidi_control(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}')
+/// `text` as it fits on one line of `room` points in `font`: whole, or its longest beginning in the written order that
+/// ends at a grapheme boundary, with no space before one closing `…`; empty when not even the `…` fits. A right-to-left
+/// name is cut at its logical end and laid out once, so it is never mirrored.
+pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let width = |text: &str| galley(ui, text, font, egui::Color32::PLACEHOLDER).size().x;
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    let ends: Vec<usize> = text.grapheme_indices(true).map(|(at, grapheme)| at + grapheme.len()).collect();
+    let cut = |count: usize| {
+        let end = if count == 0 { 0 } else { ends.get(count - 1).copied().unwrap_or(0) };
+        format!("{}…", text.get(..end).unwrap_or_default().trim_end())
+    };
+    // The most clusters whose cut fits: a binary search, each step one layout (egui keeps the galleys it laid out).
+    let (mut low, mut high) = (0_usize, ends.len());
+    if width(&cut(0)) > room {
+        return String::new();
+    }
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if width(&cut(middle)) <= room {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    cut(low)
 }
 
-/// `text` from outside as a name a screen reader hears or a link carries: [`plain`], so no name carries a bidi format
-/// character that could turn round what follows it.
+/// Whether `c` is an explicit bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069): what could turn
+/// round the words after it.
+fn bidi_override(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// `text` from outside as a name a screen reader hears or a link carries: [`plain`], so no name carries an override
+/// that could turn round what follows it.
 pub(crate) fn spoken(text: &str) -> String {
     plain(text).into_owned()
 }

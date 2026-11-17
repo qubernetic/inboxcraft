@@ -163,7 +163,8 @@ fn shown_words(text: &'static str) -> String {
     let mut harness = builder().allow_missing_glyphs().with_size(vec2(700.0, 100.0)).build_ui_state(
         move |ui, shown: &mut String| {
             let galley = super::words(ui, &theme, &crate::component::plain(text), 545.0);
-            *shown = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+            // What is laid out, in the written order (egui keeps right-to-left glyphs in the order they are drawn).
+            *shown = galley.job.text.clone();
         },
         String::new(),
     );
@@ -202,25 +203,19 @@ fn hostile_words_keep_the_banner_at_its_sheet_size_cut_once_at_a_character() {
         let shown = shown_words(text);
         assert_eq!(shown.matches('…').count(), 1, "one ellipsis: {:?}", shown.chars().rev().take(12).collect::<String>());
         assert!(shown.ends_with('…'), "it ends the line");
-        let kept = shown.trim_end_matches('…');
-        if text.contains('\u{301}') || text.chars().any(|c| ('\u{0590}'..='\u{06FF}').contains(&c)) {
-            // Combining marks lay out as glyphs of their base, right-to-left words in their own order: bounded only.
-            assert!(shown.chars().count() <= 401, "{} glyphs laid out", shown.chars().count());
-        } else {
-            assert!(
-                crate::component::plain(text).starts_with(kept),
-                "cut between characters, nothing else changed: {:?}",
-                kept.chars().take(30).collect::<String>()
-            );
-        }
+        assert!(
+            whole_prefix(&crate::component::plain(text), &shown),
+            "cut between grapheme clusters, nothing else changed: {:?}",
+            shown.chars().rev().take(12).collect::<String>()
+        );
     }
 }
 
 #[test]
 fn no_bidi_control_reaches_a_name_and_a_long_link_name_is_cut() {
-    let link: &'static str = Box::leak(format!("always for \u{2066}{}@example.org\u{2069} \u{202E}", "a".repeat(300)).into_boxed_str());
+    let link_words: &'static str = Box::leak(format!("always for \u{2066}{}@example.org\u{2069} \u{202E}", "a".repeat(300)).into_boxed_str());
     for text in hostile_texts() {
-        let harness = bounce(text, link);
+        let harness = bounce(text, link_words);
         let name = crate::component::spoken(text);
         let banner = harness.get_by_label(&name);
         let rect = banner.rect();
@@ -228,10 +223,12 @@ fn no_bidi_control_reaches_a_name_and_a_long_link_name_is_cut() {
         for name in &names {
             assert!(!name.contains(BIDI), "a name carries a bidi control: {:?}", name.chars().take(20).collect::<String>());
         }
+        let link_text = link_words;
         let link = harness.query_all_by_role(egui::accesskit::Role::Button).next().unwrap_or_else(|| panic!("no link"));
         assert!(rect.contains_rect(link.rect()), "the link {:?} leaves the banner {rect:?}", link.rect());
+        // Its name is the whole address, without the bidi controls; the words drawn are cut.
         let label = link.accesskit_node().label().unwrap_or_default();
-        assert!(label.starts_with("always for ") && label.ends_with('…'), "{label:?}");
+        assert_eq!(label, crate::component::spoken(link_text), "the whole name");
     }
 }
 
@@ -241,4 +238,72 @@ fn a_banner_is_as_high_as_its_lines_at_130_percent() {
     let harness = harness(theme, 4);
     let rect = harness.get_by_label(STATES[4].2).rect();
     assert_eq!(rect.height(), (8.0 + theme.fonts.caption.line + 8.0).ceil(), "whole points: {rect:?}");
+}
+
+/// Whether `kept`, without a closing ellipsis, ends at a grapheme boundary of `full` and is its logical prefix.
+fn whole_prefix(full: &str, kept: &str) -> bool {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let kept = kept.strip_suffix('…').unwrap_or(kept).trim_end();
+    full.starts_with(kept) && (kept.is_empty() || full.grapheme_indices(true).any(|(at, grapheme)| at + grapheme.len() == kept.len()))
+}
+
+#[test]
+fn an_override_in_mail_cannot_reorder_the_words_after_it() {
+    let text = "abc \u{202E}def ghi\u{202C} jkl \u{2067}mno\u{2069}";
+    assert_eq!(crate::component::plain(text), "abc def ghi jkl mno");
+    // Drawn, the glyphs come in the order the words are written.
+    assert_eq!(shown_words(Box::leak(text.to_owned().into_boxed_str())), "abc def ghi jkl mno");
+}
+
+#[test]
+fn right_to_left_names_keep_their_direction_marks() {
+    for name in ["\u{200F}דנה כהן (עבודה) 2\u{200F}", "\u{061C}سارة (العمل) 3\u{061C}", "\u{200E}Ines (Work)\u{200E}"] {
+        assert_eq!(crate::component::plain(name), name, "the marks stay: {name:?}");
+        assert_eq!(crate::component::spoken(name), name, "and in names: {name:?}");
+    }
+}
+
+/// A banner's link called `name` cut to `room` points: the words drawn.
+fn cut_link(name: &'static str, room: f32) -> String {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = builder()
+        .allow_missing_glyphs()
+        .with_size(vec2(700.0, 100.0))
+        .build_ui_state(move |ui, cut: &mut String| *cut = super::cut_name(ui, &theme, name, room), String::new());
+    harness.run();
+    harness.state().clone()
+}
+
+#[test]
+fn a_cut_keeps_every_grapheme_whole_and_never_mirrors_a_right_to_left_name() {
+    let names: [&'static str; 4] = [
+        Box::leak(format!("always for {}", "👩\u{200D}👩\u{200D}👧".repeat(60)).into_boxed_str()),
+        Box::leak(format!("always for {}", "e\u{301}\u{302}".repeat(200)).into_boxed_str()),
+        Box::leak(format!("always for {}", "דנה כהן ".repeat(60)).into_boxed_str()),
+        Box::leak(format!("always for {}", "🇭🇺🇳🇴".repeat(80)).into_boxed_str()),
+    ];
+    for name in names {
+        for room in [90.0, 151.0, 230.0] {
+            let cut = cut_link(name, room);
+            assert!(cut.ends_with('…') && cut.matches('…').count() == 1, "{room}: {cut:?}");
+            assert!(whole_prefix(name, &cut), "{room}: {cut:?} is not a whole-grapheme prefix in the written order");
+        }
+    }
+    // The 400 character bound of a banner's words keeps graphemes whole too.
+    let text: &'static str = Box::leak(format!("{}{}", "a".repeat(398), "👩\u{200D}👩\u{200D}👧".repeat(4)).into_boxed_str());
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = builder()
+        .allow_missing_glyphs()
+        .with_size(vec2(700.0, 100.0))
+        .build_ui_state(move |ui, laid: &mut String| *laid = super::words(ui, &theme, text, 10_000.0).job.text.clone(), String::new());
+    harness.run();
+    assert!(whole_prefix(text, harness.state()), "{:?}", harness.state().chars().rev().take(8).collect::<String>());
+}
+
+#[test]
+fn a_cut_links_name_is_heard_whole() {
+    let link: &'static str = Box::leak(format!("always for {}@example.org", "a".repeat(300)).into_boxed_str());
+    let harness = bounce("Pictures held back.", link);
+    let names: Vec<String> = harness.query_all_by_role(egui::accesskit::Role::Button).filter_map(|node| node.accesskit_node().label()).collect();
+    assert_eq!(names, vec![link.to_owned()], "the link's name is the whole address");
 }
