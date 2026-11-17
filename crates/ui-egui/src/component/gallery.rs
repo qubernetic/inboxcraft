@@ -47,7 +47,7 @@ const TOP: f32 = 660.0;
 const BOARDS: f32 = 960.0;
 
 /// The height of the boards of the toggles and choices, under the other boards, in points.
-const CONTROLS: f32 = 520.0;
+const CONTROLS: f32 = 760.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -645,10 +645,45 @@ fn pills(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The select's board: default, hover, focus, open (the field alone, its list being a popup's), disabled, unavailable
+/// with its reason; then pressed, which the sheet does not draw.
+fn selects(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Select"));
+    let names = [(0, tr!("Every week")), (1, tr!("Every month"))];
+    // One name on every cell: each in its own id scope, as a select's id is made from its name.
+    let select = Select { name: tr!("Repeat"), shown: tr!("Every week"), options: &names, current: Some(0), icon: IconId::Changed, width: 200.0 };
+    cells(ui, theme, |ui| {
+        for (state, shown) in [(tr!("default"), Shown::Rest), (tr!("hover"), Shown::Hover), (tr!("focus"), Shown::Focus)] {
+            cell(ui, theme, state, |ui| {
+                ui.push_id(state, |ui| select.show_with(ui, theme, &mut false, None, Some(shown)));
+            });
+        }
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("open"), |ui| {
+            ui.push_id("open", |ui| select.field_open(ui, theme));
+        });
+        cell(ui, theme, tr!("disabled"), |ui| {
+            ui.push_id("disabled", |ui| ui.add_enabled_ui(false, |ui| select.show(ui, theme, &mut false)));
+        });
+        cell(ui, theme, tr!("pressed"), |ui| {
+            ui.push_id("pressed", |ui| select.show_with(ui, theme, &mut false, None, Some(Shown::Pressed)));
+        });
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("unavailable"), |ui| {
+            let calendar = Select { name: tr!("Calendar"), ..select };
+            calendar.show_noted(ui, theme, &mut false, Some(tr!("Not yet: add a calendar account first")));
+            tooltip::bubble_noted(ui, theme, keymap, tr!("Calendar"), None, Some(tr!("Not yet: add a calendar account first")));
+        });
+    });
+}
+
 /// The choices' column of boards.
-fn controls_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+fn controls_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     segments(ui, theme);
     pills(ui, theme);
+    selects(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
