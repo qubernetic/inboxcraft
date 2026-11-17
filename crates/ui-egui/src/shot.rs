@@ -1137,6 +1137,13 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         outbox(&mut app, &clock, &shot.out, scene)?;
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
+    for (key, at) in [("pointer", shot.pointer), ("click", shot.click)] {
+        if let Some([x, y]) = at
+            && !((0.0..=width).contains(&x) && (0.0..=height).contains(&y))
+        {
+            return Err(bad(format!("{}: {key} [{x}, {y}] is not inside the window of {width} by {height} points", shot.out)));
+        }
+    }
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
     match shot.click {
         Some([x, y]) => render_clicked(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, pos2(x, y)),
