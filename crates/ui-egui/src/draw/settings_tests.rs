@@ -247,3 +247,27 @@ fn the_sending_page_saves_each_accounts_signature_for_its_new_messages() {
     press(&mut harness, "Save the signature of Personal");
     assert_eq!(harness.state().mailbox().account(1).map(|account| account.signature.as_str()), Some(""), "an empty field clears it");
 }
+
+#[test]
+fn a_signature_past_its_2000_characters_is_refused_whole_and_said() {
+    let most = inboxcraft_model::Account::MAX_SIGNATURE_CHARS;
+    let mut harness = opened();
+    harness.get_by_label("Sending, settings page").click();
+    harness.run();
+    let field = || (Role::MultilineTextInput, "Signature of Personal");
+    harness.get_by_role_and_label(field().0, field().1).focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.key_press(Key::Backspace);
+    harness.run();
+    // Two bytes a character: within the field's bytes, past the model's characters.
+    harness.event(egui::Event::Paste("é".repeat(most + 1)));
+    harness.run();
+    assert_eq!(harness.state().settings().signature(1), Some(""), "refused whole, nothing cut in");
+    let said = harness.query_all(egui_kittest::kittest::by().label_contains("Too long")).count();
+    assert_eq!(said, 1, "the field says why");
+    harness.event(egui::Event::Paste("é".repeat(most)));
+    harness.run();
+    assert_eq!(harness.state().settings().signature(1).map(|typed| typed.chars().count()), Some(most), "exactly the cap goes in");
+}

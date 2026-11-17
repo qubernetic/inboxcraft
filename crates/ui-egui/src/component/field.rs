@@ -137,9 +137,9 @@ pub const MAX_TEXT: usize = 64 << 10;
 /// reader, but a long message is worth more than a quick frame.
 pub const MAX_BODY: usize = 1 << 20;
 
-/// What a field holds at most.
+/// What a field holds at most: a caller names it for [`multiline_field_holding`] (in the unit its text is kept in).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Cap {
+pub enum Cap {
     /// So many characters.
     Chars(usize),
     /// So many bytes.
@@ -739,21 +739,22 @@ fn margin_of(outer: Rect, inner: Rect) -> Margin {
 /// [`text_field`]. Enter starts a new line. It holds at most [`MAX_TEXT`] bytes; what would pass them is refused whole,
 /// and the line under it says so. A text already longer opens whole and can be edited down.
 pub fn multiline_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>) -> Response {
-    multiline_inner(ui, theme, id, text, field, MAX_TEXT, None)
+    multiline_inner(ui, theme, id, text, field, Cap::Bytes(MAX_TEXT), None)
 }
 
-/// [`multiline_field`] that holds at most `most` bytes, more or less than [`MAX_TEXT`].
-pub fn multiline_field_holding(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, most: usize) -> Response {
-    multiline_inner(ui, theme, id, text, field, most, None)
+/// [`multiline_field`] that holds at most `cap` (characters or bytes) instead of [`MAX_TEXT`] bytes: the cap of what
+/// the text is kept as (a signature's characters), so that what would pass it is refused whole and said, never cut.
+pub fn multiline_field_holding(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, cap: Cap) -> Response {
+    multiline_inner(ui, theme, id, text, field, cap, None)
 }
 
 /// [`multiline_field`] drawn in `shown`: a board of the gallery.
 pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
-    multiline_inner(ui, theme, id, text, field, MAX_TEXT, shown)
+    multiline_inner(ui, theme, id, text, field, Cap::Bytes(MAX_TEXT), shown)
 }
 
-/// The field of several lines, holding at most `holds` bytes, drawn in `shown`.
-fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, holds: usize, shown: Option<Shown>) -> Response {
+/// The field of several lines, holding at most `cap`, drawn in `shown`.
+fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, cap: Cap, shown: Option<Shown>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field * 2.0) } else { theme.boxes().field * 2.0 };
@@ -768,7 +769,6 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = s.s2;
         label_row(ui, theme, field.label, width);
-        let cap = Cap::Bytes(holds);
         let said = guard(ui, id, text, cap, true);
         let refusal = said.map(|_| cap.sentence());
         let bring = said == Some(Refusal::Fresh) && field.error.is_none();

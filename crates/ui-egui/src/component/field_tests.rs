@@ -1110,7 +1110,7 @@ fn a_multiline_field_holds_64_kib_unless_its_caller_names_more() {
     let most = 256 << 10;
     let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
         move |ui, text: &mut String| {
-            super::multiline_field_holding(ui, &theme, egui::Id::unique("larger"), text, &Field::new("Hostile", "hint"), most);
+            super::multiline_field_holding(ui, &theme, egui::Id::unique("larger"), text, &Field::new("Hostile", "hint"), super::Cap::Bytes(most));
         },
         String::new(),
     );
