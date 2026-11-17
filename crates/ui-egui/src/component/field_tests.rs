@@ -841,3 +841,24 @@ fn a_password_never_reaches_a_screen_reader_nor_the_undo_history() {
     harness.run();
     assert_eq!(harness.state(), "");
 }
+
+#[test]
+fn a_disabled_stored_password_is_an_empty_box() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let harness = staged(theme, |p| p.bg, vec2(420.0, 200.0), |ui, theme| {
+            let mut text = String::new();
+            let field = Field { enabled: false, ..Field::new("New password", "empty keeps the stored one") };
+            ui.vertical(|ui| {
+                ui.set_width(320.0);
+                password_field(ui, theme, egui::Id::unique("stored"), &mut text, &field, Secret::Stored);
+            });
+        });
+        let texts = drawn(&harness);
+        assert!(texts.iter().all(|text| text.text != "empty keeps the stored one"), "{mode:?}: no hint");
+        assert!(texts.iter().all(|text| text.text != "\u{e2fa}"), "{mode:?}: no lock");
+        assert!(texts.iter().all(|text| !text.text.starts_with("The stored password")), "{mode:?}: no sentence");
+        let mark = one(&harness, "\u{e752}");
+        assert_eq!(mark.colour, theme.palette.dim, "{mode:?}: the password mark in `dim`");
+    }
+}

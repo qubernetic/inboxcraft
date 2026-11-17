@@ -467,7 +467,10 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let password = matches!(kind, Line::Password(_));
         let font = if password || kind == Line::Mono { theme.fonts.mono } else { theme.fonts.body };
         // The mark at the right end: the lock of a read-only or stored field, the password mark.
+        let disabled_password = password && !(field.enabled && ui.is_enabled() && !soon::is_soon(ui));
         let mark = match kind {
+            // Disabled, a password field of either kind is the sheet's empty box with the password mark.
+            Line::Password(_) if disabled_password => Some(PASSWORD),
             _ if field.read_only || stored => Some(LOCK),
             Line::Password(Secret::Typed) => Some(PASSWORD),
             Line::Text | Line::Mono => None,
@@ -509,7 +512,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                     state.store(ui.ctx(), id);
                 }
                 let clip = inner.expand2(vec2(caret_size(theme).x + theme.spacing.s1, vertical));
-                if empty {
+                if empty && !disabled_password {
                     // A stored password's hint is words, in `body`, centred as words are.
                     let hint_font = if stored { theme.fonts.body } else { font };
                     let at = pos2(inner.left(), rect.top() + ((height - hint_font.line) / 2.0).max(0.0));
@@ -528,7 +531,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
             let ink = if !seen.enabled && password { p.dim } else { p.muted };
             crate::iconset::paint_glyph(&painter, at, glyph, ink);
         }
-        let note = stored.then_some(tr!("The stored password is in your system's credential store and is never shown."));
+        let note = (stored && !disabled_password).then_some(tr!("The stored password is in your system's credential store and is never shown."));
         under(ui, theme, field.error, note, width);
         response
     })
