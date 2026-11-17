@@ -560,3 +560,42 @@ fn a_focus_ring_stands_on_whole_pixels_at_every_scale_its_clearance_kept() {
         }
     }
 }
+
+#[test]
+fn a_focus_ring_round_a_hostile_rect_never_panics_and_stays_one_shape() {
+    let (nan, inf) = (f32::NAN, f32::INFINITY);
+    let hostile = [
+        egui::Rect::from_min_max(pos2(nan, nan), pos2(nan, nan)),
+        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(nan, 10.0)),
+        egui::Rect::from_min_max(pos2(-inf, -inf), pos2(inf, inf)),
+        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(inf, 10.0)),
+        egui::Rect::from_min_max(pos2(50.0, 50.0), pos2(10.0, 10.0)),
+        egui::Rect::from_min_max(pos2(20.0, 20.0), pos2(20.0, 20.0)),
+        egui::Rect::from_min_max(pos2(-1.0e9, -1.0e9), pos2(1.0e9, 1.0e9)),
+        egui::Rect::NOTHING,
+        egui::Rect::EVERYTHING,
+    ];
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        for rect in hostile {
+            for place in [super::Ring::Inside, super::Ring::Outside] {
+                assert!(ring_at(rect, place, ppp).len() <= 1, "{rect:?} {place:?} at {ppp}: one ring at most");
+                // Painted all the way to triangles, it stays a bounded mesh.
+                let ctx = egui::Context::default();
+                ctx.set_pixels_per_point(ppp);
+                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
+                let mut output = ctx.run_ui(input, |ui| super::focus_ring(ui.painter(), &theme, rect, place));
+                output.textures_delta.clear();
+                let meshes = ctx.tessellate(output.shapes, ppp);
+                let vertices: usize = meshes
+                    .iter()
+                    .map(|mesh| match &mesh.primitive {
+                        egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                        egui::epaint::Primitive::Callback(_) => 0,
+                    })
+                    .sum();
+                assert!(vertices <= 64, "{rect:?} {place:?} at {ppp}: {vertices} vertices");
+            }
+        }
+    }
+}
