@@ -12,9 +12,9 @@
 [![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![Dev Flatpak: Linux](https://img.shields.io/badge/dev%20Flatpak-Linux-lightgrey)](docs/development.md#the-dev-flatpak)
 
-<img src="docs/design/mood.png" width="820" alt="The design file's Mood page: the main window with the screener card, the grouped inbox and a thread in the reader, in the Electric, Aurora and Citrus accent presets, each in light and dark">
+<img src="docs/design/cover.png" width="820" alt="The cover of the design file: the InboxCraft mark and wordmark, how to read the file, and the list of its pages, in the Qubernetic form language">
 
-<sub>The design file's Mood page, the look InboxCraft is built towards. What the app shows today is below.</sub>
+<sub>The cover of the design file, the look InboxCraft is built towards. What the app shows today is below.</sub>
 
 </div>
 
