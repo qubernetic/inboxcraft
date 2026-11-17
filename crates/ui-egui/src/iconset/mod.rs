@@ -7,7 +7,7 @@
 //!
 //! Phosphor maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its
 //! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The app icon is not from
-//! Phosphor; it is drawn in code in [`crate::icons`].
+//! Phosphor; it is the brand's mark, see [`crate::icons`].
 
 mod phosphor;
 

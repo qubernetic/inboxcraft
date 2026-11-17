@@ -313,9 +313,11 @@ installed app, and it starts from the desktop's menu like any other: the entry o
 | `io.github.qubernetic.inboxcraft.desktop` | the menu entry, one main window, with the sample mailbox and Quit as its actions |
 | `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
 
-The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
-shapes are the window icon. After a change to the shapes, `just icon` exports the file again; a test fails while the
-file and the code differ.
+The icon is the InboxCraft mark, a trademark of Qubernetic (see `NOTICE`): the manifest copies the brand's icon
+theme tree, `assets/brand/inboxcraft/linux/hicolor/` (every size from 16 to 512 px and the scalable SVG), into
+`/app/share/icons/hicolor/`. The window icon and the tray icon are the brand's PNGs built into the binary
+(`crates/ui-egui/src/icons.rs`). The files are pinned (see "Pinned asset files"): a new version of the mark comes
+from the brand's release, never from an edit here.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
@@ -452,7 +454,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - **The Flatpak inputs.** A PR runs `flatpak` only when it changes one of these, the files the manifest builds from
   apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
   metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
-  `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
+  `assets/brand/inboxcraft/linux/` (the icons the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
   `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to `develop` or
   `main`, not in its own PR.
 - **No Flatpak on an epic push.** A push to `epic/**` skips `flatpak` (10 to 11 billed minutes per push, #78). What

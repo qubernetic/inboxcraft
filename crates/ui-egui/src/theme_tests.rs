@@ -350,11 +350,10 @@ fn no_code_paints_a_gradient_or_a_blur() {
             sources(&root.join(dir), &mut files);
         }
     }
-    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter, the picture rasteriser, the app icon (its own mark,
-    // until it is drawn again) and the icon set's duotone weight are allowed.
+    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter, the picture rasteriser and the icon set's duotone
+    // weight are allowed.
     let src = root.join("src");
-    let allowed =
-        [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs"), src.join("icons.rs"), src.join("iconset").join("mod.rs")];
+    let allowed = [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs"), src.join("iconset").join("mod.rs")];
     let mut found = Vec::new();
     for file in files.iter().filter(|file| !allowed.contains(file)) {
         let text = std::fs::read_to_string(file).unwrap();

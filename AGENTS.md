@@ -43,7 +43,7 @@ A crash can lose a message the person was writing. **This outranks feature work.
 ## Assets: no vendor iconography or images
 **Non-negotiable.** Never copy, trace, crop or recreate icons, images, sounds, fonts, themes or text from Spark,
 Mailspring, Outlook, Gmail or any other product. Every asset is original (drawn in code is preferred:
-`crates/ui-egui/src/icons.rs`), CC0, OSI open source or a redistributable Creative Commons licence, and every asset
+`crates/ui-egui/src/sample.rs`), CC0, OSI open source or a redistributable Creative Commons licence, and every asset
 file has a row in `ATTRIBUTION.md` in the same commit (`cargo xtask assets` enforces it). Sample mail and people are
 invented.
 

@@ -40,6 +40,29 @@ fn the_tray_icon_is_inboxcraft_s() {
     assert_eq!(icon.data.len(), usize::try_from(icon.width * icon.height * 4).unwrap());
 }
 
+/// Whether an ARGB pixel shows the flap's cyan, `#22A8E0`, within 8 a channel.
+fn cyan(&[a, r, g, b]: &[u8; 4]) -> bool {
+    a > 0 && r.abs_diff(0x22) <= 8 && g.abs_diff(0xA8) <= 8 && b.abs_diff(0xE0) <= 8
+}
+
+#[test]
+fn the_flap_turns_cyan_with_unread_mail() {
+    let (mut tray, _heard, _woken) = tray();
+    let sizes = |pixmap: &[ksni::Icon]| pixmap.iter().map(|icon| (icon.width, icon.height)).collect::<Vec<_>>();
+    let shows_cyan = |pixmap: &[ksni::Icon]| pixmap.iter().any(|icon| icon.data.as_chunks::<4>().0.iter().any(cyan));
+    tray.show(0);
+    let read = tray.icon_pixmap();
+    assert!(!read.is_empty());
+    assert!(!shows_cyan(&read), "no cyan while nothing is unread");
+    tray.show(3);
+    let unread = tray.icon_pixmap();
+    assert!(shows_cyan(&unread), "the flap is cyan while mail is unread");
+    assert_eq!(sizes(&read), sizes(&unread));
+    assert_eq!(sizes(&read), [(16, 16), (22, 22), (24, 24)]);
+    tray.show(0);
+    assert!(!shows_cyan(&tray.icon_pixmap()), "and plain again once it is read");
+}
+
 #[test]
 fn the_tooltip_says_how_much_is_unread() {
     let (mut tray, _heard, _woken) = tray();
