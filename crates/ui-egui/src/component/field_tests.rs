@@ -886,35 +886,48 @@ fn a_disabled_stored_password_is_an_empty_box() {
     }
 }
 
+/// What the clipboard is handed when `TYPED` is typed into a field, all of it selected and `event` (Copy or Cut) sent:
+/// a password field (`password`) or a text field, in one harness.
+fn copied_from(password: bool, event: &egui::Event) -> Vec<String> {
+    let theme = theme();
+    let role = if password { Role::PasswordInput } else { Role::TextInput };
+    let mut harness = builder().build_ui_state(
+        move |ui, text: &mut String| {
+            if password {
+                password_field(ui, &theme, egui::Id::unique("password"), text, &Field::new("Password", ""), Secret::Typed);
+            } else {
+                text_field(ui, &theme, egui::Id::unique("text"), text, &Field::new("Name", ""));
+            }
+        },
+        String::new(),
+    );
+    harness.run();
+    harness.get_by_role(role).focus();
+    harness.run();
+    harness.get_by_role(role).type_text(TYPED);
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.run();
+    harness.event(event.clone());
+    harness.step();
+    harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn copy_and_cut_in_a_password_field_put_nothing_on_the_clipboard() {
     for event in [egui::Event::Copy, egui::Event::Cut] {
-        let theme = theme();
-        let mut harness = builder().build_ui_state(
-            move |ui, text: &mut String| {
-                password_field(ui, &theme, egui::Id::unique("password"), text, &Field::new("Password", ""), Secret::Typed);
-            },
-            String::new(),
-        );
-        harness.run();
-        harness.get_by_role(Role::PasswordInput).focus();
-        harness.run();
-        harness.get_by_role(Role::PasswordInput).type_text(TYPED);
-        harness.run();
-        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-        harness.run();
-        harness.event(event.clone());
-        harness.step();
-        let copied: Vec<String> = harness
-            .output()
-            .platform_output
-            .commands
-            .iter()
-            .filter_map(|command| match command {
-                egui::OutputCommand::CopyText(text) => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
+        // The control: the same steps in a text field hand the clipboard what was typed.
+        assert_eq!(copied_from(false, &event), [TYPED.to_owned()], "{event:?}: a text field copies");
+        let copied = copied_from(true, &event);
         assert!(copied.iter().all(|text| text.is_empty() || !text.contains('k')), "{event:?}: {copied:?}");
         assert!(copied.is_empty(), "{event:?}: nothing goes to the clipboard: {copied:?}");
     }
