@@ -437,7 +437,7 @@ fn bidi_controls_ime_and_a_stale_selection_never_panic() {
         harness.run_ok();
         harness.event(egui::Event::Ime(egui::ImeEvent::Commit("x".repeat(10 << 20))));
         harness.run_ok();
-        assert!(harness.state().len() < 1 << 20 || matches!(kind, Kind::Many | Kind::PlainText), "{kind:?}");
+        assert!(!harness.state().contains("xxxx"), "{kind:?}: the 10 MiB commit is refused");
         harness.event(egui::Event::Ime(egui::ImeEvent::Commit("ñë".to_owned())));
         harness.run_ok();
         // A selection made, then the text replaced from outside: the selection points past its end.
@@ -946,4 +946,144 @@ fn a_caret_blinks_at_full_motion_too_and_comes_back_on() {
         let off = seen.iter().position(|on| !on).unwrap_or(0);
         assert!(seen.iter().skip(off).any(|on| *on), "reduced {reduced}: it comes back on");
     }
+}
+
+/// The two kinds of several lines.
+const MULTILINE: [Kind; 2] = [Kind::Many, Kind::PlainText];
+
+#[test]
+fn enter_at_the_cap_of_a_text_of_several_lines_is_refused() {
+    for kind in MULTILINE {
+        let (most, _) = cap_of(kind);
+        let mut harness = field_of(kind, "");
+        harness.event(egui::Event::Paste("y".repeat(most - 1)));
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most - 1, "{kind:?}");
+        // Two bytes do not fit in one: an "é" is refused, an "e" is taken.
+        harness.event(egui::Event::Text("é".to_owned()));
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most - 1, "{kind:?}: the byte cap counts bytes");
+        assert!(says_too_long(&harness), "{kind:?}");
+        harness.key_press(egui::Key::Enter);
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most, "{kind:?}: Enter is taken while a byte is free");
+        assert!(harness.state().ends_with('\n'), "{kind:?}");
+        for _ in 0..3 {
+            harness.key_press(egui::Key::Enter);
+            harness.run_ok();
+        }
+        assert_eq!(harness.state().len(), most, "{kind:?}: Enter at the cap adds nothing");
+        assert!(says_too_long(&harness), "{kind:?}: and the field says why");
+    }
+}
+
+#[test]
+fn over_the_cap_a_person_can_always_edit_down() {
+    for kind in KINDS {
+        let (most, _) = cap_of(kind);
+        // A text already over its cap, as a draft loaded from the store may be: it opens whole.
+        let over = "y".repeat(most + 10);
+        let mut harness = field_of(kind, &over);
+        harness.run_ok();
+        assert_eq!(harness.state(), &over, "{kind:?}: opened whole");
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::End);
+        harness.run_ok();
+        // The last character selected and typed over: the text does not grow, so it is taken.
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowLeft);
+        harness.run_ok();
+        harness.event(egui::Event::Text("z".to_owned()));
+        harness.run_ok();
+        assert!(harness.state().len() == most + 10 && harness.state().ends_with('z'), "{kind:?}: a same-size edit is taken");
+        // Growing it is refused.
+        harness.event(egui::Event::Text("q".to_owned()));
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most + 10, "{kind:?}: growth past the cap is refused");
+        // Deleting is taken.
+        harness.key_press(egui::Key::Backspace);
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most + 9, "{kind:?}: deleting is taken");
+    }
+}
+
+#[test]
+fn a_refused_ime_commit_takes_its_preedit_out_of_the_text() {
+    for kind in KINDS {
+        let mut harness = field_of(kind, "kept");
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::End);
+        harness.run_ok();
+        harness.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: "ëñ".to_owned(), active_range_chars: Some(0..2) }));
+        harness.run_ok();
+        assert_eq!(harness.state(), "keptëñ", "{kind:?}: the composition stands in the text");
+        harness.event(egui::Event::Ime(egui::ImeEvent::Commit("x".repeat(10 << 20))));
+        harness.run_ok();
+        assert_eq!(harness.state(), "kept", "{kind:?}: the refused commit leaves neither itself nor the composition");
+        assert!(says_too_long(&harness), "{kind:?}");
+    }
+}
+
+/// A message text of `lines` lines in a page 160 high that scrolls, or nothing while the state's flag is false.
+fn body_in_a_page(lines: usize) -> Harness<'static, (String, bool)> {
+    let theme = theme();
+    let text: String = (0..lines).map(|n| format!("Line {n} of a long draft.\n")).collect();
+    let mut harness = builder().with_size(vec2(600.0, 200.0)).build_ui_state(
+        move |ui, (text, shown): &mut (String, bool)| {
+            if !*shown {
+                return;
+            }
+            egui::ScrollArea::vertical().max_height(160.0).auto_shrink([false, false]).show(ui, |ui| {
+                let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, width: f32| {
+                    let mut job = egui::text::LayoutJob::single_section(text.as_str().to_owned(), theme.fonts.body.format(theme.palette.ink));
+                    job.wrap.max_width = width;
+                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                };
+                super::plain_text(ui, egui::Id::unique("body"), text, 3, &mut layouter, "Message text", &theme);
+            });
+        },
+        (text, true),
+    );
+    harness.run_ok();
+    harness.get_by_label("Message text").focus();
+    harness.run_ok();
+    harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::End);
+    harness.run_ok();
+    harness
+}
+
+/// The "Too long" sentence the last frame painted, if any.
+fn too_long_at<State>(harness: &Harness<'static, State>) -> Option<Rect> {
+    drawn(harness).into_iter().find(|text| text.text.starts_with("Too long")).map(|text| text.rect)
+}
+
+#[test]
+fn the_too_long_line_is_brought_into_view_when_it_appears() {
+    let mut harness = body_in_a_page(200);
+    harness.event(egui::Event::Text("!".to_owned()));
+    harness.run_ok();
+    assert!(harness.get_by_label("Message text").rect().top() < -1000.0, "the page scrolled to the caret at the end");
+    assert!(too_long_at(&harness).is_none());
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.run_ok();
+    let Some(line) = too_long_at(&harness) else { panic!("the sentence is painted, so in view") };
+    assert!(line.top() >= 0.0 && line.bottom() <= 160.0, "{line:?} in the page's view");
+}
+
+#[test]
+fn the_too_long_line_goes_when_the_text_changes_from_outside_or_the_field_goes() {
+    let mut harness = body_in_a_page(3);
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.run_ok();
+    assert!(too_long_at(&harness).is_some());
+    // The text replaced from outside (a chip taken, a template used).
+    harness.state_mut().0 = "Short.".to_owned();
+    harness.run_ok();
+    assert!(too_long_at(&harness).is_none(), "the sentence went with the text it was about");
+    harness.event(egui::Event::Paste("x".repeat(super::MAX_TEXT)));
+    harness.run_ok();
+    assert!(too_long_at(&harness).is_some());
+    // The field not drawn for a frame (the composer closed), then drawn again with the same id.
+    harness.state_mut().1 = false;
+    harness.run_ok();
+    harness.state_mut().1 = true;
+    harness.run_ok();
+    assert!(too_long_at(&harness).is_none(), "a field drawn afresh says nothing it refused before");
 }

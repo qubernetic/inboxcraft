@@ -281,12 +281,16 @@ pub(crate) fn recipient_field_with(
             copies_pressed = response.clicked();
         }
         let refused = field::refusal(ui.ctx(), id);
-        if let Some(error) = line.error.or(refused.as_deref()) {
+        let bring = line.error.is_none() && refused.as_ref().is_some_and(|(_, fresh)| *fresh);
+        if let Some(error) = line.error.or(refused.as_ref().map(|(sentence, _)| sentence.as_str())) {
             let mut job = egui::text::LayoutJob::single_section(error.to_owned(), theme.fonts.caption.format(p.minus));
             job.wrap.max_width = width.max(1.0);
             let text = ui.painter().layout_job(job);
             let (place, response) = ui.allocate_exact_size(vec2(width, text.size().y), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(Role::Label, true, error));
+            if bring {
+                response.scroll_to_me(None);
+            }
             painter.galley(place.min, text, p.minus);
         }
         RecipientsOutput { field: typed, removed, copies: copies_pressed }

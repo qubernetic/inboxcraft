@@ -345,3 +345,19 @@ fn a_recipient_that_is_not_an_address_is_named_under_its_line() {
     assert_eq!(under.len(), 2, "under the line and beside Send: {under:?}");
     assert!(under.iter().any(|rect| rect.top() > line.bottom() && rect.top() < line.bottom() + 24.0), "{under:?} under {line:?}");
 }
+
+#[test]
+fn a_refused_paste_is_said_in_view_and_forgotten_when_the_composer_closes() {
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "We meet at the plot at ten.");
+    harness.event(egui::Event::Paste("x".repeat(crate::component::field::MAX_TEXT + 1)));
+    harness.run();
+    let too_long = |harness: &Harness<'static, InboxApp>| harness.query_all(egui_kittest::kittest::by().label_contains("Too long")).count();
+    assert_eq!(too_long(&harness), 1, "the composer says why the paste went nowhere");
+    assert_eq!(harness.state().composer().unwrap().text(), "We meet at the plot at ten.", "nothing of it was taken");
+    harness.get_by_role_and_label(Role::Button, "Close; the draft is kept").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    assert_eq!(too_long(&harness), 0, "a new composer says nothing of the last one's paste");
+}
