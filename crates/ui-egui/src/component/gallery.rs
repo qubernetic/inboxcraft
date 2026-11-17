@@ -655,7 +655,8 @@ fn segments(ui: &mut Ui, theme: &Theme) {
     });
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("long-label"), |ui| {
-            let long = [(0, tr!("Grouped"), font), (1, tr!("A summary of everything in the inbox"), font), (2, tr!("List"), font)];
+            // The board's own sample words, so the cut at 136 is compared glyph by glyph.
+            let long = [(0, tr!("Gruppiert"), font), (1, tr!("Zusammenfassung des Posteingangs"), font), (2, tr!("Liste"), font)];
             segmented(ui, theme, &long, 0);
         });
     });

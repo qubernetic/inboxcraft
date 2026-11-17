@@ -82,6 +82,9 @@ fn the_boards_say_what_the_design_boards_say_on_their_ground() {
         harness
             .get_by_role_and_label(Role::Tooltip, "Snooze is not there for a message that is still being sent. Wait until it has left the outbox.");
         assert_eq!(harness.query_all_by_label("Empfangsbestätigung für diese Nachricht anfordern").count(), 2, "{mode:?} the long labels");
+        // The segmented board's long label: its words, so its width (95 | 160 | 63 and four lines) and its cut.
+        let long = harness.get_by_label("Gruppiert / Zusammenfassung des Posteingangs / Liste").rect();
+        assert!((long.width() - 322.0).abs() < 0.01 && (long.height() - 32.0).abs() < 0.01, "{mode:?} {long:?}");
         // Each unavailable cell shows its reason under the control, 36 below its top, as the board does.
         for (name, reason) in [
             ("Pin", "Not yet: choose a message first"),
