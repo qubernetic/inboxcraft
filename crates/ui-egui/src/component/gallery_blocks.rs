@@ -169,8 +169,8 @@ fn facts_board(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         recipients: None,
     };
     let long = Facts {
-        from: "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio.example.org>",
-        to: "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Ada Brannock",
+        from: "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio-collective.example.org>",
+        to: "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Halvard Engen, Sunniva Aalto, Dmitri Vale, Rosalind Thackeray, Kettle & Co, Type Weekly",
         date,
         recipients: Some(12),
         ..Facts::default()

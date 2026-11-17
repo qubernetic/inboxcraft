@@ -69,3 +69,14 @@ fn the_boards_of_the_blocks_page_stand_on_bg_with_every_set() {
         assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the settings row's unavailable state");
     }
 }
+
+#[test]
+fn the_long_facts_carry_the_boards_words_whole() {
+    // The board's long-text state holds more than its lines show: the cut part is the board's words too.
+    let harness = harness(Mode::Dark, true);
+    let from = "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio-collective.example.org>";
+    let to = "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Halvard Engen, \
+              Sunniva Aalto, Dmitri Vale, Rosalind Thackeray, Kettle & Co, Type Weekly";
+    let shown = crate::component::facts::Facts { from, to, date: "Mon 16 Nov 2026, 14:02", ..Default::default() };
+    assert_eq!(harness.query_all_by_label(&crate::component::facts::spoken(&shown)).count(), 1, "the long-text facts in the board's words");
+}
