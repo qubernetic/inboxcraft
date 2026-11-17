@@ -27,7 +27,7 @@ use super::field::{self, Field, Secret};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
 use super::popup::{Item, ItemState};
-use super::recipient::{self, RecipientState};
+use super::recipient::{self, Recipient, RecipientState, Recipients};
 use super::scroll::{self, Bar};
 use super::segmented::{self, segmented};
 use super::select::Select;
@@ -930,6 +930,42 @@ fn fields_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.push_id("text-field", |ui| text_fields(ui, theme));
     ui.push_id("multiline-field", |ui| multiline_fields(ui, theme));
     ui.push_id("recipient-chip", |ui| recipient_chips(ui, theme));
+    ui.push_id("recipient-field", |ui| recipient_fields(ui, theme));
+}
+
+/// The recipient field's board: empty, focus, typing, with-chips, invalid, disabled, wrapped, each 560 wide.
+fn recipient_fields(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Recipient field"));
+    let people = |names: &[&str]| -> Vec<Recipient> {
+        names
+            .iter()
+            .map(|name| Recipient {
+                shown: (*name).to_owned(),
+                spoken: (*name).to_owned(),
+                state: if name.ends_with('@') { RecipientState::Invalid } else { RecipientState::Valid },
+            })
+            .collect()
+    };
+    let wrapped = ["Teodor Vasquez", "Mirela Anton", "Pavel Hruska", "Bakery on the corner", "Ines Okafor", "Studio, everyone"];
+    let states: [(&str, Vec<Recipient>, &str, Option<&str>, bool, Option<Shown>); 7] = [
+        (tr!("empty"), Vec::new(), "", None, true, None),
+        (tr!("focus"), Vec::new(), "", None, true, Some(Shown::Focus)),
+        (tr!("typing"), Vec::new(), "teo", None, true, Some(Shown::Focus)),
+        (tr!("with-chips"), people(&["Teodor Vasquez", "Mirela Anton"]), "", None, true, None),
+        (tr!("invalid"), people(&["Mirela Anton", "teodor@"]), "", Some(tr!("teodor@ is not an address")), true, None),
+        (tr!("disabled"), people(&["Teodor Vasquez"]), "", None, false, None),
+        (tr!("wrapped"), people(&wrapped), "", None, true, Some(Shown::Focus)),
+    ];
+    for (state, chips, typed, error, enabled, shown) in states {
+        cells(ui, theme, |ui| {
+            field_cell(ui, theme, state, 560.0, |ui| {
+                let line = Recipients { name: tr!("To"), chips: &chips, hint: tr!("Name or address"), copies: true, error, enabled };
+                let mut typing = typed.to_owned();
+                let id = ui.make_persistent_id("to");
+                recipient::recipient_field_with(ui, theme, id, &mut typing, &line, shown);
+            });
+        });
+    }
 }
 
 /// The recipient chip's board: valid, invalid, hover, focus, long, disabled; and pressed, which the sheet does not
