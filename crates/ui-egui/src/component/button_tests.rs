@@ -735,7 +735,8 @@ fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<
 fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
     for mode in [Mode::Dark, Mode::Light] {
         let p = Theme::new(mode, TextScale::default()).palette;
-        for index in 0..faded().len() {
+        // Only the text button fades: the presentation's `.btn` transition.
+        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0)) {
             let (label, _, ground, colour) = faded().swap_remove(index);
             let p_ref = &p;
             let (rest, hover, on, off) = fade_of(mode, index, false);
@@ -746,6 +747,21 @@ fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
                 assert!(crate::component::tests::strictly_between(mid, a, b), "{mode:?} {label}: {mid:?} not between {a:?} and {b:?}");
                 assert_eq!(&frames[8], end, "{mode:?} {label}: the fade ends at the value itself");
             }
+        }
+    }
+}
+
+/// The controls the presentation gives no transition: their hover is at once at every level of motion.
+const INSTANT: [&str; 2] = ["Pin", "Show details"];
+
+#[test]
+fn at_full_motion_an_icon_button_and_a_links_underline_change_at_once() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for index in (0..faded().len()).filter(|index| INSTANT.contains(&faded()[*index].0)) {
+            let label = faded()[index].0;
+            let (rest, hover, on, off) = fade_of(mode, index, false);
+            assert_eq!(on[0], hover, "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], rest, "{mode:?} {label}: the first frame after leaving");
         }
     }
 }

@@ -10,7 +10,7 @@ use egui::{Color32, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 use crate::draw::paint::{self, Ring};
 use crate::theme::Theme;
 
-use super::{Face, Shown, between, lit};
+use super::{Face, Hover, Shown, between, lit};
 
 /// The room between the number and the word, in points.
 const GAP: f32 = 8.0;
@@ -38,7 +38,7 @@ pub(crate) fn section_label_with(ui: &mut Ui, theme: &Theme, index: &str, word: 
     let (rect, response) = ui.allocate_exact_size(vec2(left + GAP + right, font.line.ceil()), sense);
     let name = format!("{index} {word}");
     response.widget_info(|| WidgetInfo::labeled(if folds { Role::Button } else { Role::Label }, ui.is_enabled(), &name));
-    let lit = if folds { lit(ui, theme, &response, enabled, shown) } else { super::Lit::default() };
+    let lit = if folds { lit(ui, theme, &response, enabled, shown, Hover::AtOnce) } else { super::Lit::default() };
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let reach = rect.expand2(HOVER_REACH);

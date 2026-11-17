@@ -182,8 +182,8 @@ fn enter_and_space_press_a_focused_folding_label_and_its_ring_stands_round_the_r
 }
 
 #[test]
-fn a_folding_labels_word_cross_fades_at_full_motion_and_jumps_at_reduced() {
-    use crate::component::tests::{hover_frames, rests, staged_motion, strictly_between};
+fn a_folding_labels_hover_is_at_once_at_every_level_of_motion() {
+    use crate::component::tests::{hover_frames, rests, staged_motion};
     for mode in [Mode::Dark, Mode::Light] {
         let theme = Theme::new(mode, TextScale::default());
         let p = theme.palette;
@@ -201,13 +201,8 @@ fn a_folding_labels_word_cross_fades_at_full_motion_and_jumps_at_reduced() {
             );
             let (on, off) = hover_frames(&mut harness, name, 10);
             assert!(rests(&mut harness, 2), "{mode:?} {reduced}");
-            if reduced {
-                assert_eq!((word(&on[0]), word(&off[0])), (Some(p.ink), Some(p.muted)), "{mode:?}");
-            } else {
-                assert!(word(&on[3]).is_some_and(|c| strictly_between(c, p.muted, p.ink)), "{mode:?} {:?}", word(&on[3]));
-                assert!(word(&off[3]).is_some_and(|c| strictly_between(c, p.ink, p.muted)), "{mode:?} {:?}", word(&off[3]));
-                assert_eq!((word(&on[8]), word(&off[8])), (Some(p.ink), Some(p.muted)), "{mode:?}");
-            }
+            // The presentation gives the label no transition: at once at every level.
+            assert_eq!((word(&on[0]), word(&off[0])), (Some(p.ink), Some(p.muted)), "{mode:?} {reduced}");
         }
     }
 }

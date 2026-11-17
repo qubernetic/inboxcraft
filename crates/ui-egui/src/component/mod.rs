@@ -87,17 +87,30 @@ pub(crate) struct Lit {
     pub focus: bool,
 }
 
+/// How a control's hover comes: as the presentation gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Hover {
+    /// A cross-fade over the `fast` token at full motion (`.btn`: its edge and background); at once with reduced
+    /// motion.
+    Fades,
+    /// At once at every level (the presentation gives it no transition).
+    AtOnce,
+}
+
 /// What `response` shows, `enabled` or not, in `theme`; `forced` draws a state whatever the pointer does (the
-/// gallery's boards). Hover cross-fades through [`crate::motion::fade`], which lands at once when motion is reduced;
-/// pressed and focus are at once at every level. Pressed is the pointer held down on it, or Enter or Space held down
-/// while it has the focus.
-pub(crate) fn lit(ui: &Ui, theme: &crate::theme::Theme, response: &Response, enabled: bool, forced: Option<Shown>) -> Lit {
+/// gallery's boards). Hover comes as `hover` says, through [`crate::motion::fade`] when it fades; pressed and focus
+/// are at once at every level. Pressed is the pointer held down on it, or Enter or Space held down while it has the
+/// focus.
+pub(crate) fn lit(ui: &Ui, theme: &crate::theme::Theme, response: &Response, enabled: bool, forced: Option<Shown>, hover_comes: Hover) -> Lit {
     if let Some(shown) = forced {
         let hover = shown == Shown::Hover;
         return Lit { hover, fade: if hover { 1.0 } else { 0.0 }, pressed: shown == Shown::Pressed && enabled, focus: shown == Shown::Focus };
     }
     let hover = enabled && response.hovered();
-    let fade = crate::motion::fade(ui.ctx(), response.id.with("hover"), hover, theme.motion.fast);
+    let fade = match hover_comes {
+        Hover::Fades => crate::motion::fade(ui.ctx(), response.id.with("hover"), hover, theme.motion.fast),
+        Hover::AtOnce => f32::from(u8::from(hover)),
+    };
     let focus = response.has_focus();
     let keyed = focus && ui.input(|input| input.key_down(Key::Enter) || input.key_down(Key::Space));
     let pressed = enabled && (response.is_pointer_button_down_on() || keyed);

@@ -19,7 +19,7 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 
 use super::key::{Chip, ChipState};
-use super::{Face, Shown, between, control_side, lit, soon, tooltip};
+use super::{Face, Hover, Shown, between, control_side, lit, soon, tooltip};
 
 /// An icon button.
 #[derive(Debug, Clone, Copy)]
@@ -105,7 +105,7 @@ impl<'a> IconButton<'a> {
         let sense = if enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
         response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, self.active, self.name));
-        let lit = lit(ui, theme, &response, enabled, self.shown);
+        let lit = lit(ui, theme, &response, enabled, self.shown, Hover::AtOnce);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             // The rail's buttons (drawn in its ink) stand on the `panel`, whose hover is `grid`; every other on a
@@ -307,7 +307,7 @@ impl<'a> TextButton<'a> {
         let sense = if enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(inner + PAD * 2.0, control_side(theme)), sense);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
-        let lit = lit(ui, theme, &response, enabled, self.shown);
+        let lit = lit(ui, theme, &response, enabled, self.shown, Hover::Fades);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             // The tone's colours at rest, under the pointer and pressed; hover cross-fades from rest, pressed is at once.
@@ -425,7 +425,7 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(width + pad * 2.0, height), sense);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
-    let lit = lit(ui, theme, &response, enabled, shown);
+    let lit = lit(ui, theme, &response, enabled, shown, Hover::AtOnce);
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         if lit.pressed {
