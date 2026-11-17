@@ -426,12 +426,13 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
     let lock = field.read_only;
     let side = theme.boxes().icon;
     // The room right of the text: the pad, or the lock's column of a read-only field.
-    let right = if lock { s.s2 + side + s.s1 } else { pad };
+    let right = if lock { 1.0 + s.s3 + side + s.s2 } else { pad };
     let wrap = width - pad - right;
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = s.s2;
         label_row(ui, theme, field.label, width);
-        let rows = layout(ui, text, font, p.ink, Some(wrap), false).size().y.max(font.line);
+        // Every row is a line high, the last one too.
+        let rows = layout(ui, text, font, p.ink, Some(wrap), false).rows.len().max(1) as f32 * font.line;
         let whole = rows + s.s2 * 2.0 + 2.0;
         let scrolls = whole > most;
         let height = whole.clamp(least, most);
@@ -449,8 +450,11 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
         let bar = if scrolls { theme.sizes.scrollbar } else { 0.0 };
         let view = Rect::from_min_max(pos2(rect.left() + pad, inside.top() + s.s2), pos2(inside.right() - bar - right_pad, inside.bottom() - s.s2));
         let margin = margin_of(Rect::from_min_max(inside.min, pos2(inside.right() - bar, inside.bottom())), view);
-        let response = ui
-            .scope_builder(UiBuilder::new().max_rect(inside), |ui| {
+        // A child that leaves the cursor where the box put it.
+        let mut child = ui.new_child(UiBuilder::new().max_rect(inside));
+        let response = {
+            let ui = &mut child;
+            {
                 edit_scope(ui, seen.enabled);
                 let mut fixed: &str = text.as_str();
                 let buffer: &mut dyn TextBuffer = if field.read_only { &mut fixed } else { text };
@@ -490,8 +494,8 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
                 } else {
                     edit(ui)
                 }
-            })
-            .inner;
+            }
+        };
         let spoken = name(field);
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken));
         if lock {

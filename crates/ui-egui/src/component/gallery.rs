@@ -874,9 +874,58 @@ fn text_fields(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The notes of the multiline field's board, line by line.
+const NOTES: [&str; 16] = [
+    "Bring the printed proofs.",
+    "The side door is open from 14:00.",
+    "Parking is behind the mill.",
+    "As the hall is cold, bring a jumper.",
+    "Tea and coffee are on the long table.",
+    "The proofs go back with Teodor.",
+    "Leave the wet sketches on the rack.",
+    "The lift is out; the stairs are left.",
+    "We close the shutters at 18:00.",
+    "Odile has the key to the back room.",
+    "The plotter is on the first floor.",
+    "Lunch is at the bakery on the corner.",
+    "Bring your own pens for the marking.",
+    "The new paper samples came on Monday.",
+    "Ask Mirela about the frames.",
+    "Thank you, all of you.",
+];
+
+/// The multiline field's board: empty, filled, focus, error, disabled, read-only, grown, at-limit, scrolling,
+/// scrolling-focus.
+fn multiline_fields(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Multiline field"));
+    let notes = Field::new(tr!("Notes for the guests"), tr!("Anything they should know"));
+    let first = |count: usize| NOTES.iter().take(count).copied().collect::<Vec<_>>().join("\n");
+    let one = |ui: &mut Ui, value: String, field: Field<'_>, shown: Option<Shown>| {
+        let id = ui.make_persistent_id("field");
+        let mut text = value;
+        field::multiline_with(ui, theme, id, &mut text, &field, shown);
+    };
+    let error = Field { error: Some(tr!("Too long for a note: 200 characters at most, this has 236.")), ..notes };
+    let rows: [[(&str, String, Field<'_>, Option<Shown>); 2]; 5] = [
+        [(tr!("empty"), String::new(), notes, None), (tr!("filled"), first(2), notes, None)],
+        [(tr!("focus"), first(2) + "\n", notes, Some(Shown::Focus)), (tr!("error"), first(5), error, None)],
+        [(tr!("disabled"), first(2), Field { enabled: false, ..notes }, None), (tr!("read-only"), first(2), Field { read_only: true, ..notes }, None)],
+        [(tr!("grown"), first(6), notes, None), (tr!("at-limit"), first(10), notes, None)],
+        [(tr!("scrolling"), first(16), notes, None), (tr!("scrolling-focus"), first(16), notes, Some(Shown::Focus))],
+    ];
+    for row in rows {
+        cells(ui, theme, |ui| {
+            for (state, value, field, shown) in row {
+                field_cell(ui, theme, state, 320.0, |ui| one(ui, value, field, shown));
+            }
+        });
+    }
+}
+
 /// The fields' left column of boards.
 fn fields_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
-    text_fields(ui, theme);
+    ui.push_id("text-field", |ui| text_fields(ui, theme));
+    ui.push_id("multiline-field", |ui| multiline_fields(ui, theme));
 }
 
 /// The fields' middle column of boards.

@@ -9,7 +9,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{Field, Secret, margin, multiline_field, password_field, search, text_field};
 use crate::component::Shown;
-use crate::component::tests::{Look, Own, bring, builder, drew_icon, own, painted, staged, theme};
+use crate::component::tests::{Look, Own, bring, builder, drew_icon, own, painted, painted_in, staged, theme};
 use crate::iconset::IconId;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -283,6 +283,220 @@ fn hostile_text_in_a_field_never_panics() {
             harness.run();
             harness.key_press(egui::Key::Backspace);
             harness.run();
+        }
+    }
+}
+
+/// The states of the multiline field's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Many {
+    Empty,
+    Filled,
+    Focus,
+    Error,
+    Disabled,
+    ReadOnly,
+    Grown,
+    AtLimit,
+    Scrolling,
+    ScrollingFocus,
+}
+
+const MANY: [Many; 10] = [
+    Many::Empty,
+    Many::Filled,
+    Many::Focus,
+    Many::Error,
+    Many::Disabled,
+    Many::ReadOnly,
+    Many::Grown,
+    Many::AtLimit,
+    Many::Scrolling,
+    Many::ScrollingFocus,
+];
+
+/// `count` short lines of a note.
+fn lines(count: usize) -> String {
+    (1..=count).map(|n| format!("Line {n} of the note.")).collect::<Vec<_>>().join("\n")
+}
+
+/// The value of the multiline field in `state`.
+fn many_value(state: Many) -> String {
+    match state {
+        Many::Empty => String::new(),
+        Many::Filled | Many::Disabled | Many::ReadOnly => "Bring the printed proofs.\nThe side door is open from 14:00.".to_owned(),
+        Many::Focus => "Bring the printed proofs.\nThe side door is open from 14:00.\n".to_owned(),
+        Many::Error => lines(5),
+        Many::Grown => lines(6),
+        Many::AtLimit => lines(10),
+        Many::Scrolling | Many::ScrollingFocus => lines(16),
+    }
+}
+
+const NOTES: &str = "Notes for the guests";
+
+/// The multiline field of the sheet, 320 wide, in `state`.
+fn multiline_in(mode: Mode, state: Many) -> (Rect, Own, crate::component::tests::Paint, Harness<'static>) {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.bg,
+        vec2(420.0, 400.0),
+        move |ui, theme| {
+            let id = egui::Id::unique("notes");
+            let mut text = ui.data_mut(|data| data.get_temp_mut_or_insert_with(id.with("text"), || many_value(state)).clone());
+            let field = Field {
+                label: NOTES,
+                hint: "Anything they should know",
+                error: (state == Many::Error).then_some("Too long for a note: 200 characters at most, this has 236."),
+                enabled: state != Many::Disabled,
+                read_only: state == Many::ReadOnly,
+            };
+            ui.spacing_mut().scroll = crate::component::scroll::style(theme);
+            ui.vertical(|ui| {
+                ui.set_width(320.0);
+                multiline_field(ui, theme, id, &mut text, &field);
+            });
+            ui.data_mut(|data| data.insert_temp(id.with("text"), text));
+        },
+    );
+    if matches!(state, Many::Focus | Many::ScrollingFocus) {
+        bring(&mut harness, NOTES, Shown::Focus);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::End);
+        harness.run();
+    }
+    let rect = box_of(&harness, NOTES);
+    let paint = painted_in(&harness, NOTES, rect);
+    (rect, own(&paint, rect), paint, harness)
+}
+
+/// The box of the field `label`: its text node's rect, or the scroll area's around it while it scrolls.
+fn box_of(harness: &Harness<'static>, label: &str) -> Rect {
+    let node = harness.get_by_label(label).rect();
+    // The edit lies inside the box's 1 px edge; a scrolled one is taller than the box and starts above it.
+    let edges: Vec<Rect> = drawn_rects(harness).into_iter().filter(|rect| (rect.width() - 320.0).abs() < 0.01 && rect.left() == node.left() - 1.0).collect();
+    edges.first().copied().unwrap_or(node.expand(1.0))
+}
+
+/// The rects of the 1 px edges the last frame painted.
+fn drawn_rects<State>(harness: &Harness<'_, State>) -> Vec<Rect> {
+    fn walk(shape: &Shape, found: &mut Vec<Rect>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            Shape::Rect(rect) if rect.stroke.width > 0.0 => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn a_multiline_field_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for state in MANY {
+            let (rect, look, paint, harness) = multiline_in(mode, state);
+            let at = format!("{mode:?} {state:?}: {look:#?} {rect:?}");
+            let height = match state {
+                Many::Error => 128.0,
+                Many::Grown => 150.0,
+                Many::AtLimit => 238.0,
+                Many::Scrolling | Many::ScrollingFocus => 240.0,
+                _ => 96.0,
+            };
+            assert!((rect.width() - 320.0).abs() < 0.01 && (rect.height() - height).abs() < 0.01, "{at}");
+            let (fill, edge) = match state {
+                Many::Focus | Many::ScrollingFocus => (Some(p.term), (p.cyan_edge, false)),
+                Many::Error => (Some(p.term), (p.minus, false)),
+                Many::Disabled => (None, (p.line, true)),
+                Many::ReadOnly => (None, (p.line, false)),
+                _ => (Some(p.term), (p.line, false)),
+            };
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, Some((1.0, edge.0, edge.1)), "{at}");
+            assert!(look.ring.is_none() && look.radius <= 0.0, "{at}");
+            let label = one(&harness, "NOTES FOR THE GUESTS");
+            assert_eq!(label.rect.min, rect.min - vec2(0.0, 24.0), "{at}");
+            assert_eq!((label.colour, label.family.as_str(), label.size), (p.muted, "Monospace", 11.0), "{at}");
+            // The text 13 in and 9 down (the 1 px edge and the 8 above), Plex Sans 14/22.
+            let value = many_value(state);
+            let (shown, colour) = match state {
+                Many::Empty => ("Anything they should know".to_owned(), p.muted),
+                Many::Disabled => (value, p.muted),
+                _ => (value, p.ink),
+            };
+            let text = one(&harness, &shown);
+            if !matches!(state, Many::ScrollingFocus) {
+                assert_eq!(text.rect.min, rect.min + vec2(13.0, 9.0), "{at} {text:?}");
+            }
+            assert_eq!((text.colour, text.family.as_str(), text.size, text.row), (colour, "Proportional", 14.0, 22.0), "{at}");
+            let wide = match state {
+                Many::ReadOnly => 270.0,
+                Many::Scrolling | Many::ScrollingFocus => 290.0,
+                _ => 294.0,
+            };
+            assert!(text.rect.width() <= wide + 0.01, "{at} {text:?} wider than {wide}");
+            // The caret: at the start of the third line, or inside the view while it scrolls.
+            let block = caret(&paint, p.cyan_edge);
+            match state {
+                Many::Focus => assert_eq!(block, Some(Rect::from_min_size(rect.min + vec2(13.0, 56.0), vec2(7.0, 16.0))), "{at}"),
+                Many::ScrollingFocus => {
+                    let view = Rect::from_min_max(rect.min + vec2(13.0, 9.0), rect.max - vec2(17.0, 9.0));
+                    assert!(block.is_some_and(|block| view.expand(1.0).contains_rect(block)), "{at} {block:?}");
+                }
+                _ => assert_eq!(block, None, "{at}"),
+            }
+            // While it scrolls, the bar's thumb at rest stands 4 wide in the 12 strip inside the right edge.
+            let thumb = paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.muted) && (shape.rect.width() - 4.0).abs() < 0.01);
+            if matches!(state, Many::Scrolling | Many::ScrollingFocus) {
+                let thumb = thumb.map(|shape| shape.rect);
+                assert!(thumb.is_some_and(|thumb| thumb.left() == rect.left() + 311.0 && thumb.top() >= rect.top() + 1.0 && thumb.bottom() <= rect.bottom() - 1.0), "{at} {thumb:?}");
+            } else {
+                assert!(thumb.is_none(), "{at}");
+            }
+            let lock: Vec<_> = drawn(&harness).into_iter().filter(|drawn| drawn.text == "\u{e2fa}").collect();
+            if state == Many::ReadOnly {
+                assert!(lock.len() == 1 && (lock[0].rect.center() - (rect.min + vec2(299.0, 17.0))).length() < 1.5, "{at} {lock:?}");
+            } else {
+                assert!(lock.is_empty(), "{at}");
+            }
+            if state == Many::Error {
+                let message = one(&harness, "Too long for a note: 200 characters at most, this has 236.");
+                assert_eq!((message.rect.min, message.colour), (rect.left_bottom() + vec2(0.0, 8.0), p.minus), "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_multiline_field_grows_to_240_then_scrolls() {
+    for (count, height, scrolls) in [(3, 96.0, false), (10, 238.0, false), (16, 240.0, true)] {
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let harness = staged(
+            theme,
+            |p| p.bg,
+            vec2(420.0, 400.0),
+            move |ui, theme| {
+                let mut text = lines(count);
+                ui.spacing_mut().scroll = crate::component::scroll::style(theme);
+                ui.vertical(|ui| {
+                    ui.set_width(320.0);
+                    multiline_field(ui, theme, egui::Id::unique("notes"), &mut text, &Field::new(NOTES, ""));
+                });
+            },
+        );
+        let rect = box_of(&harness, NOTES);
+        assert!((rect.height() - height).abs() < 0.01, "{count} lines: {rect:?}");
+        let paint = painted_in(&harness, NOTES, rect);
+        let thumb = paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == theme.palette.muted)).map(|shape| shape.rect);
+        if scrolls {
+            // The bar's strip is 12 wide between the box's right edge and the text, inside the edge.
+            let strip = Rect::from_min_max(pos2(rect.right() - 13.0, rect.top() + 1.0), pos2(rect.right() - 1.0, rect.bottom() - 1.0));
+            assert!(thumb.is_some_and(|thumb| strip.contains_rect(thumb) && (thumb.center().x - strip.center().x).abs() < 0.01), "{thumb:?} in {strip:?}");
+        } else {
+            assert_eq!(thumb, None, "{count} lines");
         }
     }
 }

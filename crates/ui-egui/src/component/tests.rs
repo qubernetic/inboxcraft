@@ -267,8 +267,13 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
 /// When no widget or more than one has `label`, when the harness does not [`record_layers`] (build it with
 /// [`builder`]), or when no ground holds the widget (place it with [`stage`]).
 pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint {
+    painted_in(harness, label, harness.get_by_label(label).rect())
+}
+
+/// [`painted`] for the widget `label` whose own rect is `own` and not its node's: a field whose text node scrolls
+/// inside its box.
+pub(crate) fn painted_in<State>(harness: &Harness<'_, State>, label: &str, own: Rect) -> Paint {
     let node = harness.get_by_label(label);
-    let own = node.rect();
     let grown = own.expand(AROUND);
     let id = node.accesskit_node().locate().0;
     let recorded = harness
@@ -335,7 +340,7 @@ fn focused<State>(harness: &Harness<'_, State>) -> Option<NodeId> {
 }
 
 /// The labels of the pressable controls (a click or focus action, not disabled, not hidden; static text, which egui
-/// makes focusable for selecting, left out) Tab never focuses: Tab is pressed
+/// makes focusable for selecting, and scroll bars left out) Tab never focuses: Tab is pressed
 /// until the focus comes back to a control it has been on (at most 2 000 presses), two frames after each press. A
 /// control without a label is named by its role.
 pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<String> {
@@ -349,6 +354,8 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
                 && !node.is_disabled()
                 && !node.is_hidden()
                 && node.role() != accesskit::Role::Label
+                // A scroll bar is never a Tab stop: the keyboard scrolls what it holds (a field's text, a list).
+                && node.role() != accesskit::Role::ScrollBar
         })
         .map(|node| {
             let node = node.accesskit_node();
