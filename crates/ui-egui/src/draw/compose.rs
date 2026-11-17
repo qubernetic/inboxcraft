@@ -19,7 +19,7 @@
 //! through the [`Composer`]'s methods, which run the engine's commands.
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, vec2};
+use egui::{Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, vec2};
 use inboxcraft_time::Timestamp;
 
 use super::paint::line;
@@ -111,6 +111,16 @@ fn suggestions_id() -> Id {
 /// The id the send-later picker's state is kept under between frames and openings.
 fn later_id() -> Id {
     Id::unique("compose-later")
+}
+
+/// The id of the From line's menu of the accounts.
+pub(super) fn from_menu() -> Id {
+    Id::unique("compose-from-menu")
+}
+
+/// The id of the menu of the templates.
+pub(super) fn templates_menu() -> Id {
+    Id::unique("compose-templates-menu")
 }
 
 /// The id of the send-later picker's popup.
@@ -296,15 +306,18 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         if response.has_focus() {
             super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
         }
-        Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, body * MENU, |ui| {
-                for choice in mailbox.accounts() {
-                    let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
-                    if popup::choice(ui, theme, &text, choice.id == account.id).clicked() && choice.id != account.id {
+        popup::menu(ui.ctx(), theme, &response, from_menu(), body * MENU, |ui| {
+            let mut chosen = false;
+            for choice in mailbox.accounts() {
+                let text = tr!("{label} ({address})", label = choice.label, address = choice.address);
+                if popup::choice(ui, theme, &text, choice.id == account.id).clicked() {
+                    chosen = true;
+                    if choice.id != account.id {
                         asked.push(Asked::From(choice.id));
                     }
                 }
-            });
+            }
+            ((), chosen)
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(RichText::new(&account.label).font(theme.fonts.caption.id()).color(p.muted));
@@ -320,15 +333,16 @@ fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, a
         return;
     }
     let response = button.show(ui, theme, keymap);
-    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, theme.fonts.body.size * MENU, |ui| {
-            ui.label(RichText::new(tr!("Put in a template")).font(theme.fonts.caption.id()).color(theme.palette.muted));
-            for (at, name) in composer.templates().iter().enumerate() {
-                if popup::entry(ui, theme, keymap, name, None).clicked() {
-                    asked.push(Asked::Template(at));
-                }
+    popup::menu(ui.ctx(), theme, &response, templates_menu(), theme.fonts.body.size * MENU, |ui| {
+        popup::title(ui, theme, tr!("Put in a template"), None);
+        let mut chosen = false;
+        for (at, name) in composer.templates().iter().enumerate() {
+            if popup::entry(ui, theme, keymap, name, None).clicked() {
+                asked.push(Asked::Template(at));
+                chosen = true;
             }
-        });
+        }
+        ((), chosen)
     });
 }
 

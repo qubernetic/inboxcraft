@@ -960,8 +960,12 @@ fn raw_widgets(code: &str) -> Vec<(usize, String)> {
         "text_edit_singleline",
         "text_edit_multiline",
     ];
-    const TYPES: [&str; 7] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton", "TextEdit"];
+    const TYPES: [&str; 8] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton", "TextEdit", "Popup"];
     let mut found = Vec::new();
+    // egui's popups (the float is the one way to a menu): its free function as well as its type.
+    for call in ["popup_below_widget(", "popup_above_or_below_widget("] {
+        found.extend(code.match_indices(call).filter(|(at, _)| word_at(code, *at, call.trim_end_matches('('))).map(|(at, _)| (at, call.to_owned())));
+    }
     for method in METHODS {
         for call in [format!(".{method}("), format!("Ui::{method}(")] {
             found.extend(code.match_indices(call.as_str()).map(|(at, _)| (at, call.clone())));
@@ -1092,6 +1096,10 @@ fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
         [".text_edit_singleline(", ".text_edit_multiline("]
     );
     assert!(scan("if let Some(state) = egui::text_edit::TextEditState::load(ctx, id) {}").is_empty());
+    // Menus: views open them through `component::popup`.
+    assert_eq!(scan("egui::Popup::menu(&response).show(|ui| {});"), ["Popup"]);
+    assert_eq!(scan("Popup::context_menu(&row).show(add); egui::popup_below_widget(ui, id, &r, close, add);"), ["Popup", "popup_below_widget("]);
+    assert!(scan("popup::menu(ctx, theme, &response, id, width, add); PopupCloseBehavior::CloseOnClick;").is_empty());
 }
 
 #[test]

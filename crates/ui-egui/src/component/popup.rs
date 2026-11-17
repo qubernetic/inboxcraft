@@ -590,6 +590,75 @@ pub fn clicked(ctx: &Context, response: &Response, id: Id) -> bool {
     response.clicked() && !stale
 }
 
+/// How many frames a control asks for the keyboard back after its float closed on a choice: the float held the
+/// keyboard that frame and the next.
+const REFOCUS_FRAMES: u8 = 3;
+
+/// Gives the keyboard back to `opener` while the menu `id` closed on a choice asks for it.
+fn refocus(ctx: &Context, opener: &Response, id: Id) {
+    let key = id.with("refocus");
+    if let Some(left) = ctx.data(|data| data.get_temp::<u8>(key)) {
+        if opener.has_focus() || left == 0 || is_open(ctx, id) {
+            ctx.data_mut(|data| data.remove::<u8>(key));
+        } else {
+            opener.request_focus();
+            ctx.data_mut(|data| data.insert_temp(key, left.saturating_sub(1)));
+        }
+    }
+}
+
+/// A menu `width` wide that `opener` opens and closes (a press, or Enter or Space on it): the [`float`] `id` hung
+/// under it while it is open, `add` drawing its rows and saying whether one was chosen, which closes it (and gives
+/// `opener` the keyboard back when the row was chosen by the keyboard); Esc or a press outside close it too and give
+/// `opener` the keyboard back. What `add` gave while it is open.
+pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    refocus(ctx, opener, id);
+    if clicked(ctx, opener, id) {
+        set_open(ctx, id, !is_open(ctx, id));
+    }
+    menu_at(ctx, theme, opener, opener.rect, id, width, add)
+}
+
+/// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.
+pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    refocus(ctx, row, id);
+    let at = id.with("at");
+    if row.secondary_clicked() {
+        let pointer = row.interact_pointer_pos().unwrap_or(row.rect.left_bottom());
+        ctx.data_mut(|data| data.insert_temp(at, pointer));
+        set_open(ctx, id, true);
+    }
+    let anchor = ctx.data(|data| data.get_temp::<Pos2>(at)).map_or(row.rect, |pointer| Rect::from_min_size(pointer - vec2(0.0, DROP), Vec2::ZERO));
+    menu_at(ctx, theme, row, anchor, id, width, add)
+}
+
+/// The open menu `id` under `anchor`, giving `opener` the keyboard back when it closes.
+fn menu_at<R>(ctx: &Context, theme: &Theme, opener: &Response, anchor: Rect, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    if !is_open(ctx, id) {
+        return None;
+    }
+    // A row with the keyboard: the choice is the keyboard's, and the keyboard goes back to the opener. A row chosen by
+    // the pointer leaves the keyboard where it was, with nothing (the window's keys then act, as before the menu).
+    let keyed = ctx.memory(|memory| memory.focused().is_some());
+    let shown = float(ctx, theme, &Float { id, anchor, width, returns_to: opener.id }, add);
+    match shown {
+        None => {
+            set_open(ctx, id, false);
+            None
+        }
+        Some((inner, chosen)) => {
+            if chosen {
+                set_open(ctx, id, false);
+                if keyed {
+                    opener.request_focus();
+                    ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
+                }
+            }
+            Some(inner)
+        }
+    }
+}
+
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.
 #[must_use]
 pub fn escape(ctx: &Context) -> bool {
@@ -599,4 +668,4 @@ pub fn escape(ctx: &Context) -> bool {
 
 #[cfg(test)]
 #[path = "popup_tests.rs"]
-mod tests;
+pub(crate) mod tests;

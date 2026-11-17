@@ -30,7 +30,7 @@
 use std::cell::Cell;
 
 use egui::{
-    Align, Color32, Frame, Id, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
+    Align, Color32, Frame, Id, Layout, Margin, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
     UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_model::Role;
@@ -308,13 +308,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
-        Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, width, |ui| {
-                if let Some(chosen) = group_menu(ui, theme, message.group, &message.address) {
-                    acted = Some(chosen);
-                    ui.close();
-                }
-            });
+        let menu = Id::unique("list-group-menu").with(message.id);
+        popup::context_menu(ui.ctx(), theme, &response, menu, width, |ui| {
+            let chosen = group_menu(ui, theme, message.group, &message.address);
+            if chosen.is_some() {
+                acted = chosen;
+            }
+            ((), chosen.is_some())
         });
     }
     Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }

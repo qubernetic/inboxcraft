@@ -326,3 +326,11 @@ fn without_an_account_there_is_no_new_message() {
     assert!(!harness.state().can_run(keymap::COMPOSE));
     assert!(harness.query_all_by_role_and_label(Role::Button, "New message").next().is_none());
 }
+
+#[test]
+fn the_from_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside() {
+    for key in [None, Some(Key::Enter), Some(Key::Space)] {
+        let mut harness = composing(egui::Theme::Light);
+        crate::component::popup::tests::walk_a_menu(&mut harness, (Role::ComboBox, "From Mira Holloway <mira@example.org>"), key);
+    }
+}

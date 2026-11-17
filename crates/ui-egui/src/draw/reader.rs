@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Pos2, Rect, RichText, ScrollArea, Sense, Shape,
     Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
@@ -203,17 +203,28 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     };
     let response = button.show(ui, theme, keymap);
     let width = theme.fonts.body.size * MENU_WIDTH;
-    Popup::menu(&response).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            crate::component::label(ui, theme.fonts.label, tr!("Move to"), theme.palette.muted);
-            for folder in mailbox.move_targets(id) {
-                // The full path, so a folder inside another says where it is.
-                if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
-                    drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
-                }
+    popup::menu(ui.ctx(), theme, &response, move_menu(), width, |ui| {
+        popup::title(ui, theme, tr!("Move to"), None);
+        let mut chosen = false;
+        for folder in mailbox.move_targets(id) {
+            // The full path, so a folder inside another says where it is.
+            if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
+                drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
+                chosen = true;
             }
-        })
+        }
+        ((), chosen)
     });
+}
+
+/// The id of the Move menu.
+pub(super) fn move_menu() -> Id {
+    Id::unique("reader-move-menu")
+}
+
+/// The id of the More menu.
+pub(super) fn more_menu() -> Id {
+    Id::unique("reader-more-menu")
 }
 
 /// The id the time picker's state is kept under between frames and openings.
@@ -347,9 +358,12 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
                 divider(ui, theme);
                 let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
                 let width = theme.fonts.body.size * MENU_WIDTH;
-                Popup::menu(&response)
-                    .frame(Frame::NONE)
-                    .show(|ui| popup::panel(ui, theme, width, |ui| more(ui, theme, keymap, mailbox, reader, drawn)));
+                popup::menu(ui.ctx(), theme, &response, more_menu(), width, |ui| {
+                    // Any row chosen closes it: each asks for something.
+                    let before = drawn.asked.len();
+                    more(ui, theme, keymap, mailbox, reader, drawn);
+                    ((), drawn.asked.len() > before)
+                });
             });
         });
     });

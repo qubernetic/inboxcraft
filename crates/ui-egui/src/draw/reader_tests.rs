@@ -674,3 +674,14 @@ fn the_notice_s_dismiss_is_a_link_that_space_presses() {
     harness.run();
     assert_eq!(harness.state().reader().notice(), None);
 }
+
+#[test]
+fn more_and_move_open_by_the_pointer_enter_and_space_and_keep_tab_inside() {
+    for opener in ["More", "Move to a folder"] {
+        for key in [None, Some(Key::Enter), Some(Key::Space)] {
+            let fetch = Recorder::default();
+            let mut harness = opened(&fetch, None, "Photos from the coast walk");
+            crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, opener), key);
+        }
+    }
+}

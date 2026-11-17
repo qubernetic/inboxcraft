@@ -788,3 +788,57 @@ fn enter_and_space_press_a_suggestion_as_the_pointer_does() {
         });
     }
 }
+
+/// The node with the keyboard, its role and name.
+fn focused_node<State>(harness: &Harness<'_, State>) -> Option<(Role, Option<String>, egui::accesskit::NodeId)> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).map(|node| {
+        let data = node.accesskit_node();
+        (data.role(), data.label(), data.locate().0)
+    })
+}
+
+/// A menu that the control `opener` (by role and name) opens, walked by the keyboard: open by `key` on the focused
+/// opener (down and up in frames of their own), Tab round its rows (each a menu row, back on the first, never out of
+/// the menu), then Esc: closed, the keyboard back on the opener.
+pub(crate) fn walk_a_menu<State>(harness: &mut Harness<'_, State>, opener: (Role, &str), key: Option<Key>) {
+    let (role, label) = opener;
+    harness.get_by_role_and_label(role, label).focus();
+    harness.run_ok();
+    match key {
+        Some(key) => {
+            harness.key_down(key);
+            harness.run_ok();
+            harness.key_up(key);
+            harness.run_ok();
+        }
+        None => {
+            harness.get_by_role_and_label(role, label).click();
+            harness.run_ok();
+        }
+    }
+    walk_an_open_menu(harness, opener);
+}
+
+/// A menu just opened from `opener`, walked as [`walk_a_menu`] walks it after opening it.
+pub(crate) fn walk_an_open_menu<State>(harness: &mut Harness<'_, State>, opener: (Role, &str)) {
+    let (role, label) = opener;
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        harness.key_press(Key::Tab);
+        harness.run_ok();
+        let Some((role, name, id)) = focused_node(harness) else { panic!("{label}: Tab left nothing focused") };
+        assert!(matches!(role, Role::MenuItem | Role::MenuItemRadio), "{label}: Tab left the menu for {role:?} {name:?}");
+        if seen.first() == Some(&id) {
+            break;
+        }
+        seen.push(id);
+    }
+    assert!(seen.len() >= 2 && seen.len() < 60, "{label}: Tab goes round {} rows", seen.len());
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run_ok();
+    assert_eq!(focused_node(harness).map(|(.., id)| id), seen.last().copied(), "{label}: Shift Tab from the first is the last");
+    harness.key_press(Key::Escape);
+    harness.run_ok();
+    assert!(harness.query_all_by_role(Role::MenuItem).chain(harness.query_all_by_role(Role::MenuItemRadio)).all(|row| !seen.contains(&row.accesskit_node().locate().0)), "{label}: Esc closed it");
+    assert!(harness.get_by_role_and_label(role, label).is_focused(), "{label}: the keyboard is back on the opener");
+}
