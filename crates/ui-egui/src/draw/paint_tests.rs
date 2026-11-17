@@ -195,6 +195,8 @@ fn a_dashed_edge_on_any_rect_and_radius_returns_and_stays_small() {
         at(10.0, 10.0, 1e9, 20.0),
         at(-5e8, 10.0, 1e9, 1e9),
         at(1e30, 1e30, 40.0, 20.0),
+        Rect::from_min_max(pos2(-1e30, -1e30), pos2(1e30, 1e30)),
+        Rect::from_min_max(pos2(-f32::MAX, -f32::MAX), pos2(f32::MAX, f32::MAX)),
     ];
     let colour = egui::Color32::from_rgb(0x8b, 0x91, 0x96);
     for scale in [1.0, 1.25, 1.5, 2.0] {

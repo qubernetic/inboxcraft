@@ -640,6 +640,54 @@ fn a_dashed_edge_is_2_on_2_off_clockwise_on_whole_pixels() {
     }
 }
 
+/// A dashed edge round `rect` with corners of `radius`, alone on nothing, in an 80 by 50 point picture at `scale`.
+fn dashed_alone(rect: Rect, colour: Color32, radius: f32, scale: f32) -> Picture {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(scale);
+    let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+    let mut output = ctx.run_ui(input, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius));
+    output.textures_delta.clear();
+    let primitives = ctx.tessellate(output.shapes, scale);
+    fill(&primitives, &white(), (80.0 * scale).round() as usize, (50.0 * scale).round() as usize, scale)
+}
+
+/// The box `rect` covers in whole pixels at `scale`: its edges rounded to the pixel grid.
+fn pixel_box(rect: Rect, scale: f32) -> (usize, usize, usize, usize) {
+    let px = |points: f32| (points * scale).round() as usize;
+    (px(rect.left()), px(rect.top()), px(rect.right()) - px(rect.left()), px(rect.bottom()) - px(rect.top()))
+}
+
+#[test]
+fn a_dashed_edge_is_2_px_on_2_off_and_1_px_thick_at_every_scale() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0)] {
+            let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+            let picture = dashed_alone(rect, colour, 0.0, scale);
+            let (left, top, wide, high) = pixel_box(rect, scale);
+            let mut wrong = Vec::new();
+            for y in 0..picture.height {
+                for x in 0..picture.width {
+                    let inside = (left..left + wide).contains(&x) && (top..top + high).contains(&y);
+                    let (bx, by) = (x.wrapping_sub(left), y.wrapping_sub(top));
+                    let edge = inside && (bx == 0 || by == 0 || bx == wide - 1 || by == high - 1);
+                    let want = if edge && dash_on(bx, by, wide, high) { colour } else { Color32::TRANSPARENT };
+                    let got = picture.pixel(x, y);
+                    if got != Some(want) {
+                        wrong.push((bx as isize, by as isize, got));
+                    }
+                }
+            }
+            assert!(
+                wrong.is_empty(),
+                "{w} × {h} at {scale} ({wide} × {high} px): {} pixels wrong, e.g. {:?}",
+                wrong.len(),
+                &wrong[..wrong.len().min(6)]
+            );
+        }
+    }
+}
+
 #[test]
 fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
     let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
