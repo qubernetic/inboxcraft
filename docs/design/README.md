@@ -1,6 +1,6 @@
 # InboxCraft design file
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor · **Status:** draft
+> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major · **Status:** draft
 
 `inboxcraft.figcraft` is the design file of the whole app, made in
 [FigCraft](https://getartcraft.com/apps/figcraft): InboxCraft in the form language of the Qubernetic brand. **It is
@@ -102,3 +102,6 @@ implemented. This list will name what is still missing once that work has begun.
 | 2026-11-08 | minor | Cards, selection, white on custom colours and floats are in the code; the event tokens are, their painting is not (#205) |
 | 2026-11-08 | minor | Controls and events in the calendar are in the code (#206) |
 | 2026-11-08 | minor | The account form, an account's settings and the check after a change (#216) |
+| 2026-11-17 | minor | The Qubernetic design file, first part, beside the present one (#222) |
+| 2026-11-17 | minor | The Qubernetic design file, second part: the frame and the main screens (#224) |
+| 2026-11-17 | major | The Qubernetic design file takes the place of the earlier one (#226) |
