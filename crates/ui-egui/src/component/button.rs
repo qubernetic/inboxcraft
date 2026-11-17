@@ -19,7 +19,7 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 
 use super::key::{Chip, ChipState};
-use super::{Shown, control_side, lit, soon, tooltip};
+use super::{Face, Shown, between, control_side, lit, soon, tooltip};
 
 /// An icon button.
 #[derive(Debug, Clone, Copy)]
@@ -110,26 +110,28 @@ impl<'a> IconButton<'a> {
             let painter = ui.painter();
             // The rail's buttons (drawn in its ink) stand on the `panel`, whose hover is `grid`; every other on a
             // `surface`, whose hover is `stage`.
-            let hover = if self.ink.is_some() { p.grid } else { p.stage };
-            if self.active && enabled {
+            let (hover, ground) = if self.ink.is_some() { (p.grid, p.panel) } else { (p.stage, p.surface) };
+            let colour = if !enabled {
+                p.dim
+            } else if self.active {
                 // Selected and pressed: the wash keeps and takes the accent edge, as a pressed primary does (the
                 // sheet has no pressed state for a selected button).
                 painter.rect_filled(rect, 0.0, p.cyan_muted);
                 if lit.pressed {
                     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
                 }
+                self.ink.unwrap_or(p.cyan_text)
             } else if lit.pressed {
                 painter.rect_filled(rect, 0.0, hover);
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-            } else if lit.hover {
-                painter.rect_filled(rect, 0.0, hover);
-            }
-            let colour = match (self.ink, enabled, self.active, lit.hover || lit.pressed) {
-                (_, false, _, _) => p.dim,
-                (Some(ink), true, _, _) => ink,
-                (None, true, true, _) => p.cyan_text,
-                (None, true, false, true) => p.ink,
-                (None, true, false, false) => p.muted,
+                self.ink.unwrap_or(p.ink)
+            } else {
+                let rest = Face { fill: None, edge: None, ink: self.ink.unwrap_or(p.muted) };
+                let face = between(rest, Face { fill: Some(hover), edge: None, ink: self.ink.unwrap_or(p.ink) }, lit.fade, ground);
+                if let Some(fill) = face.fill {
+                    painter.rect_filled(rect, 0.0, fill);
+                }
+                face.ink
             };
             let icon = if self.side.is_some() { side * 0.5 } else { theme.icon_side() };
             crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, colour);
@@ -308,21 +310,25 @@ impl<'a> TextButton<'a> {
         let lit = lit(ui, theme, &response, enabled, self.shown);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
-            // (fill, edge, text) of the tone in this state.
-            let (fill, edge, ink) = match (self.tone, enabled, lit.pressed, lit.hover) {
-                (_, false, ..) => (None, None, p.muted),
-                (Tone::Primary, true, true, _) => (Some(p.cyan_muted), Some(p.cyan_edge), p.cyan_text),
-                (Tone::Primary, true, false, true) => (Some(p.ink), None, p.bg),
-                (Tone::Primary, true, false, false) => (Some(p.cyan), None, p.on_cyan),
-                (Tone::Secondary, true, true, _) => (Some(p.stage), Some(p.ink), p.ink),
-                (Tone::Secondary, true, false, true) => (Some(p.stage), Some(p.muted), p.ink),
-                (Tone::Secondary, true, false, false) => (None, Some(p.line), p.ink),
-                (Tone::Danger, true, true, _) => (Some(p.stage), Some(p.minus), p.minus),
-                (Tone::Danger, true, false, true) => (Some(p.minus), None, p.bg),
-                (Tone::Danger, true, false, false) => (None, Some(p.minus), p.minus),
-                (Tone::Plain, true, true, _) => (Some(p.stage), Some(p.muted), p.ink),
-                (Tone::Plain, true, false, true) => (Some(p.stage), None, p.ink),
-                (Tone::Plain, true, false, false) => (None, None, p.ink),
+            // The tone's colours at rest, under the pointer and pressed; hover cross-fades from rest, pressed is at once.
+            let face = |fill, edge, ink| Face { fill, edge, ink };
+            let (rest, hovered, held) = match self.tone {
+                Tone::Primary => {
+                    (face(Some(p.cyan), None, p.on_cyan), face(Some(p.ink), None, p.bg), face(Some(p.cyan_muted), Some(p.cyan_edge), p.cyan_text))
+                }
+                Tone::Secondary => {
+                    (face(None, Some(p.line), p.ink), face(Some(p.stage), Some(p.muted), p.ink), face(Some(p.stage), Some(p.ink), p.ink))
+                }
+                Tone::Danger => (face(None, Some(p.minus), p.minus), face(Some(p.minus), None, p.bg), face(Some(p.stage), Some(p.minus), p.minus)),
+                Tone::Plain => (face(None, None, p.ink), face(Some(p.stage), None, p.ink), face(Some(p.stage), Some(p.muted), p.ink)),
+            };
+            let Face { fill, edge, ink } = if !enabled {
+                face(None, None, p.muted)
+            } else if lit.pressed {
+                held
+            } else {
+                // Buttons stand on a `surface`: a fill that is not there at rest grows out of it.
+                between(rest, hovered, lit.fade, p.surface)
             };
             if let Some(fill) = fill {
                 painter.rect_filled(rect, 0.0, fill);
@@ -426,10 +432,22 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
             painter.rect_filled(rect, 0.0, p.cyan_muted);
         }
         let top = (rect.center().y - galley.size().y / 2.0).round();
-        if lit.hover || lit.pressed {
-            // The underline: a hairline two points over the foot of the text's line.
+        // The underline: a hairline two points over the foot of the text's line, at once while pressed, else
+        // cross-fading in from the `surface` a link stands on.
+        let underline = if lit.pressed {
+            Some(p.cyan_text)
+        } else {
+            between(
+                Face { fill: None, edge: None, ink: p.surface },
+                Face { fill: None, edge: Some(p.cyan_text), ink: p.surface },
+                lit.fade,
+                p.surface,
+            )
+            .edge
+        };
+        if let Some(colour) = underline {
             let y = top + font.line - 2.0;
-            paint::hairline(painter, egui::pos2(rect.left() + pad, y), egui::pos2(rect.left() + pad + width - 1.0, y), p.cyan_text);
+            paint::hairline(painter, egui::pos2(rect.left() + pad, y), egui::pos2(rect.left() + pad + width - 1.0, y), colour);
         }
         painter.galley(egui::pos2(rect.left() + pad, top), galley, ink);
         if lit.focus {

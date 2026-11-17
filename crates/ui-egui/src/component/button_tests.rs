@@ -678,3 +678,86 @@ fn enter_and_space_each_give_the_pressed_look_to_the_focused_control() {
         }
     }
 }
+
+/// A control of the hover fade test: its label, how to draw it, its ground, and the one colour the fade moves, read
+/// from its look (`None`: not painted, so the ground shows).
+type Faded = (&'static str, Draw, fn(&crate::theme::Palette) -> egui::Color32, fn(&Own) -> Option<egui::Color32>);
+
+fn faded() -> Vec<Faded> {
+    vec![
+        (
+            "Pin",
+            Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.texts.first().map(|t| t.1),
+        ),
+        ("Send", Box::new(|ui, theme| drop(TextButton::new("Send").primary().show(ui, theme, &Keymap::default()))), |p| p.surface, |o| o.fill),
+        (
+            "Reply all",
+            Box::new(|ui, theme| drop(TextButton::new("Reply all").secondary().show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.edge.map(|e| e.1),
+        ),
+        (
+            "Delete",
+            Box::new(|ui, theme| drop(TextButton::new("Delete").danger().show(ui, theme, &Keymap::default()))),
+            |p| p.surface,
+            |o| o.texts.first().map(|t| t.1),
+        ),
+        ("Discard", Box::new(|ui, theme| drop(TextButton::new("Discard").plain().show(ui, theme, &Keymap::default()))), |p| p.surface, |o| o.fill),
+        (
+            "Show details",
+            Box::new(|ui, theme| drop(super::link(ui, theme, &Keymap::default(), "Show details"))),
+            |p| p.surface,
+            |o| o.lines.first().copied(),
+        ),
+    ]
+}
+
+/// The fade frames of the control at `index` of [`faded`] with motion `reduced` or full: (rest, hover, on, off).
+fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<Own>) {
+    let theme = Theme::new(mode, TextScale::default());
+    let label = faded()[index].0;
+    let draw = move |ui: &mut egui::Ui, theme: &Theme| (faded().swap_remove(index).1)(ui, theme);
+    let still = |shown| {
+        let mut harness = staged(theme, faded()[index].2, egui::vec2(400.0, 120.0), draw);
+        bring(&mut harness, label, shown);
+        let rect = harness.get_by_label(label).rect();
+        own(&painted(&harness, label), rect)
+    };
+    let mut harness = crate::component::tests::staged_motion(theme, reduced, faded()[index].2, egui::vec2(400.0, 120.0), draw);
+    let (on, off) = crate::component::tests::hover_frames(&mut harness, label, 10);
+    assert!(crate::component::tests::rests(&mut harness, 2), "{mode:?} {label} asks for no repaint once the fade has ended");
+    (still(Shown::Rest), still(Shown::Hover), on, off)
+}
+
+#[test]
+fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for index in 0..faded().len() {
+            let (label, _, ground, colour) = faded().swap_remove(index);
+            let p_ref = &p;
+            let (rest, hover, on, off) = fade_of(mode, index, false);
+            let (from, to) = (colour(&rest).unwrap_or(ground(p_ref)), colour(&hover).unwrap_or(ground(p_ref)));
+            // Frame 4 is 4/60 s, half-way; frame 8 is past 125 ms.
+            for (frames, a, b, end) in [(&on, from, to, &hover), (&off, to, from, &rest)] {
+                let mid = colour(&frames[3]).unwrap_or(ground(p_ref));
+                assert!(crate::component::tests::strictly_between(mid, a, b), "{mode:?} {label}: {mid:?} not between {a:?} and {b:?}");
+                assert_eq!(&frames[8], end, "{mode:?} {label}: the fade ends at the value itself");
+            }
+        }
+    }
+}
+
+#[test]
+fn at_reduced_motion_hover_follows_the_pointer_in_the_same_frame() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for index in 0..faded().len() {
+            let label = faded()[index].0;
+            let (rest, hover, on, off) = fade_of(mode, index, true);
+            assert_eq!(on[0], hover, "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], rest, "{mode:?} {label}: the first frame after leaving");
+        }
+    }
+}

@@ -522,6 +522,46 @@ pub(crate) fn staged(
     harness
 }
 
+/// [`staged`] with motion `reduced` or full: frames step one [`FRAME`] at a time.
+pub(crate) fn staged_motion(
+    theme: Theme,
+    reduced: bool,
+    ground: fn(&crate::theme::Palette) -> Color32,
+    size: Vec2,
+    add: impl Fn(&mut egui::Ui, &Theme) + 'static,
+) -> Harness<'static> {
+    let mut harness = builder().with_size(size).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), reduced);
+        stage(ui, ground(theme.palette), |ui| add(ui, &theme));
+    });
+    harness.run();
+    harness
+}
+
+/// The looks of the widget `label` frame by frame as the pointer comes onto it, `frames` frames, then leaves it,
+/// `frames` frames more: `(on, off)`, the first of each the frame the pointer moved in.
+pub(crate) fn hover_frames(harness: &mut Harness<'static>, label: &str, frames: usize) -> (Vec<Own>, Vec<Own>) {
+    let look = |harness: &mut Harness<'static>| {
+        harness.step();
+        let rect = harness.get_by_label(label).rect();
+        own(&painted(harness, label), rect)
+    };
+    harness.get_by_label(label).hover();
+    let on = (0..frames).map(|_| look(harness)).collect();
+    harness.hover_at(pos2(1.0, 1.0));
+    let off = (0..frames).map(|_| look(harness)).collect();
+    (on, off)
+}
+
+/// Whether `mid` lies strictly between `a` and `b`: every channel within them, and neither end itself.
+pub(crate) fn strictly_between(mid: Color32, a: Color32, b: Color32) -> bool {
+    let within = (0..4).all(|i| {
+        let (m, x, y) = (mid.to_array()[i], a.to_array()[i], b.to_array()[i]);
+        x.min(y) <= m && m <= x.max(y)
+    });
+    within && mid != a && mid != b
+}
+
 /// The family name of the icons.
 pub(crate) fn icons() -> String {
     crate::theme::icon_font(1.0).family.to_string()

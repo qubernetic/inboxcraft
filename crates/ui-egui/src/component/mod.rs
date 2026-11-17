@@ -76,26 +76,68 @@ pub enum Shown {
 }
 
 /// What a pressable control shows of the pointer and the keyboard: the hover fill, the pressed look, the focus ring.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct Lit {
+    /// The pointer is over it (and it can be used).
     pub hover: bool,
+    /// How far its colours have faded from rest (0) to hover (1): over the `fast` token at full motion, at once
+    /// with reduced motion.
+    pub fade: f32,
     pub pressed: bool,
     pub focus: bool,
 }
 
 /// What `response` shows, `enabled` or not, in `theme`; `forced` draws a state whatever the pointer does (the
-/// gallery's boards). Hover keeps [`crate::motion::toggle`], which lands at once when motion is reduced. Pressed is
-/// the pointer held down on it, or Enter or Space held down while it has the focus.
+/// gallery's boards). Hover cross-fades through [`crate::motion::fade`], which lands at once when motion is reduced;
+/// pressed and focus are at once at every level. Pressed is the pointer held down on it, or Enter or Space held down
+/// while it has the focus.
 pub(crate) fn lit(ui: &Ui, theme: &crate::theme::Theme, response: &Response, enabled: bool, forced: Option<Shown>) -> Lit {
     if let Some(shown) = forced {
-        return Lit { hover: shown == Shown::Hover, pressed: shown == Shown::Pressed && enabled, focus: shown == Shown::Focus };
+        let hover = shown == Shown::Hover;
+        return Lit { hover, fade: if hover { 1.0 } else { 0.0 }, pressed: shown == Shown::Pressed && enabled, focus: shown == Shown::Focus };
     }
-    let hovered = enabled && response.hovered();
-    let hover = crate::motion::toggle(ui.ctx(), response.id.with("hover"), hovered, theme.motion.hover_fade) > 0.0;
+    let hover = enabled && response.hovered();
+    let fade = crate::motion::fade(ui.ctx(), response.id.with("hover"), hover, theme.motion.fast);
     let focus = response.has_focus();
     let keyed = focus && ui.input(|input| input.key_down(Key::Enter) || input.key_down(Key::Space));
     let pressed = enabled && (response.is_pointer_button_down_on() || keyed);
-    Lit { hover: hover && enabled, pressed, focus }
+    Lit { hover, fade: if enabled { fade } else { 0.0 }, pressed, focus }
+}
+
+/// A control's colours in one state: its fill and edge (`None`: not painted) and its text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Face {
+    pub fill: Option<egui::Color32>,
+    pub edge: Option<egui::Color32>,
+    pub ink: egui::Color32,
+}
+
+/// The colours `t` of the way from `rest` to `hover` (0 to 1) on `ground`: each colour mixed between two opaque
+/// colours, never faded by alpha. A fill or edge one end does not paint mixes with what shows there instead: the
+/// ground for a fill, the fill of the moment (or the ground) for an edge; at the end that does not paint it is gone.
+pub(crate) fn between(rest: Face, hover: Face, t: f32, ground: egui::Color32) -> Face {
+    let t = t.clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return rest;
+    }
+    if t >= 1.0 {
+        return hover;
+    }
+    let mix = |a: egui::Color32, b: egui::Color32| a.lerp_to_gamma(b, t);
+    let fill = match (rest.fill, hover.fill) {
+        (Some(a), Some(b)) => Some(mix(a, b)),
+        (None, Some(b)) => Some(mix(ground, b)),
+        (Some(a), None) => Some(mix(a, ground)),
+        (None, None) => None,
+    };
+    let under = fill.unwrap_or(ground);
+    let edge = match (rest.edge, hover.edge) {
+        (Some(a), Some(b)) => Some(mix(a, b)),
+        (None, Some(b)) => Some(mix(under, b)),
+        (Some(a), None) => Some(mix(a, under)),
+        (None, None) => None,
+    };
+    Face { fill, edge, ink: mix(rest.ink, hover.ink) }
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for

@@ -10,7 +10,7 @@ use egui::{Color32, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 use crate::draw::paint::{self, Ring};
 use crate::theme::Theme;
 
-use super::{Shown, lit};
+use super::{Face, Shown, between, lit};
 
 /// The room between the number and the word, in points.
 const GAP: f32 = 8.0;
@@ -41,15 +41,23 @@ pub(crate) fn section_label_with(ui: &mut Ui, theme: &Theme, index: &str, word: 
     let lit = if folds { lit(ui, theme, &response, enabled, shown) } else { super::Lit::default() };
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        if lit.hover || lit.pressed {
-            painter.rect_filled(rect.expand2(HOVER_REACH), 0.0, p.grid);
+        let reach = rect.expand2(HOVER_REACH);
+        let word = if active { p.ink } else { p.muted };
+        let face = if lit.pressed {
+            Face { fill: Some(p.grid), edge: Some(p.muted), ink: p.ink }
+        } else {
+            // The hover cross-fades from rest on the `panel` a label stands on.
+            between(Face { fill: None, edge: None, ink: word }, Face { fill: Some(p.grid), edge: None, ink: p.ink }, lit.fade, p.panel)
+        };
+        if let Some(fill) = face.fill {
+            painter.rect_filled(reach, 0.0, fill);
         }
-        if lit.pressed {
+        if let Some(edge) = face.edge {
             // Pressed: a muted edge round the hover fill, as a pressed icon button takes one (the sheet has no
             // pressed state for the label).
-            painter.rect_stroke(rect.expand2(HOVER_REACH), 0.0, egui::Stroke::new(1.0, p.muted), egui::StrokeKind::Inside);
+            painter.rect_stroke(reach, 0.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside);
         }
-        let ink = if active || lit.hover || lit.pressed { p.ink } else { p.muted };
+        let ink = face.ink;
         let top = (rect.center().y - number.size().y / 2.0).round();
         painter.galley(pos2(rect.left(), top), number, p.cyan_text);
         painter.galley(pos2(rect.left() + left + GAP, top), words, ink);
