@@ -69,6 +69,9 @@ struct Unfolding {
     rows: Vec<Id>,
 }
 
+/// The most rows of a float that come in one after another; the rest come in with the last of them.
+const STAGGERED: usize = 12;
+
 /// The most rows of a float Home and End know of.
 const MOST_ROWS: usize = 512;
 
@@ -98,7 +101,8 @@ fn line_in(ui: &Ui, theme: &Theme, row: Id, pressable: bool) -> f32 {
             }
             data.insert_temp(unfolding_id(), next);
         }
-        unfolding.map(|unfolding| (unfolding.opened, unfolding.next.saturating_add(1)))
+        // Rows past the first few that fit come in with the last of them, so a long list stops moving at once.
+        unfolding.map(|unfolding| (unfolding.opened, unfolding.next.saturating_add(1).min(STAGGERED)))
     });
     unfolding.map_or(1.0, |(opened, index)| motion::unfold(&ctx, opened, index, theme.motion.fast))
 }
@@ -106,9 +110,14 @@ fn line_in(ui: &Ui, theme: &Theme, row: Id, pressable: bool) -> f32 {
 /// Draws a float's content with its rows coming in from `opened`; what `add` gave and the rows that take a press.
 fn unfolding<R>(ui: &mut Ui, theme: &Theme, width: f32, opened: f64, add: impl FnOnce(&mut Ui) -> R) -> (R, Vec<Id>) {
     let ctx = ui.ctx().clone();
+    // A float opened from inside another keeps the outer one's rows aside and gives them back after.
+    let outer = ctx.data_mut(|data| data.remove_temp::<Unfolding>(unfolding_id()));
     ctx.data_mut(|data| data.insert_temp(unfolding_id(), Unfolding { opened, next: 0, rows: Vec::new() }));
     let inner = panel(ui, theme, width, add);
     let rows = ctx.data_mut(|data| data.remove_temp::<Unfolding>(unfolding_id())).map(|unfolding| unfolding.rows).unwrap_or_default();
+    if let Some(outer) = outer {
+        ctx.data_mut(|data| data.insert_temp(unfolding_id(), outer));
+    }
     (inner, rows)
 }
 
@@ -143,8 +152,14 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let now = ctx.input(|input| input.time);
     let kept = ctx.data(|data| data.get_temp::<Kept>(key)).filter(|kept| kept.pass.saturating_add(1) >= pass);
     let opening = kept.is_none();
-    let width = sane(float.width);
-    if !opening {
+    // Never larger than the window less its 3 px of ground: past that its rows scroll.
+    let screen = ctx.content_rect();
+    let room = vec2((screen.width() - CLEAR * 2.0).max(32.0), (screen.height() - CLEAR * 2.0).max(32.0));
+    let width = sane(float.width).min(room.x);
+    // Only the float on top answers Esc and a press outside it: one opened from it closes first.
+    let mine = LayerId::new(Order::Foreground, float.id);
+    let on_top = ctx.memory(|memory| memory.top_modal_layer()).is_none_or(|top| top == mine);
+    if !opening && on_top {
         let rect = kept.map(|kept| kept.rect);
         let (escaped, beside) = ctx.input_mut(|input| {
             let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
@@ -159,7 +174,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
             ctx.memory_mut(|memory| memory.request_focus(float.returns_to));
             return None;
         }
-    } else {
+    } else if opening {
         // The keyboard leaves the control the float opened from, so that Tab starts on the float's first row.
         ctx.memory_mut(|memory| {
             if let Some(focused) = memory.focused() {
@@ -171,13 +186,26 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let size = kept.map_or(vec2(width, 0.0), |kept| kept.rect.size());
     let at = placed(float.anchor.left_bottom() + vec2(0.0, DROP), size, ctx.content_rect(), ctx.pixels_per_point());
     // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
-    ctx.memory_mut(|memory| memory.set_modal_layer(LayerId::new(Order::Foreground, float.id)));
+    ctx.memory_mut(|memory| memory.set_modal_layer(mine));
+    // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
+    ctx.move_to_top(mine);
     let shown = Area::new(float.id)
         .order(Order::Foreground)
         .pivot(Align2::LEFT_TOP)
         .fixed_pos(at)
         .fade_in(false)
-        .show(ctx, |ui| unfolding(ui, theme, width, opened, add));
+        .show(ctx, |ui| {
+            unfolding(ui, theme, width, opened, |ui| {
+                // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
+                if size.y >= room.y - 0.5 {
+                    let area = ScrollArea::vertical().id_salt(float.id.with("rows")).max_height(room.y - 2.0);
+                    super::scroll::show_thin(ui, theme, area, THUMB, BAR, add).inner
+                } else {
+                    ui.set_max_height(room.y - 2.0);
+                    add(ui)
+                }
+            })
+        });
     ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
     let (inner, rows) = shown.inner;
     // Home and End go to the first and the last row, from a row (a field in the float keeps them for its text).

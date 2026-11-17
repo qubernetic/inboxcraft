@@ -884,3 +884,92 @@ fn every_row_pressed_by_the_pointer_enter_or_space_takes_the_decided_colours() {
         }
     }
 }
+
+#[test]
+fn a_float_larger_than_the_window_stays_inside_and_scrolls() {
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
+    let (width, height) = (600.0, 300.0);
+    let mut harness = builder().with_size(egui::vec2(width, height)).build_ui_state(
+        move |ui, chosen: &mut Option<usize>| {
+            motion::set_reduced(ui.ctx(), true);
+            let keymap = Keymap::default();
+            let float = super::Float { id: Id::unique("tall"), anchor: egui::Rect::from_min_size(pos2(40.0, 20.0), egui::vec2(8.0, 8.0)), width: 1000.0, returns_to: Id::unique("x") };
+            super::float(ui.ctx(), &theme, &float, |ui| {
+                for n in 0..40 {
+                    let name = format!("Row {n}");
+                    if super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name: &name, caption: None, action: None, state: super::ItemState::Default }).clicked() {
+                        *chosen = Some(n);
+                    }
+                }
+            });
+        },
+        None,
+    );
+    harness.run();
+    let (found, _) = rects(&harness);
+    let float = found.iter().find(|(_, fill, _)| *fill == theme.palette.surface).map(|(rect, ..)| *rect).unwrap_or(egui::Rect::NOTHING);
+    assert!(float.left() >= 3.0 && float.top() >= 3.0 && float.right() <= width - 3.0 && float.bottom() <= height - 3.0, "{float:?}");
+    assert!(found.iter().any(|(rect, fill, _)| *fill == theme.palette.muted && rect.width() == 2.0 && float.contains_rect(*rect)), "its rows scroll: the thumb");
+    // The last row is reached by scrolling.
+    harness.get_by_label("Row 39").scroll_to_me();
+    harness.run();
+    assert!(float.contains_rect(harness.get_by_label("Row 39").rect()), "the last row scrolls into the float");
+    harness.get_by_label("Row 39").click();
+    harness.run();
+    assert_eq!(*harness.state(), Some(39), "a row in the scrolled float takes its press");
+}
+
+#[test]
+fn esc_in_a_float_opened_from_a_float_closes_only_the_inner_one() {
+    let theme = theme();
+    let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
+        move |ui, (outer, inner): &mut (bool, bool)| {
+            motion::set_reduced(ui.ctx(), true);
+            let keymap = Keymap::default();
+            let open = crate::component::button::TextButton::new("Open").show(ui, &theme, &keymap);
+            if open.clicked() {
+                *outer = true;
+            }
+            if !*outer {
+                return;
+            }
+            let float = super::Float { id: Id::unique("outer"), anchor: open.rect, width: 240.0, returns_to: open.id };
+            let shown = super::float(ui.ctx(), &theme, &float, |ui| {
+                let more = super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name: "More", caption: None, action: None, state: super::ItemState::Default });
+                if more.clicked() {
+                    *inner = true;
+                }
+                if *inner {
+                    let float = super::Float { id: Id::unique("inner"), anchor: more.rect, width: 200.0, returns_to: more.id };
+                    let shown = super::float(ui.ctx(), &theme, &float, |ui| {
+                        for name in ["Inner first", "Inner second"] {
+                            super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default });
+                        }
+                    });
+                    *inner = shown.is_some();
+                }
+            });
+            *outer = shown.is_some();
+        },
+        (false, false),
+    );
+    harness.run();
+    harness.get_by_label("Open").click();
+    harness.run();
+    harness.key_press(Key::Tab);
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(*harness.state(), (true, true), "both open");
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert!(harness.get_by_label("Inner first").is_focused(), "Tab is the inner float's");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert_eq!(*harness.state(), (true, false), "only the inner one closed");
+    assert!(harness.get_by_label("More").is_focused(), "the keyboard is back in the outer one");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert_eq!(*harness.state(), (false, false));
+    assert!(harness.get_by_label("Open").is_focused());
+}
