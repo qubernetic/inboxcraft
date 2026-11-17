@@ -6,12 +6,13 @@
 //! the account picker, the unified views, the Outbox while anything is in it (its badge how many), and each account's
 //! folders with their unread badges.
 
-use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{Align, Color32, Layout, Rect, RichText, Role, ScrollArea, Sense, Ui, WidgetInfo, vec2};
 
 use super::Screen;
 use super::paint::{NavRow, nav_row};
 use crate::component::avatar;
 use crate::component::button::IconButton;
+use crate::component::select::Select;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use inboxcraft_model::Role as FolderRole;
@@ -184,42 +185,34 @@ fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
     if unread == 0 { named } else { tr!("{name}, {count} unread", name = named, count = unread) }
 }
 
-/// The account picker: the account shown (or All accounts) in an outlined field with a chevron.
+/// The account picker: a select of All accounts and each account, the one shown in its field. Whether its list is open
+/// is the window's to keep, as a list of egui's own would be.
 fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Asked) {
     let current = match mailbox.narrowed().and_then(|id| mailbox.account(id)) {
         Some(account) => account.label.clone(),
         None => tr!("All accounts").to_owned(),
     };
-    let width = ui.available_width();
-    let ink = theme.palette.muted;
-    // A field, not a button: the field colour at rest.
-    let visuals = &mut ui.visuals_mut().widgets;
-    visuals.inactive.weak_bg_fill = theme.palette.term;
-    visuals.inactive.bg_fill = theme.palette.term;
-    let response = ComboBox::from_id_salt("account-picker")
-        .selected_text(RichText::new(current).font(theme.fonts.body.id()).color(theme.palette.ink))
-        .width(width)
-        .icon(move |ui, rect, _, _| {
-            // A chevron pointing down, drawn in lines like the icons.
-            let c = rect.center();
-            let w = rect.width().min(rect.height()) * 0.3;
-            let stroke = Stroke::new(1.5, ink);
-            ui.painter().line_segment([pos2(c.x - w, c.y - w / 2.0), pos2(c.x, c.y + w / 2.0)], stroke);
-            ui.painter().line_segment([pos2(c.x, c.y + w / 2.0), pos2(c.x + w, c.y - w / 2.0)], stroke);
-        })
-        .show_ui(ui, |ui| {
-            if ui.selectable_label(mailbox.narrowed().is_none(), tr!("All accounts")).clicked() {
-                asked.narrow = Some(None);
-            }
-            for account in mailbox.accounts() {
-                let text = tr!("{label} ({address})", label = account.label, address = account.address);
-                if ui.selectable_label(mailbox.narrowed() == Some(account.id), text).clicked() {
-                    asked.narrow = Some(Some(account.id));
-                }
-            }
-        })
-        .response;
-    response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, tr!("Accounts")));
+    let names: Vec<(Option<u64>, String)> = std::iter::once((None, tr!("All accounts").to_owned()))
+        .chain(
+            mailbox.accounts().iter().map(|account| (Some(account.id), tr!("{label} ({address})", label = account.label, address = account.address))),
+        )
+        .collect();
+    let options: Vec<(Option<u64>, &str)> = names.iter().map(|(id, name)| (*id, name.as_str())).collect();
+    let kept = ui.make_persistent_id("account-picker");
+    let mut open = ui.data(|data| data.get_temp::<bool>(kept)).unwrap_or(false);
+    let select = Select {
+        name: tr!("Accounts"),
+        shown: &current,
+        options: &options,
+        current: Some(mailbox.narrowed()),
+        icon: IconId::At,
+        width: ui.available_width(),
+    };
+    let (_, taken) = select.show(ui, theme, &mut open);
+    ui.data_mut(|data| data.insert_temp(kept, open));
+    if let Some(taken) = taken {
+        asked.narrow = Some(taken);
+    }
 }
 
 /// A section's heading: small capitals in the muted colour.

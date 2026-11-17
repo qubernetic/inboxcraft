@@ -617,6 +617,28 @@ fn a_hovered_row_takes_the_fill_of_its_ground() {
 }
 
 #[test]
+fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
+    let mut harness = harness();
+    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
+    field.focus();
+    harness.run();
+    harness.key_down(Key::Enter);
+    harness.run();
+    harness.key_up(Key::Enter);
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio (holloway.studio@example.org)").focus();
+    harness.run();
+    harness.key_down(Key::Enter);
+    harness.run();
+    harness.key_up(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().narrowed(), Some(2));
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "the list closed");
+    assert_eq!(harness.get_by_role_and_label(Role::ComboBox, "Accounts").accesskit_node().value().as_deref(), Some("Studio"));
+}
+
+#[test]
 fn the_error_banner_s_dismiss_is_a_link_that_enter_presses() {
     let mut harness = harness();
     harness.state_mut().mailbox_mut().open(Place::Folder(4242));
