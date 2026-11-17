@@ -994,10 +994,47 @@ fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The menu item's board: default, hover, focus, chosen, unavailable, with-key, with-caption, danger, long,
+/// from-plugin (a plugin's row is coming soon), and pressed, which the sheet does not draw.
+fn menu_items(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Menu item"));
+    let archive = (Some(IconId::Archive), tr!("Archive"), None, None, ItemState::Default);
+    let rows: [[(&str, (Option<IconId>, &str, Option<&str>, Option<&str>, ItemState), Option<Shown>); 2]; 5] = [
+        [(tr!("default"), archive, None), (tr!("hover"), archive, Some(Shown::Hover))],
+        [(tr!("focus"), archive, Some(Shown::Focus)), (tr!("chosen"), (archive.0, archive.1, None, None, ItemState::Chosen), None)],
+        [
+            (tr!("unavailable"), (Some(IconId::Move), tr!("Move to…"), Some(tr!("no other mailbox")), None, ItemState::Unavailable), None),
+            (tr!("with-key"), (Some(IconId::Snooze), tr!("Snooze…"), None, Some("mail.snooze"), ItemState::Default), None),
+        ],
+        [
+            (tr!("with-caption"), (Some(IconId::Snooze), tr!("Tomorrow morning"), Some("Tue 08:00"), None, ItemState::Default), None),
+            (tr!("danger"), (Some(IconId::Delete), tr!("Delete"), None, Some("mail.delete"), ItemState::Danger), None),
+        ],
+        [
+            (tr!("long"), (Some(IconId::Move), tr!("Move to Studio / Clients / Bakery on the corner / 2026"), None, Some("mail.move"), ItemState::Default), None),
+            (tr!("pressed"), archive, Some(Shown::Pressed)),
+        ],
+    ];
+    for row in rows {
+        cells(ui, theme, |ui| {
+            for (state, item, shown) in row {
+                field_cell(ui, theme, state, 240.0, |ui| menu_row(ui, theme, keymap, item, shown));
+            }
+        });
+    }
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("from-plugin"), 240.0, |ui| {
+            soon(ui, theme, |ui| menu_row(ui, theme, keymap, (Some(IconId::File), tr!("Track this parcel"), Some("parcels.track · no key"), None, ItemState::Default), None));
+        });
+        field_cell(ui, theme, tr!("chosen-pressed"), 240.0, |ui| menu_row(ui, theme, keymap, (archive.0, archive.1, None, None, ItemState::Chosen), Some(Shown::Pressed)));
+    });
+}
+
 /// The fields' middle column of boards.
 fn fields_middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.push_id("password-field", |ui| password_fields(ui, theme));
     ui.push_id("popup-panel", |ui| popup_panels(ui, theme, keymap));
+    ui.push_id("menu-item", |ui| menu_items(ui, theme, keymap));
 }
 
 /// The fields' right column of boards.

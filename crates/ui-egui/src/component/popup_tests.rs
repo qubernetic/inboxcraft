@@ -408,3 +408,170 @@ fn home_and_end_go_to_the_first_and_the_last_row_of_a_float() {
     harness.run();
     assert!(harness.get_by_label("First").is_focused(), "Home");
 }
+
+/// The states of the menu item's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Menu {
+    Default,
+    Hover,
+    Focus,
+    Chosen,
+    Unavailable,
+    WithKey,
+    WithCaption,
+    Danger,
+    Long,
+}
+
+const MENU: [Menu; 9] =
+    [Menu::Default, Menu::Hover, Menu::Focus, Menu::Chosen, Menu::Unavailable, Menu::WithKey, Menu::WithCaption, Menu::Danger, Menu::Long];
+
+/// The row of the sheet in `state`: its icon, name, caption, action and state.
+fn menu_row(state: Menu) -> (IconId, &'static str, Option<&'static str>, Option<&'static str>, super::ItemState) {
+    use super::ItemState as S;
+    match state {
+        Menu::Unavailable => (IconId::Move, "Move to…", Some("no other mailbox"), None, S::Unavailable),
+        Menu::WithKey => (IconId::Snooze, "Snooze…", None, Some("mail.snooze"), S::Default),
+        Menu::WithCaption => (IconId::Snooze, "Tomorrow morning", Some("Tue 08:00"), None, S::Default),
+        Menu::Danger => (IconId::Delete, "Delete", None, Some("mail.delete"), S::Danger),
+        Menu::Long => (IconId::Move, "Move to Studio / Clients / Bakery on the corner / 2026", None, Some("mail.move"), S::Default),
+        Menu::Chosen => (IconId::Archive, "Archive", None, None, S::Chosen),
+        _ => (IconId::Archive, "Archive", None, None, S::Default),
+    }
+}
+
+/// The keys the sheet's rows show: H for snooze and move, Del for delete.
+fn menu_keys() -> Keymap {
+    let mut keymap = Keymap::default();
+    keymap.bind("mail.snooze", KeyboardShortcut::new(Modifiers::NONE, Key::H));
+    keymap.bind("mail.move", KeyboardShortcut::new(Modifiers::NONE, Key::V));
+    keymap.bind("mail.delete", KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
+    keymap
+}
+
+/// The menu item of the sheet, 240 wide on a `surface` stage, in `state` brought as a person brings it.
+fn menu_in(mode: crate::theme::Mode, state: Menu, shown: crate::component::Shown) -> (egui::Rect, crate::component::tests::Own, Harness<'static>) {
+    let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
+    let (icon, name, caption, action, row) = menu_row(state);
+    let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), move |ui, theme| {
+        let keymap = menu_keys();
+        ui.vertical(|ui| {
+            ui.set_width(240.0);
+            super::menu_item(ui, theme, &keymap, &super::Item { icon: Some(icon), name, caption, action, state: row });
+        });
+    });
+    crate::component::tests::bring(&mut harness, name, shown);
+    let rect = harness.get_by_label(name).rect();
+    let look = crate::component::tests::own(&crate::component::tests::painted(&harness, name), rect);
+    (rect, look, harness)
+}
+
+#[test]
+fn a_menu_item_looks_as_its_sheet_says_in_every_state() {
+    use crate::component::Shown;
+    use crate::component::field::tests::{drawn, one};
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for state in MENU {
+            let shown = match state {
+                Menu::Hover => Shown::Hover,
+                Menu::Focus => Shown::Focus,
+                _ => Shown::Rest,
+            };
+            let (rect, look, harness) = menu_in(mode, state, shown);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert_eq!(rect.size(), egui::vec2(240.0, 32.0), "{at}");
+            let fill = matches!(state, Menu::Hover | Menu::Chosen).then_some(p.stage);
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, (state == Menu::Focus).then_some((1.0, p.cyan_edge, false)), "{at}");
+            assert!(look.ring.is_none() && look.radius <= 2.0, "{at}");
+            let (icon, name, caption, _, _) = menu_row(state);
+            let shift = if state == Menu::Focus { 1.0 } else { 0.0 };
+            let (icon_ink, ink) = match state {
+                Menu::Hover | Menu::Chosen => (p.ink, p.ink),
+                Menu::Unavailable => (p.dim, p.muted),
+                Menu::Danger => (p.minus, p.minus),
+                _ => (p.muted, p.ink),
+            };
+            let glyph = one(&harness, &crate::iconset::glyph(icon).to_string());
+            assert!((glyph.rect.center() - (rect.min + egui::vec2(20.0 + shift, 16.0))).length() < 1.0 && glyph.colour == icon_ink, "{at} {glyph:?}");
+            let shown_name = drawn(&harness).into_iter().find(|text| text.family == "Proportional").unwrap_or_else(|| panic!("{at}: no name"));
+            assert_eq!(shown_name.rect.min, rect.min + egui::vec2(36.0 + shift, 5.0), "{at} {shown_name:?}");
+            assert_eq!((shown_name.colour, shown_name.size, shown_name.row), (ink, 14.0, 22.0), "{at}");
+            if state == Menu::Long {
+                // Cut with an ellipsis 8 before the chip: 167 wide at most.
+                assert!(shown_name.rect.right() <= rect.left() + 203.0 + 0.5, "{at} {shown_name:?}");
+            }
+            assert_eq!(shown_name.text, name, "{at}");
+            // The key chip at the right end, 6 down, 20 high: H, Del, V, or Enter on the chosen row.
+            let key = match state {
+                Menu::WithKey => Some(("H", 17.0)),
+                Menu::Danger => Some(("Del", 30.0)),
+                Menu::Long => Some(("V", 17.0)),
+                Menu::Chosen => Some(("Enter", 43.0)),
+                _ => None,
+            };
+            let (found, _) = rects(&harness);
+            let chip = found.iter().find(|(r, _, stroke)| *stroke == Some((1.0, p.line)) && (r.height() - 20.0).abs() < 0.01).map(|(r, ..)| *r);
+            match key {
+                Some((text, width)) => {
+                    assert_eq!(chip, Some(egui::Rect::from_min_size(rect.min + egui::vec2(228.0 - width, 6.0), egui::vec2(width, 20.0))), "{at}");
+                    assert_eq!(one(&harness, text).colour, p.muted, "{at}");
+                }
+                None => assert_eq!(chip, None, "{at}"),
+            }
+            // The caption in `mono_s`, `muted`, its right end at 228, 8 down.
+            match caption {
+                Some(caption) => {
+                    let text = one(&harness, caption);
+                    assert!((text.rect.right() - (rect.left() + 228.0)).abs() < 0.5 && text.rect.top() == rect.top() + 8.0, "{at} {text:?}");
+                    assert_eq!((text.colour, text.family.as_str(), text.size), (p.muted, "Monospace", 11.0), "{at}");
+                }
+                None => {}
+            }
+            let bar = found.iter().find(|(r, fill, _)| *fill == p.cyan_edge && r.width() == 2.0).map(|(r, ..)| *r);
+            assert_eq!(bar, (state == Menu::Chosen).then_some(egui::Rect::from_min_size(rect.min, egui::vec2(2.0, 32.0))), "{at}");
+        }
+    }
+}
+
+/// `label` drawn by `draw` on a `surface` stage held down by the pointer, and by `key` while it has the focus: the
+/// looks of both and of the focused row at rest.
+fn held(mode: crate::theme::Mode, label: &'static str, draw: fn(&mut egui::Ui, &crate::theme::Theme)) {
+    use crate::component::press_tests::held_by;
+    let whole: crate::component::press_tests::Part = |rect, _| rect;
+    let size = egui::vec2(400.0, 120.0);
+    let (_, pointer) = held_by(mode, label, None, size, whole, draw);
+    let (_, rest) = held_by(mode, label, Some(Key::A), size, whole, draw);
+    for key in [Key::Enter, Key::Space] {
+        let (_, look) = held_by(mode, label, Some(key), size, whole, draw);
+        let what = format!("{mode:?} {label} {key:?}: {look:#?} pointer {pointer:#?} rest {rest:#?}");
+        assert_eq!((look.fill, look.edge, &look.texts), (pointer.fill, pointer.edge, &pointer.texts), "{what}");
+        assert_ne!((look.fill, look.edge), (rest.fill, rest.edge), "pressed differs from rest: {what}");
+    }
+}
+
+#[test]
+fn enter_and_space_press_a_menu_item_as_the_pointer_does() {
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        held(mode, "Archive", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default });
+        });
+        // Pressed, an unchosen row is the secondary press; the chosen row the accent wash.
+        let (_, look, _) = menu_in(mode, Menu::Default, crate::component::Shown::Pressed);
+        assert_eq!((look.fill, look.edge), (Some(p.stage), Some((1.0, p.ink, false))), "{mode:?}");
+        let (_, look, _) = menu_in(mode, Menu::Chosen, crate::component::Shown::Pressed);
+        assert_eq!((look.fill, look.edge), (Some(p.cyan_muted), Some((1.0, p.cyan_edge, false))), "{mode:?}");
+    }
+}
+
+#[test]
+fn an_unavailable_menu_item_takes_no_press() {
+    let (_, _, mut harness) = menu_in(crate::theme::Mode::Light, Menu::Unavailable, crate::component::Shown::Rest);
+    assert!(harness.get_by_label("Move to…").accesskit_node().is_disabled());
+    harness.get_by_label("Move to…").hover();
+    harness.run();
+    assert_eq!(crate::component::tests::own(&crate::component::tests::painted(&harness, "Move to…"), harness.get_by_label("Move to…").rect()).fill, None);
+}
