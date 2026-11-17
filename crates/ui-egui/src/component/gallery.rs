@@ -25,7 +25,7 @@ use super::key::{ChipState, key_chip};
 use super::segmented::segmented;
 use super::select::Select;
 use super::soon::{soon, soon_tag};
-use super::switch::switch;
+use super::switch::{self, SwitchState, switch};
 use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
@@ -531,10 +531,44 @@ fn radios(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The switch's board: off, on, hover, focus, disabled, disabled-on, waiting, and unavailable with its reason.
+fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Switch"));
+    let name = tr!("Start with the computer");
+    cells(ui, theme, |ui| {
+        let states = [
+            (tr!("off"), SwitchState::Off, Shown::Rest),
+            (tr!("on"), SwitchState::On, Shown::Rest),
+            (tr!("hover"), SwitchState::Off, Shown::Hover),
+            (tr!("focus"), SwitchState::On, Shown::Focus),
+        ];
+        for (state, stands, shown) in states {
+            cell(ui, theme, state, |ui| {
+                switch::switch_with(ui, theme, name, stands, Some(shown));
+            });
+        }
+        for (state, stands) in [(tr!("disabled"), SwitchState::Off), (tr!("disabled-on"), SwitchState::On)] {
+            cell(ui, theme, state, |ui| {
+                ui.add_enabled_ui(false, |ui| switch::switch_in(ui, theme, name, stands));
+            });
+        }
+        cell(ui, theme, tr!("waiting"), |ui| {
+            switch::switch_in(ui, theme, name, SwitchState::Waiting);
+        });
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("unavailable"), |ui| {
+            switch::switch_in(ui, theme, name, SwitchState::Unavailable);
+            tooltip::bubble_noted(ui, theme, keymap, name, None, Some(tr!("Not there in the Flatpak yet")));
+        });
+    });
+}
+
 /// The toggles' column of boards.
-fn controls_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+fn controls_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     checkboxes(ui, theme);
     radios(ui, theme);
+    switches(ui, theme, keymap);
 }
 
 /// The choices' column of boards.
