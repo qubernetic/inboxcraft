@@ -39,7 +39,8 @@ fn the_gallery_shows_every_component_in_both_modes() {
                 assert!(harness.query_all_by_label(name).count() >= 1, "{name}");
             }
             assert!(harness.query_by_label_contains("This morning").is_none(), "a preset behind is hidden");
-            harness.get_by_role_and_label(Role::Switch, "Notify me when it comes back");
+            // The picker's alert switch, and the one on the time picker's board.
+            assert!(harness.query_all_by_role_and_label(Role::Switch, "Notify me when it comes back").count() >= 1);
             harness.get_by_label("Ctrl F");
             harness.get_by_label("Ctrl Z");
             for (name, _) in sample::people() {

@@ -544,13 +544,13 @@ impl InboxApp {
     /// send-later picker asked for by [`InboxApp::open_send_later`].
     fn show_picker(&mut self, ctx: &egui::Context) {
         if std::mem::take(&mut self.later_picker) {
-            egui::Popup::open_id(ctx, compose::later_popup());
+            crate::component::popup::set_open(ctx, compose::later_popup(), true);
         }
         let Some(typed) = self.picker.take() else { return };
         let mut state = crate::component::time_picker::TimePicker::default();
         state.set_typed(&typed);
         ctx.data_mut(|data| data.insert_temp(reader::picker_id(), state));
-        egui::Popup::open_id(ctx, reader::picker_popup());
+        crate::component::popup::set_open(ctx, reader::picker_popup(), true);
     }
 
     /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.

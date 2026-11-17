@@ -153,6 +153,10 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
         });
         if escaped || beside {
             ctx.data_mut(|data| data.remove::<Kept>(key));
+            if beside {
+                // The press that closed it may come up on the control it opened from: that is not a press to open it.
+                ctx.data_mut(|data| data.insert_temp(float.id.with("closing-press"), ()));
+            }
             ctx.memory_mut(|memory| memory.request_focus(float.returns_to));
             return None;
         }
@@ -556,6 +560,29 @@ pub fn choice(ui: &mut Ui, theme: &Theme, name: &str, chosen: bool) -> Response 
 /// A choice row of a select: [`choice`] (the select's sheet draws its rows as `menu-choice`, without an icon).
 pub fn option(ui: &mut Ui, theme: &Theme, _icon: IconId, name: &str, chosen: bool) -> Response {
     menu_choice(ui, theme, name, chosen, true)
+}
+
+/// Whether the float `id` is open: a flag kept in `ctx` for a float opened by a control or a key elsewhere.
+#[must_use]
+pub fn is_open(ctx: &Context, id: Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(id.with("open"))).unwrap_or(false)
+}
+
+/// Opens or closes the float `id` ([`is_open`]).
+pub fn set_open(ctx: &Context, id: Id, open: bool) {
+    ctx.data_mut(|data| data.insert_temp(id.with("open"), open));
+}
+
+/// Whether `response` (the control the float `id` opens from) was clicked to open or close it: a click that is the
+/// release of the press that closed the float (outside it, on the control) is not one.
+#[must_use]
+pub fn clicked(ctx: &Context, response: &Response, id: Id) -> bool {
+    let key = id.with("closing-press");
+    let stale = ctx.data(|data| data.get_temp::<()>(key)).is_some();
+    if stale && (response.clicked() || !ctx.input(|input| input.pointer.any_down())) {
+        ctx.data_mut(|data| data.remove::<()>(key));
+    }
+    response.clicked() && !stale
 }
 
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.

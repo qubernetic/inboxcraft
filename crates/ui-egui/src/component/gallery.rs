@@ -248,7 +248,7 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
         Preset { name: tr!("Tomorrow morning"), at: at(7, 8, 0) },
         Preset { name: tr!("Next week"), at: at(9, 8, 0) },
     ];
-    let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: Some(tr!("Notify me when it comes back")), presets: &presets };
+    let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: Some(tr!("Notify me when it comes back")), presets: &presets, extra: None, note: None };
     let id = Id::unique("gallery-time-picker");
     let mut state = ui.data_mut(|data| {
         data.get_temp_mut_or_insert_with(id, || {
@@ -1117,9 +1117,56 @@ fn typed_times(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The time picker's board: presets, hover, typed-valid, typed-invalid, with-alert, past, empty-hint, from Monday
+/// 16 November 2026 at 10:00 (18:00 for past, when Later today has gone), with the sheet's presets.
+fn time_pickers(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Time picker"));
+    let presets = [
+        Preset { name: tr!("Later today"), at: at(16, 17, 0) },
+        Preset { name: tr!("Tomorrow morning"), at: at(17, 8, 0) },
+        Preset { name: tr!("This weekend"), at: at(21, 9, 0) },
+        Preset { name: tr!("Next week"), at: at(23, 8, 0) },
+    ];
+    let one = |ui: &mut Ui, typed: &str, alert: bool, late: bool, forced: time_picker::Forced| {
+        let ask = Ask {
+            title: tr!("Snooze until"),
+            confirm: tr!("Snooze"),
+            alert: alert.then_some(tr!("Notify me when it comes back")),
+            presets: &presets,
+            extra: None,
+            note: None,
+        };
+        let mut state = TimePicker::with_alert(true);
+        state.set_typed(typed);
+        let now = at(16, if late { 18 } else { 10 }, 0);
+        popup::panel(ui, theme, time_picker::WIDTH, |ui| time_picker::show_with(ui, theme, &mut state, &ask, now, Offset::UTC, forced));
+    };
+    let typing = time_picker::Forced { hover: None, typing: true };
+    let rows: [[(&str, &str, bool, bool, time_picker::Forced); 2]; 3] = [
+        [(tr!("presets"), "", false, false, time_picker::Forced::default()), (tr!("hover"), "", false, false, time_picker::Forced { hover: Some(1), typing: false })],
+        [(tr!("typed-valid"), "thu 9", false, false, typing), (tr!("typed-invalid"), "thursdy", false, false, typing)],
+        [(tr!("with-alert"), "thu 9", true, false, typing), (tr!("past"), "2026-11-02 09:00", false, true, typing)],
+    ];
+    for row in rows {
+        cells(ui, theme, |ui| {
+            for (state, typed, alert, late, forced) in row {
+                cell(ui, theme, state, |ui| {
+                    ui.push_id(state, |ui| one(ui, typed, alert, late, forced));
+                });
+            }
+        });
+    }
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("empty-hint"), |ui| {
+            ui.push_id("empty-hint", |ui| one(ui, "", false, false, typing));
+        });
+    });
+}
+
 /// The fields' right column of boards.
 fn fields_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.push_id("typed-time", |ui| typed_times(ui, theme));
+    ui.push_id("time-picker", |ui| time_pickers(ui, theme));
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText,
+    Align, Align2, Area, Color32, ColorImage, Frame, Galley, Grid, Id, Layout, Margin, Order, Popup, Pos2, Rect, RichText,
     ScrollArea, Sense, Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
@@ -216,8 +216,6 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     });
 }
 
-/// The width of the time picker, in body text sizes.
-const PICKER_WIDTH: f32 = 22.75;
 
 /// The id the time picker's state is kept under between frames and openings.
 pub(super) fn picker_id() -> Id {
@@ -244,31 +242,41 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
         return;
     };
     let response = button.show(ui, theme, keymap);
-    if response.clicked() {
-        // A new opening: the presets read again, the text typed before gone.
-        drawn.asked.push(Asked::Presets);
-        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+    let ctx = ui.ctx().clone();
+    if popup::clicked(&ctx, &response, picker_popup()) {
+        let open = !popup::is_open(&ctx, picker_popup());
+        popup::set_open(&ctx, picker_popup(), open);
+        if open {
+            // A new opening: the presets read again, the text typed before gone.
+            drawn.asked.push(Asked::Presets);
+            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
+        }
     }
-    let width = theme.fonts.body.size * PICKER_WIDTH;
-    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).gap(theme.spacing.s3).frame(Frame::NONE).show(
-        |ui| {
-            popup::panel(ui, theme, width, |ui| {
-                let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
-                let ask = Ask { title, confirm, alert: None, presets: &presets };
-                let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
-                let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-                ui.data_mut(|data| data.insert_temp(picker_id(), state));
-                match picked {
-                    Picked::At { at, .. } => {
-                        drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
-                        ui.close();
-                    }
-                    Picked::Cancelled => ui.close(),
-                    Picked::Open => {}
-                }
-            })
-        },
-    );
+    if !popup::is_open(&ctx, picker_popup()) {
+        return;
+    }
+    let float = popup::Float { id: picker_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    let shown = popup::float(&ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let ask = Ask { title, confirm, alert: None, presets: &presets, extra: None, note: None };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(picker_id())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(picker_id(), state));
+        picked
+    });
+    match shown {
+        Some(Picked::At { at, .. }) => {
+            drawn.asked.push(Asked::Act(id, if sent { Act::FollowUp(at) } else { Act::Snooze(at) }));
+            popup::set_open(&ctx, picker_popup(), false);
+            response.request_focus();
+        }
+        Some(Picked::Cancelled | Picked::Extra) => {
+            popup::set_open(&ctx, picker_popup(), false);
+            response.request_focus();
+        }
+        Some(Picked::Open) => {}
+        None => popup::set_open(&ctx, picker_popup(), false),
+    }
 }
 
 /// Pin, or "Take the pin off" (shown active) for a pinned message.

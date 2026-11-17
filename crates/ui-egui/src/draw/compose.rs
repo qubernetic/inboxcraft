@@ -20,7 +20,7 @@
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit,
+    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, TextEdit,
     Ui, WidgetInfo, vec2,
 };
 use inboxcraft_time::Timestamp;
@@ -123,43 +123,49 @@ pub(super) fn later_popup() -> Id {
     Id::unique("compose-later-popup")
 }
 
-/// The width of the send-later picker, in body-size units.
-const PICKER: f32 = 22.0;
 
 /// The caret beside Send: it opens the time picker, whose time makes Send a Schedule, and "Send now instead" while a
 /// time is picked; with it, the note that nothing goes while InboxCraft is closed.
 fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &Composer, asked: &mut Vec<Asked>) {
     let response = IconButton::new(IconId::Caret, tr!("Send later")).show(ui, theme, keymap);
-    if response.clicked() {
-        // A new opening: the presets read again, the text typed before gone.
-        asked.push(Asked::Presets);
-        ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(later_id()).open());
+    let ctx = ui.ctx().clone();
+    if popup::clicked(&ctx, &response, later_popup()) {
+        let open = !popup::is_open(&ctx, later_popup());
+        popup::set_open(&ctx, later_popup(), open);
+        if open {
+            // A new opening: the presets read again, the text typed before gone.
+            asked.push(Asked::Presets);
+            ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(later_id()).open());
+        }
     }
-    let width = theme.fonts.body.size * PICKER;
-    Popup::menu(&response).id(later_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).frame(Frame::NONE).show(|ui| {
-        popup::panel(ui, theme, width, |ui| {
-            let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
-            let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets };
-            let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
-            let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
-            ui.data_mut(|data| data.insert_temp(later_id(), state));
-            match picked {
-                Picked::At { at, .. } => {
-                    asked.push(Asked::Later(Some(at)));
-                    ui.close();
-                }
-                Picked::Cancelled => ui.close(),
-                Picked::Open => {}
-            }
-            if composer.later().is_some() && popup::entry(ui, theme, keymap, tr!("Send now instead"), None).clicked() {
-                asked.push(Asked::Later(None));
-                ui.close();
-            }
-            ui.add_space(theme.spacing.s1);
-            let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
-            ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
-        });
+    if !popup::is_open(&ctx, later_popup()) {
+        return;
+    }
+    let float = popup::Float { id: later_popup(), anchor: response.rect, width: time_picker::WIDTH, returns_to: response.id };
+    let shown = popup::float(&ctx, theme, &float, |ui| {
+        let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
+        let note = tr!("It goes while InboxCraft or its tray runs; a time missed sends at the next start, and says so.");
+        let extra = composer.later().is_some().then_some(tr!("Send now instead"));
+        let ask = Ask { title: tr!("Send later"), confirm: tr!("Schedule"), alert: None, presets: &presets, extra, note: Some(note) };
+        let mut state = ui.data_mut(|data| data.get_temp::<TimePicker>(later_id())).unwrap_or_default();
+        let picked = time_picker::show(ui, theme, &mut state, &ask, mailbox.now(), mailbox.offset());
+        ui.data_mut(|data| data.insert_temp(later_id(), state));
+        picked
     });
+    let close = |asked: &mut Vec<Asked>, later: Option<Option<inboxcraft_time::Timestamp>>| {
+        if let Some(later) = later {
+            asked.push(Asked::Later(later));
+        }
+        popup::set_open(&ctx, later_popup(), false);
+        response.request_focus();
+    };
+    match shown {
+        Some(Picked::At { at, .. }) => close(asked, Some(Some(at))),
+        Some(Picked::Extra) => close(asked, Some(None)),
+        Some(Picked::Cancelled) => close(asked, None),
+        Some(Picked::Open) => {}
+        None => popup::set_open(&ctx, later_popup(), false),
+    }
 }
 
 /// A line's name on the left, in the muted colour, `width` points wide and in the middle of the first `height` points.
