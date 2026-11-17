@@ -214,6 +214,10 @@ pub struct Sizes {
     pub icon: f32,
     /// An icon's side as a mark in a row.
     pub mark: f32,
+    /// The side of a check box's and a radio button's box.
+    pub check: f32,
+    /// A pill's height.
+    pub pill: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -230,6 +234,8 @@ pub(crate) const SIZES: Sizes = Sizes {
     scrollbar: 12.0,
     icon: 16.0,
     mark: 14.0,
+    check: 16.0,
+    pill: 24.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -427,6 +433,12 @@ impl Fonts {
     #[must_use]
     pub fn event_title(&self) -> Font {
         self.title.sized(self.title.size * 0.9)
+    }
+
+    /// The mark of a ticked check box, `×`: Plex Mono SemiBold 14/16.
+    #[must_use]
+    pub fn check_mark(&self) -> Font {
+        Font { face: Face::MonoSemiBold, size: self.button.size * 14.0 / 13.0, ..self.button }
     }
 
     /// The initials on an avatar `side` points square, in `strong`.
@@ -762,6 +774,8 @@ impl Theme {
             row_link: self.size(z.row_link),
             icon: self.size(z.icon),
             mark: self.size(z.mark),
+            check: self.size(z.check),
+            pill: self.size(z.pill),
             ..z
         }
     }

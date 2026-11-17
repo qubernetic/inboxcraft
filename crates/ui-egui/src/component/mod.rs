@@ -203,9 +203,23 @@ pub(crate) fn corner(points: f32) -> CornerRadius {
     CornerRadius::same(points.clamp(0.0, 255.0) as u8)
 }
 
+/// `ui`'s painter at full strength: egui fades a disabled `Ui`'s painter, and disabled is never a fade in this look
+/// (`muted` text and a dashed edge instead). A control that draws its own disabled state paints with this.
+pub(crate) fn solid(ui: &Ui) -> egui::Painter {
+    let mut painter = ui.painter().clone();
+    if !ui.is_enabled() {
+        painter.set_opacity(1.0);
+    }
+    painter
+}
+
 #[cfg(test)]
 pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "walk_tests.rs"]
 mod walk_tests;
+
+#[cfg(test)]
+#[path = "press_tests.rs"]
+pub(crate) mod press_tests;

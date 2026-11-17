@@ -1,117 +1,134 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Check boxes and radio buttons: a box or a ring before its name. A ticked box is filled in the accent with the tick
-//! on it, a chosen ring carries a dot of the accent; off they are the field's colour with a quiet edge. The whole row
-//! answers a press.
+//! Check boxes and radio buttons: a 16 px square before its name in mono 13, 12 between them, no round shapes. An
+//! empty box has a `muted` edge (an edge that carries meaning is never the hairline colour). A ticked box is the
+//! `cyan` fill with a `cyan_edge` edge and `×` in `on_cyan`; a chosen radio button keeps its square empty and carries
+//! a solid 8 px `cyan_edge` square inside. Hovered, the empty box takes the `stage` fill and an `ink` edge and the
+//! full one turns to `ink`; pressed, either is the accent wash with the accent edge. Focus is the ring round the box;
+//! disabled is a dashed `muted` edge, the name and the cross in `muted`, the chosen square in `dim`. The whole row answers a press; none
+//! of it moves (the design gives these no transition).
 
-use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
-use crate::draw::paint;
-use crate::motion;
+use crate::draw::paint::{self, Ring};
 use crate::theme::Theme;
 
-use super::{cut, soon, tick};
+use super::{Hover, Shown, cut, lit, solid, soon};
 
-/// The side of the box or the ring, in points.
-const BOX: f32 = 18.0;
+/// Between the box and its name, in points.
+const GAP: f32 = 12.0;
 
-/// The corner of the box, in points.
-const CORNER: f32 = 5.0;
+/// From a radio button's box to its chosen square, in points.
+const DOT_INSET: f32 = 4.0;
 
-/// The side of the tick, in points.
-const TICK: f32 = 12.0;
-
-/// The diameter of a chosen ring's dot, in points.
-const DOT: f32 = 8.0;
-
-/// Between the box or ring and its name, in points.
-const GAP: f32 = 8.0;
-
-/// The box or ring and `name` after it, in the room there is; the response is clicked when it was pressed.
-fn row(ui: &mut Ui, theme: &Theme, role: Role, name: &str, on: bool) -> (Response, egui::Rect) {
-    let p = &theme.palette;
-    let high = theme.fonts.body.line.max(BOX);
-    let ink = soon::ink(ui, theme, p.ink);
-    let text = cut(ui, name, theme.fonts.body, ink, f32::INFINITY);
-    let wanted = BOX + GAP + text.size().x;
-    let wide = wanted.min(ui.available_width().max(BOX));
-    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), soon::sense(ui, Sense::click()));
-    response.widget_info(|| WidgetInfo::selected(role, ui.is_enabled() && !soon::is_soon(ui), on, name));
-    let mark = egui::Rect::from_min_size(pos2(rect.left(), rect.center().y - BOX / 2.0), vec2(BOX, BOX));
-    if ui.is_rect_visible(rect) {
-        let room = rect.right() - mark.right() - GAP;
-        let text = if wide < wanted { cut(ui, name, theme.fonts.body, ink, room) } else { text };
-        ui.painter().galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, ink);
-    }
-    (response, mark)
+/// A check box or a radio button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Check,
+    Radio,
 }
 
-/// Lays the hover fade over `mark` as `round` as it should be; none coming soon.
-fn hover(ui: &Ui, theme: &Theme, response: &Response, mark: egui::Rect, round: f32) {
-    let lit = response.hovered() && !soon::is_soon(ui);
-    let shown = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
-    if shown > 0.0 {
-        ui.painter().rect_filled(mark, round, theme.palette.stage);
+/// How the box is drawn: its fill, its edge (dashed or not) and the colour of its mark when it is on.
+struct Look {
+    fill: Color32,
+    edge: Option<(Color32, bool)>,
+    mark: Color32,
+}
+
+/// The box's look for `kind`, `on` or not, `enabled` or not, under what the pointer and the keyboard do (`lit`).
+fn look(theme: &Theme, kind: Kind, on: bool, enabled: bool, lit: super::Lit) -> Look {
+    let p = &theme.palette;
+    let none = Color32::TRANSPARENT;
+    if !enabled {
+        // The cross is text a person reads, never `dim`; the radio button's square is a mark, `dim` as the switch's knob.
+        let mark = if kind == Kind::Check { p.muted } else { p.dim };
+        return Look { fill: none, edge: Some((p.muted, true)), mark };
     }
+    if lit.pressed {
+        let mark = if kind == Kind::Check { p.cyan_text } else { p.cyan_edge };
+        return Look { fill: p.cyan_muted, edge: Some((p.cyan_edge, false)), mark };
+    }
+    match (kind, on, lit.hover) {
+        (Kind::Check, true, true) => Look { fill: p.ink, edge: None, mark: p.bg },
+        (Kind::Check, true, false) => Look { fill: p.cyan, edge: Some((p.cyan_edge, false)), mark: p.on_cyan },
+        (Kind::Radio, true, false) => Look { fill: none, edge: Some((p.cyan_edge, false)), mark: p.cyan_edge },
+        (_, _, true) => Look { fill: p.stage, edge: Some((p.ink, false)), mark: p.ink },
+        (_, false, false) => Look { fill: none, edge: Some((p.muted, false)), mark: p.muted },
+    }
+}
+
+/// The box and `name` after it, in the room there is, drawn in `shown` when a board asks; clicked when it was pressed.
+fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: Option<Shown>) -> Response {
+    let p = &theme.palette;
+    let enabled = ui.is_enabled() && !soon::is_soon(ui);
+    let side = theme.boxes().check;
+    let font = theme.fonts.mono;
+    let high = font.line.max(side);
+    let ink = if enabled { p.ink } else { p.muted };
+    let text = cut(ui, name, font, ink, f32::INFINITY);
+    let wanted = side + GAP + text.size().x.ceil();
+    let wide = wanted.min(ui.available_width().max(side));
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), sense);
+    let role = if kind == Kind::Check { Role::CheckBox } else { Role::RadioButton };
+    response.widget_info(|| WidgetInfo::selected(role, enabled, on, name));
+    let lit = lit(ui, theme, &response, enabled, shown, Hover::AtOnce);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let painter = solid(ui);
+    let mark = Rect::from_min_size(pos2(rect.left(), rect.center().y - side / 2.0), vec2(side, side));
+    let text = if wide < wanted { cut(ui, name, font, ink, rect.right() - mark.right() - GAP) } else { text };
+    painter.galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, ink);
+    let look = look(theme, kind, on, enabled, lit);
+    match look.edge {
+        Some((colour, true)) => {
+            painter.rect_filled(mark, 0.0, look.fill);
+            paint::dashed(&painter, mark, colour);
+        }
+        Some((colour, false)) => {
+            painter.rect(mark, 0.0, look.fill, Stroke::new(1.0, colour), StrokeKind::Inside);
+        }
+        None => {
+            painter.rect_filled(mark, 0.0, look.fill);
+        }
+    }
+    if on {
+        match kind {
+            Kind::Check => {
+                let cross = super::galley(ui, "×", theme.fonts.check_mark(), look.mark);
+                painter.galley(mark.center() - cross.size() / 2.0, cross, look.mark);
+            }
+            Kind::Radio => {
+                painter.rect_filled(mark.shrink(DOT_INSET), 0.0, look.mark);
+            }
+        }
+    }
+    if lit.focus {
+        paint::focus_ring(&painter, theme, mark, Ring::Outside);
+    }
+    response
 }
 
 /// A check box named `name`; clicked when it was pressed.
 pub fn checkbox(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    let (response, mark) = row(ui, theme, Role::CheckBox, name, on);
-    if ui.is_rect_visible(mark) {
-        let p = &theme.palette;
-        let painter = ui.painter();
-        if soon::is_soon(ui) {
-            // Coming soon: the box is a dashed edge, the tick in the muted colour.
-            paint::dashed(painter, mark, p.muted);
-            if on {
-                tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.muted);
-            }
-            return response;
-        }
-        if on {
-            painter.rect_filled(mark, CORNER, p.cyan);
-            tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.on_cyan);
-        } else {
-            painter.rect_filled(mark, CORNER, p.term);
-            painter.rect_stroke(mark, CORNER, Stroke::new(1.0, p.line), StrokeKind::Inside);
-        }
-        hover(ui, theme, &response, mark, CORNER);
-        if response.has_focus() {
-            painter.rect_stroke(mark.expand(2.0), CORNER + 2.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);
-        }
-    }
-    response
+    toggle(ui, theme, Kind::Check, name, on, None)
+}
+
+/// [`checkbox`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+pub(crate) fn checkbox_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
+    toggle(ui, theme, Kind::Check, name, on, shown)
 }
 
 /// A radio button named `name`, the chosen one of its row or not; clicked when it was pressed.
 pub fn radio(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    let (response, mark) = row(ui, theme, Role::RadioButton, name, on);
-    if ui.is_rect_visible(mark) {
-        let p = &theme.palette;
-        let painter = ui.painter();
-        if soon::is_soon(ui) {
-            // Coming soon: the ring is a dashed edge, the dot in the muted colour.
-            paint::dashed(painter, mark, p.muted);
-            if on {
-                painter.circle_filled(mark.center(), DOT / 2.0, p.muted);
-            }
-            return response;
-        }
-        let round = BOX / 2.0;
-        painter.rect_filled(mark, round, p.term);
-        let edge = if on { Stroke::new(2.0, p.cyan_text) } else { Stroke::new(1.0, p.line) };
-        painter.rect_stroke(mark, round, edge, StrokeKind::Inside);
-        if on {
-            painter.circle_filled(mark.center(), DOT / 2.0, p.cyan_text);
-        }
-        hover(ui, theme, &response, mark, round);
-        if response.has_focus() {
-            painter.rect_stroke(mark.expand(2.0), round + 2.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);
-        }
-    }
-    response
+    toggle(ui, theme, Kind::Radio, name, on, None)
+}
+
+/// [`radio`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+pub(crate) fn radio_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
+    toggle(ui, theme, Kind::Radio, name, on, shown)
 }
 
 #[cfg(test)]
