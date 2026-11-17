@@ -359,16 +359,35 @@ fn the_focus_edge_is_drawn_after_the_rows_content_every_pixel_of_it() {
     }
 }
 
-/// The rows `text` lays down (`let <name> = row(…)` or `row_with(…)`, a path before it or not) whose `<name>.finish(`
-/// never follows. A row whose result is dropped is refused by `#[must_use]` already.
+/// The rows `text` lays down with `let <name> = row(…)` or `row_with(…)` (a path before it or not, the `let` on one line
+/// or wrapped onto the next) whose `<name>.finish(` never follows later in the file.
+///
+/// It is a heuristic, and it says so. It catches a row bound with `let` and never finished. It does not see a row that
+/// is not bound with `let` (a `match` arm, a struct field, an argument: `#[must_use]` refuses only a row dropped
+/// outright, and reading `.response` satisfies it), and a later `<name>.finish(` anywhere in the file, in another
+/// function that reuses the name, satisfies an earlier unfinished row. In a file that defines a `fn row(` or
+/// `fn row_with(` of its own (the mail list), a bare `row(` is that function, so only a call through a path
+/// (`row::row(`) counts there.
 fn unfinished(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().map(|line| line.split("//").next().unwrap_or_default()).collect();
+    let local = lines.iter().any(|line| line.contains("fn row(") || line.contains("fn row_with("));
     let mut found = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let Some(rest) = line.trim_start().strip_prefix("let ") else { continue };
+        // A `let x =` that rustfmt wrapped: its call is on the next line.
+        let joined;
+        let rest = match (rest.trim_end().strip_suffix(" ="), lines.get(index + 1)) {
+            (Some(name), Some(next)) => {
+                joined = format!("{name} = {}", next.trim_start());
+                joined.as_str()
+            }
+            _ => rest,
+        };
         let Some((name, call)) = rest.split_once(" = ") else { continue };
         let callee = call.split('(').next().unwrap_or_default();
-        if !(callee == "row" || callee == "row_with" || callee.ends_with("::row") || callee.ends_with("::row_with")) {
+        let bare = callee == "row" || callee == "row_with";
+        let pathed = callee.ends_with("::row") || callee.ends_with("::row_with");
+        if !(pathed || (bare && !local)) {
             continue;
         }
         let name = name.trim_start_matches("mut ").trim();
@@ -410,6 +429,12 @@ fn every_row_a_view_lays_down_is_finished() {
     let sample = "let drawn = super::row::row_with(ui, theme, id, 56.0, ground, false, false, None);\nlet text = 1;";
     assert_eq!(self::unfinished(sample), vec!["line 1: drawn".to_owned()], "the check finds a row left unfinished");
     assert!(self::unfinished(&format!("{sample}\ndrawn.finish(ui, theme);")).is_empty());
+    // A `let` rustfmt wrapped onto two lines is seen.
+    let wrapped = "let drawn =\n    row::row(ui, theme, id, 56.0, RowGround::Surface, false, false);";
+    assert_eq!(self::unfinished(wrapped), vec!["line 1: drawn".to_owned()], "a wrapped let");
+    // A file with a `fn row` of its own (the mail list's) calls that one when it writes `row(`: no hit.
+    let local = "fn row(ui: &mut Ui) -> Response { todo }\nfn rows() { let drawn = row(ui); let ground = RowGround::Surface; }";
+    assert!(self::unfinished(local).is_empty(), "a local fn row is not the component's");
 }
 
 #[test]

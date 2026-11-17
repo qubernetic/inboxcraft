@@ -7,9 +7,9 @@
 //! the caller's: [`row`] lays the row down and says where it is and how it stands, the caller draws its content, and
 //! [`Row::finish`] then paints the focus edge over that content, so no fill, avatar or text of it can cover the edge.
 //!
-//! Forgetting [`Row::finish`] loses the focus edge, so it is hard to forget: `row` is `#[must_use]` and says so, and
-//! `every_row_a_view_lays_down_is_finished` (`row_tests.rs`) fails when a source file lays down more rows (calls that
-//! name a `RowGround`) than it finishes.
+//! Forgetting [`Row::finish`] loses the focus edge, so it is made hard to forget: `row` is `#[must_use]` and says so,
+//! and `every_row_a_view_lays_down_is_finished` (`row_tests.rs`) fails when a source file binds a row with `let` and
+//! never calls `.finish(` on that name later. That scan is a heuristic; its doc says what it does not see.
 //!
 //! The hover fill cross-fades over the `fast` token at full motion (the presentation's `.row` has `background
 //! var(--fast)`), and comes at once with reduced motion; nothing else of the row moves. A row that is not in sight

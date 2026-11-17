@@ -4,8 +4,9 @@
 //! The banner over a message or a page: a label in capitals in the kind's colour, the words in `caption` and `ink`
 //! beside it, and under them the small links that answer it, on the `panel` fill in a 1 px edge of the kind's colour.
 //! 8 above and below, 12 left and right and between the label and the words, 16 between the links. Its text is data:
-//! cut only between characters, drawn as plain words (every control character a space), wrapped onto at most three
-//! lines, the last ending with one ellipsis. A link gives back the id the caller gave it, never words from the text.
+//! drawn as plain words (every control character a space, no bidi override), on one line, cut between grapheme clusters
+//! with one ellipsis; a link's words are cut so too, and a screen reader hears them whole. A link gives back the id the
+//! caller gave it, never words from the text.
 //! Nothing in it moves.
 
 use egui::{Align, Layout, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
