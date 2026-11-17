@@ -831,3 +831,294 @@ fn glyphs_have_the_same_linear_coverage_in_dark_and_light() {
     let differ = dark.iter().zip(&light).filter(|(d, l)| d != l).count();
     assert_eq!(differ, 0, "{differ} texels of the dark atlas are not the light one's");
 }
+
+/// `text` as the compiler reads it, for a scan: comments and the insides of string and character literals dropped,
+/// and white space dropped wherever it does not stand between two parts of words, so that a call split over lines or
+/// spaced out reads as one (`ui . button (` is `ui.button(`). The second value is the line (from 1) of each character
+/// kept.
+fn squeezed(text: &str) -> (String, Vec<usize>) {
+    let chars: Vec<char> = text.chars().collect();
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let (mut out, mut lines) = (String::new(), Vec::new());
+    let (mut line, mut at, mut gap) = (1, 0, false);
+    // Skips to the end of a quoted run that started before `at`, counting its lines.
+    let skip_quoted = |at: &mut usize, line: &mut usize, close: &str| {
+        let close: Vec<char> = close.chars().collect();
+        while *at < chars.len() {
+            if chars[*at] == '\n' {
+                *line += 1;
+            }
+            if close.len() == 1 && chars[*at] == '\\' {
+                *at += 2;
+                continue;
+            }
+            if chars[*at..].starts_with(&close) {
+                *at += close.len();
+                return;
+            }
+            *at += 1;
+        }
+    };
+    while at < chars.len() {
+        let c = chars[at];
+        let next = chars.get(at + 1).copied();
+        let before = out.chars().last();
+        if c == '\n' {
+            line += 1;
+            gap = true;
+            at += 1;
+        } else if c.is_whitespace() {
+            gap = true;
+            at += 1;
+        } else if c == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            let mut depth = 0;
+            while at < chars.len() {
+                if chars[at..].starts_with(&['/', '*']) {
+                    depth += 1;
+                    at += 2;
+                } else if chars[at..].starts_with(&['*', '/']) {
+                    depth -= 1;
+                    at += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    if chars[at] == '\n' {
+                        line += 1;
+                    }
+                    at += 1;
+                }
+            }
+            gap = true;
+        } else if (c == 'r' || (c == 'b' && next == Some('r'))) && !(before.is_some_and(word) && !gap) && {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start.min(chars.len())..].iter().take_while(|c| **c == '#').count();
+            chars.get(start + hashes) == Some(&'"')
+        } {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start..].iter().take_while(|c| **c == '#').count();
+            at = start + hashes + 1;
+            skip_quoted(&mut at, &mut line, &format!("\"{}", "#".repeat(hashes)));
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '"' {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "\"");
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '\'' && (next == Some('\\') || chars.get(at + 2) == Some(&'\'')) {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "'");
+            out.push_str("''");
+            lines.extend([line, line]);
+            gap = false;
+        } else {
+            if gap && before.is_some_and(word) && word(c) {
+                out.push(' ');
+                lines.push(line);
+            }
+            gap = false;
+            out.push(c);
+            lines.push(line);
+            at += 1;
+        }
+    }
+    (out, lines)
+}
+
+/// Whether `name` stands in `code` at `at` as a word of its own.
+fn word_at(code: &str, at: usize, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    code[at..].starts_with(name) && !code[..at].chars().last().is_some_and(word) && !code[at + name.len()..].chars().next().is_some_and(word)
+}
+
+/// Where in `code` the word `name` stands, as a word of its own.
+fn words(code: &str, name: &str) -> Vec<usize> {
+    code.match_indices(name).map(|(at, _)| at).filter(|at| word_at(code, *at, name)).collect()
+}
+
+/// The raw egui widgets a squeezed view's `code` uses, each with where it starts: a method of `Ui` that adds one, or
+/// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
+/// is not one).
+fn raw_widgets(code: &str) -> Vec<(usize, String)> {
+    const METHODS: [&str; 9] =
+        ["button", "small_button", "checkbox", "radio", "radio_value", "selectable_label", "selectable_value", "toggle_value", "separator"];
+    const TYPES: [&str; 6] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton"];
+    let mut found = Vec::new();
+    for method in METHODS {
+        for call in [format!(".{method}("), format!("Ui::{method}(")] {
+            found.extend(code.match_indices(call.as_str()).map(|(at, _)| (at, call.clone())));
+        }
+    }
+    for name in TYPES {
+        found.extend(
+            words(code, name)
+                .into_iter()
+                .filter(|at| !code[..*at].ends_with("Role::") && !code[..*at].ends_with("TextStyle::"))
+                .map(|at| (at, name.to_owned())),
+        );
+    }
+    found.sort();
+    found
+}
+
+/// The end of the balanced brackets that open at `at` in `code`, or `at` when none opens there.
+fn closing(code: &str, at: usize) -> usize {
+    let bytes = code.as_bytes();
+    let Some(open @ (b'(' | b'<')) = bytes.get(at).copied() else { return at };
+    let close = if open == b'(' { b')' } else { b'>' };
+    let mut depth = 0;
+    for (index, byte) in bytes.iter().enumerate().skip(at) {
+        if *byte == open {
+            depth += 1;
+        } else if *byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return index + 1;
+            }
+        }
+    }
+    bytes.len()
+}
+
+/// The methods called one after the other from `at` in `code`: `.a(…).b::<…>(…)` gives `a` and `b`.
+fn chain(code: &str, mut at: usize) -> Vec<String> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut called = Vec::new();
+    at = closing(code, at);
+    while code[at..].starts_with('.') {
+        let name: String = code[at + 1..].chars().take_while(|c| word(*c)).collect();
+        if name.is_empty() {
+            break;
+        }
+        at += 1 + name.len();
+        if code[at..].starts_with("::") {
+            at = closing(code, at + 2);
+        }
+        at = closing(code, at);
+        called.push(name);
+    }
+    called
+}
+
+/// The scroll areas a squeezed file's `code` shows itself instead of through `component::scroll`, each with where it
+/// starts: one built and shown in one chain, one kept in a binding or a parameter and shown from there, and a
+/// renamed import, which the scan could not follow.
+fn bare_scroll_areas(code: &str) -> Vec<(usize, String)> {
+    const SHOWN: [&str; 3] = ["show", "show_rows", "show_viewport"];
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut found = Vec::new();
+    for at in words(code, "ScrollArea") {
+        let rest = &code[at + "ScrollArea".len()..];
+        if rest.starts_with(" as ") {
+            found.push((at, "ScrollArea as".to_owned()));
+        }
+        if let Some(built) = rest.strip_prefix("::") {
+            let name: String = built.chars().take_while(|c| word(*c)).collect();
+            let after = at + "ScrollArea::".len() + name.len();
+            if chain(code, after).iter().any(|called| SHOWN.contains(&called.as_str())) {
+                found.push((at, format!("ScrollArea::{name}(…).show")));
+            }
+        }
+        // `let area = ScrollArea::…`, `area: ScrollArea`, `area: egui::ScrollArea`: the name it is kept under.
+        let mut lead = &code[..at];
+        while let Some(path) = lead.strip_suffix("::") {
+            lead = path.trim_end_matches(word);
+        }
+        let kept = if lead.ends_with('=') && !lead.ends_with("==") {
+            Some(lead.trim_end_matches('='))
+        } else if lead.ends_with(':') && !lead.ends_with("::") {
+            Some(lead.trim_end_matches(':'))
+        } else {
+            None
+        };
+        let Some(kept) = kept else { continue };
+        let name: String = kept.chars().rev().take_while(|c| word(*c)).collect::<Vec<_>>().into_iter().rev().collect();
+        if name.is_empty() {
+            continue;
+        }
+        for shown in SHOWN {
+            let call = format!("{name}.{shown}(");
+            found.extend(code.match_indices(call.as_str()).filter(|(at, _)| word_at(code, *at, &name)).map(|(at, _)| (at, call.clone())));
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_squeeze_drops_comments_literals_and_the_room_between_words() {
+    let (code, lines) =
+        squeezed("ui\n  . button (\"Dismiss // not a comment\") // ui.checkbox(\nlet mut a = 'x'; /* ComboBox */ r#\"ui.separator()\"#;");
+    assert_eq!(code, "ui.button(\"\")let mut a='';\"\";");
+    assert_eq!(lines.first(), Some(&1));
+    assert_eq!(lines.get(code.find(".button").unwrap()), Some(&2));
+    assert_eq!(squeezed("fn f<'a>(x: &'a str) {}").0, "fn f<'a>(x:&'a str){}");
+}
+
+#[test]
+fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("if ui.button(tr!(\"Dismiss\")).clicked() {}"), [".button("]);
+    assert_eq!(scan("ui\n    .checkbox(\n        &mut on,\n        name,\n    );"), [".checkbox("]);
+    assert_eq!(scan("row . selectable_label ( on , text )"), [".selectable_label("]);
+    assert_eq!(scan("egui::ComboBox::from_id_salt(\"x\")"), ["ComboBox"]);
+    assert_eq!(scan("ui.add(egui::Button::new(\"x\")); Ui::separator(ui);"), ["Button", "Ui::separator("]);
+    assert!(scan("TextButton::new(x).show(ui, theme, keymap); IconButton::new(i, n)").is_empty());
+    assert!(scan("WidgetInfo::labeled(Role::ComboBox, true, name); egui::PointerButton::Primary").is_empty());
+    assert!(scan("(TextStyle::Button, f.button.id())").is_empty());
+    assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
+}
+
+#[test]
+fn the_scroll_scan_sees_an_area_shown_without_the_component() {
+    let scan = |text: &str| bare_scroll_areas(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(
+        scan("ScrollArea::vertical().id_salt(\"a\")\n    .auto_shrink([false; 2])\n    .show(ui, |ui| {});"),
+        ["ScrollArea::vertical(…).show"]
+    );
+    assert_eq!(scan("egui::ScrollArea::both().show_rows(ui, 20.0, 10, |ui, rows| {});"), ["ScrollArea::both(…).show"]);
+    assert_eq!(scan("let mut area = ScrollArea::vertical();\narea = area.max_height(4.0);\narea . show(ui, add);"), ["area.show("]);
+    assert_eq!(scan("fn f(ui: &mut Ui, area: egui::ScrollArea) { area.show_viewport(ui, add); }"), ["area.show_viewport("]);
+    assert_eq!(scan("use egui::ScrollArea as Area;"), ["ScrollArea as"]);
+    assert!(scan("let area = ScrollArea::vertical().max_height(4.0);\nscroll::show(ui, theme, area, |ui| {});").is_empty());
+    assert!(scan("crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {});").is_empty());
+}
+
+#[test]
+fn no_view_uses_a_raw_egui_widget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    assert!(files.len() > 10, "the walk found the sources");
+    let components = root.join("src").join("component");
+    let scroll = components.join("scroll.rs");
+    let mut found = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        let (code, lines) = squeezed(&text);
+        // Only the scroll bar's own code shows a scroll area; components may use egui's widgets, views may not.
+        let mut sites = if *file == scroll { Vec::new() } else { bare_scroll_areas(&code) };
+        if !file.starts_with(&components) {
+            sites.extend(raw_widgets(&code));
+        }
+        for (at, what) in sites {
+            let line = code[..at].chars().count();
+            let line = lines.get(line).copied().unwrap_or(0);
+            found.push((file.strip_prefix(root).unwrap().display().to_string(), line, what));
+        }
+    }
+    found.sort();
+    let found: Vec<String> = found.into_iter().map(|(file, line, what)| format!("{file}:{line}: {what}")).collect();
+    assert!(found.is_empty(), "views use the components, and only component/scroll.rs shows a scroll area:\n{}", found.join("\n"));
+}
