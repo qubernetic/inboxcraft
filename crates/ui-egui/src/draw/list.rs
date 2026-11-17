@@ -194,12 +194,18 @@ fn empty(ui: &mut Ui, theme: &Theme, title: &str, detail: &str) {
     });
 }
 
-/// The two lines of a message row: the sender's and the subject's, each as high as its tallest font.
+/// The two lines of a message row: the sender's with the date, and the subject's with the preview (both `caption`),
+/// each as high as its tallest style's line.
 fn row_lines(theme: &Theme) -> (f32, f32) {
     let f = &theme.fonts;
     let first = [f.body, f.strong, f.mono_s].map(|font| font.line).into_iter().fold(0.0, f32::max);
-    let second = [f.body, f.strong, f.caption].map(|font| font.line).into_iter().fold(0.0, f32::max);
-    (first, second)
+    (first, f.caption.line)
+}
+
+/// Where a row's first line starts below its top: the two lines and their gap centred in the fixed row height.
+fn lines_top(theme: &Theme) -> f32 {
+    let (first, second) = row_lines(theme);
+    ((row_height(theme) - first - line_gap(theme) - second) / 2.0).max(0.0)
 }
 
 /// The side of a row's avatar: a little under its two lines.
@@ -223,10 +229,9 @@ fn line_gap(theme: &Theme) -> f32 {
     theme.spacing.s1 / 2.0
 }
 
-/// The height of a message row: its two lines and air, from the font's metrics at the current text scale.
+/// The height of a message row: the design's fixed mail row at the current text scale.
 pub(super) fn row_height(theme: &Theme) -> f32 {
-    let (first, second) = row_lines(theme);
-    theme.spacing.s2 * 2.0 + first + line_gap(theme) + second
+    theme.boxes().mail_row
 }
 
 /// How far the account's stripe stands from a row's left edge, and how much further in it pushes the row's content.
@@ -268,7 +273,7 @@ const MENU_WIDTH: f32 = 18.0;
 /// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
 pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str) -> Option<Act> {
     let mut chosen = None;
-    ui.label(theme.fonts.label.rich(tr!("Group")).color(theme.palette.muted));
+    crate::component::label(ui, theme.fonts.label, tr!("Group"), theme.palette.muted);
     for kind in GroupKind::ALL {
         if popup::choice(ui, theme, kind.text(), current == Some(kind)).clicked() {
             chosen = Some(Act::Group(Some(kind)));
@@ -359,7 +364,7 @@ fn paint_row(
         ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     let (first_height, second_height) = row_lines(theme);
-    let first = rect.top() + s.s2;
+    let first = rect.top() + lines_top(theme);
     let second = first + first_height + line_gap(theme);
     // With the account's stripe the dot, the avatar and the text stand further in.
     let inset = if account_marker {
@@ -378,13 +383,14 @@ fn paint_row(
     avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
     let left = rect.left() + inset + text_indent(theme);
     let right = rect.right() - s.s3;
-    let (sender_font, subject_font) = if message.seen { (f.body, f.body) } else { (f.strong, f.strong) };
+    // Unread shows on the first line (the sender in `strong`) and in the dot; the second line is `caption` either way.
+    let sender_font = if message.seen { f.body } else { f.strong };
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
     let date = line(ui, &[(&mailbox.row_date(message), f.mono_s, p.muted)], f32::INFINITY);
     let date_left = right - date.size().x;
     ui.painter().galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
     // The flag next to the date, the pin left of it, on the sender's line.
-    let flag_size = (first_height - 2.0).max(1.0);
+    let flag_size = theme.mark_side();
     let mut end = date_left - s.s2;
     for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
         if shown {
@@ -412,7 +418,7 @@ fn paint_row(
     ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.ink);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let preview = after_subject(&message.preview);
-    let text = line(ui, &[(subject, subject_font, p.ink), (&preview, f.caption, p.muted)], right - left);
+    let text = line(ui, &[(subject, f.caption, p.ink), (&preview, f.caption, p.muted)], right - left);
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
     let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
@@ -546,12 +552,12 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     crate::iconset::paint(controls.painter(), at, icon, ink);
     controls.painter().galley(pos2(at.right() + s.s1, chip.center().y - standing.size().y / 2.0), standing, ink);
     right = right.min(controls.min_rect().left() - s.s3);
-    let top = rect.top() + s.s2;
+    let top = rect.top() + lines_top(theme);
     let to = tr!("To {whom}", whom = whom);
     let to = line(ui, &[(&to, f.body, p.ink)], (right - left).max(1.0));
     ui.painter().galley(pos2(left, top + (first - to.size().y) / 2.0), to, p.ink);
-    let second_top = top + first + s.s1;
-    let subject = line(ui, &[(subject, f.body, p.ink)], (right - left).max(1.0));
+    let second_top = top + first + line_gap(theme);
+    let subject = line(ui, &[(subject, f.caption, p.ink)], (right - left).max(1.0));
     ui.painter().galley(pos2(left, second_top + (second - subject.size().y) / 2.0), subject, p.ink);
     if let Some(reply) = refused {
         let reply = line(ui, &[(reply, f.caption, p.minus)], (rect.right() - s.s3 - left).max(1.0));
@@ -856,7 +862,7 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) 
     let mut mode = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(s.s1, s.s1);
-        ui.label(theme.fonts.label.rich(tr!("Screener")).color(theme.palette.muted));
+        crate::component::label(ui, theme.fonts.label, tr!("Screener"), theme.palette.muted);
         for choice in ScreenerMode::ALL {
             if pill(ui, theme, super::settings::screener_name(choice), rows.mailbox.screener_mode() == choice).clicked() {
                 mode = Some(choice);

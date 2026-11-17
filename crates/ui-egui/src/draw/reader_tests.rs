@@ -615,3 +615,29 @@ fn columns_never_pass_the_room_however_little_there_is() {
     }
     assert!(super::reader::column_widths(&[], 300.0, 12.0).is_empty());
 }
+
+/// Whether `font` is a face of IBM Plex Sans (the families `theme` gives it) or of IBM Plex Mono.
+fn plex(font: &egui::FontId) -> &'static str {
+    use crate::theme::Face;
+    let named = |face: Face| egui::FontFamily::Name(face.name().into());
+    match &font.family {
+        egui::FontFamily::Proportional => "sans",
+        egui::FontFamily::Monospace => "mono",
+        family if *family == named(Face::SansSemiBold) => "sans",
+        family if *family == named(Face::MonoSemiBold) => "mono",
+        _ => "other",
+    }
+}
+
+#[test]
+fn people_s_words_are_in_plex_sans_and_the_app_s_in_plex_mono() {
+    let fetch = Recorder::default();
+    let harness = opened(&fetch, None, "Photos from the coast walk");
+    let font = |start: &str| super::tests::font_of(&harness, start);
+    for people in ["Teodor Lisk", "Here are the ones from the cliff path"] {
+        assert_eq!(plex(&font(people)), "sans", "{people}");
+    }
+    for app in ["Reply", "Forward", "Show done", "04:00", "4"] {
+        assert_eq!(plex(&font(app)), "mono", "{app}");
+    }
+}

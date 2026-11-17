@@ -12,7 +12,7 @@ use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{control_side, cut, galley, margin, tick};
+use super::{cut, galley, margin, tick};
 
 /// Draws a float of `width` points into `ui` with `add` drawing its content.
 pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -71,7 +71,7 @@ pub fn option(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, chosen: bool
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: &str, action: Option<&str>, chosen: Option<bool>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(theme);
+    let height = theme.boxes().menu_row;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| match chosen {
         Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, true, chosen, name),

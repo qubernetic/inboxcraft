@@ -134,7 +134,7 @@ fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<As
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s3);
-    ui.label(theme.fonts.label.rich(tr!("Calendars")).color(p.muted));
+    crate::component::label(ui, theme.fonts.label, tr!("Calendars"), p.muted);
     ui.add_space(s.s2);
     for row in calendar.calendars() {
         ui.horizontal(|ui| {
@@ -166,7 +166,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
                 asked.push(Asked::Pick(None));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.heading.id()).color(p.ink)).wrap());
+                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.strong.id()).color(p.ink)).wrap());
             });
         });
     });

@@ -188,7 +188,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     }
     ui.add_space(theme.spacing.s1);
     ui.separator();
-    ui.label(RichText::new(tr!("When a message leaves the list")).font(theme.fonts.caption.id()).color(p.muted));
+    crate::component::label(ui, theme.fonts.label, tr!("When a message leaves the list"), p.muted);
     for after in [After::Next, After::Previous, After::List] {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
         if response.clicked() {
@@ -208,7 +208,7 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     let width = theme.fonts.body.size * MENU_WIDTH;
     Popup::menu(&response).frame(Frame::NONE).show(|ui| {
         popup::panel(ui, theme, width, |ui| {
-            ui.label(RichText::new(tr!("Move to")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            crate::component::label(ui, theme.fonts.label, tr!("Move to"), theme.palette.muted);
             for folder in mailbox.move_targets(id) {
                 // The full path, so a folder inside another says where it is.
                 if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
@@ -863,7 +863,8 @@ pub(super) fn blocks(
             ui.vertical(|ui| match block {
                 Block::Text { kind, spans, .. } => {
                     let (font, prefix) = match kind {
-                        TextKind::Heading(level) => (if *level <= 2 { f.title } else { f.heading }, String::new()),
+                        // A heading in a message is what its writer wrote: Plex Sans SemiBold, like bold text.
+                        TextKind::Heading(_) => (f.strong, String::new()),
                         TextKind::ListItem { depth, marker } => {
                             let pad = "    ".repeat(usize::from((*depth).clamp(1, 6)).saturating_sub(1));
                             let mark = match marker {
@@ -1122,7 +1123,7 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
         parts.push(tr!("first mail {when}", when = mailbox.short_date(first)));
     }
     parts.push(if count == 1 { tr!("1 message waiting").to_owned() } else { tr!("{count} messages waiting", count = count) });
-    let side = f.title.line + f.caption.line;
+    let side = f.strong.line + f.caption.line;
     let near = pointer_near(ui, side);
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
@@ -1138,7 +1139,7 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
                 }
                 ui.with_layout(Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.title.id()).color(p.ink)).truncate());
+                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.strong.id()).color(p.ink)).truncate());
                     ui.add(egui::Label::new(RichText::new(parts.join(" · ")).font(f.caption.id()).color(p.muted)).truncate());
                 });
             });
@@ -1160,7 +1161,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
         ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.ink)).wrap());
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = s.s1;
-            ui.label(RichText::new(tr!("Into")).font(theme.fonts.caption.id()).color(p.muted));
+            crate::component::label(ui, theme.fonts.label, tr!("Into"), p.muted);
             for kind in GroupKind::ALL {
                 if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
                     into = if into == Some(kind) { None } else { Some(kind) };

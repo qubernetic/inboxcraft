@@ -35,12 +35,12 @@ fn between(theme: &Theme) -> f32 {
     theme.spacing.s2
 }
 
-/// A field `width` points wide under its `label` (the caption in the muted colour); `add` draws the field.
+/// A field `width` points wide under its `label` (the `label` style in the muted colour); `add` draws the field.
 fn labelled(ui: &mut Ui, theme: &Theme, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> Response) -> Response {
     ui.vertical(|ui| {
         ui.set_width(width);
         ui.spacing_mut().item_spacing.y = theme.spacing.s1;
-        let label = ui.label(RichText::new(label).font(theme.fonts.caption.id()).color(theme.palette.muted));
+        let label = crate::component::label(ui, theme.fonts.label, label, theme.palette.muted);
         add(ui).labelled_by(label.id)
     })
     .inner
@@ -112,7 +112,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let found = onboarding.found().cloned();
     let form = onboarding.form_mut();
     let mut detect = false;
-    let label = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
+    let label = crate::component::label(ui, theme.fonts.label, tr!("Address"), p.muted);
     ui.horizontal(|ui| {
         let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
         let room = width - ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.ink).size().x) - 64.0;
@@ -170,7 +170,7 @@ fn server_row(
         labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, port_text, &usual(chosen).to_string(), port)));
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = s.s1;
-            ui.label(RichText::new(tr!("Security")).font(theme.fonts.caption.id()).color(theme.palette.muted));
+            crate::component::label(ui, theme.fonts.label, tr!("Security"), theme.palette.muted);
             ui.horizontal(|ui| {
                 for choice in [Security::Tls, Security::StartTls] {
                     if pill::pill(ui, theme, choice.text(), chosen == choice).clicked() {
@@ -219,7 +219,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     ui.label(RichText::new(tr!("Account settings")).font(theme.fonts.title.id()).color(p.ink));
     ui.add_space(s.s2);
     let address = onboarding.form().address.clone();
-    let caption = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
+    let caption = crate::component::label(ui, theme.fonts.label, tr!("Address"), p.muted);
     ui.add(egui::Label::new(RichText::new(address).font(theme.fonts.body.id()).color(p.ink)).wrap()).labelled_by(caption.id);
     ui.add_space(s.s1);
     let form = onboarding.form_mut();
@@ -309,7 +309,7 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
         ui.vertical(|ui| {
             let colour = if matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt) { p.muted } else { p.ink };
             ui.label(
-                RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).font(theme.fonts.body.id()).color(colour),
+                RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).font(theme.fonts.mono.id()).color(colour),
             );
             let mut details = Vec::new();
             // A step that did not run tried no server.

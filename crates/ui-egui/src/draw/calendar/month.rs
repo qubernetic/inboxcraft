@@ -159,7 +159,7 @@ fn day_events(
     let response = ui.interact(area, ui.scope_id().with(("calendar-more", week, index)), Sense::click());
     let spoken = tr!("{count} more on {day}", count = left_out, day = day::long(day));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &spoken));
-    let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.caption, p.muted)], area.width());
+    let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.mono, p.muted)], area.width());
     ui.painter().galley(pos2(area.left() + theme.spacing.s1, area.top()), galley, p.muted);
     if response.clicked() {
         asked.push(Asked::Open(day));

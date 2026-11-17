@@ -121,7 +121,7 @@ impl TimePicker {
 fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(theme) + s.s1;
+    let height = theme.boxes().field;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, tr!("{name}, {time}", name = name, time = time)));
     let lit = response.hovered() || response.has_focus();

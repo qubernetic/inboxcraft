@@ -46,10 +46,11 @@ use egui::{CornerRadius, Galley, Margin, Ui};
 
 use crate::theme::{Font, Theme};
 
-/// The side of a control (an icon button, a pill's height): a line of button text and a little room.
+/// The side of a control (an icon button, a text button, a hover action): the design's fixed button height at the
+/// text scale; its text is centred in it.
 #[must_use]
 pub fn control_side(theme: &Theme) -> f32 {
-    theme.fonts.button.line + theme.spacing.s2 * 1.5
+    theme.boxes().button
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for
@@ -67,6 +68,16 @@ pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width:
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
     ui.painter().layout_job(job)
+}
+
+/// `text` as a label in `font` and `colour`. A style in capitals paints capitals, but a screen reader hears `text` as
+/// written.
+pub(crate) fn label(ui: &mut Ui, font: Font, text: &str, colour: egui::Color32) -> egui::Response {
+    let response = ui.label(font.rich(text).color(colour));
+    if font.caps {
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
+    }
+    response
 }
 
 /// A margin of `x` points left and right and `y` above and below.

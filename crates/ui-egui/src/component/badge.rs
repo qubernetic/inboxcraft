@@ -57,8 +57,8 @@ pub fn chip(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str) -> Response {
     let s = &theme.spacing;
     let p = theme.palette;
     let ink = p.cyan_text;
-    let text = galley(ui, name, theme.fonts.caption, ink);
-    let size = vec2(text.size().x + s.s2 * 2.0, text.size().y + s.s1);
+    let text = galley(ui, name, theme.fonts.mono_s, ink);
+    let size = vec2(text.size().x + s.s2 * 2.0, theme.boxes().chip);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, spoken));
     if ui.is_rect_visible(rect) {

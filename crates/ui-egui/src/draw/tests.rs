@@ -64,11 +64,50 @@ fn a_flagged_row_shows_the_flag_icon() {
 }
 
 #[test]
+fn a_mark_in_a_row_is_14_points_and_an_icon_in_a_button_16() {
+    let harness = harness();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let sizes = |id: IconId| -> Vec<f32> {
+        let glyph = crate::iconset::glyph(id).to_string();
+        flat(&harness.output().shapes)
+            .into_iter()
+            .filter_map(|(_, shape)| match shape {
+                egui::Shape::Text(text) if text.galley.job.text == glyph => {
+                    text.galley.job.sections.first().map(|section| section.format.font_id.size)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let flags = sizes(IconId::Flag);
+    assert!(!flags.is_empty(), "the flagged rows draw their flag");
+    assert!(flags.iter().all(|size| *size == theme.mark_side()), "{flags:?}");
+    assert_eq!(theme.mark_side(), 14.0);
+    let compose = sizes(IconId::Compose);
+    assert_eq!(compose, vec![theme.icon_side()], "the compose button's icon");
+}
+
+#[test]
+fn a_mail_row_and_a_text_button_keep_the_design_s_heights_at_every_text_scale() {
+    let mut harness = harness();
+    let row = "Odile Brannock, Allotment rota for November, 08:35, unread";
+    for (percent, mail_row, button) in [(100, 56.0, 32.0), (130, 72.0, 42.0)] {
+        let scale = TextScale::from_percent(percent).unwrap();
+        harness.state_mut().set_text_scale(scale);
+        harness.run();
+        let theme = Theme::new(Mode::Light, scale);
+        assert_eq!(theme.boxes().mail_row, mail_row);
+        assert_eq!(harness.get_by_label(row).rect().height(), mail_row, "{percent} %");
+        assert_eq!(harness.get_by_role_and_label(Role::Button, "Review").rect().height(), button, "{percent} %");
+    }
+}
+
+#[test]
 fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     let mut app = sample_app();
     app.mailbox_mut().set_inbox_view(InboxView::Simple);
     // Tall enough for every row under the header and its pills.
-    let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread");
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
@@ -139,10 +178,11 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     let harness = harness();
     let fonts = Theme::new(Mode::Light, TextScale::default()).fonts;
     // Odile's row is unread, Teodor's is read.
+    // Unread shows on the first line; the second line (subject and preview) is the caption either way.
     assert_eq!(font_of(&harness, "Odile Brannock"), fonts.strong.id());
-    assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.strong.id());
+    assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.caption.id());
     assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.body.id());
-    assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.body.id());
+    assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.caption.id());
     assert_ne!(fonts.body.id(), fonts.strong.id());
     let preview = flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
         egui::Shape::Text(text) if text.galley.job.text.starts_with("Teodor Lisk") => None,

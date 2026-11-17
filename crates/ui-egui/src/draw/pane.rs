@@ -224,7 +224,7 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
 /// A section's heading: small capitals in the muted colour.
 fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.s3);
-    ui.label(theme.fonts.label.rich(text).color(theme.palette.muted));
+    crate::component::label(ui, theme.fonts.label, text, theme.palette.muted);
     ui.add_space(theme.spacing.s1);
 }
 

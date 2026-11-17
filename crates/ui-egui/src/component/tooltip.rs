@@ -14,17 +14,20 @@ use crate::theme::Theme;
 
 use super::galley;
 
-/// The chip of a key (`Ctrl+F`): small text in a rounded frame.
+/// The chip of a key (`Ctrl+F`): the `key` style in a square frame of the design's fixed chip height, the text centred.
 pub fn key_chip(ui: &mut Ui, theme: &Theme, key: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    Frame::new()
-        .fill(p.panel)
-        .stroke(egui::Stroke::new(1.0, p.line))
-        .corner_radius(super::corner(0.0))
-        .inner_margin(super::margin(s.s1 * 1.5, 1.0))
-        .show(ui, |ui| ui.label(egui::RichText::new(key).font(theme.fonts.caption.id()).color(p.ink)))
-        .inner
+    let text = galley(ui, key, theme.fonts.key, p.ink);
+    let size = egui::vec2(text.size().x + s.s1 * 3.0, theme.boxes().chip);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, key));
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 0.0, p.panel);
+        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
+        ui.painter().galley(rect.center() - text.size() / 2.0, text, p.ink);
+    }
+    response
 }
 
 /// The bubble's content: the name of the action and the chip of its key from `keymap`, on a float drawn under them.

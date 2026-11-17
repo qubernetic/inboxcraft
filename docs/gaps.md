@@ -358,10 +358,10 @@ time from the code as it is, not measured.
   others) and emoji show as boxes (egui's emoji fonts are not built in), and right-to-left text is laid out left to
   right (egui has no bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
-  crate only, the project owner's to confirm). Labels set in capitals reach a screen reader in capitals. Most views
-  take the styles through egui's own labels, which carry the size but not the line height or tracking; the drawn rows
-  and controls carry all three. A message row is 62 points tall at 100 %, not the design's 56, until the rows take
-  their final shape (#232).
+  crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the
+  size but not the line height or tracking; the drawn rows and controls carry all three. egui's text fields still
+  take their height from Plex's own line, so the add-account form after Detect runs past the settings sheet and
+  scrolls (#232).
 - Text size (#83, #86, #87, #231): the text scale (90 % to 130 %) is set on the appearance settings page or through
   `ui.text_scale.set`, and kept on disk; the type is IBM Plex, with no choice. The fit test draws the list, the
   reader, the add-account page and the settings page at 90 %, 100 % and 130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.

@@ -31,7 +31,7 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
     let width = ui.available_width().max(1.0);
-    let header_height = theme.fonts.heading.line + s.s3 * 2.0;
+    let header_height = theme.boxes().group_head;
     let (header_rect, header) = ui.allocate_exact_size(vec2(width, header_height), Sense::click());
     header.widget_info(|| WidgetInfo::selected(Role::Button, true, open, title));
     let lit = header.hovered() || header.has_focus();

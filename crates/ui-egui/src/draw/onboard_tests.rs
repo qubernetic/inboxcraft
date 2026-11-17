@@ -66,7 +66,7 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
     harness.get_by_label("No accounts yet");
     // Without an account the folder pane would hold only the app's name: it is left out.
     assert_eq!(harness.get_all_by_label("Add account").count(), 1, "on the empty window only");
-    assert!(harness.query_by_label("MAILBOXES").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
+    assert!(harness.query_by_label("Mailboxes").is_none() && harness.query_all_by_label("InboxCraft").count() <= 1, "no folder pane");
     harness.get_by_role_and_label(Role::Button, "Add account").click();
     harness.run();
     assert!(harness.state().settings().is_open());
@@ -152,7 +152,8 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Found in your provider's settings file.");
     harness.get_by_label("What Detect asked (2)");
     assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
-    // After Detect the form is taller than the sheet: the button is scrolled into view first.
+    // After Detect the form ends below the 780-point sheet (its fields and labels follow Plex's taller line): the
+    // button is scrolled into view first, as a person would.
     harness.get_by_label("Check and add").scroll_to_me();
     harness.run();
     harness.get_by_label("Check and add").click();

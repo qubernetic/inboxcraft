@@ -640,10 +640,34 @@ impl Theme {
         (px * self.text_scale.factor() / 2.0).round() * 2.0
     }
 
+    /// The fixed heights at the text scale (each through [`Theme::size`]); the widths, the avatars and the scroll bar
+    /// stay as they are.
+    #[must_use]
+    pub fn boxes(&self) -> Sizes {
+        let z = self.sizes;
+        Sizes {
+            button: self.size(z.button),
+            field: self.size(z.field),
+            menu_row: self.size(z.menu_row),
+            mail_row: self.size(z.mail_row),
+            group_head: self.size(z.group_head),
+            chip: self.size(z.chip),
+            icon: self.size(z.icon),
+            mark: self.size(z.mark),
+            ..z
+        }
+    }
+
     /// The side of an icon in a control at the text scale.
     #[must_use]
     pub fn icon_side(&self) -> f32 {
-        self.size(self.sizes.icon)
+        self.boxes().icon
+    }
+
+    /// The side of an icon as a mark in a row's line (a flag, a pin, a paperclip) at the text scale.
+    #[must_use]
+    pub fn mark_side(&self) -> f32 {
+        self.boxes().mark
     }
 
     /// egui's colours for this theme: flat, square, no shadow of egui's own.

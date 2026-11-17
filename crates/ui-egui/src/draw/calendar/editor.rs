@@ -22,7 +22,7 @@ use crate::component::segmented::{self, segmented};
 use crate::component::select::Select;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::{Face, Font, Theme};
+use crate::theme::{Font, Theme};
 use crate::tr;
 
 /// The editor's width, in points, as the design draws it.
@@ -57,13 +57,9 @@ pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap,
     asked
 }
 
-/// A label's font: the caption, SemiBold.
-fn label_font(theme: &Theme) -> Font {
-    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
-}
-
+/// A field's label: the `label` style (Plex Mono, capitals) in the muted colour.
 fn label(ui: &mut Ui, theme: &Theme, text: &str) -> Response {
-    ui.label(RichText::new(text).font(label_font(theme).id()).color(theme.palette.muted))
+    crate::component::label(ui, theme.fonts.label, text, theme.palette.muted)
 }
 
 /// A field under its `label` (the caption in the muted colour); `add` draws the field.

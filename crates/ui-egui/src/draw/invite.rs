@@ -152,7 +152,7 @@ fn head(ui: &mut Ui, theme: &Theme, invite: &Invite) {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = s.s1;
             let title = if invite.event.summary.is_empty() { tr!("(no title)").to_owned() } else { invite.event.summary.clone() };
-            ui.add(egui::Label::new(RichText::new(title).font(f.title.id()).color(p.ink)).wrap());
+            ui.add(egui::Label::new(RichText::new(title).font(f.strong.id()).color(p.ink)).wrap());
             let line = invite.line();
             if !line.is_empty() {
                 ui.add(egui::Label::new(RichText::new(line).font(f.body.id()).color(p.ink)).wrap());

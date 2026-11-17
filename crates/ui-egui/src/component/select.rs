@@ -30,7 +30,7 @@ const SIDES: f32 = 10.0;
 /// it.
 #[must_use]
 pub fn height(theme: &Theme) -> f32 {
-    theme.fonts.body.line + 18.0
+    theme.boxes().field
 }
 
 /// What a select shows and offers.

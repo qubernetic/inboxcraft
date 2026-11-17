@@ -396,8 +396,9 @@ fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, 
     let s = &theme.spacing;
     let f = &theme.fonts;
     let first = f.strong.line.max(f.mono_s.line);
-    let second = f.body.line;
-    let height = first + second + s.s2 * 1.5;
+    let second = f.caption.line;
+    let gap = s.s1 / 2.0;
+    let height = theme.boxes().mail_row;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
@@ -415,13 +416,13 @@ fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, 
     let left = face.right() + s.s3;
     let time = line(ui, &[(time, f.mono_s, p.muted)], rect.width());
     let right = rect.right() - s.s3;
-    let top = rect.top() + s.s2 * 0.75;
+    let top = rect.top() + ((height - first - gap - second) / 2.0).max(0.0);
     painter.galley(pos2(right - time.size().x, top + (first - time.size().y) / 2.0), time.clone(), p.muted);
     let sender_font = if unread { f.strong } else { f.body };
     let name = line(ui, &[(sender.0, sender_font, p.ink)], (right - time.size().x - s.s2 - left).max(1.0));
     painter.galley(pos2(left, top + (first - name.size().y) / 2.0), name, p.ink);
-    let subject = line(ui, &[(subject, if unread { f.strong } else { f.body }, p.ink)], (right - left).max(1.0));
-    painter.galley(pos2(left, top + first), subject, p.ink);
+    let subject = line(ui, &[(subject, f.caption, p.ink)], (right - left).max(1.0));
+    painter.galley(pos2(left, top + first + gap), subject, p.ink);
 }
 
 /// The preview: two rows of the list, the first one selected, in `theme`.
@@ -429,7 +430,7 @@ fn preview(ui: &mut Ui, theme: &Theme) {
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s3);
-    ui.label(theme.fonts.label.rich(tr!("Preview")).color(p.muted));
+    crate::component::label(ui, theme.fonts.label, tr!("Preview"), p.muted);
     ui.add_space(s.s1);
     Frame::new().fill(p.bg).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s2).show(ui, |ui| {
         ui.set_width(ui.available_width());
