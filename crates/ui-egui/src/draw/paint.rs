@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The small pieces the panes are drawn from: one line of text cut to a width, the selection, a navigation row, a
-//! badge, and the flat grounds: a pane, a float with the one shadow, a hairline.
+//! badge, and the flat grounds: a pane, a float with the one shadow, a hairline and a divider made of one.
 
 use std::sync::Arc;
 
@@ -160,6 +160,13 @@ fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
 /// A line one point wide (whole physical pixels, at least one) in `colour` from `a` to `b`, on whole pixels.
 pub(crate) fn hairline(painter: &Painter, a: Pos2, b: Pos2, colour: Color32) {
     painter.add(hairline_shape(a, b, colour, painter.pixels_per_point()));
+}
+
+/// A divider across the width of `ui`: a row one point high with a [`hairline`] in `colour` on it.
+pub(crate) fn rule(ui: &mut Ui, colour: Color32) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    hairline(ui.painter(), rect.left_top(), rect.right_top(), colour);
+    response
 }
 
 /// The panes of one frame. [`Panes::begin`] keeps a place under everything drawn after it; each [`Panes::card`]

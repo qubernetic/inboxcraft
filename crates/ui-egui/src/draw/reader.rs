@@ -167,16 +167,14 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         if popup::entry(ui, theme, keymap, name, None).clicked() {
             drawn.asked.push(Asked::Details(row.id));
         }
-        ui.add_space(theme.spacing.s1);
-        ui.separator();
+        paint::rule(ui, p.line);
         if row.group.is_some()
             && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
         {
             drawn.asked.push(Asked::Act(row.id, act));
         }
         if row.group.is_some() {
-            ui.add_space(theme.spacing.s1);
-            ui.separator();
+            paint::rule(ui, p.line);
         }
     }
     let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
@@ -186,8 +184,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     if popup::entry(ui, theme, keymap, tr!("Close"), None).clicked() {
         drawn.asked.push(Asked::Close);
     }
-    ui.add_space(theme.spacing.s1);
-    ui.separator();
+    paint::rule(ui, p.line);
     crate::component::label(ui, theme.fonts.label, tr!("When a message leaves the list"), p.muted);
     for after in [After::Next, After::Previous, After::List] {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
@@ -909,7 +906,7 @@ pub(super) fn blocks(
                     run.show(ui, document, drawn);
                 }
                 Block::Rule { .. } => {
-                    ui.separator();
+                    paint::rule(ui, p.line);
                 }
                 Block::Image { image, .. } => picture(ui, theme, reader, id, image, document, textures, drawn),
                 Block::Table { rows, .. } if depth < MAX_DEPTH => {

@@ -156,7 +156,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s4);
-    ui.separator();
+    crate::draw::paint::rule(ui, p.line);
     ui.add_space(s.s2);
     ui.horizontal(|ui| {
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
