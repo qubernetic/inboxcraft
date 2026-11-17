@@ -40,8 +40,7 @@ fn harness(theme: egui::Theme) -> Harness<'static, InboxApp> {
 /// The harness with Odile's rota open in the reader.
 fn reading(theme: egui::Theme) -> Harness<'static, InboxApp> {
     let mut harness = harness(theme);
-    // Pressed as a screen reader presses it: a pointer at the row's middle lands on its hover actions now.
-    harness.query_all_by_label_contains(ROTA).next().unwrap().click_accesskit();
+    harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().reader().open_id().is_some());
     harness
@@ -80,8 +79,7 @@ fn reply_all_and_forward_open_theirs_and_forward_asks_whom() {
     press(&mut harness, "Reply all");
     assert_eq!(harness.state().composer().unwrap().title(), format!("Re: {ROTA}"));
     press(&mut harness, "Close; the draft is kept");
-    // Pressed as a screen reader presses it: a pointer at the row's middle lands on its hover actions now.
-    harness.query_all_by_label_contains(ROTA).next().unwrap().click_accesskit();
+    harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     press(&mut harness, "Forward");
     let composer = harness.state().composer().unwrap();
@@ -96,8 +94,7 @@ fn a_reply_keeps_the_draft_that_was_being_written() {
     let mut harness = harness(egui::Theme::Light);
     press(&mut harness, "New message");
     let first = harness.state().composer().unwrap().draft();
-    // Pressed as a screen reader presses it: a pointer at the row's middle lands on its hover actions now.
-    harness.query_all_by_label_contains(ROTA).next().unwrap().click_accesskit();
+    harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
     press(&mut harness, "Reply");

@@ -256,3 +256,40 @@ fn the_group_is_the_scaled_strip_at_130_percent() {
     let harness = group(theme, None, None);
     assert_eq!(harness.get_by_label("Done").rect().height(), theme.boxes().strip);
 }
+
+/// The group of the sheet's four actions on a line `width` wide; the state keeps what it drew and where it stood.
+fn on_a_line(width: f32) -> Harness<'static, (Option<Shown>, Rect, Rect)> {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().with_size(vec2(400.0, 100.0)).build_ui_state(
+        move |ui, (drawn, line, placed): &mut (Option<Shown>, Rect, Rect)| {
+            let (_, at) = ui.allocate_space(vec2(width, 24.0));
+            *line = at;
+            *placed = super::place(ui, &theme, &Keymap::default(), at, &sheet(None));
+            *drawn = Some(actions(ui, &theme, &Keymap::default(), Id::unique("narrow"), at, true, &sheet(None)));
+        },
+        (None, Rect::NOTHING, Rect::NOTHING),
+    );
+    harness.run();
+    harness
+}
+
+#[test]
+fn actions_that_do_not_fit_their_line_give_way_from_the_end() {
+    for (width, shown) in [(197.0, 4), (196.0, 3), (137.0, 3), (136.0, 2), (43.0, 1), (42.0, 0), (0.0, 0)] {
+        let harness = on_a_line(width);
+        let (drawn, line, placed) = *harness.state();
+        let names: Vec<&str> = SHEET.iter().map(|(name, ..)| *name).filter(|name| harness.query_by_label(name).is_some()).collect();
+        let wanted: Vec<&str> = SHEET.iter().take(shown).map(|(name, ..)| *name).collect();
+        assert_eq!(names, wanted, "a line {width} wide");
+        for name in &names {
+            let rect = harness.get_by_label(name).rect();
+            assert!(line.contains_rect(rect), "{width}: {name} {rect:?} leaves the line {line:?}");
+            assert!(placed.contains_rect(rect), "{width}: {name} {rect:?} outside the group's box {placed:?}");
+        }
+        let left = drawn.map_or(f32::NAN, |drawn| drawn.left);
+        assert!(left >= line.left() - 0.01, "{width}: the group starts at {left}, left of its line");
+        if shown == 0 {
+            assert_eq!(placed.width(), 0.0, "{width}: nothing to cover");
+        }
+    }
+}

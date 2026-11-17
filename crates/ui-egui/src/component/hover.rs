@@ -5,6 +5,9 @@
 //! at the right end of the row's first line. It shows for a hovered row and for the row the keyboard is on, at once:
 //! the presentation's `.row:hover .acts` has no transition. Its buttons follow the row in the `Tab` order.
 //!
+//! The group stands in the line it is given and never left of it: the actions that do not fit give way from the end,
+//! the first (Done) last. A row gives it the right part of its first line and keeps the rest (its middle) to itself.
+//!
 //! An action at rest is its `muted` icon and its chip; under the pointer a 1 px `muted` edge and an `ink` icon; with
 //! the keyboard focus the edge is `cyan_edge`. Held down (the sheet draws no pressed look) it takes the secondary
 //! button's press: the `stage` fill and an `ink` edge. An action that cannot run is its icon in `dim` and its chip
@@ -79,6 +82,39 @@ pub fn width(ui: &Ui, theme: &Theme, keymap: &Keymap, list: &[Action<'_>]) -> f3
     laid.iter().map(|action| action.width).sum::<f32>() + gaps
 }
 
+/// How many of `laid`, from the first, fit side by side `gap` apart in `room` points, and how wide they are: the actions
+/// that do not fit give way from the end (Delete before Read, Read before Snooze, Snooze before Done).
+fn fitted(laid: &[Laid], gap: f32, room: f32) -> (usize, f32) {
+    let mut total = 0.0;
+    let mut count = 0;
+    for action in laid {
+        let next = if count == 0 { action.width } else { total + gap + action.width };
+        if next > room + 0.01 {
+            break;
+        }
+        total = next;
+        count += 1;
+    }
+    (count, total)
+}
+
+/// The box of the group of `list` on `line`: its right edge on the line's, as high as an action and centred on the
+/// line, as wide as the actions that fit in the line (none: an empty box at the line's right end). What a row covers
+/// under the group, and nothing more.
+#[must_use]
+pub fn place(ui: &Ui, theme: &Theme, keymap: &Keymap, line: Rect, list: &[Action<'_>]) -> Rect {
+    let laid = lay(ui, theme, keymap, list, soon::is_soon(ui));
+    let (_, total) = fitted(&laid, theme.spacing.s1, line.width());
+    group_box(theme, line, total)
+}
+
+/// The group's box `total` wide on `line`, on whole points.
+fn group_box(theme: &Theme, line: Rect, total: f32) -> Rect {
+    let high = theme.boxes().strip;
+    let top = (line.center().y - high / 2.0).round();
+    Rect::from_min_size(pos2((line.right() - total).round(), top), vec2(total, high))
+}
+
 /// The group `id` of `list` at the right end of `line` (the row's first line: the group's right edge on the line's,
 /// centred on it), when `shown`.
 pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, line: Rect, shown: bool, list: &[Action<'_>]) -> Shown {
@@ -105,14 +141,18 @@ pub(crate) fn actions_with(
     let soon = soon::is_soon(ui);
     let laid = lay(ui, theme, keymap, list, soon);
     let gap = theme.spacing.s1;
-    let total = laid.iter().map(|action| action.width).sum::<f32>() + laid.len().saturating_sub(1) as f32 * gap;
-    let high = theme.boxes().strip;
+    // The group never runs left of its line: what does not fit gives way from the end.
+    let (count, total) = fitted(&laid, gap, line.width());
+    if count == 0 {
+        return Shown { clicked: None, left: line.right(), openness: 0.0 };
+    }
+    let group = group_box(theme, line, total);
+    let (high, top) = (group.height(), group.top());
     let icon = theme.mark_side();
-    let top = (line.center().y - high / 2.0).round();
-    let mut x = (line.right() - total).round();
+    let mut x = group.left();
     let left = x;
     let mut clicked = None;
-    for (index, (action, laid)) in list.iter().zip(laid).enumerate() {
+    for (index, (action, laid)) in list.iter().zip(laid).take(count).enumerate() {
         let rect = Rect::from_min_size(pos2(x, top), vec2(laid.width, high));
         x += laid.width + gap;
         let enabled = !soon && action.unavailable.is_none() && ui.is_enabled();

@@ -178,8 +178,7 @@ fn closing_the_composer_loses_no_text() {
 fn a_message_pressed_in_the_list_floats_the_composer_and_it_comes_back_whole() {
     let mut harness = composing(egui::Theme::Light);
     type_into(&mut harness, "Message text", "Half a thought");
-    // Pressed as a screen reader presses it: a pointer at the row's middle lands on its hover actions now.
-    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click_accesskit();
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
     assert!(harness.state().reader().open_id().is_some(), "the reader has its place back");

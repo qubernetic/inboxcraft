@@ -537,3 +537,77 @@ fn the_key_of_an_action_only_a_coming_soon_control_offers_runs_nothing() {
         assert_eq!(harness.state().palette().is_open(), normal, "its key opens the palette, a usable control offering it too: {normal}");
     }
 }
+
+/// Opens Teodor's message with a pointer press on its row, so the list stands beside the reader at its default width.
+fn beside_the_reader() -> Harness<'static, InboxApp> {
+    let mut harness = harness(false);
+    harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
+    harness.run();
+    assert!(harness.state().reader().open_id().is_some(), "Teodor's message is open");
+    harness
+}
+
+/// Presses Odile's row in its middle with the pointer, the way a person does: the pointer comes, the row shows its
+/// hover actions, then the press. The row opens and nothing is acted on.
+fn press_odile_in_the_middle(harness: &mut Harness<'static, InboxApp>, width: &str) {
+    let before = harness.state().reader().open_id();
+    let middle = harness.get_by_label(ODILE).rect().center();
+    harness.hover_at(middle);
+    harness.run();
+    for name in ["Done", "Mark as read", "Delete", "Snooze"] {
+        for button in harness.query_all_by_role_and_label(Role::Button, name) {
+            assert!(!button.rect().contains(middle), "{width}: {name} at {:?} lies under the row's middle {middle:?}", button.rect());
+        }
+    }
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    assert!(harness.query_by_label("Marked as done").is_none(), "{width}: nothing was done");
+    assert_ne!(harness.state().reader().open_id(), before, "{width}: Odile's message opened");
+}
+
+#[test]
+fn a_pointer_press_on_a_rows_middle_opens_it_at_the_default_and_the_narrowest_list() {
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    assert!((row.width() - (380.0 - 36.0)).abs() <= 12.0, "the default list: {row:?}");
+    press_odile_in_the_middle(&mut harness, "380");
+    // The list's edge dragged as far left as it goes.
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    let y = row.center().y;
+    let mut narrowest = row;
+    for x in 1..40 {
+        let from = egui::pos2(row.right() + x as f32, y);
+        harness.hover_at(from);
+        harness.drag_at(from);
+        harness.run();
+        harness.hover_at(egui::pos2(10.0, y));
+        harness.run();
+        harness.drop_at(egui::pos2(10.0, y));
+        harness.run();
+        narrowest = harness.get_by_label(ODILE).rect();
+        if narrowest.width() < row.width() - 100.0 {
+            break;
+        }
+    }
+    assert!(narrowest.width() < 120.0, "the list is at its narrowest: {narrowest:?}");
+    press_odile_in_the_middle(&mut harness, "narrowest");
+}
+
+#[test]
+fn a_pointer_press_on_done_beside_the_reader_marks_the_message_done() {
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    // The row's own Done, not the reader's.
+    let done = harness.query_all_by_role_and_label(Role::Button, "Done").map(|node| node.rect()).find(|rect| row.contains(rect.center()));
+    let done = done.unwrap_or_else(|| panic!("no Done on the hovered row"));
+    harness.hover_at(done.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Done").find(|node| node.rect() == done).unwrap().click();
+    // The row slides out over a few frames.
+    harness.run_steps(12);
+    harness.get_by_label("Marked as done");
+    assert!(harness.query_by_label(ODILE).is_none(), "the row has left the inbox");
+}

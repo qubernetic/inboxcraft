@@ -342,7 +342,7 @@ fn paint_row(
     let selected = mailbox.selected() == Some(message.id);
     if selected {
         selection(ui.painter(), theme, rect, 0.0);
-    } else if response.hovered() {
+    } else if ui.rect_contains_pointer(rect) {
         ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     let (first_height, second_height) = row_lines(theme);
@@ -405,13 +405,14 @@ fn paint_row(
     // Last, so the solid float covers whatever of the row lies under it.
     let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
     let actions = actions(message);
+    // As the mail row's sheet places it: on the first line, its right edge 16 in from the row's. The row keeps its
+    // middle: the group has the line right of the middle (4 clear of it), and what does not fit there gives way from
+    // the end, so a press on the row's middle opens it at every width of the list.
+    let line = Rect::from_min_max(pos2(rect.center().x + s.s1, first), pos2(rect.right() - s.s4, first + first_height));
     // The group paints no ground of its own: until this row cuts its text short of it, the row's fill covers what
-    // lies under the group.
-    let line = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(rect.right() - s.s3, rect.bottom()));
+    // lies under the group's own box.
     if reach {
-        let width = hover::width(ui, theme, keymap, &actions);
-        let cover = Rect::from_min_max(pos2(line.right() - width - s.s1, rect.top()), pos2(line.right(), rect.bottom() - 1.0));
-        ui.painter().rect_filled(cover, 0.0, p.stage);
+        ui.painter().rect_filled(hover::place(ui, theme, keymap, line, &actions), 0.0, p.stage);
     }
     let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), line, reach, &actions);
     shown.clicked.and_then(|index| act(message, index))
