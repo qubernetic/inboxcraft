@@ -48,11 +48,13 @@ type Draw = fn(&mut Ui, &Theme, &Keymap);
 /// The height of the page's upper part, the columns of components, in points.
 const TOP: f32 = 660.0;
 
-/// The height of the boards under the columns, in points.
-const BOARDS: f32 = 960.0;
+/// The height of the boards under the columns, in points: their taller column, and the gap the columns above leave
+/// over the boards' first heading, so every band stands as far under the one above.
+const BOARDS: f32 = 835.0;
 
-/// The height of the boards of the toggles and choices, under the other boards, in points.
-const CONTROLS: f32 = 860.0;
+/// The height of the boards of the toggles and choices, under the other boards, in points: their taller column and
+/// the same gap.
+const CONTROLS: f32 = 807.0;
 
 /// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
 const MARKS: f32 = 480.0;
