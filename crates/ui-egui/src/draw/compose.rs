@@ -19,10 +19,7 @@
 //! through the [`Composer`]'s methods, which run the engine's commands.
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{
-    Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke,
-    Ui, WidgetInfo, vec2,
-};
+use egui::{Align, Align2, Area, Frame, Id, Key, Layout, Modifiers, Order, Popup, Pos2, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, vec2};
 use inboxcraft_time::Timestamp;
 
 use super::paint::line;
@@ -41,7 +38,6 @@ use crate::tr;
 
 /// The width of the line names (From, To, Subject), in body-size units.
 const NAMES: f32 = 4.5;
-
 
 /// The width of the floating panel, in body-size units.
 const FLOATING: f32 = 22.0;
@@ -121,7 +117,6 @@ fn later_id() -> Id {
 pub(super) fn later_popup() -> Id {
     Id::unique("compose-later-popup")
 }
-
 
 /// The caret beside Send: it opens the time picker, whose time makes Send a Schedule, and "Send now instead" while a
 /// time is picked; with it, the note that nothing goes while InboxCraft is closed.

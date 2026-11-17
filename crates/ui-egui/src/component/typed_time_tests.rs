@@ -212,7 +212,10 @@ enum Typed {
 }
 
 /// The field of the sheet, 296 wide, in `state`, focused where the sheet focuses it.
-fn typed_in(mode: crate::theme::Mode, state: Typed) -> (egui::Rect, crate::component::tests::Own, crate::component::tests::Paint, egui_kittest::Harness<'static>) {
+fn typed_in(
+    mode: crate::theme::Mode,
+    state: Typed,
+) -> (egui::Rect, crate::component::tests::Own, crate::component::tests::Paint, egui_kittest::Harness<'static>) {
     use egui_kittest::kittest::Queryable as _;
     let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
     let value = match state {
@@ -221,15 +224,20 @@ fn typed_in(mode: crate::theme::Mode, state: Typed) -> (egui::Rect, crate::compo
         Typed::Invalid => "thursdy",
         Typed::Past => "2026-11-02 09:00",
     };
-    let mut harness = crate::component::tests::staged(theme, |p| p.bg, egui::vec2(400.0, 160.0), move |ui, theme| {
-        let id = egui::Id::unique("typed");
-        let mut text = ui.data_mut(|data| data.get_temp_mut_or_insert_with(id.with("text"), || value.to_owned()).clone());
-        ui.vertical(|ui| {
-            ui.set_width(296.0);
-            super::typed_time_field(ui, theme, id, "Type a time", &mut text, now(), Offset::UTC);
-        });
-        ui.data_mut(|data| data.insert_temp(id.with("text"), text));
-    });
+    let mut harness = crate::component::tests::staged(
+        theme,
+        |p| p.bg,
+        egui::vec2(400.0, 160.0),
+        move |ui, theme| {
+            let id = egui::Id::unique("typed");
+            let mut text = ui.data_mut(|data| data.get_temp_mut_or_insert_with(id.with("text"), || value.to_owned()).clone());
+            ui.vertical(|ui| {
+                ui.set_width(296.0);
+                super::typed_time_field(ui, theme, id, "Type a time", &mut text, now(), Offset::UTC);
+            });
+            ui.data_mut(|data| data.insert_temp(id.with("text"), text));
+        },
+    );
     if state != Typed::Empty {
         crate::component::tests::bring(&mut harness, "Type a time", crate::component::Shown::Focus);
         harness.key_press(egui::Key::End);
@@ -258,8 +266,13 @@ fn a_typed_time_looks_as_its_sheet_says_in_every_state() {
                 Typed::Empty | Typed::Focus => {
                     let shown = one(&harness, hint);
                     let left = if state == Typed::Focus { 28.0 } else { 13.0 };
-                    assert_eq!((shown.rect.min, shown.colour, shown.family.as_str(), shown.size, shown.row), (rect.min + egui::vec2(left, 8.0), p.muted, "Monospace", 13.0, 20.0), "{at}");
-                    let expected = (state == Typed::Focus).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(13.0, 10.0), egui::vec2(7.0, 16.0)));
+                    assert_eq!(
+                        (shown.rect.min, shown.colour, shown.family.as_str(), shown.size, shown.row),
+                        (rect.min + egui::vec2(left, 8.0), p.muted, "Monospace", 13.0, 20.0),
+                        "{at}"
+                    );
+                    let expected =
+                        (state == Typed::Focus).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(13.0, 10.0), egui::vec2(7.0, 16.0)));
                     assert_eq!(block, expected, "{at}");
                 }
                 _ => {
@@ -269,8 +282,16 @@ fn a_typed_time_looks_as_its_sheet_says_in_every_state() {
                         _ => "2026-11-02 09:00",
                     };
                     let shown = one(&harness, value);
-                    assert_eq!((shown.rect.min, shown.colour, shown.family.as_str(), shown.size), (rect.min + egui::vec2(13.0, 8.0), p.ink, "Monospace", 13.0), "{at}");
-                    assert_eq!(block, Some(egui::Rect::from_min_size(egui::pos2((shown.rect.right() + 2.0).round(), rect.top() + 10.0), egui::vec2(7.0, 16.0))), "{at}");
+                    assert_eq!(
+                        (shown.rect.min, shown.colour, shown.family.as_str(), shown.size),
+                        (rect.min + egui::vec2(13.0, 8.0), p.ink, "Monospace", 13.0),
+                        "{at}"
+                    );
+                    assert_eq!(
+                        block,
+                        Some(egui::Rect::from_min_size(egui::pos2((shown.rect.right() + 2.0).round(), rect.top() + 10.0), egui::vec2(7.0, 16.0))),
+                        "{at}"
+                    );
                     assert!(drawn(&harness).iter().all(|text| text.text != hint), "{at}: no hint over typed text");
                 }
             }
@@ -285,9 +306,18 @@ fn a_typed_time_looks_as_its_sheet_says_in_every_state() {
             match reading {
                 Some((words, colour, left)) => {
                     let line = one(&harness, words);
-                    assert_eq!((line.rect.min, line.colour, line.size, line.row), (rect.left_bottom() + egui::vec2(left, 8.0), colour, 12.0, 18.0), "{at}");
+                    assert_eq!(
+                        (line.rect.min, line.colour, line.size, line.row),
+                        (rect.left_bottom() + egui::vec2(left, 8.0), colour, 12.0, 18.0),
+                        "{at}"
+                    );
                     if state == Typed::Valid {
-                        assert!(tick.len() == 1 && (tick[0].rect.center() - (rect.left_bottom() + egui::vec2(7.0, 17.0))).length() < 1.0 && tick[0].colour == p.cyan_text, "{at} {tick:?}");
+                        assert!(
+                            tick.len() == 1
+                                && (tick[0].rect.center() - (rect.left_bottom() + egui::vec2(7.0, 17.0))).length() < 1.0
+                                && tick[0].colour == p.cyan_text,
+                            "{at} {tick:?}"
+                        );
                     } else {
                         assert!(tick.is_empty(), "{at}");
                     }

@@ -103,8 +103,7 @@ enum State {
     Long,
 }
 
-const STATES: [State; 8] =
-    [State::Empty, State::Filled, State::Hover, State::Focus, State::Error, State::Disabled, State::ReadOnly, State::Long];
+const STATES: [State; 8] = [State::Empty, State::Filled, State::Hover, State::Focus, State::Error, State::Disabled, State::ReadOnly, State::Long];
 
 const LONG: &str = "https://dav.example.org/calendars/odile/shared-with-the-studio/";
 
@@ -374,7 +373,8 @@ fn multiline_in(mode: Mode, state: Many) -> (Rect, Own, crate::component::tests:
 fn box_of(harness: &Harness<'static>, label: &str) -> Rect {
     let node = harness.get_by_label(label).rect();
     // The edit lies inside the box's 1 px edge; a scrolled one is taller than the box and starts above it.
-    let edges: Vec<Rect> = drawn_rects(harness).into_iter().filter(|rect| (rect.width() - 320.0).abs() < 0.01 && rect.left() == node.left() - 1.0).collect();
+    let edges: Vec<Rect> =
+        drawn_rects(harness).into_iter().filter(|rect| (rect.width() - 320.0).abs() < 0.01 && rect.left() == node.left() - 1.0).collect();
     edges.first().copied().unwrap_or(node.expand(1.0))
 }
 
@@ -438,35 +438,47 @@ fn a_multiline_field_looks_as_its_sheet_says_in_every_state() {
                 _ => 294.0,
             };
             assert!(text.rect.width() <= wide + 0.01, "{at} {text:?} wider than {wide}");
-            // The caret: at the start of the third line, or inside the view while it scrolls.
-            let block = caret(&paint, p.cyan_edge);
-            match state {
-                Many::Focus => assert_eq!(block, Some(Rect::from_min_size(rect.min + vec2(13.0, 56.0), vec2(7.0, 16.0))), "{at}"),
-                Many::ScrollingFocus => {
-                    let view = Rect::from_min_max(rect.min + vec2(13.0, 9.0), rect.max - vec2(17.0, 9.0));
-                    assert!(block.is_some_and(|block| view.expand(1.0).contains_rect(block)), "{at} {block:?}");
-                }
-                _ => assert_eq!(block, None, "{at}"),
-            }
-            // While it scrolls, the bar's thumb at rest stands 4 wide in the 12 strip inside the right edge.
-            let thumb = paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.muted) && (shape.rect.width() - 4.0).abs() < 0.01);
-            if matches!(state, Many::Scrolling | Many::ScrollingFocus) {
-                let thumb = thumb.map(|shape| shape.rect);
-                assert!(thumb.is_some_and(|thumb| thumb.left() == rect.left() + 311.0 && thumb.top() >= rect.top() + 1.0 && thumb.bottom() <= rect.bottom() - 1.0), "{at} {thumb:?}");
-            } else {
-                assert!(thumb.is_none(), "{at}");
-            }
-            let lock: Vec<_> = drawn(&harness).into_iter().filter(|drawn| drawn.text == "\u{e2fa}").collect();
-            if state == Many::ReadOnly {
-                assert!(lock.len() == 1 && (lock[0].rect.center() - (rect.min + vec2(299.0, 17.0))).length() < 1.5, "{at} {lock:?}");
-            } else {
-                assert!(lock.is_empty(), "{at}");
-            }
-            if state == Many::Error {
-                let message = one(&harness, "Too long for a note: 200 characters at most, this has 236.");
-                assert_eq!((message.rect.min, message.colour), (rect.left_bottom() + vec2(0.0, 8.0), p.minus), "{at}");
-            }
+            marks_of_a_multiline_field(mode, state, rect, &paint, &harness);
         }
+    }
+}
+
+/// The caret, the scroll thumb, the lock and the message of the multiline field in `state`.
+fn marks_of_a_multiline_field(mode: Mode, state: Many, rect: Rect, paint: &crate::component::tests::Paint, harness: &Harness<'static>) {
+    let p = Theme::new(mode, TextScale::default()).palette;
+    let at = format!("{mode:?} {state:?}");
+    // The caret: at the start of the third line, or inside the view while it scrolls.
+    let block = caret(paint, p.cyan_edge);
+    match state {
+        Many::Focus => assert_eq!(block, Some(Rect::from_min_size(rect.min + vec2(13.0, 56.0), vec2(7.0, 16.0))), "{at}"),
+        Many::ScrollingFocus => {
+            let view = Rect::from_min_max(rect.min + vec2(13.0, 9.0), rect.max - vec2(17.0, 9.0));
+            assert!(block.is_some_and(|block| view.expand(1.0).contains_rect(block)), "{at} {block:?}");
+        }
+        _ => assert_eq!(block, None, "{at}"),
+    }
+    // While it scrolls, the bar's thumb at rest stands 4 wide in the 12 strip inside the right edge.
+    let thumb =
+        paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.muted) && (shape.rect.width() - 4.0).abs() < 0.01);
+    if matches!(state, Many::Scrolling | Many::ScrollingFocus) {
+        let thumb = thumb.map(|shape| shape.rect);
+        assert!(
+            thumb
+                .is_some_and(|thumb| thumb.left() == rect.left() + 311.0 && thumb.top() >= rect.top() + 1.0 && thumb.bottom() <= rect.bottom() - 1.0),
+            "{at} {thumb:?}"
+        );
+    } else {
+        assert!(thumb.is_none(), "{at}");
+    }
+    let lock: Vec<_> = drawn(harness).into_iter().filter(|drawn| drawn.text == "\u{e2fa}").collect();
+    if state == Many::ReadOnly {
+        assert!(lock.len() == 1 && (lock[0].rect.center() - (rect.min + vec2(299.0, 17.0))).length() < 1.5, "{at} {lock:?}");
+    } else {
+        assert!(lock.is_empty(), "{at}");
+    }
+    if state == Many::Error {
+        let message = one(harness, "Too long for a note: 200 characters at most, this has 236.");
+        assert_eq!((message.rect.min, message.colour), (rect.left_bottom() + vec2(0.0, 8.0), p.minus), "{at}");
     }
 }
 
@@ -494,7 +506,10 @@ fn a_multiline_field_grows_to_240_then_scrolls() {
         if scrolls {
             // The bar's strip is 12 wide between the box's right edge and the text, inside the edge.
             let strip = Rect::from_min_max(pos2(rect.right() - 13.0, rect.top() + 1.0), pos2(rect.right() - 1.0, rect.bottom() - 1.0));
-            assert!(thumb.is_some_and(|thumb| strip.contains_rect(thumb) && (thumb.center().x - strip.center().x).abs() < 0.01), "{thumb:?} in {strip:?}");
+            assert!(
+                thumb.is_some_and(|thumb| strip.contains_rect(thumb) && (thumb.center().x - strip.center().x).abs() < 0.01),
+                "{thumb:?} in {strip:?}"
+            );
         } else {
             assert_eq!(thumb, None, "{count} lines");
         }

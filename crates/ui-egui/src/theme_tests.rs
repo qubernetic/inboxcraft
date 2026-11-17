@@ -1087,7 +1087,10 @@ fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
     assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
     // Text: views write in the fields of `component::field`.
     assert_eq!(scan("ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint));"), ["TextEdit"]);
-    assert_eq!(scan("ui.text_edit_singleline(&mut text); ui . text_edit_multiline ( &mut more );"), [".text_edit_singleline(", ".text_edit_multiline("]);
+    assert_eq!(
+        scan("ui.text_edit_singleline(&mut text); ui . text_edit_multiline ( &mut more );"),
+        [".text_edit_singleline(", ".text_edit_multiline("]
+    );
     assert!(scan("if let Some(state) = egui::text_edit::TextEditState::load(ctx, id) {}").is_empty());
 }
 

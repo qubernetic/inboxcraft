@@ -167,7 +167,14 @@ pub fn recipient_field(ui: &mut Ui, theme: &Theme, id: Id, typing: &mut String, 
 }
 
 /// [`recipient_field`] drawn in `shown`: a board of the gallery.
-pub(crate) fn recipient_field_with(ui: &mut Ui, theme: &Theme, id: Id, typing: &mut String, line: &Recipients<'_>, shown: Option<Shown>) -> RecipientsOutput {
+pub(crate) fn recipient_field_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    typing: &mut String,
+    line: &Recipients<'_>,
+    shown: Option<Shown>,
+) -> RecipientsOutput {
     let p = &theme.palette;
     let s = &theme.spacing;
     let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field * 4.0) } else { theme.boxes().field * 4.0 };
@@ -244,7 +251,10 @@ pub(crate) fn recipient_field_with(ui: &mut Ui, theme: &Theme, id: Id, typing: &
         }
         // The text being typed: the rest of its row, the field's caret and hint its own.
         let start = at(typing_at);
-        let typing_rect = Rect::from_min_max(pos2(start.x, start.y + (chip - field_height) / 2.0), pos2(rect.right() - right, start.y + (chip + field_height) / 2.0));
+        let typing_rect = Rect::from_min_max(
+            pos2(start.x, start.y + (chip - field_height) / 2.0),
+            pos2(rect.right() - right, start.y + (chip + field_height) / 2.0),
+        );
         let mut child = ui.new_child(UiBuilder::new().max_rect(typing_rect));
         let hint = if line.chips.is_empty() { line.hint } else { "" };
         let field = Field { label: "", hint, error: None, enabled, read_only: false };

@@ -18,8 +18,8 @@
 //! gives its hover no transition.
 
 use egui::{
-    Align2, Area, Color32, Context, Id, Key, LayerId, Modifiers, Order, Pos2, Rect, Response, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind,
-    Ui, Vec2, WidgetInfo, pos2, vec2,
+    Align2, Area, Color32, Context, Id, Key, LayerId, Modifiers, Order, Pos2, Rect, Response, Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
+    Vec2, WidgetInfo, pos2, vec2,
 };
 
 use crate::draw::paint::{self, FloatEdge};
@@ -30,7 +30,7 @@ use crate::theme::{Theme, mix};
 use crate::tr;
 
 use super::key::{Chip, ChipState};
-use super::{Hover, Shown, cut, galley, lit, soon, solid};
+use super::{Hover, Shown, cut, galley, lit, solid, soon};
 
 /// How far a float hangs under the control it opens from, in points.
 const DROP: f32 = 4.0;
@@ -147,8 +147,7 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     if !opening {
         let rect = kept.map(|kept| kept.rect);
         let (escaped, beside) = ctx.input_mut(|input| {
-            let beside = input.pointer.any_pressed()
-                && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
+            let beside = input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| rect.is_some_and(|rect| !rect.contains(at)));
             (input.consume_key(Modifiers::NONE, Key::Escape), beside)
         });
         if escaped || beside {
@@ -185,7 +184,13 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let focused = ctx.memory(|memory| memory.focused());
     if focused.is_some_and(|focused| rows.contains(&focused)) {
         let (home, end) = ctx.input_mut(|input| (input.consume_key(Modifiers::NONE, Key::Home), input.consume_key(Modifiers::NONE, Key::End)));
-        let to = if home { rows.first() } else if end { rows.last() } else { None };
+        let to = if home {
+            rows.first()
+        } else if end {
+            rows.last()
+        } else {
+            None
+        };
         if let Some(to) = to {
             ctx.memory_mut(|memory| memory.request_focus(*to));
         }

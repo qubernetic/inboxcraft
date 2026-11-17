@@ -249,7 +249,14 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
         Preset { name: tr!("Tomorrow morning"), at: at(7, 8, 0) },
         Preset { name: tr!("Next week"), at: at(9, 8, 0) },
     ];
-    let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: Some(tr!("Notify me when it comes back")), presets: &presets, extra: None, note: None };
+    let ask = Ask {
+        title: tr!("Snooze until"),
+        confirm: tr!("Snooze"),
+        alert: Some(tr!("Notify me when it comes back")),
+        presets: &presets,
+        extra: None,
+        note: None,
+    };
     let id = Id::unique("gallery-time-picker");
     let mut state = ui.data_mut(|data| {
         data.get_temp_mut_or_insert_with(id, || {
@@ -836,6 +843,23 @@ fn marks_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     icons(ui, theme);
 }
 
+/// A menu row of a board: its icon, name, caption, action and state.
+type MenuRow<'a> = (Option<IconId>, &'a str, Option<&'a str>, Option<&'a str>, ItemState);
+
+/// A cell of the menu item's board: its state's name, the row and what it is drawn in.
+type MenuCell<'a> = (&'a str, MenuRow<'a>, Option<Shown>);
+
+/// A cell of the multiline field's board: its state's name, the text, the field and what it is drawn in.
+type NoteCell<'a> = (&'a str, String, Field<'a>, Option<Shown>);
+
+/// A cell of the recipient field's board: its state's name, the chips, the text typed, the error, whether it can be
+/// used and what it is drawn in.
+type LineCell<'a> = (&'a str, Vec<Recipient>, &'a str, Option<&'a str>, bool, Option<Shown>);
+
+/// A cell of the time picker's board: its state's name, the text typed, the alert, whether it is late, and what is
+/// forced on it.
+type PickerCell<'a> = (&'a str, &'a str, bool, bool, time_picker::Forced);
+
 /// A cell of a field's board, `width` wide.
 fn field_cell(ui: &mut Ui, theme: &Theme, state: &str, width: f32, add: impl FnOnce(&mut Ui)) {
     cell(ui, theme, state, |ui| {
@@ -909,10 +933,13 @@ fn multiline_fields(ui: &mut Ui, theme: &Theme) {
         field::multiline_with(ui, theme, id, &mut text, &field, shown);
     };
     let error = Field { error: Some(tr!("Too long for a note: 200 characters at most, this has 236.")), ..notes };
-    let rows: [[(&str, String, Field<'_>, Option<Shown>); 2]; 5] = [
+    let rows: [[NoteCell<'_>; 2]; 5] = [
         [(tr!("empty"), String::new(), notes, None), (tr!("filled"), first(2), notes, None)],
         [(tr!("focus"), first(2) + "\n", notes, Some(Shown::Focus)), (tr!("error"), first(5), error, None)],
-        [(tr!("disabled"), first(2), Field { enabled: false, ..notes }, None), (tr!("read-only"), first(2), Field { read_only: true, ..notes }, None)],
+        [
+            (tr!("disabled"), first(2), Field { enabled: false, ..notes }, None),
+            (tr!("read-only"), first(2), Field { read_only: true, ..notes }, None),
+        ],
         [(tr!("grown"), first(6), notes, None), (tr!("at-limit"), first(10), notes, None)],
         [(tr!("scrolling"), first(16), notes, None), (tr!("scrolling-focus"), first(16), notes, Some(Shown::Focus))],
     ];
@@ -947,7 +974,7 @@ fn recipient_fields(ui: &mut Ui, theme: &Theme) {
             .collect()
     };
     let wrapped = ["Teodor Vasquez", "Mirela Anton", "Pavel Hruska", "Bakery on the corner", "Ines Okafor", "Studio, everyone"];
-    let states: [(&str, Vec<Recipient>, &str, Option<&str>, bool, Option<Shown>); 7] = [
+    let states: [LineCell<'_>; 7] = [
         (tr!("empty"), Vec::new(), "", None, true, None),
         (tr!("focus"), Vec::new(), "", None, true, Some(Shown::Focus)),
         (tr!("typing"), Vec::new(), "teo", None, true, Some(Shown::Focus)),
@@ -1018,7 +1045,7 @@ fn password_fields(ui: &mut Ui, theme: &Theme) {
 }
 
 /// A menu row of the boards: `icon`, `name` and the key of `action`, in `state`, drawn in `shown`.
-fn menu_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: (Option<IconId>, &str, Option<&str>, Option<&str>, ItemState), shown: Option<Shown>) {
+fn menu_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: MenuRow<'_>, shown: Option<Shown>) {
     let (icon, name, caption, action, state) = row;
     popup::menu_item_with(ui, theme, keymap, &Item { icon, name, caption, action, state }, false, shown);
 }
@@ -1031,7 +1058,13 @@ fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cell(ui, theme, tr!("default"), |ui| {
             popup::panel(ui, theme, 240.0, |ui| {
                 menu_row(ui, theme, keymap, (Some(IconId::Mail), tr!("Mark as read"), None, None, ItemState::Default), None);
-                menu_row(ui, theme, keymap, (Some(IconId::Archive), tr!("Archive"), None, Some("mail.archive"), ItemState::Default), Some(Shown::Hover));
+                menu_row(
+                    ui,
+                    theme,
+                    keymap,
+                    (Some(IconId::Archive), tr!("Archive"), None, Some("mail.archive"), ItemState::Default),
+                    Some(Shown::Hover),
+                );
                 menu_row(ui, theme, keymap, (Some(IconId::Snooze), tr!("Snooze…"), None, None, ItemState::Default), None);
                 menu_row(ui, theme, keymap, (Some(IconId::Move), tr!("Move to…"), None, None, ItemState::Default), None);
                 popup::hairline(ui, theme);
@@ -1042,7 +1075,15 @@ fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             popup::panel(ui, theme, 240.0, |ui| {
                 popup::title(ui, theme, tr!("Move to"), Some("40"));
                 popup::scrolled(ui, theme, Id::unique("gallery-move-to"), 147.0, |ui| {
-                    let names = [tr!("Archive"), tr!("Clients"), tr!("Clients / Bakery"), tr!("Invoices 2026"), tr!("Newsletters"), tr!("Receipts"), tr!("Studio")];
+                    let names = [
+                        tr!("Archive"),
+                        tr!("Clients"),
+                        tr!("Clients / Bakery"),
+                        tr!("Invoices 2026"),
+                        tr!("Newsletters"),
+                        tr!("Receipts"),
+                        tr!("Studio"),
+                    ];
                     for (index, name) in names.into_iter().enumerate() {
                         let shown = (index == 2).then_some(Shown::Hover);
                         ui.push_id(index, |ui| menu_row(ui, theme, keymap, (None, name, None, None, ItemState::Default), shown));
@@ -1063,7 +1104,7 @@ fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 fn menu_items(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Menu item"));
     let archive = (Some(IconId::Archive), tr!("Archive"), None, None, ItemState::Default);
-    let rows: [[(&str, (Option<IconId>, &str, Option<&str>, Option<&str>, ItemState), Option<Shown>); 2]; 5] = [
+    let rows: [[MenuCell<'_>; 2]; 5] = [
         [(tr!("default"), archive, None), (tr!("hover"), archive, Some(Shown::Hover))],
         [(tr!("focus"), archive, Some(Shown::Focus)), (tr!("chosen"), (archive.0, archive.1, None, None, ItemState::Chosen), None)],
         [
@@ -1075,7 +1116,11 @@ fn menu_items(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             (tr!("danger"), (Some(IconId::Delete), tr!("Delete"), None, Some("mail.delete"), ItemState::Danger), None),
         ],
         [
-            (tr!("long"), (Some(IconId::Move), tr!("Move to Studio / Clients / Bakery on the corner / 2026"), None, Some("mail.move"), ItemState::Default), None),
+            (
+                tr!("long"),
+                (Some(IconId::Move), tr!("Move to Studio / Clients / Bakery on the corner / 2026"), None, Some("mail.move"), ItemState::Default),
+                None,
+            ),
             (tr!("pressed"), archive, Some(Shown::Pressed)),
         ],
     ];
@@ -1088,9 +1133,19 @@ fn menu_items(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
     cells(ui, theme, |ui| {
         field_cell(ui, theme, tr!("from-plugin"), 240.0, |ui| {
-            soon(ui, theme, |ui| menu_row(ui, theme, keymap, (Some(IconId::File), tr!("Track this parcel"), Some("parcels.track · no key"), None, ItemState::Default), None));
+            soon(ui, theme, |ui| {
+                menu_row(
+                    ui,
+                    theme,
+                    keymap,
+                    (Some(IconId::File), tr!("Track this parcel"), Some("parcels.track · no key"), None, ItemState::Default),
+                    None,
+                )
+            });
         });
-        field_cell(ui, theme, tr!("chosen-pressed"), 240.0, |ui| menu_row(ui, theme, keymap, (archive.0, archive.1, None, None, ItemState::Chosen), Some(Shown::Pressed)));
+        field_cell(ui, theme, tr!("chosen-pressed"), 240.0, |ui| {
+            menu_row(ui, theme, keymap, (archive.0, archive.1, None, None, ItemState::Chosen), Some(Shown::Pressed))
+        });
     });
 }
 
@@ -1205,8 +1260,11 @@ fn time_pickers(ui: &mut Ui, theme: &Theme) {
         popup::panel(ui, theme, time_picker::WIDTH, |ui| time_picker::show_with(ui, theme, &mut state, &ask, now, Offset::UTC, forced));
     };
     let typing = time_picker::Forced { hover: None, typing: true };
-    let rows: [[(&str, &str, bool, bool, time_picker::Forced); 2]; 3] = [
-        [(tr!("presets"), "", false, false, time_picker::Forced::default()), (tr!("hover"), "", false, false, time_picker::Forced { hover: Some(1), typing: false })],
+    let rows: [[PickerCell<'_>; 2]; 3] = [
+        [
+            (tr!("presets"), "", false, false, time_picker::Forced::default()),
+            (tr!("hover"), "", false, false, time_picker::Forced { hover: Some(1), typing: false }),
+        ],
         [(tr!("typed-valid"), "thu 9", false, false, typing), (tr!("typed-invalid"), "thursdy", false, false, typing)],
         [(tr!("with-alert"), "thu 9", true, false, typing), (tr!("past"), "2026-11-02 09:00", false, true, typing)],
     ];

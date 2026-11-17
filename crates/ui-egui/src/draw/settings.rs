@@ -14,8 +14,8 @@
 //! choose closes the page.
 
 use egui::{
-    Align, Area, Frame, Id, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder,
-    WidgetInfo, pos2, vec2,
+    Align, Area, Frame, Id, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo,
+    pos2, vec2,
 };
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
@@ -591,7 +591,13 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
             ui.add_space(s.s1);
             let label = tr!("Signature of {account}", account = account.label);
             let typed = settings.signature_mut(account.id, &account.signature);
-            let field = crate::component::field::multiline_field(ui, theme, Id::unique("signature").with(account.id), typed, &crate::component::field::Field::new("", ""));
+            let field = crate::component::field::multiline_field(
+                ui,
+                theme,
+                Id::unique("signature").with(account.id),
+                typed,
+                &crate::component::field::Field::new("", ""),
+            );
             ui.ctx().accesskit_node_builder(field.id, |node| node.set_label(&label));
             let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
             ui.add_space(s.s1);

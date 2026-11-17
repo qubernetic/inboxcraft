@@ -38,13 +38,18 @@ fn chip_name(state: Chip) -> &'static str {
 fn chip_in(mode: Mode, state: Chip, shown: Shown) -> (Rect, Own, Harness<'static>) {
     let theme = Theme::new(mode, TextScale::default());
     let name = chip_name(state);
-    let mut harness = staged(theme, |p| p.term, vec2(400.0, 100.0), move |ui, theme| {
-        if state == Chip::Disabled {
-            ui.disable();
-        }
-        let kind = if state == Chip::Invalid { RecipientState::Invalid } else { RecipientState::Valid };
-        recipient_chip(ui, theme, name, kind);
-    });
+    let mut harness = staged(
+        theme,
+        |p| p.term,
+        vec2(400.0, 100.0),
+        move |ui, theme| {
+            if state == Chip::Disabled {
+                ui.disable();
+            }
+            let kind = if state == Chip::Invalid { RecipientState::Invalid } else { RecipientState::Valid };
+            recipient_chip(ui, theme, name, kind);
+        },
+    );
     match state {
         Chip::Hover => bring(&mut harness, name, Shown::Hover),
         Chip::Focus => bring(&mut harness, &format!("Remove {name}"), Shown::Focus),
@@ -80,7 +85,10 @@ fn a_recipient_chip_looks_as_its_sheet_says_in_every_state() {
             assert!((x.rect.center() - (rect.right_top() + vec2(-12.0, 12.0))).length() < 1.0 && x.colour == cross, "{at} {x:?}");
             let warning: Vec<_> = drawn(&harness).into_iter().filter(|text| text.text == "\u{e4e0}").collect();
             if state == Chip::Invalid {
-                assert!(warning.len() == 1 && (warning[0].rect.center() - (rect.min + vec2(16.0, 12.0))).length() < 1.0 && warning[0].colour == p.minus, "{at}");
+                assert!(
+                    warning.len() == 1 && (warning[0].rect.center() - (rect.min + vec2(16.0, 12.0))).length() < 1.0 && warning[0].colour == p.minus,
+                    "{at}"
+                );
             } else {
                 assert!(warning.is_empty(), "{at}");
             }
@@ -99,9 +107,14 @@ fn a_recipient_chip_pressed_by_the_pointer_enter_or_space_is_the_secondary_press
         assert_eq!((look.fill, look.edge), (Some(p.stage), Some((1.0, p.ink, false))), "{mode:?}");
         for key in [egui::Key::Enter, egui::Key::Space] {
             let theme = Theme::new(mode, TextScale::default());
-            let mut harness = staged(theme, |p| p.term, vec2(400.0, 100.0), |ui, theme| {
-                recipient_chip(ui, theme, "Teodor Vasquez", RecipientState::Valid);
-            });
+            let mut harness = staged(
+                theme,
+                |p| p.term,
+                vec2(400.0, 100.0),
+                |ui, theme| {
+                    recipient_chip(ui, theme, "Teodor Vasquez", RecipientState::Valid);
+                },
+            );
             bring(&mut harness, "Remove Teodor Vasquez", Shown::Focus);
             harness.key_down(key);
             harness.run();
@@ -147,23 +160,30 @@ fn line_in(mode: Mode, state: Line) -> (Rect, Own, crate::component::tests::Pain
         _ => &[],
     };
     let chips = people(names);
-    let mut harness = staged(theme, |p| p.bg, vec2(640.0, 200.0), move |ui, theme| {
-        let id = egui::Id::unique("to");
-        let mut typing = ui.data_mut(|data| data.get_temp_mut_or_insert_with(id.with("t"), || if state == Line::Typing { "teo".to_owned() } else { String::new() }).clone());
-        let line = Recipients {
-            name: "To",
-            chips: &chips,
-            hint: "Name or address",
-            copies: true,
-            error: (state == Line::Invalid).then_some("teodor@ is not an address"),
-            enabled: state != Line::Disabled,
-        };
-        ui.vertical(|ui| {
-            ui.set_width(560.0);
-            recipient_field(ui, theme, id, &mut typing, &line);
-        });
-        ui.data_mut(|data| data.insert_temp(id.with("t"), typing));
-    });
+    let mut harness = staged(
+        theme,
+        |p| p.bg,
+        vec2(640.0, 200.0),
+        move |ui, theme| {
+            let id = egui::Id::unique("to");
+            let mut typing = ui.data_mut(|data| {
+                data.get_temp_mut_or_insert_with(id.with("t"), || if state == Line::Typing { "teo".to_owned() } else { String::new() }).clone()
+            });
+            let line = Recipients {
+                name: "To",
+                chips: &chips,
+                hint: "Name or address",
+                copies: true,
+                error: (state == Line::Invalid).then_some("teodor@ is not an address"),
+                enabled: state != Line::Disabled,
+            };
+            ui.vertical(|ui| {
+                ui.set_width(560.0);
+                recipient_field(ui, theme, id, &mut typing, &line);
+            });
+            ui.data_mut(|data| data.insert_temp(id.with("t"), typing));
+        },
+    );
     if matches!(state, Line::Focus | Line::Typing | Line::Wrapped) {
         bring(&mut harness, "To", Shown::Focus);
         harness.key_press(egui::Key::End);
@@ -212,11 +232,16 @@ fn a_recipient_field_looks_as_its_sheet_says_in_every_state() {
                 Line::Typing => {
                     let typed = one(&harness, "teo");
                     assert_eq!((typed.rect.min, typed.colour), (rect.min + vec2(45.0, 7.0), p.ink), "{at}");
-                    assert_eq!(block, Some(Rect::from_min_size(pos2((typed.rect.right() + 2.0).round(), rect.top() + 10.0), vec2(7.0, 16.0))), "{at}");
+                    assert_eq!(
+                        block,
+                        Some(Rect::from_min_size(pos2((typed.rect.right() + 2.0).round(), rect.top() + 10.0), vec2(7.0, 16.0))),
+                        "{at}"
+                    );
                 }
                 _ => {}
             }
-            let chips: Vec<_> = harness.query_all_by_role(Role::ListItem).map(|node| (node.accesskit_node().label().unwrap_or_default(), node.rect())).collect();
+            let chips: Vec<_> =
+                harness.query_all_by_role(Role::ListItem).map(|node| (node.accesskit_node().label().unwrap_or_default(), node.rect())).collect();
             match state {
                 Line::WithChips | Line::Invalid | Line::Disabled => {
                     assert_eq!(chips.first().map(|(_, rect)| rect.min), Some(rect.min + vec2(45.0, 6.0)), "{at} {chips:?}");

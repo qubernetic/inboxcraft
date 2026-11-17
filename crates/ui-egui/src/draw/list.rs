@@ -30,8 +30,8 @@
 use std::cell::Cell;
 
 use egui::{
-    Align, Color32, Frame, Id, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
-    StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Color32, Frame, Id, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke, StrokeKind, Ui,
+    UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_model::Role;
 

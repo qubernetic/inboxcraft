@@ -319,7 +319,15 @@ pub fn passed(text: &str, now: Timestamp, offset: Offset) -> bool {
 /// it, once something is typed, what it reads as at `now`: a tick and the time in full in `cyan_text`, or why there is
 /// none in `muted`. It counts as soon as it reads as a time: no Enter. `name` is what a screen reader calls it.
 #[allow(clippy::too_many_arguments)]
-pub fn typed_time_field(ui: &mut egui::Ui, theme: &crate::theme::Theme, id: egui::Id, name: &str, text: &mut String, now: Timestamp, offset: Offset) -> egui::Response {
+pub fn typed_time_field(
+    ui: &mut egui::Ui,
+    theme: &crate::theme::Theme,
+    id: egui::Id,
+    name: &str,
+    text: &mut String,
+    now: Timestamp,
+    offset: Offset,
+) -> egui::Response {
     typed_time_with(ui, theme, id, name, text, now, offset, None)
 }
 

@@ -103,14 +103,9 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let keys = [Key::Enter, Key::Space];
         let (went_down, held, released) = ui.input(|input| {
             // A key held down repeats its press; only the first goes down, so a key held on from a row never opens it.
-            let fresh = input.events.iter().any(|event| {
-                matches!(event, egui::Event::Key { key, pressed: true, repeat: false, .. } if keys.contains(key))
-            });
-            (
-                fresh,
-                keys.iter().any(|key| input.key_down(*key)),
-                keys.iter().any(|key| input.key_released(*key)),
-            )
+            let fresh =
+                input.events.iter().any(|event| matches!(event, egui::Event::Key { key, pressed: true, repeat: false, .. } if keys.contains(key)));
+            (fresh, keys.iter().any(|key| input.key_down(*key)), keys.iter().any(|key| input.key_released(*key)))
         });
         let armed = id.with("key-down");
         let focused = response.has_focus() && !*open;

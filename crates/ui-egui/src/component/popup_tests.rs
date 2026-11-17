@@ -115,10 +115,7 @@ fn choice_rows_mark_the_chosen_one_and_entries_line_up_with_items() {
     assert_eq!(chosen.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
     assert_eq!(harness.get_by_label("Go back to the list").accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
     assert_eq!(harness.get_by_label("Full width").accesskit_node().role(), Role::MenuItem);
-    assert!(
-        crate::component::field::tests::drawn(&harness).iter().any(|text| text.text == super::CHECK.to_string()),
-        "the chosen one is ticked"
-    );
+    assert!(crate::component::field::tests::drawn(&harness).iter().any(|text| text.text == super::CHECK.to_string()), "the chosen one is ticked");
 }
 
 #[test]
@@ -157,8 +154,11 @@ fn a_hovered_row_of_a_float_is_the_stage_and_shows_in_dark_mode() {
 }
 
 /// Every rect the last frame painted: `(rect, fill, stroke)`, and whether a mesh (the float's shadow) was painted.
-fn rects<State>(harness: &Harness<'_, State>) -> (Vec<(egui::Rect, egui::Color32, Option<(f32, egui::Color32)>)>, bool) {
-    fn walk(shape: &egui::Shape, found: &mut Vec<(egui::Rect, egui::Color32, Option<(f32, egui::Color32)>)>, mesh: &mut bool) {
+/// A painted rect: where, its fill and its stroke.
+type Drawn = (egui::Rect, egui::Color32, Option<(f32, egui::Color32)>);
+
+fn rects<State>(harness: &Harness<'_, State>) -> (Vec<Drawn>, bool) {
+    fn walk(shape: &egui::Shape, found: &mut Vec<Drawn>, mesh: &mut bool) {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found, mesh)),
             egui::Shape::Rect(rect) if rect.blur_width == 0.0 => {
@@ -208,7 +208,12 @@ fn float_in(mode: crate::theme::Mode, state: Panel) -> Harness<'static> {
                 super::scrolled(ui, &theme, Id::unique("rows"), 147.0, |ui| {
                     for name in MAILBOXES.iter().chain(MAILBOXES.iter()) {
                         ui.push_id(ui.next_auto_id(), |ui| {
-                            super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default })
+                            super::menu_item(
+                                ui,
+                                &theme,
+                                &keymap,
+                                &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default },
+                            )
                         });
                     }
                 });
@@ -255,7 +260,10 @@ fn a_float_looks_as_its_sheet_says_in_every_state() {
                     assert!(found.iter().any(|(rect, fill, _)| *rect == title && *fill == p.panel), "{at}: the title row");
                     let label = crate::component::field::tests::one(&harness, "MOVE TO");
                     assert_eq!((label.rect.min, label.colour), (pos2(33.0, 63.0), p.muted), "{at}");
-                    assert!(found.iter().any(|(rect, fill, _)| rect.left() == 255.0 && rect.width() == 2.0 && rect.height() == 40.0 && *fill == p.muted), "{at}: the thumb");
+                    assert!(
+                        found.iter().any(|(rect, fill, _)| rect.left() == 255.0 && rect.width() == 2.0 && rect.height() == 40.0 && *fill == p.muted),
+                        "{at}: the thumb"
+                    );
                     assert_eq!(harness.get_all_by_label("Archive").next().map(|row| row.rect().top()), Some(86.0), "{at}");
                 }
                 Panel::Empty => {
@@ -282,7 +290,12 @@ fn opener() -> Harness<'static, bool> {
                 let float = super::Float { id: Id::unique("menu"), anchor: button.rect, width: 240.0, returns_to: button.id };
                 let shown = super::float(ui.ctx(), &theme, &float, |ui| {
                     for name in ["First", "Second", "Third"] {
-                        super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default });
+                        super::menu_item(
+                            ui,
+                            &theme,
+                            &keymap,
+                            &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default },
+                        );
                     }
                 });
                 *open = shown.is_some();
@@ -339,10 +352,20 @@ fn a_float_at_the_window_s_edge_keeps_three_pixels() {
         let keymap = Keymap::default();
         let mut harness = builder().with_size(egui::vec2(width, height)).build_ui(move |ui| {
             motion::set_reduced(ui.ctx(), true);
-            let float = super::Float { id: Id::unique("edge"), anchor: egui::Rect::from_min_size(anchor, egui::vec2(8.0, 8.0)), width: 240.0, returns_to: Id::unique("x") };
+            let float = super::Float {
+                id: Id::unique("edge"),
+                anchor: egui::Rect::from_min_size(anchor, egui::vec2(8.0, 8.0)),
+                width: 240.0,
+                returns_to: Id::unique("x"),
+            };
             super::float(ui.ctx(), &theme, &float, |ui| {
                 for name in ["First", "Second", "Third"] {
-                    super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default });
+                    super::menu_item(
+                        ui,
+                        &theme,
+                        &keymap,
+                        &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default },
+                    );
                 }
             });
         });
@@ -351,7 +374,10 @@ fn a_float_at_the_window_s_edge_keeps_three_pixels() {
         let float = found.iter().find(|(_, fill, _)| *fill == theme.palette.surface).map(|(rect, ..)| *rect).unwrap_or(egui::Rect::NOTHING);
         assert!(float.left() >= 3.0 && float.top() >= 3.0 && float.right() <= width - 3.0 && float.bottom() <= height - 3.0, "{anchor:?}: {float:?}");
         assert_eq!(float.size(), egui::vec2(240.0, 98.0), "{anchor:?}: it moves, it never shrinks");
-        assert!(found.iter().any(|(rect, _, stroke)| *rect == float && *stroke == Some((1.0, theme.palette.cyan_edge))), "{anchor:?}: all four edges");
+        assert!(
+            found.iter().any(|(rect, _, stroke)| *rect == float && *stroke == Some((1.0, theme.palette.cyan_edge))),
+            "{anchor:?}: all four edges"
+        );
     }
 }
 
@@ -360,18 +386,31 @@ fn a_float_s_rows_come_in_one_after_the_other_at_full_motion_and_at_once_reduced
     for reduced in [false, true] {
         let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
         let keymap = Keymap::default();
-        let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(move |ui, open: &mut bool| {
-            motion::set_reduced(ui.ctx(), reduced);
-            if !*open {
-                return;
-            }
-            let float = super::Float { id: Id::unique("in"), anchor: egui::Rect::from_min_size(pos2(20.0, 20.0), egui::vec2(8.0, 8.0)), width: 240.0, returns_to: Id::unique("x") };
-            super::float(ui.ctx(), &theme, &float, |ui| {
-                for name in ["First", "Second", "Third"] {
-                    super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default });
+        let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
+            move |ui, open: &mut bool| {
+                motion::set_reduced(ui.ctx(), reduced);
+                if !*open {
+                    return;
                 }
-            });
-        }, false);
+                let float = super::Float {
+                    id: Id::unique("in"),
+                    anchor: egui::Rect::from_min_size(pos2(20.0, 20.0), egui::vec2(8.0, 8.0)),
+                    width: 240.0,
+                    returns_to: Id::unique("x"),
+                };
+                super::float(ui.ctx(), &theme, &float, |ui| {
+                    for name in ["First", "Second", "Third"] {
+                        super::menu_item(
+                            ui,
+                            &theme,
+                            &keymap,
+                            &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default },
+                        );
+                    }
+                });
+            },
+            false,
+        );
         harness.run();
         *harness.state_mut() = true;
         harness.step();
@@ -386,7 +425,10 @@ fn a_float_s_rows_come_in_one_after_the_other_at_full_motion_and_at_once_reduced
                 harness.step();
             }
             let first = colour(&harness, "First");
-            assert!(crate::component::tests::strictly_between(first, theme.palette.surface, ink), "the first row on its way, a mix of colours: {first:?}");
+            assert!(
+                crate::component::tests::strictly_between(first, theme.palette.surface, ink),
+                "the first row on its way, a mix of colours: {first:?}"
+            );
         }
         assert!(crate::component::tests::rests(&mut harness, 30), "reduced {reduced}: it lands and rests");
         assert!(["First", "Second", "Third"].iter().all(|name| colour(&harness, name) == ink));
@@ -453,13 +495,18 @@ fn menu_keys() -> Keymap {
 fn menu_in(mode: crate::theme::Mode, state: Menu, shown: crate::component::Shown) -> (egui::Rect, crate::component::tests::Own, Harness<'static>) {
     let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
     let (icon, name, caption, action, row) = menu_row(state);
-    let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), move |ui, theme| {
-        let keymap = menu_keys();
-        ui.vertical(|ui| {
-            ui.set_width(240.0);
-            super::menu_item(ui, theme, &keymap, &super::Item { icon: Some(icon), name, caption, action, state: row });
-        });
-    });
+    let mut harness = crate::component::tests::staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(400.0, 120.0),
+        move |ui, theme| {
+            let keymap = menu_keys();
+            ui.vertical(|ui| {
+                ui.set_width(240.0);
+                super::menu_item(ui, theme, &keymap, &super::Item { icon: Some(icon), name, caption, action, state: row });
+            });
+        },
+    );
     crate::component::tests::bring(&mut harness, name, shown);
     let rect = harness.get_by_label(name).rect();
     let look = crate::component::tests::own(&crate::component::tests::painted(&harness, name), rect);
@@ -521,13 +568,10 @@ fn a_menu_item_looks_as_its_sheet_says_in_every_state() {
                 None => assert_eq!(chip, None, "{at}"),
             }
             // The caption in `mono_s`, `muted`, its right end at 228, 8 down.
-            match caption {
-                Some(caption) => {
-                    let text = one(&harness, caption);
-                    assert!((text.rect.right() - (rect.left() + 228.0)).abs() < 0.5 && text.rect.top() == rect.top() + 8.0, "{at} {text:?}");
-                    assert_eq!((text.colour, text.family.as_str(), text.size), (p.muted, "Monospace", 11.0), "{at}");
-                }
-                None => {}
+            if let Some(caption) = caption {
+                let text = one(&harness, caption);
+                assert!((text.rect.right() - (rect.left() + 228.0)).abs() < 0.5 && text.rect.top() == rect.top() + 8.0, "{at} {text:?}");
+                assert_eq!((text.colour, text.family.as_str(), text.size), (p.muted, "Monospace", 11.0), "{at}");
             }
             let bar = found.iter().find(|(r, fill, _)| *fill == p.cyan_edge && r.width() == 2.0).map(|(r, ..)| *r);
             assert_eq!(bar, (state == Menu::Chosen).then_some(egui::Rect::from_min_size(rect.min, egui::vec2(2.0, 32.0))), "{at}");
@@ -557,7 +601,12 @@ fn enter_and_space_press_a_menu_item_as_the_pointer_does() {
         let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
         held(mode, "Archive", |ui, theme| {
             ui.set_width(240.0);
-            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default });
+            super::menu_item(
+                ui,
+                theme,
+                &Keymap::default(),
+                &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default },
+            );
         });
         // Pressed, an unchosen row is the secondary press; the chosen row the accent wash.
         let (_, look, _) = menu_in(mode, Menu::Default, crate::component::Shown::Pressed);
@@ -573,7 +622,10 @@ fn an_unavailable_menu_item_takes_no_press() {
     assert!(harness.get_by_label("Move to…").accesskit_node().is_disabled());
     harness.get_by_label("Move to…").hover();
     harness.run();
-    assert_eq!(crate::component::tests::own(&crate::component::tests::painted(&harness, "Move to…"), harness.get_by_label("Move to…").rect()).fill, None);
+    assert_eq!(
+        crate::component::tests::own(&crate::component::tests::painted(&harness, "Move to…"), harness.get_by_label("Move to…").rect()).fill,
+        None
+    );
 }
 
 #[test]
@@ -585,13 +637,18 @@ fn a_menu_choice_looks_as_its_sheet_says_in_every_state() {
         for state in ["off", "on", "hover", "unavailable"] {
             let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
             let name = if state == "unavailable" { "Every month" } else { "Every week" };
-            let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), move |ui, theme| {
-                ui.vertical(|ui| {
-                    ui.set_width(240.0);
-                    let reason = (state == "unavailable").then_some("not synced");
-                    super::menu_choice_with(ui, theme, name, state == "on", reason, None);
-                });
-            });
+            let mut harness = crate::component::tests::staged(
+                theme,
+                |p| p.surface,
+                egui::vec2(400.0, 120.0),
+                move |ui, theme| {
+                    ui.vertical(|ui| {
+                        ui.set_width(240.0);
+                        let reason = (state == "unavailable").then_some("not synced");
+                        super::menu_choice_with(ui, theme, name, state == "on", reason, None);
+                    });
+                },
+            );
             if state == "hover" {
                 crate::component::tests::bring(&mut harness, name, Shown::Hover);
             }
@@ -606,7 +663,10 @@ fn a_menu_choice_looks_as_its_sheet_says_in_every_state() {
             assert_eq!(look.edge, None, "{at}");
             let tick: Vec<_> = drawn(&harness).into_iter().filter(|text| text.text == super::CHECK.to_string()).collect();
             if state == "on" {
-                assert!(tick.len() == 1 && (tick[0].rect.center() - (rect.min + egui::vec2(20.0, 16.0))).length() < 1.0 && tick[0].colour == p.cyan_text, "{at} {tick:?}");
+                assert!(
+                    tick.len() == 1 && (tick[0].rect.center() - (rect.min + egui::vec2(20.0, 16.0))).length() < 1.0 && tick[0].colour == p.cyan_text,
+                    "{at} {tick:?}"
+                );
             } else {
                 assert!(tick.is_empty(), "{at}");
             }
@@ -659,12 +719,17 @@ fn a_suggestion_row_looks_as_its_sheet_says_in_every_state() {
             } else {
                 ("Teodor Vasquez", "teodor@example.org")
             };
-            let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(420.0, 120.0), move |ui, theme| {
-                ui.vertical(|ui| {
-                    ui.set_width(320.0);
-                    super::suggestion_row(ui, theme, name, address, state == Suggest::Selected);
-                });
-            });
+            let mut harness = crate::component::tests::staged(
+                theme,
+                |p| p.surface,
+                egui::vec2(420.0, 120.0),
+                move |ui, theme| {
+                    ui.vertical(|ui| {
+                        ui.set_width(320.0);
+                        super::suggestion_row(ui, theme, name, address, state == Suggest::Selected);
+                    });
+                },
+            );
             let spoken = format!("{name}, {address}");
             match state {
                 Suggest::Hover => crate::component::tests::bring(&mut harness, &spoken, Shown::Hover),
@@ -684,13 +749,17 @@ fn a_suggestion_row_looks_as_its_sheet_says_in_every_state() {
             let face = egui::Rect::from_min_size(rect.min + egui::vec2(12.0 + shift, 8.0), egui::vec2(24.0, 24.0));
             let ground = if lit { p.surface } else { p.stage };
             assert!(
-                paint.rects().any(|shape| shape.rect == face && matches!(shape.look, crate::component::tests::Look::Rect { fill, radius, .. } if fill == ground && radius == 2.0)),
+                paint.rects().any(|shape| shape.rect == face
+                    && matches!(shape.look, crate::component::tests::Look::Rect { fill, radius, .. } if fill == ground && radius == 2.0)),
                 "{at}: the avatar"
             );
             let shown = one(&harness, name);
             assert_eq!((shown.rect.min, shown.colour, shown.size), (rect.min + egui::vec2(44.0 + shift, 9.0), p.ink, 14.0), "{at}");
             let mail = drawn(&harness).into_iter().find(|text| text.text == address).unwrap_or_else(|| panic!("{at}: no address"));
-            assert!((mail.rect.left() - (shown.rect.right().round() + 8.0)).abs() < 0.01 && mail.rect.top() == rect.top() + 12.0, "{at} {mail:?} after {shown:?}");
+            assert!(
+                (mail.rect.left() - (shown.rect.right().round() + 8.0)).abs() < 0.01 && mail.rect.top() == rect.top() + 12.0,
+                "{at} {mail:?} after {shown:?}"
+            );
             assert_eq!((mail.colour, mail.family.as_str(), mail.size), (p.muted, "Monospace", 11.0), "{at}");
             let right = if state == Suggest::Selected { 257.0 } else { 308.0 - shift };
             assert!(mail.rect.right() <= rect.left() + right + 0.5, "{at} {mail:?}");
@@ -701,7 +770,11 @@ fn a_suggestion_row_looks_as_its_sheet_says_in_every_state() {
             let bar = found.iter().find(|(r, fill, _)| *fill == p.cyan_edge && r.width() == 2.0).map(|(r, ..)| *r);
             assert_eq!(bar, (state == Suggest::Selected).then_some(egui::Rect::from_min_size(rect.min, egui::vec2(2.0, 40.0))), "{at}");
             let chip = found.iter().find(|(r, _, stroke)| *stroke == Some((1.0, p.line)) && r.height() == 20.0).map(|(r, ..)| *r);
-            assert_eq!(chip, (state == Suggest::Selected).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(265.0, 10.0), egui::vec2(43.0, 20.0))), "{at}");
+            assert_eq!(
+                chip,
+                (state == Suggest::Selected).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(265.0, 10.0), egui::vec2(43.0, 20.0))),
+                "{at}"
+            );
         }
     }
 }

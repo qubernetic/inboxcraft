@@ -39,8 +39,14 @@ fn harness(alert: bool) -> Harness<'static, Probe> {
             motion::set_reduced(ui.ctx(), true);
             let presets: Vec<Preset<'_>> =
                 PRESETS.iter().map(|(name, [day, hour, minute])| Preset { name, at: at(2026, 11, *day, *hour, *minute) }).collect();
-            let ask =
-                Ask { title: "Snooze until", confirm: "Snooze", alert: probe.alert.then_some("Notify me when it comes back"), presets: &presets, extra: None, note: None };
+            let ask = Ask {
+                title: "Snooze until",
+                confirm: "Snooze",
+                alert: probe.alert.then_some("Notify me when it comes back"),
+                presets: &presets,
+                extra: None,
+                note: None,
+            };
             match show(ui, &theme, &mut probe.picker, &ask, probe.now, Offset::UTC) {
                 Picked::Open => {}
                 picked => probe.picked.push(picked),
@@ -242,7 +248,8 @@ fn sheet_in(mode: crate::theme::Mode, state: Sheet) -> Harness<'static> {
             })
             .clone()
         });
-        let presets: Vec<Preset<'_>> = SHEET_PRESETS.iter().map(|(name, [day, hour, minute])| Preset { name, at: at(2026, 11, *day, *hour, *minute) }).collect();
+        let presets: Vec<Preset<'_>> =
+            SHEET_PRESETS.iter().map(|(name, [day, hour, minute])| Preset { name, at: at(2026, 11, *day, *hour, *minute) }).collect();
         let alert = (state == Sheet::WithAlert).then_some("Notify me when it comes back");
         let ask = Ask { title: "Snooze until", confirm: "Snooze", alert, presets: &presets, extra: None, note: None };
         ui.add_space(8.0);
@@ -308,7 +315,9 @@ fn a_time_picker_looks_as_its_sheet_says_in_every_state() {
             assert_eq!((title.rect.min, title.colour, title.size), (origin + vec2(13.0, 11.0), p.muted, 11.0), "{at}");
             let esc = one(&harness, "Esc");
             assert!((esc.rect.center().x - (origin.x + 1.0 + 276.0 + 15.0)).abs() < 1.0, "{at} {esc:?}");
-            let line = |y: f32, colour| found.iter().any(|(rect, fill)| *rect == egui::Rect::from_min_size(origin + vec2(1.0, y), vec2(318.0, 1.0)) && *fill == colour);
+            let line = |y: f32, colour| {
+                found.iter().any(|(rect, fill)| *rect == egui::Rect::from_min_size(origin + vec2(1.0, y), vec2(318.0, 1.0)) && *fill == colour)
+            };
             assert!(line(37.0, p.line), "{at}: the title's hairline");
             // The presets still ahead, 32 high, `panel_line` between them.
             let names: Vec<&str> = if state == Sheet::Past {

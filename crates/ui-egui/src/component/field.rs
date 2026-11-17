@@ -27,7 +27,7 @@ use crate::motion;
 use crate::theme::{Font, Theme};
 use crate::tr;
 
-use super::{Shown, galley, scroll, soon};
+use super::{Shown, scroll, soon};
 
 /// The margin inside a form field: the field is as tall as a button with a little more room.
 #[must_use]
@@ -167,7 +167,15 @@ pub fn password_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, fie
 }
 
 /// [`password_field`] drawn in `shown`: a board of the gallery.
-pub(crate) fn password_field_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, secret: Secret, shown: Option<Shown>) -> Response {
+pub(crate) fn password_field_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    text: &mut String,
+    field: &Field<'_>,
+    secret: Secret,
+    shown: Option<Shown>,
+) -> Response {
     one_line(ui, theme, id, text, field, Line::Password(secret), MAX_SECRET, shown)
 }
 
@@ -251,7 +259,8 @@ fn under(ui: &mut Ui, theme: &Theme, error: Option<&str>, note: Option<&str>, wi
 /// `text` laid out in `font` and `colour` for a field: wrapped at `wrap` when it is `Some`, on one line otherwise,
 /// trailing spaces kept; a password's characters each a dot.
 fn layout(ui: &Ui, text: &str, font: Font, colour: Color32, wrap: Option<f32>, password: bool) -> Arc<Galley> {
-    let shown = if password { std::iter::repeat_n(egui::epaint::text::PASSWORD_REPLACEMENT_CHAR, text.chars().count()).collect() } else { text.to_owned() };
+    let shown =
+        if password { std::iter::repeat_n(egui::epaint::text::PASSWORD_REPLACEMENT_CHAR, text.chars().count()).collect() } else { text.to_owned() };
     let mut job = LayoutJob::single_section(shown, font.format(colour));
     job.keep_trailing_whitespace = true;
     match wrap {

@@ -9,7 +9,7 @@
 //! was refused, and Cancel and Save. The fields and choices change the [`Editor`] as they are used; Save and Cancel
 //! come back as [`Asked`].
 
-use egui::{Align, Align2, Area, Frame, Id, Layout, Margin, Order, Rect, Response, RichText, Ui, vec2};
+use egui::{Align, Align2, Area, Frame, Id, Layout, Order, Rect, Response, RichText, Ui, vec2};
 
 use super::Asked;
 use crate::calendar::Editor;
@@ -37,7 +37,6 @@ const LABEL_GAP: f32 = 6.0;
 
 /// Between Repeat and Show as, in points.
 const CHOICE_GAP: f32 = 14.0;
-
 
 /// The editor over the top right of `screen`; what was pressed in it.
 pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, screen: Rect) -> Vec<Asked> {
