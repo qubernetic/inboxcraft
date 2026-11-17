@@ -842,3 +842,45 @@ pub(crate) fn walk_an_open_menu<State>(harness: &mut Harness<'_, State>, opener:
     assert!(harness.query_all_by_role(Role::MenuItem).chain(harness.query_all_by_role(Role::MenuItemRadio)).all(|row| !seen.contains(&row.accesskit_node().locate().0)), "{label}: Esc closed it");
     assert!(harness.get_by_role_and_label(role, label).is_focused(), "{label}: the keyboard is back on the opener");
 }
+
+#[test]
+fn every_row_pressed_by_the_pointer_enter_or_space_takes_the_decided_colours() {
+    use crate::component::press_tests::{Draw, Part, held_by};
+    let whole: Part = |rect, _| rect;
+    let rows: [(&str, Draw, bool); 6] = [
+        ("Archive", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default });
+        }, false),
+        ("Chosen", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Chosen", caption: None, action: None, state: super::ItemState::Chosen });
+        }, true),
+        ("Every week", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_choice(ui, theme, "Every week", false, true);
+        }, false),
+        ("Every month", |ui, theme| {
+            ui.set_width(240.0);
+            super::menu_choice(ui, theme, "Every month", true, true);
+        }, true),
+        ("Teodor Vasquez, teodor@example.org", |ui, theme| {
+            ui.set_width(320.0);
+            super::suggestion_row(ui, theme, "Teodor Vasquez", "teodor@example.org", false);
+        }, false),
+        ("Mirela Anton, mirela@example.org", |ui, theme| {
+            ui.set_width(320.0);
+            super::suggestion_row(ui, theme, "Mirela Anton", "mirela@example.org", true);
+        }, true),
+    ];
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for (label, draw, chosen) in rows {
+            let want = if chosen { (Some(p.cyan_muted), Some((1.0, p.cyan_edge, false))) } else { (Some(p.stage), Some((1.0, p.ink, false))) };
+            for key in [None, Some(Key::Enter), Some(Key::Space)] {
+                let (_, look) = held_by(mode, label, key, egui::vec2(420.0, 120.0), whole, draw);
+                assert_eq!((look.fill, look.edge), want, "{mode:?} {label} {key:?}");
+            }
+        }
+    }
+}
