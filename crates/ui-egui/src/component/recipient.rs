@@ -23,7 +23,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::field::{self, Field};
-use super::{Hover, Shown, cut, galley, lit, solid, soon};
+use super::{Hover, Shown, cut, galley, lit, scroll, solid, soon};
 
 /// Whether a recipient is an address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,13 +61,7 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     let height = theme.boxes().pill;
     let glyph = theme.boxes().mark.min(height);
     let invalid = state == RecipientState::Invalid;
-    let ink = if !enabled {
-        p.muted
-    } else if invalid {
-        p.minus
-    } else {
-        p.ink
-    };
+    let ink = chip_ink(theme, state, enabled);
     // 1 px edge and 8 before the name (the warning and 4 first when it is not an address), 4 and the cross, 4 and the
     // edge after it.
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
@@ -189,27 +183,18 @@ pub(crate) fn recipient_field_with(
     let right = pad + copies.as_ref().map_or(0.0, |copies| copies.size().x + s.s2);
     let left = pad + name_width + s.s2;
     let room = (width - left - right).max(1.0);
-    // Where each chip goes and where the typing goes, rows 10 apart.
-    let widths: Vec<f32> = line.chips.iter().map(|recipient| chip_width(ui, theme, recipient)).collect();
-    let mut places = Vec::with_capacity(widths.len());
-    let (mut x, mut row) = (0.0_f32, 0_usize);
-    for width in &widths {
-        if x > 0.0 && x + width > room {
-            x = 0.0;
-            row = row.saturating_add(1);
-        }
-        places.push((x, row));
-        x += width + s.s1;
+    let inks: Vec<Color32> = line.chips.iter().map(|recipient| chip_ink(theme, recipient.state, enabled)).collect();
+    let widths: Vec<f32> = line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink)).collect();
+    let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
+    // Past its most rows the line scrolls: the bar's room comes off the chips' row.
+    let scrolls = rows > MOST_ROWS;
+    if scrolls {
+        (places, typing_at, rows) = flow(&widths, (room - theme.sizes.scrollbar - s.s1).max(1.0), s.s1);
     }
-    if x > 0.0 && room - x < TYPING.min(room) {
-        x = 0.0;
-        row = row.saturating_add(1);
-    }
-    let typing_at = (x, row);
-    let rows = row.saturating_add(1) as f32;
-    let wrapped = rows > 1.0;
-    let inner = rows * chip + (rows - 1.0) * ROW_GAP;
-    let height = if wrapped { inner + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0 } else { field_height };
+    let shown_rows = rows.min(MOST_ROWS) as f32;
+    let wrapped = rows > 1;
+    let inner = |rows: f32| rows * chip + (rows - 1.0).max(0.0) * ROW_GAP;
+    let height = if wrapped { inner(shown_rows) + (s.s1 + s.s1 / 2.0 + 1.0) * 2.0 } else { field_height };
     ui.vertical(|ui| {
         let (mut removed, mut copies_pressed) = (None, false);
         ui.spacing_mut().item_spacing.y = s.s2;
@@ -232,33 +217,52 @@ pub(crate) fn recipient_field_with(
             }
         }
         // The first row's middle: the name, the chips and "Cc Bcc" line up on it.
-        let top = if wrapped { rect.top() + (height - inner) / 2.0 } else { rect.top() + (height - chip) / 2.0 };
+        let top = if wrapped { rect.top() + (height - inner(shown_rows)) / 2.0 } else { rect.top() + (height - chip) / 2.0 };
         let first = top + chip / 2.0;
         let name = galley(ui, line.name, label, p.muted);
         painter.galley(pos2(rect.left() + pad, first - name.size().y / 2.0), name, p.muted);
-        let origin = pos2(rect.left() + left, top);
-        let at = |(x, row): (f32, usize)| origin + vec2(x, row as f32 * (chip + ROW_GAP));
-        for (index, (recipient, place)) in line.chips.iter().zip(places.iter()).enumerate() {
-            let place = Rect::from_min_size(at(*place), vec2(widths.get(index).copied().unwrap_or(0.0), chip));
-            let mut child = ui.new_child(UiBuilder::new().max_rect(place));
-            if !enabled {
-                child.disable();
+        let mut typed = None;
+        // The chips and the typing, from `origin`: in the box, or in the area that scrolls in it.
+        let mut content = |ui: &mut Ui, origin: egui::Pos2| {
+            let at = |(x, row): (f32, usize)| origin + vec2(x, row as f32 * (chip + ROW_GAP));
+            for (index, (recipient, place)) in line.chips.iter().zip(places.iter()).enumerate() {
+                let place = Rect::from_min_size(at(*place), vec2(widths.get(index).copied().unwrap_or(0.0), chip));
+                if !ui.is_rect_visible(place.expand(theme.spacing.s1)) {
+                    continue;
+                }
+                // Each chip in an id of its own: two chips may hold one address.
+                let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(("chip", index)));
+                if !enabled {
+                    child.disable();
+                }
+                let chip_shown = if enabled { None } else { Some(Shown::Rest) };
+                if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.state, chip_shown).clicked() {
+                    removed = Some(index);
+                }
             }
-            let chip_shown = if enabled { None } else { Some(Shown::Rest) };
-            if chip_with(&mut child, theme, &recipient.shown, &recipient.spoken, recipient.state, chip_shown).clicked() {
-                removed = Some(index);
-            }
+            let start = at(typing_at);
+            let typing_rect = Rect::from_min_max(
+                pos2(start.x, start.y + (chip - field_height) / 2.0),
+                pos2(origin.x + room, start.y + (chip + field_height) / 2.0),
+            );
+            let mut child = ui.new_child(UiBuilder::new().max_rect(typing_rect));
+            let hint = if line.chips.is_empty() { line.hint } else { "" };
+            let field = Field { label: "", hint, error: None, enabled, read_only: false };
+            typed = Some(field::bare_line(&mut child, theme, id, typing, &field, shown));
+        };
+        if scrolls {
+            let area = Rect::from_min_max(pos2(rect.left() + left, rect.top() + 1.0), pos2(rect.right() - right, rect.bottom() - 1.0));
+            let mut child = ui.new_child(UiBuilder::new().max_rect(area));
+            let scroll = egui::ScrollArea::vertical().id_salt(id.with("chips")).max_height(area.height()).auto_shrink([false, false]);
+            let pads = top - rect.top() - 1.0;
+            scroll::show(&mut child, theme, scroll, |ui| {
+                let (whole, _) = ui.allocate_exact_size(vec2(ui.available_width(), inner(rows as f32) + pads * 2.0), Sense::hover());
+                content(ui, whole.min + vec2(0.0, pads));
+            });
+        } else {
+            content(ui, pos2(rect.left() + left, top));
         }
-        // The text being typed: the rest of its row, the field's caret and hint its own.
-        let start = at(typing_at);
-        let typing_rect = Rect::from_min_max(
-            pos2(start.x, start.y + (chip - field_height) / 2.0),
-            pos2(rect.right() - right, start.y + (chip + field_height) / 2.0),
-        );
-        let mut child = ui.new_child(UiBuilder::new().max_rect(typing_rect));
-        let hint = if line.chips.is_empty() { line.hint } else { "" };
-        let field = Field { label: "", hint, error: None, enabled, read_only: false };
-        let typed = field::bare_line(&mut child, theme, id, typing, &field, shown);
+        let typed = typed.unwrap_or_else(|| ui.interact(Rect::NOTHING, id, Sense::hover()));
         let spoken = line.name;
         ui.ctx().accesskit_node_builder(typed.id, |node| node.set_label(spoken));
         if let Some(copies) = copies {
@@ -287,14 +291,48 @@ pub(crate) fn recipient_field_with(
     .inner
 }
 
-/// The width a recipient's chip takes, in points.
-fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient) -> f32 {
+/// The most rows of chips a line shows before it scrolls.
+const MOST_ROWS: usize = 4;
+
+/// Where chips `widths` wide go in rows `room` wide, `gap` apart: each chip's `(x, row)`, the typing's, and the rows.
+fn flow(widths: &[f32], room: f32, gap: f32) -> (Vec<(f32, usize)>, (f32, usize), usize) {
+    let mut places = Vec::with_capacity(widths.len());
+    let (mut x, mut row) = (0.0_f32, 0_usize);
+    for width in widths {
+        if x > 0.0 && x + width > room {
+            x = 0.0;
+            row = row.saturating_add(1);
+        }
+        places.push((x, row));
+        x += width + gap;
+    }
+    if x > 0.0 && room - x < TYPING.min(room) {
+        x = 0.0;
+        row = row.saturating_add(1);
+    }
+    (places, (x, row), row.saturating_add(1))
+}
+
+/// The colour of a chip's name: what [`chip_with`] lays it out in, so the two share one layout.
+fn chip_ink(theme: &Theme, state: RecipientState, enabled: bool) -> Color32 {
+    let p = &theme.palette;
+    if !enabled {
+        p.muted
+    } else if state == RecipientState::Invalid {
+        p.minus
+    } else {
+        p.ink
+    }
+}
+
+/// The width a recipient's chip takes, in points, its name laid out in `ink` as the chip lays it out.
+fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32) -> f32 {
     let s = &theme.spacing;
     let glyph = theme.boxes().mark.min(theme.boxes().pill);
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let words = cut(ui, &recipient.shown, theme.fonts.body, Color32::PLACEHOLDER, (WIDEST - lead - tail).max(1.0));
+    let words = cut(ui, &recipient.shown, theme.fonts.body, ink, (WIDEST - lead - tail).max(1.0));
     (lead + words.size().x + tail).ceil()
 }
 

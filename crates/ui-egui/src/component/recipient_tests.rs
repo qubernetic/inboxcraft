@@ -290,3 +290,68 @@ fn a_recipient_line_takes_typing_removes_a_chip_and_opens_cc_bcc() {
     harness.run();
     assert_eq!(*harness.state(), ("odile".to_owned(), Some(0), true));
 }
+
+/// A recipient line of `chips` on a stage, 560 wide; its box's height read from the drawn `term` fill.
+fn line_of(chips: Vec<Recipient>) -> Harness<'static> {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    staged(theme, |p| p.bg, vec2(640.0, 400.0), move |ui, theme| {
+        ui.spacing_mut().scroll = crate::component::scroll::style(theme);
+        let mut typing = String::new();
+        let line = Recipients { name: "To", chips: &chips, hint: "Name or address", copies: true, error: None, enabled: true };
+        ui.vertical(|ui| {
+            ui.set_width(560.0);
+            recipient_field(ui, theme, egui::Id::unique("to"), &mut typing, &line);
+        });
+    })
+}
+
+#[test]
+fn two_chips_of_one_address_are_two_controls() {
+    let same = Recipient { shown: "Teodor Vasquez".to_owned(), spoken: "Teodor Vasquez, teodor@example.org".to_owned(), state: RecipientState::Valid };
+    let harness = line_of(vec![same.clone(), same]);
+    let crosses: Vec<_> = harness.query_all_by_label("Remove Teodor Vasquez").map(|node| node.accesskit_node().locate().0).collect();
+    assert_eq!(crosses.len(), 2);
+    assert_ne!(crosses[0], crosses[1], "one id each");
+}
+
+#[test]
+fn five_hundred_recipients_stay_in_a_box_of_four_rows_that_scrolls() {
+    let many: Vec<Recipient> = (0..500)
+        .map(|n| Recipient { shown: format!("person{n}@example.org"), spoken: format!("person{n}@example.org"), state: RecipientState::Valid })
+        .collect();
+    let started = std::time::Instant::now();
+    let harness = line_of(many);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let boxes: Vec<Rect> = {
+        fn walk(shape: &egui::Shape, found: &mut Vec<Rect>, fill: egui::Color32) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found, fill)),
+                egui::Shape::Rect(rect) if rect.fill == fill && rect.rect.width() > 500.0 => found.push(rect.rect),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found, theme.palette.term));
+        found
+    };
+    assert_eq!(boxes.len(), 1, "{boxes:?}");
+    // Four rows of 24, 10 apart, and 7 above and below.
+    assert_eq!(boxes[0].height(), 4.0 * 24.0 + 3.0 * 10.0 + 14.0, "{boxes:?}");
+    let thumb = drawn_fills(&harness).into_iter().any(|(rect, fill)| fill == theme.palette.muted && rect.width() == 4.0 && boxes[0].contains_rect(rect));
+    assert!(thumb, "the slice's scroll bar");
+}
+
+/// The filled rects the last frame painted.
+fn drawn_fills(harness: &Harness<'static>) -> Vec<(Rect, egui::Color32)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Rect(rect) if rect.fill.a() > 0 => found.push((rect.rect, rect.fill)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
