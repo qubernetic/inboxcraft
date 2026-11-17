@@ -959,9 +959,45 @@ fn hover_actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The empty state's board: the bare one, its lines centred, and the one with an action, its lines on the left.
+fn empty_states(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::empty::{empty_state, empty_state_with};
+    title(ui, theme, tr!("Empty state"));
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("default"), |ui| {
+            ui.allocate_ui(vec2(440.0, 216.0), |ui| {
+                empty_state(
+                    ui,
+                    theme,
+                    tr!("Inbox · nothing to read"),
+                    tr!("All read.\nNew mail lands here."),
+                    tr!("This folder holds no unread messages. “Show done” brings back what you finished."),
+                );
+            });
+        });
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("with-action"), |ui| {
+            ui.allocate_ui(vec2(440.0, 250.0), |ui| {
+                let action = TextButton::new(tr!("Add account")).primary().arrow();
+                empty_state_with(
+                    ui,
+                    theme,
+                    tr!("No accounts yet"),
+                    tr!("Add an account to read its mail here."),
+                    tr!("Nothing leaves this computer before you do."),
+                    action,
+                    keymap,
+                );
+            });
+        });
+    });
+}
+
 /// The right column of the shared rows and blocks.
 fn blocks_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     hover_actions(ui, theme, keymap);
+    empty_states(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

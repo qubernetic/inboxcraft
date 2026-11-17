@@ -36,6 +36,7 @@ pub mod banner;
 pub mod button;
 pub mod card;
 pub mod checkbox;
+pub mod empty;
 pub mod field;
 pub mod gallery;
 pub mod hover;
