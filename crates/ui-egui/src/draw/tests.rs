@@ -56,6 +56,38 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     })
 }
 
+/// The rect strokes of `colour` the last frame of `output` drew round or inside `near` (grown by 4 points): for each,
+/// the outer bound of its line, its width, and whether its clip rect holds that bound whole.
+pub(super) fn strokes_round(output: &egui::FullOutput, colour: egui::Color32, near: egui::Rect) -> Vec<(egui::Rect, f32, bool)> {
+    fn rects<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::RectShape>) {
+        match shape {
+            egui::Shape::Rect(rect) => found.push(rect),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| rects(shape, found)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        let mut found = Vec::new();
+        rects(&clipped.shape, &mut found);
+        for rect in found {
+            if rect.stroke.color != colour || rect.stroke.width <= 0.0 {
+                continue;
+            }
+            let width = rect.stroke.width;
+            let outer = match rect.stroke_kind {
+                egui::StrokeKind::Inside => rect.rect,
+                egui::StrokeKind::Middle => rect.rect.expand(width / 2.0),
+                egui::StrokeKind::Outside => rect.rect.expand(width),
+            };
+            if near.expand(4.0).contains_rect(outer) && outer.intersects(near) {
+                out.push((outer, width, clipped.clip_rect.expand(0.01).contains_rect(outer)));
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn a_flagged_row_shows_the_flag_icon() {
     let harness = harness();
@@ -582,4 +614,211 @@ fn a_hovered_row_takes_the_fill_of_its_ground() {
     harness.run();
     assert!(filled_at(&harness, calendar, p.grid), "a hovered rail button is the grid");
     assert!(!filled_at(&harness, calendar, p.stage));
+}
+
+/// The physical columns that tall upright lines in `colour` cover within 4 points of `x` in the last frame of
+/// `harness`, tessellated without feathering.
+fn upright_line_columns(harness: &Harness<'static, InboxApp>, colour: egui::Color32, x: f32) -> std::collections::BTreeSet<i32> {
+    let output = harness.output();
+    let ppp = output.pixels_per_point;
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let mut covered = std::collections::BTreeSet::new();
+    for clipped in tessellator.tessellate_shapes(output.shapes.clone()) {
+        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+        for triangle in mesh.indices.chunks(3) {
+            let corners: Vec<_> = triangle.iter().map(|at| mesh.vertices[*at as usize]).collect();
+            if corners.iter().any(|vertex| vertex.color != colour) {
+                continue;
+            }
+            let span = egui::Rect::from_points(&corners.iter().map(|vertex| vertex.pos).collect::<Vec<_>>());
+            if span.width() > 4.0 || span.height() < 200.0 || (span.left() - x).abs() > 4.0 {
+                continue;
+            }
+            covered.extend((span.left() * ppp).round() as i32..(span.right() * ppp).round() as i32);
+        }
+    }
+    covered
+}
+
+/// Where the rail ends: its buttons stand in its middle.
+fn rail_right(harness: &Harness<'static, InboxApp>, theme: &Theme) -> f32 {
+    harness.get_by_role_and_label(Role::Button, "Calendar").rect().center().x + super::pane::rail_width(theme) / 2.0
+}
+
+#[test]
+fn one_line_stands_between_the_rail_and_the_pane_beside_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for ppp in [1.0_f32, 1.5] {
+        let wide = ppp.round().max(1.0) as usize;
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(ppp)
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.run();
+        let seam = rail_right(&harness, &theme);
+        let mail = upright_line_columns(&harness, theme.palette.line, seam);
+        assert_eq!(mail.len(), wide, "{ppp}: one line between the rail and the folder pane: {mail:?}");
+        harness.get_by_role_and_label(Role::Button, "Calendar").click();
+        harness.run();
+        let calendar = upright_line_columns(&harness, theme.palette.line, seam);
+        assert_eq!(calendar.len(), wide, "{ppp}: one line between the rail and the calendar's side: {calendar:?}");
+    }
+}
+
+#[test]
+fn the_rail_keeps_its_line_where_no_pane_stands_beside_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
+    let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
+    let columns = upright_line_columns(&harness, theme.palette.line, rail_right(&harness, &theme));
+    assert_eq!(columns.len(), 1, "the rail's own edge: {columns:?}");
+}
+
+#[test]
+fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
+    let mut harness = harness();
+    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
+    field.focus();
+    harness.run();
+    harness.key_down(Key::Enter);
+    harness.run();
+    harness.key_up(Key::Enter);
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItemRadio, "Studio (holloway.studio@example.org)").focus();
+    harness.run();
+    harness.key_down(Key::Enter);
+    harness.run();
+    harness.key_up(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().narrowed(), Some(2));
+    assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "All accounts").is_none(), "the list closed");
+    assert_eq!(harness.get_by_role_and_label(Role::ComboBox, "Accounts").accesskit_node().value().as_deref(), Some("Studio"));
+}
+
+#[test]
+fn the_error_banner_s_dismiss_is_a_link_that_enter_presses() {
+    let mut harness = harness();
+    harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+    harness.run();
+    assert!(harness.state().mailbox().error().is_some());
+    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().error(), None);
+}
+
+/// The physical rows that long level lines in `colours` cover between `from` and `to` (points) in the last frame of
+/// `harness`, tessellated without feathering.
+pub(super) fn level_line_rows(
+    harness: &Harness<'static, InboxApp>,
+    colours: &[egui::Color32],
+    from: f32,
+    to: f32,
+) -> std::collections::BTreeSet<i32> {
+    let output = harness.output();
+    let ppp = output.pixels_per_point;
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let mut covered = std::collections::BTreeSet::new();
+    for clipped in tessellator.tessellate_shapes(output.shapes.clone()) {
+        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+        for triangle in mesh.indices.chunks(3) {
+            let corners: Vec<_> = triangle.iter().map(|at| mesh.vertices[*at as usize]).collect();
+            let Some(first) = corners.first() else { continue };
+            if !colours.contains(&first.color) || corners.iter().any(|vertex| vertex.color != first.color) {
+                continue;
+            }
+            let span = egui::Rect::from_points(&corners.iter().map(|vertex| vertex.pos).collect::<Vec<_>>());
+            if span.height() > 4.0 || span.width() < 200.0 || span.bottom() < from || span.top() > to {
+                continue;
+            }
+            covered.extend((span.top() * ppp).round() as i32..(span.bottom() * ppp).round() as i32);
+        }
+    }
+    covered
+}
+
+#[test]
+fn one_line_stands_between_the_error_banner_and_the_panes_under_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let p = theme.palette;
+    for ppp in [1.0_f32, 1.5] {
+        let wide = ppp.round().max(1.0) as usize;
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(ppp)
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+        harness.run();
+        harness.run();
+        let error = harness.state().mailbox().error().unwrap().to_owned();
+        let text = harness.get_by_label(&error).rect();
+        // The sheet's padding: 12 at the sides (from the window's left, where the rail starts).
+        let window = rail_right(&harness, &theme) - super::pane::rail_width(&theme);
+        assert!((text.left() - window - 12.0).abs() < 0.01, "{ppp}: {text:?} in a window from {window}");
+        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let rows = level_line_rows(&harness, &[p.line, p.minus], dismiss.bottom(), dismiss.bottom() + 16.0);
+        assert_eq!(rows.len(), wide, "{ppp}: one line between the banner and the panes: {rows:?}");
+    }
+}
+
+#[test]
+fn the_error_banner_is_drawn_over_the_window_s_ground() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let mut app = sample_app();
+        app.mailbox_mut().open(Place::Folder(4242));
+        assert!(app.mailbox().error().is_some());
+        let picture = crate::shot::render(&mut app, vec2(1100.0, 720.0), 1.0, mode).unwrap();
+        let at = |x: usize, y: usize| picture.pixel(x, y).map(|pixel| (pixel.r(), pixel.g(), pixel.b()));
+        let rgb = |colour: egui::Color32| Some((colour.r(), colour.g(), colour.b()));
+        // Its `panel` ground across the window under its `minus` top line, its line at the foot.
+        assert_eq!(at(700, 0), rgb(p.minus), "{mode:?}: the top line");
+        assert_eq!(at(700, 4), rgb(p.panel), "{mode:?}: the banner's ground");
+        let words = (12..400).any(|x| (8..26).any(|y| at(x, y).is_some_and(|c| Some(c) != rgb(p.panel))));
+        assert!(words, "{mode:?}: its words are drawn");
+    }
+}
+
+#[test]
+fn the_account_picker_with_a_stale_account_shows_and_focuses_all_accounts() {
+    let mut harness = harness();
+    harness.state_mut().mailbox_mut().narrow_stale(4242);
+    harness.run();
+    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
+    field.focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    let first = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts");
+    assert!(first.accesskit_node().is_focused(), "the row the field shows takes the focus");
+    assert_eq!(first.accesskit_node().toggled(), Some(Toggled::True), "and is the chosen one");
+}
+
+#[test]
+fn the_line_under_the_error_banner_is_its_minus_edge() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let p = theme.palette;
+    for ppp in [1.0_f32, 1.5] {
+        let wide = ppp.round().max(1.0) as usize;
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(ppp)
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+        harness.run();
+        harness.run();
+        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let (from, to) = (dismiss.bottom(), dismiss.bottom() + 16.0);
+        assert_eq!(level_line_rows(&harness, &[p.minus], from, to).len(), wide, "{ppp}: the sheet's minus edge all round");
+        assert!(level_line_rows(&harness, &[p.line], from, to).is_empty(), "{ppp}: and no pane line beside it");
+    }
 }

@@ -60,7 +60,7 @@ pub mod shot;
 pub mod theme;
 pub mod workers;
 
-pub use draw::{InboxApp, Screen};
+pub use draw::{InboxApp, Screen, rows_built};
 pub use error::UiError;
 
 /// The crate's package name.

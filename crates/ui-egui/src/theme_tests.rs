@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    FLOAT_SHADOW, Face, Font, Fonts, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast, font_definitions, install_fonts, mix, over,
-    preference,
+    FALLBACK_PROBES, FLOAT_SHADOW, Face, Fallback, Font, Fonts, ICON, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast,
+    font_definitions, font_definitions_with, install_fallbacks, install_fonts, missing_probes, mix, over, preference,
 };
 use crate::motion::MOTION;
 
@@ -267,6 +267,8 @@ fn the_visuals_follow_the_tokens_flat_and_square() {
         assert_eq!(visuals.selection.bg_fill, p.cyan_muted);
         assert_eq!(visuals.hyperlink_color, p.cyan_text);
         assert_eq!(visuals.override_text_color, Some(p.ink));
+        // Glyph coverage is alpha as it is, in both modes, as the design draws it: no boost in the dark.
+        assert_eq!(visuals.text_options.color_transfer_function, egui::epaint::FontColorTransferFunction::Off, "{:?}", theme.mode);
         assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(visuals.window_corner_radius, egui::CornerRadius::ZERO);
@@ -279,8 +281,8 @@ fn the_visuals_follow_the_tokens_flat_and_square() {
         let style = theme.style();
         assert_eq!(style.spacing.item_spacing.y, theme.spacing.s1);
         assert_eq!(style.spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
-        assert!(style.spacing.scroll.floating_width >= 4.0);
-        assert!(style.spacing.scroll.bar_width > style.spacing.scroll.floating_width, "wider under the pointer");
+        // The thumb grows under the pointer inside a strip of one width: the scroll bar component paints it.
+        assert_eq!(style.spacing.scroll, crate::component::scroll::style(&theme), "the scroll bar's own style");
         for (style_of, font) in [
             (egui::TextStyle::Small, theme.fonts.caption),
             (egui::TextStyle::Body, theme.fonts.body),
@@ -529,6 +531,92 @@ fn install_fonts_puts_plex_into_the_context() {
     assert_eq!(width(f.heading), width(f.title.sized(15.0)), "Plex Mono keeps one advance in both weights");
 }
 
+/// The shipped Plex Sans as a fallback under another name.
+fn plex_as(name: &str) -> Fallback {
+    Fallback { name: name.to_owned(), data: include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf").to_vec(), index: 0 }
+}
+
+#[test]
+fn fallbacks_stand_behind_plex_in_every_text_family() {
+    let definitions = font_definitions_with(&[plex_as("system: Fake")]);
+    let icon = egui::FontFamily::Name(ICON.into());
+    let mut text_families = 0;
+    for (family, fonts) in &definitions.families {
+        if *family == icon {
+            assert!(!fonts.iter().any(|name| name == "system: Fake"), "the icon family holds no fallback");
+        } else {
+            text_families += 1;
+            assert_eq!(fonts.last().map(String::as_str), Some("system: Fake"), "{family:?}: {fonts:?}");
+        }
+    }
+    assert_eq!(text_families, 5, "the five faces' families, Proportional and Monospace among them");
+    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
+    assert_eq!(proportional.first().map(String::as_str), Some("IBMPlexSans-Regular"));
+    assert!(definitions.font_data.contains_key("system: Fake"));
+}
+
+#[test]
+fn a_fallback_that_is_not_a_font_is_skipped() {
+    let junk = Fallback { name: "junk".to_owned(), data: b"not a font".to_vec(), index: 0 };
+    let far = Fallback { index: 99, ..plex_as("far") };
+    let empty = Fallback { name: "empty".to_owned(), data: Vec::new(), index: 0 };
+    let fallbacks = [junk, far, empty];
+    let definitions = font_definitions_with(&fallbacks);
+    for name in ["junk", "far", "empty"] {
+        assert!(!definitions.font_data.contains_key(name), "{name}");
+        assert!(definitions.families.values().all(|fonts| !fonts.iter().any(|font| font == name)), "{name}");
+    }
+    let ctx = egui::Context::default();
+    let _ = install_fallbacks(&ctx, fallbacks.to_vec());
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.label("日本語 🙂");
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn a_fallback_never_replaces_one_of_the_app_s_faces() {
+    let definitions = font_definitions_with(&[plex_as("IBMPlexMono-Regular"), plex_as(ICON)]);
+    let mono = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
+    assert_eq!(mono.iter().filter(|name| *name == "IBMPlexMono-Regular").count(), 1);
+    assert_eq!(definitions.families.get(&egui::FontFamily::Name(ICON.into())).map(Vec::len), Some(1));
+}
+
+#[test]
+fn no_fallbacks_is_today_s_definitions() {
+    let (with, without) = (font_definitions_with(&[]), font_definitions());
+    assert_eq!(with.families, without.families);
+    assert_eq!(with.font_data.keys().collect::<Vec<_>>(), without.font_data.keys().collect::<Vec<_>>());
+    for (name, data) in &with.font_data {
+        let other = &without.font_data[name];
+        assert_eq!((data.bytes(), data.index), (other.bytes(), other.index), "{name}");
+    }
+}
+
+#[test]
+fn install_fallbacks_puts_them_into_the_context_and_asks_for_one_repaint() {
+    let ctx = fonts_ctx();
+    let fallback = plex_as("system: Fake");
+    let bytes = fallback.data.as_ptr();
+    let definitions = install_fallbacks(&ctx, vec![fallback]);
+    assert!(ctx.has_requested_repaint(), "the new fonts are drawn without waiting for input");
+    assert_eq!(definitions.font_data["system: Fake"].bytes().as_ptr(), bytes, "the bytes move in, not copied");
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.last()).map(String::as_str), Some("system: Fake"));
+    assert_eq!(ctx.fonts(|fonts| fonts.definitions().font_data["system: Fake"].bytes().as_ptr()), bytes, "nor in the context");
+}
+
+#[test]
+fn the_app_s_own_fonts_lack_every_probe() {
+    // Plex, Audiowide and egui's bundled faces (Ubuntu Light, Hack, the egui icons; egui's emoji faces are not
+    // compiled in) hold none of the probes, so the start searches for all eight.
+    assert_eq!(missing_probes(&FALLBACK_PROBES), FALLBACK_PROBES.to_vec());
+    assert_eq!(missing_probes(&[("latin", 'A'), ("arrows", '⇧'), ("han", '日')]), vec![("han", '日')], "Plex and Hack hold these");
+    assert_eq!(FALLBACK_PROBES.map(|(_, sign)| sign), ['日', 'あ', '한', 'ع', 'א', 'ท', 'अ', '🙂']);
+}
+
 /// `text` laid out in `font` the way the components do it, in a frame of `ctx`.
 fn laid_out(ctx: &egui::Context, text: &str, font: Font) -> std::sync::Arc<egui::Galley> {
     let mut galley = None;
@@ -709,4 +797,372 @@ fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
         assert_eq!(theme.motion, MOTION);
         assert_eq!(theme.style().animation_time, MOTION.tooltip);
     }
+}
+
+/// The font atlas `ctx` builds in `mode` for a few words in the mono and the sans: every texel's alpha.
+fn atlas_in(mode: egui::Theme) -> Vec<u8> {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    Theme::apply(&ctx, &Look::default());
+    ctx.set_theme(mode);
+    let mut atlas = Vec::new();
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let theme = Theme::current(ui.ctx(), &Look::default());
+            ui.label(theme.fonts.mono_s.rich("Archive H 01"));
+            ui.label(theme.fonts.body.rich("Marked as done"));
+        });
+        for (_, patches) in output.textures_delta.set.drain() {
+            for patch in patches {
+                let egui::ImageData::Color(image) = &patch.image;
+                if patch.pos.is_none() {
+                    atlas = image.pixels.iter().map(|texel| texel.a()).collect();
+                }
+            }
+        }
+    }
+    atlas
+}
+
+#[test]
+fn glyphs_have_the_same_linear_coverage_in_dark_and_light() {
+    let (dark, light) = (atlas_in(egui::Theme::Dark), atlas_in(egui::Theme::Light));
+    assert!(dark.iter().any(|alpha| *alpha > 0 && *alpha < 255), "the atlas holds edge texels");
+    let differ = dark.iter().zip(&light).filter(|(d, l)| d != l).count();
+    assert_eq!(differ, 0, "{differ} texels of the dark atlas are not the light one's");
+}
+
+/// `text` as the compiler reads it, for a scan: comments and the insides of string and character literals dropped,
+/// and white space dropped wherever it does not stand between two parts of words, so that a call split over lines or
+/// spaced out reads as one (`ui . button (` is `ui.button(`). The second value is the line (from 1) of each character
+/// kept.
+fn squeezed(text: &str) -> (String, Vec<usize>) {
+    let chars: Vec<char> = text.chars().collect();
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let (mut out, mut lines) = (String::new(), Vec::new());
+    let (mut line, mut at, mut gap) = (1, 0, false);
+    // Skips to the end of a quoted run that started before `at`, counting its lines.
+    let skip_quoted = |at: &mut usize, line: &mut usize, close: &str| {
+        let close: Vec<char> = close.chars().collect();
+        while *at < chars.len() {
+            if chars[*at] == '\n' {
+                *line += 1;
+            }
+            if close.len() == 1 && chars[*at] == '\\' {
+                *at += 2;
+                continue;
+            }
+            if chars[*at..].starts_with(&close) {
+                *at += close.len();
+                return;
+            }
+            *at += 1;
+        }
+    };
+    while at < chars.len() {
+        let c = chars[at];
+        let next = chars.get(at + 1).copied();
+        let before = out.chars().last();
+        if c == '\n' {
+            line += 1;
+            gap = true;
+            at += 1;
+        } else if c.is_whitespace() {
+            gap = true;
+            at += 1;
+        } else if c == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            let mut depth = 0;
+            while at < chars.len() {
+                if chars[at..].starts_with(&['/', '*']) {
+                    depth += 1;
+                    at += 2;
+                } else if chars[at..].starts_with(&['*', '/']) {
+                    depth -= 1;
+                    at += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    if chars[at] == '\n' {
+                        line += 1;
+                    }
+                    at += 1;
+                }
+            }
+            gap = true;
+        } else if (c == 'r' || (c == 'b' && next == Some('r'))) && !(before.is_some_and(word) && !gap) && {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start.min(chars.len())..].iter().take_while(|c| **c == '#').count();
+            chars.get(start + hashes) == Some(&'"')
+        } {
+            let start = if c == 'b' { at + 2 } else { at + 1 };
+            let hashes = chars[start..].iter().take_while(|c| **c == '#').count();
+            at = start + hashes + 1;
+            skip_quoted(&mut at, &mut line, &format!("\"{}", "#".repeat(hashes)));
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '"' {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "\"");
+            out.push_str("\"\"");
+            lines.extend([line, line]);
+            gap = false;
+        } else if c == '\'' && (next == Some('\\') || chars.get(at + 2) == Some(&'\'')) {
+            at += 1;
+            skip_quoted(&mut at, &mut line, "'");
+            out.push_str("''");
+            lines.extend([line, line]);
+            gap = false;
+        } else {
+            if gap && before.is_some_and(word) && word(c) {
+                out.push(' ');
+                lines.push(line);
+            }
+            gap = false;
+            out.push(c);
+            lines.push(line);
+            at += 1;
+        }
+    }
+    (out, lines)
+}
+
+/// Whether `name` stands in `code` at `at` as a word of its own.
+fn word_at(code: &str, at: usize, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    code[at..].starts_with(name) && !code[..at].chars().last().is_some_and(word) && !code[at + name.len()..].chars().next().is_some_and(word)
+}
+
+/// Where in `code` the word `name` stands, as a word of its own.
+fn words(code: &str, name: &str) -> Vec<usize> {
+    code.match_indices(name).map(|(at, _)| at).filter(|at| word_at(code, *at, name)).collect()
+}
+
+/// The raw egui widgets a squeezed view's `code` uses, each with where it starts: a method of `Ui` that adds one, or
+/// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
+/// is not one).
+fn raw_widgets(code: &str) -> Vec<(usize, String)> {
+    const METHODS: [&str; 13] = [
+        "button",
+        "small_button",
+        "checkbox",
+        "radio",
+        "radio_value",
+        "selectable_label",
+        "selectable_value",
+        "toggle_value",
+        "separator",
+        "link",
+        "hyperlink",
+        "menu_button",
+        "collapsing",
+    ];
+    const TYPES: [&str; 11] = [
+        "ComboBox",
+        "Button",
+        "Checkbox",
+        "SelectableLabel",
+        "Separator",
+        "RadioButton",
+        "Hyperlink",
+        "ImageButton",
+        "Slider",
+        "DragValue",
+        "CollapsingHeader",
+    ];
+    let mut found = Vec::new();
+    for method in METHODS {
+        for call in [format!(".{method}("), format!("Ui::{method}(")] {
+            found.extend(code.match_indices(call.as_str()).map(|(at, _)| (at, call.clone())));
+        }
+    }
+    for name in TYPES {
+        found.extend(
+            words(code, name)
+                .into_iter()
+                .filter(|at| !code[..*at].ends_with("Role::") && !code[..*at].ends_with("TextStyle::"))
+                .map(|at| (at, name.to_owned())),
+        );
+    }
+    found.sort();
+    found
+}
+
+/// The end of the balanced brackets that open at `at` in `code`, or `at` when none opens there.
+fn closing(code: &str, at: usize) -> usize {
+    let bytes = code.as_bytes();
+    let Some(open @ (b'(' | b'<')) = bytes.get(at).copied() else { return at };
+    let close = if open == b'(' { b')' } else { b'>' };
+    let mut depth = 0;
+    for (index, byte) in bytes.iter().enumerate().skip(at) {
+        if *byte == open {
+            depth += 1;
+        } else if *byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return index + 1;
+            }
+        }
+    }
+    bytes.len()
+}
+
+/// The methods called one after the other from `at` in `code`: `.a(…).b::<…>(…)` gives `a` and `b`.
+fn chain(code: &str, mut at: usize) -> Vec<String> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut called = Vec::new();
+    at = closing(code, at);
+    while code[at..].starts_with('.') {
+        let name: String = code[at + 1..].chars().take_while(|c| word(*c)).collect();
+        if name.is_empty() {
+            break;
+        }
+        at += 1 + name.len();
+        if code[at..].starts_with("::") {
+            at = closing(code, at + 2);
+        }
+        at = closing(code, at);
+        called.push(name);
+    }
+    called
+}
+
+/// The scroll areas a squeezed file's `code` shows itself instead of through `component::scroll`, each with where it
+/// starts: one built and shown in one chain, one kept in a binding or a parameter and shown from there, and a
+/// renamed import, which the scan could not follow.
+fn bare_scroll_areas(code: &str) -> Vec<(usize, String)> {
+    const SHOWN: [&str; 3] = ["show", "show_rows", "show_viewport"];
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut found = Vec::new();
+    for at in words(code, "ScrollArea") {
+        let rest = &code[at + "ScrollArea".len()..];
+        if rest.starts_with(" as ") {
+            found.push((at, "ScrollArea as".to_owned()));
+        }
+        if let Some(built) = rest.strip_prefix("::") {
+            let name: String = built.chars().take_while(|c| word(*c)).collect();
+            let after = at + "ScrollArea::".len() + name.len();
+            if chain(code, after).iter().any(|called| SHOWN.contains(&called.as_str())) {
+                found.push((at, format!("ScrollArea::{name}(…).show")));
+            }
+        }
+        // `let area = ScrollArea::…`, `area: ScrollArea`, `area: egui::ScrollArea`: the name it is kept under.
+        let mut lead = &code[..at];
+        while let Some(path) = lead.strip_suffix("::") {
+            lead = path.trim_end_matches(word);
+        }
+        let kept = if lead.ends_with('=') && !lead.ends_with("==") {
+            Some(lead.trim_end_matches('='))
+        } else if lead.ends_with(':') && !lead.ends_with("::") {
+            Some(lead.trim_end_matches(':'))
+        } else {
+            None
+        };
+        let Some(kept) = kept else { continue };
+        let name: String = kept.chars().rev().take_while(|c| word(*c)).collect::<Vec<_>>().into_iter().rev().collect();
+        if name.is_empty() {
+            continue;
+        }
+        for shown in SHOWN {
+            let call = format!("{name}.{shown}(");
+            found.extend(code.match_indices(call.as_str()).filter(|(at, _)| word_at(code, *at, &name)).map(|(at, _)| (at, call.clone())));
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_squeeze_drops_comments_literals_and_the_room_between_words() {
+    let (code, lines) =
+        squeezed("ui\n  . button (\"Dismiss // not a comment\") // ui.checkbox(\nlet mut a = 'x'; /* ComboBox */ r#\"ui.separator()\"#;");
+    assert_eq!(code, "ui.button(\"\")let mut a='';\"\";");
+    assert_eq!(lines.first(), Some(&1));
+    assert_eq!(lines.get(code.find(".button").unwrap()), Some(&2));
+    assert_eq!(squeezed("fn f<'a>(x: &'a str) {}").0, "fn f<'a>(x:&'a str){}");
+}
+
+#[test]
+fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("if ui.button(tr!(\"Dismiss\")).clicked() {}"), [".button("]);
+    assert_eq!(scan("ui\n    .checkbox(\n        &mut on,\n        name,\n    );"), [".checkbox("]);
+    assert_eq!(scan("row . selectable_label ( on , text )"), [".selectable_label("]);
+    assert_eq!(scan("egui::ComboBox::from_id_salt(\"x\")"), ["ComboBox"]);
+    assert_eq!(scan("ui.add(egui::Button::new(\"x\")); Ui::separator(ui);"), ["Button", "Ui::separator("]);
+    assert!(scan("TextButton::new(x).show(ui, theme, keymap); IconButton::new(i, n)").is_empty());
+    assert!(scan("WidgetInfo::labeled(Role::ComboBox, true, name); egui::PointerButton::Primary").is_empty());
+    assert!(scan("(TextStyle::Button, f.button.id())").is_empty());
+    assert!(scan("theme.fonts.button.rich(text); // ui.button(\"x\")\nlet s = \"ui.separator()\";").is_empty());
+}
+
+#[test]
+fn the_widget_scan_sees_links_menus_folds_and_value_widgets() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("ui.link(\"x\"); ui.hyperlink(url);"), [".link(", ".hyperlink("]);
+    assert_eq!(scan("ui.menu_button(\"More\", |ui| {}); ui.collapsing(\"Log\", |ui| {});"), [".menu_button(", ".collapsing("]);
+    assert_eq!(scan("ui.add(egui::Hyperlink::new(url)); ui.add(egui::ImageButton::new(image));"), ["Hyperlink", "ImageButton"]);
+    assert_eq!(scan("ui.add(egui::Slider::new(&mut v, 0.0..=1.0)); ui.add(DragValue::new(&mut v));"), ["Slider", "DragValue"]);
+    assert_eq!(scan("egui::CollapsingHeader::new(\"Server\").show(ui, add);"), ["CollapsingHeader"]);
+    assert_eq!(scan("ui.radio(on, name); ui.toggle_value(&mut on, name);"), [".radio(", ".toggle_value("]);
+    assert!(scan("button::link(ui, theme, keymap, name); WidgetInfo::slider(true, 1.0, name); Role::Slider").is_empty());
+}
+
+#[test]
+fn the_scroll_scan_sees_an_area_shown_without_the_component() {
+    let scan = |text: &str| bare_scroll_areas(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(
+        scan("ScrollArea::vertical().id_salt(\"a\")\n    .auto_shrink([false; 2])\n    .show(ui, |ui| {});"),
+        ["ScrollArea::vertical(…).show"]
+    );
+    assert_eq!(scan("egui::ScrollArea::both().show_rows(ui, 20.0, 10, |ui, rows| {});"), ["ScrollArea::both(…).show"]);
+    assert_eq!(scan("let mut area = ScrollArea::vertical();\narea = area.max_height(4.0);\narea . show(ui, add);"), ["area.show("]);
+    assert_eq!(scan("fn f(ui: &mut Ui, area: egui::ScrollArea) { area.show_viewport(ui, add); }"), ["area.show_viewport("]);
+    assert_eq!(scan("use egui::ScrollArea as Area;"), ["ScrollArea as"]);
+    assert!(scan("let area = ScrollArea::vertical().max_height(4.0);\nscroll::show(ui, theme, area, |ui| {});").is_empty());
+    assert!(scan("crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {});").is_empty());
+}
+
+/// The raw widgets a view may still use, each until the slice that replaces it: the details on adding an account fold
+/// under an egui collapsing header (the gaps line "The details on adding an account still fold under an egui
+/// collapsing header", #233). Its import and its one use.
+fn admitted(file: &Path, what: &str) -> bool {
+    file == Path::new("src/draw/onboard.rs") && what == "CollapsingHeader"
+}
+
+#[test]
+fn no_view_uses_a_raw_egui_widget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        if root.join(dir).is_dir() {
+            sources(&root.join(dir), &mut files);
+        }
+    }
+    assert!(files.len() > 10, "the walk found the sources");
+    let components = root.join("src").join("component");
+    let scroll = components.join("scroll.rs");
+    let mut found = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        let (code, lines) = squeezed(&text);
+        // Only the scroll bar's own code shows a scroll area; components may use egui's widgets, views may not.
+        let mut sites = if *file == scroll { Vec::new() } else { bare_scroll_areas(&code) };
+        if !file.starts_with(&components) {
+            sites.extend(raw_widgets(&code).into_iter().filter(|(_, what)| !admitted(file.strip_prefix(root).unwrap(), what)));
+        }
+        for (at, what) in sites {
+            let line = code[..at].chars().count();
+            let line = lines.get(line).copied().unwrap_or(0);
+            found.push((file.strip_prefix(root).unwrap().display().to_string(), line, what));
+        }
+    }
+    found.sort();
+    let found: Vec<String> = found.into_iter().map(|(file, line, what)| format!("{file}:{line}: {what}")).collect();
+    assert!(found.is_empty(), "views use the components, and only component/scroll.rs shows a scroll area:\n{}", found.join("\n"));
 }

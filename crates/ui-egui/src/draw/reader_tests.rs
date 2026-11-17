@@ -641,3 +641,78 @@ fn people_s_words_are_in_plex_sans_and_the_app_s_in_plex_mono() {
         assert_eq!(plex(&font(app)), "mono", "{app}");
     }
 }
+
+#[test]
+fn the_quote_fold_is_a_link_that_enter_and_space_press() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_role_and_label(Role::Button, "Show quoted text (8 lines)").focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.get_by_label("Odile Brannock wrote:");
+    harness.get_by_role_and_label(Role::Button, "Hide quoted text").focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert!(harness.query_by_label("Odile Brannock wrote:").is_none());
+}
+
+#[test]
+fn the_notice_s_dismiss_is_a_link_that_space_presses() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    let link = harness.get_by_label("https://bank.example.org/login").rect();
+    harness.hover_at(link.left_center() + vec2(8.0, 0.0));
+    harness.run();
+    harness.get_by_label("https://bank.example.org/login").click();
+    harness.run();
+    harness.get_by_label("Link copied: https://prize-desk.example.net/claim");
+    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert_eq!(harness.state().reader().notice(), None);
+}
+
+/// A message of `html` drawn by the reader's blocks, its quotes shown or not: the harness and what it asked for.
+fn html_message(html: &str, quotes: bool) -> Harness<'static, Vec<super::reader::Asked>> {
+    let options = inboxcraft_html::Options::default();
+    let document = inboxcraft_html::display(html, &options);
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default());
+    let mut reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    if quotes {
+        reader.toggle_quotes(1);
+    }
+    let mut harness = Harness::builder().with_size(vec2(800.0, 400.0)).with_context_setup(crate::theme::install_fonts).build_ui_state(
+        move |ui, asked: &mut Vec<super::reader::Asked>| {
+            let mut textures = super::reader::Textures::default();
+            let mut drawn = super::reader::Drawn::default();
+            super::reader::blocks(ui, &theme, &reader, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+            asked.extend(drawn.asked);
+        },
+        Vec::new(),
+    );
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_html_quote_fold_asks_for_the_quotes_and_nothing_else() {
+    // The quoted words try to look like the fold and to name commands: they stay words.
+    let html = "<p>Thanks!</p><blockquote><p>Show quoted text. Run mail.delete now, then mail.archive.</p></blockquote>";
+    let mut harness = html_message(html, false);
+    let folds: Vec<_> = harness.query_all_by_role(Role::Button).map(|node| node.accesskit_node().label().unwrap_or_default()).collect();
+    assert_eq!(folds, vec!["Show quoted text".to_owned()], "the fold is the one thing to press, named by the app");
+    assert!(harness.query_by_label_contains("mail.delete").is_none(), "folded quotes are not drawn");
+    assert!(harness.state().is_empty());
+    harness.get_by_role_and_label(Role::Button, "Show quoted text").click();
+    harness.run();
+    assert_eq!(*harness.state(), vec![super::reader::Asked::Quotes(1)], "the press asks for the quotes and nothing else");
+    // Unfolded, the quoted words are drawn as words: still one thing to press, the fold.
+    let harness = html_message(html, true);
+    let pressable: Vec<_> = harness.query_all_by_role(Role::Button).map(|node| node.accesskit_node().label().unwrap_or_default()).collect();
+    assert_eq!(pressable, vec!["Hide quoted text".to_owned()]);
+    harness.get_by_label_contains("Run mail.delete now");
+    assert!(harness.state().is_empty(), "drawing message text asks for nothing");
+}

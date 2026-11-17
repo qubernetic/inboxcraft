@@ -123,6 +123,21 @@ The same acts work on a real account, through the same engine commands (`mail.se
 change also goes to the server. The sample's own
 command, `sample.mail.set`, is refused in any other session.
 
+### The frame bench (`just bench-ui`)
+`just bench-ui` builds the `ui_bench` example in the release profile in the container and measures how long the
+sample window takes to build a frame (its `ui` and the tessellation, on the CPU; nothing is drawn on a GPU) over the
+sample grown to 10 000 invented messages (`sample::grown`), of which the list shows the engine's 1 000 newest; the
+header says both. Four scenes of 300 frames each, after 30 to warm up: `inbox-default-rest` (the inbox in the view a
+new owner sees, today the cards), `inbox-list-rest` and `inbox-list-scroll` (the grouped list, which lays out every
+listed row, scrolling 40 points a frame: the stress case) and `reader-html` (the reader open on an HTML message).
+For each it prints `median_ms`, `p95_ms`, the `shapes` and the list's `rows_built` of the last frame, and it starts
+with the CPU's model, its core count and the first core's frequency governor, so numbers from two machines are never
+mixed up. It runs twice: with every core free, where the budget is a p95 of at most 4 ms, and pinned to one core with
+`taskset -c 0`, where it is one frame at 60 Hz, 16.6 ms; a scene that misses either is a miss. The pinned run pins
+the core but not the clock: the governor is printed, not set, as setting it needs root, and the header says so.
+Without `taskset` the pinned run is skipped with a line saying so. The bench is not a gate: a MISS never makes it
+fail.
+
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|
@@ -533,7 +548,9 @@ written and expanded, and `dav_xml`, `dav_client` and `testkit_dav` (#144): the 
 CalDAV client's response reader with discovery and sync fed what it read, and the fake CalDAV server's own request
 and XML readers and session, and `engine_invite` (#149): any bytes kept as a message's body, and as an invitation's
 calendar part, read into its invitation mark and card, answered and removed, and `engine_alerts` (#150): any bytes
-a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on.
+a calendar sync brings as an event, read for its alerts across a change of the clock and fired as time goes on, and
+`fontconfig_scan` (#233): any bytes as a fontconfig file, through the desktop app's bounded reader of the font
+folders.
 
 `.github/workflows/close-issues-on-merge.yml` closes the issues named on their own `Closes #N` line when a PR is
 merged into `develop`. A slice merged into an epic branch closes nothing; the epic PR into `develop` closes them all.

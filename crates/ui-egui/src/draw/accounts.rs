@@ -10,7 +10,7 @@
 use egui::{Align, CursorIcon, Frame, Layout, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use super::onboard;
-use super::paint::{focus_ring, line};
+use super::paint::{Ring, focus_ring, line};
 use super::settings::{Asked, row_with};
 use crate::component::avatar;
 use crate::component::button::TextButton;
@@ -40,7 +40,9 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, p.stage);
     }
-    focus_ring(ui, theme, &response);
+    if response.has_focus() {
+        focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+    }
     let painter = ui.painter();
     let mid = rect.center().y;
     painter.circle_filled(pos2(rect.left() + s.s2, mid), 4.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
@@ -92,7 +94,9 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
         let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
         crate::iconset::paint(ui.painter(), at, IconId::Back, p.cyan_text);
         ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
-        focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
+        }
     }
     response.clicked()
 }

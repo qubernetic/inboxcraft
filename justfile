@@ -96,6 +96,11 @@ wasm: _up
 shot script="crates/ui-egui/shots.jsonl": _up
     {{ exec }} cargo run -p inboxcraft-ui-egui --example ui_shot -- "{{ script }}"
 
+# Frame-time bench of the sample window (ui_bench, release): every core free, then pinned to one core
+bench-ui: _up
+    {{ exec }} cargo run --release -p inboxcraft-ui-egui --example ui_bench
+    {{ exec }} sh -c 'if command -v taskset >/dev/null 2>&1; then taskset -c 0 cargo run --release -q -p inboxcraft-ui-egui --example ui_bench -- --pinned; else echo "ui_bench: no taskset here, so no run pinned to one core"; fi'
+
 # Each ui_shot picture next to the mood sketch of its preset and mode (sketches in plan/mood, pairs in plan/side-by-side)
 side-by-side *args: _up
     {{ exec }} cargo xtask side-by-side {{ args }}

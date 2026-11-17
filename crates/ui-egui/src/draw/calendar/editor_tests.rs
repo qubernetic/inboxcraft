@@ -27,7 +27,8 @@ fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn press(harness: &mut Harness<'static, InboxApp>, name: &str) {
-    harness.get_by_role_and_label(Role::Button, name).click();
+    // A button, or a segmented control's option.
+    harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name)).click();
     harness.run();
 }
 
@@ -130,7 +131,7 @@ fn an_edit_with_its_guests_told_says_so_in_the_toast() {
 fn the_form_s_controls_change_the_event() {
     let mut harness = on_calendar(egui::Theme::Light);
     press(&mut harness, "New event");
-    harness.get_by_role_and_label(Role::Button, "Studio").click();
+    harness.get_by_role_and_label(Role::RadioButton, "Studio").click();
     harness.run();
     press(&mut harness, "Free");
     choose_repeat(&mut harness, "Weekly");
@@ -215,7 +216,7 @@ fn a_new_event_in_a_narrow_window_still_offers_every_control() {
     press(&mut harness, "Calendar");
     press(&mut harness, "New event");
     for name in ["Busy", "Free"] {
-        harness.get_by_role_and_label(Role::Button, name);
+        harness.get_by_role_and_label(Role::RadioButton, name);
     }
     harness.get_by_role_and_label(Role::ComboBox, "Repeat");
 }

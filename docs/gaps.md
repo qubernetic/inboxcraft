@@ -354,9 +354,16 @@ time from the code as it is, not measured.
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
 - The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
-  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Devanagari and
-  others) and emoji show as boxes (egui's emoji fonts are not built in), and right-to-left text is laid out left to
-  right (egui has no bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
+  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Thai, Devanagari
+  and others) and emoji are drawn with fonts found on the computer, searched at start on a worker thread and placed
+  behind Plex; where the computer has none for a script, they show as boxes (egui's emoji fonts are not built in).
+  Colour emoji fonts are not used (egui draws outlines only), so emoji need a font with outlines, such as Noto Emoji.
+  Only one sign per script is looked for, so a found font may still lack rarer signs of its script. The folders
+  come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
+  fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,
+  which is not checked inside a Flatpak yet, nor on a real desktop. A configuration or font file swapped for a FIFO
+  between the type check and the open blocks the search's worker thread (the window is not affected) (#233). Right-to-left text is laid out left to right (egui has no
+  bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the
   size but not the line height or tracking; the drawn rows and controls carry all three. egui's text fields still
@@ -371,8 +378,8 @@ time from the code as it is, not measured.
   and handling of missing glyphs.
 - Icons (#84, #86, #231, #232): Phosphor Regular, one family and one weight, with no choice; a state never swaps
   in a filled glyph. The design draws an icon `muted`, and `ink` on the current row or a hovered button, never in
-  the accent; the code still draws some in `cyan_text` (an active icon button, the pin on a row, the icons of the
-  settings rows, the add-account steps and the empty list) until those components are restyled. The set has the ids the window and the triage actions need so
+  the accent but on a selected icon button; the code still draws some in `cyan_text` (the pin on a row, the icons
+  of the settings rows, the add-account steps and the empty list) until those components are restyled. The set has the ids the window and the triage actions need so
   far; a toolbar or a view that needs another meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The Phosphor Regular font is bundled
   whole (every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new font file. An icon

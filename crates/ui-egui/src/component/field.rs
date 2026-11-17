@@ -6,8 +6,11 @@
 
 use egui::{Align2, Id, Margin, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, pos2, vec2};
 
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::theme::Theme;
+
+use super::soon;
 
 /// The margin inside a form field: the field is as tall as a button with a little more room.
 #[must_use]
@@ -27,9 +30,15 @@ pub fn search(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, hint: &str,
     let round = 0.0;
     let focused = ui.memory(|memory| memory.has_focus(id));
     let (edge, ink) = if focused { (Stroke::new(2.0, p.cyan_edge), p.ink) } else { (Stroke::new(1.0, p.line), p.muted) };
+    // Coming soon, the field is disabled with its `Ui`, and its edge is dashed.
+    let soon = soon::is_soon(ui);
     if ui.is_rect_visible(rect) {
         ui.painter().rect_filled(rect, round, p.term);
-        ui.painter().rect_stroke(rect, round, edge, StrokeKind::Inside);
+        if soon {
+            paint::dashed(ui.painter(), rect, p.muted);
+        } else {
+            ui.painter().rect_stroke(rect, round, edge, StrokeKind::Inside);
+        }
     }
     let icon = theme.fonts.body.size * 1.15;
     let at = Rect::from_center_size(pos2(rect.left() + s.s3 + icon / 2.0, rect.center().y), vec2(icon, icon));

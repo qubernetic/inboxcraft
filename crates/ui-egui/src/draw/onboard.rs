@@ -8,6 +8,7 @@ use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
 use crate::component::button::{self, TextButton};
+use crate::component::checkbox::checkbox_wrapping;
 use crate::component::{field as field_style, margin, pill};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
@@ -122,7 +123,9 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
             detect = true;
         }
     });
-    ui.checkbox(&mut form.ispdb, tr!("Also ask Mozilla's list of providers (tells Mozilla the domain)"));
+    if checkbox_wrapping(ui, theme, tr!("Also ask Mozilla's list of providers (tells Mozilla the domain)"), form.ispdb).clicked() {
+        form.ispdb = !form.ispdb;
+    }
     note(
         ui,
         theme,
@@ -391,7 +394,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(FORM_WIDTH);
         if let Some(error) = onboarding.error() {
             note(ui, theme, error, p.minus);

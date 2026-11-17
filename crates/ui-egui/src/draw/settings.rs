@@ -14,18 +14,19 @@
 //! choose closes the page.
 
 use egui::{
-    Align, Area, Frame, Id, Key, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align, Area, Frame, Id, Layout, Order, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
-use super::paint::{NavRow, focus_ring, line, nav_row, selection};
+use super::paint::{NavRow, Ring, focus_ring, line, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
 use crate::component::segmented::{segmented, segmented_for};
+use crate::component::slider;
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::draw::paint::{self, FloatEdge};
@@ -48,9 +49,6 @@ const TEXT_MIN: f32 = 240.0;
 
 /// A window on a window-frame card, in points.
 const THUMB: [f32; 2] = [84.0, 52.0];
-
-/// The slider's track, in points.
-const TRACK: [f32; 2] = [200.0, 6.0];
 
 /// What the owner asked for on the sheet this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,7 +275,9 @@ fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], pain
         let picture = Rect::from_min_size(pos2(rect.center().x - swatch[0] / 2.0, rect.top() + s.s2), vec2(swatch[0], swatch[1]));
         paint(painter, picture);
         painter.galley(pos2(rect.center().x - galley.size().x / 2.0, picture.bottom() + s.s1), galley, p.ink);
-        focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+        }
     }
     response
 }
@@ -306,55 +306,6 @@ fn thumb(painter: &Painter, theme: &Theme, rect: Rect, frame: WindowFrame) {
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
 }
 
-/// The text size as a slider over the steps from 90 % to 130 %, a small and a large A at its ends and the size after
-/// it. A press or a drag sets the step under the pointer; the arrow keys move it one step.
-fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
-    let p = &theme.palette;
-    let steps = TextScale::ALL;
-    let last = steps.len().saturating_sub(1).max(1);
-    let index = steps.iter().position(|step| *step == now).unwrap_or(1);
-    ui.label(RichText::new("A").font(theme.fonts.caption.id()).color(p.muted));
-    let knob = 16.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(TRACK[0], knob), Sense::click_and_drag());
-    let name = tr!("Text size");
-    response.widget_info(|| WidgetInfo::slider(true, f64::from(now.percent()), name));
-    let mut wanted = None;
-    if response.clicked() || response.dragged() {
-        response.request_focus();
-        if let Some(at) = response.interact_pointer_pos() {
-            let t = ((at.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            // The nearest step; the cast is of a small index.
-            wanted = Some((t * last as f32).round() as usize);
-        }
-    }
-    if response.has_focus() {
-        let (left, right) = ui.input(|input| (input.key_pressed(Key::ArrowLeft), input.key_pressed(Key::ArrowRight)));
-        if left {
-            wanted = Some(index.saturating_sub(1));
-        } else if right {
-            wanted = Some((index + 1).min(last));
-        }
-    }
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        let track = Rect::from_center_size(rect.center(), vec2(TRACK[0], TRACK[1]));
-        painter.rect_filled(track, 0.0, p.stage);
-        // An index of five steps.
-        let x = track.left() + track.width() * index as f32 / last as f32;
-        let done = Rect::from_min_max(track.min, pos2(x.max(track.left() + TRACK[1]), track.bottom()));
-        painter.rect_filled(done, 0.0, p.cyan);
-        let knob_rect = Rect::from_center_size(pos2(x, rect.center().y), vec2(knob, knob));
-        painter.rect_filled(knob_rect, 0.0, p.term);
-        painter.rect_stroke(knob_rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-        if response.has_focus() {
-            painter.rect_stroke(knob_rect.expand(2.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Outside);
-        }
-    }
-    ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
-    ui.label(theme.fonts.mono.rich(&tr!("{percent} %", percent = now.percent())).color(p.ink));
-    wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
-}
-
 /// The rows of the Appearance page; what was asked for.
 fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
@@ -374,7 +325,7 @@ fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Optio
     });
     let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
     row(ui, theme, tr!("Text size"), &[tr!("90 % to 130 %. Rows and toolbars follow the font.")], &mut |ui| {
-        if let Some(scale) = text_size(ui, theme, now) {
+        if let Some(scale) = slider::text_size(ui, theme, now) {
             asked = Some(Asked::Scale(scale));
         }
     });
@@ -498,7 +449,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
 /// The Appearance page under its title: the rows and the preview, scrolling.
 fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         asked = rows(ui, theme, current, reduce);
         preview(ui, theme);
@@ -506,7 +457,7 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) ->
     asked
 }
 
-/// A key as a chip that can be pressed: `shown` in a rounded frame, ringed in the focus colour while it `waits`.
+/// A key as a chip that can be pressed: `shown` in a frame, its edge in the accent while it `waits`.
 fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
@@ -518,10 +469,13 @@ fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, if response.hovered() { p.grid } else { p.panel });
-        let edge = if waits { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+        // Waiting for a key it is the key chip's capture state: a 1 px accent edge.
+        let edge = Stroke::new(1.0, if waits { p.cyan_edge } else { p.line });
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
-        focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
+        }
     }
     response
 }
@@ -587,7 +541,7 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     }
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - s.s3);
         if list.is_empty() {
             ui.add_space(s.s4);
@@ -610,7 +564,7 @@ const HOLDS: [u8; 4] = [5, 10, 30, 60];
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let s = &theme.spacing;
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - s.s3);
         let hold = mailbox.hold_seconds();
         let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
@@ -662,7 +616,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
 fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         let modes = ScreenerMode::ALL.map(|mode| (mode, screener_name(mode), f.button));
         let screener_notes = [
@@ -713,12 +667,14 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
 fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Settings, desk: DeskView) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         note(
             ui,
             theme,
-            tr!("Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."),
+            tr!(
+                "Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."
+            ),
         );
         note(
             ui,

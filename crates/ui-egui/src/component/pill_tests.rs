@@ -4,8 +4,13 @@
 use egui::accesskit::{Role, Toggled};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::pill;
-use crate::component::tests::{builder, theme};
+use egui::vec2;
+
+use super::{pill, pill_with};
+use crate::component::Shown;
+use crate::component::press_tests::{Part, keys_press_as_the_pointer};
+use crate::component::tests::{Own, bring, builder, own, painted, staged, theme};
+use crate::theme::{Mode, TextScale, Theme};
 
 #[test]
 fn a_pill_is_a_selectable_button_with_its_word() {
@@ -59,25 +64,6 @@ fn rects(output: &egui::FullOutput) -> Vec<(egui::Color32, egui::Color32)> {
 }
 
 #[test]
-fn a_selected_pill_is_one_even_tone_and_another_has_no_fill_and_a_quiet_edge() {
-    let theme = theme();
-    let palette = theme.palette;
-    let draw = |selected: bool| {
-        let mut harness = builder().build_ui(move |ui| {
-            pill(ui, &theme, "Unread", selected);
-        });
-        harness.run();
-        rects(harness.output())
-    };
-    let plain = draw(false);
-    assert!(plain.iter().any(|(_, stroke)| *stroke == palette.muted), "{plain:?}");
-    assert!(plain.iter().all(|(fill, _)| *fill != palette.panel && *fill != palette.stage), "{plain:?}");
-    let chosen = draw(true);
-    assert!(chosen.iter().any(|(fill, _)| *fill == palette.stage), "{chosen:?}");
-    assert!(chosen.iter().all(|(_, stroke)| *stroke != palette.muted), "{chosen:?}");
-}
-
-#[test]
 fn a_hovered_pill_fades_its_hover_in_and_a_focused_one_shows_its_ring() {
     let theme = theme();
     let palette = theme.palette;
@@ -95,4 +81,121 @@ fn a_hovered_pill_fades_its_hover_in_and_a_focused_one_shows_its_ring() {
     harness.get_by_label("Unread").focus();
     harness.run();
     assert!(ring(&harness), "a focused pill shows the focus ring");
+}
+
+/// The states of the pill's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Default,
+    Hover,
+    Focus,
+    Selected,
+    Disabled,
+}
+
+const STATES: [State; 5] = [State::Default, State::Hover, State::Focus, State::Selected, State::Disabled];
+
+fn pill_in(mode: Mode, scale: TextScale, state: State, shown: Shown) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 100.0),
+        move |ui, theme| {
+            if state == State::Disabled {
+                ui.disable();
+            }
+            pill(ui, theme, "New senders", state == State::Selected);
+        },
+    );
+    bring(&mut harness, "New senders", shown);
+    let rect = harness.get_by_label("New senders").rect();
+    (rect, own(&painted(&harness, "New senders"), rect))
+}
+
+#[test]
+fn a_pill_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for state in STATES {
+            let shown = match state {
+                State::Hover => Shown::Hover,
+                State::Focus => Shown::Focus,
+                _ => Shown::Rest,
+            };
+            let (rect, look) = pill_in(mode, TextScale::default(), state, shown);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert!((rect.width() - 89.0).abs() < 0.01 && (rect.height() - 24.0).abs() < 0.01, "{at} {rect:?}");
+            let (fill, edge, text) = match state {
+                State::Default | State::Focus => (None, (p.line, false), p.muted),
+                State::Hover => (Some(p.stage), (p.muted, false), p.ink),
+                State::Selected => (Some(p.cyan_muted), (p.cyan_edge, false), p.cyan_text),
+                State::Disabled => (None, (p.line, true), p.muted),
+            };
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, Some((1.0, edge.0, edge.1)), "{at}");
+            assert_eq!(look.texts, vec![("New senders".to_owned(), text, "Monospace".to_owned(), 11.0)], "{at}");
+            let ring = (state == State::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+            assert_eq!(look.ring, ring, "{at}");
+            assert!(look.radius <= 0.0 && !look.overflows, "{at}");
+        }
+    }
+}
+
+#[test]
+fn a_pill_at_130_percent_is_the_scaled_height() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    let (rect, _) = pill_in(Mode::Light, TextScale::ALL[4], State::Default, Shown::Rest);
+    assert!((rect.height() - theme.boxes().pill).abs() < 0.01, "{rect:?}");
+}
+
+#[test]
+fn a_long_pill_ends_at_240_and_its_box_at_256() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(600.0, 100.0),
+        |ui, theme| {
+            pill(ui, theme, "Every sender who wrote to you for the first time this month or the month before", false);
+        },
+    );
+    harness.run();
+    let rect = harness.get_by_label("Every sender who wrote to you for the first time this month or the month before").rect();
+    assert!((rect.width() - 256.0).abs() < 0.01, "{rect:?}");
+}
+
+#[test]
+fn a_pressed_pill_is_the_secondary_press_or_the_accent_wash_with_an_ink_word_when_selected() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for (state, fill, edge, text) in [(State::Default, p.stage, p.ink, p.ink), (State::Selected, p.cyan_muted, p.cyan_edge, p.ink)] {
+            let (_, look) = pill_in(mode, TextScale::default(), state, Shown::Pressed);
+            assert_eq!((look.fill, look.edge), (Some(fill), Some((1.0, edge, false))), "{mode:?} {state:?} {look:#?}");
+            assert_eq!(look.texts[0].1, text, "{mode:?} {state:?}");
+        }
+    }
+}
+
+#[test]
+fn enter_and_space_press_a_focused_pill() {
+    let whole: Part = |rect, _| rect;
+    let ring: Part = |rect, _| rect.expand(3.0);
+    keys_press_as_the_pointer("New senders", vec2(400.0, 100.0), whole, ring, |ui, theme| drop(pill(ui, theme, "New senders", false)));
+    keys_press_as_the_pointer("New senders", vec2(400.0, 100.0), whole, ring, |ui, theme| drop(pill(ui, theme, "New senders", true)));
+}
+
+#[test]
+fn the_gallery_forces_a_hovered_pill() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 100.0),
+        |ui, theme| {
+            pill_with(ui, theme, "New senders", false, Some(Shown::Hover));
+        },
+    );
+    let rect = harness.get_by_label("New senders").rect();
+    assert_eq!(own(&painted(&harness, "New senders"), rect).fill, Some(theme.palette.stage));
 }

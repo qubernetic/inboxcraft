@@ -12,7 +12,7 @@ use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
-use super::{button, galley, margin, tooltip};
+use super::{button, galley, key, margin, soon};
 
 /// What a toast says.
 #[derive(Debug, Clone, Copy)]
@@ -37,9 +37,9 @@ pub fn panel(ui: &mut Ui, theme: &Theme, keymap: &Keymap, toast: &Toast<'_>) -> 
             ui.label(galley(ui, toast.text, theme.fonts.body, p.ink));
             if let Some(action) = toast.undo {
                 let undo = button::link(ui, theme, keymap, tr!("Undo"));
-                undone = undo.clicked() || keymap.pressed(ui.ctx(), action);
+                undone = undo.clicked() || (!soon::is_soon(ui) && keymap.pressed(ui.ctx(), action));
                 if let Some(chip) = keymap.chip(ui.ctx(), action) {
-                    tooltip::key_chip(ui, theme, &chip);
+                    key::key_chip(ui, theme, &chip, key::ChipState::Default);
                 }
             }
         });

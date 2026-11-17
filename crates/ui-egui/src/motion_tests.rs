@@ -27,7 +27,7 @@ pub(crate) fn frame<R>(ctx: &Context, time: f64, f: impl FnOnce(&Context) -> R) 
 
 #[test]
 fn every_motion_token_is_short_and_real() {
-    assert_eq!(MOTION.all().len(), 5);
+    assert_eq!(MOTION.all().len(), 6);
     for seconds in MOTION.all() {
         assert!(seconds > 0.0 && seconds <= LONGEST, "{seconds}");
     }

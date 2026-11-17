@@ -527,7 +527,7 @@ const TEXTS: &[Text] = &[
             "<h1>Time for a check-up</h1><p><img src=\"https://pictures.example.org/cycles/workshop.png\" alt=\"The workshop bench\"></p>\
              <p>It has been a year since the last check. Book a slot and we will look at the <b>brakes</b>, the <b>chain</b> and the \
              gears.</p><ul><li>Brakes and pads</li><li>Chain and gears</li><li>Tyres and lights</li></ul>\
-             <p><a href=\"https://cycles.example.org/book\">Book a slot</a> or call in at the shop.</p><p>Wheelwright Cycles</p>",
+             <p><a href=\"https://cycles.example.org/book\">Book a slot</a> or call in at the shop.</p><hr><p>Wheelwright Cycles</p>",
         ),
         files: &[],
     },
@@ -710,6 +710,36 @@ pub fn mailbox(now: Timestamp) -> Result<Memory, UiError> {
         batch.push(change);
     }
     let mut store = Memory::new(StoreConfig::default());
+    store.apply(&batch).map_err(UiError::sample)?;
+    Ok(store)
+}
+
+/// The sample [`mailbox`] grown to `count` messages (at least the sample's own) for the frame bench: the first
+/// account's inbox gets copies of its own sample mail that starts no thread, each a little older than the one before,
+/// with its body. Everyone in them is still the sample's invented people on `example.org`.
+///
+/// # Errors
+///
+/// As [`mailbox`].
+pub fn grown(now: Timestamp, count: usize) -> Result<Memory, UiError> {
+    const INBOX: u64 = 1;
+    let mut store = mailbox(now)?;
+    let threaded = |subject: &str| LINKS.iter().any(|(linked, ..)| *linked == subject);
+    let mut templates = Vec::new();
+    for sample in MESSAGES.iter().filter(|sample| sample.folder == INBOX && !threaded(sample.subject)) {
+        templates.push((sample, source(sample)?));
+    }
+    let first_id = u64::try_from(MESSAGES.len()).unwrap_or(u64::MAX).saturating_add(1);
+    let first_uid = u32::try_from(MESSAGES.iter().filter(|sample| sample.folder == INBOX).count()).unwrap_or(u32::MAX).saturating_add(1);
+    let mut batch = Batch::new();
+    for (index, (template, (source, text))) in (0..count.saturating_sub(MESSAGES.len())).zip(templates.iter().cycle()) {
+        let step = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+        let copy = Sample { minutes_ago: template.minutes_ago.saturating_add(step.saturating_mul(37)), ..**template };
+        let id = first_id.saturating_add(step - 1);
+        let uid = first_uid.saturating_add(u32::try_from(index).unwrap_or(u32::MAX));
+        batch.push(Change::PutMessage(message(id, uid, 1, &copy, now)?));
+        batch.push(Change::PutBody(MessageId::new(id), Body::new(source.clone(), text).map_err(UiError::sample)?));
+    }
     store.apply(&batch).map_err(UiError::sample)?;
     Ok(store)
 }

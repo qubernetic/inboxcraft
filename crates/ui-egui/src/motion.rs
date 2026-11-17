@@ -14,8 +14,12 @@ use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
 /// The durations of the motion tokens, in seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Motion {
-    /// Hover actions fading in over a row, a control's hover fill.
+    /// Hover actions fading in over a row, and the hover of the controls not yet restyled to the design (checkbox,
+    /// pill, select, segmented control, popup rows, card, time picker); the restyled ones take [`Motion::fast`] or
+    /// change at once, as the presentation has them.
     pub hover_fade: f32,
+    /// The `fast` token: a control's colours cross-fading between rest and hover, linear.
+    pub fast: f32,
     /// A tooltip appearing.
     pub tooltip: f32,
     /// A row sliding out of the list when it is done.
@@ -29,13 +33,13 @@ pub struct Motion {
 impl Motion {
     /// Every token.
     #[must_use]
-    pub const fn all(&self) -> [f32; 5] {
-        [self.hover_fade, self.tooltip, self.row_slide, self.card, self.toast]
+    pub const fn all(&self) -> [f32; 6] {
+        [self.hover_fade, self.fast, self.tooltip, self.row_slide, self.card, self.toast]
     }
 }
 
 /// The motion tokens.
-pub const MOTION: Motion = Motion { hover_fade: 0.12, tooltip: 0.1, row_slide: 0.18, card: 0.16, toast: 0.2 };
+pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_slide: 0.18, card: 0.16, toast: 0.2 };
 
 /// No token is longer than this.
 pub const LONGEST: f32 = 0.25;
@@ -88,6 +92,12 @@ fn duration(ctx: &Context, seconds: f32) -> f32 {
 pub fn toggle(ctx: &Context, id: Id, on: bool, seconds: f32) -> f32 {
     let seconds = duration(ctx, seconds);
     ctx.animate_bool_with_time_and_easing(id, on, seconds, easing::cubic_out)
+}
+
+/// [`toggle`] at an even pace: a cross-fade of colours, as the design's `linear` transitions run.
+pub fn fade(ctx: &Context, id: Id, on: bool, seconds: f32) -> f32 {
+    let seconds = duration(ctx, seconds);
+    ctx.animate_bool_with_time_and_easing(id, on, seconds, easing::linear)
 }
 
 /// How far `id` has appeared over `seconds` since the first frame it was shown in, eased, 0 to 1; something that

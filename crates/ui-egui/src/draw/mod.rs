@@ -47,15 +47,19 @@ mod pane;
 mod reader;
 mod settings;
 
+pub use list::rows_built;
+
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
+use crate::component::button;
+use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
@@ -457,7 +461,8 @@ impl InboxApp {
     /// Runs the action `id` of [`keymap::actions`], as its key, the rail or the palette do; an action that cannot run
     /// now ([`InboxApp::can_run`]) does nothing.
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
-        if !self.can_run(id) {
+        // An action only a coming-soon control offered runs by no way in.
+        if !self.can_run(id) || soon::blocked(ctx, id) {
             return;
         }
         match id {
@@ -609,8 +614,9 @@ impl InboxApp {
             Some(Captured::Key(shortcut)) => {
                 let had = self.keymap.action_of(shortcut).filter(|other| *other != waiting).and_then(keymap::action);
                 self.keymap.bind(waiting, shortcut);
-                let note =
-                    had.map(|had| tr!("{key} was the key of {action}; it has none now.", key = ctx.format_shortcut(&shortcut), action = had.name));
+                let note = had.map(|had| {
+                    tr!("{key} was the key of {action}; it has none now.", key = crate::component::key::key_words(&shortcut), action = had.name)
+                });
                 self.settings.captured(note);
             }
             None => {}
@@ -653,6 +659,7 @@ impl InboxApp {
                 });
                 !(quiet && bare) && self.keymap.pressed(ctx, id)
             })
+            .filter(|id| !soon::blocked(ctx, id))
             .collect()
     }
 
@@ -1260,15 +1267,12 @@ impl InboxApp {
         if left_full {
             self.reader.set_full_width(false);
         }
-        let mut dismiss = false;
-        if let Some(error) = self.mailbox.error() {
-            Panel::top("error").show_separator_line(false).frame(Frame::new().fill(p.minus).inner_margin(margin(s.s2))).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(error).color(p.bg));
-                    dismiss = ui.button(tr!("Dismiss")).clicked();
-                });
-            });
-        }
+        // The window's ground first, under the error banner too; then the place for the panes, then everything else.
+        // The panes touch; a hairline divides them.
+        let corner = self.window_corner(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
+        // In the app's own frame the banner stands under the strip and beside the rail, so it comes after them.
+        let early = self.error_banner(ui, &theme, corner, false);
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
@@ -1283,21 +1287,22 @@ impl InboxApp {
         let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
-        // The window's ground first, then the place for the panes, then everything else. The panes touch; a hairline
-        // divides them.
-        let corner = self.window_corner(ui.ctx());
-        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
         let mut layers = Panes::begin(ui.painter());
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
-        let clicked_rail = Panel::left("rail")
+        let rail = Panel::left("rail")
             .resizable(false)
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)))
-            .inner;
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)));
+        // The rail draws its own edge, so the pane beside it draws none: one line between them.
+        layers.edged(rail.response.rect);
+        let clicked_rail = rail.inner;
         self.own_frame_parts(ui, &theme, corner);
+        let late = self.error_banner(ui, &theme, corner, true);
+        let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
+        layers.capped(banner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
         if self.screen == Screen::Calendar {
@@ -1369,7 +1374,8 @@ impl InboxApp {
             changed = self.settings_sheet(ui.ctx(), &theme);
         }
         let palette = if self.palette.is_open() {
-            let runnable: Vec<&str> = keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id)).collect();
+            let runnable: Vec<&str> =
+                keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id) && !soon::blocked(ui.ctx(), id)).collect();
             palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)
         } else {
             None
@@ -1499,6 +1505,46 @@ impl InboxApp {
         frame::edges(ui.ctx());
     }
 
+    /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
+    /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
+    /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
+    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
+    /// beside the rail, whose lines are its top and left edges, and the frame's outline its right one; where it
+    /// reaches the window's top (the top row) its top right corner is the window's `corner`. Whether Dismiss was
+    /// pressed, and the banner's rect. Called twice a frame, before the rail and strip and after them; it draws in
+    /// the call `framed` names (the own frame's or not).
+    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
+        let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
+        let p = theme.palette;
+        let mut dismiss = false;
+        // A corner of a few points; the clamp keeps the cast inside u8.
+        let round = corner.clamp(0.0, 255.0) as u8;
+        let on_top = (ui.available_rect_before_wrap().top() - ui.ctx().content_rect().top()).abs() < 0.5;
+        let corners = match (framed, on_top) {
+            (false, _) => egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 },
+            (true, true) => egui::CornerRadius { nw: 0, ne: round, sw: 0, se: 0 },
+            (true, false) => egui::CornerRadius::ZERO,
+        };
+        let ground = Frame::new().fill(p.panel).corner_radius(corners).inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 });
+        let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
+                dismiss = button::link_sized(ui, theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
+            });
+        });
+        let r = shown.response.rect;
+        let painter = ui.painter();
+        let (right, bottom) = (r.right() - 1.0, r.bottom() - 1.0);
+        if !framed {
+            paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
+            paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
+            paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
+        }
+        // Its `minus` edge at the foot is the one line between it and the panes, which draw none there.
+        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.minus);
+        (dismiss, Some(r))
+    }
+
     /// The app's own frame over the panes, when it draws one: the controls of the top row at the end of the right
     /// pane's first row, and the window's outline.
     fn own_frame_over(&self, ctx: &egui::Context, theme: &Theme, corner: f32) {
@@ -1625,7 +1671,7 @@ impl InboxApp {
 
     /// The act whose key was pressed in this frame, on the selected row.
     fn keyed_act(&self, ctx: &egui::Context) -> Option<(u64, Act)> {
-        let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action))?;
+        let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action) && !soon::blocked(ctx, action))?;
         self.row_act(action)
     }
 

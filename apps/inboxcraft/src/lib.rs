@@ -40,6 +40,9 @@ pub mod autostart;
 pub mod control;
 pub mod desk;
 pub mod desktop;
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+pub mod fontconfig;
+pub mod fonts;
 pub mod instance;
 pub mod notify;
 pub mod store;

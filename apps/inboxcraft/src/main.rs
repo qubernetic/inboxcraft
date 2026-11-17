@@ -9,7 +9,8 @@
 //! notifications (through the notification portal in the Flatpak). The CLI and the MCP server reach it through the control
 //! channel ([`inboxcraft::control`]), with the token in the credential store. Closing the window leaves it running
 //! ([`Desktop`]) unless the owner turned that off on the Notifications page ([`OwnerDesk`], which also starts
-//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one.
+//! InboxCraft with the computer); a new window opens on the same app when a later start or the tray asks for one. Text in
+//! scripts IBM Plex does not hold takes the computer's own fonts, found on a worker thread ([`inboxcraft::fonts`]).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -24,17 +25,20 @@ use inboxcraft::accounts::{Entries, OsEntries};
 use inboxcraft::control::Listening;
 use inboxcraft::desk::OwnerDesk;
 use inboxcraft::desktop::{Desktop, WINDOWLESS_TICK};
+use inboxcraft::fonts::Fallbacks;
 use inboxcraft::instance::Request;
 use inboxcraft::{Source, Step};
 use inboxcraft_engine::appearance::WindowFrame;
 use inboxcraft_time::SystemClock;
 use inboxcraft_ui_egui::fetch::Wake;
 
-/// The window's content as eframe draws it, for as long as one window lives.
-struct Window<'a>(&'a mut Desktop);
+/// The window's content as eframe draws it, for as long as one window lives, and the computer's fonts it takes once
+/// they are found.
+struct Window<'a>(&'a mut Desktop, Fallbacks);
 
 impl eframe::App for Window<'_> {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.1.install(ctx);
         self.0.tick(ctx);
     }
 
@@ -60,8 +64,11 @@ impl eframe::App for Window<'_> {
 type Shown = Arc<Mutex<Option<egui::Context>>>;
 
 /// Opens windows on `desktop` until InboxCraft ends: while the desktop has no window it keeps the mail in step and
-/// waits for a request for one.
+/// waits for a request for one. The computer's fonts for the scripts IBM Plex lacks are searched for meanwhile, on a
+/// worker thread; the window opens with the app's own fonts and takes those once they are found.
 fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
+    let wake = wake_of(shown);
+    let found = inboxcraft::fonts::search(move || wake());
     loop {
         if desktop.is_quitting() {
             return ExitCode::SUCCESS;
@@ -87,7 +94,7 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
         // `run_and_return` (the default) keeps eframe's event loop, so a later window can open on it.
         let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
         let context = Arc::clone(shown);
-        let window = Window(&mut desktop);
+        let window = Window(&mut desktop, Fallbacks::new(Arc::clone(&found)));
         let made = move |creation: &eframe::CreationContext<'_>| {
             if let Ok(mut shown) = context.lock() {
                 *shown = Some(creation.egui_ctx.clone());

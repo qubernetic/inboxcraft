@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 
@@ -394,4 +394,43 @@ fn the_form_says_what_detect_sends_before_it_is_pressed() {
     harness.get_by_label(
         "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password.",
     );
+}
+
+#[test]
+fn the_back_link_rings_itself_outside_2_px_clear() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
+        open_form(&mut harness);
+        harness.get_by_label("Back to the accounts").focus();
+        harness.run();
+        let rect = harness.get_by_label("Back to the accounts").rect();
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let strokes = super::tests::strokes_round(harness.output(), cyan, rect);
+        let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+        assert!(
+            strokes.iter().any(|(ring, width, whole)| near(*ring, rect.expand(3.0)) && *width == 1.0 && *whole),
+            "{theme:?}: {strokes:?} {rect:?}"
+        );
+        assert!(!strokes.iter().any(|(ring, ..)| rect.contains_rect(*ring)), "{theme:?} no ring inside: {strokes:?} {rect:?}");
+    }
+}
+
+#[test]
+fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
+    const NAME: &str = "Also ask Mozilla's list of providers (tells Mozilla the domain)";
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    let ticked = |harness: &Harness<'static, InboxApp>| harness.state().onboarding().form().ispdb;
+    assert!(!ticked(&harness), "it starts off");
+    harness.get_by_role_and_label(Role::CheckBox, NAME).click();
+    harness.run();
+    assert!(ticked(&harness), "a click ticks it");
+    assert_eq!(harness.get_by_role_and_label(Role::CheckBox, NAME).accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
+    harness.get_by_role_and_label(Role::CheckBox, NAME).focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert!(!ticked(&harness), "Space takes the tick off");
 }

@@ -35,7 +35,7 @@ use egui::{
 };
 use inboxcraft_model::Role;
 
-use super::paint::{focus_ring, line, selection};
+use super::paint::{Ring, focus_ring, line, selection};
 use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::{self, Action};
@@ -51,30 +51,10 @@ use crate::tr;
 /// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
 pub(super) const ROW_INSET: f32 = 6.0;
 
-/// The room the vertical scroll bar takes at the right of a scroll area, kept free so it never lies over a card or a
-/// row's date.
-fn scroll_room(ui: &Ui) -> f32 {
-    let scroll = &ui.spacing().scroll;
-    scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin
-}
-
-/// A vertical scroll area for the list's cards. The bar's room is kept only while the content overflows (as measured
-/// on the frame before), so cards run the pane's whole width whenever they all fit.
-fn scrolled<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let id = ui.make_persistent_id("list-overflows");
-    let overflowed = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
-    let output = ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        if overflowed {
-            ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
-        }
-        add(ui)
-    });
-    let overflows = output.content_size.y > output.inner_rect.height();
-    if overflows != overflowed {
-        ui.data_mut(|data| data.insert_temp(id, overflows));
-        ui.ctx().request_repaint();
-    }
-    output.inner
+/// A vertical scroll area for the list's cards. Its bar takes its own room beside them only while the content
+/// overflows, so cards run the pane's whole width whenever they all fit and never lie under the bar.
+fn scrolled<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), add).inner
 }
 
 /// The rows a group shows before "Show all".
@@ -322,7 +302,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
     let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
-    focus_ring(ui, theme, &response);
+    if response.has_focus() {
+        focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+    }
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
         Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {
@@ -569,7 +551,7 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
 /// The outbox on one card: each send in it, newest last; what a button asked for.
 fn outbox(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Option<(u64, Outbox)> {
     let mut asked = None;
-    scrolled(ui, |ui| {
+    scrolled(ui, theme, |ui| {
         sheet(ui, theme, false, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             for row in mailbox.outbox() {
@@ -594,6 +576,8 @@ struct Rows<'a> {
     leaving: Cell<(bool, bool)>,
     /// "Done all" pressed this frame: the group's messages.
     done_all: Cell<Option<Vec<u64>>>,
+    /// How many rows this frame laid out, seen or not: what the frame bench reads ([`rows_built`]).
+    built: Cell<usize>,
 }
 
 impl Rows<'_> {
@@ -602,6 +586,7 @@ impl Rows<'_> {
         let mut clicked = None;
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         for message in messages {
+            self.built.set(self.built.get().saturating_add(1));
             let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker);
             if drawn.clicked {
                 clicked = Some(message.id);
@@ -722,7 +707,7 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Optio
     let s = &rows.theme.spacing;
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
-    scrolled(ui, |ui| {
+    scrolled(ui, rows.theme, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
@@ -770,7 +755,7 @@ fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option
     let s = &rows.theme.spacing;
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
-    scrolled(ui, |ui| {
+    scrolled(ui, rows.theme, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
@@ -807,15 +792,11 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     super::paint::pane(ui.painter(), theme, card);
     ui.painter().rect_stroke(card, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
-    // The bar's room is kept only when the rows do not all fit, so a short list runs the card's whole width.
-    let overflows = content > room.height();
+    // The bar takes its room beside the rows only when they do not all fit, so a short list runs the card's width.
     let mut clicked = None;
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
-        ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, height, count, |ui, range| {
-            if overflows {
-                ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
-            }
+        crate::component::scroll::show_rows(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), height, count, |ui, range| {
             clicked = rows.show(ui, rows.mailbox.messages().get(range).unwrap_or_default());
         });
     });
@@ -872,6 +853,19 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) 
     (clicked, mode)
 }
 
+/// Where the rows a frame built are kept for [`rows_built`].
+fn rows_built_id() -> Id {
+    Id::unique("list-rows-built")
+}
+
+/// How many message rows the list laid out in the last frame that drew rows (each row allocated, whether it was on
+/// screen or not), taken out so the next read sees only a later frame's: `None` when no frame drew rows since. For
+/// the frame bench (`ui_bench`).
+#[must_use]
+pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
+    ctx.data_mut(|data| data.remove_temp::<usize>(rows_built_id()))
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
@@ -906,6 +900,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
+        built: Cell::new(0),
     };
     let mut screener_mode = None;
     let (clicked, review) = match view {
@@ -925,5 +920,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     };
     let (drawn, out) = rows.leaving.get();
+    let built = rows.built.get();
+    ui.ctx().data_mut(|data| data.insert_temp(rows_built_id(), built));
     Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None, screener: screener_mode }
 }

@@ -200,8 +200,14 @@ pub struct Sizes {
     pub group_head: f32,
     /// A key chip's and a tag's height.
     pub chip: f32,
+    /// A link's height.
+    pub link: f32,
+    /// The height of a row's small link, as high as the row's text line.
+    pub row_link: f32,
     /// The avatar's sides: small, middle, large.
     pub avatar: [f32; 3],
+    /// A badge's height and least width.
+    pub badge: f32,
     /// The mail list's width.
     pub list: f32,
     /// The scroll bar's width.
@@ -210,6 +216,10 @@ pub struct Sizes {
     pub icon: f32,
     /// An icon's side as a mark in a row.
     pub mark: f32,
+    /// The side of a check box's and a radio button's box.
+    pub check: f32,
+    /// A pill's height.
+    pub pill: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -219,11 +229,16 @@ pub(crate) const SIZES: Sizes = Sizes {
     mail_row: 56.0,
     group_head: 32.0,
     chip: 20.0,
+    link: 24.0,
+    row_link: 16.0,
     avatar: [24.0, 32.0, 40.0],
+    badge: 16.0,
     list: 440.0,
     scrollbar: 12.0,
     icon: 16.0,
     mark: 14.0,
+    check: 16.0,
+    pill: 24.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -246,6 +261,29 @@ pub enum Face {
 }
 
 impl Face {
+    /// The face's own underline, from its `post` table, as shares of the size: how far its middle lies under the
+    /// baseline, and how thick it is.
+    #[must_use]
+    pub const fn underline(self) -> (f32, f32) {
+        match self {
+            Self::Mono => (0.140, 0.060),
+            Self::MonoSemiBold => (0.112, 0.088),
+            Self::Sans => (0.095, 0.060),
+            Self::SansSemiBold => (0.075, 0.088),
+            Self::Brand => (154.0 / 2048.0, 102.0 / 2048.0),
+        }
+    }
+
+    /// The face's ascent and descent from its `hhea` table, as shares of the size: a design text box puts its
+    /// baseline half the leading (line height less their sum) under its top, plus the ascent.
+    #[must_use]
+    pub const fn extent(self) -> (f32, f32) {
+        match self {
+            Self::Mono | Self::MonoSemiBold | Self::Sans | Self::SansSemiBold => (1.025, 0.275),
+            Self::Brand => (2027.0 / 2048.0, 584.0 / 2048.0),
+        }
+    }
+
     /// Every face.
     pub const ALL: [Self; 5] = [Self::Mono, Self::MonoSemiBold, Self::Sans, Self::SansSemiBold, Self::Brand];
 
@@ -408,6 +446,12 @@ impl Fonts {
     #[must_use]
     pub fn event_title(&self) -> Font {
         self.title.sized(self.title.size * 0.9)
+    }
+
+    /// The mark of a ticked check box, `×`: Plex Mono SemiBold 14/16.
+    #[must_use]
+    pub fn check_mark(&self) -> Font {
+        Font { face: Face::MonoSemiBold, size: self.button.size * 14.0 / 13.0, ..self.button }
     }
 
     /// The initials on an avatar `side` points square, in `strong`.
@@ -578,7 +622,11 @@ pub fn font_definitions() -> egui::FontDefinitions {
         let fonts = std::iter::once(face.name().to_owned()).chain(behind.iter().cloned()).collect();
         definitions.families.insert(face.family(), fonts);
     }
-    definitions.font_data.insert(ICON.to_owned(), std::sync::Arc::new(egui::FontData::from_static(ICON_FONT)));
+    // The icons are drawn as their outlines are, as the design draws its SVGs: hinting would snap them half a pixel up.
+    definitions.font_data.insert(
+        ICON.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(ICON_FONT).tweak(egui::FontTweak { hinting: Some(false), ..egui::FontTweak::default() })),
+    );
     definitions.families.insert(FontFamily::Name(ICON.into()), vec![ICON.to_owned()]);
     definitions
 }
@@ -586,6 +634,81 @@ pub fn font_definitions() -> egui::FontDefinitions {
 /// Installs [`font_definitions`] in `ctx`, from its next frame.
 pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
+}
+
+/// One face of a font file found on the computer, for the signs the app's own fonts lack.
+#[derive(Clone)]
+pub struct Fallback {
+    /// Its name among the fonts.
+    pub name: String,
+    /// The whole font file.
+    pub data: Vec<u8>,
+    /// The face's index in the file.
+    pub index: u32,
+}
+
+/// One sign of each script the app's fonts may lack: what the start looks for on the computer.
+pub const FALLBACK_PROBES: [(&str, char); 8] =
+    [("han", '日'), ("kana", 'あ'), ("hangul", '한'), ("arabic", 'ع'), ("hebrew", 'א'), ("thai", 'ท'), ("devanagari", 'अ'), ("emoji", '🙂')];
+
+/// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
+/// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
+/// (egui panics on one) and one whose name is taken are left out. Copies the bytes: [`font_definitions_from`] takes
+/// them.
+#[must_use]
+pub fn font_definitions_with(fallbacks: &[Fallback]) -> egui::FontDefinitions {
+    font_definitions_from(fallbacks.to_vec())
+}
+
+/// [`font_definitions_with`] `fallbacks`, whose bytes move into egui's font data without a copy.
+#[must_use]
+pub fn font_definitions_from(fallbacks: Vec<Fallback>) -> egui::FontDefinitions {
+    let mut definitions = font_definitions();
+    let icon = FontFamily::Name(ICON.into());
+    for Fallback { name, data, index } in fallbacks {
+        if definitions.font_data.contains_key(&name) || !readable(&data, index) {
+            continue;
+        }
+        definitions.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_blob(std::sync::Arc::new(data), index)));
+        for (family, fonts) in &mut definitions.families {
+            if *family != icon {
+                fonts.push(name.clone());
+            }
+        }
+    }
+    definitions
+}
+
+/// Installs [`font_definitions_from`] `fallbacks` in `ctx`, asks for one frame to draw with them, and gives the
+/// definitions back for another window: they share the bytes.
+pub fn install_fallbacks(ctx: &egui::Context, fallbacks: Vec<Fallback>) -> egui::FontDefinitions {
+    let definitions = font_definitions_from(fallbacks);
+    ctx.set_fonts(definitions.clone());
+    ctx.request_repaint();
+    definitions
+}
+
+/// Whether egui can read `data` as a font with a face at `index`: the check egui makes before it panics.
+fn readable(data: &[u8], index: u32) -> bool {
+    skrifa::FontRef::from_index(data, index).is_ok()
+}
+
+/// The `probes` whose sign no font of a text family in [`font_definitions`] maps: what the computer's fonts are
+/// searched for.
+#[must_use]
+pub fn missing_probes(probes: &[(&'static str, char)]) -> Vec<(&'static str, char)> {
+    use skrifa::MetadataProvider as _;
+    let definitions = font_definitions();
+    let icon = FontFamily::Name(ICON.into());
+    let names: std::collections::BTreeSet<&String> =
+        definitions.families.iter().filter(|(family, _)| **family != icon).flat_map(|(_, fonts)| fonts).collect();
+    let charmaps: Vec<skrifa::charmap::Charmap<'_>> = names
+        .into_iter()
+        .filter_map(|name| definitions.font_data.get(name))
+        .filter_map(|data| skrifa::FontRef::from_index(data.bytes(), data.index).ok())
+        .map(|font| font.charmap())
+        .collect();
+    probes.iter().copied().filter(|(_, sign)| !charmaps.iter().any(|charmap| charmap.map(*sign).is_some())).collect()
 }
 
 /// What the tokens take from the owner's choices besides the mode: the text scale.
@@ -648,8 +771,8 @@ impl Theme {
         (px * self.text_scale.factor() / 2.0).round() * 2.0
     }
 
-    /// The fixed heights at the text scale (each through [`Theme::size`]); the widths, the avatars and the scroll bar
-    /// stay as they are.
+    /// The fixed heights at the text scale (each through [`Theme::size`]), and the avatars' sides with them; the
+    /// widths and the scroll bar stay as they are.
     #[must_use]
     pub fn boxes(&self) -> Sizes {
         let z = self.sizes;
@@ -660,8 +783,14 @@ impl Theme {
             mail_row: self.size(z.mail_row),
             group_head: self.size(z.group_head),
             chip: self.size(z.chip),
+            link: self.size(z.link),
+            row_link: self.size(z.row_link),
             icon: self.size(z.icon),
             mark: self.size(z.mark),
+            check: self.size(z.check),
+            pill: self.size(z.pill),
+            avatar: z.avatar.map(|side| self.size(side)),
+            badge: self.size(z.badge),
             ..z
         }
     }
@@ -687,6 +816,9 @@ impl Theme {
             Mode::Dark => Visuals::dark(),
         };
         let square = CornerRadius::ZERO;
+        // Glyph coverage becomes alpha as it is in both modes, as the design draws text: egui's dark default would
+        // thicken every glyph edge.
+        visuals.text_options.color_transfer_function = egui::epaint::FontColorTransferFunction::Off;
         visuals.override_text_color = Some(p.ink);
         visuals.weak_text_color = Some(p.muted);
         visuals.panel_fill = p.bg;
@@ -733,11 +865,8 @@ impl Theme {
         style.spacing.item_spacing = vec2(s.s2, s.s1);
         style.spacing.button_padding = vec2(s.s2, s.s1);
         style.spacing.window_margin = egui::Margin::same(12);
-        // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
-        style.spacing.scroll.fade.strength = 0.0;
-        // A bar wide enough to see at rest and the full width under the pointer; square, like everything.
-        style.spacing.scroll.floating_width = 5.0;
-        style.spacing.scroll.bar_width = self.sizes.scrollbar;
+        // The scroll bar beside the content, painted by the component; no fade laid over text.
+        style.spacing.scroll = crate::component::scroll::style(self);
         motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),

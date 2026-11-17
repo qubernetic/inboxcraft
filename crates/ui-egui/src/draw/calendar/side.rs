@@ -42,7 +42,7 @@ const DOT: f32 = 8.0;
 
 /// The side panel.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
-    ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]), |ui| {
         mini_month(ui, theme, keymap, calendar, asked);
         calendars(ui, theme, calendar, asked);
         if let Some(event) = calendar.picked() {
@@ -156,7 +156,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s4);
-    ui.separator();
+    crate::draw::paint::rule(ui, p.line);
     ui.add_space(s.s2);
     ui.horizontal(|ui| {
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());

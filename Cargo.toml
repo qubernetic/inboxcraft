@@ -74,6 +74,17 @@ rusqlite = { version = "0.41", default-features = false, features = ["bundled"] 
 # ui-egui and the desktop app only (layer 6): the immediate-mode UI with its bundled fonts (OFL and the Ubuntu Font
 # Licence, see NOTICE). No `links` feature: a link in the UI never opens a browser on its own.
 egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
+# ui-egui and the desktop app only (already in the graph through egui): reads a font face the way egui does, so a face
+# egui cannot read is never handed to it, and a found face counts only where it has an outline egui can draw
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
+# the desktop app only, native only: reads the names and style of the computer's own fonts found for the scripts IBM
+# Plex lacks (pure Rust, no C library). Without its own folder walk (`fontconfig`), which loops over a collection
+# claiming billions of faces, and without `memmap`: files are read, not mapped.
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs"] }
+# the desktop app on Linux and the BSDs only: reads fontconfig's files (bounded, by the app's own code) for the folders
+# the system keeps its fonts in, so a Flatpak finds the host's fonts through its runtime. No DTD entities beyond its
+# own billion-laughs checks; a node limit is set per file.
+roxmltree = { version = "0.20", default-features = false, features = ["std"] }
 # the desktop app only: the window, through OpenGL (glow) on Wayland or X11; no wgpu, no persistence, no links
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "wayland", "x11"] }
 # ui-egui tests only: drives the UI through its AccessKit tree and refuses controls without an accessible name

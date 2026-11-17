@@ -70,8 +70,8 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let harness = on_shortcuts(theme);
         assert!(!harness.get_by_label("Shortcuts, settings page").accesskit_node().is_disabled());
-        harness.get_by_label("Key of Command palette: Ctrl+K");
-        harness.get_by_label("Key of Search mail: Ctrl+F");
+        harness.get_by_label("Key of Command palette: Ctrl K");
+        harness.get_by_label("Key of Search mail: Ctrl F");
         harness.get_by_label("Show sent mail has no key");
         harness.get_by_role_and_label(Role::TextInput, "Find a command");
         harness.get_by_role_and_label(Role::Button, "Reset all keys");
@@ -90,7 +90,7 @@ fn a_press_on_a_key_waits_for_the_next_key_which_becomes_the_action_s() {
     harness.run();
     assert_eq!(harness.state().settings().capturing(), None);
     assert_eq!(harness.state().keymap().shortcut(keymap::SENT), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Num3)));
-    harness.get_by_label("Key of Show sent mail: Ctrl+3");
+    harness.get_by_label("Key of Show sent mail: Ctrl 3");
     assert!(harness.state().settings().is_open(), "the press only gave the key");
     // The new key works at once.
     harness.state_mut().close_settings();
@@ -109,7 +109,7 @@ fn a_key_another_action_had_moves_and_the_page_says_so() {
     assert_eq!(harness.state().keymap().shortcut(keymap::SENT), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::K)));
     assert_eq!(harness.state().keymap().shortcut(keymap::PALETTE), None, "one key runs one action");
     assert!(!harness.state().palette().is_open(), "the press gave a key and opened nothing");
-    harness.get_by_label("Ctrl+K was the key of Command palette; it has none now.");
+    harness.get_by_label("Ctrl K was the key of Command palette; it has none now.");
     harness.get_by_label("Command palette has no key");
     // Giving an action its own key again says nothing.
     press_chip(&mut harness, "Key of Show sent mail");
@@ -152,7 +152,7 @@ fn the_field_narrows_the_list() {
     harness.run();
     assert_eq!(harness.state().settings().find(), "sent");
     harness.get_by_label("Show sent mail has no key");
-    assert!(harness.query_by_label("Key of Command palette: Ctrl+K").is_none());
+    assert!(harness.query_by_label("Key of Command palette: Ctrl K").is_none());
     harness.get_by_role_and_label(Role::TextInput, "Find a command").type_text(" zzz");
     harness.run();
     harness.get_by_label("No command matches “sent zzz”.");
@@ -279,4 +279,26 @@ fn the_rail_and_the_keys_that_show_another_place_forget_the_open_state() {
     harness.state_mut().palette_mut().close();
     harness.run();
     assert_closed_clean(&mut harness);
+}
+
+#[test]
+fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let waiting = "Show sent mail: press a key, or Escape to keep the old one";
+        harness.get_by_label(waiting).focus();
+        harness.run();
+        let rect = harness.get_by_label(waiting).rect();
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let mut strokes = super::tests::strokes_round(harness.output(), cyan, rect);
+        strokes.sort_by(|a, b| a.0.width().total_cmp(&b.0.width()));
+        let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+        assert_eq!(strokes.len(), 2, "{theme:?} the edge and the ring: {strokes:?}");
+        let ((edge, edge_width, _), (ring, ring_width, whole)) = (strokes[0], strokes[1]);
+        assert!(near(edge, rect) && edge_width == 1.0, "{theme:?} the edge is 1 px: {strokes:?} {rect:?}");
+        assert!(near(ring, rect.expand(3.0)) && ring_width == 1.0, "{theme:?} the ring is outside, 2 px clear: {strokes:?} {rect:?}");
+        assert!(whole, "{theme:?} the ring has room: {strokes:?}");
+    }
 }

@@ -561,3 +561,303 @@ fn a_shot_shows_the_outbox_the_countdown_send_later_and_a_bounce() {
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "outbox": "waiting"}"#)).unwrap_err().to_string();
     assert!(error.contains("has no window"), "{error}");
 }
+
+#[test]
+fn a_low_floats_shadow_fades_evenly_along_the_diagonals_from_its_corners() {
+    let shadow = crate::theme::FLOAT_SHADOW;
+    let offset = egui::vec2(0.0, f32::from(shadow.offset[1]));
+    let reach = 1.5 * f32::from(shadow.blur);
+    for (x, y) in [(60.0, 60.0), (60.5, 60.0), (60.0, 60.5), (60.3, 60.7)] {
+        for size in [egui::vec2(48.0, 24.0), egui::vec2(63.0, 24.0), egui::vec2(88.0, 28.0), egui::vec2(237.0, 32.0)] {
+            let rect = Rect::from_min_size(pos2(x, y), size);
+            let mesh = crate::draw::paint::shadow_mesh(rect);
+            let picture = fill(&[ClippedPrimitive { clip_rect: Rect::EVERYTHING, primitive: Primitive::Mesh(mesh) }], &white(), 400, 200, 1.0);
+            let alpha = |px: i64, py: i64| {
+                usize::try_from(px).ok().zip(usize::try_from(py).ok()).and_then(|(px, py)| picture.pixel(px, py)).map_or(0, |c| c.a())
+            };
+            let core = rect.translate(offset);
+            for (corner, (dx, dy)) in
+                [(core.left_top(), (-1, -1)), (core.right_top(), (1, -1)), (core.left_bottom(), (-1, 1)), (core.right_bottom(), (1, 1))]
+            {
+                let (cx, cy) = (corner.x.floor() as i64, corner.y.floor() as i64);
+                let line: Vec<u8> = (0..reach as i64).map(|step| alpha(cx + dx * step, cy + dy * step)).collect();
+                assert!(line[2] > 0, "{rect:?} {corner:?}: shaded at the corner: {line:?}");
+                let steps = line.windows(2).all(|pair| pair[1] <= pair[0]);
+                let dark = line.windows(3).any(|three| three[1] > three[0] && three[1] > three[2]);
+                assert!(steps && !dark, "{rect:?} {corner:?}: not even outward: {line:?}");
+            }
+        }
+    }
+}
+
+/// The picture of a dashed edge round `rect` in `colour` with corners of `radius`, on the light ground.
+fn dashed_picture(rect: Rect, colour: Color32, radius: f32) -> Picture {
+    super::paint(egui::vec2(80.0, 50.0), 1.0, Mode::Light, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius)).unwrap()
+}
+
+/// Whether the design's dashed edge is on at pixel `(x, y)` of a `w` by `h` box: one path clockwise from the top
+/// left corner along the box's edge, dashes 2 on and 2 off, the phase carried round the corners, 1 px inside.
+fn dash_on(x: usize, y: usize, w: usize, h: usize) -> bool {
+    dash_on_scaled(x, y, w, h, 1, 2)
+}
+
+/// [`dash_on`] with a line `thick` pixels thick and dashes and gaps of `dash` pixels: a pixel in a side's band takes
+/// that side's place on the path; where two bands cross at a corner it is on when either side has it on.
+fn dash_on_scaled(x: usize, y: usize, w: usize, h: usize, thick: usize, dash: usize) -> bool {
+    let on = |s: usize| s % (2 * dash) < dash;
+    let mut sides = Vec::new();
+    if y < thick {
+        sides.push(x);
+    }
+    if x >= w - thick {
+        sides.push(w + y);
+    }
+    if y >= h - thick {
+        sides.push(w + h + (w - 1 - x));
+    }
+    if x < thick {
+        sides.push(2 * w + h + (h - 1 - y));
+    }
+    sides.into_iter().any(on)
+}
+
+#[test]
+fn a_dashed_edge_is_2_on_2_off_clockwise_on_whole_pixels() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for (w, h) in [(40, 20), (41, 19), (17, 20), (56, 32)] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w as f32, h as f32));
+        let picture = dashed_picture(rect, colour, 0.0);
+        let ground = picture.pixel(2, 2);
+        let mut wrong = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                let want = if edge && dash_on(x, y, w, h) { Some(colour) } else { ground };
+                let got = picture.pixel(10 + x, 10 + y);
+                if got != want {
+                    wrong.push((x, y, got));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{w} × {h}: {} pixels wrong, e.g. {:?}", wrong.len(), &wrong[..wrong.len().min(6)]);
+        for x in [9, 10 + w] {
+            assert_eq!(picture.pixel(x, 15), ground, "{w} × {h}: nothing outside");
+        }
+    }
+}
+
+/// A dashed edge round `rect` with corners of `radius`, alone on nothing, in an 80 by 50 point picture at `scale`.
+fn dashed_alone(rect: Rect, colour: Color32, radius: f32, scale: f32) -> Picture {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(scale);
+    let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+    let mut output = ctx.run_ui(input, |ui| crate::draw::paint::dashed_round(ui.painter(), rect, colour, radius));
+    output.textures_delta.clear();
+    let primitives = ctx.tessellate(output.shapes, scale);
+    fill(&primitives, &white(), (80.0 * scale).round() as usize, (50.0 * scale).round() as usize, scale)
+}
+
+/// The box `rect` covers in whole pixels at `scale`: its edges rounded to the pixel grid.
+fn pixel_box(rect: Rect, scale: f32) -> (usize, usize, usize, usize) {
+    let px = |points: f32| (points * scale).round() as usize;
+    (px(rect.left()), px(rect.top()), px(rect.right()) - px(rect.left()), px(rect.bottom()) - px(rect.top()))
+}
+
+/// The thickness of a dashed edge at `scale`, in pixels, as a solid 1 point edge weighs: 1, 1, 2, 2 at 1, 1.25, 1.5
+/// and 2; and its dash and gap, 2 points rounded to pixels: 2, 3, 3, 4.
+fn dash_metrics(scale: f32) -> (usize, usize) {
+    (scale.round().max(1.0) as usize, (2.0 * scale).round() as usize)
+}
+
+#[test]
+fn a_dashed_edge_follows_the_scale_on_whole_pixels() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let (thick, dash) = dash_metrics(scale);
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0)] {
+            let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+            let picture = dashed_alone(rect, colour, 0.0, scale);
+            let (left, top, wide, high) = pixel_box(rect, scale);
+            let mut wrong = Vec::new();
+            for y in 0..picture.height {
+                for x in 0..picture.width {
+                    let inside = (left..left + wide).contains(&x) && (top..top + high).contains(&y);
+                    let (bx, by) = (x.wrapping_sub(left), y.wrapping_sub(top));
+                    let edge = inside && (bx < thick || by < thick || bx >= wide - thick || by >= high - thick);
+                    let want = if edge && dash_on_scaled(bx, by, wide, high, thick, dash) { colour } else { Color32::TRANSPARENT };
+                    let got = picture.pixel(x, y);
+                    if got != Some(want) {
+                        wrong.push((bx as isize, by as isize, got));
+                    }
+                }
+            }
+            assert!(
+                wrong.is_empty(),
+                "{w} × {h} at {scale} ({wide} × {high} px): {} pixels wrong, e.g. {:?}",
+                wrong.len(),
+                &wrong[..wrong.len().min(6)]
+            );
+        }
+    }
+}
+
+/// The weight of an edge across column `x` of `picture` from row `from` on: the coverage of its pixels summed, in
+/// pixels.
+fn weight_down(picture: &Picture, x: usize, from: usize) -> f32 {
+    (from..from + 6).map(|y| picture.pixel(x, y).map_or(0.0, |c| f32::from(c.a()) / 255.0)).sum()
+}
+
+#[test]
+fn a_dashed_edge_weighs_what_a_solid_1_point_edge_does_at_every_scale() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(40.0, 20.0));
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(scale);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, colour), egui::StrokeKind::Inside);
+        });
+        output.textures_delta.clear();
+        let primitives = ctx.tessellate(output.shapes, scale);
+        let size = |points: f32| (points * scale).round() as usize;
+        let solid = fill(&primitives, &white(), size(80.0), size(50.0), scale);
+        let dashed = dashed_alone(rect, colour, 0.0, scale);
+        let (left, top, ..) = pixel_box(rect, scale);
+        // The solid edge's weight, rounded to whole pixels as the dashed edge must lie on them.
+        let want = weight_down(&solid, left + size(20.0), top).round();
+        // Across a dash of the top, just right of the left side's band: that column is on at every scale.
+        let got = weight_down(&dashed, left + dash_metrics(scale).0, top);
+        assert_eq!(got, want, "at {scale}: the dashed edge is {got} px, the solid one {want}");
+    }
+}
+
+#[test]
+fn a_dashed_edge_paints_each_pixel_once() {
+    // A translucent colour shows a pixel painted twice: it comes out more opaque than the colour.
+    let colour = Color32::from_rgba_premultiplied(40, 42, 44, 96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0), (17.0, 20.0)] {
+            for radius in [0.0, 2.0] {
+                let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+                let picture = dashed_alone(rect, colour, radius, scale);
+                let mut twice = Vec::new();
+                for y in 0..picture.height {
+                    for x in 0..picture.width {
+                        let alpha = picture.pixel(x, y).map_or(0, |c| c.a());
+                        if alpha > colour.a() {
+                            twice.push((x, y, alpha));
+                        }
+                    }
+                }
+                assert!(twice.is_empty(), "{w} × {h} radius {radius} at {scale}: {} pixels painted twice: {twice:?}", twice.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(17.0, 20.0));
+    let picture = dashed_picture(rect, colour, 2.0);
+    let ground = picture.pixel(2, 2);
+    // The top's straight part starts 2 in, at the path's start: on, on, off, off.
+    let top: Vec<_> = (12..18).map(|x| picture.pixel(x, 10)).collect();
+    assert_eq!(top, vec![Some(colour), Some(colour), ground, ground, Some(colour), Some(colour)], "{top:?}");
+    // The corner pixel itself is only partly covered, as a round corner's is.
+    for (x, y) in [(10, 10), (26, 10), (26, 29), (10, 29)] {
+        assert_ne!(picture.pixel(x, y), Some(colour), "corner {x}, {y}");
+    }
+}
+
+/// The coverage (0 to 1) of each row of a hovered link `name` in `size`, drawn at 10, 10 on nothing: the mean alpha of
+/// the row across the link's text, its first and last two columns left out.
+fn underline_rows(name: &'static str, size: crate::component::button::LinkSize) -> Vec<f32> {
+    let keymap = crate::keymap::Keymap::default();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut width = 0;
+    let picture = super::paint(egui::vec2(200.0, 60.0), 1.0, Mode::Light, |ui| {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(180.0, 40.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let response = crate::component::button::link_with(ui, &theme, &keymap, name, size, true, Some(crate::component::Shown::Hover));
+            width = response.rect.width() as usize;
+        });
+    })
+    .unwrap();
+    let pad = if size == crate::component::button::LinkSize::Line { 4 } else { 0 };
+    (0..30)
+        .map(|row| {
+            let columns: Vec<f32> =
+                (10 + pad + 2..10 + width - pad - 2).map(|x| picture.pixel(x, 10 + row).map_or(0.0, |c| f32::from(c.a()) / 255.0)).collect();
+            columns.iter().sum::<f32>() / columns.len().max(1) as f32
+        })
+        .collect()
+}
+
+#[test]
+fn a_links_underline_is_the_fonts_in_the_rows_the_sheet_draws_it() {
+    use crate::component::button::LinkSize;
+    // The sheet underlines the text as the font does: 0.06 em thick, 0.14 em under the baseline. In the 24 high link
+    // that is row 18 at about 70 %; in the 16 high small link row 13 at about 65 %.
+    for (name, size, row) in [("Show details", LinkSize::Line, 18), ("show all", LinkSize::Small, 13)] {
+        let rows = underline_rows(name, size);
+        let at = format!("{name}: {:?}", rows.iter().enumerate().skip(10).take(12).map(|(r, c)| (r, (c * 100.0).round())).collect::<Vec<_>>());
+        assert!((0.55..=0.85).contains(&rows[row]), "{at}");
+        assert!(rows[row - 1] <= 0.2 && rows[row + 1] <= 0.2, "{at}");
+    }
+}
+
+#[test]
+fn an_icon_sits_in_its_box_as_the_board_draws_it() {
+    // The icon button board: the pin's ink in a 32 box runs over columns 10 to 22 and rows 9 to 21, its bar across
+    // rows 12 and 13 (hinted, the outline snaps up into rows 8 to 21).
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let picture = super::paint(egui::vec2(60.0, 60.0), 1.0, Mode::Light, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        // A 16 px glyph in the middle of a 32 box at 10, 10, as the icon button paints it.
+        crate::iconset::paint(
+            ui.painter(),
+            Rect::from_center_size(pos2(26.0, 26.0), egui::vec2(16.0, 16.0)),
+            crate::iconset::IconId::Pin,
+            theme.palette.ink,
+        );
+    })
+    .unwrap();
+    // Rows and columns with at least a quarter of ink somewhere in them.
+    let inked = |x: usize, y: usize| picture.pixel(x, y).is_some_and(|c| c.a() >= 64);
+    let rows: Vec<usize> = (0..32).filter(|y| (0..32).any(|x| inked(10 + x, 10 + y))).collect();
+    let columns: Vec<usize> = (0..32).filter(|x| (0..32).any(|y| inked(10 + x, 10 + y))).collect();
+    assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
+    assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
+}
+
+#[test]
+fn a_click_presses_before_the_picture_and_what_it_opens_is_drawn() {
+    // A button that paints its ground cyan once it has been pressed.
+    let pressed = std::cell::Cell::new(false);
+    let picture = super::paint_pointed(vec2(120.0, 60.0), 1.0, Mode::Dark, super::Pointer { rest: None, click: Some(pos2(30.0, 20.0)) }, |ui| {
+        let button = ui.put(Rect::from_min_size(pos2(10.0, 10.0), vec2(60.0, 20.0)), egui::Button::new("Press"));
+        if button.clicked() {
+            pressed.set(true);
+        }
+        if pressed.get() {
+            ui.painter().rect_filled(Rect::from_min_size(pos2(80.0, 40.0), vec2(20.0, 10.0)), 0.0, Color32::from_rgb(0, 200, 255));
+        }
+    })
+    .unwrap();
+    assert!(pressed.get(), "the press reached the button");
+    assert_eq!(picture.pixel(90, 45), Some(Color32::from_rgb(0, 200, 255)), "what the press opened is in the picture");
+    assert!(shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "click": [1, 1]}"#)).is_err(), "the gallery has no window");
+}
+
+#[test]
+fn a_pointer_or_a_click_off_any_window_is_refused_by_name() {
+    for key in ["pointer", "click"] {
+        for at in ["[1e39, 10]", "[10, -1e39]", "[100000, 10]", "[-5, 10]"] {
+            let line = format!(r#"{{"out": "x.png", "mode": "dark", "{key}": {at}}}"#);
+            let error = shoot(&shot(&line)).err().map(|error| error.to_string()).unwrap_or_default();
+            assert!(error.contains("x.png") && error.contains(key), "{key} {at}: {error:?}");
+        }
+    }
+}

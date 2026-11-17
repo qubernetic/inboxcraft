@@ -184,7 +184,7 @@ fn the_keys_act_on_the_keyboard_selected_row_and_the_undo_key_undoes() {
     harness.key_press(Key::D);
     harness.run();
     assert!(harness.query_by_label(ODILE_READ).is_none());
-    harness.get_by_label("Ctrl+Z");
+    harness.get_by_label("Ctrl Z");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     harness.get_by_label(ODILE_READ);
@@ -211,7 +211,7 @@ fn keys_typed_into_the_search_field_do_not_act() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
     harness.run();
-    assert!(harness.query_by_label("Ctrl+Z").is_none(), "Undo's key belongs to the field while it has the focus");
+    assert!(harness.query_by_label("Ctrl Z").is_none(), "Undo's key belongs to the field while it has the focus");
     harness.key_press(Key::R);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
@@ -353,7 +353,7 @@ fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
     quick_tooltips(&harness);
     harness.get_by_label(ODILE).hover();
     harness.run();
-    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl+1"), ("Appearance settings", "Ctrl+Comma")] {
+    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl 1"), ("Appearance settings", "Ctrl Comma")] {
         harness.get_by_role_and_label(Role::Button, name).hover();
         harness.run();
         assert!(harness.query_all_by_label(chip).count() >= 1, "{name} shows {chip}");
@@ -513,4 +513,27 @@ fn a_row_without_a_preview_has_no_dot_after_its_subject() {
     assert_eq!(super::list::after_subject(""), "");
     assert_eq!(super::list::after_subject("  \t"), "");
     assert_eq!(super::list::after_subject("Hi all"), "  · Hi all");
+}
+
+#[test]
+fn the_list_counts_the_rows_it_built_for_the_bench() {
+    let harness = harness(false);
+    let built = crate::rows_built(&harness.ctx).unwrap();
+    let all = harness.state().mailbox().messages().len();
+    assert!(built > 0 && built <= all, "{built} of {all}");
+    assert_eq!(crate::rows_built(&harness.ctx), None, "read once");
+}
+
+/// Archive is no example here: the reader's toolbar offers it whenever a message is open.
+#[test]
+fn the_key_of_an_action_only_a_coming_soon_control_offers_runs_nothing() {
+    for normal in [false, true] {
+        let mut harness = still();
+        crate::component::tests::offer_soon(&harness.ctx, crate::keymap::PALETTE, normal);
+        harness.run();
+        assert_eq!(crate::component::soon::blocked(&harness.ctx, crate::keymap::PALETTE), !normal);
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        assert_eq!(harness.state().palette().is_open(), normal, "its key opens the palette, a usable control offering it too: {normal}");
+    }
 }

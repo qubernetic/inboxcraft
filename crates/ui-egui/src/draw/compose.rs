@@ -328,7 +328,9 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
         crate::iconset::paint(ui.painter(), mark, IconId::Caret, p.muted);
-        super::paint::focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
+        }
         Popup::menu(&response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, body * MENU, |ui| {
                 for choice in mailbox.accounts() {
@@ -499,7 +501,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         let rows = (height / theme.fonts.body.line).floor().max(3.0);
         let marks = composer.blanks().to_vec();
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
-        egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
+        crate::component::scroll::show(ui, theme, egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
             // A whole number of rows, fewer than a few hundred: the cast keeps it.
             let edit = TextEdit::multiline(composer.text_mut())
                 .layouter(&mut layouter)

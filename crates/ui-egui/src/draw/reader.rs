@@ -167,16 +167,14 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         if popup::entry(ui, theme, keymap, name, None).clicked() {
             drawn.asked.push(Asked::Details(row.id));
         }
-        ui.add_space(theme.spacing.s1);
-        ui.separator();
+        paint::rule(ui, p.line);
         if row.group.is_some()
             && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
         {
             drawn.asked.push(Asked::Act(row.id, act));
         }
         if row.group.is_some() {
-            ui.add_space(theme.spacing.s1);
-            ui.separator();
+            paint::rule(ui, p.line);
         }
     }
     let (name, full) = if reader.full_width() { (tr!("Leave full width"), false) } else { (tr!("Full width"), true) };
@@ -186,8 +184,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     if popup::entry(ui, theme, keymap, tr!("Close"), None).clicked() {
         drawn.asked.push(Asked::Close);
     }
-    ui.add_space(theme.spacing.s1);
-    ui.separator();
+    paint::rule(ui, p.line);
     crate::component::label(ui, theme.fonts.label, tr!("When a message leaves the list"), p.muted);
     for after in [After::Next, After::Previous, After::List] {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
@@ -501,7 +498,9 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
         let preview = format!("   {}", row.preview);
         let text = super::paint::line(ui, &[(&row.sender, f.body, p.ink), (&preview, f.caption, p.muted)], date_left - s.s3 - left);
         ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
-        super::paint::focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
+        }
     }
     if response.clicked() {
         drawn.asked.push(Asked::Expand(row.id));
@@ -848,7 +847,8 @@ pub(super) fn blocks(
         if quote > 0 && !toggled {
             toggled = true;
             let text = if quotes { tr!("Hide quoted text") } else { tr!("Show quoted text") };
-            if ui.button(theme.fonts.button.rich(text)).clicked() {
+            // A quiet act in the text: a link, with no key of its own.
+            if button::link_sized(ui, theme, &Keymap::empty(), text, button::LinkSize::Small).clicked() {
                 drawn.asked.push(Asked::Quotes(id));
             }
         }
@@ -907,7 +907,7 @@ pub(super) fn blocks(
                     run.show(ui, document, drawn);
                 }
                 Block::Rule { .. } => {
-                    ui.separator();
+                    paint::rule(ui, p.line);
                 }
                 Block::Image { image, .. } => picture(ui, theme, reader, id, image, document, textures, drawn),
                 Block::Table { rows, .. } if depth < MAX_DEPTH => {
@@ -952,7 +952,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
                 } else {
                     tr!("Show quoted text ({count} lines)", count = lines)
                 };
-                if ui.button(label).clicked() {
+                if button::link_sized(ui, theme, &Keymap::empty(), &label, button::LinkSize::Small).clicked() {
                     drawn.asked.push(Asked::Quotes(id));
                 }
                 if shown {
@@ -1227,7 +1227,7 @@ pub(super) fn show(
         egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s2))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.ink));
-                if ui.button(tr!("Dismiss")).clicked() {
+                if button::link_sized(ui, theme, keymap, tr!("Dismiss"), button::LinkSize::Small).clicked() {
                     drawn.asked.push(Asked::Dismiss);
                 }
             });
@@ -1241,7 +1241,7 @@ pub(super) fn show(
             None => toolbar(ui, theme, keymap, mailbox, reader, &mut drawn),
         },
     );
-    ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader"), |ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         Frame::new()
             .inner_margin(Margin {

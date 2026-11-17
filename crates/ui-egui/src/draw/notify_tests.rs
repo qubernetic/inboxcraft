@@ -136,14 +136,14 @@ fn the_page_lists_every_account_with_its_level_and_a_press_changes_it() {
     let mut harness = on_the_page(app());
     harness.get_by_label("Notifications, settings page");
     harness.get_by_label("Personal · mira@example.org");
-    assert_eq!(toggled(&harness, Role::Button, "All for Personal"), Some(Toggled::True));
-    assert_eq!(toggled(&harness, Role::Button, "People only for Studio"), Some(Toggled::False));
-    harness.get_by_role_and_label(Role::Button, "People only for Studio").click();
+    assert_eq!(toggled(&harness, Role::RadioButton, "All for Personal"), Some(Toggled::True));
+    assert_eq!(toggled(&harness, Role::RadioButton, "People only for Studio"), Some(Toggled::False));
+    harness.get_by_role_and_label(Role::RadioButton, "People only for Studio").click();
     harness.run();
     assert_eq!(harness.state().mailbox().notify_level(2), Level::People);
     assert_eq!(harness.state().mailbox().notify_level(1), Level::All);
-    assert_eq!(toggled(&harness, Role::Button, "People only for Studio"), Some(Toggled::True));
-    harness.get_by_role_and_label(Role::Button, "None for Personal").click();
+    assert_eq!(toggled(&harness, Role::RadioButton, "People only for Studio"), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::RadioButton, "None for Personal").click();
     harness.run();
     assert_eq!(harness.state().mailbox().notify_level(1), Level::None);
 }

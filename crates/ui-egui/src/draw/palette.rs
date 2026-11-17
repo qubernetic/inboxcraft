@@ -142,7 +142,7 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
                 ui.label(egui::RichText::new(none).font(theme.fonts.body.id()).color(p.muted));
             } else {
                 let height = theme.boxes().menu_row * ROWS;
-                ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
+                crate::component::scroll::show(ui, theme, ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
                     for (index, action) in matches.iter().enumerate() {
                         if row(ui, theme, keymap, action, index == palette.picked(), can(action)).clicked() {
                             asked = Some(Asked::Run(action.id));

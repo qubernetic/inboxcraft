@@ -28,12 +28,12 @@ fn binding_a_key_replaces_the_old_one_and_takes_it_from_any_other_action() {
 }
 
 #[test]
-fn the_chip_reads_the_key_as_the_platform_writes_it() {
+fn the_chip_writes_the_key_out_in_words() {
     let ctx = Context::default();
     let mut keymap = Keymap::default();
-    assert_eq!(keymap.chip(&ctx, FIND).as_deref(), Some("Ctrl+F"));
+    assert_eq!(keymap.chip(&ctx, FIND).as_deref(), Some("Ctrl F"));
     keymap.bind(FIND, CTRL_K);
-    assert_eq!(keymap.chip(&ctx, FIND).as_deref(), Some("Ctrl+K"));
+    assert_eq!(keymap.chip(&ctx, FIND).as_deref(), Some("Ctrl K"));
     assert_eq!(keymap.chip(&ctx, "mail.nothing"), None);
 }
 
