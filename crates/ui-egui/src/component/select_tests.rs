@@ -447,3 +447,15 @@ fn a_select_whose_choice_the_options_no_longer_hold_opens_on_its_first_row() {
     harness.run();
     assert!(harness.get_by_role_and_label(Role::MenuItemRadio, "Never").is_focused(), "the first row has the keyboard");
 }
+
+#[test]
+fn a_screen_reader_s_click_on_the_field_closes_the_open_choices() {
+    let mut harness = harness(240.0, &OPTIONS);
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat").click_accesskit();
+    harness.run();
+    assert!(harness.state().0, "it opens");
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat").click_accesskit();
+    harness.run();
+    assert_eq!(*harness.state(), (false, 0), "the field closes what it opened, nothing taken");
+    assert!(harness.get_by_role_and_label(Role::ComboBox, "Repeat").is_focused());
+}

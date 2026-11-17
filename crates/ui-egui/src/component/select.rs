@@ -124,6 +124,10 @@ impl<T: Copy + PartialEq> Select<'_, T> {
             *open = !*open;
             if *open {
                 ui.data_mut(|data| data.insert_temp(id.with("opened"), ()));
+            } else {
+                // Closed by the field itself (a screen reader's click): the field keeps the keyboard.
+                response.request_focus();
+                ui.data_mut(|data| data.insert_temp(id.with("refocus"), 3_u8));
             }
         }
         let refocus = id.with("refocus");
