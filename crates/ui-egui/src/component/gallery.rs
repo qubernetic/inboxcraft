@@ -18,7 +18,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
-use super::button::{IconButton, TextButton};
+use super::button::{IconButton, TextButton, Tone};
 use super::checkbox::checkbox;
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
@@ -75,6 +75,7 @@ pub fn keymap() -> Keymap {
         keymap.bind(action, egui::KeyboardShortcut::new(egui::Modifiers::NONE, key));
     }
     keymap.bind("ui.undo", egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z));
+    keymap.bind("mail.send", egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter));
     keymap
 }
 
@@ -283,6 +284,49 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The text button's board: each tone in default, hover, focus, pressed, disabled and unavailable; then with the
+/// arrow, with its key, with an icon, and with a label cut at its widest.
+fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Text button"));
+    let tones = [(tr!("Send"), Tone::Primary), (tr!("Reply all"), Tone::Secondary), (tr!("Delete"), Tone::Danger), (tr!("Discard"), Tone::Plain)];
+    let states = [(tr!("default"), Shown::Rest), (tr!("hover"), Shown::Hover), (tr!("focus"), Shown::Focus), (tr!("pressed"), Shown::Pressed)];
+    for (label, tone) in tones {
+        cells(ui, theme, |ui| {
+            for (state, shown) in states {
+                cell(ui, theme, state, |ui| {
+                    TextButton::new(label).tone(tone).shown(shown).show(ui, theme, keymap);
+                });
+            }
+            cell(ui, theme, tr!("disabled"), |ui| {
+                TextButton::new(label).tone(tone).enabled(false).show(ui, theme, keymap);
+            });
+            cell(ui, theme, tr!("unavailable"), |ui| {
+                TextButton::new(label).tone(tone).unavailable(tr!("Not yet: add a recipient first")).show(ui, theme, keymap);
+            });
+        });
+    }
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("with arrow"), |ui| {
+            TextButton::new(tr!("Continue")).primary().arrow().show(ui, theme, keymap);
+        });
+        cell(ui, theme, tr!("with key"), |ui| {
+            TextButton::new(tr!("Send")).primary().action("mail.send").key(true).show(ui, theme, keymap);
+        });
+        cell(ui, theme, tr!("with icon"), |ui| {
+            TextButton::new(tr!("Attach")).secondary().icon(IconId::Attach).show(ui, theme, keymap);
+        });
+    });
+    cells(ui, theme, |ui| {
+        let long = tr!("Ask for a receipt when this message is read by every recipient");
+        cell(ui, theme, tr!("long label"), |ui| {
+            TextButton::new(long).primary().show(ui, theme, keymap);
+        });
+        cell(ui, theme, tr!("long label"), |ui| {
+            TextButton::new(long).secondary().show(ui, theme, keymap);
+        });
+    });
+}
+
 /// The key chip's board: default, on cyan, capture, none, disabled.
 fn key_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Key chip"));
@@ -305,6 +349,7 @@ fn key_chips(ui: &mut Ui, theme: &Theme) {
 /// The boards' left column.
 fn boards_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     icon_buttons(ui, theme, keymap);
+    text_buttons(ui, theme, keymap);
 }
 
 /// The boards' right column.

@@ -16,9 +16,9 @@ use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, v
 use crate::draw::paint::{self, Ring};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::motion;
 use crate::theme::Theme;
 
+use super::key::{Chip, ChipState};
 use super::{Shown, control_side, lit, soon, tooltip};
 
 /// An icon button.
@@ -137,23 +137,29 @@ impl<'a> IconButton<'a> {
     }
 }
 
-/// How far a disabled text button is faded.
-const DISABLED: f32 = 0.45;
-
 /// How a text button stands out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
-    /// Text only, with a hover fill (Done all, Clear).
-    Quiet,
-    /// Outlined in the field border (Reply all, Cancel).
-    Secondary,
-    /// `on_cyan` on the `cyan` fill: the one thing to do.
+    /// `on_cyan` on the `cyan` fill: the one thing to do on a surface.
     Primary,
-    /// On the error colour: a hard step, such as blocking a sender.
+    /// A 1 px `line` edge (Reply all, Cancel).
+    Secondary,
+    /// A 1 px `minus` edge and `minus` text: a hard step, such as deleting or blocking.
     Danger,
+    /// Text only (Done all, Clear, Discard).
+    Plain,
 }
 
-/// A text button: its name, an optional icon before it, and its tone.
+/// The widest a text button's label gets before it ends with an ellipsis, in points.
+const LABEL_WIDEST: f32 = 240.0;
+
+/// The room left and right inside a text button, in points.
+const PAD: f32 = 12.0;
+
+/// The room between a text button's parts (icon, label, arrow, key), in points.
+const GAP: f32 = 8.0;
+
+/// A text button: its name, an optional icon before it, a trailing arrow, its key, and its tone.
 #[derive(Debug, Clone, Copy)]
 pub struct TextButton<'a> {
     name: &'a str,
@@ -161,13 +167,17 @@ pub struct TextButton<'a> {
     tone: Tone,
     action: Option<&'a str>,
     note: Option<&'a str>,
+    enabled: bool,
+    arrow: bool,
+    key: bool,
+    shown: Option<Shown>,
 }
 
 impl<'a> TextButton<'a> {
-    /// A quiet button called `name`.
+    /// A plain button called `name`.
     #[must_use]
     pub fn new(name: &'a str) -> Self {
-        Self { name, icon: None, tone: Tone::Quiet, action: None, note: None }
+        Self { name, icon: None, tone: Tone::Plain, action: None, note: None, enabled: true, arrow: false, key: false, shown: None }
     }
 
     /// The primary button: on the cyan fill.
@@ -177,17 +187,31 @@ impl<'a> TextButton<'a> {
         self
     }
 
-    /// A secondary button: outlined.
+    /// A secondary button: a 1 px edge.
     #[must_use]
     pub fn secondary(mut self) -> Self {
         self.tone = Tone::Secondary;
         self
     }
 
-    /// The red button of a hard step: filled with the error colour.
+    /// The button of a hard step: the `minus` edge and text, filled under the pointer.
     #[must_use]
     pub fn danger(mut self) -> Self {
         self.tone = Tone::Danger;
+        self
+    }
+
+    /// A plain button: text only.
+    #[must_use]
+    pub fn plain(mut self) -> Self {
+        self.tone = Tone::Plain;
+        self
+    }
+
+    /// The button in `tone`.
+    #[must_use]
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
         self
     }
 
@@ -198,6 +222,22 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// The trailing `→` of an act that leads to another place or a next step (Read mail, Continue, New event); an
+    /// act done in place (Save, Send, Done) has none.
+    #[must_use]
+    pub fn arrow(mut self) -> Self {
+        self.arrow = true;
+        self
+    }
+
+    /// Whether the key of its action is `shown` as a chip in the button, after the name. An action without a key
+    /// shows none.
+    #[must_use]
+    pub fn key(mut self, shown: bool) -> Self {
+        self.key = shown;
+        self
+    }
+
     /// The action it runs, whose key its tooltip shows.
     #[must_use]
     pub fn action(mut self, action: &'a str) -> Self {
@@ -205,77 +245,117 @@ impl<'a> TextButton<'a> {
         self
     }
 
-    /// Cannot be pressed yet: faded, its tooltip saying why (`note`).
+    /// Whether it can be pressed: one that cannot has `muted` text and a dashed edge.
+    #[must_use]
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Cannot be pressed yet: drawn disabled, its tooltip saying why (`note`).
     #[must_use]
     pub fn unavailable(mut self, note: &'a str) -> Self {
         self.note = Some(note);
         self
     }
 
+    /// Drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+    #[must_use]
+    pub fn shown(mut self, shown: Shown) -> Self {
+        self.shown = Some(shown);
+        self
+    }
+
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
-        let s = &theme.spacing;
         let soon = soon::is_soon(ui);
-        let enabled = self.note.is_none() && !soon;
+        let enabled = self.enabled && self.note.is_none() && !soon && ui.is_enabled();
         if let Some(action) = self.action {
             soon::offer(ui, action);
         }
-        let ink = match self.tone {
-            _ if soon => p.muted,
-            Tone::Primary => p.on_cyan,
-            Tone::Danger => p.bg,
-            Tone::Quiet | Tone::Secondary => p.ink,
+        // Coming soon, its key would do nothing: neither the chip nor the tooltip shows it.
+        let action = self.action.filter(|_| !soon);
+        let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
+        let font = theme.fonts.button;
+        // Laid out before the state is known: the colour is the painter's, given when it is painted.
+        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, LABEL_WIDEST);
+        let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
+        // A label cut at its widest takes all of it, as the design's does.
+        let label_width = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+        let icon_side = theme.icon_side();
+        let chip_state = match (enabled, self.tone) {
+            (false, _) => ChipState::Disabled,
+            (true, Tone::Primary) => ChipState::OnCyan,
+            (true, _) => ChipState::Default,
         };
-        let galley = super::galley(ui, self.name, theme.fonts.button, ink);
-        let height = control_side(theme);
-        let icon_side = theme.fonts.button.size * 1.2;
-        let lead = self.icon.map_or(0.0, |_| icon_side + s.s2);
+        let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
+        let parts = [
+            self.icon.map(|_| icon_side),
+            Some(label_width),
+            arrow.as_ref().map(|arrow| arrow.size().x.ceil()),
+            chip.as_ref().map(|chip| chip.size().x),
+        ];
+        let inner = parts.iter().flatten().sum::<f32>() + GAP * (parts.iter().flatten().count().saturating_sub(1) as f32);
         let sense = if enabled { Sense::click() } else { Sense::hover() };
-        let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + lead + s.s3 * 2.0, height), sense);
+        let (rect, response) = ui.allocate_exact_size(vec2(inner + PAD * 2.0, control_side(theme)), sense);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
-        let lit = enabled && (response.hovered() || response.has_focus());
-        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
+        let lit = lit(ui, theme, &response, enabled, self.shown);
         if ui.is_rect_visible(rect) {
-            let mut faded = ui.painter().clone();
-            // Coming soon is drawn faint by colour, never faded.
-            faded.multiply_opacity(if enabled || soon { 1.0 } else { DISABLED });
-            let painter = &faded;
-            let round = 0.0;
-            match self.tone {
-                // Coming soon: no fill, a dashed edge round every button that has a box.
-                Tone::Primary | Tone::Danger | Tone::Secondary if soon => paint::dashed(painter, rect, p.muted),
-                Tone::Primary => {
-                    painter.rect_filled(rect, round, p.cyan);
-                }
-                Tone::Danger => {
-                    painter.rect_filled(rect, round, p.minus);
-                }
-                Tone::Secondary => {
-                    painter.rect_stroke(rect.shrink(0.5), round, Stroke::new(1.0, p.line), StrokeKind::Inside);
-                }
-                Tone::Quiet => {}
+            let painter = ui.painter();
+            // (fill, edge, text) of the tone in this state.
+            let (fill, edge, ink) = match (self.tone, enabled, lit.pressed, lit.hover) {
+                (_, false, ..) => (None, None, p.muted),
+                (Tone::Primary, true, true, _) => (Some(p.cyan_muted), Some(p.cyan_edge), p.cyan_text),
+                (Tone::Primary, true, false, true) => (Some(p.ink), None, p.bg),
+                (Tone::Primary, true, false, false) => (Some(p.cyan), None, p.on_cyan),
+                (Tone::Secondary, true, true, _) => (Some(p.stage), Some(p.ink), p.ink),
+                (Tone::Secondary, true, false, true) => (Some(p.stage), Some(p.muted), p.ink),
+                (Tone::Secondary, true, false, false) => (None, Some(p.line), p.ink),
+                (Tone::Danger, true, true, _) => (Some(p.stage), Some(p.minus), p.minus),
+                (Tone::Danger, true, false, true) => (Some(p.minus), None, p.bg),
+                (Tone::Danger, true, false, false) => (None, Some(p.minus), p.minus),
+                (Tone::Plain, true, true, _) => (Some(p.stage), Some(p.muted), p.ink),
+                (Tone::Plain, true, false, true) => (Some(p.stage), None, p.ink),
+                (Tone::Plain, true, false, false) => (None, None, p.ink),
+            };
+            if let Some(fill) = fill {
+                painter.rect_filled(rect, 0.0, fill);
             }
-            if hover > 0.0 && matches!(self.tone, Tone::Quiet | Tone::Secondary) {
-                painter.rect_filled(rect, round, p.stage);
+            if let Some(edge) = edge {
+                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, edge), StrokeKind::Inside);
             }
-            let left = rect.center().x - (galley.size().x + lead) / 2.0;
+            // Disabled is a dashed `line` edge round a box, never a fade; a plain button has no box to dash.
+            if !enabled && self.tone != Tone::Plain {
+                paint::dashed(painter, rect, p.line);
+            }
+            let mut x = rect.left() + PAD;
             if let Some(icon) = self.icon {
-                let at = egui::Rect::from_center_size(egui::pos2(left + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
+                let at = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - icon_side / 2.0), vec2(icon_side, icon_side));
                 crate::iconset::paint(painter, at, icon, ink);
+                x += icon_side + GAP;
             }
-            painter.galley(egui::pos2(left + lead, rect.center().y - galley.size().y / 2.0), galley, ink);
-            if response.has_focus() {
-                painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+            painter.galley(egui::pos2(x, rect.center().y - label.size().y / 2.0), label, ink);
+            x += label_width + GAP;
+            if let Some(arrow) = arrow {
+                let width = arrow.size().x.ceil();
+                painter.galley(egui::pos2(x, rect.center().y - arrow.size().y / 2.0), arrow, ink);
+                x += width + GAP;
+            }
+            if let Some(chip) = chip {
+                let top = rect.center().y - chip.size().y / 2.0;
+                chip.paint(painter, egui::pos2(x, top.round()));
+            }
+            if lit.focus {
+                paint::focus_ring(painter, theme, rect, Ring::Outside);
             }
         }
-        // Coming soon, its key would do nothing: the tooltip shows none.
-        tooltip::attach_note(response, theme, keymap, self.name, self.action.filter(|_| !soon), self.note)
+        tooltip::attach_note(response, theme, keymap, self.name, action, self.note)
     }
 }
 
-/// A text button called `name` that runs `action`, whose key its tooltip shows: a quiet one with a hover fill, or the
-/// `primary` one on the cyan fill.
+/// A text button called `name` that runs `action`, whose key its tooltip shows: a plain one, or the `primary` one on
+/// the cyan fill.
 pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, primary: bool) -> Response {
     let button = TextButton::new(name);
     let button = if primary { button.primary() } else { button };
@@ -286,7 +366,7 @@ pub fn text(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Opt
     .show(ui, theme, keymap)
 }
 
-/// A text button like [`text`] that cannot be pressed yet: faded, and its tooltip says why (`note`).
+/// A text button like [`text`] that cannot be pressed yet: drawn disabled, and its tooltip says why (`note`).
 pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, primary: bool, note: &str) -> Response {
     let button = TextButton::new(name).unavailable(note);
     if primary { button.primary() } else { button }.show(ui, theme, keymap)

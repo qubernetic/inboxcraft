@@ -59,7 +59,9 @@ fn every_control_of_the_gallery_has_a_name_and_fits_the_page() {
 #[test]
 fn the_gallery_keymap_has_a_key_for_every_action_it_shows() {
     let keymap = keymap();
-    for action in ["mail.done", "mail.archive", "mail.delete", "mail.snooze", "mail.pin", "mail.move", "mail.read", "ui.undo", crate::keymap::FIND] {
+    for action in
+        ["mail.done", "mail.archive", "mail.delete", "mail.snooze", "mail.pin", "mail.move", "mail.read", "mail.send", "ui.undo", crate::keymap::FIND]
+    {
         assert!(keymap.shortcut(action).is_some(), "{action}");
     }
 }

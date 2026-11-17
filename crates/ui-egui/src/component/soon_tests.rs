@@ -80,16 +80,18 @@ fn inside_soon_a_text_button_senses_hover_only_takes_no_focus_and_is_disabled() 
 }
 
 #[test]
-fn inside_soon_a_text_buttons_label_is_muted_and_its_edge_dashed_muted() {
+fn inside_soon_a_text_buttons_label_is_muted_and_its_edge_dashed_as_a_disabled_buttons() {
     let harness = one_button();
     let muted = theme().palette.muted;
+    let line = theme().palette.line;
     let paint = painted(&harness, "Export");
     assert!(
         paint.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, colour, .. } if text == "Export" && *colour == muted)),
         "{paint:#?}"
     );
+    // The text button's sheet: disabled is a dashed `line` edge and `muted` text.
     let dashed =
-        Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, muted)), stroke_kind: egui::StrokeKind::Inside, radius: 0.0, dashed: true };
+        Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, line)), stroke_kind: egui::StrokeKind::Inside, radius: 0.0, dashed: true };
     assert!(paint.rects().any(|shape| shape.inside && shape.look == dashed), "{paint:#?}");
     assert!(
         !paint.rects().any(|shape| matches!(shape.look, Look::Rect { fill, dashed: false, .. } if shape.inside && fill.a() > 0)),
@@ -239,13 +241,16 @@ fn every_text_inside_soon_is_muted() {
 }
 
 #[test]
-fn every_box_inside_soon_has_a_dashed_muted_edge() {
+fn every_box_inside_soon_has_a_dashed_edge() {
     let harness = board();
-    let muted = theme().palette.muted;
-    for label in ["Send", "Reply all", "Block", "Sync contacts", "Personal", "Daily", "Unread", "Flagged", "Repeat", "Scheduled", "coming soon"] {
+    let p = theme().palette;
+    // A button's disabled edge is `line` (its sheet); the other boxes keep the `muted` edge of coming soon.
+    let buttons = ["Send", "Reply all", "Block"];
+    for label in buttons.into_iter().chain(["Sync contacts", "Personal", "Daily", "Unread", "Flagged", "Repeat", "Scheduled", "coming soon"]) {
         let paint = painted(&harness, label);
-        let edge = paint.rects().find(|shape| matches!(shape.look, Look::Rect { stroke: Some((_, colour)), dashed: true, .. } if colour == muted));
-        let edge = edge.unwrap_or_else(|| panic!("{label}: no dashed muted edge: {paint:#?}"));
+        let want = if buttons.contains(&label) { p.line } else { p.muted };
+        let edge = paint.rects().find(|shape| matches!(shape.look, Look::Rect { stroke: Some((_, colour)), dashed: true, .. } if colour == want));
+        let edge = edge.unwrap_or_else(|| panic!("{label}: no dashed edge in its colour: {paint:#?}"));
         assert!(
             !paint.rects().any(
                 |shape| matches!(shape.look, Look::Rect { stroke: Some(_), dashed: false, .. } if shape.rect.contains_rect(edge.rect.shrink(1.0)))
@@ -273,7 +278,8 @@ fn colours(shape: &Shape, found: &mut Vec<Color32>) {
             found.push(text.fallback_color);
             found.extend(text.override_text_color);
             for row in &text.galley.rows {
-                found.extend(row.row.visuals.mesh.vertices.iter().map(|vertex| vertex.color));
+                // The placeholder is never drawn: the painter's colour takes its place.
+                found.extend(row.row.visuals.mesh.vertices.iter().map(|vertex| vertex.color).filter(|colour| *colour != Color32::PLACEHOLDER));
             }
             if text.opacity_factor < 1.0 {
                 found.push(Color32::from_black_alpha(1));

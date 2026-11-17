@@ -5,7 +5,7 @@ use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{IconButton, TextButton};
+use super::{IconButton, TextButton, Tone};
 use crate::component::Shown;
 use crate::component::control_side;
 use crate::component::tests::{Own, bring, builder, drew_icon, icons, own, painted, staged, theme};
@@ -98,7 +98,9 @@ fn text_colours(output: &egui::FullOutput) -> Vec<(String, egui::Color32)> {
             egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
             egui::Shape::Text(text) => {
                 let colour = text.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next();
-                out.push((text.galley.text().to_owned(), colour.unwrap_or(text.fallback_color)));
+                // A galley laid out in the placeholder colour takes the painter's colour.
+                let colour = colour.filter(|colour| *colour != egui::Color32::PLACEHOLDER);
+                out.push((text.galley.text().to_owned(), text.override_text_color.or(colour).unwrap_or(text.fallback_color)));
             }
             _ => {}
         }
@@ -233,14 +235,14 @@ fn an_unavailable_text_button_takes_no_press() {
 }
 
 #[test]
-fn a_danger_button_is_filled_with_the_error_colour_and_reads_on_it() {
+fn a_danger_button_has_the_minus_edge_and_text() {
     let theme = theme();
     let mut harness = builder().build_ui(move |ui| {
         TextButton::new("Block").danger().show(ui, &theme, &Keymap::default());
     });
     harness.run();
     let colours = text_colours(harness.output());
-    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.bg));
+    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.minus));
     harness.get_by_role_and_label(Role::Button, "Block");
 }
 
@@ -345,4 +347,177 @@ fn an_icon_button_held_down_by_enter_is_pressed() {
     let look = own(&painted(&harness, "Pin"), rect);
     assert_eq!(look.edge, Some((1.0, theme.palette.muted, false)), "{look:#?}");
     assert_eq!(look.fill, Some(theme.palette.stage), "{look:#?}");
+}
+
+/// The states of the text button's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextState {
+    Default,
+    Hover,
+    Focus,
+    Pressed,
+    Disabled,
+    Unavailable,
+}
+
+const TEXT_STATES: [TextState; 6] =
+    [TextState::Default, TextState::Hover, TextState::Focus, TextState::Pressed, TextState::Disabled, TextState::Unavailable];
+
+/// The four tones with the sheet's label of each and its width there.
+const TONES: [(Tone, &str, f32); 4] =
+    [(Tone::Primary, "Send", 56.0), (Tone::Secondary, "Reply all", 95.0), (Tone::Danger, "Delete", 71.0), (Tone::Plain, "Discard", 79.0)];
+
+/// A keymap with Ctrl Enter for sending.
+fn send_keys() -> Keymap {
+    let mut keymap = Keymap::default();
+    keymap.bind("mail.send", egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter));
+    keymap
+}
+
+/// `button` (labelled `label`) on a `surface` stage in `mode` at `scale`, brought into `shown`: its rect and its look.
+fn text_button_in(
+    mode: Mode,
+    scale: TextScale,
+    label: &'static str,
+    shown: Shown,
+    button: impl Fn() -> TextButton<'static> + 'static,
+) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(400.0, 120.0),
+        move |ui, theme| {
+            button().show(ui, theme, &send_keys());
+        },
+    );
+    bring(&mut harness, label, shown);
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+/// The text button `label` in `tone` and `state`.
+fn toned(label: &'static str, tone: Tone, state: TextState) -> impl Fn() -> TextButton<'static> + 'static {
+    move || {
+        let button = TextButton::new(label);
+        let button = match tone {
+            Tone::Primary => button.primary(),
+            Tone::Secondary => button.secondary(),
+            Tone::Danger => button.danger(),
+            Tone::Plain => button.plain(),
+        };
+        match state {
+            TextState::Disabled => button.enabled(false),
+            TextState::Unavailable => button.unavailable("Not yet: add a recipient first"),
+            _ => button,
+        }
+    }
+}
+
+fn shown_of(state: TextState) -> Shown {
+    match state {
+        TextState::Hover => Shown::Hover,
+        TextState::Focus => Shown::Focus,
+        TextState::Pressed => Shown::Pressed,
+        _ => Shown::Rest,
+    }
+}
+
+/// The label's text in `look`: its colour, family and size.
+fn label_of(look: &Own, label: &str) -> Option<(egui::Color32, String, f32)> {
+    look.texts.iter().find(|(text, ..)| text == label).map(|(_, colour, family, size)| (*colour, family.clone(), *size))
+}
+
+#[test]
+fn a_text_button_looks_as_its_sheet_says_in_every_tone_and_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let font = theme.fonts.button;
+        for (tone, label, width) in TONES {
+            for state in TEXT_STATES {
+                let (rect, look) = text_button_in(mode, TextScale::default(), label, shown_of(state), toned(label, tone, state));
+                let at = format!("{mode:?} {tone:?} {state:?}: {look:#?}");
+                assert!((rect.width() - width).abs() <= 1.0 && (rect.height() - 32.0).abs() < 0.01, "{at} {rect:?}");
+                let dashed = (1.0, p.line, true);
+                let (fill, edge, ink) = match (tone, state) {
+                    (Tone::Plain, TextState::Disabled | TextState::Unavailable) => (None, None, p.muted),
+                    (_, TextState::Disabled | TextState::Unavailable) => (None, Some(dashed), p.muted),
+                    (Tone::Primary, TextState::Default | TextState::Focus) => (Some(p.cyan), None, p.on_cyan),
+                    (Tone::Primary, TextState::Hover) => (Some(p.ink), None, p.bg),
+                    (Tone::Primary, TextState::Pressed) => (Some(p.cyan_muted), Some((1.0, p.cyan_edge, false)), p.cyan_text),
+                    (Tone::Secondary, TextState::Default | TextState::Focus) => (None, Some((1.0, p.line, false)), p.ink),
+                    (Tone::Secondary, TextState::Hover) => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                    (Tone::Secondary, TextState::Pressed) => (Some(p.stage), Some((1.0, p.ink, false)), p.ink),
+                    (Tone::Danger, TextState::Default | TextState::Focus) => (None, Some((1.0, p.minus, false)), p.minus),
+                    (Tone::Danger, TextState::Hover) => (Some(p.minus), None, p.bg),
+                    (Tone::Danger, TextState::Pressed) => (Some(p.stage), Some((1.0, p.minus, false)), p.minus),
+                    (Tone::Plain, TextState::Default | TextState::Focus) => (None, None, p.ink),
+                    (Tone::Plain, TextState::Hover) => (Some(p.stage), None, p.ink),
+                    (Tone::Plain, TextState::Pressed) => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                };
+                assert_eq!(look.fill, fill, "{at}");
+                assert_eq!(look.edge, edge, "{at}");
+                let ring = (state == TextState::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+                assert_eq!(look.ring, ring, "{at}");
+                assert_eq!(label_of(&look, label), Some((ink, font.id().family.to_string(), font.size)), "{at}");
+                assert_eq!(look.texts.len(), 1, "{at}");
+                assert!(!look.overflows, "{at}");
+                assert!(look.radius <= 0.0, "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_text_button_with_an_arrow_a_key_an_icon_or_a_long_label_looks_as_its_sheet_says() {
+    const LONG: &str = "Ask for a receipt when this message is read by every recipient";
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let rest = |label, button: fn() -> TextButton<'static>| text_button_in(mode, TextScale::default(), label, Shown::Rest, button);
+        let (rect, look) = rest("Continue", || TextButton::new("Continue").primary().arrow());
+        assert!((rect.width() - 103.0).abs() <= 1.0, "{rect:?}");
+        assert_eq!(
+            look.texts.iter().map(|(text, colour, ..)| (text.as_str(), *colour)).collect::<Vec<_>>(),
+            [("Continue", p.on_cyan), ("→", p.on_cyan)]
+        );
+        let (rect, look) = rest("Send", || TextButton::new("Send").primary().action("mail.send").key(true));
+        assert!((rect.width() - 140.0).abs() <= 1.0, "{rect:?}");
+        assert_eq!(look.fill, Some(p.cyan), "{look:#?}");
+        assert!(look.texts.iter().any(|(text, colour, ..)| text == "Ctrl Enter" && *colour == p.on_cyan), "{look:#?}");
+        assert!(look.radius <= 2.0, "only the chip is rounded: {look:#?}");
+        let (rect, look) = rest("Attach", || TextButton::new("Attach").secondary().icon(IconId::Attach));
+        assert!((rect.width() - 95.0).abs() <= 1.0, "{rect:?}");
+        assert!(look.texts.iter().any(|(_, colour, family, size)| *colour == p.ink && *family == icons() && *size == 16.0), "{look:#?}");
+        for button in [(|| TextButton::new(LONG).primary()) as fn() -> TextButton<'static>, || TextButton::new(LONG).secondary()] {
+            let (rect, look) = rest(LONG, button);
+            assert!((rect.width() - 264.0).abs() <= 1.0, "{rect:?}");
+            assert!(!look.overflows, "{look:#?}");
+        }
+    }
+}
+
+#[test]
+fn a_text_button_at_130_percent_is_the_scaled_height() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    for (tone, label, _) in TONES {
+        for state in TEXT_STATES {
+            let (rect, _) = text_button_in(Mode::Light, TextScale::ALL[4], label, shown_of(state), toned(label, tone, state));
+            assert!((rect.height() - theme.boxes().button).abs() < 0.01, "{tone:?} {state:?} {rect:?}");
+        }
+    }
+}
+
+#[test]
+fn a_pressed_button_differs_from_a_hovered_one() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (tone, label, _) in TONES {
+            let (_, hovered) = text_button_in(mode, TextScale::default(), label, Shown::Hover, toned(label, tone, TextState::Hover));
+            let (_, pressed) = text_button_in(mode, TextScale::default(), label, Shown::Pressed, toned(label, tone, TextState::Pressed));
+            assert_ne!(hovered, pressed, "{mode:?} {tone:?}");
+        }
+        let (_, hovered) = icon_button_in(mode, TextScale::default(), IconState::Hover);
+        let (_, pressed) = icon_button_in(mode, TextScale::default(), IconState::Pressed);
+        assert_ne!(hovered, pressed, "{mode:?} icon button");
+    }
 }
