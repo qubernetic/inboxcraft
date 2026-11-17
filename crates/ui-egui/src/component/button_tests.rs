@@ -150,7 +150,7 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_is_on_cyan
     crate::component::tests::quick_tooltips(&harness.ctx);
     harness.get_by_role_and_label(Role::Button, "Review").hover();
     harness.run();
-    harness.get_by_label("Ctrl+F");
+    harness.get_by_label("Ctrl F");
 }
 
 #[test]

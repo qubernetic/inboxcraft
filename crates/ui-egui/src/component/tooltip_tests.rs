@@ -28,10 +28,10 @@ fn harness() -> Harness<'static, Keymap> {
 #[test]
 fn hovering_a_button_shows_its_name_and_key() {
     let mut harness = harness();
-    assert!(harness.query_by_label("Ctrl+F").is_none(), "no tooltip before the hover");
+    assert!(harness.query_by_label("Ctrl F").is_none(), "no tooltip before the hover");
     harness.get_by_label("Search").hover();
     harness.run();
-    harness.get_by_label("Ctrl+F");
+    harness.get_by_label("Ctrl F");
     assert_eq!(harness.query_all_by_label("Search").count(), 2, "the button and its tooltip's name");
 }
 
@@ -40,13 +40,14 @@ fn a_changed_key_shows_in_its_tooltip_at_once() {
     let mut harness = harness();
     harness.get_by_label("Search").hover();
     harness.run();
-    harness.get_by_label("Ctrl+F");
+    harness.get_by_label("Ctrl F");
     let changed = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::K);
-    let written = harness.ctx.format_shortcut(&changed);
+    let written = crate::component::key::key_words(&changed);
+    assert_eq!(written, "Ctrl Shift K");
     harness.state_mut().bind(FIND, changed);
     harness.step();
     harness.get_by_label(&written);
-    assert!(harness.query_by_label("Ctrl+F").is_none());
+    assert!(harness.query_by_label("Ctrl F").is_none());
     harness.state_mut().unbind(FIND);
     harness.step();
     assert!(harness.query_by_label(&written).is_none(), "an action without a key shows no chip");
@@ -74,5 +75,5 @@ fn the_bubble_alone_names_the_action_and_its_key() {
     harness.get_by_label("Search");
     harness.get_by_label("Flag");
     harness.get_by_label("Find");
-    assert_eq!(harness.query_all_by_label("Ctrl+F").count(), 1);
+    assert_eq!(harness.query_all_by_label("Ctrl F").count(), 1);
 }

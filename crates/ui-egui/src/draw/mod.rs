@@ -613,8 +613,9 @@ impl InboxApp {
             Some(Captured::Key(shortcut)) => {
                 let had = self.keymap.action_of(shortcut).filter(|other| *other != waiting).and_then(keymap::action);
                 self.keymap.bind(waiting, shortcut);
-                let note =
-                    had.map(|had| tr!("{key} was the key of {action}; it has none now.", key = ctx.format_shortcut(&shortcut), action = had.name));
+                let note = had.map(|had| {
+                    tr!("{key} was the key of {action}; it has none now.", key = crate::component::key::key_words(&shortcut), action = had.name)
+                });
                 self.settings.captured(note);
             }
             None => {}

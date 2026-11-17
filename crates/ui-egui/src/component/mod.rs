@@ -12,6 +12,7 @@
 //! - [`select`]: a closed field with the choice in it and a popup of the choices.
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
+//! - [`key`]: the chip of a key, its words read from a shortcut.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
@@ -31,6 +32,7 @@ pub mod checkbox;
 pub mod field;
 pub mod gallery;
 pub mod hover;
+pub mod key;
 pub mod pill;
 pub mod popup;
 pub mod segmented;

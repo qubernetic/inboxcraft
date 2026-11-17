@@ -14,22 +14,6 @@ use crate::theme::Theme;
 
 use super::galley;
 
-/// The chip of a key (`Ctrl+F`): the `key` style in a square frame of the design's fixed chip height, the text centred.
-pub fn key_chip(ui: &mut Ui, theme: &Theme, key: &str) -> Response {
-    let p = &theme.palette;
-    let s = &theme.spacing;
-    let text = galley(ui, key, theme.fonts.key, p.ink);
-    let size = egui::vec2(text.size().x + s.s1 * 3.0, theme.boxes().chip);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, key));
-    if ui.is_rect_visible(rect) {
-        ui.painter().rect_filled(rect, 0.0, p.panel);
-        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, p.line), egui::StrokeKind::Inside);
-        ui.painter().galley(rect.center() - text.size() / 2.0, text, p.ink);
-    }
-    response
-}
-
 /// The bubble's content: the name of the action and the chip of its key from `keymap`, on a float drawn under them.
 pub fn bubble(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>) {
     noted(ui, theme, keymap, name, action, None);
@@ -46,7 +30,7 @@ fn noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option
             let text = galley(ui, name, theme.fonts.body, theme.palette.ink);
             ui.label(text);
             if let Some(chip) = chip {
-                key_chip(ui, theme, &chip);
+                super::key::key_chip(ui, theme, &chip, super::key::ChipState::Default);
             }
         });
         if let Some(note) = note {

@@ -288,10 +288,10 @@ impl Keymap {
         self.bindings.remove(action);
     }
 
-    /// The key of `action` as the platform writes it (`Ctrl+F`, `⌘F`), for a key chip.
+    /// The key of `action` written out in words for a key chip (`Ctrl F`, `Del`, `↓`); `None` when it has none.
     #[must_use]
-    pub fn chip(&self, ctx: &Context, action: &str) -> Option<String> {
-        self.shortcut(action).map(|shortcut| ctx.format_shortcut(&shortcut))
+    pub fn chip(&self, _ctx: &Context, action: &str) -> Option<String> {
+        self.shortcut(action).map(|shortcut| crate::component::key::key_words(&shortcut))
     }
 
     /// Whether the key of `action` was pressed in this frame; the press is taken, so nothing else sees it.

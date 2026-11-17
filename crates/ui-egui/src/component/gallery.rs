@@ -21,6 +21,7 @@ use super::Shown;
 use super::button::{IconButton, TextButton};
 use super::checkbox::checkbox;
 use super::hover::{self, Action};
+use super::key::{ChipState, key_chip};
 use super::segmented::segmented;
 use super::select::Select;
 use super::soon::{soon, soon_tag};
@@ -282,13 +283,34 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The key chip's board: default, on cyan, capture, none, disabled.
+fn key_chips(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Key chip"));
+    cells(ui, theme, |ui| {
+        let chips = [
+            (tr!("default"), "A", ChipState::Default),
+            (tr!("on cyan"), "Ctrl Enter", ChipState::OnCyan),
+            (tr!("capture"), tr!("press the keys"), ChipState::Capture),
+            (tr!("none"), tr!("none"), ChipState::Disabled),
+            (tr!("disabled"), "H", ChipState::Disabled),
+        ];
+        for (state, key, chip) in chips {
+            cell(ui, theme, state, |ui| {
+                key_chip(ui, theme, key, chip);
+            });
+        }
+    });
+}
+
 /// The boards' left column.
 fn boards_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     icon_buttons(ui, theme, keymap);
 }
 
 /// The boards' right column.
-fn boards_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn boards_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    key_chips(ui, theme);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {

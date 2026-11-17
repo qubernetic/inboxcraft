@@ -184,7 +184,7 @@ fn the_keys_act_on_the_keyboard_selected_row_and_the_undo_key_undoes() {
     harness.key_press(Key::D);
     harness.run();
     assert!(harness.query_by_label(ODILE_READ).is_none());
-    harness.get_by_label("Ctrl+Z");
+    harness.get_by_label("Ctrl Z");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     harness.get_by_label(ODILE_READ);
@@ -211,7 +211,7 @@ fn keys_typed_into_the_search_field_do_not_act() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
     harness.run();
-    assert!(harness.query_by_label("Ctrl+Z").is_none(), "Undo's key belongs to the field while it has the focus");
+    assert!(harness.query_by_label("Ctrl Z").is_none(), "Undo's key belongs to the field while it has the focus");
     harness.key_press(Key::R);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
@@ -353,7 +353,7 @@ fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
     quick_tooltips(&harness);
     harness.get_by_label(ODILE).hover();
     harness.run();
-    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl+1"), ("Appearance settings", "Ctrl+Comma")] {
+    for (name, chip) in [("Done", "D"), ("Mark as read", "R"), ("Mail", "Ctrl 1"), ("Appearance settings", "Ctrl Comma")] {
         harness.get_by_role_and_label(Role::Button, name).hover();
         harness.run();
         assert!(harness.query_all_by_label(chip).count() >= 1, "{name} shows {chip}");

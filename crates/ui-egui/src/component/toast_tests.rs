@@ -36,7 +36,7 @@ fn a_toast_says_what_happened_and_offers_undo_with_its_key() {
     let harness = harness(true);
     harness.get_by_label("Marked as done");
     harness.get_by_label("Undo");
-    harness.get_by_label("Ctrl+Z");
+    harness.get_by_label("Ctrl Z");
     assert!(harness.get_by_label("Marked as done").rect().bottom() <= 400.5);
 }
 

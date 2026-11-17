@@ -35,8 +35,8 @@ fn the_gallery_shows_every_component_in_both_modes() {
             }
             assert!(harness.query_by_label_contains("This morning").is_none(), "a preset behind is hidden");
             harness.get_by_role_and_label(Role::Switch, "Notify me when it comes back");
-            harness.get_by_label("Ctrl+F");
-            harness.get_by_label("Ctrl+Z");
+            harness.get_by_label("Ctrl F");
+            harness.get_by_label("Ctrl Z");
             for (name, _) in sample::people() {
                 assert!(harness.get_all_by_label(name).any(|node| node.accesskit_node().role() == Role::Image), "{name}");
             }
