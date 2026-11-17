@@ -1705,19 +1705,6 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
-    "url": "https://static.crates.io/crates/fontconfig-parser/fontconfig-parser-0.5.8.crate",
-    "sha256": "bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646",
-    "dest": "cargo/vendor/fontconfig-parser-0.5.8"
-  },
-  {
-    "type": "inline",
-    "contents": "{\"package\": \"bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646\", \"files\": {}}",
-    "dest": "cargo/vendor/fontconfig-parser-0.5.8",
-    "dest-filename": ".cargo-checksum.json"
-  },
-  {
-    "type": "archive",
-    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/fontdb/fontdb-0.24.0.crate",
     "sha256": "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f",
     "dest": "cargo/vendor/fontdb-0.24.0"

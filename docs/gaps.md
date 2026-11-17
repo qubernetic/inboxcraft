@@ -358,8 +358,10 @@ time from the code as it is, not measured.
   and others) and emoji are drawn with fonts found on the computer, searched at start on a worker thread and placed
   behind Plex; where the computer has none for a script, they show as boxes (egui's emoji fonts are not built in).
   Colour emoji fonts are not used (egui draws outlines only), so emoji need a font with outlines, such as Noto Emoji.
-  Only one sign per script is looked for, so a found font may still lack rarer signs of its script. This is not
-  checked on a real desktop or in the Flatpak yet (#233). Right-to-left text is laid out left to right (egui has no
+  Only one sign per script is looked for, so a found font may still lack rarer signs of its script. The folders
+  come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
+  fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,
+  which is not checked inside a Flatpak yet, nor on a real desktop (#233). Right-to-left text is laid out left to right (egui has no
   bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the

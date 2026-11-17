@@ -23,7 +23,7 @@ serde_json = { workspace = true }
 skrifa = { workspace = true }
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
-fontconfig-parser = { workspace = true }
+roxmltree = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { workspace = true }

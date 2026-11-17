@@ -605,30 +605,39 @@ pub const FALLBACK_PROBES: [(&str, char); 8] =
 
 /// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
 /// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
-/// (egui panics on one) and one whose name is taken are left out.
+/// (egui panics on one) and one whose name is taken are left out. Copies the bytes: [`font_definitions_from`] takes
+/// them.
 #[must_use]
 pub fn font_definitions_with(fallbacks: &[Fallback]) -> egui::FontDefinitions {
+    font_definitions_from(fallbacks.to_vec())
+}
+
+/// [`font_definitions_with`] `fallbacks`, whose bytes move into egui's font data without a copy.
+#[must_use]
+pub fn font_definitions_from(fallbacks: Vec<Fallback>) -> egui::FontDefinitions {
     let mut definitions = font_definitions();
     let icon = FontFamily::Name(ICON.into());
-    for fallback in fallbacks {
-        if definitions.font_data.contains_key(&fallback.name) || !readable(&fallback.data, fallback.index) {
+    for Fallback { name, data, index } in fallbacks {
+        if definitions.font_data.contains_key(&name) || !readable(&data, index) {
             continue;
         }
-        let data = egui::FontData::from_blob(std::sync::Arc::new(fallback.data.clone()), fallback.index);
-        definitions.font_data.insert(fallback.name.clone(), std::sync::Arc::new(data));
+        definitions.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_blob(std::sync::Arc::new(data), index)));
         for (family, fonts) in &mut definitions.families {
             if *family != icon {
-                fonts.push(fallback.name.clone());
+                fonts.push(name.clone());
             }
         }
     }
     definitions
 }
 
-/// Installs [`font_definitions_with`] `fallbacks` in `ctx` and asks for one frame to draw with them.
-pub fn install_fallbacks(ctx: &egui::Context, fallbacks: &[Fallback]) {
-    ctx.set_fonts(font_definitions_with(fallbacks));
+/// Installs [`font_definitions_from`] `fallbacks` in `ctx`, asks for one frame to draw with them, and gives the
+/// definitions back for another window: they share the bytes.
+pub fn install_fallbacks(ctx: &egui::Context, fallbacks: Vec<Fallback>) -> egui::FontDefinitions {
+    let definitions = font_definitions_from(fallbacks);
+    ctx.set_fonts(definitions.clone());
     ctx.request_repaint();
+    definitions
 }
 
 /// Whether egui can read `data` as a font with a face at `index`: the check egui makes before it panics.

@@ -565,7 +565,7 @@ fn a_fallback_that_is_not_a_font_is_skipped() {
         assert!(definitions.families.values().all(|fonts| !fonts.iter().any(|font| font == name)), "{name}");
     }
     let ctx = egui::Context::default();
-    install_fallbacks(&ctx, &fallbacks);
+    let _ = install_fallbacks(&ctx, fallbacks.to_vec());
     ctx.run_ui(egui::RawInput::default(), |ui| {
         ui.label("日本語 🙂");
     })
@@ -595,11 +595,15 @@ fn no_fallbacks_is_today_s_definitions() {
 #[test]
 fn install_fallbacks_puts_them_into_the_context_and_asks_for_one_repaint() {
     let ctx = fonts_ctx();
-    install_fallbacks(&ctx, &[plex_as("system: Fake")]);
+    let fallback = plex_as("system: Fake");
+    let bytes = fallback.data.as_ptr();
+    let definitions = install_fallbacks(&ctx, vec![fallback]);
     assert!(ctx.has_requested_repaint(), "the new fonts are drawn without waiting for input");
+    assert_eq!(definitions.font_data["system: Fake"].bytes().as_ptr(), bytes, "the bytes move in, not copied");
     ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
     assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.last()).map(String::as_str), Some("system: Fake"));
+    assert_eq!(ctx.fonts(|fonts| fonts.definitions().font_data["system: Fake"].bytes().as_ptr()), bytes, "nor in the context");
 }
 
 #[test]
