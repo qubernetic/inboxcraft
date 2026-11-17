@@ -183,9 +183,9 @@ impl Cap {
 fn bytes(most: usize) -> String {
     const KIB: usize = 1 << 10;
     const MIB: usize = 1 << 20;
-    if most >= MIB && most % MIB == 0 {
+    if most >= MIB && most.is_multiple_of(MIB) {
         format!("{} MiB", most / MIB)
-    } else if most >= KIB && most % KIB == 0 {
+    } else if most >= KIB && most.is_multiple_of(KIB) {
         format!("{} KiB", most / KIB)
     } else {
         format!("{most} bytes")
