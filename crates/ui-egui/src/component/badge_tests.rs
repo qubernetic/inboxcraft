@@ -144,3 +144,38 @@ fn the_count_beside_a_row_is_the_sheets_count_badge() {
         assert_eq!(lefts[2], 200.0, "{mode:?} a count of 0 is not shown: {lefts:?}");
     }
 }
+
+#[test]
+fn the_count_beside_a_row_stands_on_whole_pixels_and_ends_at_the_snapped_right() {
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        for n in [7_u64, 1204, 12_345] {
+            let theme = Theme::new(Mode::Light, TextScale::default());
+            let fill = theme.palette.cyan_muted;
+            let (right, centre) = (200.3, 40.7);
+            let mut harness = builder().with_pixels_per_point(ppp).build_ui_state(
+                move |ui, left: &mut f32| {
+                    *left = count(ui, &theme, n, right, centre);
+                },
+                0.0,
+            );
+            harness.run();
+            let left = *harness.state();
+            let rects: Vec<egui::Rect> = harness
+                .output()
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                    _ => None,
+                })
+                .collect();
+            let at = format!("{ppp} {n}: {rects:?}");
+            assert_eq!(rects.len(), 1, "{at}");
+            let rect = rects[0];
+            let whole = |at: f32| ((at * ppp) - (at * ppp).round()).abs() < 1e-3;
+            assert!(whole(rect.left()) && whole(rect.right()) && whole(rect.top()) && whole(rect.bottom()), "whole pixels: {at}");
+            assert!(same(rect.right(), (right * ppp).round() / ppp), "ends at the snapped right: {at}");
+            assert!(same(rect.left(), left), "returns its left edge: {at} {left}");
+        }
+    }
+}

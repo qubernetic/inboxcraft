@@ -95,11 +95,16 @@ pub fn count_width(ui: &Ui, theme: &Theme, count: u64) -> f32 {
     lay(ui, theme, count).map_or(0.0, |(size, _)| size.x)
 }
 
-/// Paints a count badge (the sheet's count) with `count` in it, its right edge at `right`, centred on `centre_y`, on
-/// whole points; returns its left edge. A count of 0 is not shown: its left edge is `right`.
+/// Paints a count badge (the sheet's count) with `count` in it, its right edge at `right` (on the nearest pixel
+/// boundary), centred on `centre_y`, every edge on whole physical pixels; returns its left edge. A count of 0 is not
+/// shown: its left edge is `right`.
 pub fn count(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> f32 {
     let Some((size, text)) = lay(ui, theme, count) else { return right };
-    let rect = Rect::from_min_size(pos2((right - size.x).round(), (centre_y - size.y / 2.0).round()), size);
+    let ppp = ui.ctx().pixels_per_point();
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let pixels = |at: f32| (at * ppp).round();
+    let (end, top) = (pixels(right), pixels(centre_y - size.y / 2.0));
+    let rect = Rect::from_min_max(pos2((end - pixels(size.x)) / ppp, top / ppp), pos2(end / ppp, (top + pixels(size.y)) / ppp));
     paint(ui, theme, rect, text, BadgeKind::Count);
     rect.left()
 }
