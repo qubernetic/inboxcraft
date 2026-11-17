@@ -65,19 +65,23 @@ fn below(z: f32) -> f32 {
 fn shadow_cuts(low: f32, high: f32, reach: f32) -> Vec<f32> {
     let (first, last) = (low - reach, high + reach);
     let mut cuts = vec![first, last];
+    // A fixed count of steps per edge, never a sum that stops growing far from the origin.
+    let steps = (2.0 * reach / SHADOW_STEP).floor().clamp(0.0, 64.0) as usize;
     for edge in [low, high] {
-        let mut at = edge - reach;
-        while at <= edge + reach {
+        for step in 0..=steps {
+            let at = edge - reach + step as f32 * SHADOW_STEP;
             if at > first && at < last {
                 cuts.push(at);
             }
-            at += SHADOW_STEP;
         }
     }
     cuts.sort_by(f32::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 0.25);
     cuts
 }
+
+/// The farthest from the origin a [`shadow_mesh`]'s box may lie, in points.
+const SHADOW_FARTHEST: f32 = 1.0e7;
 
 /// The distance between the cuts of a [`shadow_mesh`] across a blurred edge, in points.
 const SHADOW_STEP: f32 = 4.0;
@@ -92,16 +96,19 @@ pub(crate) fn shadow_mesh(rect: Rect) -> egui::epaint::Mesh {
     let reach = 3.0 * sigma;
     let core = rect.translate(vec2(f32::from(shadow.offset[0]), f32::from(shadow.offset[1]))).expand(f32::from(shadow.spread));
     let mut mesh = egui::epaint::Mesh::default();
-    if !core.is_finite() || sigma <= 0.0 {
+    // Nothing so far off is ever on a screen: a box past this, or not a number, casts no shadow.
+    if !core.is_finite() || [core.min.x, core.min.y, core.max.x, core.max.y].iter().any(|at| at.abs() > SHADOW_FARTHEST) || sigma <= 0.0 {
         return mesh;
     }
     let shade = |at: f32, low: f32, high: f32| (below((at - low) / sigma) - below((at - high) / sigma)).clamp(0.0, 1.0);
     let (xs, ys) = (shadow_cuts(core.left(), core.right(), reach), shadow_cuts(core.top(), core.bottom(), reach));
-    let strength = f32::from(shadow.color.a());
+    let token = shadow.color.to_array().map(f32::from);
     for y in &ys {
         for x in &xs {
-            let alpha = (strength * shade(*x, core.left(), core.right()) * shade(*y, core.top(), core.bottom())).round() as u8;
-            mesh.colored_vertex(pos2(*x, *y), Color32::from_black_alpha(alpha));
+            let share = shade(*x, core.left(), core.right()) * shade(*y, core.top(), core.bottom());
+            // The premultiplied token scaled as a whole, so its colour holds whatever it is.
+            let [r, g, b, a] = token.map(|channel| (channel * share).round() as u8);
+            mesh.colored_vertex(pos2(*x, *y), Color32::from_rgba_premultiplied(r, g, b, a));
         }
     }
     let columns = xs.len();
@@ -119,7 +126,13 @@ pub(crate) fn shadow_mesh(rect: Rect) -> egui::epaint::Mesh {
 /// mesh is not a shadow (one with a vertex that is not black, or none).
 #[cfg(test)]
 pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
-    let black = !mesh.vertices.is_empty() && mesh.vertices.iter().all(|v| v.color.r() == 0 && v.color.g() == 0 && v.color.b() == 0);
+    // Every corner is the token scaled: its channels in the token's proportions, within a step of rounding.
+    let token = FLOAT_SHADOW.color.to_array().map(i32::from);
+    let scaled = |v: &egui::epaint::Vertex| {
+        let c = v.color.to_array().map(i32::from);
+        (0..3).all(|i| (c[i] * token[3] - c[3] * token[i]).abs() <= token[3])
+    };
+    let black = !mesh.vertices.is_empty() && mesh.vertices.iter().all(scaled);
     let reach = 1.5 * f32::from(FLOAT_SHADOW.blur);
     black.then(|| Rect::from_points(&mesh.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()).shrink(reach))
 }

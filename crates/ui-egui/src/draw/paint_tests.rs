@@ -92,3 +92,58 @@ fn the_shadow_keeps_its_blur_whatever_the_floats_height() {
         assert_eq!(edge, 0, "{height}: clear at the outline");
     }
 }
+
+#[test]
+fn a_shadow_mesh_far_off_or_not_a_number_returns_at_once_and_small() {
+    let most = 60 * 60;
+    for at in [1.0e9, f32::MAX / 4.0, f32::MAX, -f32::MAX, f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+        for rect in [
+            egui::Rect::from_min_size(pos2(at, at), vec2(63.0, 24.0)),
+            egui::Rect::from_min_size(pos2(10.0, 10.0), vec2(at, 24.0)),
+            egui::Rect::from_min_max(pos2(10.0, 10.0), pos2(at, at)),
+        ] {
+            let mesh = super::shadow_mesh(rect);
+            assert!(mesh.vertices.len() <= most, "{rect:?}: {} vertices", mesh.vertices.len());
+        }
+    }
+}
+
+/// The alpha (0 to 255) the mesh paints at `at`: the triangle that holds it, its corners mixed by where `at` lies.
+fn sampled(mesh: &egui::epaint::Mesh, at: egui::Pos2) -> f32 {
+    let cross = |a: egui::Pos2, b: egui::Pos2, p: egui::Pos2| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    for triangle in mesh.indices.as_chunks::<3>().0 {
+        let [a, b, c] = [0, 1, 2].map(|i| mesh.vertices[triangle[i] as usize]);
+        let area = cross(a.pos, b.pos, c.pos);
+        let (wa, wb, wc) = (cross(b.pos, c.pos, at) / area, cross(c.pos, a.pos, at) / area, cross(a.pos, b.pos, at) / area);
+        if wa >= 0.0 && wb >= 0.0 && wc >= 0.0 {
+            return wa * f32::from(a.color.a()) + wb * f32::from(b.color.a()) + wc * f32::from(c.color.a());
+        }
+    }
+    0.0
+}
+
+#[test]
+fn the_shadow_is_the_sheets_0_12_blur_32_black_at_40_percent() {
+    // The sheet: dropShadow 0, 12, blur 32, spread 0, #000000 at 0.4. Read as CSS reads a blur, a normal fall-off
+    // whose standard deviation is 16: the numbers below are worked out from that, not read from the code.
+    let rect = egui::Rect::from_min_size(pos2(100.0, 100.0), vec2(400.0, 400.0));
+    let mesh = super::shadow_mesh(rect);
+    assert!(mesh.vertices.iter().all(|v| v.color.r() == 0 && v.color.g() == 0 && v.color.b() == 0), "black");
+    let (centre_x, centre_y) = (300.0, 312.0);
+    let checks = [
+        (pos2(centre_x, centre_y), 102.0, "the middle: 40 %"),
+        (pos2(100.0, centre_y), 51.0, "the left edge: half"),
+        (pos2(500.0, centre_y), 51.0, "the right edge: half"),
+        (pos2(centre_x, 112.0), 51.0, "the top edge, 12 down: half"),
+        (pos2(centre_x, 512.0), 51.0, "the bottom edge, 12 down: half"),
+        (pos2(centre_x, 100.0), 23.1, "the float's own top, 12 over the shadow's: 102 × Φ(−0.75)"),
+        (pos2(84.0, centre_y), 16.2, "16 out: 102 × Φ(−1)"),
+        (pos2(68.0, centre_y), 2.3, "32 out: 102 × Φ(−2)"),
+        (pos2(centre_x, 544.0), 2.3, "32 under: 102 × Φ(−2)"),
+        (pos2(100.0, 112.0), 25.5, "the corner: a quarter"),
+    ];
+    for (at, want, what) in checks {
+        let got = sampled(&mesh, at);
+        assert!((got - want).abs() <= 1.5, "{what}: {got} at {at:?}, want {want}");
+    }
+}
