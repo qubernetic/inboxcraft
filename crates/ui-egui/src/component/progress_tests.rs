@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use std::time::Duration;
+
 use egui::{Color32, Rect, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -148,6 +150,40 @@ fn a_running_mark_goes_round_one_dot_each_125_ms() {
         assert!((2..=4).contains(&moved), "reduced {reduced}: {gaps:?}");
         moved = gaps.windows(2).filter(|pair| matches!(pair, [Some(a), Some(b)] if *b != (*a + 1) % 8 && a != b)).count();
         assert_eq!(moved, 0, "clockwise one dot at a time: {gaps:?}");
+    }
+}
+
+#[test]
+fn a_running_bar_asks_for_a_timed_repaint_and_a_done_one_rests() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    for state in [ProgressState::Running(0.3), ProgressState::Done, ProgressState::Failed(0.3)] {
+        let mut harness = builder().with_size(vec2(400.0, 80.0)).build_ui(move |ui| {
+            motion::set_reduced(ui.ctx(), false);
+            stage(ui, theme.palette.surface, |ui| progress(ui, &theme, &Keymap::default(), "syncing", state, "30 %"));
+        });
+        harness.run_steps(4);
+        let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap_or(Duration::MAX);
+        match state {
+            ProgressState::Running(_) => {
+                assert!(delay >= Duration::from_millis(100) && delay <= Duration::from_millis(125), "a timed repaint, never at once: {delay:?}");
+            }
+            _ => assert!(crate::component::tests::rests(&mut harness, 4), "{state:?} rests: {delay:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_fraction_outside_0_1_is_clamped() {
+    for (fraction, cells) in [(f32::NAN, 0), (-1.0, 0), (7.0, 10), (f32::INFINITY, 10), (f32::NEG_INFINITY, 0)] {
+        let filled = |text: &str| text.chars().filter(|c| *c == '=').count();
+        let running = bar(ProgressState::Running(fraction));
+        assert_eq!(filled(&running), cells, "{fraction}: {running}");
+        assert_eq!(running.chars().count(), 12, "{fraction}: {running}");
+        let failed = bar(ProgressState::Failed(fraction));
+        assert_eq!(failed.chars().count(), 12, "{fraction}: {failed}");
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let harness = line(theme, "syncing", ProgressState::Running(fraction), "", false);
+        harness.get_by_label("syncing");
     }
 }
 
