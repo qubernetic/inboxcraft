@@ -42,11 +42,12 @@ fn every_control_of_the_gallery_is_reached_by_tab() {
     known.sort();
     assert_eq!(missed, known, "the controls Tab never reaches");
     // The coming-soon board is in the walk's tree, each control disabled (so neither reached nor a gap), and its
-    // tag shows once.
+    // tag shows on it.
     for (role, label) in [(Role::Button, "Export"), (Role::Switch, "Sync contacts"), (Role::MenuItem, "Scheduled messages")] {
         assert!(harness.get_by_role_and_label(role, label).accesskit_node().is_disabled(), "{label} is coming soon");
     }
-    assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the tag once");
+    // The tag once on the coming-soon board, and once on the tag's board as one of its states.
+    assert_eq!(harness.query_all_by_label("coming soon").count(), 2, "the tag once on each board");
 }
 
 #[test]

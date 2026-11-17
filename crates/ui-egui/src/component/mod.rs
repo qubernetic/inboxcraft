@@ -13,6 +13,7 @@
 //! - [`checkbox`]: a filled check box and a radio button.
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
+//! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
@@ -39,6 +40,7 @@ pub mod segmented;
 pub mod select;
 pub mod soon;
 pub mod switch;
+pub mod tag;
 pub mod time_picker;
 pub mod toast;
 pub mod tooltip;

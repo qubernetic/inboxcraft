@@ -10,17 +10,13 @@
 //! action offered in the last drawn frame only by controls inside `soon` is [`blocked`]; its key runs nothing and the
 //! palette does not offer it. Its tooltip shows no key, since that key would do nothing.
 
-use egui::{Color32, Context, Id, Response, Role, Sense, Ui, UiBuilder, UiStackInfo, WidgetInfo, pos2, vec2};
+use egui::{Color32, Context, Id, Response, Sense, Ui, UiBuilder, UiStackInfo};
 
-use crate::draw::paint;
 use crate::theme::Theme;
 use crate::tr;
 
 /// The tag on the [`Ui`] that [`soon`] opens; every `Ui` inside it has it in its stack.
 const SOON: &str = "inboxcraft-coming-soon";
-
-/// The widest the tag's words get before they end with an ellipsis, in points.
-const TAG_WIDEST: f32 = 240.0;
 
 /// The most actions one frame's controls note, each way.
 const MOST_OFFERED: usize = 256;
@@ -111,19 +107,9 @@ pub(crate) fn ink(ui: &Ui, theme: &Theme, colour: Color32) -> Color32 {
 }
 
 /// The coming-soon mark: "coming soon" in `mono_s` and `muted` in a dashed `muted` edge with nothing inside, as
-/// high as a tag. It is never a button.
+/// high as a tag: the [`super::tag`] of coming soon. It is never a button.
 pub fn soon_tag(ui: &mut Ui, theme: &Theme) -> Response {
-    let p = &theme.palette;
-    let text = tr!("coming soon");
-    let pad = theme.spacing.s3 / 2.0;
-    let galley = super::cut(ui, text, theme.fonts.mono_s, p.muted, TAG_WIDEST);
-    let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + pad * 2.0, theme.boxes().chip), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, ui.is_enabled(), text));
-    if ui.is_rect_visible(rect) {
-        paint::dashed(ui.painter(), rect, p.muted);
-        ui.painter().galley(pos2(rect.left() + pad, rect.center().y - galley.size().y / 2.0), galley, p.muted);
-    }
-    response
+    super::tag::coming_soon(ui, theme, tr!("coming soon"))
 }
 
 #[cfg(test)]

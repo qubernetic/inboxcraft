@@ -26,6 +26,7 @@ use super::segmented::segmented;
 use super::select::Select;
 use super::soon::{soon, soon_tag};
 use super::switch::switch;
+use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, pill, popup, tooltip};
@@ -306,22 +307,22 @@ fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         });
     }
     cells(ui, theme, |ui| {
-        cell(ui, theme, tr!("with arrow"), |ui| {
+        cell(ui, theme, tr!("with-arrow"), |ui| {
             TextButton::new(tr!("Continue")).primary().arrow().show(ui, theme, keymap);
         });
-        cell(ui, theme, tr!("with key"), |ui| {
+        cell(ui, theme, tr!("with-key"), |ui| {
             TextButton::new(tr!("Send")).primary().action("mail.send").key(true).show(ui, theme, keymap);
         });
-        cell(ui, theme, tr!("with icon"), |ui| {
+        cell(ui, theme, tr!("with-icon"), |ui| {
             TextButton::new(tr!("Attach")).secondary().icon(IconId::Attach).show(ui, theme, keymap);
         });
     });
     cells(ui, theme, |ui| {
         let long = tr!("Ask for a receipt when this message is read by every recipient");
-        cell(ui, theme, tr!("long label"), |ui| {
+        cell(ui, theme, tr!("long-label"), |ui| {
             TextButton::new(long).primary().show(ui, theme, keymap);
         });
-        cell(ui, theme, tr!("long label"), |ui| {
+        cell(ui, theme, tr!("long-label"), |ui| {
             TextButton::new(long).secondary().show(ui, theme, keymap);
         });
     });
@@ -346,13 +347,35 @@ fn links(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The tag's board: default, accent, warn, minus, plus, coming soon.
+fn tags(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Tag"));
+    cells(ui, theme, |ui| {
+        let tags = [
+            (tr!("default"), tr!("Draft"), TagKind::Default),
+            (tr!("accent"), tr!("New sender"), TagKind::Accent),
+            (tr!("warn"), tr!("Returned"), TagKind::Warn),
+            (tr!("minus"), tr!("Not delivered"), TagKind::Minus),
+            (tr!("plus"), tr!("Let in"), TagKind::Plus),
+        ];
+        for (state, text, kind) in tags {
+            cell(ui, theme, state, |ui| {
+                tag(ui, theme, text, kind);
+            });
+        }
+        cell(ui, theme, tr!("coming-soon"), |ui| {
+            soon_tag(ui, theme);
+        });
+    });
+}
+
 /// The key chip's board: default, on cyan, capture, none, disabled.
 fn key_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Key chip"));
     cells(ui, theme, |ui| {
         let chips = [
             (tr!("default"), "A", ChipState::Default),
-            (tr!("on cyan"), "Ctrl Enter", ChipState::OnCyan),
+            (tr!("on-cyan"), "Ctrl Enter", ChipState::OnCyan),
             (tr!("capture"), tr!("press the keys"), ChipState::Capture),
             (tr!("none"), tr!("none"), ChipState::Disabled),
             (tr!("disabled"), "H", ChipState::Disabled),
@@ -375,6 +398,7 @@ fn boards_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 fn boards_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     links(ui, theme, keymap);
     key_chips(ui, theme);
+    tags(ui, theme);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
