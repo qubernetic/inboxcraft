@@ -404,7 +404,16 @@ fn paint_row(
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
     let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
+    let actions = actions(message);
+    // The group paints no ground of its own: until this row cuts its text short of it, the row's fill covers what
+    // lies under the group.
+    let line = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(rect.right() - s.s3, rect.bottom()));
+    if reach {
+        let width = hover::width(ui, theme, keymap, &actions);
+        let cover = Rect::from_min_max(pos2(line.right() - width - s.s1, rect.top()), pos2(line.right(), rect.bottom() - 1.0));
+        ui.painter().rect_filled(cover, 0.0, p.stage);
+    }
+    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), line, reach, &actions);
     shown.clicked.and_then(|index| act(message, index))
 }
 

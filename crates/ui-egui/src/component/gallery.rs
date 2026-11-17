@@ -875,8 +875,44 @@ fn blocks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     rows(ui, theme);
 }
 
+/// The hover actions' board: default, action-hover, focus and unavailable, Done D, Snooze H, Read R and Delete Del.
+fn hover_actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use crate::keymap::SNOOZE;
+    title(ui, theme, tr!("Hover actions"));
+    // The page's keymap gives D, R and Del to its own actions; Snooze keeps the app's H, as the sheet shows.
+    let (done, read, delete) = ("mail.done", "mail.read", "mail.delete");
+    let group = |snooze: Option<&'static str>| {
+        [
+            Action { icon: IconId::Done, name: tr!("Done"), action: Some(done), unavailable: None },
+            Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(SNOOZE), unavailable: snooze },
+            Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some(read), unavailable: None },
+            Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(delete), unavailable: None },
+        ]
+    };
+    let states = [
+        (tr!("default"), None, None),
+        (tr!("action-hover"), None, Some((0, Shown::Hover))),
+        (tr!("focus"), None, Some((0, Shown::Focus))),
+        (tr!("unavailable"), Some(tr!("Not yet: the time picker comes with the pickers")), None),
+    ];
+    for pair in states.chunks(2) {
+        cells(ui, theme, |ui| {
+            for (state, snooze, forced) in pair {
+                cell(ui, theme, state, |ui| {
+                    let width = hover::width(ui, theme, keymap, &group(*snooze));
+                    let (_, line) = ui.allocate_space(vec2(width, theme.boxes().strip));
+                    let id = Id::new("gallery-hover-actions").with(*state);
+                    hover::actions_with(ui, theme, keymap, id, line, true, &group(*snooze), *forced);
+                });
+            }
+        });
+    }
+}
+
 /// The right column of the shared rows and blocks.
-fn blocks_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn blocks_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    hover_actions(ui, theme, keymap);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
