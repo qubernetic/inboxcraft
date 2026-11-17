@@ -217,12 +217,15 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let float = popup::Float { id: id.with("popup"), anchor: rect, width: POPUP.min(rect.width()), returns_to: id };
         popup::float(&ctx, theme, &float, |ui| {
             let mut taken = None;
+            let known = self.options.iter().any(|(value, _)| self.current == Some(*value));
             let area = ScrollArea::vertical().id_salt("select-rows").max_height(most);
             scroll::show(ui, theme, area, |ui| {
                 for (index, (value, name)) in self.options.iter().enumerate() {
                     let chosen = self.current == Some(*value);
                     let row = popup::option(ui, theme, self.icon, name, chosen);
-                    if opened_now && (chosen || (self.current.is_none() && index == 0)) {
+                    // The current choice takes the keyboard, or the first row when there is none among the options (none
+                    // chosen, or one the options no longer hold).
+                    if opened_now && (chosen || (!known && index == 0)) {
                         row.request_focus();
                     }
                     if row.clicked() {

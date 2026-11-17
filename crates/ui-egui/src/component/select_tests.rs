@@ -430,3 +430,20 @@ fn a_held_key_repeating_on_a_row_never_opens_the_choices_again() {
         assert_eq!(*harness.state(), (false, 2), "{key:?}: the repeats and the release open nothing");
     }
 }
+
+#[test]
+fn a_select_whose_choice_the_options_no_longer_hold_opens_on_its_first_row() {
+    let theme = theme();
+    let mut harness = builder().with_size(vec2(500.0, 400.0)).build_ui_state(
+        move |ui, open: &mut bool| {
+            motion::set_reduced(ui.ctx(), true);
+            let select = Select { name: "Account", shown: "Gone", options: &OPTIONS, current: Some(99), icon: IconId::Changed, width: 240.0 };
+            select.show(ui, &theme, open);
+        },
+        false,
+    );
+    harness.run();
+    harness.get_by_role_and_label(Role::ComboBox, "Account").click();
+    harness.run();
+    assert!(harness.get_by_role_and_label(Role::MenuItemRadio, "Never").is_focused(), "the first row has the keyboard");
+}
