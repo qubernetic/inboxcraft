@@ -122,9 +122,15 @@ fn the_component_gallery_is_not_a_window_nor_an_icon_sheet() {
 }
 
 #[test]
-fn a_script_naming_a_preset_is_refused() {
-    let error = parse_script(r#"{"out":"x.png","preset":"aurora"}"#).unwrap_err().to_string();
-    assert!(error.contains("preset"), "{error}");
+fn a_script_naming_a_preset_a_font_or_an_icon_set_is_refused() {
+    for (json, key) in [
+        (r#"{"out":"x.png","preset":"aurora"}"#, "preset"),
+        (r#"{"out":"x.png","font":"inter"}"#, "font"),
+        (r#"{"out":"x.png","icon_set":"lucide"}"#, "icon_set"),
+    ] {
+        let error = parse_script(json).unwrap_err().to_string();
+        assert!(error.contains(key), "{json}: {error}");
+    }
 }
 
 #[test]
@@ -134,21 +140,6 @@ fn a_text_scale_draws_the_window_with_larger_type() {
     let large = shoot(&shot(r#"{"out": "x.png", "mode": "light", "size": [600, 400], "text_scale": 130}"#)).unwrap();
     assert_eq!(plain, hundred, "100 % is the default");
     assert_ne!(plain, large);
-}
-
-#[test]
-fn a_font_and_an_icon_set_draw_the_window_the_gallery_and_the_sheet_in_them() {
-    for page in [r#""size": [600, 400]"#, r#""components": true"#, r#""icons": true"#] {
-        let plain = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", {page}}}"#))).unwrap();
-        let named = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "figtree", "icon_set": "phosphor", {page}}}"#))).unwrap();
-        assert_eq!(plain, named, "{page}: Figtree and Phosphor are the default");
-        let inter = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "font": "inter", {page}}}"#))).unwrap();
-        let lucide = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "icon_set": "lucide", {page}}}"#))).unwrap();
-        if !page.contains("icons") {
-            assert_ne!(plain, inter, "{page}");
-        }
-        assert_ne!(plain, lucide, "{page}");
-    }
 }
 
 #[test]
@@ -243,8 +234,6 @@ fn a_shot_that_names_something_wrong_is_refused() {
         (r#"{"out": "x.png", "mode": "light", "size": [0, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100000, 100]}"#, "pixels a side"),
         (r#"{"out": "x.png", "mode": "light", "size": [100, -5]}"#, "pixels a side"),
-        (r#"{"out": "x.png", "mode": "light", "font": "Comic Sans"}"#, "font \"Comic Sans\" is not figtree or inter"),
-        (r#"{"out": "x.png", "mode": "light", "icon_set": "tabler"}"#, "icon set \"tabler\" is not phosphor or lucide"),
         (r#"{"out": "x.png", "mode": "light", "view": "tiles"}"#, "view \"tiles\" is not cards, list or simple"),
     ] {
         let error = shoot(&shot(json)).unwrap_err().to_string();

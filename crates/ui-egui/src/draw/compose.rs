@@ -199,7 +199,7 @@ fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
             if chip.ok {
                 avatar::paint(ui.painter(), theme, mark, &shown, &chip.address());
             } else {
-                theme.icons.paint(ui.painter(), mark.shrink(1.0), IconId::Junk, Style::Regular, ink);
+                crate::iconset::paint(ui.painter(), mark.shrink(1.0), IconId::Junk, Style::Regular, ink);
             }
             ui.painter().galley(egui::pos2(mark.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, ink);
             let remove = tr!("Remove {recipient}", recipient = shown);
@@ -327,7 +327,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         }
         ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
-        theme.icons.paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
+        crate::iconset::paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
         super::paint::focus_ring(ui, theme, &response);
         Popup::menu(&response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, body * MENU, |ui| {
@@ -451,7 +451,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
                 ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
                 let side = line_height(ui, theme.fonts.caption);
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.minus);
+                crate::iconset::paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.minus);
             }
         });
     });

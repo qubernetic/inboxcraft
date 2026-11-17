@@ -180,7 +180,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
         ui.horizontal(|ui| {
             let side = line_height(ui, theme.fonts.caption);
             let (spot, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), spot, IconId::Globe, Style::Regular, p.muted);
+            crate::iconset::paint(ui.painter(), spot, IconId::Globe, Style::Regular, p.muted);
             ui.add(egui::Label::new(RichText::new(zone).font(theme.fonts.caption.id()).color(p.muted)).wrap());
         });
     }

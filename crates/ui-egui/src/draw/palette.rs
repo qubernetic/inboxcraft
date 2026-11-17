@@ -58,7 +58,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: boo
         let ink = if run { p.ink } else { p.muted };
         let side = theme.fonts.body.size * 1.2;
         let icon = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
-        theme.icons.paint(painter, icon, action.icon, Style::Regular, ink);
+        crate::iconset::paint(painter, icon, action.icon, Style::Regular, ink);
         let mut right = rect.right() - s.s2;
         if let Some(chip) = keymap.chip(ui.ctx(), action.id) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);

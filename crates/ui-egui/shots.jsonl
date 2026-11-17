@@ -43,20 +43,9 @@
 # the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
-# The second typeface and icon set (E1.16a): the list with the reader in Inter, every icon and the components in Lucide.
-{"out": "docs/images/list-inter-light.png", "mode": "light", "font": "inter", "select": "Photos from the coast walk"}
-{"out": "docs/images/list-inter-dark.png", "mode": "dark", "font": "inter", "select": "Photos from the coast walk"}
-{"out": "docs/images/icons-lucide-light.png", "mode": "light", "icon_set": "lucide", "icons": true, "scale": 2}
-{"out": "docs/images/icons-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "icons": true, "scale": 2}
-{"out": "docs/images/components-lucide-light.png", "mode": "light", "icon_set": "lucide", "components": true}
-{"out": "docs/images/components-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "components": true}
-# The appearance settings page (E1.16b), in Inter and with Lucide.
+# The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
-{"out": "docs/images/settings-inter-light.png", "mode": "light", "font": "inter", "size": [1200, 820], "settings": true}
-{"out": "docs/images/settings-inter-dark.png", "mode": "dark", "font": "inter", "size": [1200, 820], "settings": true}
-{"out": "docs/images/settings-lucide-light.png", "mode": "light", "icon_set": "lucide", "size": [1200, 820], "settings": true}
-{"out": "docs/images/settings-lucide-dark.png", "mode": "dark", "icon_set": "lucide", "size": [1200, 820], "settings": true}
 # The message list (E1.17a): the screener and group cards and the hover actions on the row selected by
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}

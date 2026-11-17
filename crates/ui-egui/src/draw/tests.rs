@@ -14,7 +14,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
-use crate::iconset::{IconId, IconSet, Style};
+use crate::iconset::{IconId, Style};
 use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
 use crate::theme::{Mode, ModePreference, TextScale, Theme, contrast};
@@ -38,7 +38,7 @@ fn harness() -> Harness<'static, InboxApp> {
     harness_with(sample_app(), egui::Theme::Light)
 }
 
-/// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
+/// Whether the last frame of `output` drew `id` in `style`: its front glyph in its font.
 pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {
@@ -47,7 +47,7 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = IconSet::default().glyph(id, style);
+    let glyph = crate::iconset::glyph(id, style);
     let Some((front, _)) = glyph.layers.last() else { return false };
     let family = glyph.face.id(1.0).family;
     let mut found = Vec::new();

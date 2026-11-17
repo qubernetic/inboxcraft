@@ -599,7 +599,7 @@ fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {
         ui.horizontal(|ui| {
             let side = super::paint::line_height(ui, theme.fonts.body);
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, IconId::Failed, Style::Regular, p.minus);
+            crate::iconset::paint(ui.painter(), rect, IconId::Failed, Style::Regular, p.minus);
             ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.ink)).wrap());
         });
     });
@@ -637,7 +637,7 @@ fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s2;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, IconId::Shield, Style::Regular, p.cyan_text);
+            crate::iconset::paint(ui.painter(), rect, IconId::Shield, Style::Regular, p.cyan_text);
             ui.add(egui::Label::new(RichText::new(text).font(f.body.id()).color(p.ink)).wrap());
             if beside {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -995,7 +995,7 @@ fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files: &[File], d
                 Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s2)).corner_radius(0.0).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                        theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.cyan_text);
+                        crate::iconset::paint(ui.painter(), rect, IconId::File, Style::Regular, p.cyan_text);
                         ui.vertical(|ui| {
                             ui.set_max_width((ui.available_width() - save - gap).max(1.0));
                             ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.ink)).truncate());

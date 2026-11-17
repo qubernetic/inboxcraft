@@ -203,7 +203,7 @@ fn lock_note(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.horizontal(|ui| {
         let side = theme.fonts.caption.size * 1.2;
         let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), at, IconId::Lock, Style::Regular, theme.palette.muted);
+        crate::iconset::paint(ui.painter(), at, IconId::Lock, Style::Regular, theme.palette.muted);
         note(ui, theme, text, theme.palette.muted);
     });
 }
@@ -287,7 +287,7 @@ fn mark(ui: &mut Ui, theme: &Theme, state: StepState) {
         StepState::Pending => (IconId::Waiting, Style::Regular, p.cyan_text),
         StepState::Skipped | StepState::Held | StepState::NotSet | StepState::NotBuilt => (IconId::Skipped, Style::Regular, p.muted),
     };
-    theme.icons.paint(ui.painter(), rect, id, style, colour);
+    crate::iconset::paint(ui.painter(), rect, id, style, colour);
 }
 
 fn state_text(state: StepState) -> &'static str {
@@ -342,7 +342,7 @@ fn failure(ui: &mut Ui, theme: &Theme, onboarding: &Onboarding) {
     ui.horizontal(|ui| {
         let side = super::paint::line_height(ui, theme.fonts.body);
         let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), at, IconId::Failed, Style::Fill, p.minus);
+        crate::iconset::paint(ui.painter(), at, IconId::Failed, Style::Fill, p.minus);
         ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.minus)).wrap());
     });
 }

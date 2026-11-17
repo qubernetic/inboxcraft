@@ -11,7 +11,7 @@ use super::card::card;
 use super::hover::{self, Action};
 use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
-use crate::iconset::{IconId, IconSet, Style};
+use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion::{self, tests::FRAME};
 use crate::theme::{Mode, TextScale, Theme, install_fonts};
@@ -42,7 +42,7 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = IconSet::default().glyph(id, style);
+    let glyph = crate::iconset::glyph(id, style);
     let Some((front, _)) = glyph.layers.last() else { return false };
     let family = glyph.face.id(1.0).family;
     let mut found = Vec::new();

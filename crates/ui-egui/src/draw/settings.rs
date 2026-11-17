@@ -9,7 +9,7 @@
 //! "Undo send", how long every send waits before it goes (5, 10, 30 or 60 seconds), and each account's signature, saved
 //! with its Save button. Shortcuts lists every action of
 //! the window with its key: a press on the key waits for the next key pressed, which becomes the action's. Each setting is a row: its name and a note on the left, its control on the right (or
-//! under them where the row is narrow): segmented choices for the mode, the typeface and the icon set, cards for the
+//! under them where the row is narrow): a segmented choice for the mode (Auto, Dark, Light), cards for the
 //! window frame, a slider for the text size and a switch for "Reduce motion"; a preview in the look the controls
 //! choose closes the page.
 
@@ -18,7 +18,7 @@ use egui::{
     UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_engine::ScreenerMode;
-use inboxcraft_engine::appearance::{Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
 use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
@@ -56,8 +56,6 @@ const TRACK: [f32; 2] = [200.0, 6.0];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
     Mode(ThemeMode),
-    Font(Typeface),
-    Icons(Icons),
     Scale(TextScale),
     ReduceMotion(bool),
     Frame(WindowFrame),
@@ -127,28 +125,15 @@ pub(super) struct DeskView {
     pub(super) asking: bool,
 }
 
+/// The modes in the order the page shows them.
+const MODES: [ThemeMode; 3] = [ThemeMode::System, ThemeMode::Dark, ThemeMode::Light];
+
 /// The name of a mode.
 fn mode_name(mode: ThemeMode) -> &'static str {
     match mode {
-        ThemeMode::System => tr!("System"),
+        ThemeMode::System => tr!("Auto"),
         ThemeMode::Light => tr!("Light"),
         ThemeMode::Dark => tr!("Dark"),
-    }
-}
-
-/// The name of a typeface, as it is written.
-fn font_name(typeface: Typeface) -> &'static str {
-    match typeface {
-        Typeface::Figtree => "Figtree",
-        Typeface::Inter => "Inter",
-    }
-}
-
-/// The name of an icon set, as it is written.
-fn icons_name(icons: Icons) -> &'static str {
-    match icons {
-        Icons::Phosphor => "Phosphor",
-        Icons::Lucide => "Lucide",
     }
 }
 
@@ -239,7 +224,7 @@ fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes:
     ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
         let side = line_height(ui, theme.fonts.body) * 1.2;
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), rect, icon, Style::Regular, theme.palette.cyan_text);
+        crate::iconset::paint(ui.painter(), rect, icon, Style::Regular, theme.palette.cyan_text);
         ui.add_space(theme.spacing.s1);
         let used = side + theme.spacing.s1 + ui.spacing().item_spacing.x * 2.0;
         ui.vertical(|ui| {
@@ -380,23 +365,10 @@ fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
 fn rows(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    let modes = ThemeMode::ALL.map(|mode| (mode, mode_name(mode), f.button));
-    row(ui, theme, tr!("Mode"), &[tr!("System follows the computer's light or dark choice.")], &mut |ui| {
+    let modes = MODES.map(|mode| (mode, mode_name(mode), f.button));
+    row(ui, theme, tr!("Mode"), &[tr!("Auto follows the computer's light or dark choice.")], &mut |ui| {
         if let Some(mode) = segmented(ui, theme, &modes, current.theme) {
             asked = Some(Asked::Mode(mode));
-        }
-    });
-    // Each typeface's name is written in it.
-    let faces = Typeface::ALL.map(|typeface| (typeface, font_name(typeface), Font { typeface, ..f.button }));
-    row(ui, theme, tr!("Typeface"), &[], &mut |ui| {
-        if let Some(typeface) = segmented(ui, theme, &faces, current.font) {
-            asked = Some(Asked::Font(typeface));
-        }
-    });
-    let sets = Icons::ALL.map(|icons| (icons, icons_name(icons), f.button));
-    row(ui, theme, tr!("Icons"), &[], &mut |ui| {
-        if let Some(icons) = segmented(ui, theme, &sets, current.icons) {
-            asked = Some(Asked::Icons(icons));
         }
     });
     row(ui, theme, tr!("Window frame"), &[tr!("The system's title bar, or a frame in the app's own colours.")], &mut |ui| {

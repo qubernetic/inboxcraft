@@ -171,7 +171,7 @@ fn chip(ui: &mut Ui, theme: &Theme, id: IconId, text: &str) {
             ui.spacing_mut().item_spacing.x = s.s2;
             let side = super::paint::line_height(ui, font);
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, id, Style::Regular, p.minus);
+            crate::iconset::paint(ui.painter(), rect, id, Style::Regular, p.minus);
             ui.add(egui::Label::new(RichText::new(text).font(font.id()).color(p.minus)).wrap());
         });
     });
@@ -181,7 +181,7 @@ fn chip(ui: &mut Ui, theme: &Theme, id: IconId, text: &str) {
 fn icon(ui: &mut Ui, theme: &Theme, id: IconId) {
     let side = super::paint::line_height(ui, theme.fonts.caption);
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    theme.icons.paint(ui.painter(), rect, id, Style::Regular, theme.palette.muted);
+    crate::iconset::paint(ui.painter(), rect, id, Style::Regular, theme.palette.muted);
 }
 
 /// A faint strip with the older-version clock: what a version a later one replaced said.

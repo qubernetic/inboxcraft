@@ -35,7 +35,7 @@ pub fn search(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, hint: &str,
     }
     let icon = theme.fonts.body.size * 1.15;
     let at = Rect::from_center_size(pos2(rect.left() + s.s3 + icon / 2.0, rect.center().y), vec2(icon, icon));
-    theme.icons.paint(ui.painter(), at, IconId::Search, Style::Regular, ink);
+    crate::iconset::paint(ui.painter(), at, IconId::Search, Style::Regular, ink);
     let inner = Rect::from_min_max(pos2(at.right() + s.s2, rect.top()), pos2(rect.right() - s.s3, rect.bottom()));
     let edit = TextEdit::singleline(text)
         .id(id)

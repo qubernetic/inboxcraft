@@ -87,9 +87,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
         match (icon, chosen) {
-            (Some(icon), Some(false)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.muted),
-            (Some(icon), Some(true)) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.cyan_text),
-            (Some(icon), None) => theme.icons.paint(painter, icon_rect, icon, Style::Regular, p.ink),
+            (Some(icon), Some(false)) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.muted),
+            (Some(icon), Some(true)) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.cyan_text),
+            (Some(icon), None) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.ink),
             (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
             (None, _) => {}
         }

@@ -389,7 +389,7 @@ fn paint_row(
     for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
         if shown {
             let at = Rect::from_min_size(pos2(end - flag_size, first + (first_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-            theme.icons.paint(ui.painter(), at, icon, Style::Fill, colour);
+            crate::iconset::paint(ui.painter(), at, icon, Style::Fill, colour);
             end -= flag_size + s.s2;
         }
     }
@@ -543,7 +543,7 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     let (chip, _) = controls.allocate_exact_size(vec2(standing.size().x + mark + s.s1 + s.s2 * 2.0, mark + s.s1 * 2.0), Sense::hover());
     controls.painter().rect_filled(chip, 0.0, p.panel);
     let at = Rect::from_min_size(pos2(chip.left() + s.s2, chip.center().y - mark / 2.0), vec2(mark, mark));
-    theme.icons.paint(controls.painter(), at, icon, Style::Regular, ink);
+    crate::iconset::paint(controls.painter(), at, icon, Style::Regular, ink);
     controls.painter().galley(pos2(at.right() + s.s1, chip.center().y - standing.size().y / 2.0), standing, ink);
     right = right.min(controls.min_rect().left() - s.s3);
     let top = rect.top() + s.s2;
@@ -823,7 +823,7 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
     let s = &theme.spacing;
     let side = line_height(ui, theme.fonts.body) * 3.6;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
+    crate::iconset::paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
     ui.add_space(s.s3);
     ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.ink));
     ui.add_space(s.s1);

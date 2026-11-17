@@ -84,7 +84,7 @@ pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
     let s = &theme.spacing;
     let side = line_height(ui, theme.fonts.body) * 3.6;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    theme.icons.paint(ui.painter(), rect, IconId::Calendar, Style::Duotone, p.cyan_text);
+    crate::iconset::paint(ui.painter(), rect, IconId::Calendar, Style::Duotone, p.cyan_text);
     ui.add_space(s.s3);
     ui.label(RichText::new(tr!("No calendars yet")).font(theme.fonts.title.id()).color(p.ink));
     ui.add_space(s.s1);

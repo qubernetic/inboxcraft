@@ -1,20 +1,12 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 
 use super::{FILE, KEYS_FILE, Keep, KeepFile, MAX_FILE, NoKeep};
 
 fn chosen() -> Appearance {
-    Appearance {
-        theme: ThemeMode::Dark,
-        accent: Accent::Preset("citrus"),
-        font: Typeface::Inter,
-        icons: Icons::Lucide,
-        text_scale: 120,
-        motion: Motion::Reduce,
-        frame: WindowFrame::TopRow,
-    }
+    Appearance { theme: ThemeMode::Dark, text_scale: 120, motion: Motion::Reduce, frame: WindowFrame::TopRow }
 }
 
 #[test]
@@ -26,7 +18,7 @@ fn a_kept_appearance_comes_back_from_the_file() {
     keep.store(&chosen()).unwrap();
     assert_eq!(KeepFile::new(path.clone()).load(), Some(chosen()));
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains("\"font\": \"inter\""), "{text}");
+    assert!(text.contains("\"motion\": \"reduce\""), "{text}");
     // Storing again replaces the file and leaves no temporary file behind.
     keep.store(&Appearance::default()).unwrap();
     assert_eq!(keep.load(), Some(Appearance::default()));

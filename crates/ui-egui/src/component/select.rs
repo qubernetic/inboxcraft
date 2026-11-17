@@ -100,7 +100,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         let caret = Rect::from_center_size(pos2(rect.right() - SIDES - CARET / 2.0, rect.center().y), vec2(CARET, CARET));
-        theme.icons.paint(painter, caret, IconId::Caret, Style::Regular, p.muted);
+        crate::iconset::paint(painter, caret, IconId::Caret, Style::Regular, p.muted);
         let text = cut(ui, self.shown, theme.fonts.body, p.ink, caret.left() - rect.left() - SIDES * 2.0);
         painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.ink);
     }

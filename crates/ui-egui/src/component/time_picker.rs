@@ -154,7 +154,7 @@ fn reading(ui: &mut Ui, theme: &Theme, chosen: Option<Timestamp>, now: Timestamp
             Some(at) => {
                 let side = line_height(ui, theme.fonts.caption);
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Done, Style::Fill, p.cyan_text);
+                crate::iconset::paint(ui.painter(), rect, IconId::Done, Style::Fill, p.cyan_text);
                 ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.cyan_text));
             }
             None => {

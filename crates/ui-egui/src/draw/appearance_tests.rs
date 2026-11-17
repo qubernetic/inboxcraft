@@ -7,12 +7,11 @@ use std::path::Path;
 
 use egui::vec2;
 use egui_kittest::Harness;
-use inboxcraft_engine::appearance::{Accent, Appearance, Icons, Motion, Typeface};
+use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
 use super::InboxApp;
-use crate::iconset::IconSet;
 use crate::keep::{FILE, Keep, KeepFile};
 use crate::mailbox::Mailbox;
 use crate::motion;
@@ -45,9 +44,7 @@ fn every_choice_persists_across_a_restart() {
     let mut harness = window(&file);
     assert_eq!(*harness.state().appearance(), Appearance::default());
     run(&mut harness, "ui.theme.set", json!({ "mode": "dark" }));
-    run(&mut harness, "ui.accent.set", json!({ "preset": "aurora" }));
-    run(&mut harness, "ui.font.set", json!({ "font": "inter" }));
-    run(&mut harness, "ui.icons.set", json!({ "icons": "lucide" }));
+    run(&mut harness, "ui.frame.set", json!({ "frame": "top_row" }));
     run(&mut harness, "ui.text_scale.set", json!({ "percent": 120 }));
     run(&mut harness, "ui.motion.set", json!({ "reduce": "on" }));
     let chosen = *harness.state().appearance();
@@ -57,8 +54,7 @@ fn every_choice_persists_across_a_restart() {
     let app = restarted.state();
     assert_eq!(*app.appearance(), chosen);
     assert_eq!(app.mode(), ModePreference::Dark);
-    assert_eq!(app.typeface(), Typeface::Inter);
-    assert_eq!(app.icons(), IconSet::Lucide);
+    assert_eq!(app.appearance().frame, WindowFrame::TopRow);
     assert_eq!(app.text_scale(), TextScale::from_percent(120).unwrap());
     assert!(app.reduce_motion());
     // The restarted window draws with them from its first frame.
@@ -70,17 +66,16 @@ fn every_choice_persists_across_a_restart() {
 }
 
 #[test]
-fn an_accent_the_engine_keeps_changes_no_colour() {
+fn an_appearance_kept_by_the_old_look_loads_and_draws_the_one_palette() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join(FILE);
-    let mut harness = window(&file);
-    run(&mut harness, "ui.accent.set", json!({ "custom": ["#2f6bff", "#8a3ffc", "#ff2d95", "#3a1d8c"] }));
-    let Accent::Custom(kept) = harness.state().appearance().accent else { panic!("custom") };
-    drop(harness);
-    let restarted = window(&file);
-    assert_eq!(restarted.state().appearance().accent, Accent::Custom(kept));
-    let dark = Theme::new(Mode::Dark, TextScale::default()).style();
-    assert_eq!(restarted.ctx.style_of(egui::Theme::Dark).visuals, dark.visuals, "one palette, whatever the accent");
+    let old = json!({ "theme": "dark", "accent": { "preset": "aurora" }, "font": "inter", "icons": "lucide", "text_scale": 110 });
+    std::fs::write(&file, old.to_string()).unwrap();
+    let harness = window(&file);
+    assert_eq!(*harness.state().appearance(), Appearance { theme: ThemeMode::Dark, text_scale: 110, ..Appearance::default() });
+    let dark = Theme::new(Mode::Dark, TextScale::from_percent(110).unwrap()).style();
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals, dark.visuals, "one palette, whatever the old file named");
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).text_styles, dark.text_styles, "Figtree, whatever the old file named");
 }
 
 #[test]
@@ -90,8 +85,7 @@ fn the_window_s_own_setters_run_the_commands_and_are_kept_too() {
     let mut harness = window(&file);
     let app = harness.state_mut();
     app.set_mode(ModePreference::Light);
-    app.set_typeface(Typeface::Inter);
-    app.set_icons(Icons::Lucide);
+    app.set_frame(WindowFrame::System);
     app.set_text_scale(TextScale::from_percent(90).unwrap());
     app.set_reduce_motion(false);
     harness.run();
@@ -99,6 +93,7 @@ fn the_window_s_own_setters_run_the_commands_and_are_kept_too() {
     assert_eq!(kept, *harness.state().appearance());
     assert_eq!(kept.motion, Motion::Full);
     assert_eq!(kept.text_scale, 90);
+    assert_eq!(kept.frame, WindowFrame::System);
 }
 
 #[test]
@@ -122,8 +117,8 @@ fn a_change_from_outside_the_window_is_kept_from_the_next_frame() {
     let file = dir.path().join(FILE);
     let mut harness = window(&file);
     assert_eq!(KeepFile::new(file.clone()).load(), None, "nothing is written while nothing changed");
-    harness.state_mut().mailbox_mut().run("ui.icons.set", &json!({ "icons": "lucide" })).unwrap();
+    harness.state_mut().mailbox_mut().run("ui.motion.set", &json!({ "reduce": "on" })).unwrap();
     assert_eq!(KeepFile::new(file.clone()).load(), None);
     harness.run();
-    assert_eq!(KeepFile::new(file).load().map(|kept| kept.icons), Some(Icons::Lucide));
+    assert_eq!(KeepFile::new(file).load().map(|kept| kept.motion), Some(Motion::Reduce));
 }

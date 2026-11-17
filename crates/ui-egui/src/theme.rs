@@ -8,9 +8,9 @@
 //! that carry meaning 3:1; the tests check every pair. This file is the only place that names a colour; a test refuses
 //! colour constants anywhere else in the crate. Two values are translucent: [`Palette::scrim`] and [`FLOAT_SHADOW`].
 //!
-//! Every text style is a font token of [`Fonts`]: a weight of the [`Typeface`] the owner chose (Figtree, replacing
-//! egui's Ubuntu Light, or Inter; both bundled) or the monospaced face, at a size the [`TextScale`] multiplies. The icon
-//! fonts are [`IconFont`]s. This file is also the only place that names a font.
+//! Every text style is a font token of [`Fonts`]: a weight of Figtree (bundled, replacing egui's Ubuntu Light) or the
+//! monospaced face, at a size the [`TextScale`] multiplies. The icon fonts are [`IconFont`]s, Phosphor's. This file is
+//! also the only place that names a font.
 //!
 //! The owner's choices arrive as the engine's [`Appearance`] (the `ui.*.set` commands); [`Look`] is what of it the
 //! tokens need.
@@ -19,9 +19,8 @@ use egui::epaint::Shadow;
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, Style, TextStyle, Visuals, vec2};
 
 use inboxcraft_engine::appearance::Appearance;
-pub use inboxcraft_engine::appearance::{ThemeMode as ModePreference, Typeface};
+pub use inboxcraft_engine::appearance::ThemeMode as ModePreference;
 
-use crate::iconset::IconSet;
 use crate::motion::{self, MOTION, Motion};
 
 /// Light or dark: the mode shown now.
@@ -223,7 +222,7 @@ pub(crate) const SIZES: Sizes = Sizes {
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
 pub const FLOAT_SHADOW: Shadow = Shadow { offset: [0, 12], blur: 32, spread: 0, color: Color32::from_rgba_premultiplied(0, 0, 0, 102) };
 
-/// A weight of the typeface, lightest first.
+/// A weight of Figtree, lightest first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Weight {
     /// Running text and previews.
@@ -236,55 +235,49 @@ pub enum Weight {
     Bold,
 }
 
-/// A face of a font token: the typeface at a weight, or the monospaced face.
+/// A face of a font token: Figtree at a weight, or the monospaced face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Face {
-    /// The typeface (Figtree).
+    /// Figtree.
     Sans(Weight),
     /// The monospaced face, for preformatted text and code.
     Mono,
 }
 
-/// A font token: a face of a typeface and a size in points.
+/// A font token: a face and a size in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Font {
     /// The size in points, the text scale applied.
     pub size: f32,
     /// The face.
     pub face: Face,
-    /// The typeface a [`Face::Sans`] weight is drawn in.
-    pub typeface: Typeface,
 }
 
 /// The weights the tokens use, lightest first.
 const WEIGHTS: [Weight; 4] = [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold];
 
-/// The family name of a weight of a typeface: one font file each. Figtree Regular is egui's proportional family too.
-const fn family_name(typeface: Typeface, weight: Weight) -> &'static str {
-    match (typeface, weight) {
-        (Typeface::Figtree, Weight::Regular) => "Figtree-Regular",
-        (Typeface::Figtree, Weight::Medium) => "Figtree-Medium",
-        (Typeface::Figtree, Weight::SemiBold) => "Figtree-SemiBold",
-        (Typeface::Figtree, Weight::Bold) => "Figtree-Bold",
-        (Typeface::Inter, Weight::Regular) => "Inter-Regular",
-        (Typeface::Inter, Weight::Medium) => "Inter-Medium",
-        (Typeface::Inter, Weight::SemiBold) => "Inter-SemiBold",
-        (Typeface::Inter, Weight::Bold) => "Inter-Bold",
+/// The family name of a weight of Figtree: one font file each. Figtree Regular is egui's proportional family too.
+const fn family_name(weight: Weight) -> &'static str {
+    match weight {
+        Weight::Regular => "Figtree-Regular",
+        Weight::Medium => "Figtree-Medium",
+        Weight::SemiBold => "Figtree-SemiBold",
+        Weight::Bold => "Figtree-Bold",
     }
 }
 
 impl Font {
     const fn sans(size: f32, weight: Weight) -> Self {
-        Self { size, face: Face::Sans(weight), typeface: Typeface::Figtree }
+        Self { size, face: Face::Sans(weight) }
     }
 
     /// egui's font for this token.
     #[must_use]
     pub fn id(self) -> FontId {
-        let family = match (self.face, self.typeface) {
-            (Face::Mono, _) => FontFamily::Monospace,
-            (Face::Sans(Weight::Regular), Typeface::Figtree) => FontFamily::Proportional,
-            (Face::Sans(weight), typeface) => FontFamily::Name(family_name(typeface, weight).into()),
+        let family = match self.face {
+            Face::Mono => FontFamily::Monospace,
+            Face::Sans(Weight::Regular) => FontFamily::Proportional,
+            Face::Sans(weight) => FontFamily::Name(family_name(weight).into()),
         };
         FontId::new(self.size, family)
     }
@@ -364,9 +357,9 @@ impl Fonts {
         }
     }
 
-    /// The tokens at 100 % in `typeface`, at `scale`.
-    fn of(typeface: Typeface, scale: TextScale) -> Self {
-        FONTS.map(|font| Font { typeface, ..font.scaled(scale.factor()) })
+    /// The tokens at 100 %, at `scale`.
+    fn of(scale: TextScale) -> Self {
+        FONTS.map(|font| font.scaled(scale.factor()))
     }
 }
 
@@ -417,12 +410,8 @@ pub struct Theme {
     pub sizes: Sizes,
     /// The text scale its fonts are at.
     pub text_scale: TextScale,
-    /// The typeface its fonts are in.
-    pub typeface: Typeface,
-    /// Its font tokens, in the typeface at the text scale.
+    /// Its font tokens at the text scale.
     pub fonts: Fonts,
-    /// The icon set its icons are drawn from.
-    pub icons: IconSet,
     /// How long its motion takes ([`crate::motion`]).
     pub motion: Motion,
 }
@@ -465,23 +454,19 @@ const FONTS: Fonts = Fonts {
     heading: Font::sans(15.0, Weight::SemiBold),
     title: Font::sans(20.0, Weight::Bold),
     display: Font::sans(26.0, Weight::Bold),
-    mono: Font { size: 13.0, face: Face::Mono, typeface: Typeface::Figtree },
+    mono: Font { size: 13.0, face: Face::Mono },
 };
 
-/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`) and Inter (the same licence,
-/// `assets/fonts/inter/OFL.txt`), the weights the tokens use, by [`family_name`].
-const TYPEFACES: [(&str, &[u8]); 8] = [
+/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`), the weights the tokens use, by
+/// [`family_name`].
+const TYPEFACES: [(&str, &[u8]); 4] = [
     ("Figtree-Regular", include_bytes!("../../../assets/fonts/figtree/Figtree-Regular.ttf")),
     ("Figtree-Medium", include_bytes!("../../../assets/fonts/figtree/Figtree-Medium.ttf")),
     ("Figtree-SemiBold", include_bytes!("../../../assets/fonts/figtree/Figtree-SemiBold.ttf")),
     ("Figtree-Bold", include_bytes!("../../../assets/fonts/figtree/Figtree-Bold.ttf")),
-    ("Inter-Regular", include_bytes!("../../../assets/fonts/inter/Inter-Regular.ttf")),
-    ("Inter-Medium", include_bytes!("../../../assets/fonts/inter/Inter-Medium.ttf")),
-    ("Inter-SemiBold", include_bytes!("../../../assets/fonts/inter/Inter-SemiBold.ttf")),
-    ("Inter-Bold", include_bytes!("../../../assets/fonts/inter/Inter-Bold.ttf")),
 ];
 
-/// The font an icon set draws a weight with.
+/// The font of a Phosphor weight the icon painter draws with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IconFont {
     /// Phosphor Regular: lines.
@@ -490,17 +475,13 @@ pub enum IconFont {
     PhosphorFill,
     /// Phosphor Duotone: each icon a back glyph and a line glyph.
     PhosphorDuotone,
-    /// Lucide: lines, its only weight.
-    Lucide,
 }
 
-/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, and Lucide (ISC,
-/// `assets/icons/lucide/LICENSE`), each a family of its own.
-const ICON_FONTS: [(IconFont, &str, &[u8]); 4] = [
+/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, each a family of its own.
+const ICON_FONTS: [(IconFont, &str, &[u8]); 3] = [
     (IconFont::PhosphorRegular, "Phosphor", include_bytes!("../../../assets/icons/phosphor/Phosphor.ttf")),
     (IconFont::PhosphorFill, "Phosphor-Fill", include_bytes!("../../../assets/icons/phosphor/Phosphor-Fill.ttf")),
     (IconFont::PhosphorDuotone, "Phosphor-Duotone", include_bytes!("../../../assets/icons/phosphor/Phosphor-Duotone.ttf")),
-    (IconFont::Lucide, "Lucide", include_bytes!("../../../assets/icons/lucide/Lucide.ttf")),
 ];
 
 impl IconFont {
@@ -512,10 +493,9 @@ impl IconFont {
     }
 }
 
-/// egui's fonts with Figtree in place of Ubuntu Light: each weight of Figtree and Inter is a family of its own,
-/// followed by egui's emoji and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family
-/// of its own too, with nothing behind it. Every typeface and icon set is installed, so a change of either is a change
-/// of tokens only.
+/// egui's fonts with Figtree in place of Ubuntu Light: each weight of Figtree is a family of its own, followed by
+/// egui's emoji and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family of its own
+/// too, with nothing behind it.
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
@@ -529,11 +509,9 @@ pub fn font_definitions() -> egui::FontDefinitions {
     let fallbacks = definitions.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let family = |first: &str| std::iter::once(first.to_owned()).chain(fallbacks.iter().cloned()).collect::<Vec<_>>();
     definitions.families.insert(FontFamily::Proportional, family("Figtree-Regular"));
-    for typeface in Typeface::ALL {
-        for weight in WEIGHTS {
-            let name = family_name(typeface, weight);
-            definitions.families.insert(FontFamily::Name(name.into()), family(name));
-        }
+    for weight in WEIGHTS {
+        let name = family_name(weight);
+        definitions.families.insert(FontFamily::Name(name.into()), family(name));
     }
     let monospace = definitions.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(monospace.len().min(1), "Figtree-Regular".to_owned());
@@ -549,69 +527,38 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
 
-/// What the tokens take from the owner's choices besides the mode: the text scale, the typeface and the icon set.
+/// What the tokens take from the owner's choices besides the mode: the text scale.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Look {
     /// The text scale.
     pub text_scale: TextScale,
-    /// The typeface.
-    pub typeface: Typeface,
-    /// The icon set.
-    pub icons: IconSet,
 }
 
 impl Look {
     /// What the tokens take from `appearance`; a text scale this front end does not have is 100 %.
     #[must_use]
     pub fn of(appearance: &Appearance) -> Self {
-        Self {
-            text_scale: TextScale::from_percent(appearance.text_scale).unwrap_or_default(),
-            typeface: appearance.font,
-            icons: IconSet::of(appearance.icons),
-        }
+        Self { text_scale: TextScale::from_percent(appearance.text_scale).unwrap_or_default() }
     }
 }
 
 impl Theme {
-    /// The look of `mode` at `text_scale`, in Figtree with Phosphor icons.
+    /// The look of `mode` at `text_scale`.
     #[must_use]
     pub fn new(mode: Mode, text_scale: TextScale) -> Self {
-        let typeface = Typeface::default();
-        Self {
-            mode,
-            palette: Palette::of(mode),
-            spacing: SPACING,
-            sizes: SIZES,
-            text_scale,
-            typeface,
-            fonts: Fonts::of(typeface, text_scale),
-            icons: IconSet::default(),
-            motion: MOTION,
-        }
+        Self { mode, palette: Palette::of(mode), spacing: SPACING, sizes: SIZES, text_scale, fonts: Fonts::of(text_scale), motion: MOTION }
     }
 
     /// The look of `mode` with everything else from `look`.
     #[must_use]
     pub fn of(mode: Mode, look: &Look) -> Self {
-        Self::new(mode, look.text_scale).with_typeface(look.typeface).with_icons(look.icons)
+        Self::new(mode, look.text_scale)
     }
 
     /// The same look with every font token at `scale`.
     #[must_use]
     pub fn with_text_scale(self, scale: TextScale) -> Self {
-        Self { text_scale: scale, fonts: Fonts::of(self.typeface, scale), ..self }
-    }
-
-    /// The same look with every font token in `typeface`.
-    #[must_use]
-    pub fn with_typeface(self, typeface: Typeface) -> Self {
-        Self { typeface, fonts: Fonts::of(typeface, self.text_scale), ..self }
-    }
-
-    /// The same look with the icons from `icons`.
-    #[must_use]
-    pub fn with_icons(self, icons: IconSet) -> Self {
-        Self { icons, ..self }
+        Self { text_scale: scale, fonts: Fonts::of(scale), ..self }
     }
 
     /// The look `ctx` shows now with everything else from `look`.

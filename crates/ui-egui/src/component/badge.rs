@@ -47,7 +47,7 @@ pub fn group(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, side: f32) ->
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, name));
     if ui.is_rect_visible(rect) {
-        theme.icons.paint(ui.painter(), rect.shrink(side * 0.15), icon, Style::Regular, group_ink(theme));
+        crate::iconset::paint(ui.painter(), rect.shrink(side * 0.15), icon, Style::Regular, group_ink(theme));
     }
     response
 }

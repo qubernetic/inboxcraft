@@ -19,9 +19,8 @@
 //! - [`picture`]: the PNG and JPEG pictures of a message decoded into RGBA, with their size checked first.
 //! - [`quote`]: a plain-text body split into what the sender wrote and the quotes the reader folds.
 //! - [`shot`]: headless pictures of the window for `ui_shot`, filled on the CPU and written as PNG.
-//! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], the set (Phosphor or Lucide) maps it to a
-//!   glyph.
-//! - [`settings`]: the appearance settings page's state: open or not, and the custom accent as the owner types it.
+//! - [`iconset`]: the icon painter: views ask for an [`iconset::IconId`], Phosphor's fonts give its glyph.
+//! - [`settings`]: the settings sheet's state: open or not, the page shown and what its pages hold while it is open.
 //! - [`keep`]: where the appearance choices (the `ui.*.set` commands) and the keys are kept between runs.
 //! - [`desk`]: the app's side of running without a window: in the background, and starting with the computer.
 //! - [`motion`]: the motion tokens and the one reduced-motion flag every animation reads.

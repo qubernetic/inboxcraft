@@ -90,7 +90,7 @@ try:
   toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
   slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
-- the appearance settings (the gear on the rail, Ctrl+Comma): mode, preset, typeface, icons, text scale and reduced
+- the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
 - the composer (New message in the folder pane, or C): recipients as chips with suggestions from the sample's people,
   a signature from the Sending page, the draft kept at every change; Close keeps it, Discard removes it. Send is

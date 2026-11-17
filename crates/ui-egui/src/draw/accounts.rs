@@ -66,7 +66,7 @@ fn none_yet(ui: &mut Ui, theme: &Theme) {
         ui.vertical_centered(|ui| {
             let side = line_height(ui, theme.fonts.body) * 2.4;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
+            crate::iconset::paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
             ui.add_space(s.s2);
             ui.label(RichText::new(tr!("Your accounts show up here")).font(theme.fonts.heading.id()).color(p.ink));
             ui.add_space(s.s1);
@@ -90,7 +90,7 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
             ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
-        theme.icons.paint(ui.painter(), at, IconId::Back, Style::Regular, p.cyan_text);
+        crate::iconset::paint(ui.painter(), at, IconId::Back, Style::Regular, p.cyan_text);
         ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
         focus_ring(ui, theme, &response);
     }

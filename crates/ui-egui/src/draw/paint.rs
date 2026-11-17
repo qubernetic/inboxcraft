@@ -181,7 +181,7 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
             let side = theme.fonts.body.size * 1.15;
             let at = Rect::from_center_size(pos2(left + side / 2.0, rect.center().y), vec2(side, side));
             let (style, ink) = if row.selected { (Style::Fill, p.cyan_text) } else { (Style::Regular, p.muted) };
-            theme.icons.paint(painter, at, icon, style, ink);
+            crate::iconset::paint(painter, at, icon, style, ink);
             left += side + s.s2;
         }
         let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s2, rect.center().y) - s.s2 } else { rect.right() - s.s2 };

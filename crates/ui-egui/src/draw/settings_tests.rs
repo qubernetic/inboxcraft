@@ -7,7 +7,7 @@ use egui::accesskit::{Role, Toggled};
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
-use inboxcraft_engine::appearance::{Icons, Motion, ThemeMode, Typeface, WindowFrame};
+use inboxcraft_engine::appearance::{Motion, ThemeMode, WindowFrame};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -95,19 +95,13 @@ fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_l
 #[test]
 fn every_control_runs_its_command() {
     let mut harness = opened();
-    assert!(selected(&harness, "System"));
+    assert!(selected(&harness, "Auto"));
     assert_eq!(press(&mut harness, "Dark"), "ui.theme.set");
     assert_eq!(harness.state().appearance().theme, ThemeMode::Dark);
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
     assert!(selected(&harness, "Dark"));
 
     assert!(harness.query_by_label("Aurora").is_none(), "one palette: no accent to choose");
-
-    assert_eq!(press(&mut harness, "Inter"), "ui.font.set");
-    assert_eq!(harness.state().appearance().font, Typeface::Inter);
-
-    assert_eq!(press(&mut harness, "Lucide"), "ui.icons.set");
-    assert_eq!(harness.state().appearance().icons, Icons::Lucide);
 
     // The slider: a press in its middle sets 110 %, the right arrow a step more.
     harness.get_by_role_and_label(Role::Slider, "Text size").click();
@@ -128,6 +122,21 @@ fn every_control_runs_its_command() {
     assert_eq!(harness.state().appearance().motion, Motion::Reduce);
     assert_eq!(harness.get_by_role_and_label(Role::Switch, "Reduce motion").accesskit_node().toggled(), Some(Toggled::True));
     assert!(harness.query_by_label("Custom").is_none());
+}
+
+#[test]
+fn the_appearance_page_has_no_accent_typeface_or_icon_choice() {
+    let harness = opened();
+    for gone in ["Accent", "Custom", "Typeface", "Icons"] {
+        assert!(harness.query_by_label(gone).is_none(), "{gone}");
+    }
+    for kept in ["Mode", "Text size", "Reduce motion", "Window frame"] {
+        assert!(harness.query_all_by_label(kept).count() > 0, "{kept}");
+    }
+    // The mode reads Auto, Dark, Light, left to right; Auto is the system's.
+    let x = |label: &str| harness.get_by_role_and_label(Role::Button, label).rect().center().x;
+    assert!(x("Auto") < x("Dark") && x("Dark") < x("Light"));
+    assert!(harness.query_by_label("System").is_none());
 }
 
 #[test]

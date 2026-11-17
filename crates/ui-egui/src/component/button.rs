@@ -106,7 +106,7 @@ impl<'a> IconButton<'a> {
             };
             let colour = if self.enabled { colour } else { p.dim };
             let icon = if self.side.is_some() { side * 0.5 } else { theme.fonts.body.size * 1.3 };
-            theme.icons.paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, style, colour);
+            crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, style, colour);
             if response.has_focus() {
                 painter.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }
@@ -229,7 +229,7 @@ impl<'a> TextButton<'a> {
             let left = rect.center().x - (galley.size().x + lead) / 2.0;
             if let Some(icon) = self.icon {
                 let at = egui::Rect::from_center_size(egui::pos2(left + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
-                theme.icons.paint(painter, at, icon, Style::Regular, ink);
+                crate::iconset::paint(painter, at, icon, Style::Regular, ink);
             }
             painter.galley(egui::pos2(left + lead, rect.center().y - galley.size().y / 2.0), galley, ink);
             if response.has_focus() {

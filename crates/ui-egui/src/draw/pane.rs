@@ -67,7 +67,7 @@ fn mark(ui: &mut Ui, theme: &Theme, ink: Color32) {
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, "InboxCraft"));
     ui.painter().rect_filled(rect, 0.0, theme.palette.stage);
     let icon = side * 0.5;
-    theme.icons.paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Mail, Style::Fill, ink);
+    crate::iconset::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Mail, Style::Fill, ink);
 }
 
 /// The owner's avatar at the rail's foot: the first account's initials, `muted` on a `stage` square.

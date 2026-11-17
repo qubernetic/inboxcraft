@@ -50,7 +50,7 @@ mod settings;
 use std::sync::Arc;
 
 use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
-use inboxcraft_engine::appearance::{Appearance, Icons, Motion, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -60,7 +60,6 @@ use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
-use crate::iconset::IconSet;
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, Mailbox, Pile, Place};
@@ -70,7 +69,7 @@ use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::settings::{Section, Settings};
-use crate::theme::{self, Look, ModePreference, TextScale, Theme, Typeface};
+use crate::theme::{self, Look, ModePreference, TextScale, Theme};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
 use paint::Panes;
@@ -696,8 +695,7 @@ impl InboxApp {
         &self.settings
     }
 
-    /// The appearance settings page, to type a custom accent from outside (the `ui_shot` scripts, later the control
-    /// channel).
+    /// The settings sheet, to drive from outside (the `ui_shot` scripts, later the control channel).
     pub fn settings_mut(&mut self) -> &mut Settings {
         &mut self.settings
     }
@@ -1153,28 +1151,6 @@ impl InboxApp {
     /// (`ui.text_scale.set`).
     pub fn set_text_scale(&mut self, scale: TextScale) {
         self.appear("ui.text_scale.set", &json!({ "percent": scale.percent() }));
-    }
-
-    /// The typeface every font token is in.
-    #[must_use]
-    pub fn typeface(&self) -> Typeface {
-        self.appearance().font
-    }
-
-    /// Draws every text in `typeface`, from the next frame (`ui.font.set`).
-    pub fn set_typeface(&mut self, typeface: Typeface) {
-        self.appear("ui.font.set", &json!({ "font": typeface.id() }));
-    }
-
-    /// The icon set the icons come from.
-    #[must_use]
-    pub fn icons(&self) -> IconSet {
-        IconSet::of(self.appearance().icons)
-    }
-
-    /// Draws the icons from `icons`, from the next frame (`ui.icons.set`).
-    pub fn set_icons(&mut self, icons: Icons) {
-        self.appear("ui.icons.set", &json!({ "icons": icons.id() }));
     }
 
     /// Who draws the window's frame, from the next frame (`ui.frame.set`).
@@ -1750,8 +1726,6 @@ impl InboxApp {
     fn apply_settings(&mut self, asked: settings::Asked) {
         match asked {
             settings::Asked::Mode(mode) => self.set_mode(mode),
-            settings::Asked::Font(typeface) => self.set_typeface(typeface),
-            settings::Asked::Icons(icons) => self.set_icons(icons),
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),

@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 /// A page of the settings sheet that is built.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
-    /// Mode, typeface, icons, window frame, text size and motion.
+    /// Mode, window frame, text size and motion.
     #[default]
     Appearance,
     /// The accounts, and adding one.
