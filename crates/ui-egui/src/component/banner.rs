@@ -54,8 +54,9 @@ const UNDER: f32 = 4.0;
 /// The room between two links, in points.
 const LINK_GAP: f32 = 16.0;
 
-/// The most lines the words take.
-const ROWS: usize = 3;
+/// The most lines the words take: one, as the sheet's box is one line high; the rest is cut with an ellipsis (a bounce's
+/// whole report is behind its link).
+const ROWS: usize = 1;
 
 /// A banner of `kind` across `ui`'s width saying `text`, with `links` under it; the id of the link pressed.
 pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, text: &str, links: &[BannerLink<'_>]) -> Option<String> {
@@ -73,7 +74,7 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
     let label_width = label.size().x.ceil();
     let left = PAD_X + label_width + PAD_X;
     let room = (width - left - PAD_X).max(1.0);
-    let words = super::wrapped(ui, &super::plain(text), f.caption, p.ink, room, ROWS, Align::LEFT);
+    let words = words(ui, theme, &super::plain(text), room);
     let words_high = words.size().y.max(f.caption.line);
     let link_high = theme.boxes().row_link;
     let column = if links.is_empty() { words_high } else { words_high + UNDER + link_high };
@@ -82,7 +83,7 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
     let high = (PAD_Y + column.max(f.caption.line) + PAD_Y).ceil();
     let (_, rect) = ui.allocate_space(vec2(width, high));
     let response = ui.interact(rect, ui.scope_id().with("banner").with(text), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(text)));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect(rect, 0.0, p.panel, Stroke::new(1.0, edge), StrokeKind::Inside);
@@ -97,12 +98,48 @@ pub fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, kind: BannerKind, tex
     let mut child = ui.new_child(UiBuilder::new().max_rect(row).layout(Layout::left_to_right(Align::Center)));
     child.spacing_mut().item_spacing.x = LINK_GAP;
     let mut pressed = None;
+    let mut left = room;
     for link in links {
-        if link_sized(&mut child, theme, keymap, link.name, LinkSize::Small).clicked() {
+        // A link's words are data too (an address): without bidi controls, cut with one ellipsis to the room left.
+        let name = cut_name(ui, theme, &super::spoken(link.name), left);
+        if name.is_empty() {
+            break;
+        }
+        let response = link_sized(&mut child, theme, keymap, &name, LinkSize::Small);
+        left -= response.rect.width() + LINK_GAP;
+        if response.clicked() {
             pressed = Some(link.id.to_owned());
         }
     }
     pressed
+}
+
+/// The most characters of a banner's words laid out: far more than a line of 640 shows.
+const MOST: usize = 400;
+
+/// The banner's words `text` laid out in `room` points: one line, cut between characters with one ellipsis (at most
+/// [`MOST`] characters are laid out at all).
+pub(crate) fn words(ui: &Ui, theme: &Theme, text: &str, room: f32) -> std::sync::Arc<egui::Galley> {
+    let (kept, capped) = super::capped(text, MOST);
+    let galley = super::wrapped(ui, kept, theme.fonts.caption, theme.palette.ink, room, ROWS, Align::LEFT);
+    if galley.elided || !capped {
+        return galley;
+    }
+    // The line held all it was given: the ellipsis says the rest was left out.
+    super::wrapped(ui, &format!("{kept}…"), theme.fonts.caption, theme.palette.ink, room, ROWS, Align::LEFT)
+}
+
+/// A link's `name` as it fits in `room` points in the small link's face: whole, or cut between characters with one
+/// ellipsis; empty when not even the ellipsis fits.
+fn cut_name(ui: &Ui, theme: &Theme, name: &str, room: f32) -> String {
+    if room < 1.0 {
+        return String::new();
+    }
+    let galley = super::cut(ui, name, theme.fonts.mono_s, theme.palette.cyan_text, room);
+    if !galley.elided {
+        return name.to_owned();
+    }
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
 }
 
 #[cfg(test)]

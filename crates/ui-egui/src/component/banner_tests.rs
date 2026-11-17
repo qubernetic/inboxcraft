@@ -3,10 +3,10 @@
 
 use egui::{Color32, Key, Rect, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{BannerKind, BannerLink, banner};
-use crate::component::tests::{Look, builder, own, painted, stage, staged};
+use crate::component::tests::{Look, builder, own, painted, stage};
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::{Mode, Palette, TextScale, Theme};
@@ -138,33 +138,101 @@ fn a_banner_link_gives_its_id_on_a_click_and_on_enter_and_on_space() {
     }
 }
 
-#[test]
-fn a_long_or_hostile_text_wraps_inside_the_banner_and_ends_with_one_ellipsis() {
+/// The bidi format characters no name may carry: embeddings, overrides and isolates, and the marks.
+const BIDI: [char; 12] =
+    ['\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{200E}', '\u{200F}', '\u{061C}'];
+
+/// A bounce banner 640 wide saying `text` with one link `link`, on a stage.
+fn bounce(text: &'static str, link: &'static str) -> egui_kittest::Harness<'static> {
     let theme = Theme::new(Mode::Dark, TextScale::default());
-    let hostile = "550\u{0}\r\n5.1.1 ".repeat(200) + "é‍👩‍👩‍👧";
-    let text: &'static str = Box::leak(hostile.into_boxed_str());
-    let harness = staged(
-        theme,
-        |p| p.surface,
-        vec2(700.0, 300.0),
-        move |ui, theme| {
+    // The app draws a box for a character no face has (egui's default); the test harness would panic instead.
+    let mut harness = builder().allow_missing_glyphs().with_size(vec2(700.0, 200.0)).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, theme.palette.surface, |ui| {
             ui.set_width(640.0);
-            banner(ui, theme, &Keymap::default(), BannerKind::Bounce, text, &[BannerLink { name: "open the report", id: "r" }]);
-        },
-    );
-    let node = harness.get_by_label(text);
-    let rect = node.rect();
-    let paint = painted(&harness, text);
-    let body = paint.shapes.iter().find_map(|shape| match &shape.look {
-        Look::Text { text: words, .. } if words.contains("5.1.1") => Some((shape.rect, words.clone())),
-        _ => None,
+            banner(ui, &theme, &Keymap::default(), BannerKind::Bounce, text, &[BannerLink { name: link, id: "report" }]);
+        });
     });
-    let (body, words) = body.unwrap_or((Rect::NOTHING, String::new()));
-    assert!(rect.contains_rect(body), "{rect:?} {body:?}");
-    assert!(body.height() <= 3.0 * 18.0 + 0.01, "at most three lines: {body:?}");
-    assert!(!words.contains(['\0', '\r', '\n']), "no control characters are drawn");
-    assert_eq!(rect.height(), (8.0 + body.height() + 4.0 + 16.0 + 8.0).ceil());
-    harness.get_by_label("open the report");
+    harness.run();
+    harness
+}
+
+/// The characters the words of a banner 640 wide show for `text`, as laid out.
+fn shown_words(text: &'static str) -> String {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = builder().allow_missing_glyphs().with_size(vec2(700.0, 100.0)).build_ui_state(
+        move |ui, shown: &mut String| {
+            let galley = super::words(ui, &theme, &crate::component::plain(text), 545.0);
+            *shown = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+        },
+        String::new(),
+    );
+    harness.run();
+    harness.state().clone()
+}
+
+/// Hostile words: a 2 000 letter word, 10 000 combining marks, control characters, right-to-left text with overrides.
+fn hostile_texts() -> Vec<&'static str> {
+    let texts = [
+        "x".repeat(2000),
+        format!("e{}", "\u{301}".repeat(10_000)),
+        "550\u{0}\r\n5.1.1 ".repeat(200) + "é\u{200D}👩\u{200D}👩\u{200D}👧",
+        "שלום עולם, ".repeat(100) + "\u{202E}gro.elpmaxe@ eve",
+        "مرحبا ".repeat(300),
+    ];
+    texts.into_iter().map(|text| &*Box::leak(text.into_boxed_str())).collect()
+}
+
+#[test]
+fn hostile_words_keep_the_banner_at_its_sheet_size_cut_once_at_a_character() {
+    for text in hostile_texts() {
+        let harness = bounce(text, "open the report");
+        let name = crate::component::spoken(text);
+        let rect = harness.get_by_label(&name).rect();
+        assert_eq!(rect.size(), vec2(640.0, 54.0), "{:?}…: the sheet's box", text.chars().take(12).collect::<String>());
+        let paint = painted(&harness, &name);
+        assert!(paint.shapes.iter().all(|shape| !shape.overflows), "nothing leaves the banner");
+        for shape in &paint.shapes {
+            if let Look::Text { text: words, .. } = &shape.look {
+                assert!(rect.contains_rect(shape.rect), "{:?} at {:?}", words.chars().take(12).collect::<String>(), shape.rect);
+                assert!(!words.contains(['\0', '\r', '\n']), "no control character is drawn");
+                assert!(!words.contains(BIDI), "no bidi control is drawn: egui would apply it");
+            }
+        }
+        let shown = shown_words(text);
+        assert_eq!(shown.matches('…').count(), 1, "one ellipsis: {:?}", shown.chars().rev().take(12).collect::<String>());
+        assert!(shown.ends_with('…'), "it ends the line");
+        let kept = shown.trim_end_matches('…');
+        if text.contains('\u{301}') || text.chars().any(|c| ('\u{0590}'..='\u{06FF}').contains(&c)) {
+            // Combining marks lay out as glyphs of their base, right-to-left words in their own order: bounded only.
+            assert!(shown.chars().count() <= 401, "{} glyphs laid out", shown.chars().count());
+        } else {
+            assert!(
+                crate::component::plain(text).starts_with(kept),
+                "cut between characters, nothing else changed: {:?}",
+                kept.chars().take(30).collect::<String>()
+            );
+        }
+    }
+}
+
+#[test]
+fn no_bidi_control_reaches_a_name_and_a_long_link_name_is_cut() {
+    let link: &'static str = Box::leak(format!("always for \u{2066}{}@example.org\u{2069} \u{202E}", "a".repeat(300)).into_boxed_str());
+    for text in hostile_texts() {
+        let harness = bounce(text, link);
+        let name = crate::component::spoken(text);
+        let banner = harness.get_by_label(&name);
+        let rect = banner.rect();
+        let names: Vec<String> = harness.root().children_recursive().filter_map(|node| node.accesskit_node().label()).collect();
+        for name in &names {
+            assert!(!name.contains(BIDI), "a name carries a bidi control: {:?}", name.chars().take(20).collect::<String>());
+        }
+        let link = harness.query_all_by_role(egui::accesskit::Role::Button).next().unwrap_or_else(|| panic!("no link"));
+        assert!(rect.contains_rect(link.rect()), "the link {:?} leaves the banner {rect:?}", link.rect());
+        let label = link.accesskit_node().label().unwrap_or_default();
+        assert!(label.starts_with("always for ") && label.ends_with('…'), "{label:?}");
+    }
 }
 
 #[test]
