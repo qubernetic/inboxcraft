@@ -51,7 +51,7 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Stroke, Ui, UiBuilder};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
@@ -1267,17 +1267,11 @@ impl InboxApp {
         if left_full {
             self.reader.set_full_width(false);
         }
-        let mut dismiss = false;
-        if let Some(error) = self.mailbox.error() {
-            // The error banner of the design: the `panel` ground in a `minus` edge, its act a small link.
-            let ground = Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.minus)).inner_margin(margin(s.s2));
-            Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
-                    dismiss = button::link_sized(ui, &theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
-                });
-            });
-        }
+        // The window's ground first, under the error banner too; then the place for the panes, then everything else.
+        // The panes touch; a hairline divides them.
+        let corner = self.window_corner(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
+        let (dismiss, banner) = self.error_banner(ui, &theme, corner);
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
@@ -1292,11 +1286,10 @@ impl InboxApp {
         let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
-        // The window's ground first, then the place for the panes, then everything else. The panes touch; a hairline
-        // divides them.
-        let corner = self.window_corner(ui.ctx());
-        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
         let mut layers = Panes::begin(ui.painter());
+        if let Some(banner) = banner {
+            layers.capped(banner);
+        }
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
         let rail = Panel::left("rail")
@@ -1509,6 +1502,38 @@ impl InboxApp {
                 .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title, corner));
         }
         frame::edges(ui.ctx());
+    }
+
+    /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
+    /// sides, its act a small link, a `minus` hairline on its top and sides. Its last row holds the one `line` hairline
+    /// between it and what stands under it; the panes there draw no line of their own ([`Panes::capped`]). Whether
+    /// Dismiss was pressed, and the banner's rect. Its top corners follow the window's `corner`.
+    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32) -> (bool, Option<Rect>) {
+        let Some(error) = self.mailbox.error() else { return (false, None) };
+        let p = theme.palette;
+        let mut dismiss = false;
+        // A corner of a few points; the clamp keeps the cast inside u8.
+        let round = corner.clamp(0.0, 255.0) as u8;
+        let ground = Frame::new().fill(p.panel).corner_radius(egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 }).inner_margin(Margin {
+            left: 12,
+            right: 12,
+            top: 8,
+            bottom: 8,
+        });
+        let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
+                dismiss = button::link_sized(ui, theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
+            });
+        });
+        let r = shown.response.rect;
+        let painter = ui.painter();
+        let (right, bottom) = (r.right() - 1.0, r.bottom() - 1.0);
+        paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
+        paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
+        paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
+        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.line);
+        (dismiss, Some(r))
     }
 
     /// The app's own frame over the panes, when it draws one: the controls of the top row at the end of the right

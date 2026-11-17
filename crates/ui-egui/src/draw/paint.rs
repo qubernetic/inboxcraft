@@ -246,13 +246,20 @@ pub(crate) struct Panes {
     slot: ShapeIdx,
     rects: Vec<Rect>,
     edged: Vec<Rect>,
+    capped: Vec<Rect>,
 }
 
 impl Panes {
     /// Keeps the place for the panes in `painter`'s list, after what it holds now.
     #[must_use]
     pub(crate) fn begin(painter: &Painter) -> Self {
-        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new() }
+        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new(), capped: Vec::new() }
+    }
+
+    /// Notes `rect`, a strip above the panes that draws the line on its bottom edge itself (the error banner): a pane
+    /// that starts under it draws no line on its top.
+    pub(crate) fn capped(&mut self, rect: Rect) {
+        self.capped.push(rect);
     }
 
     /// Notes `rect`, a strip beside the panes that draws the line on its right edge itself (the rail, whose edge
@@ -287,7 +294,9 @@ impl Panes {
             if !near(rect.right(), window.right()) && !followed {
                 shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
             }
-            if !near(rect.top(), window.top()) {
+            // A strip's own bottom edge is the line between it and this pane.
+            let under_cap = self.capped.iter().any(|strip| near(strip.bottom(), rect.top()));
+            if !near(rect.top(), window.top()) && !under_cap {
                 shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
             }
             // The pane under this one starts at its bottom: that pane's top line is the one line between them.
