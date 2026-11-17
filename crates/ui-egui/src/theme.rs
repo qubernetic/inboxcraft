@@ -597,7 +597,11 @@ pub fn font_definitions() -> egui::FontDefinitions {
         let fonts = std::iter::once(face.name().to_owned()).chain(behind.iter().cloned()).collect();
         definitions.families.insert(face.family(), fonts);
     }
-    definitions.font_data.insert(ICON.to_owned(), std::sync::Arc::new(egui::FontData::from_static(ICON_FONT)));
+    // The icons are drawn as their outlines are, as the design draws its SVGs: hinting would snap them half a pixel up.
+    definitions.font_data.insert(
+        ICON.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(ICON_FONT).tweak(egui::FontTweak { hinting: Some(false), ..egui::FontTweak::default() })),
+    );
     definitions.families.insert(FontFamily::Name(ICON.into()), vec![ICON.to_owned()]);
     definitions
 }

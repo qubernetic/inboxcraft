@@ -691,3 +691,27 @@ fn a_links_underline_is_the_fonts_in_the_rows_the_sheet_draws_it() {
         assert!(rows[row - 1] <= 0.2 && rows[row + 1] <= 0.2, "{at}");
     }
 }
+
+#[test]
+fn an_icon_sits_in_its_box_as_the_board_draws_it() {
+    // The icon button board: the pin's ink in a 32 box runs over columns 10 to 22 and rows 9 to 21, its bar across
+    // rows 12 and 13 (hinted, the outline snaps up into rows 8 to 21).
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let picture = super::paint(egui::vec2(60.0, 60.0), 1.0, Mode::Light, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        // A 16 px glyph in the middle of a 32 box at 10, 10, as the icon button paints it.
+        crate::iconset::paint(
+            ui.painter(),
+            Rect::from_center_size(pos2(26.0, 26.0), egui::vec2(16.0, 16.0)),
+            crate::iconset::IconId::Pin,
+            theme.palette.ink,
+        );
+    })
+    .unwrap();
+    // Rows and columns with at least a quarter of ink somewhere in them.
+    let inked = |x: usize, y: usize| picture.pixel(x, y).is_some_and(|c| c.a() >= 64);
+    let rows: Vec<usize> = (0..32).filter(|y| (0..32).any(|x| inked(10 + x, 10 + y))).collect();
+    let columns: Vec<usize> = (0..32).filter(|x| (0..32).any(|y| inked(10 + x, 10 + y))).collect();
+    assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
+    assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
+}
