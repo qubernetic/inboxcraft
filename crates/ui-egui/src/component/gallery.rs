@@ -5,7 +5,8 @@
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
 //! a tooltip, a popup menu, a toast, a board of controls that are coming soon, and the time picker as a float at
 //! [`now`] with `thu 9` typed; under them the boards of the sets drawn as their sheets say, every state labelled in the
-//! sheet's order. The data is invented; the keys come from [`keymap`], a keymap with a key for each action shown.
+//! sheet's order, and under them the marks: avatar, badge, scroll bar, account bar and the icons. The data is
+//! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
@@ -54,7 +55,7 @@ const BOARDS: f32 = 960.0;
 const CONTROLS: f32 = 860.0;
 
 /// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
-const MARKS: f32 = 400.0;
+const MARKS: f32 = 480.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -780,11 +781,25 @@ fn scroll_bars(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The account bar's board: the six accounts' colours.
+fn account_bars(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Account bar"));
+    cells(ui, theme, |ui| {
+        let accounts = [tr!("acct1"), tr!("acct2"), tr!("acct3"), tr!("acct4"), tr!("acct5"), tr!("acct6")];
+        for (account, state) in (0_u64..).zip(accounts) {
+            cell(ui, theme, state, |ui| {
+                super::account_bar(ui, theme, account);
+            });
+        }
+    });
+}
+
 /// The marks' left column.
 fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     avatars(ui, theme);
     badges(ui, theme);
     scroll_bars(ui, theme);
+    account_bars(ui, theme);
 }
 
 /// The icon's board: the 45 icons at 16 px in `muted`, in the sheet's order, eight to a row.

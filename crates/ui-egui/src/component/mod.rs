@@ -24,6 +24,7 @@
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
 //! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
 //! - [`slider`]: the text size on five ticks, 90 % to 130 %.
+//! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
 //! - [`soon`]: what is designed and not built yet, drawn unavailable, and its "coming soon" tag.
 //! - [`time_picker`]: presets and a typed time for snooze, send later and reminders ([`typed_time`] reads the text).
 //!
@@ -203,6 +204,19 @@ pub(crate) fn tick(painter: &egui::Painter, rect: egui::Rect, colour: egui::Colo
     painter.line(vec![at(0.15, 0.55), at(0.4, 0.8), at(0.85, 0.2)], egui::Stroke::new(1.5, colour));
 }
 
+/// The size of the account bar in points: a fixed mark, as large at every text scale.
+const ACCOUNT_BAR: egui::Vec2 = egui::vec2(3.0, 12.0);
+
+/// The account bar: 3 × 12 px, square, in the colour of the account counted `account` from 0, the six colours
+/// repeating from the seventh (`accounts[account % 6]`). It is a mark beside a row's sender; the row says the account.
+pub fn account_bar(ui: &mut Ui, theme: &Theme, account: u64) -> Response {
+    let (rect, response) = ui.allocate_exact_size(ACCOUNT_BAR, egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 0.0, theme.account_colour(account));
+    }
+    response
+}
+
 /// A corner radius of `points`.
 pub(crate) fn corner(points: f32) -> CornerRadius {
     // A few points; the clamp keeps the cast inside u8.
@@ -229,3 +243,7 @@ mod walk_tests;
 #[cfg(test)]
 #[path = "press_tests.rs"]
 pub(crate) mod press_tests;
+
+#[cfg(test)]
+#[path = "account_tests.rs"]
+mod account_tests;
