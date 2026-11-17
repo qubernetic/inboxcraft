@@ -170,7 +170,12 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
         let pad = if squeezed { theme.spacing.s1 } else { PAD };
         // A point more than the name needs, so that rounding never cuts a name that fits.
         let text = cut(ui, name, *font, ink, (rect.width() - pad * 2.0 + 1.0).min(WIDEST));
-        painter.galley(rect.center() - text.size() / 2.0, text, ink);
+        // The design's text box hugs the name (rounded up to a whole point) and is at most the room, 136 at most; it
+        // stands in the middle and holds the words, cut or not, from its left.
+        let full = paint::run_box(galley(ui, name, *font, ink).size().x);
+        let room = (rect.width() - pad * 2.0).clamp(0.0, WIDEST);
+        let at = pos2(rect.center().x - full.min(room) / 2.0, rect.center().y - text.size().y / 2.0);
+        paint::run_at(&painter, at, text, ink);
     }
     if visible && lit.focus {
         paint::focus_ring(&painter, theme, track, Ring::Outside);

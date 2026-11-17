@@ -195,3 +195,40 @@ fn outside_its_box_a_tooltip_paints_the_one_shadow_and_nothing_else() {
         }
     }
 }
+
+/// The pixels of the unavailable switch's dashed edge (its colour `muted`, the ground `bg`) with its reason tooltip
+/// drawn under it as a board draws it: the count of pixels darker than `muted` in the edge's rows.
+fn darkened_dashes(mode: Mode) -> usize {
+    use crate::component::switch::{SwitchState, switch_noted};
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = Keymap::empty();
+    let (muted, ground) = (theme.palette.muted, theme.palette.bg);
+    let size = egui::vec2(240.0, 80.0);
+    let picture = crate::shot::paint(size, 1.0, mode, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        ui.painter().rect_filled(egui::Rect::from_min_size(egui::Pos2::ZERO, size), 0.0, ground);
+        let under = ui.painter().add(egui::Shape::Noop);
+        switch_noted(ui, &theme, "Background", SwitchState::Unavailable, Some("Not there in the Flatpak yet"));
+        super::bubble_noted_under(ui, &theme, &keymap, "Background", None, Some("Not there in the Flatpak yet"), under);
+    })
+    .unwrap();
+    let close = |a: egui::Color32, b: egui::Color32| a.r().abs_diff(b.r()).max(a.g().abs_diff(b.g())).max(a.b().abs_diff(b.b())) <= 8;
+    let mut darker = 0;
+    for y in 0..20 {
+        for x in 0..40 {
+            let Some(pixel) = picture.pixel(x, y) else { continue };
+            // A pixel of the dashes, but not the colour itself: the shadow has darkened it.
+            if close(pixel, muted) && pixel != muted {
+                darker += 1;
+            }
+        }
+    }
+    darker
+}
+
+#[test]
+fn a_board_s_reason_tooltip_lays_its_shadow_under_the_control_above_it() {
+    for mode in [Mode::Dark, Mode::Light] {
+        assert_eq!(darkened_dashes(mode), 0, "{mode:?}: the switch's dashes keep their colour");
+    }
+}

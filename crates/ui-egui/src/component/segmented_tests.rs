@@ -375,3 +375,61 @@ fn a_screen_reader_chooses_an_option_by_its_own_click_and_the_control_stays_one_
     assert_eq!(stops, 1);
     assert!(keyboard_walk(&mut harness).is_empty());
 }
+
+#[test]
+fn a_cut_option_starts_at_its_padding_as_the_design_s_136_wide_text_box_does() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(600.0, 120.0),
+        |ui, theme| {
+            let font = theme.fonts.button;
+            segmented(ui, theme, &[(0, LONG[0], font), (1, LONG[1], font), (2, LONG[2], font)], 0);
+        },
+    );
+    harness.run();
+    let paint = painted(&harness, &LONG.join(" / "));
+    let option = harness.get_by_label(LONG[1]).rect();
+    let long = paint.shapes.iter().find(|shape| matches!(&shape.look, Look::Text { text, .. } if text == LONG[1]));
+    let left = long.map(|shape| shape.rect.left() - option.left());
+    // The sheet: the option is 160 wide (136 and 12 each side), its text box at 12 holds the cut words from its left.
+    assert!((option.width() - 160.0).abs() < 0.01, "{option:?}");
+    assert!(left.is_some_and(|left| (left - 12.0).abs() < 0.01), "{left:?}");
+}
+
+#[test]
+fn the_long_label_s_cut_words_are_painted_as_they_were_cut_off_the_pixel_grid() {
+    let shown = |galley: &egui::Galley| -> String { galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect() };
+    for ppp in [1.0, 1.5] {
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let mut harness = builder().with_size(egui::vec2(600.0, 120.0)).with_pixels_per_point(ppp).build_ui_state(
+            move |ui, laid: &mut String| {
+                let font = theme.fonts.button;
+                // 1.9 points in, so the option's text box starts off the physical pixel grid (0.9 of a pixel at 1.0).
+                ui.horizontal(|ui| {
+                    ui.add_space(1.9);
+                    segmented(ui, &theme, &[(0, LONG[0], font), (1, LONG[1], font), (2, LONG[2], font)], 0);
+                });
+                *laid = shown(&crate::component::cut(ui, LONG[1], font, theme.palette.muted, WIDEST_TEXT));
+            },
+            String::new(),
+        );
+        harness.run();
+        let painted: Vec<String> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.job.text == LONG[1] => Some(shown(&text.galley)),
+                _ => None,
+            })
+            .collect();
+        let laid = harness.state().clone();
+        assert!(laid.ends_with('…'), "{ppp}: {laid:?}");
+        assert_eq!(painted, vec![laid], "{ppp}: nothing dropped while painting");
+    }
+}
+
+/// The widest an option's words run before they are cut.
+const WIDEST_TEXT: f32 = 136.0;

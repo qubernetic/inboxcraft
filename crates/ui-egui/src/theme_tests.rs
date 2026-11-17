@@ -947,9 +947,34 @@ fn words(code: &str, name: &str) -> Vec<usize> {
 /// one of their types (an accessibility role or a text style of the same name, `Role::ComboBox`, `TextStyle::Button`,
 /// is not one).
 fn raw_widgets(code: &str) -> Vec<(usize, String)> {
-    const METHODS: [&str; 9] =
-        ["button", "small_button", "checkbox", "radio", "radio_value", "selectable_label", "selectable_value", "toggle_value", "separator"];
-    const TYPES: [&str; 6] = ["ComboBox", "Button", "Checkbox", "SelectableLabel", "Separator", "RadioButton"];
+    const METHODS: [&str; 13] = [
+        "button",
+        "small_button",
+        "checkbox",
+        "radio",
+        "radio_value",
+        "selectable_label",
+        "selectable_value",
+        "toggle_value",
+        "separator",
+        "link",
+        "hyperlink",
+        "menu_button",
+        "collapsing",
+    ];
+    const TYPES: [&str; 11] = [
+        "ComboBox",
+        "Button",
+        "Checkbox",
+        "SelectableLabel",
+        "Separator",
+        "RadioButton",
+        "Hyperlink",
+        "ImageButton",
+        "Slider",
+        "DragValue",
+        "CollapsingHeader",
+    ];
     let mut found = Vec::new();
     for method in METHODS {
         for call in [format!(".{method}("), format!("Ui::{method}(")] {
@@ -1077,6 +1102,18 @@ fn the_widget_scan_sees_calls_and_types_however_they_are_written() {
 }
 
 #[test]
+fn the_widget_scan_sees_links_menus_folds_and_value_widgets() {
+    let scan = |text: &str| raw_widgets(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    assert_eq!(scan("ui.link(\"x\"); ui.hyperlink(url);"), [".link(", ".hyperlink("]);
+    assert_eq!(scan("ui.menu_button(\"More\", |ui| {}); ui.collapsing(\"Log\", |ui| {});"), [".menu_button(", ".collapsing("]);
+    assert_eq!(scan("ui.add(egui::Hyperlink::new(url)); ui.add(egui::ImageButton::new(image));"), ["Hyperlink", "ImageButton"]);
+    assert_eq!(scan("ui.add(egui::Slider::new(&mut v, 0.0..=1.0)); ui.add(DragValue::new(&mut v));"), ["Slider", "DragValue"]);
+    assert_eq!(scan("egui::CollapsingHeader::new(\"Server\").show(ui, add);"), ["CollapsingHeader"]);
+    assert_eq!(scan("ui.radio(on, name); ui.toggle_value(&mut on, name);"), [".radio(", ".toggle_value("]);
+    assert!(scan("button::link(ui, theme, keymap, name); WidgetInfo::slider(true, 1.0, name); Role::Slider").is_empty());
+}
+
+#[test]
 fn the_scroll_scan_sees_an_area_shown_without_the_component() {
     let scan = |text: &str| bare_scroll_areas(&squeezed(text).0).into_iter().map(|(_, name)| name).collect::<Vec<_>>();
     assert_eq!(
@@ -1089,6 +1126,13 @@ fn the_scroll_scan_sees_an_area_shown_without_the_component() {
     assert_eq!(scan("use egui::ScrollArea as Area;"), ["ScrollArea as"]);
     assert!(scan("let area = ScrollArea::vertical().max_height(4.0);\nscroll::show(ui, theme, area, |ui| {});").is_empty());
     assert!(scan("crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {});").is_empty());
+}
+
+/// The raw widgets a view may still use, each until the slice that replaces it: the details on adding an account fold
+/// under an egui collapsing header (the gaps line "The details on adding an account still fold under an egui
+/// collapsing header", #233). Its import and its one use.
+fn admitted(file: &Path, what: &str) -> bool {
+    file == Path::new("src/draw/onboard.rs") && what == "CollapsingHeader"
 }
 
 #[test]
@@ -1110,7 +1154,7 @@ fn no_view_uses_a_raw_egui_widget() {
         // Only the scroll bar's own code shows a scroll area; components may use egui's widgets, views may not.
         let mut sites = if *file == scroll { Vec::new() } else { bare_scroll_areas(&code) };
         if !file.starts_with(&components) {
-            sites.extend(raw_widgets(&code));
+            sites.extend(raw_widgets(&code).into_iter().filter(|(_, what)| !admitted(file.strip_prefix(root).unwrap(), what)));
         }
         for (at, what) in sites {
             let line = code[..at].chars().count();

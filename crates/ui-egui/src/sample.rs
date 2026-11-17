@@ -527,7 +527,7 @@ const TEXTS: &[Text] = &[
             "<h1>Time for a check-up</h1><p><img src=\"https://pictures.example.org/cycles/workshop.png\" alt=\"The workshop bench\"></p>\
              <p>It has been a year since the last check. Book a slot and we will look at the <b>brakes</b>, the <b>chain</b> and the \
              gears.</p><ul><li>Brakes and pads</li><li>Chain and gears</li><li>Tyres and lights</li></ul>\
-             <p><a href=\"https://cycles.example.org/book\">Book a slot</a> or call in at the shop.</p><p>Wheelwright Cycles</p>",
+             <p><a href=\"https://cycles.example.org/book\">Book a slot</a> or call in at the shop.</p><hr><p>Wheelwright Cycles</p>",
         ),
         files: &[],
     },

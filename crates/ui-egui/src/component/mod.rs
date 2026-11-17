@@ -181,12 +181,13 @@ pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> 
     ui.painter().layout_job(job)
 }
 
-/// [`galley`], cut with an ellipsis at `width`.
+/// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:
+/// spaces the cut leaves before it are dropped.
 pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32) -> Arc<Galley> {
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    ui.painter().layout_job(job)
+    crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job))
 }
 
 /// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one

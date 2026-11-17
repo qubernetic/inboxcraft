@@ -253,3 +253,56 @@ fn the_rail_s_mark_starts_where_the_cards_start_in_every_frame() {
         assert!((mark.top() - cards).abs() <= 0.5, "{frame:?}: the mark starts at {}, the cards at {cards}", mark.top());
     }
 }
+
+/// The sample in the own frame of `frame` at `ppp`, with an error shown or not.
+fn framed(frame: WindowFrame, ppp: f32, error: bool) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_own_frame(true);
+    app.set_frame(frame);
+    if error {
+        app.mailbox_mut().open(crate::mailbox::Place::Folder(4242));
+    }
+    let mut harness = Harness::builder()
+        .with_size(vec2(1100.0, 700.0))
+        .with_pixels_per_point(ppp)
+        .with_context_setup(install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness.run();
+    harness
+}
+
+/// Whether the rows of `rows` run on from one to the next: one line.
+fn one_run(rows: &std::collections::BTreeSet<i32>) -> bool {
+    match (rows.first(), rows.last()) {
+        (Some(first), Some(last)) => usize::try_from(last - first + 1).is_ok_and(|span| span == rows.len()),
+        _ => false,
+    }
+}
+
+#[test]
+fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
+    for ppp in [1.0_f32, 1.5] {
+        let theme = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default());
+        let p = theme.palette;
+        let quiet = framed(WindowFrame::Strip, ppp, false);
+        let mut harness = framed(WindowFrame::Strip, ppp, true);
+        assert!(harness.state().mailbox().error().is_some());
+        for name in ["Minimise", "Maximise", "Close the window"] {
+            assert_eq!(harness.get_by_label(name).rect(), quiet.get_by_label(name).rect(), "{ppp} {name}: the strip stays where it is");
+        }
+        let error = harness.state().mailbox().error().unwrap().to_owned();
+        let words = harness.get_by_label(&error).rect();
+        let strip = super::frame::STRIP;
+        assert!(words.top() > strip, "{ppp}: the banner's words {words:?} are under the strip");
+        let colours = [p.line, p.minus];
+        let upper = super::tests::level_line_rows(&harness, &colours, strip - 3.0, words.top() - 1.0);
+        assert!(one_run(&upper), "{ppp}: one line between the strip and the banner: {upper:?}");
+        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let lower = super::tests::level_line_rows(&harness, &colours, dismiss.bottom(), dismiss.bottom() + 16.0);
+        assert!(one_run(&lower), "{ppp}: one line between the banner and the panes: {lower:?}");
+        // The strip still moves the window.
+        let seen = drag_from(&mut harness, pos2(500.0, strip / 2.0));
+        assert!(seen.contains(&ViewportCommand::StartDrag), "{ppp}: {seen:?}");
+    }
+}

@@ -280,6 +280,16 @@ impl Face {
         }
     }
 
+    /// The face's ascent and descent from its `hhea` table, as shares of the size: a design text box puts its
+    /// baseline half the leading (line height less their sum) under its top, plus the ascent.
+    #[must_use]
+    pub const fn extent(self) -> (f32, f32) {
+        match self {
+            Self::Mono | Self::MonoSemiBold | Self::Sans | Self::SansSemiBold => (1.025, 0.275),
+            Self::Brand => (2027.0 / 2048.0, 584.0 / 2048.0),
+        }
+    }
+
     /// Every face.
     pub const ALL: [Self; 5] = [Self::Mono, Self::MonoSemiBold, Self::Sans, Self::SansSemiBold, Self::Brand];
 

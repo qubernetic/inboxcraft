@@ -242,7 +242,11 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
                 size: font.size,
                 row_height,
             };
-            Some((text.galley.rect.translate(text.pos.to_vec2()), look))
+            // The run itself: a fraction of a pixel laid out before it (`paint::run_at`) is not text.
+            let lead = text.galley.job.sections.first().map_or(0.0, |section| section.leading_space.max(0.0));
+            let mut rect = text.galley.rect.translate(text.pos.to_vec2());
+            rect.min.x = (rect.min.x + lead).min(rect.max.x);
+            Some((rect, look))
         }
         _ => None,
     }
@@ -593,4 +597,55 @@ pub(crate) fn strictly_between(mid: Color32, a: Color32, b: Color32) -> bool {
 /// The family name of the icons.
 pub(crate) fn icons() -> String {
     crate::theme::icon_font(1.0).family.to_string()
+}
+
+/// The centre of the ink in `picture` inside the whole pixels `x` and `y` (start inclusive, end exclusive): every
+/// pixel weighted by how far it stands from `ground` towards `ink`, a pixel's centre at its index + 0.5.
+pub(crate) fn ink_centre(
+    picture: &crate::shot::Picture,
+    x: std::ops::Range<usize>,
+    y: std::ops::Range<usize>,
+    ground: Color32,
+    ink: Color32,
+) -> Option<(f32, f32)> {
+    let channels = |colour: Color32| [f32::from(colour.r()), f32::from(colour.g()), f32::from(colour.b())];
+    let (g, i) = (channels(ground), channels(ink));
+    let towards = [i[0] - g[0], i[1] - g[1], i[2] - g[2]];
+    let length = towards.iter().map(|d| d * d).sum::<f32>();
+    if length <= 0.0 {
+        return None;
+    }
+    let (mut mass, mut sx, mut sy) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for py in y {
+        for px in x.clone() {
+            let p = channels(picture.pixel(px, py)?);
+            let cover = ((p[0] - g[0]) * towards[0] + (p[1] - g[1]) * towards[1] + (p[2] - g[2]) * towards[2]) / length;
+            let cover = cover.clamp(0.0, 1.0);
+            mass += cover;
+            sx += cover * (px as f32 + 0.5);
+            sy += cover * (py as f32 + 0.5);
+        }
+    }
+    (mass > 0.0).then(|| (sx / mass, sy / mass))
+}
+
+#[test]
+fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, shown: &mut Vec<String>| {
+            let font = theme.fonts.button;
+            let show = |text: &str, width: f32| -> String {
+                let galley = super::cut(ui, text, font, theme.palette.ink, width);
+                galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
+            };
+            *shown = vec![show("Zusammenfassung des Posteingangs", 136.0), show("Keep a copy", 400.0), show("ab cd", 1.0)];
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let shown = harness.state();
+    assert_eq!(shown[0], "Zusammenfassung…", "the design drops the space the cut leaves before the ellipsis");
+    assert_eq!(shown[1], "Keep a copy", "a name that fits is not touched");
+    assert!(shown[2].chars().count() <= 2, "{:?}", shown[2]);
 }

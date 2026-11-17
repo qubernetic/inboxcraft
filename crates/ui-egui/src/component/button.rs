@@ -433,16 +433,16 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
         }
         let top = (rect.center().y - galley.size().y / 2.0).round();
         // The underline, under the pointer and while pressed: the font's own, as the sheet's text decoration draws it,
-        // its thickness and its place under the baseline from the face, so its edges may fall between pixels.
+        // its thickness and its place under the baseline from the face, so its edges may fall between pixels. The
+        // baseline is the design's text box's (the box of the line height in the middle, half the leading over the
+        // ascent), not the hinted one egui puts the letters on, which lies a fraction of a pixel lower.
         if lit.pressed || lit.hover {
-            let baseline = galley.rows.first().and_then(|row| row.glyphs.first().map(|glyph| row.pos.y + glyph.pos.y)).unwrap_or(font.size);
+            let (ascent, descent) = font.face.extent();
+            let baseline = rect.center().y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size;
             let (below, thick) = font.face.underline();
-            let middle = top + baseline + below * font.size;
-            let line = egui::Rect::from_x_y_ranges(
-                rect.left() + pad..=rect.left() + pad + width,
-                middle - thick * font.size / 2.0..=middle + thick * font.size / 2.0,
-            );
-            painter.rect_filled(line, 0.0, p.cyan_text);
+            let middle = baseline + below * font.size;
+            let band = (middle - thick * font.size / 2.0, middle + thick * font.size / 2.0);
+            paint::sampled_band(painter, rect.left() + pad..=rect.left() + pad + width, band, p.cyan_text);
         }
         painter.galley(egui::pos2(rect.left() + pad, top), galley, ink);
         if lit.focus {

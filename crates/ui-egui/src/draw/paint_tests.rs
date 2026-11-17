@@ -299,3 +299,210 @@ fn panes_that_meet_share_one_line_side_by_side_and_stacked() {
         assert_eq!(stacked.len(), wide, "{ppp}: one line between stacked panes: {stacked:?}");
     }
 }
+
+#[test]
+fn a_text_box_hugs_its_run_rounded_up_to_a_whole_point() {
+    assert_eq!(super::run_box(6.6), 7.0);
+    assert_eq!(super::run_box(13.2), 14.0);
+    assert_eq!(super::run_box(14.0), 14.0);
+    assert_eq!(super::run_box(39.6), 40.0);
+    assert_eq!(super::run_box(0.0), 0.0);
+    assert_eq!(super::run_box(f32::NAN), 0.0);
+    assert_eq!(super::run_box(f32::INFINITY), 0.0);
+}
+
+/// The text shapes of one frame at `ppp` that paints `"7"` with [`super::run_at`] at `x`: their origins and the
+/// leading space of each one's first section.
+fn run_origins(ppp: f32, x: f32) -> Vec<(f32, f32)> {
+    let shapes = frame_shapes(ppp, |ui| {
+        let job = egui::text::LayoutJob::simple_singleline("7".to_owned(), egui::FontId::monospace(11.0), egui::Color32::WHITE);
+        let galley = ui.painter().layout_job(job);
+        super::run_at(ui.painter(), pos2(x, 3.0), galley, egui::Color32::WHITE);
+    });
+    shapes
+        .iter()
+        .filter_map(|shape| if let Shape::Text(text) = shape { Some(text) } else { None })
+        .map(|text| (text.pos.x, text.galley.job.sections.first().map_or(f32::NAN, |first| first.leading_space)))
+        .collect()
+}
+
+#[test]
+fn a_run_at_a_fraction_of_a_pixel_stands_on_the_whole_pixel_with_the_rest_laid_out_before_it() {
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    let one = run_origins(1.0, 4.5);
+    assert!(one.len() == 1 && near(one[0].0, 4.0) && near(one[0].1, 0.5), "{one:?}");
+    let whole = run_origins(1.0, 5.0);
+    assert!(whole.len() == 1 && near(whole[0].0, 5.0) && near(whole[0].1, 0.0), "{whole:?}");
+    // 4.6 points at 1.5 pixels a point: 6.9 pixels, so the origin is pixel 6 (4.0 points) and 0.6 points follow.
+    let more = run_origins(1.5, 4.6);
+    assert!(more.len() == 1 && near(more[0].0, 4.0) && near(more[0].1, 0.6), "{more:?}");
+    assert!(run_origins(1.0, f32::NAN).is_empty() && run_origins(1.0, f32::INFINITY).is_empty(), "nothing at no place");
+}
+
+#[test]
+fn a_run_at_half_a_pixel_is_drawn_half_way_between_the_two_whole_pixels() {
+    use crate::component::tests::ink_centre;
+    let mode = Mode::Dark;
+    let theme = Theme::new(mode, TextScale::default());
+    let centre = |x: f32| {
+        let picture = crate::shot::paint(vec2(24.0, 20.0), 1.0, mode, |ui| {
+            crate::theme::install_fonts(ui.ctx());
+            let galley = crate::component::galley(ui, "7", theme.fonts.mono_s, theme.palette.ink);
+            super::run_at(ui.painter(), pos2(x, 2.0), galley, theme.palette.ink);
+        })
+        .unwrap();
+        let ground = picture.pixel(0, 0).unwrap();
+        ink_centre(&picture, 0..24, 0..20, ground, theme.palette.ink).unwrap().0
+    };
+    let (left, half, right) = (centre(4.0), centre(4.5), centre(5.0));
+    assert!((right - left - 1.0).abs() < 0.05, "{left} {right}");
+    assert!((half - (left + 0.5)).abs() < 0.1, "x.5 is drawn at x.5: {left} {half} {right}");
+}
+
+#[test]
+fn a_centred_run_s_box_is_in_the_middle_on_a_half_pixel_when_the_room_left_is_odd() {
+    let shapes = frame_shapes(1.0, |ui| {
+        let job = egui::text::LayoutJob::simple_singleline("7".to_owned(), egui::FontId::monospace(11.0), egui::Color32::WHITE);
+        let galley = ui.painter().layout_job(job);
+        let wide = galley.size().x;
+        assert!(wide.fract() > 0.01, "a run of a fraction of a point: {wide}");
+        super::run_centred(ui.painter(), egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(16.0, 16.0)), galley, egui::Color32::WHITE);
+    });
+    let texts: Vec<_> = shapes.iter().filter_map(|shape| if let Shape::Text(text) = shape { Some(text) } else { None }).collect();
+    assert_eq!(texts.len(), 1);
+    let text = texts[0];
+    let lead = text.galley.job.sections.first().map_or(f32::NAN, |first| first.leading_space);
+    let wide = text.galley.size().x - lead;
+    let left = 8.0 - super::run_box(wide) / 2.0;
+    assert!((text.pos.x + lead - left).abs() < 1e-4, "the box's left at {left}: {} + {lead}", text.pos.x);
+}
+
+/// The share of `ink` over `ground` of every pixel of a dashed box `wide` by `high` with corners of 2, painted at
+/// (4, 4) at scale 1 in `mode`: rows of the picture.
+fn dashed_shares(mode: Mode, wide: f32, high: f32) -> Vec<Vec<f32>> {
+    let theme = Theme::new(mode, TextScale::default());
+    let (ground, ink) = (theme.palette.bg, theme.palette.line);
+    let size = vec2(wide + 8.0, high + 8.0);
+    let picture = crate::shot::paint(size, 1.0, mode, |ui| {
+        ui.painter().rect_filled(egui::Rect::from_min_size(pos2(0.0, 0.0), size), 0.0, ground);
+        super::dashed_round(ui.painter(), egui::Rect::from_min_size(pos2(4.0, 4.0), vec2(wide, high)), ink, 2.0);
+    })
+    .unwrap();
+    let channels = |colour: egui::Color32| [f32::from(colour.r()), f32::from(colour.g()), f32::from(colour.b())];
+    let (g, i) = (channels(ground), channels(ink));
+    let length: f32 = (0..3).map(|c| (i[c] - g[c]) * (i[c] - g[c])).sum();
+    (0..picture.height())
+        .map(|y| {
+            (0..picture.width())
+                .map(|x| {
+                    let p = channels(picture.pixel(x, y).unwrap());
+                    (0..3).map(|c| (p[c] - g[c]) * (i[c] - g[c])).sum::<f32>() / length
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A dashed box of the board: its width and height, its sides and its corners.
+type BoardDashes = (f32, f32, [&'static str; 4], [[f32; 4]; 4]);
+
+/// The design board's dashed boxes with corners of 2 (the unknown avatar, 32 by 32; the key chip's none and disabled,
+/// 37 by 20 and 17 by 20): each side's pixels clockwise from the top left, in quarters of the line's colour, and the
+/// 2 by 2 pixels of each corner clockwise from the top left, row by row, as shares.
+const DESIGN_DASHES: [BoardDashes; 3] = [
+    (
+        32.0,
+        32.0,
+        ["4400440044004400440044004400", "1430143014301430143014301430", "0143014301430143014301430143", "2024202420242024202420242024"],
+        [[0.0, 0.46, 0.45, 0.0], [0.89, 0.26, 0.2, 0.07], [0.2, 0.26, 0.64, 0.2], [0.95, 0.07, 0.07, 0.0]],
+    ),
+    (
+        37.0,
+        20.0,
+        ["440044004400440044004400440044004", "4301430143014301", "143014301430143014301430143014301", "2420242024202420"],
+        [[0.26, 0.51, 0.51, 0.2], [0.76, 0.0, 0.0, 0.07], [0.13, 0.9, 0.07, 0.26], [0.0, 0.13, 0.2, 0.9]],
+    ),
+    (
+        17.0,
+        20.0,
+        ["4400440044004", "4301430143014301", "1430143014301", "2420242024202420"],
+        [[0.26, 0.51, 0.51, 0.2], [0.76, 0.0, 0.0, 0.07], [0.13, 0.9, 0.07, 0.26], [0.0, 0.13, 0.2, 0.9]],
+    ),
+];
+
+#[test]
+fn a_dashed_box_with_round_corners_carries_its_dashes_round_them_as_the_design_board_draws_it() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (wide, high, sides, corners) in DESIGN_DASHES {
+            let shares = dashed_shares(mode, wide, high);
+            let at = |x: usize, y: usize| shares.get(y).and_then(|row| row.get(x)).copied().unwrap_or(f32::NAN);
+            let (left, top, right, bottom) = (4_usize, 4_usize, 4 + wide as usize, 4 + high as usize);
+            let r = 2;
+            let walked: [Vec<f32>; 4] = [
+                (left + r..right - r).map(|x| at(x, top)).collect(),
+                (top + r..bottom - r).map(|y| at(right - 1, y)).collect(),
+                (left + r..right - r).rev().map(|x| at(x, bottom - 1)).collect(),
+                (top + r..bottom - r).rev().map(|y| at(left, y)).collect(),
+            ];
+            for (side, (got, want)) in walked.iter().zip(sides).enumerate() {
+                let want: Vec<f32> = want.chars().map(|c| c.to_digit(10).map_or(f32::NAN, |d| d as f32 / 4.0)).collect();
+                assert_eq!(got.len(), want.len(), "{mode:?} {wide}x{high} side {side}");
+                let off = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                assert!(off <= 0.05, "{mode:?} {wide}x{high} side {side}: {got:?} against the board's {want:?}");
+            }
+            let squares = [(left, top), (right - r, top), (right - r, bottom - r), (left, bottom - r)];
+            for (corner, ((x, y), want)) in squares.iter().zip(corners).enumerate() {
+                let got = [at(*x, *y), at(x + 1, *y), at(*x, y + 1), at(x + 1, y + 1)];
+                let off = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                assert!(off <= 0.15, "{mode:?} {wide}x{high} corner {corner}: {got:?} against the board's {want:?}");
+            }
+        }
+    }
+}
+
+/// The glyphs a galley shows, row by row.
+fn shown(galley: &egui::Galley) -> String {
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
+}
+
+/// The glyphs laid out by `cut` at `width` and the glyphs painted when that galley goes through [`super::run_at`] at
+/// `x`, at `ppp`.
+fn cut_and_painted(ppp: f32, text: &'static str, width: f32, x: f32) -> (String, Vec<String>) {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let laid = std::cell::RefCell::new(String::new());
+    let shapes = frame_shapes(ppp, |ui| {
+        let galley = crate::component::cut(ui, text, theme.fonts.button, theme.palette.ink, width);
+        *laid.borrow_mut() = shown(&galley);
+        super::run_at(ui.painter(), pos2(x, 3.0), galley, theme.palette.ink);
+    });
+    let painted = shapes.iter().filter_map(|shape| if let Shape::Text(text) = shape { Some(shown(&text.galley)) } else { None }).collect();
+    (laid.into_inner(), painted)
+}
+
+#[test]
+fn a_run_painted_off_the_pixel_shows_the_glyphs_it_was_laid_out_with() {
+    for (ppp, x) in [(1.0, 4.5), (1.5, 4.5), (1.0, 4.3)] {
+        let (laid, painted) = cut_and_painted(ppp, "Zusammenfassung des Posteingangs", 136.0, x);
+        assert!(laid.ends_with('…'), "{ppp} {x}: a cut run: {laid:?}");
+        assert_eq!(painted, vec![laid.clone()], "{ppp} {x}: the same glyphs, the same ellipsis");
+        let (whole, painted) = cut_and_painted(ppp, "Liste", 136.0, x);
+        assert_eq!((whole.as_str(), painted), ("Liste", vec!["Liste".to_owned()]), "{ppp} {x}: a run that is not cut");
+    }
+}
+
+#[test]
+fn a_cut_row_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let got = std::cell::RefCell::new(Vec::new());
+    frame_shapes(1.0, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        let (f, ink) = (theme.fonts.button, theme.palette.ink);
+        let cut = super::line(ui, &[("Zusammenfassung ", f, ink), ("des Posteingangs", theme.fonts.mono, ink)], 136.0);
+        let fits = super::line(ui, &[("Liste", f, ink)], 136.0);
+        *got.borrow_mut() = vec![shown(&cut), shown(&fits), cut.job.text.clone()];
+    });
+    let got = got.into_inner();
+    assert_eq!(got[0], "Zusammenfassung…", "as `cut` and the design cut a line");
+    assert_eq!(got[1], "Liste");
+    assert_eq!(got[2], "Zusammenfassung des Posteingangs", "the text stays whole");
+}

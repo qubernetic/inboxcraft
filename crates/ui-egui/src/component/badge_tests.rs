@@ -179,3 +179,25 @@ fn the_count_beside_a_row_stands_on_whole_pixels_and_ends_at_the_snapped_right()
         }
     }
 }
+
+/// The ink centre of a count badge for `n` painted with its right edge at 16 and its middle at 8, at scale 1, and the
+/// colour of its first pixel: `None` when nothing was inked.
+fn count_ink(mode: Mode, n: u64) -> Option<(f32, f32)> {
+    let theme = Theme::new(mode, TextScale::default());
+    let picture = crate::shot::paint(egui::vec2(16.0, 16.0), 1.0, mode, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        count(ui, &theme, n, 16.0, 8.0);
+    })
+    .ok()?;
+    crate::component::tests::ink_centre(&picture, 0..16, 0..16, theme.palette.cyan_muted, theme.palette.cyan_text)
+}
+
+#[test]
+fn a_single_digit_is_centred_on_the_badge_s_middle_as_the_design_centres_its_text_box() {
+    // The sheet's text box is the run rounded up to 7 and stands at 4.5 of 16: the digit is drawn half a pixel left
+    // of where a run put on a whole pixel would land.
+    for mode in [Mode::Dark, Mode::Light] {
+        let (x, _) = count_ink(mode, 7).unwrap();
+        assert!((x - 8.0).abs() <= 0.25, "{mode:?}: the 7's ink centre is {x}, not 8.0");
+    }
+}

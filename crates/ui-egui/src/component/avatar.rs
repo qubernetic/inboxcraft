@@ -5,7 +5,7 @@
 //! ([`AvatarSize`]); an unknown person is a `?` in a dashed box. Every person's avatar has the same colours: colour
 //! belongs to accounts, never to people.
 
-use egui::{Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, vec2};
+use egui::{Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::dashed_round;
 use crate::theme::Theme;
@@ -65,7 +65,11 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
         return;
     }
     let p = theme.palette;
-    let square = Rect::from_center_size(rect.center(), vec2(side, side));
+    // The square on whole pixels first, and the initials placed from it, so the two never round apart.
+    let ppp = painter.pixels_per_point();
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let snap = |at: f32| (at * ppp).round() / ppp;
+    let square = Rect::from_min_size(pos2(snap(rect.center().x - side / 2.0), snap(rect.center().y - side / 2.0)), vec2(side, side));
     let letters = initials(name, address);
     if letters == UNKNOWN {
         dashed_round(painter, square, p.line, CORNER);
@@ -76,7 +80,7 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
     let font = if large { theme.fonts.button.semibold() } else { theme.fonts.key };
     let ink = p.muted;
     let galley = painter.layout_job(egui::text::LayoutJob::single_section(letters, font.format(ink)));
-    painter.galley(square.center() - galley.size() / 2.0, galley, ink);
+    crate::draw::paint::run_centred(painter, square, galley, ink);
 }
 
 /// What an avatar shows for a person it knows nothing of.
