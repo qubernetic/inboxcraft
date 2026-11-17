@@ -125,10 +125,10 @@ pub(crate) struct Face {
     pub ink: egui::Color32,
 }
 
-/// The colours `t` of the way from `rest` to `hover` (0 to 1) on `ground`: each colour mixed between two opaque
-/// colours, never faded by alpha. A fill or edge one end does not paint mixes with what shows there instead: the
-/// ground for a fill, the fill of the moment (or the ground) for an edge; at the end that does not paint it is gone.
-pub(crate) fn between(rest: Face, hover: Face, t: f32, ground: egui::Color32) -> Face {
+/// The colours `t` of the way from `rest` to `hover` (0 to 1), moving `toward_hover` or back: each colour opaque at
+/// both ends is mixed between them, never faded by alpha. A fill or edge that one end does not paint has no colour to
+/// mix with (the ground under a control is not known), so it switches at once to the end it moves toward.
+pub(crate) fn between(rest: Face, hover: Face, t: f32, toward_hover: bool) -> Face {
     let t = t.clamp(0.0, 1.0);
     if t <= 0.0 {
         return rest;
@@ -136,21 +136,12 @@ pub(crate) fn between(rest: Face, hover: Face, t: f32, ground: egui::Color32) ->
     if t >= 1.0 {
         return hover;
     }
-    let mix = |a: egui::Color32, b: egui::Color32| a.lerp_to_gamma(b, t);
-    let fill = match (rest.fill, hover.fill) {
-        (Some(a), Some(b)) => Some(mix(a, b)),
-        (None, Some(b)) => Some(mix(ground, b)),
-        (Some(a), None) => Some(mix(a, ground)),
-        (None, None) => None,
+    let pick = |a: Option<egui::Color32>, b: Option<egui::Color32>| match (a, b) {
+        (Some(a), Some(b)) => Some(a.lerp_to_gamma(b, t)),
+        _ if toward_hover => b,
+        _ => a,
     };
-    let under = fill.unwrap_or(ground);
-    let edge = match (rest.edge, hover.edge) {
-        (Some(a), Some(b)) => Some(mix(a, b)),
-        (None, Some(b)) => Some(mix(under, b)),
-        (Some(a), None) => Some(mix(a, under)),
-        (None, None) => None,
-    };
-    Face { fill, edge, ink: mix(rest.ink, hover.ink) }
+    Face { fill: pick(rest.fill, hover.fill), edge: pick(rest.edge, hover.edge), ink: rest.ink.lerp_to_gamma(hover.ink, t) }
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for

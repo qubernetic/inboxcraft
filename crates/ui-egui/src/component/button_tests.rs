@@ -735,8 +735,9 @@ fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<
 fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
     for mode in [Mode::Dark, Mode::Light] {
         let p = Theme::new(mode, TextScale::default()).palette;
-        // Only the text button fades: the presentation's `.btn` transition.
-        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0)) {
+        // Only the text button fades: the presentation's `.btn` transition; a plain one has nothing opaque at both
+        // ends, so nothing of it fades.
+        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0) && faded()[*index].0 != "Discard") {
             let (label, _, ground, colour) = faded().swap_remove(index);
             let p_ref = &p;
             let (rest, hover, on, off) = fade_of(mode, index, false);
@@ -774,6 +775,33 @@ fn at_reduced_motion_hover_follows_the_pointer_in_the_same_frame() {
             let (rest, hover, on, off) = fade_of(mode, index, true);
             assert_eq!(on[0], hover, "{mode:?} {label}: the first hovered frame");
             assert_eq!(off[0], rest, "{mode:?} {label}: the first frame after leaving");
+        }
+    }
+}
+
+#[test]
+fn a_text_buttons_fill_that_is_not_there_at_rest_switches_at_once_on_any_ground() {
+    use crate::component::tests::{hover_frames, staged_motion};
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let grounds: [fn(&crate::theme::Palette) -> egui::Color32; 2] = [|p| p.panel, |p| p.stage];
+        for ground in grounds {
+            for (label, tone) in [("Reply all", Tone::Secondary), ("Discard", Tone::Plain), ("Delete", Tone::Danger)] {
+                let mut harness = staged_motion(theme, false, ground, egui::vec2(400.0, 120.0), move |ui, theme| {
+                    TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                });
+                let (on, off) = hover_frames(&mut harness, label, 10);
+                let hover_fill = if tone == Tone::Danger { p.minus } else { p.stage };
+                for (at, look) in on.iter().enumerate() {
+                    assert_ne!(look.fill, Some(p.surface), "{mode:?} {label} frame {at} in");
+                    assert_eq!(look.fill, Some(hover_fill), "{mode:?} {label} frame {at} in: the fill at once");
+                }
+                for (at, look) in off.iter().enumerate() {
+                    assert_eq!(look.fill, None, "{mode:?} {label} frame {at} out: gone at once");
+                    assert!(look.edge.is_none_or(|edge| edge.1 != p.surface), "{mode:?} {label} frame {at} out");
+                }
+            }
         }
     }
 }

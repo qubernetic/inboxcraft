@@ -46,8 +46,7 @@ pub(crate) fn section_label_with(ui: &mut Ui, theme: &Theme, index: &str, word: 
         let face = if lit.pressed {
             Face { fill: Some(p.grid), edge: Some(p.muted), ink: p.ink }
         } else {
-            // The hover cross-fades from rest on the `panel` a label stands on.
-            between(Face { fill: None, edge: None, ink: word }, Face { fill: Some(p.grid), edge: None, ink: p.ink }, lit.fade, p.panel)
+            between(Face { fill: None, edge: None, ink: word }, Face { fill: Some(p.grid), edge: None, ink: p.ink }, lit.fade, lit.hover)
         };
         if let Some(fill) = face.fill {
             painter.rect_filled(reach, 0.0, fill);

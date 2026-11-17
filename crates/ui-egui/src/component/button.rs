@@ -110,7 +110,7 @@ impl<'a> IconButton<'a> {
             let painter = ui.painter();
             // The rail's buttons (drawn in its ink) stand on the `panel`, whose hover is `grid`; every other on a
             // `surface`, whose hover is `stage`.
-            let (hover, ground) = if self.ink.is_some() { (p.grid, p.panel) } else { (p.stage, p.surface) };
+            let hover = if self.ink.is_some() { p.grid } else { p.stage };
             let colour = if !enabled {
                 p.dim
             } else if self.active {
@@ -127,7 +127,7 @@ impl<'a> IconButton<'a> {
                 self.ink.unwrap_or(p.ink)
             } else {
                 let rest = Face { fill: None, edge: None, ink: self.ink.unwrap_or(p.muted) };
-                let face = between(rest, Face { fill: Some(hover), edge: None, ink: self.ink.unwrap_or(p.ink) }, lit.fade, ground);
+                let face = between(rest, Face { fill: Some(hover), edge: None, ink: self.ink.unwrap_or(p.ink) }, lit.fade, lit.hover);
                 if let Some(fill) = face.fill {
                     painter.rect_filled(rect, 0.0, fill);
                 }
@@ -327,8 +327,8 @@ impl<'a> TextButton<'a> {
             } else if lit.pressed {
                 held
             } else {
-                // Buttons stand on a `surface`: a fill that is not there at rest grows out of it.
-                between(rest, hovered, lit.fade, p.surface)
+                // A fill or edge that is not there at one end switches at once; the rest cross-fades.
+                between(rest, hovered, lit.fade, lit.hover)
             };
             if let Some(fill) = fill {
                 painter.rect_filled(rect, 0.0, fill);
@@ -432,19 +432,8 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
             painter.rect_filled(rect, 0.0, p.cyan_muted);
         }
         let top = (rect.center().y - galley.size().y / 2.0).round();
-        // The underline: a hairline two points over the foot of the text's line, at once while pressed, else
-        // cross-fading in from the `surface` a link stands on.
-        let underline = if lit.pressed {
-            Some(p.cyan_text)
-        } else {
-            between(
-                Face { fill: None, edge: None, ink: p.surface },
-                Face { fill: None, edge: Some(p.cyan_text), ink: p.surface },
-                lit.fade,
-                p.surface,
-            )
-            .edge
-        };
+        // The underline: a hairline two points over the foot of the text's line, under the pointer and while pressed.
+        let underline = (lit.pressed || lit.hover).then_some(p.cyan_text);
         if let Some(colour) = underline {
             let y = top + font.line - 2.0;
             paint::hairline(painter, egui::pos2(rect.left() + pad, y), egui::pos2(rect.left() + pad + width - 1.0, y), colour);
