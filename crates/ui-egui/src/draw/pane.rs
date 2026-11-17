@@ -264,7 +264,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         return asked;
     }
     let searching = !mailbox.query().is_empty();
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
         heading(ui, theme, tr!("Mailboxes"));
         for view in mailbox.views() {

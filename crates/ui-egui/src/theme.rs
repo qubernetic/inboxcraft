@@ -855,11 +855,8 @@ impl Theme {
         style.spacing.item_spacing = vec2(s.s2, s.s1);
         style.spacing.button_padding = vec2(s.s2, s.s1);
         style.spacing.window_margin = egui::Margin::same(12);
-        // egui's own fade at the ends of a scroll area is a gradient laid over text: neither is allowed here.
-        style.spacing.scroll.fade.strength = 0.0;
-        // A bar wide enough to see at rest and the full width under the pointer; square, like everything.
-        style.spacing.scroll.floating_width = 5.0;
-        style.spacing.scroll.bar_width = self.sizes.scrollbar;
+        // The scroll bar beside the content, painted by the component; no fade laid over text.
+        style.spacing.scroll = crate::component::scroll::style(self);
         motion::tune(&mut style);
         style.text_styles = [
             (TextStyle::Small, f.caption.id()),

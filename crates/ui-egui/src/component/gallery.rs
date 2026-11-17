@@ -24,6 +24,7 @@ use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
+use super::scroll::{self, Bar};
 use super::segmented::{self, segmented};
 use super::select::Select;
 use super::slider;
@@ -764,10 +765,26 @@ fn badges(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The scroll bar's board: rest, hover, dragging, each a strip 12 wide and 96 high with the sheet's thumb.
+fn scroll_bars(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Scroll bar"));
+    cells(ui, theme, |ui| {
+        let bars = [(tr!("rest"), 16.0, Bar::Rest), (tr!("hover"), 16.0, Bar::Hover), (tr!("dragging"), 40.0, Bar::Dragging)];
+        for (state, top, bar) in bars {
+            cell(ui, theme, state, |ui| {
+                let (strip, _) = ui.allocate_exact_size(vec2(theme.sizes.scrollbar, 96.0), egui::Sense::hover());
+                let thumb = egui::Rangef::new(strip.top() + top, strip.top() + top + 32.0);
+                scroll::paint(ui.painter(), theme, strip, thumb, bar);
+            });
+        }
+    });
+}
+
 /// The marks' left column.
 fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     avatars(ui, theme);
     badges(ui, theme);
+    scroll_bars(ui, theme);
 }
 
 /// The icon's board: the 45 icons at 16 px in `muted`, in the sheet's order, eight to a row.

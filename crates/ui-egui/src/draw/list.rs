@@ -51,30 +51,10 @@ use crate::tr;
 /// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
 pub(super) const ROW_INSET: f32 = 6.0;
 
-/// The room the vertical scroll bar takes at the right of a scroll area, kept free so it never lies over a card or a
-/// row's date.
-fn scroll_room(ui: &Ui) -> f32 {
-    let scroll = &ui.spacing().scroll;
-    scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin
-}
-
-/// A vertical scroll area for the list's cards. The bar's room is kept only while the content overflows (as measured
-/// on the frame before), so cards run the pane's whole width whenever they all fit.
-fn scrolled<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let id = ui.make_persistent_id("list-overflows");
-    let overflowed = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
-    let output = ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        if overflowed {
-            ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
-        }
-        add(ui)
-    });
-    let overflows = output.content_size.y > output.inner_rect.height();
-    if overflows != overflowed {
-        ui.data_mut(|data| data.insert_temp(id, overflows));
-        ui.ctx().request_repaint();
-    }
-    output.inner
+/// A vertical scroll area for the list's cards. Its bar takes its own room beside them only while the content
+/// overflows, so cards run the pane's whole width whenever they all fit and never lie under the bar.
+fn scrolled<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), add).inner
 }
 
 /// The rows a group shows before "Show all".
@@ -571,7 +551,7 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
 /// The outbox on one card: each send in it, newest last; what a button asked for.
 fn outbox(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Option<(u64, Outbox)> {
     let mut asked = None;
-    scrolled(ui, |ui| {
+    scrolled(ui, theme, |ui| {
         sheet(ui, theme, false, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             for row in mailbox.outbox() {
@@ -727,7 +707,7 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Optio
     let s = &rows.theme.spacing;
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
-    scrolled(ui, |ui| {
+    scrolled(ui, rows.theme, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
@@ -775,7 +755,7 @@ fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option
     let s = &rows.theme.spacing;
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
-    scrolled(ui, |ui| {
+    scrolled(ui, rows.theme, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
@@ -812,15 +792,11 @@ fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     super::paint::pane(ui.painter(), theme, card);
     ui.painter().rect_stroke(card, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
-    // The bar's room is kept only when the rows do not all fit, so a short list runs the card's whole width.
-    let overflows = content > room.height();
+    // The bar takes its room beside the rows only when they do not all fit, so a short list runs the card's width.
     let mut clicked = None;
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
-        ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, height, count, |ui, range| {
-            if overflows {
-                ui.set_max_width((ui.available_width() - scroll_room(ui)).max(1.0));
-            }
+        crate::component::scroll::show_rows(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), height, count, |ui, range| {
             clicked = rows.show(ui, rows.mailbox.messages().get(range).unwrap_or_default());
         });
     });

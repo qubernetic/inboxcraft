@@ -501,7 +501,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         let rows = (height / theme.fonts.body.line).floor().max(3.0);
         let marks = composer.blanks().to_vec();
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
-        egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
+        crate::component::scroll::show(ui, theme, egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
             // A whole number of rows, fewer than a few hundred: the cast keeps it.
             let edit = TextEdit::multiline(composer.text_mut())
                 .layouter(&mut layouter)

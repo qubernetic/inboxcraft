@@ -1243,7 +1243,7 @@ pub(super) fn show(
             None => toolbar(ui, theme, keymap, mailbox, reader, &mut drawn),
         },
     );
-    ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader"), |ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         Frame::new()
             .inner_margin(Margin {

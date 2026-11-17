@@ -87,7 +87,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
         area = area.vertical_scroll_offset((earliest.floor() * HOUR - 8.0).max(0.0));
         ui.ctx().data_mut(|data| data.insert_temp(scrolled, true));
     }
-    area.show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, area, |ui| {
         let width = ui.available_width();
         let column = ((width - GUTTER) / count).max(1.0);
         let (rect, _) = ui.allocate_exact_size(vec2(width, HOUR * 24.0), Sense::hover());

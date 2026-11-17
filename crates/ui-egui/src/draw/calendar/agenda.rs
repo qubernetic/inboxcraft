@@ -31,7 +31,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
     let s = &theme.spacing;
     let (first, _) = calendar.span();
     let events: Vec<&EventRow> = calendar.events().collect();
-    ScrollArea::vertical().id_salt("calendar-agenda").auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().id_salt("calendar-agenda").auto_shrink([false, false]), |ui| {
         ui.spacing_mut().item_spacing.y = ROWS;
         let mut any = false;
         for offset in 0..AGENDA_DAYS {

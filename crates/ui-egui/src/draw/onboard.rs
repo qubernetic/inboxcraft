@@ -391,7 +391,7 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onboarding: &mut Onboarding) -> Option<Asked> {
     let p = theme.palette;
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(FORM_WIDTH);
         if let Some(error) = onboarding.error() {
             note(ui, theme, error, p.minus);

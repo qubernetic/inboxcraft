@@ -449,7 +449,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
 /// The Appearance page under its title: the rows and the preview, scrolling.
 fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) -> Option<Asked> {
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         asked = rows(ui, theme, current, reduce);
         preview(ui, theme);
@@ -541,7 +541,7 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
     }
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - s.s3);
         if list.is_empty() {
             ui.add_space(s.s4);
@@ -564,7 +564,7 @@ const HOLDS: [u8; 4] = [5, 10, 30, 60];
 fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, mailbox: &Mailbox) -> Option<Asked> {
     let s = &theme.spacing;
     let mut asked = None;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - s.s3);
         let hold = mailbox.hold_seconds();
         let labels = HOLDS.map(|seconds| tr!("{seconds} s", seconds = seconds));
@@ -616,7 +616,7 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
 fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         let modes = ScreenerMode::ALL.map(|mode| (mode, screener_name(mode), f.button));
         let screener_notes = [
@@ -667,12 +667,14 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
 fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Settings, desk: DeskView) -> Option<Asked> {
     let mut asked = None;
     let f = &theme.fonts;
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), |ui| {
         ui.set_max_width(ui.available_width() - theme.spacing.s3);
         note(
             ui,
             theme,
-            tr!("Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."),
+            tr!(
+                "Per account: all new mail, mail from people only, or none. Mail from your own addresses never notifies, and letting a sender in raises no burst of old mail."
+            ),
         );
         note(
             ui,

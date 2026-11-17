@@ -281,8 +281,8 @@ fn the_visuals_follow_the_tokens_flat_and_square() {
         let style = theme.style();
         assert_eq!(style.spacing.item_spacing.y, theme.spacing.s1);
         assert_eq!(style.spacing.scroll.fade.strength, 0.0, "no fade of egui's own over text");
-        assert!(style.spacing.scroll.floating_width >= 4.0);
-        assert!(style.spacing.scroll.bar_width > style.spacing.scroll.floating_width, "wider under the pointer");
+        // The thumb grows under the pointer inside a strip of one width: the scroll bar component paints it.
+        assert_eq!(style.spacing.scroll, crate::component::scroll::style(&theme), "the scroll bar's own style");
         for (style_of, font) in [
             (egui::TextStyle::Small, theme.fonts.caption),
             (egui::TextStyle::Body, theme.fonts.body),

@@ -18,6 +18,7 @@
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
 //! - [`icon`]: one of the 45 icons on its own, `muted`.
+//! - [`scroll`]: the scroll bar, 12 wide beside what scrolls, and the style egui scrolls with.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
@@ -41,6 +42,7 @@ pub mod key;
 pub mod label;
 pub mod pill;
 pub mod popup;
+pub mod scroll;
 pub mod segmented;
 pub mod select;
 pub mod slider;
