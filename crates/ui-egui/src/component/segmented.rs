@@ -7,10 +7,11 @@
 //! `ink` and takes no fill (a fill says chosen); pressed, the option is the accent wash with its word in `cyan_text`.
 //! The control is one stop for Tab with one ring round it, and the arrow keys move the choice. Disabled: a dashed edge,
 //! no `term` ground, every word `muted`, the chosen option keeping its fill with its bar in `muted`. An option's name is
-//! cut with an ellipsis at 136; where the room is too small the options share it equally. Each option is a node of its
-//! own for a screen reader, selected or not; nothing moves (the design gives it no transition).
+//! cut with an ellipsis at 136; where the room is too small the options share it equally. Each option is a radio button
+//! inside the group for a screen reader, selected or not, which its own click chooses; it is no Tab stop. Nothing moves
+//! (the design gives it no transition).
 
-use egui::{Color32, EventFilter, Key, Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use egui::{Color32, EventFilter, Key, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
 use crate::theme::{Font, Theme};
@@ -94,19 +95,37 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
         rects.push(Rect::from_min_size(pos2(left, track.top() + 1.0), vec2(wide, high - 2.0)));
         left += wide + 1.0;
     }
-    let under = |at: Option<egui::Pos2>| at.and_then(|at| rects.iter().position(|rect| rect.contains(at)));
+    // Each option is a node of its own, inside the group for a screen reader: pressable (by the pointer, or by a screen
+    // reader's click) but never a Tab stop, which the group is.
+    let inside = ui.new_child(UiBuilder::new().max_rect(track).accessibility_parent(response.id));
+    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
+    let segments: Vec<Response> = options
+        .iter()
+        .zip(&rects)
+        .enumerate()
+        .map(|(index, ((_, name, _), rect))| {
+            let segment = inside.interact(*rect, response.id.with(("segment", index)), sense);
+            let spoken = match about {
+                Some(about) => tr!("{option} for {about}", option = name, about = about),
+                None => (*name).to_owned(),
+            };
+            let on = Some(index) == now;
+            segment.widget_info(|| WidgetInfo::selected(Role::RadioButton, enabled, on, &spoken));
+            segment
+        })
+        .collect();
     let (hovered, pressed) = match shown {
         Some((Shown::Hover, index)) => (Some(index), None),
         Some((Shown::Pressed, index)) => (None, Some(index)),
         Some(_) => (None, None),
-        None if lit.pressed && response.is_pointer_button_down_on() => (None, under(ui.input(|input| input.pointer.interact_pos()))),
-        None if lit.pressed => (None, now),
-        None => (if lit.hover { under(response.hover_pos()) } else { None }, None),
+        None if !enabled => (None, None),
+        None => match segments.iter().position(Response::is_pointer_button_down_on) {
+            Some(index) => (None, Some(index)),
+            None if lit.pressed => (None, now),
+            None => (segments.iter().position(Response::hovered), None),
+        },
     };
-    let mut chosen = None;
-    if enabled && response.clicked() {
-        chosen = under(response.interact_pointer_pos());
-    }
+    let mut chosen = if enabled { segments.iter().position(Response::clicked) } else { None };
     if enabled && response.has_focus() {
         let (back, on) = ui.input(|input| (input.key_pressed(Key::ArrowLeft), input.key_pressed(Key::ArrowRight)));
         let at = now.unwrap_or(0);
@@ -127,14 +146,6 @@ pub(crate) fn segmented_with<T: Copy + PartialEq>(
     }
     for (index, ((value, name, font), rect)) in options.iter().zip(&rects).enumerate() {
         let on = *value == current;
-        let id = response.id.with(("segment", index));
-        // A node for a screen reader; the track takes the press.
-        let segment = ui.interact(*rect, id, Sense::hover());
-        let spoken = match about {
-            Some(about) => tr!("{option} for {about}", option = name, about = about),
-            None => (*name).to_owned(),
-        };
-        segment.widget_info(|| WidgetInfo::selected(Role::Button, enabled, on, &spoken));
         if !visible {
             continue;
         }

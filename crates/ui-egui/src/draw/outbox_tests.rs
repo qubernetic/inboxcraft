@@ -241,9 +241,10 @@ fn the_sending_page_sets_how_long_a_send_is_held() {
         harness.state_mut().settings_mut().open_at(crate::settings::Section::Sending);
         harness.run();
         harness.get_by_label("Undo send");
-        let toggled = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled();
+        let toggled =
+            |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::RadioButton, name).accesskit_node().toggled();
         assert_eq!(toggled(&harness, "5 s"), Some(Toggled::True), "five seconds until the owner chooses");
-        harness.get_by_role_and_label(Role::Button, "30 s").click();
+        harness.get_by_role_and_label(Role::RadioButton, "30 s").click();
         harness.run();
         assert_eq!(harness.state().mailbox().hold_seconds(), 30);
         assert_eq!(toggled(&harness, "30 s"), Some(Toggled::True));

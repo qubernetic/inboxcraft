@@ -379,7 +379,22 @@ pub(crate) fn keyboard_walk<State>(harness: &mut Harness<'_, State>) -> Vec<Stri
             None => {}
         }
     }
-    pressable.into_iter().filter(|(id, _)| !reached.contains(id)).map(|(_, label)| label).collect()
+    // A radio button without a Tab stop of its own is reached through its group (a segmented control's option: the
+    // group takes the focus and the arrow keys move the choice).
+    let through_group: Vec<NodeId> = harness
+        .root()
+        .children_recursive()
+        .filter(|node| {
+            let data = node.accesskit_node();
+            data.role() == accesskit::Role::RadioButton
+                && !data.data().supports_action(accesskit::Action::Focus)
+                && std::iter::successors(node.parent(), |up| up.parent())
+                    .find(|up| up.accesskit_node().role() == accesskit::Role::RadioGroup)
+                    .is_some_and(|group| reached.contains(&group.accesskit_node().locate().0))
+        })
+        .map(|node| node.accesskit_node().locate().0)
+        .collect();
+    pressable.into_iter().filter(|(id, _)| !reached.contains(id) && !through_group.contains(id)).map(|(_, label)| label).collect()
 }
 
 /// Whether the page rests: after `frames` frames without input, the last asks for no repaint sooner than a second

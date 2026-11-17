@@ -29,12 +29,12 @@ fn each_option_is_a_named_button_and_the_pressed_one_comes_back() {
         1,
     );
     harness.run();
-    assert_eq!(harness.get_by_role_and_label(Role::Button, "Week").accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(harness.get_by_role_and_label(Role::Button, "Day").accesskit_node().toggled(), Some(Toggled::False));
-    harness.get_by_role_and_label(Role::Button, "Month").click();
+    assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Week").accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Day").accesskit_node().toggled(), Some(Toggled::False));
+    harness.get_by_role_and_label(Role::RadioButton, "Month").click();
     harness.run();
     assert_eq!(*harness.state(), 2);
-    assert_eq!(harness.get_by_role_and_label(Role::Button, "Month").accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Month").accesskit_node().toggled(), Some(Toggled::True));
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn several_rows_with_the_same_options_say_what_each_is_for() {
         segmented_for(ui, &theme, &options(theme.fonts.button), 0, Some("Personal"));
     });
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "Week for Personal");
+    harness.get_by_role_and_label(Role::RadioButton, "Week for Personal");
 }
 
 #[test]
@@ -56,9 +56,9 @@ fn the_options_stay_in_order_in_a_row_laid_out_from_the_right() {
         });
     });
     harness.run();
-    let day = harness.get_by_role_and_label(Role::Button, "Day").rect();
-    let week = harness.get_by_role_and_label(Role::Button, "Week").rect();
-    let month = harness.get_by_role_and_label(Role::Button, "Month").rect();
+    let day = harness.get_by_role_and_label(Role::RadioButton, "Day").rect();
+    let week = harness.get_by_role_and_label(Role::RadioButton, "Week").rect();
+    let month = harness.get_by_role_and_label(Role::RadioButton, "Month").rect();
     assert!(day.right() <= week.left() && week.right() <= month.left(), "{day:?} {week:?} {month:?}");
 }
 
@@ -73,7 +73,7 @@ fn the_track_is_as_wide_as_width_says_and_an_option_keeps_its_width_when_chosen(
             assert!((ui.min_rect().width() - full).abs() <= 1.0, "{} wide, {full} expected from {before}", ui.min_rect().width());
         });
         harness.run();
-        harness.get_by_role_and_label(Role::Button, "Week").rect().width()
+        harness.get_by_role_and_label(Role::RadioButton, "Week").rect().width()
     };
     assert!((measure(0) - measure(1)).abs() < 1.0);
 }
@@ -89,8 +89,8 @@ fn in_too_little_room_the_options_share_it_and_stay_inside() {
             });
         });
         harness.run();
-        let day = harness.get_by_role_and_label(Role::Button, "Day").rect();
-        let month = harness.get_by_role_and_label(Role::Button, "Month").rect();
+        let day = harness.get_by_role_and_label(Role::RadioButton, "Day").rect();
+        let month = harness.get_by_role_and_label(Role::RadioButton, "Month").rect();
         assert!(month.right() - day.left() <= room.max(20.0) + 4.0, "{day:?} {month:?} in {room}");
     }
 }
@@ -112,8 +112,8 @@ fn a_long_name_takes_its_room() {
         segmented(ui, &theme, &[(0, "A name that is a good deal longer than any view", font), (1, "Short", font)], 1);
     });
     harness.run();
-    let long = harness.get_by_role_and_label(Role::Button, "A name that is a good deal longer than any view").rect();
-    let short = harness.get_by_role_and_label(Role::Button, "Short").rect();
+    let long = harness.get_by_role_and_label(Role::RadioButton, "A name that is a good deal longer than any view").rect();
+    let short = harness.get_by_role_and_label(Role::RadioButton, "Short").rect();
     assert!(long.width() > short.width());
 }
 
@@ -347,4 +347,31 @@ fn the_gallery_forces_a_hovered_option() {
     );
     let rect = harness.get_by_label("Week").rect();
     assert_eq!(own(&painted(&harness, "Day / Week / Month"), rect).fill, Some(p.cyan_muted));
+}
+
+#[test]
+fn a_screen_reader_chooses_an_option_by_its_own_click_and_the_control_stays_one_tab_stop() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, current: &mut u8| {
+            if let Some(picked) = segmented(ui, &theme, &options(theme.fonts.button), *current) {
+                *current = picked;
+            }
+        },
+        0,
+    );
+    harness.run();
+    let week = harness.get_by_role_and_label(Role::RadioButton, "Week");
+    assert_eq!(week.accesskit_node().toggled(), Some(Toggled::False));
+    assert!(week.accesskit_node().data().supports_action(egui::accesskit::Action::Click), "an option can be pressed");
+    assert!(!week.accesskit_node().data().supports_action(egui::accesskit::Action::Focus), "an option is no Tab stop");
+    week.click_accesskit();
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+    assert_eq!(harness.get_by_role_and_label(Role::RadioButton, "Week").accesskit_node().toggled(), Some(Toggled::True));
+    // One Tab stop: the group; its options are reached through it.
+    let stops =
+        harness.root().children_recursive().filter(|node| node.accesskit_node().data().supports_action(egui::accesskit::Action::Focus)).count();
+    assert_eq!(stops, 1);
+    assert!(keyboard_walk(&mut harness).is_empty());
 }

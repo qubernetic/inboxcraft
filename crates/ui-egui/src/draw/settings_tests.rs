@@ -38,7 +38,8 @@ fn opened() -> Harness<'static, InboxApp> {
 
 /// Presses the button called `label` and returns the id of the command the press ran.
 fn press(harness: &mut Harness<'static, InboxApp>, label: &str) -> &'static str {
-    harness.get_by_role_and_label(Role::Button, label).click();
+    // A button, or a segmented control's option.
+    harness.query_by_role_and_label(Role::RadioButton, label).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, label)).click();
     harness.run();
     harness.state().mailbox().last_run().unwrap_or("nothing")
 }
@@ -54,7 +55,8 @@ fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
 }
 
 fn selected(harness: &Harness<'static, InboxApp>, label: &str) -> bool {
-    harness.get_by_role_and_label(Role::Button, label).accesskit_node().toggled() == Some(Toggled::True)
+    let node = harness.query_by_role_and_label(Role::RadioButton, label).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, label));
+    node.accesskit_node().toggled() == Some(Toggled::True)
 }
 
 #[test]
@@ -134,7 +136,7 @@ fn the_appearance_page_has_no_accent_typeface_or_icon_choice() {
         assert!(harness.query_all_by_label(kept).count() > 0, "{kept}");
     }
     // The mode reads Auto, Dark, Light, left to right; Auto is the system's.
-    let x = |label: &str| harness.get_by_role_and_label(Role::Button, label).rect().center().x;
+    let x = |label: &str| harness.get_by_role_and_label(Role::RadioButton, label).rect().center().x;
     assert!(x("Auto") < x("Dark") && x("Dark") < x("Light"));
     assert!(harness.query_by_label("System").is_none());
 }

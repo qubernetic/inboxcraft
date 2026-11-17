@@ -40,11 +40,13 @@ fn on_calendar(theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn toggled(harness: &Harness<'static, InboxApp>, name: &str) -> Option<Toggled> {
-    harness.get_by_role_and_label(Role::Button, name).accesskit_node().toggled()
+    let node = harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name));
+    node.accesskit_node().toggled()
 }
 
 fn press(harness: &mut Harness<'static, InboxApp>, name: &str) {
-    harness.get_by_role_and_label(Role::Button, name).click();
+    // A button, or a segmented control's option.
+    harness.query_by_role_and_label(Role::RadioButton, name).unwrap_or_else(|| harness.get_by_role_and_label(Role::Button, name)).click();
     harness.run();
 }
 
