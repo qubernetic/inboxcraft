@@ -113,6 +113,9 @@ fn later_id() -> Id {
     Id::unique("compose-later")
 }
 
+/// The width of the recipient suggestions' float, in points: rows of 320 inside its edge.
+const SUGGESTIONS: f32 = 322.0;
+
 /// The id of the From line's menu of the accounts.
 pub(super) fn from_menu() -> Id {
     Id::unique("compose-from-menu")
@@ -269,7 +272,8 @@ fn suggestions(ctx: &egui::Context, theme: &Theme, composer: &Composer, at: Pos2
     if found.is_empty() {
         return;
     }
-    let width = theme.fonts.body.size * MENU;
+    // The suggestion rows are the sheet's 320 wide, inside the float's 1 px edge.
+    let width = SUGGESTIONS;
     let rect = popup::show(ctx, theme, suggestions_id(), at, width, |ui| {
         for (index, person) in found.iter().enumerate() {
             let row = popup::suggestion_row(ui, theme, person.name.trim(), &person.address, composer.highlighted() == Some(index));
