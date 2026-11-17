@@ -662,3 +662,57 @@ fn every_row_of_a_wrapped_run_stands_where_the_design_puts_it() {
         }
     }
 }
+
+/// The baselines of `font`'s rows as [`crate::component::galley`] and [`crate::component::wrapped`] lay them out at
+/// `ppp`, against the top of their galley, and the design's: half the leading (the line height less the face's ascent
+/// and descent) over the ascent.
+fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<f32>, f32) {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(ppp);
+    crate::theme::install_fonts(&ctx);
+    let mut got = Vec::new();
+    for _ in 0..2 {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 200.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            let one = crate::component::galley(ui, "Hxg", font, egui::Color32::WHITE);
+            let two = crate::component::wrapped(ui, "Hxg words that wrap onto a second row", font, egui::Color32::WHITE, 60.0, 4, egui::Align::LEFT);
+            got = [one, two]
+                .iter()
+                .flat_map(|galley| galley.rows.iter().enumerate().map(|(index, row)| (index, row.pos.y, row.glyphs.first().map(|g| g.pos.y))))
+                .filter_map(|(index, top, glyph)| glyph.map(|y| top + y - index as f32 * font.line))
+                .collect();
+        });
+        output.textures_delta.clear();
+    }
+    let (ascent, descent) = font.face.extent();
+    (got, (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size)
+}
+
+#[test]
+fn every_line_of_text_stands_within_a_quarter_pixel_of_the_designs_baseline() {
+    // The caption (Plex Sans 12/18) has its baseline on a half pixel, 13.5 under its top; egui rounds it to 14.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let f = theme.fonts;
+    for (name, font) in [
+        ("caption", f.caption),
+        ("body", f.body),
+        ("strong", f.strong),
+        ("read", f.read),
+        ("heading", f.heading),
+        ("title", f.title),
+        ("label", f.label),
+        ("mono", f.mono),
+        ("mono_s", f.mono_s),
+        ("button", f.button),
+        ("key", f.key),
+        ("display", f.display),
+    ] {
+        for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+            let (got, design) = baselines(font, ppp);
+            assert!(got.len() >= 3, "{name}: one row and a wrapped run");
+            for baseline in got {
+                assert!(((baseline - design) * ppp).abs() <= 0.25 + 1e-3, "{name} at {ppp}: the baseline at {baseline}, the design's at {design}");
+            }
+        }
+    }
+}

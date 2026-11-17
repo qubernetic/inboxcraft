@@ -13,6 +13,46 @@ use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, 
 use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
+/// `galley` with every row moved onto the design's baseline when egui's rounding left it more than a quarter of a
+/// pixel off: a text box of the design puts its baseline half the leading (line height less the face's ascent and
+/// descent) under its top, plus the ascent, a fraction of a pixel included. egui puts it on the nearest whole pixel,
+/// rounding a half up, so a caption (Plex Sans 12/18, baseline 13.5 under its top) stood half a pixel low. The row is
+/// moved by the rest; its glyphs keep their pixels and the painter samples them between two rows of pixels, as the
+/// design's renderer covers a baseline that falls between them. A row of glyphs of more than one line height is left.
+pub(crate) fn on_baseline(galley: Arc<Galley>) -> Arc<Galley> {
+    let ppp = if galley.pixels_per_point.is_finite() && galley.pixels_per_point > 0.0 { galley.pixels_per_point } else { 1.0 };
+    // Each row's exact top is the line heights of the rows over it; egui rounds every row's top as well.
+    let mut top = 0.0_f32;
+    let mut shifts = Vec::with_capacity(galley.rows.len());
+    for row in &galley.rows {
+        let first = row.glyphs.first();
+        let even = first.is_some_and(|glyph| row.glyphs.iter().all(|other| other.line_height == glyph.line_height));
+        let off = match first {
+            Some(glyph) if even => {
+                let exact =
+                    top + glyph.font_face_ascent + 0.5 * (glyph.line_height - glyph.font_height) + 0.5 * (glyph.font_height - glyph.font_face_height);
+                exact - (row.pos.y + glyph.pos.y)
+            }
+            _ => 0.0,
+        };
+        shifts.push(if off.is_finite() && (off * ppp).abs() > 0.25 + 1e-3 { off } else { 0.0 });
+        top += match first {
+            Some(glyph) if even => glyph.line_height,
+            _ => row.size.y,
+        };
+    }
+    if shifts.iter().all(|off| *off == 0.0) {
+        return galley;
+    }
+    let mut moved = (*galley).clone();
+    let reach = shifts.iter().fold(0.0_f32, |most, off| most.max(off.abs()));
+    for (row, off) in moved.rows.iter_mut().zip(shifts) {
+        row.pos.y += off;
+    }
+    moved.mesh_bounds = moved.mesh_bounds.expand2(vec2(0.0, reach));
+    Arc::new(moved)
+}
+
 /// One line of `sections` (text, font token and colour), cut with an ellipsis at `width`.
 pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> Arc<Galley> {
     let mut job = LayoutJob {
@@ -23,7 +63,7 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     for (text, font, colour) in sections {
         job.append(&font.text(text), 0.0, font.format(*colour));
     }
-    tight_cut(ui.painter(), ui.painter().layout_job(job))
+    on_baseline(tight_cut(ui.painter(), ui.painter().layout_job(job)))
 }
 
 /// A one-line `galley` cut with an ellipsis as the design cuts a line: the ellipsis follows the last letter kept, so
@@ -44,7 +84,7 @@ pub(crate) fn tight_cut(painter: &Painter, galley: Arc<Galley>) -> Arc<Galley> {
     // Half the space to spare: the space still does not fit, and rounding to pixels later cuts nothing.
     job.wrap.max_width = space.pos.x + ellipsis.advance_width + space.advance_width / 2.0;
     let want: String = before.iter().take(last + 1).map(|glyph| glyph.chr).chain(std::iter::once('…')).collect();
-    let again = painter.layout_job(job);
+    let again = on_baseline(painter.layout_job(job));
     if shown(&again) == want { again } else { galley }
 }
 
@@ -77,7 +117,7 @@ pub(crate) fn run_at(painter: &Painter, at: Pos2, galley: Arc<Galley>, colour: C
             if job.wrap.max_width.is_finite() && job.wrap.max_width >= 0.0 {
                 job.wrap.max_width += rest;
             }
-            painter.layout_job(job)
+            on_baseline(painter.layout_job(job))
         }
         _ => galley,
     };
@@ -107,8 +147,12 @@ pub(crate) fn rows_at(painter: &Painter, at: Pos2, width: f32, galley: Arc<Galle
     };
     let text = galley.job.text.as_str();
     let mut start = 0_usize;
+    // A row's top as the design has it: the line heights of the rows over it (egui rounds each).
+    let mut top = 0.0_f32;
     let count = galley.rows.len();
     for (index, row) in galley.rows.iter().enumerate() {
+        let row_top = top;
+        top += row.glyphs.first().map_or(row.size.y, |glyph| glyph.line_height);
         // The row's characters, the newline it ends with included, follow the rows before it in the text.
         let end = if index + 1 == count {
             text.len()
@@ -121,14 +165,14 @@ pub(crate) fn rows_at(painter: &Painter, at: Pos2, width: f32, galley: Arc<Galle
         let mut job = LayoutJob::single_section(words.to_owned(), section.format.clone());
         job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, ..galley.job.wrap.clone() };
         job.break_on_newline = false;
-        let one = painter.layout_job(job);
+        let one = on_baseline(painter.layout_job(job));
         let wide = one.size().x;
         let x = match align {
             egui::Align::Center => at.x + (width - wide) / 2.0,
             egui::Align::Max => at.x + width - wide,
             egui::Align::Min => at.x,
         };
-        run_at(painter, pos2(x, at.y + row.pos.y), one, colour);
+        run_at(painter, pos2(x, at.y + row_top), one, colour);
     }
 }
 

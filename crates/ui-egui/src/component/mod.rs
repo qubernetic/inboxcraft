@@ -178,7 +178,7 @@ pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> 
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap.max_width = f32::INFINITY;
     job.break_on_newline = false;
-    ui.painter().layout_job(job)
+    crate::draw::paint::on_baseline(ui.painter().layout_job(job))
 }
 
 /// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:
@@ -187,7 +187,7 @@ pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width:
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job))
+    crate::draw::paint::on_baseline(crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job)))
 }
 
 /// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one
@@ -197,7 +197,7 @@ pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, wi
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: rows.max(1), break_anywhere: false, overflow_character: Some('…') };
     job.halign = align;
-    ui.painter().layout_job(job)
+    crate::draw::paint::on_baseline(ui.painter().layout_job(job))
 }
 
 /// `text` with every control character (a NUL, a line break, a tab) put as a space and every explicit bidi embedding,
