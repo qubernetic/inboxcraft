@@ -17,6 +17,7 @@
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
+//! - [`icon`]: one of the 45 icons on its own, `muted`.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
@@ -35,6 +36,7 @@ pub mod checkbox;
 pub mod field;
 pub mod gallery;
 pub mod hover;
+pub mod icon;
 pub mod key;
 pub mod label;
 pub mod pill;

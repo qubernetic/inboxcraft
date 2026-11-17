@@ -32,7 +32,7 @@ use super::switch::{self, SwitchState, switch};
 use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
-use super::{avatar, badge, card, cut, galley, label, pill, popup, tooltip};
+use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip};
 
 /// The page's size in points.
 #[must_use]
@@ -770,8 +770,25 @@ fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     badges(ui, theme);
 }
 
+/// The icon's board: the 45 icons at 16 px in `muted`, in the sheet's order, eight to a row.
+fn icons(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Icon"));
+    for row in IconId::ALL.chunks(8) {
+        cells(ui, theme, |ui| {
+            for id in row {
+                let name = icon::name(*id);
+                cell(ui, theme, name, |ui| {
+                    icon::icon(ui, theme, *id, name);
+                });
+            }
+        });
+    }
+}
+
 /// The marks' right column.
-fn marks_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn marks_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    icons(ui, theme);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
