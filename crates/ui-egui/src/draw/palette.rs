@@ -9,9 +9,8 @@
 use egui::{Area, Frame, Id, Key, Modifiers, Order, Rect, Role, ScrollArea, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
 use crate::component::field;
-use crate::component::{control_side, cut, galley, margin};
+use crate::component::{cut, galley, margin};
 use crate::draw::paint::{self, FloatEdge};
-use crate::iconset::Style;
 use crate::keymap::{Action, Keymap};
 use crate::palette::{MAX_CHARS, Palette};
 use crate::theme::Theme;
@@ -44,7 +43,7 @@ pub(super) fn field_id() -> Id {
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: bool, run: bool) -> egui::Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme);
+    let height = theme.boxes().menu_row;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), if run { Sense::click() } else { Sense::hover() });
     response.widget_info(|| WidgetInfo::selected(Role::MenuItem, run, picked, action.name));
     if picked {
@@ -58,7 +57,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, picked: boo
         let ink = if run { p.ink } else { p.muted };
         let side = theme.fonts.body.size * 1.2;
         let icon = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
-        crate::iconset::paint(painter, icon, action.icon, Style::Regular, ink);
+        crate::iconset::paint(painter, icon, action.icon, ink);
         let mut right = rect.right() - s.s2;
         if let Some(chip) = keymap.chip(ui.ctx(), action.id) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);
@@ -142,7 +141,7 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
                 let none = tr!("No command matches “{text}”.", text = palette.query());
                 ui.label(egui::RichText::new(none).font(theme.fonts.body.id()).color(p.muted));
             } else {
-                let height = control_side(ui, theme) * ROWS;
+                let height = theme.boxes().menu_row * ROWS;
                 ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
                     for (index, action) in matches.iter().enumerate() {
                         if row(ui, theme, keymap, action, index == palette.picked(), can(action)).clicked() {
@@ -154,7 +153,7 @@ pub(super) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, palette:
             ui.add_space(s.s1);
             ui.horizontal(|ui| {
                 ui.add_space(s.s2);
-                ui.label(egui::RichText::new(tr!("↑↓ to move · Enter to run · Esc to close")).font(theme.fonts.caption.id()).color(p.muted));
+                ui.label(theme.fonts.key.rich(tr!("↑↓ to move · Enter to run · Esc to close")).color(p.muted));
             });
             ui.add_space(s.s1);
         });

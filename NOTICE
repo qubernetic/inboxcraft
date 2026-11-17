@@ -7,8 +7,9 @@ InboxCraft is a clean-room mail and calendar program. It is not affiliated with,
 Mailspring or any other mail product. Product names mentioned in the documentation (to say what a feature
 corresponds to) are trademarks of their owners.
 
-The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic. They are not licensed under
-the MIT License or the Apache License; they appear in this repository to show the product's own identity.
+The InboxCraft mark and wordmark and the Qubernetic mark are trademarks of Qubernetic, all rights reserved. They are
+not licensed under the MIT License or the Apache License; they appear in this repository, in `assets/brand/` and in
+the design files, to show the product's own identity.
 
 Portions adapted from other projects
 ------------------------------------
@@ -29,15 +30,19 @@ above.
 
 Third-party material
 --------------------
-- Figtree (https://github.com/erikdkennedy/figtree, release v2.0.3), Copyright 2022 The Figtree Project Authors,
-  SIL Open Font Licence 1.1: the Regular, Medium, SemiBold and Bold weights in `assets/fonts/figtree/`, compiled into
-  the desktop app as its typeface. The licence text is `assets/fonts/figtree/OFL.txt`.
+- IBM Plex Mono and IBM Plex Sans (https://github.com/IBM/plex), Copyright 2017 IBM Corp. with Reserved Font Name
+  "Plex", SIL Open Font Licence 1.1: the Regular and SemiBold weights in `assets/fonts/plex-mono/` (from the
+  Qubernetic brand repository, tag v0.3.0) and `assets/fonts/plex-sans/` (release `@ibm/plex-sans@1.1.0`), compiled
+  into the desktop app as its typefaces. The licence texts are the `OFL.txt` files beside them.
+- Audiowide, Copyright (c) 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI) with Reserved Font Name "Audiowide", SIL
+  Open Font Licence 1.1: `assets/fonts/audiowide/Audiowide-Regular.ttf` (from the Qubernetic brand repository, tag
+  v0.3.0), compiled into the desktop app for the product names. The licence text is `assets/fonts/audiowide/OFL.txt`.
 - Phosphor Icons (https://github.com/phosphor-icons/web, release 2.1.1), Copyright (c) 2020-2021 Phosphor Icons, MIT:
-  the Regular, Fill and Duotone icon fonts in `assets/icons/phosphor/`, compiled into the desktop app as its icon
-  set. The licence text is `assets/icons/phosphor/LICENSE`.
+  the Regular icon font `assets/icons/phosphor/Phosphor.ttf`, compiled into the desktop app as its one icon
+  family. The licence text is `assets/icons/phosphor/LICENSE`.
 - egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
   (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0; still
-  compiled in with that crate, but no text uses it since Figtree replaced it), Hack
+  compiled in with that crate; since IBM Plex replaced it, it only stands in for signs Plex lacks), Hack
   (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from), Noto
   Emoji (Copyright 2013 Google LLC, SIL Open Font Licence 1.1) and the emoji icon font with egui's subset of it
   (Copyright 2014 John Slegers, MIT). The licence texts ship in that crate's `fonts/` directory.

@@ -10,11 +10,11 @@
 use egui::{Align, CursorIcon, Frame, Layout, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use super::onboard;
-use super::paint::{focus_ring, line, line_height};
+use super::paint::{focus_ring, line};
 use super::settings::{Asked, row_with};
 use crate::component::avatar;
 use crate::component::button::TextButton;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::{AccountRow, Mailbox};
 use crate::onboard::{Onboarding, Stage};
@@ -27,7 +27,7 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
     let p = &theme.palette;
     let s = &theme.spacing;
     let f = &theme.fonts;
-    let tall = line_height(ui, f.strong).max(line_height(ui, f.body));
+    let tall = f.strong.line.max(f.body.line);
     let face = tall * 1.4;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), face + s.s2 * 1.5), Sense::click());
     let response = response.on_hover_cursor(CursorIcon::PointingHand);
@@ -64,9 +64,9 @@ fn none_yet(ui: &mut Ui, theme: &Theme) {
     Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s6).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.vertical_centered(|ui| {
-            let side = line_height(ui, theme.fonts.body) * 2.4;
+            let side = theme.fonts.body.line * 2.4;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            crate::iconset::paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
+            crate::iconset::paint(ui.painter(), rect, IconId::Inbox, p.cyan_text);
             ui.add_space(s.s2);
             ui.label(RichText::new(tr!("Your accounts show up here")).font(theme.fonts.heading.id()).color(p.ink));
             ui.add_space(s.s1);
@@ -90,7 +90,7 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
             ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         let at = Rect::from_center_size(pos2(rect.left() + icon / 2.0, rect.center().y), vec2(icon, icon));
-        crate::iconset::paint(ui.painter(), at, IconId::Back, Style::Regular, p.cyan_text);
+        crate::iconset::paint(ui.painter(), at, IconId::Back, p.cyan_text);
         ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
         focus_ring(ui, theme, &response);
     }

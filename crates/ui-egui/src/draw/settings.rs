@@ -21,7 +21,7 @@ use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
-use super::paint::{NavRow, focus_ring, line, line_height, nav_row, selection};
+use super::paint::{NavRow, focus_ring, line, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
@@ -29,12 +29,12 @@ use crate::component::segmented::{segmented, segmented_for};
 use crate::component::switch::switch;
 use crate::component::tooltip;
 use crate::draw::paint::{self, FloatEdge};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::{Action, Keymap};
 use crate::mailbox::{InboxView, Mailbox};
 use crate::onboard::Onboarding;
 use crate::settings::{Section, Settings};
-use crate::theme::{Face, Font, TextScale, Theme, Weight};
+use crate::theme::{Font, TextScale, Theme};
 use crate::tr;
 
 /// The sheet's size where the window has room for it, in points.
@@ -191,11 +191,6 @@ pub(super) fn screener_name(mode: ScreenerMode) -> &'static str {
     }
 }
 
-/// `font` in the SemiBold weight.
-fn semibold(font: Font) -> Font {
-    Font { face: Face::Sans(Weight::SemiBold), ..font }
-}
-
 fn note(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
 }
@@ -203,7 +198,7 @@ fn note(ui: &mut Ui, theme: &Theme, text: &str) {
 /// A row's name and note.
 fn texts(ui: &mut Ui, theme: &Theme, title: &str, notes: &[&str]) {
     ui.spacing_mut().item_spacing.y = 2.0;
-    ui.label(RichText::new(title).font(semibold(theme.fonts.body).id()).color(theme.palette.ink));
+    ui.label(theme.fonts.heading.rich(title).color(theme.palette.ink));
     for text in notes {
         note(ui, theme, text);
     }
@@ -222,9 +217,9 @@ fn heading(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: &str, notes:
         return;
     };
     ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-        let side = line_height(ui, theme.fonts.body) * 1.2;
+        let side = theme.fonts.body.line * 1.2;
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        crate::iconset::paint(ui.painter(), rect, icon, Style::Regular, theme.palette.cyan_text);
+        crate::iconset::paint(ui.painter(), rect, icon, theme.palette.cyan_text);
         ui.add_space(theme.spacing.s1);
         let used = side + theme.spacing.s1 + ui.spacing().item_spacing.x * 2.0;
         ui.vertical(|ui| {
@@ -268,8 +263,7 @@ pub(super) fn row_with(ui: &mut Ui, theme: &Theme, icon: Option<IconId>, title: 
 fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], paint: impl FnOnce(&Painter, Rect)) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let caption = semibold(theme.fonts.caption);
-    let galley = line(ui, &[(name, caption, p.ink)], f32::INFINITY);
+    let galley = line(ui, &[(name, theme.fonts.mono_s, p.ink)], f32::INFINITY);
     let size = vec2(swatch[0].max(galley.size().x) + s.s2 * 2.0, s.s2 + swatch[1] + s.s1 + galley.size().y + s.s2);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, name));
@@ -357,7 +351,7 @@ fn text_size(ui: &mut Ui, theme: &Theme, now: TextScale) -> Option<TextScale> {
         }
     }
     ui.label(RichText::new("A").font(theme.fonts.title.id()).color(p.muted));
-    ui.label(RichText::new(tr!("{percent} %", percent = now.percent())).font(semibold(theme.fonts.body).id()).color(p.ink));
+    ui.label(theme.fonts.mono.rich(&tr!("{percent} %", percent = now.percent())).color(p.ink));
     wanted.and_then(|at| steps.get(at).copied()).filter(|step| *step != now)
 }
 
@@ -401,9 +395,10 @@ fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, 
     let p = &theme.palette;
     let s = &theme.spacing;
     let f = &theme.fonts;
-    let first = line_height(ui, f.sender_unread).max(line_height(ui, f.caption));
-    let second = line_height(ui, f.subject);
-    let height = first + second + s.s2 * 1.5;
+    let first = f.strong.line.max(f.mono_s.line);
+    let second = f.caption.line;
+    let gap = s.s1 / 2.0;
+    let height = theme.boxes().mail_row;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
@@ -419,15 +414,15 @@ fn preview_row(ui: &mut Ui, theme: &Theme, sender: (&str, &str), subject: &str, 
         painter.circle_filled(pos2(rect.left() + s.s2, rect.center().y), 3.5, p.cyan_edge);
     }
     let left = face.right() + s.s3;
-    let time = line(ui, &[(time, f.caption, p.muted)], rect.width());
+    let time = line(ui, &[(time, f.mono_s, p.muted)], rect.width());
     let right = rect.right() - s.s3;
-    let top = rect.top() + s.s2 * 0.75;
+    let top = rect.top() + ((height - first - gap - second) / 2.0).max(0.0);
     painter.galley(pos2(right - time.size().x, top + (first - time.size().y) / 2.0), time.clone(), p.muted);
-    let sender_font = if unread { f.sender_unread } else { f.sender };
+    let sender_font = if unread { f.strong } else { f.body };
     let name = line(ui, &[(sender.0, sender_font, p.ink)], (right - time.size().x - s.s2 - left).max(1.0));
     painter.galley(pos2(left, top + (first - name.size().y) / 2.0), name, p.ink);
-    let subject = line(ui, &[(subject, if unread { f.subject_unread } else { f.subject }, p.ink)], (right - left).max(1.0));
-    painter.galley(pos2(left, top + first), subject, p.ink);
+    let subject = line(ui, &[(subject, f.caption, p.ink)], (right - left).max(1.0));
+    painter.galley(pos2(left, top + first + gap), subject, p.ink);
 }
 
 /// The preview: two rows of the list, the first one selected, in `theme`.
@@ -435,7 +430,7 @@ fn preview(ui: &mut Ui, theme: &Theme) {
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s3);
-    ui.label(RichText::new(tr!("Preview")).font(semibold(theme.fonts.caption).id()).color(p.muted));
+    crate::component::label(ui, theme.fonts.label, tr!("Preview"), p.muted);
     ui.add_space(s.s1);
     Frame::new().fill(p.bg).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s2).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -556,7 +551,7 @@ fn key_control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, wai
 /// One action of the Shortcuts page: its name, and its key at the right end; a line under it.
 fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: bool) -> Option<Asked> {
     let s = &theme.spacing;
-    let height = line_height(ui, theme.fonts.body) + s.s3 * 2.0;
+    let height = theme.fonts.body.line + s.s3 * 2.0;
     let asked = ui
         .allocate_ui_with_layout(vec2(ui.available_width(), height), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_height(height);

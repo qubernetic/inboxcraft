@@ -5,11 +5,9 @@ use std::collections::HashSet;
 
 use egui::{Color32, Rect, pos2, vec2};
 
-use super::{BACK_OPACITY, IconId, Style, glyph, paint};
+use super::{IconId, glyph, paint};
 use crate::shot::{self, Picture};
 use crate::theme::{self, Mode};
-
-const STYLES: [Style; 3] = [Style::Regular, Style::Fill, Style::Duotone];
 
 #[test]
 fn all_lists_every_id_once_in_order() {
@@ -21,51 +19,61 @@ fn all_lists_every_id_once_in_order() {
 }
 
 #[test]
-fn every_id_has_a_glyph_in_every_style_that_its_font_draws() {
+fn one_icon_family_one_weight() {
     let ctx = egui::Context::default();
     theme::install_fonts(&ctx);
     ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-    for style in STYLES {
-        for id in IconId::ALL {
-            let glyph = glyph(id, style);
-            assert!(!glyph.layers.is_empty(), "{style:?} {id:?}");
-            let font = glyph.face.id(16.0);
-            for (layer, _) in &glyph.layers {
-                assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font, *layer)), "{style:?} {id:?} {layer:?}");
-            }
+    let font = theme::icon_font(16.0);
+    assert_eq!(font.family, egui::FontFamily::Name("Phosphor".into()));
+    for id in IconId::ALL {
+        assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font, glyph(id))), "{id:?}");
+    }
+    let family = ctx.fonts(|fonts| fonts.definitions().families.get(&font.family).cloned());
+    assert_eq!(family, Some(vec!["Phosphor".to_owned()]), "Phosphor Regular alone");
+    // No code names another icon font: the names are put together so this file does not name them either.
+    let gone = [["Phosphor", "-Fill"].concat(), ["Phosphor", "-Duotone"].concat(), ["Luc", "ide"].concat()];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in ["src", "examples"] {
+        rust_files(&root.join(dir), &mut files);
+    }
+    assert!(files.len() > 10, "the scan finds the sources");
+    for file in files {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for name in &gone {
+            assert!(!text.contains(name.as_str()), "{} names {name}", file.display());
+        }
+    }
+}
+
+/// The `.rs` files under `dir`, tests included.
+fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            rust_files(&path, found);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            found.push(path);
         }
     }
 }
 
 #[test]
 fn ids_have_their_own_glyphs() {
-    for style in STYLES {
-        let glyphs: HashSet<Vec<char>> = IconId::ALL.iter().map(|id| glyph(*id, style).layers.iter().map(|(c, _)| *c).collect()).collect();
-        assert_eq!(glyphs.len(), IconId::ALL.len(), "{style:?}");
-    }
+    let glyphs: HashSet<char> = IconId::ALL.iter().map(|id| glyph(*id)).collect();
+    assert_eq!(glyphs.len(), IconId::ALL.len());
 }
 
-#[test]
-fn phosphor_draws_regular_and_fill_as_one_glyph_of_its_own_font_and_duotone_as_a_faint_back_under_the_line() {
-    for id in IconId::ALL {
-        assert_eq!(glyph(id, Style::Regular).layers.len(), 1);
-        assert_eq!(glyph(id, Style::Fill).layers.len(), 1);
-        let duotone = glyph(id, Style::Duotone);
-        let opacities: Vec<f32> = duotone.layers.iter().map(|(_, opacity)| *opacity).collect();
-        assert_eq!(opacities, vec![BACK_OPACITY, 1.0], "{id:?}");
-        assert_ne!(glyph(id, Style::Regular).face, glyph(id, Style::Fill).face);
-    }
-}
-
-/// `id` in `style` painted black into a `side` point square, at 2 pixels a point.
-fn painted(id: IconId, style: Style, side: f32) -> Picture {
+/// `id` painted black into a `side` point square, at 2 pixels a point.
+fn painted(id: IconId, side: f32) -> Picture {
     let mut first = true;
     shot::paint(vec2(side, side), 2.0, Mode::Light, |ui| {
         if first {
             theme::install_fonts(ui.ctx());
             first = false;
         }
-        paint(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(side, side)), id, style, Color32::BLACK);
+        paint(ui.painter(), Rect::from_min_size(pos2(0.0, 0.0), vec2(side, side)), id, Color32::BLACK);
     })
     .unwrap()
 }
@@ -91,26 +99,16 @@ fn ink(picture: &Picture) -> Option<([usize; 4], f32)> {
 
 #[test]
 fn a_ring_sits_in_the_middle_of_its_square_and_fills_most_of_it_at_every_size() {
-    for style in [Style::Regular, Style::Fill] {
-        for side in [16.0, 20.0, 32.0] {
-            let picture = painted(IconId::Waiting, style, side);
-            let ([l, t, r, b], _) = ink(&picture).unwrap();
-            let pixels = side * 2.0;
-            let centre = |a: usize, b: usize| (a + b + 1) as f32 / 2.0;
-            let off = (centre(l, r) - pixels / 2.0, centre(t, b) - pixels / 2.0);
-            assert!(off.0.abs() <= 1.0 && off.1.abs() <= 1.0, "{style:?} {side}: off by {off:?} pixels ({l} {t} {r} {b})");
-            let width = (r + 1 - l) as f32 / pixels;
-            assert!((0.7..=0.95).contains(&width), "{style:?} {side}: the ring is {width} of the square");
-        }
+    for side in [14.0, 16.0, 20.0, 32.0] {
+        let picture = painted(IconId::Waiting, side);
+        let ([l, t, r, b], _) = ink(&picture).unwrap();
+        let pixels = side * 2.0;
+        let centre = |a: usize, b: usize| (a + b + 1) as f32 / 2.0;
+        let off = (centre(l, r) - pixels / 2.0, centre(t, b) - pixels / 2.0);
+        assert!(off.0.abs() <= 1.0 && off.1.abs() <= 1.0, "{side}: off by {off:?} pixels ({l} {t} {r} {b})");
+        let width = (r + 1 - l) as f32 / pixels;
+        assert!((0.7..=0.95).contains(&width), "{side}: the ring is {width} of the square");
     }
-}
-
-#[test]
-fn duotone_puts_more_ink_down_than_regular_and_fill_more_still() {
-    let sum = |style| ink(&painted(IconId::Inbox, style, 24.0)).unwrap().1;
-    let regular = sum(Style::Regular);
-    assert!(sum(Style::Duotone) > regular * 1.1);
-    assert!(sum(Style::Fill) > sum(Style::Duotone));
 }
 
 #[test]
@@ -118,7 +116,7 @@ fn nothing_is_painted_into_an_empty_or_unreal_square() {
     for rect in [Rect::NOTHING, Rect::from_min_size(pos2(4.0, 4.0), vec2(0.0, 10.0)), Rect::from_min_size(pos2(f32::NAN, 0.0), vec2(10.0, 10.0))] {
         let picture = shot::paint(vec2(16.0, 16.0), 1.0, Mode::Light, |ui| {
             theme::install_fonts(ui.ctx());
-            paint(ui.painter(), rect, IconId::Inbox, Style::Fill, Color32::BLACK);
+            paint(ui.painter(), rect, IconId::Inbox, Color32::BLACK);
         })
         .unwrap();
         assert!(ink(&picture).is_none(), "{rect:?}");

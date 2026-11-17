@@ -7,9 +7,9 @@
 use egui::{Painter, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::motion;
-use crate::theme::{Face, Font, Theme, Weight};
+use crate::theme::Theme;
 
-use super::{galley, line_height};
+use super::galley;
 
 /// A selected pill or segment over `rect`: the `stage` fill.
 pub(crate) fn selected_fill(painter: &Painter, theme: &Theme, rect: Rect) {
@@ -20,9 +20,9 @@ pub(crate) fn selected_fill(painter: &Painter, theme: &Theme, rect: Rect) {
 pub fn pill(ui: &mut Ui, theme: &Theme, text: &str, selected: bool) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let font = if selected { Font { face: Face::Sans(Weight::SemiBold), ..theme.fonts.button } } else { theme.fonts.button };
+    let font = if selected { theme.fonts.button.semibold() } else { theme.fonts.button };
     let text_galley = galley(ui, text, font, p.ink);
-    let height = line_height(ui, theme.fonts.button) + s.s2;
+    let height = theme.fonts.button.line + s.s2;
     let size = vec2(text_galley.size().x + s.s3 * 2.0, height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, text));

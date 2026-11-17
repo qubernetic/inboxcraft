@@ -9,7 +9,7 @@ use egui::{Rect, RichText, ScrollArea, Sense, Ui, vec2};
 
 use super::{Asked, Shape, Text, block, caption_strong};
 use crate::calendar::{AGENDA_DAYS, Calendar, Day, EventRow, day};
-use crate::draw::paint::{line, line_height};
+use crate::draw::paint::line;
 use crate::theme::Theme;
 use crate::tr;
 
@@ -58,7 +58,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
 /// One event of `day` in the agenda.
 fn row(ui: &mut Ui, theme: &Theme, calendar: &Calendar, event: &EventRow, day: Day, salt: i64, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
-    let height = line_height(ui, theme.fonts.caption) + BAR * 2.0;
+    let height = theme.fonts.caption.line + BAR * 2.0;
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let time = if event.all_day {

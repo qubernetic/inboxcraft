@@ -100,10 +100,6 @@ shot script="crates/ui-egui/shots.jsonl": _up
 side-by-side *args: _up
     {{ exec }} cargo xtask side-by-side {{ args }}
 
-# Export the app icon drawn in crates/ui-egui/src/icons.rs to assets/app-icon/inboxcraft.svg
-icon: _up
-    {{ exec }} cargo run -p inboxcraft-ui-egui --example app_icon
-
 # Check the change fragments in changes/; --fold writes them into CHANGELOG.md, ROADMAP.md, docs/gaps.md and the revision tables
 changes *args: _up
     {{ exec }} cargo xtask changes "$@"

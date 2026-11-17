@@ -9,15 +9,15 @@
 use egui::{Align, Color32, ComboBox, Layout, Rect, RichText, Role, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use super::Screen;
-use super::paint::{NavRow, line_height, nav_row};
+use super::paint::{NavRow, nav_row};
 use crate::component::avatar;
 use crate::component::button::IconButton;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use inboxcraft_model::Role as FolderRole;
 
 use crate::mailbox::{Mailbox, Place, role_text};
-use crate::theme::{Font, Theme};
+use crate::theme::Theme;
 use crate::tr;
 
 /// The ink of the rail's icons on its flat panel.
@@ -67,7 +67,7 @@ fn mark(ui: &mut Ui, theme: &Theme, ink: Color32) {
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, "InboxCraft"));
     ui.painter().rect_filled(rect, 0.0, theme.palette.stage);
     let icon = side * 0.5;
-    crate::iconset::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Mail, Style::Fill, ink);
+    crate::iconset::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Mail, ink);
 }
 
 /// The owner's avatar at the rail's foot: the first account's initials, `muted` on a `stage` square.
@@ -79,7 +79,8 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &spoken));
     let ink = theme.palette.muted;
     ui.painter().rect_filled(rect, avatar::CORNER, theme.palette.stage);
-    let font = Font { size: side * 0.36, ..theme.fonts.strong };
+    // The rail's tile shows its initials a tenth smaller than an avatar of its side.
+    let font = theme.fonts.initials(side * 0.9);
     let galley = ui.painter().layout_no_wrap(avatar::initials("", &account.address), font.id(), ink);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
 }
@@ -224,7 +225,7 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
 /// A section's heading: small capitals in the muted colour.
 fn heading(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.s3);
-    ui.label(RichText::new(text.to_uppercase()).font(theme.fonts.caption.id()).color(theme.palette.muted).extra_letter_spacing(0.6));
+    crate::component::label(ui, theme.fonts.label, text, theme.palette.muted);
     ui.add_space(theme.spacing.s1);
 }
 
@@ -303,7 +304,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             let colour = theme.account_colour(u64::try_from(account.index).unwrap_or(0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s1;
-                let (dot, _) = ui.allocate_exact_size(vec2(10.0, line_height(ui, theme.fonts.strong)), Sense::hover());
+                let (dot, _) = ui.allocate_exact_size(vec2(10.0, theme.fonts.strong.line), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, colour);
                 ui.label(RichText::new(&account.label).font(theme.fonts.strong.id()).color(p.ink));
             });

@@ -14,7 +14,7 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
 use crate::theme::{Mode, ModePreference, TextScale, Theme, contrast};
@@ -38,8 +38,8 @@ fn harness() -> Harness<'static, InboxApp> {
     harness_with(sample_app(), egui::Theme::Light)
 }
 
-/// Whether the last frame of `output` drew `id` in `style`: its front glyph in its font.
-pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
+/// Whether the last frame of `output` drew `id`: its glyph in the icon family.
+pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {
             egui::Shape::Text(text) => found.push(text),
@@ -47,9 +47,8 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = crate::iconset::glyph(id, style);
-    let Some((front, _)) = glyph.layers.last() else { return false };
-    let family = glyph.face.id(1.0).family;
+    let front = crate::iconset::glyph(id);
+    let family = crate::theme::icon_font(1.0).family;
     let mut found = Vec::new();
     output.shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
     found.iter().any(|text| {
@@ -58,11 +57,49 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
 }
 
 #[test]
-fn a_flagged_row_shows_the_filled_flag_icon() {
+fn a_flagged_row_shows_the_flag_icon() {
     let harness = harness();
     harness.get_by_label("Petra Harbour, Draft logo for the bakery, 08:10, unread, flagged");
-    assert!(drew_icon(harness.output(), IconId::Flag, Style::Fill));
-    assert!(!drew_icon(harness.output(), IconId::Flag, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Flag));
+}
+
+#[test]
+fn a_mark_in_a_row_is_14_points_and_an_icon_in_a_button_16() {
+    let harness = harness();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let sizes = |id: IconId| -> Vec<f32> {
+        let glyph = crate::iconset::glyph(id).to_string();
+        flat(&harness.output().shapes)
+            .into_iter()
+            .filter_map(|(_, shape)| match shape {
+                egui::Shape::Text(text) if text.galley.job.text == glyph => {
+                    text.galley.job.sections.first().map(|section| section.format.font_id.size)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let flags = sizes(IconId::Flag);
+    assert!(!flags.is_empty(), "the flagged rows draw their flag");
+    assert!(flags.iter().all(|size| *size == theme.mark_side()), "{flags:?}");
+    assert_eq!(theme.mark_side(), 14.0);
+    let compose = sizes(IconId::Compose);
+    assert_eq!(compose, vec![theme.icon_side()], "the compose button's icon");
+}
+
+#[test]
+fn a_mail_row_and_a_text_button_keep_the_design_s_heights_at_every_text_scale() {
+    let mut harness = harness();
+    let row = "Odile Brannock, Allotment rota for November, 08:35, unread";
+    for (percent, mail_row, button) in [(100, 56.0, 32.0), (130, 72.0, 42.0)] {
+        let scale = TextScale::from_percent(percent).unwrap();
+        harness.state_mut().set_text_scale(scale);
+        harness.run();
+        let theme = Theme::new(Mode::Light, scale);
+        assert_eq!(theme.boxes().mail_row, mail_row);
+        assert_eq!(harness.get_by_label(row).rect().height(), mail_row, "{percent} %");
+        assert_eq!(harness.get_by_role_and_label(Role::Button, "Review").rect().height(), button, "{percent} %");
+    }
 }
 
 #[test]
@@ -141,11 +178,12 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     let harness = harness();
     let fonts = Theme::new(Mode::Light, TextScale::default()).fonts;
     // Odile's row is unread, Teodor's is read.
-    assert_eq!(font_of(&harness, "Odile Brannock"), fonts.sender_unread.id());
-    assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.subject_unread.id());
-    assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.sender.id());
-    assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.subject.id());
-    assert_ne!(fonts.sender.id(), fonts.sender_unread.id());
+    // Unread shows on the first line; the second line (subject and preview) is the caption either way.
+    assert_eq!(font_of(&harness, "Odile Brannock"), fonts.strong.id());
+    assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.caption.id());
+    assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.body.id());
+    assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.caption.id());
+    assert_ne!(fonts.body.id(), fonts.strong.id());
     let preview = flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
         egui::Shape::Text(text) if text.galley.job.text.starts_with("Teodor Lisk") => None,
         egui::Shape::Text(text) if text.galley.job.text.starts_with("Photos from the coast walk") => {
@@ -154,7 +192,7 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
         _ => None,
     });
     let preview = preview.unwrap();
-    assert_eq!(preview.font_id, fonts.preview.id());
+    assert_eq!(preview.font_id, fonts.caption.id());
     assert_eq!(preview.color, Theme::new(Mode::Light, TextScale::default()).palette.muted);
 }
 
@@ -169,10 +207,7 @@ fn a_new_text_scale_shows_from_the_next_frame_and_the_rows_grow_with_it() {
     harness.run();
     let body = harness.ctx.style_of(egui::Theme::Light).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
     assert_eq!(body, Some(Theme::new(Mode::Light, TextScale::default()).with_text_scale(large).fonts.body.size));
-    assert_eq!(
-        font_of(&harness, "Odile Brannock").size,
-        Theme::new(Mode::Light, TextScale::default()).with_text_scale(large).fonts.sender_unread.size
-    );
+    assert_eq!(font_of(&harness, "Odile Brannock").size, Theme::new(Mode::Light, TextScale::default()).with_text_scale(large).fonts.strong.size);
     let after = harness.get_by_label(row).rect().height();
     // The two lines grow by 30 %, the air around them stays.
     assert!(after > before * 1.15, "the row follows the font: {before} then {after}");

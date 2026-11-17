@@ -8,10 +8,10 @@
 
 use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
-use super::{Asked, Shape, Text, block, caption_bold, caption_strong};
+use super::{Asked, Shape, Text, block, caption_strong};
 use crate::calendar::layout::{self, Bar};
 use crate::calendar::{Calendar, Day, EventRow, day};
-use crate::draw::paint::{line, line_height};
+use crate::draw::paint::line;
 use crate::theme::Theme;
 use crate::tr;
 
@@ -27,11 +27,11 @@ const WEEK_GAP: f32 = 10.0;
 /// The room inside a cell around its number, in points.
 const CELL_PAD: f32 = 5.0;
 
-/// From one line of events to the next, beyond the height of its text, in points.
-const LANE_ROOM: f32 = 5.0;
+/// From one line of events to the next, beyond the line height of its text, in points.
+const LANE_ROOM: f32 = 2.0;
 
-/// The gap under a block in its line, in points.
-const LANE_GAP: f32 = 3.0;
+/// The gap under a block in its line, in points: a block is as tall as its text's line.
+const LANE_GAP: f32 = 2.0;
 
 /// Where the cells are.
 struct Grid {
@@ -67,7 +67,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
     let width = ui.available_width();
     let column = (width / 7.0).max(1.0);
 
-    let head = line_height(ui, theme.fonts.caption) + s.s3;
+    let head = theme.fonts.caption.line + s.s3;
     let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
     for index in 0..7_i64 {
         let name = day::weekday_short(first.plus(index).weekday());
@@ -80,9 +80,9 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
     ui.allocate_rect(rect, Sense::hover());
     let row = ((rect.height() - WEEK_GAP * (WEEKS - 1) as f32) / WEEKS as f32).max(1.0);
     let pitch = row + WEEK_GAP;
-    let lane = line_height(ui, theme.fonts.caption) + LANE_ROOM;
+    let lane = theme.fonts.caption.line + LANE_ROOM;
     // The number and the room under it; today's disc is as tall.
-    let number = line_height(ui, theme.fonts.caption) + CELL_PAD + s.s1;
+    let number = theme.fonts.mono_s.line + CELL_PAD + s.s1;
     // A count of lines, never negative.
     let room = ((row - number) / lane).floor().max(0.0) as usize;
     let grid = Grid { left: rect.left(), top: rect.top(), column, row, pitch, lane, number, room, month: calendar.focus().month() };
@@ -159,7 +159,7 @@ fn day_events(
     let response = ui.interact(area, ui.scope_id().with(("calendar-more", week, index)), Sense::click());
     let spoken = tr!("{count} more on {day}", count = left_out, day = day::long(day));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &spoken));
-    let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.caption, p.muted)], area.width());
+    let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.mono, p.muted)], area.width());
     ui.painter().galley(pos2(area.left() + theme.spacing.s1, area.top()), galley, p.muted);
     if response.clicked() {
         asked.push(Asked::Open(day));
@@ -179,7 +179,7 @@ fn day_number(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, grid: &
     } else {
         p.muted
     };
-    let font = if today { caption_bold(theme) } else { theme.fonts.caption };
+    let font = if today { theme.fonts.mono_s.semibold() } else { theme.fonts.mono_s };
     let galley = line(ui, &[(&day.date().to_string(), font, colour)], cell.width());
     // Today's disc is 20 points tall; a day's number sits inside the cell's room.
     let side = (grid.number - s.s1 + 1.0).max(1.0);

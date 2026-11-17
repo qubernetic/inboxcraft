@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The icon button: an icon in a square as tall as a line of button text with a little room, a flat hover fill, and
-//! always a tooltip with its name and key. Active (a pinned pin) it shows the Fill style in the accent on the
+//! always a tooltip with its name and key. Active (a pinned pin) it shows its icon in the accent on the
 //! `stage`; disabled (an action without a command yet) its glyph is `dim`, it takes no click and still explains itself
 //! in its tooltip, with a note that says why when it is unavailable. On the navigation rail it is drawn in one ink.
 //! A text button that is unavailable fades and says why too. Everything is square.
 
 use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
@@ -85,7 +85,7 @@ impl<'a> IconButton<'a> {
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
-        let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(ui, theme)).min(512.0);
+        let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(theme)).min(512.0);
         let sense = if self.enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
         response.widget_info(|| WidgetInfo::selected(Role::Button, self.enabled, self.active, self.name));
@@ -99,14 +99,14 @@ impl<'a> IconButton<'a> {
                 // The rail's buttons (drawn in its ink) stand on the `panel`; every other on a `surface`.
                 painter.rect_filled(rect, 0.0, if self.ink.is_some() { p.grid } else { p.stage });
             }
-            let (style, colour) = match (self.ink, self.active) {
-                (Some(ink), active) => (if active { Style::Fill } else { Style::Regular }, ink),
-                (None, true) => (Style::Fill, p.cyan_text),
-                (None, false) => (Style::Regular, p.ink),
+            let colour = match (self.ink, self.active) {
+                (Some(ink), _) => ink,
+                (None, true) => p.cyan_text,
+                (None, false) => p.ink,
             };
             let colour = if self.enabled { colour } else { p.dim };
-            let icon = if self.side.is_some() { side * 0.5 } else { theme.fonts.body.size * 1.3 };
-            crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, style, colour);
+            let icon = if self.side.is_some() { side * 0.5 } else { theme.icon_side() };
+            crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, colour);
             if response.has_focus() {
                 painter.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }
@@ -198,7 +198,7 @@ impl<'a> TextButton<'a> {
             Tone::Quiet | Tone::Secondary => p.ink,
         };
         let galley = super::galley(ui, self.name, theme.fonts.button, ink);
-        let height = control_side(ui, theme);
+        let height = control_side(theme);
         let icon_side = theme.fonts.button.size * 1.2;
         let lead = self.icon.map_or(0.0, |_| icon_side + s.s2);
         let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -229,7 +229,7 @@ impl<'a> TextButton<'a> {
             let left = rect.center().x - (galley.size().x + lead) / 2.0;
             if let Some(icon) = self.icon {
                 let at = egui::Rect::from_center_size(egui::pos2(left + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
-                crate::iconset::paint(painter, at, icon, Style::Regular, ink);
+                crate::iconset::paint(painter, at, icon, ink);
             }
             painter.galley(egui::pos2(left + lead, rect.center().y - galley.size().y / 2.0), galley, ink);
             if response.has_focus() {

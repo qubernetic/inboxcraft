@@ -13,8 +13,8 @@ use super::{Asked, caption_bold, caption_strong, tint};
 use crate::calendar::{Calendar, Day, EventRow, View, day};
 use crate::component::button::{IconButton, TextButton};
 use crate::component::checkbox::checkbox;
-use crate::draw::paint::{line, line_height, selection};
-use crate::iconset::{IconId, Style};
+use crate::draw::paint::{line, selection};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
@@ -134,7 +134,7 @@ fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<As
     let p = &theme.palette;
     let s = &theme.spacing;
     ui.add_space(s.s3);
-    ui.label(RichText::new(tr!("Calendars").to_uppercase()).font(caption_strong(theme).id()).color(p.muted).extra_letter_spacing(0.6));
+    crate::component::label(ui, theme.fonts.label, tr!("Calendars"), p.muted);
     ui.add_space(s.s2);
     for row in calendar.calendars() {
         ui.horizontal(|ui| {
@@ -166,7 +166,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
                 asked.push(Asked::Pick(None));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.heading.id()).color(p.ink)).wrap());
+                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.strong.id()).color(p.ink)).wrap());
             });
         });
     });
@@ -178,9 +178,9 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     body(ui, &event.when(), false);
     if let Some(zone) = event.zone_line() {
         ui.horizontal(|ui| {
-            let side = line_height(ui, theme.fonts.caption);
+            let side = theme.fonts.caption.line;
             let (spot, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            crate::iconset::paint(ui.painter(), spot, IconId::Globe, Style::Regular, p.muted);
+            crate::iconset::paint(ui.painter(), spot, IconId::Globe, p.muted);
             ui.add(egui::Label::new(RichText::new(zone).font(theme.fonts.caption.id()).color(p.muted)).wrap());
         });
     }

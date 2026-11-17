@@ -6,7 +6,7 @@
 
 use egui::{Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, vec2};
 
-use crate::theme::{Font, Theme};
+use crate::theme::Theme;
 
 /// The corner radius of an avatar square: one of the two things that are not square.
 pub const CORNER: f32 = 2.0;
@@ -38,7 +38,7 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
     let p = theme.palette;
     painter.rect_filled(Rect::from_center_size(rect.center(), vec2(side, side)), CORNER, p.stage);
     let ink = p.muted;
-    let font = Font { size: side * 0.4, ..theme.fonts.strong };
+    let font = theme.fonts.initials(side);
     let galley = painter.layout_no_wrap(initials(name, address), font.id(), ink);
     painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
 }

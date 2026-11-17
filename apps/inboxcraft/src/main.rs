@@ -92,7 +92,7 @@ fn windows(mut desktop: Desktop, shown: &Shown) -> ExitCode {
             if let Ok(mut shown) = context.lock() {
                 *shown = Some(creation.egui_ctx.clone());
             }
-            // Figtree from the first frame on, so no text is drawn in another font first.
+            // IBM Plex from the first frame on, so no text is drawn in another font first.
             inboxcraft_ui_egui::theme::install_fonts(&creation.egui_ctx);
             Ok(Box::new(window) as Box<dyn eframe::App + '_>)
         };

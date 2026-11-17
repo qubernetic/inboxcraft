@@ -75,7 +75,7 @@ fn an_appearance_kept_by_the_old_look_loads_and_draws_the_one_palette() {
     assert_eq!(*harness.state().appearance(), Appearance { theme: ThemeMode::Dark, text_scale: 110, ..Appearance::default() });
     let dark = Theme::new(Mode::Dark, TextScale::from_percent(110).unwrap()).style();
     assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals, dark.visuals, "one palette, whatever the old file named");
-    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).text_styles, dark.text_styles, "Figtree, whatever the old file named");
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).text_styles, dark.text_styles, "IBM Plex, whatever the old file named");
 }
 
 #[test]

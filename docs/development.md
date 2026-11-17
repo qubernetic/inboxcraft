@@ -130,7 +130,7 @@ command, `sample.mail.set`, is refused in any other session.
 | `cargo xtask spdx` | every `.rs` file starts with a `// SPDX-FileCopyrightText:` line and `// SPDX-License-Identifier:` with the workspace licence; `--fix` adds what is missing, a file under another licence is reported and never changed |
 | `cargo xtask test-files` | no inline test module (`mod tests { ... }`, `mod <name>_tests { ... }`, or any module with a body under `#[cfg(test)]`) outside test files |
 | `cargo xtask cov` | line coverage per crate and for the workspace under `cargo llvm-cov nextest` (profile `ci`), the report in `lcov.info`; `--check` fails below the floors in `.config/coverage.toml` (see "The coverage gate") |
-| `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory |
+| `cargo xtask assets` | every asset file (picture, icon, font or sound by extension, or anything under `assets/`) has a row in `ATTRIBUTION.md`; `<name>` in a row path stands for one or more characters within one directory; and the files under the folders of `.config/assets.toml` match their pinned sha256 (see "Pinned asset files") |
 | `cargo xtask changes` | every change fragment in `changes/` is well formed (see "Change fragments"); `--fold` writes them into the documents and deletes them, and is not part of `ci` |
 | `cargo xtask layers` | the layering rules below, from the table in `xtask/src/layers.rs` |
 | `cargo xtask flatpak-sources-check` | `contrib/flatpak/cargo-sources.json` is what `Cargo.lock` gives (see "The dev Flatpak"); `cargo xtask flatpak-sources` writes it |
@@ -260,6 +260,46 @@ lines joined), each Gaps line joins the end of "Known rough edges", each revisio
 document's revision table, and the status line of that document takes the date and the largest change. A malformed
 fragment, or a document without its section, makes the fold write nothing.
 
+### Pinned asset files
+Asset files copied from elsewhere (fonts, the brand marks) are pinned by sha256 in `.config/assets.toml`, so a
+changed or swapped file fails `cargo xtask assets` (and so `just ci`) instead of slipping in unnoticed. The pin sits
+beside the file's row in `ATTRIBUTION.md`, which still says whose it is and under which licence.
+
+```toml
+roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide"]
+
+[[source]]
+id = "ibm-plex"
+url = "https://github.com/IBM/plex"
+version = "<release tag>"
+
+[[file]]
+path = "assets/fonts/plex-mono/IBMPlexMono-Regular.ttf"
+source = "ibm-plex"
+from = "<its path in the source>"
+sha256 = "<64 hexadecimal digits>"
+```
+
+- `roots` lists the folders the manifest governs: every file under one of them needs a `[[file]]`, whatever its
+  directory is called (hidden, `plan` and `target` directories count too). A root that does not exist yet is fine;
+  one that exists but is not a directory is a setup error naming it. Files outside the roots may be pinned too.
+- Symbolic links are never followed: a link under a root, a root or pinned path that is a link, or a pinned path
+  with a linked directory in it, each fails as `assets: <path> is a symbolic link, not followed`.
+- A `[[source]]` names where files come from: `id`, and `url` and `version` (the release tag) as they apply.
+- A `[[file]]` has `path` and `sha256`; `source` (the `id` of a `[[source]]`) and `from` (the file's path there) say
+  where it came from. A path is relative to the repository root, `/`-separated, with no `.`, `..` or `\`.
+- The manifest must exist and parse; a bad path, a sha256 that is not 64 hexadecimal digits, an unknown key or
+  source and a file pinned twice are setup errors (exit code 2) that name the file.
+
+To add or update a file, copy it in, take its hash with `sha256sum <path>`, and add or change its `[[file]]` (and the
+`version` of its `[[source]]`) in the same commit as the file and its `ATTRIBUTION.md` row. The gate fails with one
+line per problem:
+
+- `assets: <path> is not pinned in .config/assets.toml`: a file under a root has no `[[file]]`.
+- `assets: <path> differs from its pinned sha256`: the file's contents changed.
+- `assets: <path> is pinned but missing`: a `[[file]]` has no regular file (nothing, or a directory).
+- `assets: <path> is a symbolic link, not followed`: see above.
+
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the
 checkout and without a network during the build. After the first setup, `git pull && just flatpak` updates the
@@ -273,9 +313,11 @@ installed app, and it starts from the desktop's menu like any other: the entry o
 | `io.github.qubernetic.inboxcraft.desktop` | the menu entry, one main window, with the sample mailbox and Quit as its actions |
 | `io.github.qubernetic.inboxcraft.metainfo.xml` | the AppStream description software centres show |
 
-The icon is `assets/app-icon/inboxcraft.svg`, exported from the shapes in `crates/ui-egui/src/icons.rs`; the same
-shapes are the window icon. After a change to the shapes, `just icon` exports the file again; a test fails while the
-file and the code differ.
+The icon is the InboxCraft mark, a trademark of Qubernetic (see `NOTICE`): the manifest copies the brand's icon
+theme tree, `assets/brand/inboxcraft/linux/hicolor/` (every size from 16 to 512 px and the scalable SVG), into
+`/app/share/icons/hicolor/`. The window icon and the tray icon are the brand's PNGs built into the binary
+(`crates/ui-egui/src/icons.rs`). The files are pinned (see "Pinned asset files"): a new version of the mark comes
+from the brand's release, never from an edit here.
 
 **Permissions.** The manifest asks for as little as the app needs, each with its reason in a comment above it: the
 network (IMAP, SMTP, CalDAV), a Wayland window with X11 only as a fallback (and the shared memory X11 needs), the
@@ -412,7 +454,7 @@ into `develop`, `main` and `epic/**`, on pushes to those branches, and on demand
 - **The Flatpak inputs.** A PR runs `flatpak` only when it changes one of these, the files the manifest builds from
   apart from our own Rust sources: `contrib/flatpak/` (the manifest, `cargo-sources.json`, the desktop file and the
   metainfo), `Cargo.toml` (the workspace root only), `Cargo.lock`, `.cargo/`, `apps/inboxcraft/Cargo.toml`,
-  `assets/app-icon/` (the icon the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
+  `assets/brand/inboxcraft/linux/` (the icons the manifest installs) and `.github/workflows/ci.yml`. The list lives in the
   `changes` job. A Rust change that builds natively but not in the Flatpak SDK shows on the next push to `develop` or
   `main`, not in its own PR.
 - **No Flatpak on an epic push.** A push to `epic/**` skips `flatpak` (10 to 11 billed minutes per push, #78). What

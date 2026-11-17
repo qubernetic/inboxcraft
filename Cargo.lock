@@ -5047,6 +5047,7 @@ dependencies = [
  "inboxcraft-time",
  "png",
  "serde_json",
+ "sha2",
  "tempfile",
  "toml",
 ]

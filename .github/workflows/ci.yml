@@ -71,8 +71,8 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           # The manifest folder (manifest, cargo-sources.json, desktop file, metainfo), the workspace's Cargo files
-          # and .cargo/, the app's Cargo.toml, the icon the manifest installs, and this workflow.
-          inputs=(contrib/flatpak Cargo.toml Cargo.lock .cargo apps/inboxcraft/Cargo.toml assets/app-icon
+          # and .cargo/, the app's Cargo.toml, the icons the manifest installs, and this workflow.
+          inputs=(contrib/flatpak Cargo.toml Cargo.lock .cargo apps/inboxcraft/Cargo.toml assets/brand/inboxcraft/linux
             .github/workflows/ci.yml)
           if [ "$EVENT" = push ] && [[ "$REF" == refs/heads/epic/* ]]; then
             echo "A push to an epic branch: the epic's PR into develop builds the Flatpak" >&2

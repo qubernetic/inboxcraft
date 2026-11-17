@@ -5,10 +5,14 @@
 //! GNOME with the AppIndicator extension show. Its tooltip says how much is unread; a click brings the window forward,
 //! and its menu opens the window or ends InboxCraft. Each of those is a [`Request`] to the window, which is woken to
 //! answer it. Other systems have no tray yet.
+//!
+//! The icon is the InboxCraft mark from the brand's files, at every side they ship ([`TRAY_SIDES`]), drawn light for a
+//! dark panel ([`TrayInk::Dark`]): the app does not know the panel's colour. While mail is unread its flap is cyan.
 
 use std::sync::mpsc::Sender;
 
 use inboxcraft_ui_egui::fetch::Wake;
+use inboxcraft_ui_egui::icons::{TRAY_SIDES, TrayInk, tray_icon};
 use inboxcraft_ui_egui::tr;
 use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::{MenuItem, StandardItem};
@@ -20,12 +24,15 @@ use crate::instance::Request;
 /// The app id, which names the tray and its themed icon.
 pub const APP_ID: &str = "io.github.qubernetic.inboxcraft";
 
-/// The tray's state: the unread count, and the way to the window.
+/// The tray's state: the unread count, the way to the window, and its icons.
 pub struct InboxTray {
     unread: u64,
     send: Sender<Request>,
     wake: Wake,
-    icon: Vec<Icon>,
+    /// The icon while nothing is unread, at each side.
+    read: Vec<Icon>,
+    /// The icon with the cyan flap, at the same sides.
+    unread_icon: Vec<Icon>,
 }
 
 impl std::fmt::Debug for InboxTray {
@@ -38,12 +45,7 @@ impl InboxTray {
     /// A tray that hands its requests to `send` and calls `wake` so the window answers them.
     #[must_use]
     pub fn new(send: Sender<Request>, wake: Wake) -> Self {
-        let icon = inboxcraft_ui_egui::icons::window_icon()
-            .ok()
-            .and_then(|icon| Some(Icon { width: i32::try_from(icon.width).ok()?, height: i32::try_from(icon.height).ok()?, data: argb(&icon.rgba) }))
-            .into_iter()
-            .collect();
-        Self { unread: 0, send, wake, icon }
+        Self { unread: 0, send, wake, read: pixmap(false), unread_icon: pixmap(true) }
     }
 
     fn ask(&self, request: Request) {
@@ -73,12 +75,15 @@ impl Tray for InboxTray {
         Status::Active
     }
 
+    /// No themed name while the tray has its own pixmaps: a host that finds a themed icon draws it instead of the
+    /// pixmap, and would show the app icon's tile without the cyan flap. Only with no pixmap at all is the name
+    /// [`APP_ID`], so the tray is never blank.
     fn icon_name(&self) -> String {
-        APP_ID.to_owned()
+        if self.icon_pixmap().is_empty() { APP_ID.to_owned() } else { String::new() }
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        self.icon.clone()
+        if self.unread == 0 { self.read.clone() } else { self.unread_icon.clone() }
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -115,7 +120,7 @@ pub struct TrayBadge(Handle<InboxTray>);
 impl Badge for TrayBadge {
     fn show(&mut self, unread: u64) {
         // A tray whose service ended shows nothing more.
-        let _ = self.0.update(|tray| tray.unread = unread);
+        let _ = self.0.update(|tray| tray.show(unread));
     }
 }
 
@@ -127,6 +132,18 @@ impl Badge for TrayBadge {
 /// No session bus, or no panel that shows tray icons.
 pub fn start(tray: InboxTray, sandboxed: bool) -> Result<TrayBadge, String> {
     tray.disable_dbus_name(sandboxed).spawn().map(TrayBadge).map_err(|error| format!("the tray could not be shown: {error}"))
+}
+
+/// The tray icon at every side it ships, the flap cyan when `unread`; a side whose file does not decode is left out,
+/// and with none the panel falls back to the themed icon of [`APP_ID`].
+fn pixmap(unread: bool) -> Vec<Icon> {
+    TRAY_SIDES
+        .iter()
+        .filter_map(|side| {
+            let icon = tray_icon(*side, TrayInk::Dark, unread).ok()?;
+            Some(Icon { width: i32::try_from(icon.width).ok()?, height: i32::try_from(icon.height).ok()?, data: argb(&icon.rgba) })
+        })
+        .collect()
 }
 
 /// RGBA pixels as the ARGB the StatusNotifierItem takes; a part pixel at the end is dropped.

@@ -45,7 +45,9 @@ modules:
       - install -Dm755 target/release/inboxcraft /app/bin/inboxcraft
       - install -Dm644 contrib/flatpak/io.github.qubernetic.inboxcraft.desktop /app/share/applications/io.github.qubernetic.inboxcraft.desktop
       - install -Dm644 contrib/flatpak/io.github.qubernetic.inboxcraft.metainfo.xml /app/share/metainfo/io.github.qubernetic.inboxcraft.metainfo.xml
-      - install -Dm644 assets/app-icon/inboxcraft.svg /app/share/icons/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg
+      # The InboxCraft mark at every size and as SVG, as the brand ships it for the icon theme.
+      - mkdir -p /app/share/icons/hicolor
+      - cp -r assets/brand/inboxcraft/linux/hicolor/. /app/share/icons/hicolor/
     sources:
       # The checkout itself, without build output, git data or local private folders.
       - type: dir

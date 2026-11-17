@@ -2,7 +2,7 @@
 
 # InboxCraft
 
-<img src="assets/app-icon/inboxcraft.svg" width="96" alt="The InboxCraft mark: two cards entering a notched tray, in the Electric gradient from blue through violet to pink, on a white rounded tile">
+<img src="assets/brand/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg" width="96" alt="The InboxCraft mark, a trademark of Qubernetic">
 
 **A local-first mail and calendar program for IMAP, SMTP and CalDAV, written from scratch in Rust.**
 

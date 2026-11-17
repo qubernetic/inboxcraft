@@ -29,7 +29,7 @@
 //! - [`calendar`]: the calendar screen's state, behind the rail's Calendar.
 //! - [`component`]: the design system's components: card, icon button, pill, tooltip, avatar, badge, hover actions,
 //!   toast and popup, and a gallery of them for `ui_shot`.
-//! - [`icons`]: art drawn in code: the app icon, exported as SVG for the desktop and filled as the window icon.
+//! - [`icons`]: the window icon and the tray icon, the InboxCraft mark from the brand's files.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 

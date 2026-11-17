@@ -49,6 +49,8 @@ encoding_rs = "0.8"
 proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3"
 toml = "1"
+# xtask only: the sha256 of the pinned asset files
+sha2 = "0.11"
 # time only, on wasm32-unknown-unknown: the browser's clock
 web-time = "1"
 # testkit only: the test CA, the fake servers' TLS and the test client

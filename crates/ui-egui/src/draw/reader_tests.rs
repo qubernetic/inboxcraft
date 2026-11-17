@@ -12,7 +12,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::json;
 
 use super::InboxApp;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::mailbox::{After, Mailbox};
 use crate::reader::tests::Recorder;
 use crate::sample;
@@ -225,7 +225,7 @@ fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
 fn saving_an_attachment_says_where_it_went_or_why_not() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Draft logo for the bakery");
-    assert!(super::tests::drew_icon(harness.output(), IconId::File, Style::Regular), "the tile shows the file icon");
+    assert!(super::tests::drew_icon(harness.output(), IconId::File), "the tile shows the file icon");
     harness.get_by_label("Save sketch-2.png").click();
     harness.run();
     harness.get_by_label("Saving attachments is not available in this window.");
@@ -277,7 +277,7 @@ fn the_toolbar_holds_the_mail_actions() {
     }
     assert!(!disabled("More"));
     for icon in [IconId::Done, IconId::Archive, IconId::Delete, IconId::Snooze, IconId::Pin, IconId::Move, IconId::More] {
-        assert!(super::tests::drew_icon(harness.output(), icon, Style::Regular), "{icon:?}");
+        assert!(super::tests::drew_icon(harness.output(), icon), "{icon:?}");
     }
 }
 
@@ -386,7 +386,7 @@ fn the_subject_is_set_large_with_the_message_s_group_as_a_chip_beside_who_wrote(
         }
         harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
     };
-    assert_eq!(size("Allotment rota for November"), Some(theme.fonts.display.size), "the subject is in the display font");
+    assert_eq!(size("Allotment rota for November"), Some(theme.fonts.title.size), "the subject is in the title style");
     let chip = harness.get_by_label("In People").rect();
     let subject_line = harness.get_by_label("Allotment rota for November");
     assert!(chip.top() >= subject_line.rect().bottom() - 1.0, "the chip sits under the subject");
@@ -614,4 +614,30 @@ fn columns_never_pass_the_room_however_little_there_is() {
         assert!(widths.iter().sum::<f32>() <= room + 0.001, "{widths:?} in {room}");
     }
     assert!(super::reader::column_widths(&[], 300.0, 12.0).is_empty());
+}
+
+/// Whether `font` is a face of IBM Plex Sans (the families `theme` gives it) or of IBM Plex Mono.
+fn plex(font: &egui::FontId) -> &'static str {
+    use crate::theme::Face;
+    let named = |face: Face| egui::FontFamily::Name(face.name().into());
+    match &font.family {
+        egui::FontFamily::Proportional => "sans",
+        egui::FontFamily::Monospace => "mono",
+        family if *family == named(Face::SansSemiBold) => "sans",
+        family if *family == named(Face::MonoSemiBold) => "mono",
+        _ => "other",
+    }
+}
+
+#[test]
+fn people_s_words_are_in_plex_sans_and_the_app_s_in_plex_mono() {
+    let fetch = Recorder::default();
+    let harness = opened(&fetch, None, "Photos from the coast walk");
+    let font = |start: &str| super::tests::font_of(&harness, start);
+    for people in ["Teodor Lisk", "Here are the ones from the cliff path"] {
+        assert_eq!(plex(&font(people)), "sans", "{people}");
+    }
+    for app in ["Reply", "Forward", "Show done", "04:00", "4"] {
+        assert_eq!(plex(&font(app)), "mono", "{app}");
+    }
 }

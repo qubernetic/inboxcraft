@@ -8,9 +8,10 @@
 //! that carry meaning 3:1; the tests check every pair. This file is the only place that names a colour; a test refuses
 //! colour constants anywhere else in the crate. Two values are translucent: [`Palette::scrim`] and [`FLOAT_SHADOW`].
 //!
-//! Every text style is a font token of [`Fonts`]: a weight of Figtree (bundled, replacing egui's Ubuntu Light) or the
-//! monospaced face, at a size the [`TextScale`] multiplies. The icon fonts are [`IconFont`]s, Phosphor's. This file is
-//! also the only place that names a font.
+//! Every text style is a type style of [`Fonts`]: IBM Plex Mono for what the app says, IBM Plex Sans for what people
+//! wrote, Audiowide for the product names (bundled, in front of egui's own faces), at a size and line height the
+//! [`TextScale`] multiplies. The icons are Phosphor Regular, the family [`ICON`]. This file is also the only place
+//! that names a font.
 //!
 //! The owner's choices arrive as the engine's [`Appearance`] (the `ui.*.set` commands); [`Look`] is what of it the
 //! tokens need.
@@ -205,6 +206,10 @@ pub struct Sizes {
     pub list: f32,
     /// The scroll bar's width.
     pub scrollbar: f32,
+    /// An icon's side in a control.
+    pub icon: f32,
+    /// An icon's side as a mark in a row.
+    pub mark: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -217,148 +222,241 @@ pub(crate) const SIZES: Sizes = Sizes {
     avatar: [24.0, 32.0, 40.0],
     list: 440.0,
     scrollbar: 12.0,
+    icon: 16.0,
+    mark: 14.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
 pub const FLOAT_SHADOW: Shadow = Shadow { offset: [0, 12], blur: 32, spread: 0, color: Color32::from_rgba_premultiplied(0, 0, 0, 102) };
 
-/// A weight of Figtree, lightest first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Weight {
-    /// Running text and previews.
-    Regular,
-    /// Read senders and subjects, buttons.
-    Medium,
-    /// Unread subjects, headings, bold text in a message.
-    SemiBold,
-    /// Unread senders and titles.
-    Bold,
-}
-
-/// A face of a font token: Figtree at a weight, or the monospaced face.
+/// A face of the type: IBM Plex Mono for what the app says, IBM Plex Sans for what people wrote, Audiowide for the
+/// product names. Two weights, Regular and SemiBold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Face {
-    /// Figtree.
-    Sans(Weight),
-    /// The monospaced face, for preformatted text and code.
+    /// IBM Plex Mono Regular: labels, buttons, counts, dates, the app's own lines.
     Mono,
+    /// IBM Plex Mono SemiBold: headings and key chips.
+    MonoSemiBold,
+    /// IBM Plex Sans Regular: senders, subjects, previews, message text.
+    Sans,
+    /// IBM Plex Sans SemiBold: an unread sender, emphasis.
+    SansSemiBold,
+    /// Audiowide: only the names `qubernetic` and `InboxCraft`.
+    Brand,
 }
 
-/// A font token: a face and a size in points.
+impl Face {
+    /// Every face.
+    pub const ALL: [Self; 5] = [Self::Mono, Self::MonoSemiBold, Self::Sans, Self::SansSemiBold, Self::Brand];
+
+    /// The name of the face's font file, which is also its family's name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Mono => "IBMPlexMono-Regular",
+            Self::MonoSemiBold => "IBMPlexMono-SemiBold",
+            Self::Sans => "IBMPlexSans-Regular",
+            Self::SansSemiBold => "IBMPlexSans-SemiBold",
+            Self::Brand => "Audiowide-Regular",
+        }
+    }
+
+    /// Whether the face is IBM Plex Mono, which falls back to egui's monospaced faces.
+    #[must_use]
+    pub const fn is_mono(self) -> bool {
+        matches!(self, Self::Mono | Self::MonoSemiBold)
+    }
+
+    /// egui's family of the face: Plex Mono Regular and Plex Sans Regular are egui's monospace and proportional
+    /// families, the others a family of their own.
+    fn family(self) -> FontFamily {
+        match self {
+            Self::Mono => FontFamily::Monospace,
+            Self::Sans => FontFamily::Proportional,
+            Self::MonoSemiBold | Self::SansSemiBold | Self::Brand => FontFamily::Name(self.name().into()),
+        }
+    }
+}
+
+/// A type style: a face, a size and a line height in points, the tracking as a share of the size, and whether the
+/// text is set in capitals.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Font {
-    /// The size in points, the text scale applied.
-    pub size: f32,
     /// The face.
     pub face: Face,
-}
-
-/// The weights the tokens use, lightest first.
-const WEIGHTS: [Weight; 4] = [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold];
-
-/// The family name of a weight of Figtree: one font file each. Figtree Regular is egui's proportional family too.
-const fn family_name(weight: Weight) -> &'static str {
-    match weight {
-        Weight::Regular => "Figtree-Regular",
-        Weight::Medium => "Figtree-Medium",
-        Weight::SemiBold => "Figtree-SemiBold",
-        Weight::Bold => "Figtree-Bold",
-    }
+    /// The size in points, the text scale applied.
+    pub size: f32,
+    /// The line height in points, the text scale applied.
+    pub line: f32,
+    /// The extra room between letters, as a share of the size (an em fraction; the text scale leaves it alone).
+    pub tracking: f32,
+    /// Whether the text is set in capitals.
+    pub caps: bool,
 }
 
 impl Font {
-    const fn sans(size: f32, weight: Weight) -> Self {
-        Self { size, face: Face::Sans(weight) }
+    const fn new(face: Face, size: f32, line: f32) -> Self {
+        Self { face, size, line, tracking: 0.0, caps: false }
     }
 
-    /// egui's font for this token.
+    const fn tracked(self, tracking: f32) -> Self {
+        Self { tracking, ..self }
+    }
+
+    const fn capitals(self) -> Self {
+        Self { caps: true, ..self }
+    }
+
+    /// egui's font for this style.
     #[must_use]
     pub fn id(self) -> FontId {
-        let family = match self.face {
-            Face::Mono => FontFamily::Monospace,
-            Face::Sans(Weight::Regular) => FontFamily::Proportional,
-            Face::Sans(weight) => FontFamily::Name(family_name(weight).into()),
+        FontId::new(self.size, self.face.family())
+    }
+
+    /// The text format of this style in `colour`: its font, its line height and its tracking in points.
+    #[must_use]
+    pub fn format(self, colour: Color32) -> egui::TextFormat {
+        egui::TextFormat {
+            font_id: self.id(),
+            line_height: Some(self.line),
+            extra_letter_spacing: self.tracking * self.size,
+            color: colour,
+            ..egui::TextFormat::default()
+        }
+    }
+
+    /// `text` as this style sets it: in capitals if it asks for them.
+    #[must_use]
+    pub fn text(self, text: &str) -> String {
+        if self.caps { text.to_uppercase() } else { text.to_owned() }
+    }
+
+    /// `text` as a label's rich text in this style: its font, line height and tracking, in capitals if it asks.
+    #[must_use]
+    pub fn rich(self, text: &str) -> egui::RichText {
+        egui::RichText::new(self.text(text)).font(self.id()).line_height(Some(self.line)).extra_letter_spacing(self.tracking * self.size)
+    }
+
+    /// The same style in its face's SemiBold weight (Audiowide has one weight and stays as it is).
+    #[must_use]
+    pub const fn semibold(self) -> Self {
+        let face = match self.face {
+            Face::Mono | Face::MonoSemiBold => Face::MonoSemiBold,
+            Face::Sans | Face::SansSemiBold => Face::SansSemiBold,
+            Face::Brand => Face::Brand,
         };
-        FontId::new(self.size, family)
+        Self { face, ..self }
+    }
+
+    /// The same style at `size` points, its line height kept in proportion (an avatar's initials, the product name on
+    /// Home). A size that is not a positive number keeps the style as it is.
+    #[must_use]
+    pub fn sized(self, size: f32) -> Self {
+        if size.is_finite() && size > 0.0 && self.size > 0.0 { self.scaled(size / self.size) } else { self }
     }
 
     fn scaled(self, factor: f32) -> Self {
-        Self { size: self.size * factor, ..self }
+        Self { size: self.size * factor, line: self.line * factor, ..self }
     }
 }
 
-/// The font tokens: every text style on screen is one of these.
+/// The type styles (`docs/design.md`, "Type"): every text on screen is one of these.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fonts {
-    /// Dates, addresses, badges, captions and section headings.
-    pub caption: Font,
-    /// Running text, folders, fields, empty-state details.
-    pub body: Font,
-    /// Bold text in a message.
-    pub strong: Font,
-    /// Buttons.
-    pub button: Font,
-    /// The sender of a read message.
-    pub sender: Font,
-    /// The sender of an unread message.
-    pub sender_unread: Font,
-    /// The subject of a read message.
-    pub subject: Font,
-    /// The subject of an unread message.
-    pub subject_unread: Font,
-    /// The first words of a message, after its subject (in the muted colour).
-    pub preview: Font,
-    /// Account names, empty-state titles, message headings.
-    pub heading: Font,
-    /// The view's name, page titles.
-    pub title: Font,
-    /// The reader's subject.
+    /// Home's headline: Plex Mono 40/48.
     pub display: Font,
-    /// Preformatted text and code.
+    /// The subject in the reader, a page's title: Plex Mono 22/30.
+    pub title: Font,
+    /// Headings: Plex Mono SemiBold 15/22.
+    pub heading: Font,
+    /// Section labels, column heads, the index: Plex Mono 11/16 in capitals.
+    pub label: Font,
+    /// Lines the app prints, counts, dates: Plex Mono 13/20.
     pub mono: Font,
+    /// Tags, a row's small links: Plex Mono 11/16.
+    pub mono_s: Font,
+    /// Key chips: Plex Mono SemiBold 11/14.
+    pub key: Font,
+    /// Button labels: Plex Mono 13/16.
+    pub button: Font,
+    /// Text people wrote, in lists and forms: Plex Sans 14/22.
+    pub body: Font,
+    /// An unread sender, emphasis: Plex Sans SemiBold 14/22.
+    pub strong: Font,
+    /// A row's second line, help under a field: Plex Sans 12/18.
+    pub caption: Font,
+    /// The text of a message: Plex Sans 16/26.
+    pub read: Font,
+    /// The product names, in Audiowide: 22/30 here; Home and About set their own size.
+    pub brand: Font,
 }
 
 impl Fonts {
-    /// Every token.
+    /// The caption in SemiBold: an event's summary and today's number in the calendar.
+    #[must_use]
+    pub fn caption_strong(&self) -> Font {
+        Font { face: Face::SansSemiBold, ..self.caption }
+    }
+
+    /// The title a tenth larger: the calendar's period in its toolbar.
+    #[must_use]
+    pub fn period(&self) -> Font {
+        self.title.sized(self.title.size * 1.1)
+    }
+
+    /// The title a tenth smaller: an event's title in its editor.
+    #[must_use]
+    pub fn event_title(&self) -> Font {
+        self.title.sized(self.title.size * 0.9)
+    }
+
+    /// The initials on an avatar `side` points square, in `strong`.
+    #[must_use]
+    pub fn initials(&self, side: f32) -> Font {
+        self.strong.sized(side * 0.4)
+    }
+
+    /// Every style.
     #[must_use]
     pub fn all(&self) -> Vec<Font> {
         vec![
-            self.caption,
+            self.display,
+            self.title,
+            self.heading,
+            self.label,
+            self.mono,
+            self.mono_s,
+            self.key,
+            self.button,
             self.body,
             self.strong,
-            self.button,
-            self.sender,
-            self.sender_unread,
-            self.subject,
-            self.subject_unread,
-            self.preview,
-            self.heading,
-            self.title,
-            self.display,
-            self.mono,
+            self.caption,
+            self.read,
+            self.brand,
         ]
     }
 
     fn map(self, f: impl Fn(Font) -> Font) -> Self {
         Self {
-            caption: f(self.caption),
+            display: f(self.display),
+            title: f(self.title),
+            heading: f(self.heading),
+            label: f(self.label),
+            mono: f(self.mono),
+            mono_s: f(self.mono_s),
+            key: f(self.key),
+            button: f(self.button),
             body: f(self.body),
             strong: f(self.strong),
-            button: f(self.button),
-            sender: f(self.sender),
-            sender_unread: f(self.sender_unread),
-            subject: f(self.subject),
-            subject_unread: f(self.subject_unread),
-            preview: f(self.preview),
-            heading: f(self.heading),
-            title: f(self.title),
-            display: f(self.display),
-            mono: f(self.mono),
+            caption: f(self.caption),
+            read: f(self.read),
+            brand: f(self.brand),
         }
     }
 
-    /// The tokens at 100 %, at `scale`.
-    fn of(scale: TextScale) -> Self {
+    /// The styles at 100 %, at `scale`: size and line height scale, tracking does not.
+    #[must_use]
+    pub fn of(scale: TextScale) -> Self {
         FONTS.map(|font| font.scaled(scale.factor()))
     }
 }
@@ -424,101 +522,64 @@ const fn rgb(hex: u32) -> Color32 {
 /// The tint a picture is drawn with: none.
 pub const NO_TINT: Color32 = rgb(0xFFFFFF);
 
-/// The app icon's own colours (`icons.rs`), the same in every mode so the desktop shows one icon.
-pub(crate) mod app_icon {
-    use egui::Color32;
-
-    use super::rgb;
-
-    /// The white tile.
-    pub(crate) const TILE: Color32 = rgb(0xFFFFFF);
-    /// The tile's edge: the deep ink at 16 %, so the white tile holds its shape on a light background.
-    pub(crate) const EDGE: Color32 = Color32::from_rgba_premultiplied(1, 1, 2, 41);
-    /// The gradient of the mark, first to last stop.
-    pub(crate) const GRADIENT: [Color32; 3] = [rgb(0x2F6BFF), rgb(0x8A3FFC), rgb(0xFF2D95)];
-    /// Where the gradient starts and ends on the icon's square, in units.
-    pub(crate) const GRADIENT_LINE: [[f32; 2]; 2] = [[48.0, 60.0], [208.0, 200.0]];
-}
-
-/// The font tokens at 100 %.
+/// The type styles at 100 % (`docs/design.md`, "Type").
 const FONTS: Fonts = Fonts {
-    caption: Font::sans(12.0, Weight::Regular),
-    body: Font::sans(14.0, Weight::Regular),
-    strong: Font::sans(14.0, Weight::SemiBold),
-    button: Font::sans(14.0, Weight::Medium),
-    sender: Font::sans(14.0, Weight::Medium),
-    sender_unread: Font::sans(14.0, Weight::Bold),
-    subject: Font::sans(14.0, Weight::Regular),
-    subject_unread: Font::sans(14.0, Weight::SemiBold),
-    preview: Font::sans(14.0, Weight::Regular),
-    heading: Font::sans(15.0, Weight::SemiBold),
-    title: Font::sans(20.0, Weight::Bold),
-    display: Font::sans(26.0, Weight::Bold),
-    mono: Font { size: 13.0, face: Face::Mono },
+    display: Font::new(Face::Mono, 40.0, 48.0).tracked(-0.01),
+    title: Font::new(Face::Mono, 22.0, 30.0),
+    heading: Font::new(Face::MonoSemiBold, 15.0, 22.0),
+    label: Font::new(Face::Mono, 11.0, 16.0).tracked(0.08).capitals(),
+    mono: Font::new(Face::Mono, 13.0, 20.0),
+    mono_s: Font::new(Face::Mono, 11.0, 16.0),
+    key: Font::new(Face::MonoSemiBold, 11.0, 14.0),
+    button: Font::new(Face::Mono, 13.0, 16.0),
+    body: Font::new(Face::Sans, 14.0, 22.0),
+    strong: Font::new(Face::SansSemiBold, 14.0, 22.0),
+    caption: Font::new(Face::Sans, 12.0, 18.0),
+    read: Font::new(Face::Sans, 16.0, 26.0),
+    brand: Font::new(Face::Brand, 22.0, 30.0),
 };
 
-/// Figtree (SIL Open Font Licence 1.1, `assets/fonts/figtree/OFL.txt`), the weights the tokens use, by
-/// [`family_name`].
-const TYPEFACES: [(&str, &[u8]); 4] = [
-    ("Figtree-Regular", include_bytes!("../../../assets/fonts/figtree/Figtree-Regular.ttf")),
-    ("Figtree-Medium", include_bytes!("../../../assets/fonts/figtree/Figtree-Medium.ttf")),
-    ("Figtree-SemiBold", include_bytes!("../../../assets/fonts/figtree/Figtree-SemiBold.ttf")),
-    ("Figtree-Bold", include_bytes!("../../../assets/fonts/figtree/Figtree-Bold.ttf")),
+/// The font files of the faces (SIL Open Font Licence 1.1; the licence texts are the `OFL.txt` files beside them).
+const TYPEFACES: [(Face, &[u8]); 5] = [
+    (Face::Mono, include_bytes!("../../../assets/fonts/plex-mono/IBMPlexMono-Regular.ttf")),
+    (Face::MonoSemiBold, include_bytes!("../../../assets/fonts/plex-mono/IBMPlexMono-SemiBold.ttf")),
+    (Face::Sans, include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf")),
+    (Face::SansSemiBold, include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-SemiBold.ttf")),
+    (Face::Brand, include_bytes!("../../../assets/fonts/audiowide/Audiowide-Regular.ttf")),
 ];
 
-/// The font of a Phosphor weight the icon painter draws with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum IconFont {
-    /// Phosphor Regular: lines.
-    PhosphorRegular,
-    /// Phosphor Fill: solid shapes.
-    PhosphorFill,
-    /// Phosphor Duotone: each icon a back glyph and a line glyph.
-    PhosphorDuotone,
+/// The name of the icon family: Phosphor Regular (MIT, `assets/icons/phosphor/LICENSE`), the one icon font.
+pub const ICON: &str = "Phosphor";
+
+/// The icon font file.
+const ICON_FONT: &[u8] = include_bytes!("../../../assets/icons/phosphor/Phosphor.ttf");
+
+/// The icon family at `size` points: 16 in controls, 14 for a mark in a row.
+#[must_use]
+pub fn icon_font(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(ICON.into()))
 }
 
-/// Phosphor (MIT, `assets/icons/phosphor/LICENSE`), the weights the icon painter uses, each a family of its own.
-const ICON_FONTS: [(IconFont, &str, &[u8]); 3] = [
-    (IconFont::PhosphorRegular, "Phosphor", include_bytes!("../../../assets/icons/phosphor/Phosphor.ttf")),
-    (IconFont::PhosphorFill, "Phosphor-Fill", include_bytes!("../../../assets/icons/phosphor/Phosphor-Fill.ttf")),
-    (IconFont::PhosphorDuotone, "Phosphor-Duotone", include_bytes!("../../../assets/icons/phosphor/Phosphor-Duotone.ttf")),
-];
-
-impl IconFont {
-    /// egui's font for this icon font at `size` points.
-    #[must_use]
-    pub fn id(self, size: f32) -> FontId {
-        let name = ICON_FONTS.iter().find(|(font, _, _)| *font == self).map_or("Phosphor", |(_, name, _)| name);
-        FontId::new(size, FontFamily::Name(name.into()))
-    }
-}
-
-/// egui's fonts with Figtree in place of Ubuntu Light: each weight of Figtree is a family of its own, followed by
-/// egui's emoji and icon fonts; the monospaced face (Hack) falls back to Figtree. Each icon font is a family of its own
-/// too, with nothing behind it.
+/// egui's fonts with IBM Plex in front: each face is first in its family, with egui's bundled faces behind it for
+/// the signs it does not hold (Hack, then Ubuntu Light behind Plex Mono; Ubuntu Light, then Hack behind Plex Sans and
+/// Audiowide; egui's icon font behind all). The icon family is Phosphor alone.
 #[must_use]
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut definitions = egui::FontDefinitions::default();
-    definitions.font_data.remove("Ubuntu-Light");
-    for fonts in definitions.families.values_mut() {
-        fonts.retain(|font| font != "Ubuntu-Light");
+    let bundled = |family: &FontFamily| definitions.families.get(family).cloned().unwrap_or_default();
+    let (mut proportional, monospace) = (bundled(&FontFamily::Proportional), bundled(&FontFamily::Monospace));
+    // Hack holds arrows, shapes and keys that Ubuntu Light and Plex Sans do not: behind Ubuntu Light, before the icons.
+    let missing: Vec<String> = monospace.iter().filter(|font| !proportional.contains(font)).cloned().collect();
+    let at = proportional.iter().position(|name| name == "Ubuntu-Light").map_or(0, |at| at + 1);
+    proportional.splice(at..at, missing);
+    for (face, data) in TYPEFACES {
+        definitions.font_data.insert(face.name().to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
+        let behind = if face.is_mono() { &monospace } else { &proportional };
+        let fonts = std::iter::once(face.name().to_owned()).chain(behind.iter().cloned()).collect();
+        definitions.families.insert(face.family(), fonts);
     }
-    for (name, data) in TYPEFACES {
-        definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
-    }
-    let fallbacks = definitions.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let family = |first: &str| std::iter::once(first.to_owned()).chain(fallbacks.iter().cloned()).collect::<Vec<_>>();
-    definitions.families.insert(FontFamily::Proportional, family("Figtree-Regular"));
-    for weight in WEIGHTS {
-        let name = family_name(weight);
-        definitions.families.insert(FontFamily::Name(name.into()), family(name));
-    }
-    let monospace = definitions.families.entry(FontFamily::Monospace).or_default();
-    monospace.insert(monospace.len().min(1), "Figtree-Regular".to_owned());
-    for (_, name, data) in ICON_FONTS {
-        definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_static(data)));
-        definitions.families.insert(FontFamily::Name(name.into()), vec![name.to_owned()]);
-    }
+    definitions.font_data.insert(ICON.to_owned(), std::sync::Arc::new(egui::FontData::from_static(ICON_FONT)));
+    definitions.families.insert(FontFamily::Name(ICON.into()), vec![ICON.to_owned()]);
     definitions
 }
 
@@ -585,6 +646,36 @@ impl Theme {
     #[must_use]
     pub fn size(&self, px: f32) -> f32 {
         (px * self.text_scale.factor() / 2.0).round() * 2.0
+    }
+
+    /// The fixed heights at the text scale (each through [`Theme::size`]); the widths, the avatars and the scroll bar
+    /// stay as they are.
+    #[must_use]
+    pub fn boxes(&self) -> Sizes {
+        let z = self.sizes;
+        Sizes {
+            button: self.size(z.button),
+            field: self.size(z.field),
+            menu_row: self.size(z.menu_row),
+            mail_row: self.size(z.mail_row),
+            group_head: self.size(z.group_head),
+            chip: self.size(z.chip),
+            icon: self.size(z.icon),
+            mark: self.size(z.mark),
+            ..z
+        }
+    }
+
+    /// The side of an icon in a control at the text scale.
+    #[must_use]
+    pub fn icon_side(&self) -> f32 {
+        self.boxes().icon
+    }
+
+    /// The side of an icon as a mark in a row's line (a flag, a pin, a paperclip) at the text scale.
+    #[must_use]
+    pub fn mark_side(&self) -> f32 {
+        self.boxes().mark
     }
 
     /// egui's colours for this theme: flat, square, no shadow of egui's own.

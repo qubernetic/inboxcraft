@@ -10,7 +10,7 @@ use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{cut, line_height, tick};
+use super::{cut, tick};
 
 /// The side of the box or the ring, in points.
 const BOX: f32 = 18.0;
@@ -30,7 +30,7 @@ const GAP: f32 = 8.0;
 /// The box or ring and `name` after it, in the room there is; the response is clicked when it was pressed.
 fn row(ui: &mut Ui, theme: &Theme, role: Role, name: &str, on: bool) -> (Response, egui::Rect) {
     let p = &theme.palette;
-    let high = line_height(ui, theme.fonts.body).max(BOX);
+    let high = theme.fonts.body.line.max(BOX);
     let text = cut(ui, name, theme.fonts.body, p.ink, f32::INFINITY);
     let wanted = BOX + GAP + text.size().x;
     let wide = wanted.min(ui.available_width().max(BOX));

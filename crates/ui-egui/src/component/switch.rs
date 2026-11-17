@@ -9,12 +9,10 @@ use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2
 use crate::motion;
 use crate::theme::Theme;
 
-use super::line_height;
-
 /// A switch named `name` for a screen reader, on or off; its response is clicked when it was pressed.
 pub fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     let p = &theme.palette;
-    let height = line_height(ui, theme.fonts.body);
+    let height = theme.fonts.body.line;
     let (rect, response) = ui.allocate_exact_size(vec2(height * 1.8, height), Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Switch, ui.is_enabled(), on, name));
     if ui.is_rect_visible(rect) {

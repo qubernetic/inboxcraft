@@ -32,12 +32,55 @@ fn the_tray_icon_is_inboxcraft_s() {
     let (tray, _heard, _woken) = tray();
     assert_eq!(tray.id(), APP_ID);
     assert_eq!(tray.title(), "InboxCraft");
-    assert_eq!(tray.icon_name(), APP_ID);
     assert_eq!(tray.status(), Status::Active);
     let pixmap = tray.icon_pixmap();
     let icon = pixmap.first().unwrap();
     assert!(icon.width > 0 && icon.height > 0);
     assert_eq!(icon.data.len(), usize::try_from(icon.width * icon.height * 4).unwrap());
+}
+
+/// Whether an ARGB pixel shows the flap's cyan, `#22A8E0`, within 8 a channel.
+fn cyan(&[a, r, g, b]: &[u8; 4]) -> bool {
+    a > 0 && r.abs_diff(0x22) <= 8 && g.abs_diff(0xA8) <= 8 && b.abs_diff(0xE0) <= 8
+}
+
+#[test]
+fn the_flap_turns_cyan_with_unread_mail() {
+    let (mut tray, _heard, _woken) = tray();
+    let sizes = |pixmap: &[ksni::Icon]| pixmap.iter().map(|icon| (icon.width, icon.height)).collect::<Vec<_>>();
+    let shows_cyan = |pixmap: &[ksni::Icon]| pixmap.iter().any(|icon| icon.data.as_chunks::<4>().0.iter().any(cyan));
+    tray.show(0);
+    let read = tray.icon_pixmap();
+    assert!(!read.is_empty());
+    assert!(!shows_cyan(&read), "no cyan while nothing is unread");
+    tray.show(3);
+    let unread = tray.icon_pixmap();
+    assert!(shows_cyan(&unread), "the flap is cyan while mail is unread");
+    assert_eq!(sizes(&read), sizes(&unread));
+    assert_eq!(sizes(&read), [(16, 16), (22, 22), (24, 24)]);
+    tray.show(0);
+    assert!(!shows_cyan(&tray.icon_pixmap()), "and plain again once it is read");
+}
+
+#[test]
+fn the_tray_names_no_themed_icon_while_it_has_its_own_pixmaps() {
+    let (mut tray, _heard, _woken) = tray();
+    for unread in [0, 3] {
+        tray.show(unread);
+        assert!(!tray.icon_pixmap().is_empty());
+        assert_eq!(tray.icon_name(), "", "the host draws the pixmap, with {unread} unread");
+    }
+}
+
+#[test]
+fn without_a_pixmap_the_tray_names_the_app_s_themed_icon() {
+    let (mut tray, _heard, _woken) = tray();
+    tray.read.clear();
+    tray.unread_icon.clear();
+    for unread in [0, 3] {
+        tray.show(unread);
+        assert_eq!(tray.icon_name(), APP_ID, "never blank, with {unread} unread");
+    }
 }
 
 #[test]

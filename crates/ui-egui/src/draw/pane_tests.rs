@@ -102,6 +102,6 @@ fn the_folder_pane_keeps_no_add_account_link_where_accounts_can_be_added() {
     let mut harness =
         Harness::builder().with_size(vec2(1200.0, 800.0)).with_theme(egui::Theme::Light).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
-    harness.get_by_label("MAILBOXES");
+    harness.get_by_label("Mailboxes");
     assert_eq!(harness.query_all_by_label("Add account").count(), 0);
 }

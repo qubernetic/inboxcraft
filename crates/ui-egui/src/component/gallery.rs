@@ -23,7 +23,7 @@ use super::segmented::segmented;
 use super::select::Select;
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
-use super::{avatar, badge, card, cut, galley, line_height, pill, popup, tooltip};
+use super::{avatar, badge, card, cut, galley, pill, popup, tooltip};
 
 /// The page's size in points.
 #[must_use]
@@ -78,8 +78,8 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     card::card(ui, theme, Id::unique("gallery-card-open"), tr!("Newsletters"), true, |ui| {
         for (sender, subject) in [("Studio Collective news", "The autumn programme is out"), ("Riverside Library", "Two loans are due on Friday")] {
             ui.horizontal(|ui| {
-                ui.label(galley(ui, sender, theme.fonts.sender, p.ink));
-                ui.label(galley(ui, subject, theme.fonts.preview, p.muted));
+                ui.label(galley(ui, sender, theme.fonts.body, p.ink));
+                ui.label(galley(ui, subject, theme.fonts.caption, p.muted));
             });
         }
     });
@@ -88,7 +88,7 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     caption(ui, theme, tr!("Avatars"));
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(s.s2, s.s2);
-        let side = line_height(ui, theme.fonts.body) * 2.0;
+        let side = theme.fonts.body.line * 2.0;
         for (name, address) in sample::people() {
             avatar::avatar(ui, theme, name, address, side);
         }
@@ -101,7 +101,7 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = line_height(ui, theme.fonts.sender) + s.s3 * 2.0;
+    let height = theme.fonts.body.line + s.s3 * 2.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, p.surface);
     ui.painter().rect_filled(rect, 0.0, p.stage);
@@ -110,7 +110,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.sender, p.ink, f32::INFINITY);
+    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, f32::INFINITY);
     let at = pos2(rect.left() + s.s3, rect.center().y - text.size().y / 2.0);
     ui.painter().galley(at, text, p.ink);
     hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
@@ -148,7 +148,7 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
     caption(ui, theme, tr!("Badges"));
     ui.horizontal(|ui| {
-        let side = line_height(ui, theme.fonts.heading) * 1.6;
+        let side = theme.fonts.heading.line * 1.6;
         badge::group(ui, theme, IconId::People, tr!("People"), side);
         badge::group(ui, theme, IconId::Notify, tr!("Updates"), side);
         badge::group(ui, theme, IconId::Calendar, tr!("Events"), side);
