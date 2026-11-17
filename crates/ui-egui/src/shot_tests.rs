@@ -598,18 +598,24 @@ fn dashed_picture(rect: Rect, colour: Color32, radius: f32) -> Picture {
 /// Whether the design's dashed edge is on at pixel `(x, y)` of a `w` by `h` box: one path clockwise from the top
 /// left corner along the box's edge, dashes 2 on and 2 off, the phase carried round the corners, 1 px inside.
 fn dash_on(x: usize, y: usize, w: usize, h: usize) -> bool {
-    let on = |s: usize| s % 4 < 2;
+    dash_on_scaled(x, y, w, h, 1, 2)
+}
+
+/// [`dash_on`] with a line `thick` pixels thick and dashes and gaps of `dash` pixels: a pixel in a side's band takes
+/// that side's place on the path; where two bands cross at a corner it is on when either side has it on.
+fn dash_on_scaled(x: usize, y: usize, w: usize, h: usize, thick: usize, dash: usize) -> bool {
+    let on = |s: usize| s % (2 * dash) < dash;
     let mut sides = Vec::new();
-    if y == 0 {
+    if y < thick {
         sides.push(x);
     }
-    if x == w - 1 {
+    if x >= w - thick {
         sides.push(w + y);
     }
-    if y == h - 1 {
+    if y >= h - thick {
         sides.push(w + h + (w - 1 - x));
     }
-    if x == 0 {
+    if x < thick {
         sides.push(2 * w + h + (h - 1 - y));
     }
     sides.into_iter().any(on)
@@ -657,10 +663,17 @@ fn pixel_box(rect: Rect, scale: f32) -> (usize, usize, usize, usize) {
     (px(rect.left()), px(rect.top()), px(rect.right()) - px(rect.left()), px(rect.bottom()) - px(rect.top()))
 }
 
+/// The thickness of a dashed edge at `scale`, in pixels, as a solid 1 point edge weighs: 1, 1, 2, 2 at 1, 1.25, 1.5
+/// and 2; and its dash and gap, 2 points rounded to pixels: 2, 3, 3, 4.
+fn dash_metrics(scale: f32) -> (usize, usize) {
+    (scale.round().max(1.0) as usize, (2.0 * scale).round() as usize)
+}
+
 #[test]
-fn a_dashed_edge_is_2_px_on_2_off_and_1_px_thick_at_every_scale() {
+fn a_dashed_edge_follows_the_scale_on_whole_pixels() {
     let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
     for scale in [1.0, 1.25, 1.5, 2.0] {
+        let (thick, dash) = dash_metrics(scale);
         for (w, h) in [(40.0, 20.0), (41.0, 19.0)] {
             let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
             let picture = dashed_alone(rect, colour, 0.0, scale);
@@ -670,8 +683,8 @@ fn a_dashed_edge_is_2_px_on_2_off_and_1_px_thick_at_every_scale() {
                 for x in 0..picture.width {
                     let inside = (left..left + wide).contains(&x) && (top..top + high).contains(&y);
                     let (bx, by) = (x.wrapping_sub(left), y.wrapping_sub(top));
-                    let edge = inside && (bx == 0 || by == 0 || bx == wide - 1 || by == high - 1);
-                    let want = if edge && dash_on(bx, by, wide, high) { colour } else { Color32::TRANSPARENT };
+                    let edge = inside && (bx < thick || by < thick || bx >= wide - thick || by >= high - thick);
+                    let want = if edge && dash_on_scaled(bx, by, wide, high, thick, dash) { colour } else { Color32::TRANSPARENT };
                     let got = picture.pixel(x, y);
                     if got != Some(want) {
                         wrong.push((bx as isize, by as isize, got));
@@ -685,6 +698,37 @@ fn a_dashed_edge_is_2_px_on_2_off_and_1_px_thick_at_every_scale() {
                 &wrong[..wrong.len().min(6)]
             );
         }
+    }
+}
+
+/// The weight of an edge across column `x` of `picture` from row `from` on: the coverage of its pixels summed, in
+/// pixels.
+fn weight_down(picture: &Picture, x: usize, from: usize) -> f32 {
+    (from..from + 6).map(|y| picture.pixel(x, y).map_or(0.0, |c| f32::from(c.a()) / 255.0)).sum()
+}
+
+#[test]
+fn a_dashed_edge_weighs_what_a_solid_1_point_edge_does_at_every_scale() {
+    let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
+    let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(40.0, 20.0));
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(scale);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 50.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, colour), egui::StrokeKind::Inside);
+        });
+        output.textures_delta.clear();
+        let primitives = ctx.tessellate(output.shapes, scale);
+        let size = |points: f32| (points * scale).round() as usize;
+        let solid = fill(&primitives, &white(), size(80.0), size(50.0), scale);
+        let dashed = dashed_alone(rect, colour, 0.0, scale);
+        let (left, top, ..) = pixel_box(rect, scale);
+        // The solid edge's weight, rounded to whole pixels as the dashed edge must lie on them.
+        let want = weight_down(&solid, left + size(20.0), top).round();
+        // Across a dash of the top, just right of the left side's band: that column is on at every scale.
+        let got = weight_down(&dashed, left + dash_metrics(scale).0, top);
+        assert_eq!(got, want, "at {scale}: the dashed edge is {got} px, the solid one {want}");
     }
 }
 

@@ -300,12 +300,9 @@ pub(crate) fn dashed_edges_id() -> egui::Id {
     egui::Id::unique("paint-dashed-edges")
 }
 
-/// The dash and the gap of a [`dashed`] edge, in physical pixels.
-const DASH: f32 = 2.0;
-
 /// The longest straight side of a [`dashed`] edge that is laid out, in pixels; the rest of a longer side is left
 /// bare, so a box of any size makes a bounded mesh.
-const LONGEST_SIDE: i64 = 8192;
+const LONGEST_SIDE: i64 = 4096;
 
 /// How far from the origin, in pixels, a dashed edge is still drawn.
 const FARTHEST: u64 = 1 << 40;
@@ -316,19 +313,44 @@ const LARGEST_CORNER: i64 = 32;
 /// How many samples a side of a corner pixel takes to measure how much of it the arc covers.
 const SAMPLES: i64 = 8;
 
-/// Paints a dashed edge around `rect`, inside it: a 1 px line in `colour`, dashes 2 on and 2 off along one path
-/// clockwise from the top left (after the corner's arc), the phase carried round the corners; square corners.
+/// Paints a dashed edge around `rect`, inside it: a line in `colour` as heavy as a solid 1 point edge, dashes 2 points
+/// on and 2 off along one path clockwise from the top left (after the corner's arc), the phase carried round the
+/// corners; square corners.
 pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
     dashed_round(painter, rect, colour, 0.0);
 }
 
+/// The weight and the dash of a [`dashed`] edge at a scale, in physical pixels.
+#[derive(Debug, Clone, Copy)]
+struct DashScale {
+    /// The line's thickness: `max(1, round(ppp))`, the whole pixels nearest a solid 1 point edge (which egui draws
+    /// as one full pixel and a quarter-covered one at 1.25, one full and a half-covered one at 1.5): 1, 1, 2, 2 at
+    /// 1, 1.25, 1.5 and 2.
+    thick: i64,
+    /// The dash and the gap each: `max(1, round(2 × ppp))`, 2, 3, 3, 4 at 1, 1.25, 1.5 and 2.
+    dash: i64,
+}
+
+impl DashScale {
+    fn at(ppp: f32) -> Self {
+        let pixels = |points: f32| ((points * ppp).round() as i64).clamp(1, 16);
+        Self { thick: pixels(1.0), dash: pixels(2.0) }
+    }
+
+    /// Whether the path position `at` (pixels from the path's start) lies in a dash.
+    fn on(self, at: f32) -> bool {
+        let dash = self.dash as f32;
+        at.rem_euclid(2.0 * dash) < dash
+    }
+}
+
 /// [`dashed`] with corners of `radius` points.
 ///
-/// The edge is laid out in physical pixels whatever the scale: the box is rounded to the pixel grid, the line is
-/// 1 px thick inside it and the dashes are 2 px on and 2 px off, so 1.25 or 1.5 draws the same crisp pattern as 1.0.
-/// A pixel of a straight side is on when its centre falls in a dash of the path. A corner's pixels are covered by the
-/// arc's 1 px ring, sampled, and drawn in that share of `colour`. Every pixel is painted once: at a square corner,
-/// where two sides meet, the corner pixel is on when either side has it on.
+/// The edge is laid out in physical pixels on the pixel grid: the box is rounded to it, the line lies inside the box,
+/// as thick as a solid 1 point edge rounded to whole pixels, and the dashes and gaps are 2 points rounded to whole
+/// pixels ([`DashScale`]). A pixel of a straight side is on when its centre falls in a dash of the path. A corner's
+/// pixels are covered by the arc's ring, sampled, and drawn in that share of `colour`. Every pixel is painted once: at
+/// a square corner, where two sides cross, a pixel is on when either side has it on.
 pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radius: f32) {
     // The rect first: `clamp` panics on a negative or NaN bound, so only a finite, positive box reaches the radius.
     if !rect.is_finite() || !rect.is_positive() {
@@ -346,8 +368,14 @@ pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radiu
     // Far past any screen the pixel sums could overflow: such a box is not drawn.
     let near = [left, top, right, bottom].iter().all(|at| at.unsigned_abs() <= FARTHEST);
     if near && wide >= 1 && high >= 1 {
-        let r = ((r_points * ppp).round() as i64).min(wide.min(high) / 2).clamp(0, LARGEST_CORNER);
-        let mesh = dashed_mesh(ppp, [left, top, right, bottom], r, colour);
+        let scale = DashScale::at(ppp);
+        // A round corner is at least as wide as the line, so the sides' bands and the corners never leave a gap.
+        let r = match ((r_points * ppp).round() as i64).clamp(0, LARGEST_CORNER) {
+            0 => 0,
+            r => r.max(scale.thick),
+        }
+        .min(wide.min(high) / 2);
+        let mesh = dashed_mesh(ppp, scale, [left, top, right, bottom], r, colour);
         if !mesh.is_empty() {
             painter.add(Shape::mesh(mesh));
         }
@@ -363,45 +391,43 @@ pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radiu
     });
 }
 
-/// Whether the path position `at` (pixels from the path's start) lies in a dash.
-fn dash_at(at: f32) -> bool {
-    at.rem_euclid(2.0 * DASH) < DASH
-}
-
 /// A pixel, or a step from one pixel to the next.
 type Pixel = (i64, i64);
 
 /// A side of a dashed edge and the corner after it, as [`dashed_mesh`] lists them.
-type Piece = (i64, Pixel, Pixel, Pixel, f32, Pixel);
+type Piece = (i64, Pixel, Pixel, Pixel, Pixel, f32, Pixel);
 
 /// The mesh of a dashed edge on the pixel box `[left, top, right, bottom]` with corners of `r` pixels, at `ppp`
 /// pixels per point: one square per pixel on, each pixel once.
-fn dashed_mesh(ppp: f32, [left, top, right, bottom]: [i64; 4], r: i64, colour: Color32) -> egui::epaint::Mesh {
+fn dashed_mesh(ppp: f32, scale: DashScale, [left, top, right, bottom]: [i64; 4], r: i64, colour: Color32) -> egui::epaint::Mesh {
     let quarter = std::f32::consts::FRAC_PI_2;
     let (wide, high) = (right - left, bottom - top);
-    // The sides clockwise from the top left, each followed by its corner: the side's length and its pixel `d` along
-    // it; the corner's centre (a pixel corner), the angle its arc starts at (radians, clockwise on screen) and the
-    // top left of the r by r pixel square it lies in.
+    // The sides clockwise from the top left, each followed by its corner: the side's length, its first pixel on the
+    // box's edge, the step along it and the step inward; the corner's centre (a pixel corner), the angle its arc
+    // starts at (radians, clockwise on screen) and the top left of the r by r pixel square it lies in.
     let pieces: [Piece; 4] = [
-        (wide - 2 * r, (left + r, top), (1, 0), (right - r, top + r), -quarter, (right - r, top)),
-        (high - 2 * r, (right - 1, top + r), (0, 1), (right - r, bottom - r), 0.0, (right - r, bottom - r)),
-        (wide - 2 * r, (right - 1 - r, bottom - 1), (-1, 0), (left + r, bottom - r), quarter, (left, bottom - r)),
-        (high - 2 * r, (left, bottom - 1 - r), (0, -1), (left + r, top + r), 2.0 * quarter, (left, top)),
+        (wide - 2 * r, (left + r, top), (1, 0), (0, 1), (right - r, top + r), -quarter, (right - r, top)),
+        (high - 2 * r, (right - 1, top + r), (0, 1), (-1, 0), (right - r, bottom - r), 0.0, (right - r, bottom - r)),
+        (wide - 2 * r, (right - 1 - r, bottom - 1), (-1, 0), (0, -1), (left + r, bottom - r), quarter, (left, bottom - r)),
+        (high - 2 * r, (left, bottom - 1 - r), (0, -1), (1, 0), (left + r, top + r), 2.0 * quarter, (left, top)),
     ];
+    let thick = scale.thick.min(wide).min(high);
     let mut on = std::collections::BTreeMap::<Pixel, f32>::new();
     let mut start = 0.0_f32;
-    for (long, (x, y), (dx, dy), centre, from, square) in pieces {
+    for (long, (x, y), (dx, dy), (ix, iy), centre, from, square) in pieces {
         for d in 0..long.clamp(0, LONGEST_SIDE) {
-            if dash_at(start + d as f32 + 0.5) {
-                on.insert((x + dx * d, y + dy * d), 1.0);
+            if scale.on(start + d as f32 + 0.5) {
+                for k in 0..thick {
+                    on.insert((x + dx * d + ix * k, y + dy * d + iy * k), 1.0);
+                }
             }
         }
         // The phase only, so a long side keeps every pixel of it exact.
-        start = (start + long.rem_euclid(2 * DASH as i64) as f32).rem_euclid(2.0 * DASH);
+        start = (start + long.rem_euclid(2 * scale.dash) as f32).rem_euclid(2.0 * scale.dash as f32);
         if r > 0 {
-            let arc = Corner { centre: (centre.0 as f32, centre.1 as f32), r: r as f32, from, start };
+            let arc = Corner { centre: (centre.0 as f32, centre.1 as f32), r: r as f32, thick: thick as f32, from, start, scale };
             arc.cover(&mut on, square, r);
-            start = (start + quarter * r as f32).rem_euclid(2.0 * DASH);
+            start = (start + quarter * r as f32).rem_euclid(2.0 * scale.dash as f32);
         }
     }
     let mut mesh = egui::epaint::Mesh::default();
@@ -413,14 +439,16 @@ fn dashed_mesh(ppp: f32, [left, top, right, bottom]: [i64; 4], r: i64, colour: C
     mesh
 }
 
-/// The quarter arc at a corner of a dashed edge: a 1 px ring inside radius `r` round `centre` (pixels), from angle
-/// `from` (radians, clockwise on screen) over a quarter turn, its dashes placed by the path position `start` it
-/// begins at.
+/// The quarter arc at a corner of a dashed edge: a ring `thick` pixels wide inside radius `r` round `centre` (pixels),
+/// from angle `from` (radians, clockwise on screen) over a quarter turn, its dashes placed by the path position
+/// `start` it begins at.
 struct Corner {
     centre: (f32, f32),
     r: f32,
+    thick: f32,
     from: f32,
     start: f32,
+    scale: DashScale,
 }
 
 impl Corner {
@@ -428,7 +456,7 @@ impl Corner {
     /// share of it they cover.
     fn cover(&self, on: &mut std::collections::BTreeMap<Pixel, f32>, (left, top): Pixel, side: i64) {
         let quarter = std::f32::consts::FRAC_PI_2;
-        let inner = (self.r - 1.0).max(0.0);
+        let inner = (self.r - self.thick).max(0.0);
         let step = 1.0 / SAMPLES as f32;
         for y in top..top + side {
             for x in left..left + side {
@@ -442,7 +470,7 @@ impl Corner {
                             continue;
                         }
                         let turned = (dy.atan2(dx) - self.from).rem_euclid(4.0 * quarter).min(quarter);
-                        if dash_at(self.start + turned * self.r) {
+                        if self.scale.on(self.start + turned * self.r) {
                             hits += 1;
                         }
                     }
