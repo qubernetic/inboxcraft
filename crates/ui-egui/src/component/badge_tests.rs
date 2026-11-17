@@ -49,13 +49,22 @@ fn the_group_badge_s_icon_is_the_muted_colour_and_reads_on_the_card() {
     }
 }
 
-/// The states of the badge's sheet, in its order: the count, its kind, the text it shows and its width.
-const STATES: [(u64, BadgeKind, &str, f32); 4] = [
-    (7, BadgeKind::Count, "7", 16.0),
-    (12_345, BadgeKind::Count, "9\u{202f}999+", 48.0),
-    (12, BadgeKind::Muted, "12", 22.0),
-    (3, BadgeKind::Accent, "3", 16.0),
+/// The states of the badge's sheet, in its order, and the widths the sheet's rules give for more counts: the count,
+/// its kind, the text it shows, its width at 100 % and at 130 % text (`mono_s` 14.3, a digit 8.58 wide: the text
+/// rounded up to whole points, 4 each side, at least as wide as the 20 high box).
+const STATES: [(u64, BadgeKind, &str, f32, f32); 6] = [
+    (7, BadgeKind::Count, "7", 16.0, 20.0),
+    (12_345, BadgeKind::Count, "9\u{202f}999+", 48.0, 60.0),
+    (12, BadgeKind::Muted, "12", 22.0, 26.0),
+    (3, BadgeKind::Accent, "3", 16.0, 20.0),
+    (128, BadgeKind::Count, "128", 28.0, 34.0),
+    (1204, BadgeKind::Count, "1\u{202f}204", 41.0, 51.0),
 ];
+
+/// Whether `a` and `b` are the same length to a hundredth of a point.
+fn same(a: f32, b: f32) -> bool {
+    (a - b).abs() < 0.01
+}
 
 /// The badge for `n` of `kind` on a `surface` stage: its rect and its own look.
 fn badge_in(mode: Mode, scale: TextScale, n: u64, kind: BadgeKind, text: &str) -> (egui::Rect, Own, Role) {
@@ -79,10 +88,10 @@ fn a_badge_looks_as_its_sheet_says_in_every_state() {
         let theme = Theme::new(mode, TextScale::default());
         let p = theme.palette;
         let font = theme.fonts.mono_s;
-        for (n, kind, text, width) in STATES {
+        for (n, kind, text, width, _) in STATES {
             let (rect, look, role) = badge_in(mode, TextScale::default(), n, kind, text);
             let at = format!("{mode:?} {text}: {look:#?}");
-            assert!((rect.width() - width).abs() <= 1.0 && (rect.height() - 16.0).abs() < 0.01, "{at} {rect:?}");
+            assert!(same(rect.width(), width) && same(rect.height(), 16.0), "{at} {rect:?}");
             assert_eq!(role, Role::Label, "a count is read, never pressed: {at}");
             let (fill, ink) = match kind {
                 BadgeKind::Count => (Some(p.cyan_muted), p.cyan_text),
@@ -101,11 +110,14 @@ fn a_badge_looks_as_its_sheet_says_in_every_state() {
 
 #[test]
 fn a_badge_at_130_percent_is_the_scaled_height_and_a_count_of_0_is_not_shown() {
-    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
-    for (n, kind, text, _) in STATES {
-        let (rect, ..) = badge_in(Mode::Light, TextScale::ALL[4], n, kind, text);
-        assert!((rect.height() - theme.size(16.0)).abs() < 0.01, "{text} {rect:?}");
-        assert!(rect.width() >= rect.height() - 0.01, "at least as wide as high: {text} {rect:?}");
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::ALL[4]);
+        assert!(same(theme.size(16.0), 20.0));
+        for (n, kind, text, _, width) in STATES {
+            let (rect, look, _) = badge_in(mode, TextScale::ALL[4], n, kind, text);
+            assert!(same(rect.width(), width) && same(rect.height(), 20.0), "{mode:?} {text} {rect:?}");
+            assert!(!look.overflows, "{mode:?} {text}");
+        }
     }
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let mut harness = builder().build_ui(move |ui| {
@@ -127,8 +139,8 @@ fn the_count_beside_a_row_is_the_sheets_count_badge() {
         );
         harness.run();
         let lefts = harness.state();
-        assert!((lefts[0] - 184.0).abs() <= 1.0, "{mode:?} 16 wide: {lefts:?}");
-        assert!((lefts[1] - 152.0).abs() <= 1.0, "{mode:?} 48 wide: {lefts:?}");
+        assert!(same(lefts[0], 184.0), "{mode:?} 16 wide: {lefts:?}");
+        assert!(same(lefts[1], 152.0), "{mode:?} 48 wide: {lefts:?}");
         assert_eq!(lefts[2], 200.0, "{mode:?} a count of 0 is not shown: {lefts:?}");
     }
 }
