@@ -67,6 +67,13 @@
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}
 {"out": "docs/images/list-showcase-dark.png", "mode": "dark", "size": [1400, 860], "showcase": true, "step": 2}
+# A hovered row beside the reader (#235): its hover actions on the first line right of its middle, its flag left of
+# them, its time given way.
+{"out": "docs/images/list-hover-light.png", "mode": "light", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
+{"out": "docs/images/list-hover-dark.png", "mode": "dark", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
+# The row the keyboard is on, with the app's own keys (#235): its time kept, its actions left of it.
+{"out": "docs/images/list-keyed-light.png", "mode": "light", "size": [1400, 860], "step": 2}
+{"out": "docs/images/list-keyed-dark.png", "mode": "dark", "size": [1400, 860], "step": 2}
 {"out": "docs/images/list-slide-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
 {"out": "docs/images/list-slide-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
 {"out": "docs/images/list-toast-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done"}
