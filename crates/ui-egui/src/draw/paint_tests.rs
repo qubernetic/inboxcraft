@@ -459,3 +459,33 @@ fn a_dashed_box_with_round_corners_carries_its_dashes_round_them_as_the_design_b
         }
     }
 }
+
+/// The glyphs a galley shows, row by row.
+fn shown(galley: &egui::Galley) -> String {
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
+}
+
+/// The glyphs laid out by `cut` at `width` and the glyphs painted when that galley goes through [`super::run_at`] at
+/// `x`, at `ppp`.
+fn cut_and_painted(ppp: f32, text: &'static str, width: f32, x: f32) -> (String, Vec<String>) {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let laid = std::cell::RefCell::new(String::new());
+    let shapes = frame_shapes(ppp, |ui| {
+        let galley = crate::component::cut(ui, text, theme.fonts.button, theme.palette.ink, width);
+        *laid.borrow_mut() = shown(&galley);
+        super::run_at(ui.painter(), pos2(x, 3.0), galley, theme.palette.ink);
+    });
+    let painted = shapes.iter().filter_map(|shape| if let Shape::Text(text) = shape { Some(shown(&text.galley)) } else { None }).collect();
+    (laid.into_inner(), painted)
+}
+
+#[test]
+fn a_run_painted_off_the_pixel_shows_the_glyphs_it_was_laid_out_with() {
+    for (ppp, x) in [(1.0, 4.5), (1.5, 4.5), (1.0, 4.3)] {
+        let (laid, painted) = cut_and_painted(ppp, "Zusammenfassung des Posteingangs", 136.0, x);
+        assert!(laid.ends_with('…'), "{ppp} {x}: a cut run: {laid:?}");
+        assert_eq!(painted, vec![laid.clone()], "{ppp} {x}: the same glyphs, the same ellipsis");
+        let (whole, painted) = cut_and_painted(ppp, "Liste", 136.0, x);
+        assert_eq!((whole.as_str(), painted), ("Liste", vec!["Liste".to_owned()]), "{ppp} {x}: a run that is not cut");
+    }
+}

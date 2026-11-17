@@ -51,6 +51,10 @@ pub(crate) fn run_at(painter: &Painter, at: Pos2, galley: Arc<Galley>, colour: C
             if let Some(first) = job.sections.first_mut() {
                 first.leading_space += rest;
             }
+            // epaint counts leading space against the wrap width: widen it by as much, so a cut run is not cut again.
+            if job.wrap.max_width.is_finite() && job.wrap.max_width >= 0.0 {
+                job.wrap.max_width += rest;
+            }
             painter.layout_job(job)
         }
         _ => galley,
