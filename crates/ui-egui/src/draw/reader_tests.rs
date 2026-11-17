@@ -641,3 +641,36 @@ fn people_s_words_are_in_plex_sans_and_the_app_s_in_plex_mono() {
         assert_eq!(plex(&font(app)), "mono", "{app}");
     }
 }
+
+#[test]
+fn the_quote_fold_is_a_link_that_enter_and_space_press() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_role_and_label(Role::Button, "Show quoted text (8 lines)").focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.get_by_label("Odile Brannock wrote:");
+    harness.get_by_role_and_label(Role::Button, "Hide quoted text").focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert!(harness.query_by_label("Odile Brannock wrote:").is_none());
+}
+
+#[test]
+fn the_notice_s_dismiss_is_a_link_that_space_presses() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    let link = harness.get_by_label("https://bank.example.org/login").rect();
+    harness.hover_at(link.left_center() + vec2(8.0, 0.0));
+    harness.run();
+    harness.get_by_label("https://bank.example.org/login").click();
+    harness.run();
+    harness.get_by_label("Link copied: https://prize-desk.example.net/claim");
+    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert_eq!(harness.state().reader().notice(), None);
+}

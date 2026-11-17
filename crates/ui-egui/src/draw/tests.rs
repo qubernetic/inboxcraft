@@ -615,3 +615,16 @@ fn a_hovered_row_takes_the_fill_of_its_ground() {
     assert!(filled_at(&harness, calendar, p.grid), "a hovered rail button is the grid");
     assert!(!filled_at(&harness, calendar, p.stage));
 }
+
+#[test]
+fn the_error_banner_s_dismiss_is_a_link_that_enter_presses() {
+    let mut harness = harness();
+    harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+    harness.run();
+    assert!(harness.state().mailbox().error().is_some());
+    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().error(), None);
+}

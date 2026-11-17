@@ -847,7 +847,8 @@ pub(super) fn blocks(
         if quote > 0 && !toggled {
             toggled = true;
             let text = if quotes { tr!("Hide quoted text") } else { tr!("Show quoted text") };
-            if ui.button(theme.fonts.button.rich(text)).clicked() {
+            // A quiet act in the text: a link, with no key of its own.
+            if button::link_sized(ui, theme, &Keymap::empty(), text, button::LinkSize::Small).clicked() {
                 drawn.asked.push(Asked::Quotes(id));
             }
         }
@@ -951,7 +952,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
                 } else {
                     tr!("Show quoted text ({count} lines)", count = lines)
                 };
-                if ui.button(label).clicked() {
+                if button::link_sized(ui, theme, &Keymap::empty(), &label, button::LinkSize::Small).clicked() {
                     drawn.asked.push(Asked::Quotes(id));
                 }
                 if shown {
@@ -1226,7 +1227,7 @@ pub(super) fn show(
         egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s2))).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.ink));
-                if ui.button(tr!("Dismiss")).clicked() {
+                if button::link_sized(ui, theme, keymap, tr!("Dismiss"), button::LinkSize::Small).clicked() {
                     drawn.asked.push(Asked::Dismiss);
                 }
             });

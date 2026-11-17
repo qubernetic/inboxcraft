@@ -51,13 +51,14 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Stroke, Ui, UiBuilder};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
+use crate::component::button;
 use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
@@ -1268,10 +1269,12 @@ impl InboxApp {
         }
         let mut dismiss = false;
         if let Some(error) = self.mailbox.error() {
-            Panel::top("error").show_separator_line(false).frame(Frame::new().fill(p.minus).inner_margin(margin(s.s2))).show(ui, |ui| {
+            // The error banner of the design: the `panel` ground in a `minus` edge, its act a small link.
+            let ground = Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.minus)).inner_margin(margin(s.s2));
+            Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(error).color(p.bg));
-                    dismiss = ui.button(tr!("Dismiss")).clicked();
+                    ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
+                    dismiss = button::link_sized(ui, &theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
                 });
             });
         }
