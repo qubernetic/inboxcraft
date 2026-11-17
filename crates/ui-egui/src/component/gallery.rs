@@ -34,7 +34,7 @@ use super::{avatar, badge, card, cut, galley, label, pill, popup, tooltip};
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(1400.0, TOP + BOARDS)
+    vec2(1800.0, TOP + BOARDS)
 }
 
 /// What draws a column of the page.
@@ -44,7 +44,7 @@ type Draw = fn(&mut Ui, &Theme, &Keymap);
 const TOP: f32 = 660.0;
 
 /// The height of the boards under the columns, in points.
-const BOARDS: f32 = 700.0;
+const BOARDS: f32 = 960.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -261,6 +261,20 @@ fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
     ui.add_space(theme.spacing.s2);
 }
 
+/// How far under the top of an unavailable control the board puts its reason tooltip, in points.
+const REASON_DROP: f32 = 36.0;
+
+/// The room a board leaves under a row with a reason tooltip, so the next row stays clear of it and its shadow.
+const REASON_ROOM: f32 = 48.0;
+
+/// The reason tooltip of the unavailable control `name` at `control`, as the boards draw it: 36 under its top, its
+/// left edge on the control's, over what follows (it takes no room of its own).
+fn reason_under(ui: &mut Ui, theme: &Theme, keymap: &Keymap, control: Rect, name: &str, reason: &str) {
+    let at = Rect::from_min_size(control.left_top() + vec2(0.0, REASON_DROP), vec2(320.0, 120.0));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(at).layout(egui::Layout::top_down(egui::Align::Min)));
+    tooltip::bubble_noted(&mut child, theme, keymap, name, None, Some(reason));
+}
+
 /// The icon button's board: default, hover, focus, pressed, selected, disabled, unavailable.
 fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Icon button"));
@@ -280,9 +294,12 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             pin().enabled(false).show(ui, theme, keymap);
         });
         cell(ui, theme, tr!("unavailable"), |ui| {
-            pin().unavailable(tr!("Not yet: choose a message first")).show(ui, theme, keymap);
+            let reason = tr!("Not yet: choose a message first");
+            let control = pin().unavailable(reason).show(ui, theme, keymap).rect;
+            reason_under(ui, theme, keymap, control, tr!("Pin"), reason);
         });
     });
+    ui.add_space(REASON_ROOM);
     // Not on the sheet: the pressed look of a selected button (see docs/gaps.md).
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("selected-pressed"), |ui| {
@@ -295,9 +312,14 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 /// arrow, with its key, with an icon, and with a label cut at its widest.
 fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Text button"));
-    let tones = [(tr!("Send"), Tone::Primary), (tr!("Reply all"), Tone::Secondary), (tr!("Delete"), Tone::Danger), (tr!("Discard"), Tone::Plain)];
+    let tones = [
+        (tr!("Send"), Tone::Primary, tr!("Not yet: add a recipient first")),
+        (tr!("Reply all"), Tone::Secondary, tr!("Not yet: the message has one recipient")),
+        (tr!("Delete"), Tone::Danger, tr!("Not yet: choose a message first")),
+        (tr!("Discard"), Tone::Plain, tr!("Not yet: nothing is written")),
+    ];
     let states = [(tr!("default"), Shown::Rest), (tr!("hover"), Shown::Hover), (tr!("focus"), Shown::Focus), (tr!("pressed"), Shown::Pressed)];
-    for (label, tone) in tones {
+    for (label, tone, reason) in tones {
         cells(ui, theme, |ui| {
             for (state, shown) in states {
                 cell(ui, theme, state, |ui| {
@@ -308,9 +330,11 @@ fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
                 TextButton::new(label).tone(tone).enabled(false).show(ui, theme, keymap);
             });
             cell(ui, theme, tr!("unavailable"), |ui| {
-                TextButton::new(label).tone(tone).unavailable(tr!("Not yet: add a recipient first")).show(ui, theme, keymap);
+                let control = TextButton::new(label).tone(tone).unavailable(reason).show(ui, theme, keymap).rect;
+                reason_under(ui, theme, keymap, control, label, reason);
             });
         });
+        ui.add_space(REASON_ROOM);
     }
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("with-arrow"), |ui| {
@@ -324,7 +348,7 @@ fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         });
     });
     cells(ui, theme, |ui| {
-        let long = tr!("Ask for a receipt when this message is read by every recipient");
+        let long = tr!("Empfangsbestätigung für diese Nachricht anfordern");
         cell(ui, theme, tr!("long-label"), |ui| {
             TextButton::new(long).primary().show(ui, theme, keymap);
         });
@@ -410,14 +434,14 @@ fn section_labels(ui: &mut Ui, theme: &Theme) {
 fn tooltips(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Tooltip"));
     cells(ui, theme, |ui| {
-        cell(ui, theme, tr!("default"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Print"), None));
-        cell(ui, theme, tr!("with-key"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Done"), Some("mail.done")));
+        cell(ui, theme, tr!("default"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Archive"), None));
+        cell(ui, theme, tr!("with-key"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Archive"), Some("mail.archive")));
         cell(ui, theme, tr!("unavailable-reason"), |ui| {
             tooltip::bubble_noted(ui, theme, keymap, tr!("Snooze"), None, Some(tr!("Not yet: choose a message first")));
         });
     });
     cells(ui, theme, |ui| {
-        let long = tr!("Snooze is not there for a message that is still being sent. Wait until it has left the outbox, then try again.");
+        let long = tr!("Snooze is not there for a message that is still being sent. Wait until it has left the outbox.");
         cell(ui, theme, tr!("long"), |ui| tooltip::bubble(ui, theme, keymap, long, None));
     });
 }
@@ -476,10 +500,18 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         let height = if y < TOP { top } else { BOARDS - s.s2 };
         let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            layers.card(ui, super::margin(s.s4, s.s3), |ui| {
-                ui.set_min_size(ui.available_size());
-                draw(ui, theme, keymap);
-            });
+            if y < TOP {
+                layers.card(ui, super::margin(s.s4, s.s3), |ui| {
+                    ui.set_min_size(ui.available_size());
+                    draw(ui, theme, keymap);
+                });
+            } else {
+                // The boards stand on `bg`, as the design's boards do.
+                egui::Frame::NONE.inner_margin(super::margin(s.s4, s.s3)).show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    draw(ui, theme, keymap);
+                });
+            }
         });
     }
     layers.finish(ui.painter(), theme);
