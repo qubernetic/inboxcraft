@@ -1,6 +1,6 @@
 # InboxCraft design
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** major
 
 InboxCraft's look in words: the Qubernetic design, its tokens, its rules and its screens. The source of truth is
 the FigCraft design file [`docs/design/inboxcraft.figcraft`](design/README.md): 21 pages, 64 component sets, every
@@ -499,3 +499,4 @@ each feature's behaviour is decided when it is designed. Two things on it are id
 | 2026-11-08 | minor | Segmented controls, the select, the filled check boxes and the event tokens in the calendar (#206) |
 | 2026-11-08 | minor | The list's header, stripe and row spacing, the view switch, the toast and the time picker (#208) |
 | 2026-11-08 | minor | The add form's outgoing server and CalDAV address; an account's settings (#214) |
+| 2026-11-17 | major | Rewritten for the Qubernetic design file (#226) |

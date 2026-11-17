@@ -3,7 +3,7 @@
 **Stage: pre-alpha** · next: beta, after the three blocking gaps of [docs/gaps.md](docs/gaps.md) (about 14 hours)
 and the owner's daily use on both mailboxes (E3.11)
 
-> **Last reviewed:** <date> · **Last updated:** 2026-11-08 · **Change:** minor
+> **Last reviewed:** <date> · **Last updated:** 2026-11-17 · **Change:** minor
 
 The detail is in [docs/gaps.md](docs/gaps.md) (what is missing, ranked) and [docs/architecture.md](docs/architecture.md).
 
@@ -133,6 +133,9 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | The theme and glass code follow the newest design file (#205) |
 | 2026-11-08 | The calendar's controls, event colours and event editor follow the design file (#206) |
 | 2026-11-08 | See and edit an account's servers, with SMTP and CalDAV in the add-account form (#214) |
+| 2026-11-17 | Qubernetic look: foundations, components and the InboxCraft mark drawn and approved (#222) |
+| 2026-11-17 | Qubernetic look: the frame and the main screens drawn and approved (#224) |
+| 2026-11-17 | Qubernetic look: the design file is complete and approved; the app does not follow it yet (#226) |
 
 ## Revision history
 | Date | Change | Summary |
@@ -226,3 +229,6 @@ Not planned for now; the model keeps room for them.
 | 2026-11-08 | minor | Progress log: the theme and glass code follow the newest design file (#205) |
 | 2026-11-08 | minor | Progress log: the calendar's controls, event colours and event editor (#206) |
 | 2026-11-08 | minor | Progress log: an account's servers, seen and edited (#214) |
+| 2026-11-17 | minor | Progress log: the first part of the Qubernetic design file (#222) |
+| 2026-11-17 | minor | Progress log: the second part of the Qubernetic design file (#224) |
+| 2026-11-17 | minor | Progress log: the Qubernetic design file is complete (#226) |

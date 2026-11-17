@@ -810,6 +810,16 @@ All notable changes to InboxCraft are listed here. The format follows
   worker's next sign-in, empty keeps it, and the password is never shown (#214)
 - The design file draws the outgoing server and CalDAV address of the add form, an account's settings and the check
   after a change, in light and dark (#216)
+- The first part of the Qubernetic design file, beside the present one in `docs/design/qubernetic/`: foundations,
+  58 components with every state in dark and light, and the InboxCraft mark (#222)
+- The second part of the Qubernetic design file in `docs/design/qubernetic/`: the window frame, Home, the mail lists,
+  the reader, eight kinds of message, the composer, the calendar, and the same screens at 1100 and 800 wide and at
+  130 % text (#224)
+- The third part of the Qubernetic design file: popups and menus, settings, accounts, what shows outside the
+  window, the planned features with an example of a plugin, a sketch of the phone screens, motion at three levels,
+  the layout's reasons and the coverage page (#226)
+- A "coming soon" mark in the design: a surface that is not implemented yet is shown, cannot be pressed and
+  carries the mark (#226)
 
 ### Changed
 - The README follows the brand of the design file and claims only what the code backs: the current mark, the
@@ -983,11 +993,16 @@ All notable changes to InboxCraft are listed here. The format follows
 - The toast's Undo and the time picker's Cancel are accent words without a field; the toast
   stands centred on what is right of the rail (#208)
 - The time picker's spacing follows the design file (#208)
+- The Qubernetic design file has six account colours, and the accent cyan is no account's colour (#224)
+- The Qubernetic design file is now the design file, `docs/design/inboxcraft.figcraft`, and `docs/design.md`
+  describes it; the app does not follow it yet (#226)
 
 ### Removed
 - The `draft` CI job: a draft PR now starts no job at all (#68)
 - The dev Flatpak's permission to talk to `org.freedesktop.Notifications`: in the Flatpak, notifications go through
   the notification portal, which needs none (#138)
+- The glass and gradient design file and the pictures of its pages; `docs/design/` keeps one picture, the
+  cover (#226)
 
 ### Fixed
 - The line egui drew under the list header (and the error and reader notice bars) is gone, and the list keeps the
