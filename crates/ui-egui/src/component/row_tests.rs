@@ -174,3 +174,109 @@ fn a_row_out_of_sight_paints_nothing() {
     };
     assert_eq!(count(true), count(false), "nothing painted for a row below the window");
 }
+
+#[test]
+fn the_focus_edge_is_two_pixels_inside_and_over_the_scroll_thumb() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let mut harness = crate::component::tests::builder().with_size(vec2(520.0, 240.0)).build_ui(move |ui| {
+            crate::motion::set_reduced(ui.ctx(), true);
+            ui.spacing_mut().scroll = crate::component::scroll::style(&theme);
+            crate::component::tests::stage(ui, theme.palette.surface, |ui| {
+                let area = egui::ScrollArea::vertical().id_salt("rows").max_height(150.0).auto_shrink([false, true]);
+                crate::component::scroll::show(ui, &theme, area, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    for index in 0..6 {
+                        let row = row(ui, &theme, Id::unique("scrolled-row").with(index), 56.0, RowGround::Surface, false, index == 5);
+                        let name = format!("Row {index}");
+                        row.response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+                    }
+                });
+            });
+        });
+        harness.run();
+        harness.get_by_label("Row 1").focus();
+        harness.run();
+        let rect = harness.get_by_label("Row 1").rect();
+        let paint = painted(&harness, "Row 1");
+        let inside = Rect::from_min_max(rect.min + vec2(2.0, 2.0), pos2(rect.right() - 2.0, rect.bottom() - 3.0));
+        assert_eq!(edges(&paint, p.cyan_edge), vec![inside], "{mode:?}: the edge 2 px inside the row");
+        // The thumb stands beside the rows: no `muted` fill of the bar crosses the row, so it never covers the edge.
+        let thumbs: Vec<Rect> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if shape.fill == p.muted => Some(shape.rect),
+                _ => None,
+            })
+            .collect();
+        assert!(!thumbs.is_empty(), "{mode:?}: the rows overflow, so the bar shows its thumb");
+        assert!(thumbs.iter().all(|thumb| !thumb.intersects(rect)), "{mode:?}: {thumbs:?} over {rect:?}");
+    }
+}
+
+#[test]
+fn the_last_row_draws_no_line() {
+    for ppp in [1.0, 1.5] {
+        let theme = Theme::new(Mode::Light, TextScale::default());
+        let p = theme.palette;
+        let mut harness = crate::component::tests::builder().with_pixels_per_point(ppp).with_size(vec2(520.0, 260.0)).build_ui(move |ui| {
+            crate::component::tests::stage(ui, theme.palette.surface, |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                for index in 0..3 {
+                    let row = row(ui, &theme, Id::unique("stacked-row").with(index), 56.0, RowGround::Surface, false, index == 2);
+                    let name = format!("Row {index}");
+                    row.response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+                }
+            });
+        });
+        harness.run();
+        for index in 0..3 {
+            let name = format!("Row {index}");
+            let rect = harness.get_by_label(&name).rect();
+            let paint = painted(&harness, &name);
+            let lines: Vec<(Rect, f32)> = paint
+                .rects()
+                .filter_map(|shape| match shape.look {
+                    Look::Rect { stroke: Some((width, colour)), .. } if colour == p.panel_line => Some((shape.rect, width)),
+                    _ => None,
+                })
+                .collect();
+            // Its own line lies inside it (the line just above is the row before's).
+            let own: Vec<_> = lines.iter().filter(|(line, _)| rect.contains(line.center())).collect();
+            if index == 2 {
+                assert!(own.is_empty(), "ppp {ppp}: the last row draws no line, so the pane's edge is the one line: {lines:?}");
+                continue;
+            }
+            // On whole physical pixels, inside the row: never doubled with the next row or a pane's edge.
+            assert_eq!(own.len(), 1, "ppp {ppp} {name}: {lines:?}");
+            let (line, width) = own[0];
+            let (top, bottom) = ((line.center().y - width / 2.0) * ppp, (line.center().y + width / 2.0) * ppp);
+            assert!((top - top.round()).abs() < 1e-3 && (bottom - bottom.round()).abs() < 1e-3, "ppp {ppp} {name}: {top}..{bottom}");
+            assert!(bottom <= (rect.bottom() * ppp).round() + 1e-3 && top >= (rect.bottom() * ppp).round() - ppp.round() - 1e-3, "ppp {ppp} {name}");
+        }
+    }
+}
+
+#[test]
+fn enter_and_space_each_press_a_focused_row() {
+    for key in [egui::Key::Enter, egui::Key::Space] {
+        let theme = Theme::new(Mode::Light, TextScale::default());
+        let mut harness = crate::component::tests::builder().with_size(vec2(520.0, 120.0)).build_ui_state(
+            move |ui, pressed: &mut usize| {
+                let row = row(ui, &theme, Id::unique("pressed-row"), 56.0, RowGround::Surface, false, false);
+                row.response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "Row"));
+                *pressed += usize::from(row.response.clicked());
+            },
+            0,
+        );
+        harness.run();
+        harness.get_by_label("Row").focus();
+        harness.run();
+        harness.key_press(key);
+        harness.run();
+        assert_eq!(*harness.state(), 1, "{key:?}");
+    }
+}
