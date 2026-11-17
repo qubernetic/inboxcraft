@@ -88,7 +88,11 @@ impl<'a> IconButton<'a> {
         let p = &theme.palette;
         let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(theme)).min(512.0);
         // Coming soon, it is drawn and explains itself like a disabled one.
-        let enabled = self.enabled && !soon::is_soon(ui);
+        let soon = soon::is_soon(ui);
+        let enabled = self.enabled && !soon;
+        if let Some(action) = self.action {
+            soon::offer(ui, action);
+        }
         let sense = if enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
         response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, self.active, self.name));
@@ -114,7 +118,8 @@ impl<'a> IconButton<'a> {
                 painter.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }
         }
-        tooltip::attach_note(response, theme, keymap, self.name, self.action, self.note)
+        // Coming soon, its key would do nothing: the tooltip shows none.
+        tooltip::attach_note(response, theme, keymap, self.name, self.action.filter(|_| !soon), self.note)
     }
 }
 
@@ -196,6 +201,9 @@ impl<'a> TextButton<'a> {
         let s = &theme.spacing;
         let soon = soon::is_soon(ui);
         let enabled = self.note.is_none() && !soon;
+        if let Some(action) = self.action {
+            soon::offer(ui, action);
+        }
         let ink = match self.tone {
             _ if soon => p.muted,
             Tone::Primary => p.on_cyan,
@@ -244,7 +252,8 @@ impl<'a> TextButton<'a> {
                 painter.rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }
         }
-        tooltip::attach_note(response, theme, keymap, self.name, self.action, self.note)
+        // Coming soon, its key would do nothing: the tooltip shows none.
+        tooltip::attach_note(response, theme, keymap, self.name, self.action.filter(|_| !soon), self.note)
     }
 }
 

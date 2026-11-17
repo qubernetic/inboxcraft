@@ -414,3 +414,20 @@ fn the_reduced_motion_flag_stops_every_animation_of_every_component() {
     assert!(repaint_after_switching(false) < Duration::from_millis(100), "with motion, things are still moving");
     assert!(repaint_after_switching(true) > Duration::from_secs(1), "with reduced motion, everything has landed");
 }
+
+/// Draws, at the end of every pass of `ctx`, an icon button for `action` inside [`soon`](super::soon::soon), and with
+/// `normal` a usable one for it too: a window test's way to put a coming-soon control into the app's frame.
+pub(crate) fn offer_soon(ctx: &Context, action: &'static str, normal: bool) {
+    ctx.on_end_pass(
+        "component-tests-offer-soon",
+        std::sync::Arc::new(move |ui: &mut egui::Ui| {
+            let theme = theme();
+            let keymap = Keymap::default();
+            let button = IconButton::new(IconId::Keyboard, "Later control").action(action);
+            super::soon::soon(ui, &theme, |ui| button.show(ui, &theme, &keymap));
+            if normal {
+                IconButton::new(IconId::Keyboard, "Usable control").action(action).show(ui, &theme, &keymap);
+            }
+        }),
+    );
+}

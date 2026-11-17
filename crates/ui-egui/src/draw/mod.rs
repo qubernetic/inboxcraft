@@ -58,6 +58,7 @@ use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
+use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
@@ -459,7 +460,8 @@ impl InboxApp {
     /// Runs the action `id` of [`keymap::actions`], as its key, the rail or the palette do; an action that cannot run
     /// now ([`InboxApp::can_run`]) does nothing.
     pub fn run_action(&mut self, ctx: &egui::Context, id: &str) {
-        if !self.can_run(id) {
+        // An action only a coming-soon control offered runs by no way in.
+        if !self.can_run(id) || soon::blocked(ctx, id) {
             return;
         }
         match id {
@@ -655,6 +657,7 @@ impl InboxApp {
                 });
                 !(quiet && bare) && self.keymap.pressed(ctx, id)
             })
+            .filter(|id| !soon::blocked(ctx, id))
             .collect()
     }
 
@@ -1371,7 +1374,8 @@ impl InboxApp {
             changed = self.settings_sheet(ui.ctx(), &theme);
         }
         let palette = if self.palette.is_open() {
-            let runnable: Vec<&str> = keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id)).collect();
+            let runnable: Vec<&str> =
+                keymap::actions().into_iter().map(|action| action.id).filter(|id| self.can_run(id) && !soon::blocked(ui.ctx(), id)).collect();
             palette::show(ui.ctx(), &theme, &self.keymap, &mut self.palette, &runnable)
         } else {
             None
@@ -1627,7 +1631,7 @@ impl InboxApp {
 
     /// The act whose key was pressed in this frame, on the selected row.
     fn keyed_act(&self, ctx: &egui::Context) -> Option<(u64, Act)> {
-        let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action))?;
+        let (action, _) = ROW_ACTS.into_iter().find(|(action, _)| self.keymap.pressed(ctx, action) && !soon::blocked(ctx, action))?;
         self.row_act(action)
     }
 

@@ -199,3 +199,18 @@ fn every_action_runs_through_run_action_and_an_unknown_one_does_nothing() {
     app.run_action(&ctx, keymap::DELETE);
     assert!(app.mailbox().leaving().is_some(), "the deleted row slides out");
 }
+
+#[test]
+fn the_palette_offers_no_action_only_a_coming_soon_control_offers() {
+    for normal in [false, true] {
+        let mut harness = harness(egui::Theme::Light);
+        crate::component::tests::offer_soon(&harness.ctx, keymap::SHORTCUTS, normal);
+        harness.run();
+        assert!(harness.state().can_run(keymap::SHORTCUTS));
+        let ctx = harness.ctx.clone();
+        harness.state_mut().run_action(&ctx, keymap::PALETTE);
+        harness.run();
+        let shortcuts = harness.get_by_role_and_label(Role::MenuItem, "Shortcuts").accesskit_node().is_disabled();
+        assert_eq!(shortcuts, !normal, "Shortcuts is runnable in the palette only when a usable control offers it too");
+    }
+}

@@ -5,8 +5,12 @@
 //! There it has `muted` text and dashed `muted` edges, never a fade; it cannot be pressed, takes no keyboard focus
 //! and reads as disabled to a screen reader. Each component asks [`is_soon`] before it senses clicks or focus. The
 //! surface carries the mark once, the [`soon_tag`], on its head, its row or its control.
+//!
+//! No way in reaches it, the keyboard included: a control that carries an action notes it with [`offer`], and an
+//! action offered in the last drawn frame only by controls inside `soon` is [`blocked`]; its key runs nothing and the
+//! palette does not offer it. Its tooltip shows no key, since that key would do nothing.
 
-use egui::{Color32, Response, Role, Sense, Ui, UiBuilder, UiStackInfo, WidgetInfo, pos2, vec2};
+use egui::{Color32, Context, Id, Response, Role, Sense, Ui, UiBuilder, UiStackInfo, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint;
 use crate::theme::Theme;
@@ -17,6 +21,63 @@ const SOON: &str = "inboxcraft-coming-soon";
 
 /// The widest the tag's words get before they end with an ellipsis, in points.
 const TAG_WIDEST: f32 = 240.0;
+
+/// The most actions one frame's controls note, each way.
+const MOST_OFFERED: usize = 256;
+
+/// The actions the controls of one pass offered: by a control that can be used (`normal`) and by one inside [`soon`]
+/// (`soon`); `before` holds what the pass just before blocked. A later pass starts the lists afresh.
+#[derive(Debug, Clone, Default)]
+struct Offered {
+    pass: u64,
+    normal: Vec<String>,
+    soon: Vec<String>,
+    before: Vec<String>,
+}
+
+impl Offered {
+    /// The actions only controls inside [`soon`] offered.
+    fn blocked(&self) -> Vec<String> {
+        self.soon.iter().filter(|action| !self.normal.contains(action)).cloned().collect()
+    }
+}
+
+/// Where [`Offered`] lives in the context's memory.
+fn offered_id() -> Id {
+    Id::unique("soon-offered-actions")
+}
+
+/// Notes that a control drawn in `ui` offers `action`, inside [`soon`] or not.
+pub(crate) fn offer(ui: &Ui, action: &str) {
+    let pass = ui.ctx().cumulative_pass_nr();
+    let soon = is_soon(ui);
+    ui.ctx().data_mut(|data| {
+        let offered = data.get_temp_mut_or_default::<Offered>(offered_id());
+        if offered.pass != pass {
+            let before = if offered.pass.saturating_add(1) == pass { offered.blocked() } else { Vec::new() };
+            *offered = Offered { pass, before, ..Offered::default() };
+        }
+        let list = if soon { &mut offered.soon } else { &mut offered.normal };
+        if list.len() < MOST_OFFERED && !list.iter().any(|known| known == action) {
+            list.push(action.to_owned());
+        }
+    });
+}
+
+/// Whether `action` is coming soon: in the last drawn frame, every control that offered it lay inside [`soon`]. Its
+/// key then runs nothing and the palette leaves it out.
+#[must_use]
+pub fn blocked(ctx: &Context, action: &str) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    let Some(offered) = ctx.data(|data| data.get_temp::<Offered>(offered_id())) else { return false };
+    if offered.pass == pass {
+        offered.before.iter().any(|known| known == action)
+    } else if offered.pass.saturating_add(1) == pass {
+        offered.blocked().iter().any(|known| known == action)
+    } else {
+        false
+    }
+}
 
 /// Draws `add` as not built yet: inside it every component senses hover only, reports itself disabled, paints its
 /// text in `muted` and its edge dashed in `muted`, all at full strength. What `add` gave.

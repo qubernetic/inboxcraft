@@ -4,7 +4,9 @@
 //! The gallery walked by the keyboard and left alone: every control Tab reaches, and a page that stops asking for
 //! frames once nothing moves.
 
+use egui::accesskit::Role;
 use egui_kittest::Harness;
+use egui_kittest::kittest::NodeT as _;
 use egui_kittest::kittest::Queryable as _;
 
 use super::button::IconButton;
@@ -39,6 +41,12 @@ fn every_control_of_the_gallery_is_reached_by_tab() {
     let mut known: Vec<String> = KNOWN_GAPS.iter().map(|name| (*name).to_owned()).collect();
     known.sort();
     assert_eq!(missed, known, "the controls Tab never reaches");
+    // The coming-soon board is in the walk's tree, each control disabled (so neither reached nor a gap), and its
+    // tag shows once.
+    for (role, label) in [(Role::Button, "Export"), (Role::Switch, "Sync contacts"), (Role::MenuItem, "Scheduled messages")] {
+        assert!(harness.get_by_role_and_label(role, label).accesskit_node().is_disabled(), "{label} is coming soon");
+    }
+    assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the tag once");
 }
 
 #[test]

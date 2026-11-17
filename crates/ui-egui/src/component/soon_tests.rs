@@ -6,7 +6,7 @@ use egui::{Color32, Key, Rect, Sense, Shape};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{is_soon, soon, soon_tag};
+use super::{blocked, is_soon, soon, soon_tag};
 use crate::component::button::{self, IconButton, TextButton};
 use crate::component::checkbox::{checkbox, radio};
 use crate::component::segmented::segmented;
@@ -15,7 +15,7 @@ use crate::component::switch::switch;
 use crate::component::tests::{Look, builder, keyboard_walk, painted, stage, theme};
 use crate::component::{card, pill, popup};
 use crate::iconset::IconId;
-use crate::keymap::Keymap;
+use crate::keymap::{self, Keymap};
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -300,4 +300,99 @@ fn nothing_inside_soon_is_painted_faded() {
     assert!(!found.is_empty());
     let faded: Vec<_> = found.into_iter().filter(|colour| colour.a() != 0 && colour.a() != 255).collect();
     assert!(faded.is_empty(), "painted at less than full strength: {faded:?}");
+}
+
+/// What the keyed dispatcher of [`keyed`] saw: how often the archive key ran its action.
+type Ran = u32;
+
+/// A soon text button that carries the archive action, and with `normal` the same action on a usable button too.
+/// Each frame runs the archive action when its key is pressed and it is not [`blocked`], as the window does.
+fn keyed(normal: bool) -> Harness<'static, Ran> {
+    let theme = theme();
+    let keymap = Keymap::default();
+    let mut harness = builder().build_ui_state(
+        move |ui, ran: &mut Ran| {
+            motion::set_reduced(ui.ctx(), true);
+            if keymap.pressed(ui.ctx(), keymap::ARCHIVE) && !blocked(ui.ctx(), keymap::ARCHIVE) {
+                *ran += 1;
+            }
+            stage(ui, theme.palette.surface, |ui| {
+                ui.spacing_mut().item_spacing.y = 16.0;
+                soon(ui, &theme, |ui| TextButton::new("Archive later").action(keymap::ARCHIVE).show(ui, &theme, &keymap));
+                if normal {
+                    TextButton::new("Archive now").action(keymap::ARCHIVE).show(ui, &theme, &keymap);
+                }
+            });
+        },
+        0,
+    );
+    harness.run();
+    harness
+}
+
+#[test]
+fn the_key_of_an_action_only_a_soon_control_offers_runs_nothing() {
+    let mut harness = keyed(false);
+    assert!(blocked(&harness.ctx, keymap::ARCHIVE));
+    assert!(!blocked(&harness.ctx, keymap::DELETE), "an action nothing offered is not blocked");
+    harness.key_press(Key::A);
+    harness.run();
+    assert_eq!(*harness.state(), 0);
+}
+
+#[test]
+fn an_action_a_usable_control_offers_too_still_runs_by_its_key() {
+    let mut harness = keyed(true);
+    assert!(!blocked(&harness.ctx, keymap::ARCHIVE));
+    harness.key_press(Key::A);
+    harness.run();
+    assert_eq!(*harness.state(), 1);
+}
+
+#[test]
+fn a_block_lasts_only_while_a_soon_control_offers_the_action() {
+    let theme = theme();
+    let keymap = Keymap::default();
+    let mut harness = builder().build_ui_state(
+        move |ui, shown: &mut bool| {
+            if *shown {
+                soon(ui, &theme, |ui| IconButton::new(IconId::Archive, "Archive later").action(keymap::ARCHIVE).show(ui, &theme, &keymap));
+            }
+        },
+        true,
+    );
+    harness.run();
+    assert!(blocked(&harness.ctx, keymap::ARCHIVE));
+    *harness.state_mut() = false;
+    harness.run();
+    assert!(!blocked(&harness.ctx, keymap::ARCHIVE), "the soon control is gone");
+}
+
+#[test]
+fn a_soon_controls_tooltip_names_it_and_shows_no_key() {
+    let theme = theme();
+    let keymap = Keymap::default();
+    let chip = keymap.chip(&egui::Context::default(), keymap::ARCHIVE).unwrap_or_default();
+    assert!(!chip.is_empty());
+    for soon_now in [false, true] {
+        let keymap = keymap.clone();
+        let mut harness = builder()
+            .with_context_setup(|ctx| {
+                crate::theme::install_fonts(ctx);
+                crate::component::tests::record_layers(ctx);
+                crate::component::tests::quick_tooltips(ctx);
+            })
+            .build_ui(move |ui| {
+                motion::set_reduced(ui.ctx(), true);
+                stage(ui, theme.palette.surface, |ui| {
+                    let button = IconButton::new(IconId::Archive, "Archive later").action(keymap::ARCHIVE);
+                    if soon_now { soon(ui, &theme, |ui| button.show(ui, &theme, &keymap)) } else { button.show(ui, &theme, &keymap) }
+                });
+            });
+        harness.run();
+        harness.get_by_label("Archive later").hover();
+        harness.run();
+        assert_eq!(harness.query_all_by_label("Archive later").count(), 2, "the tooltip names it, soon: {soon_now}");
+        assert_eq!(harness.query_by_label(&chip).is_some(), !soon_now, "the key chip {chip} shows only when it runs");
+    }
 }

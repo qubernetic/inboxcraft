@@ -73,6 +73,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
     let s = &theme.spacing;
     let height = theme.boxes().menu_row;
     let soon = soon::is_soon(ui);
+    if let Some(action) = action {
+        soon::offer(ui, action);
+    }
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), soon::sense(ui, Sense::click()));
     response.widget_info(|| match chosen {
         Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, !soon, chosen, name),
@@ -97,7 +100,8 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
             (None, _) => {}
         }
         let mut right = rect.right() - s.s2;
-        if let Some(chip) = action.and_then(|action| keymap.chip(ui.ctx(), action)) {
+        // Coming soon, its key would do nothing: no chip.
+        if let Some(chip) = action.filter(|_| !soon).and_then(|action| keymap.chip(ui.ctx(), action)) {
             let chip = galley(ui, &chip, theme.fonts.caption, p.muted);
             right -= chip.size().x;
             painter.galley(pos2(right, rect.center().y - chip.size().y / 2.0), chip, p.muted);

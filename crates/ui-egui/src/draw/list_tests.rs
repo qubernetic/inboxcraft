@@ -523,3 +523,17 @@ fn the_list_counts_the_rows_it_built_for_the_bench() {
     assert!(built > 0 && built <= all, "{built} of {all}");
     assert_eq!(crate::rows_built(&harness.ctx), None, "read once");
 }
+
+/// Archive is no example here: the reader's toolbar offers it whenever a message is open.
+#[test]
+fn the_key_of_an_action_only_a_coming_soon_control_offers_runs_nothing() {
+    for normal in [false, true] {
+        let mut harness = still();
+        crate::component::tests::offer_soon(&harness.ctx, crate::keymap::PALETTE, normal);
+        harness.run();
+        assert_eq!(crate::component::soon::blocked(&harness.ctx, crate::keymap::PALETTE), !normal);
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
+        harness.run();
+        assert_eq!(harness.state().palette().is_open(), normal, "its key opens the palette, a usable control offering it too: {normal}");
+    }
+}
