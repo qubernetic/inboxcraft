@@ -856,7 +856,7 @@ fn rows(ui: &mut Ui, theme: &Theme) {
                         ui.set_width(440.0);
                         let fill = if *ground == RowGround::Panel { p.panel } else { p.surface };
                         ui.painter().rect_filled(Rect::from_min_size(ui.cursor().min, vec2(440.0, theme.boxes().mail_row)), 0.0, fill);
-                        let id = Id::new("gallery-row-board").with(*state);
+                        let id = Id::unique("gallery-row-board").with(*state);
                         let drawn = row_with(ui, theme, id, 56.0, *ground, *current, *last, Some(*shown));
                         let name = format!("{} {state}", tr!("Row"));
                         drawn.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
@@ -870,9 +870,59 @@ fn rows(ui: &mut Ui, theme: &Theme) {
     }
 }
 
+/// The banner's board: remote pictures, bounce, error, failing, notice and careful, 640 wide, with the design
+/// board's words.
+fn banners(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::banner::{BannerKind, BannerLink, banner};
+    title(ui, theme, tr!("Banner"));
+    type State<'a> = (&'a str, BannerKind, &'a str, [(&'a str, &'a str); 2], usize);
+    let states: [State<'_>; 6] = [
+        (
+            tr!("remote-pictures"),
+            BannerKind::RemotePictures,
+            "3 remote pictures are not shown. Loading them tells the sender that you opened this message.",
+            [(tr!("load once"), "pictures.once"), ("always for news@brightshelf.example.org", "pictures.always")],
+            2,
+        ),
+        (
+            tr!("bounce"),
+            BannerKind::Bounce,
+            "This message did not arrive: 550 5.1.1 The address ansel@example.org does not exist.",
+            [(tr!("open the report"), "bounce.report"), (tr!("edit and send again"), "bounce.again")],
+            2,
+        ),
+        (
+            tr!("error"),
+            BannerKind::Error,
+            "The message could not be moved: the server refused (NO [CANNOT]).",
+            [(tr!("try again"), "error.again"), (tr!("dismiss"), "error.dismiss")],
+            2,
+        ),
+        (
+            tr!("failing"),
+            BannerKind::Failing,
+            "Studio refused the sign-in, and one message was not sent.",
+            [(tr!("open account"), "failing.account"), (tr!("open outbox"), "failing.outbox")],
+            2,
+        ),
+        (tr!("notice"), BannerKind::Notice, "The text is cut here: the rest is longer than the reader shows.", [("", ""); 2], 0),
+        (tr!("careful"), BannerKind::Careful, "The text says “example.org”, but the link goes to example.net.", [("", ""); 2], 0),
+    ];
+    for (state, kind, text, links, count) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(640.0);
+                let links: Vec<BannerLink<'_>> = links.iter().take(count).map(|(name, id)| BannerLink { name, id }).collect();
+                banner(ui, theme, keymap, kind, text, &links);
+            });
+        });
+    }
+}
+
 /// The left column of the shared rows and blocks.
-fn blocks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+fn blocks_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     rows(ui, theme);
+    banners(ui, theme, keymap);
 }
 
 /// The hover actions' board: default, action-hover, focus and unavailable, Done D, Snooze H, Read R and Delete Del.
@@ -901,7 +951,7 @@ fn hover_actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
                 cell(ui, theme, state, |ui| {
                     let width = hover::width(ui, theme, keymap, &group(*snooze));
                     let (_, line) = ui.allocate_space(vec2(width, theme.boxes().strip));
-                    let id = Id::new("gallery-hover-actions").with(*state);
+                    let id = Id::unique("gallery-hover-actions").with(*state);
                     hover::actions_with(ui, theme, keymap, id, line, true, &group(*snooze), *forced);
                 });
             }

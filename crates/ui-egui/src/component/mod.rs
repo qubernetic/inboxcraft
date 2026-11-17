@@ -32,6 +32,7 @@
 
 pub mod avatar;
 pub mod badge;
+pub mod banner;
 pub mod button;
 pub mod card;
 pub mod checkbox;
@@ -180,6 +181,26 @@ pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width:
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
     ui.painter().layout_job(job)
+}
+
+/// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one
+/// ellipsis; each line placed as `align` says (centred lines centre on the galley's origin). Text from outside (a
+/// mail's words, a server's answer) goes through [`plain`] first.
+pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32, rows: usize, align: egui::Align) -> Arc<Galley> {
+    let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: rows.max(1), break_anywhere: false, overflow_character: Some('…') };
+    job.halign = align;
+    ui.painter().layout_job(job)
+}
+
+/// `text` with every control character (a NUL, a line break, a tab) put as a space: text from outside drawn as plain
+/// words, never as layout.
+pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        std::borrow::Cow::Owned(text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
 }
 
 /// `text` as a label in `font` and `colour`. A style in capitals paints capitals, but a screen reader hears `text` as
