@@ -125,6 +125,117 @@ fn inset(theme: &Theme) -> f32 {
     theme.spacing.s3 + 1.0
 }
 
+/// The most characters a one-line field holds (a text, a password, a typed time, an address being typed); a field may
+/// hold fewer ([`text_field_limited`]).
+pub const MAX_LINE: usize = 4096;
+
+/// The most bytes a field of several lines holds: 1 MiB.
+pub const MAX_TEXT: usize = 1 << 20;
+
+/// What a field holds at most.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cap {
+    /// So many characters.
+    Chars(usize),
+    /// So many bytes.
+    Bytes(usize),
+}
+
+impl Cap {
+    /// The size of `text` in this cap's unit.
+    fn measure(self, text: &str) -> usize {
+        match self {
+            Self::Chars(_) => text.chars().count(),
+            Self::Bytes(_) => text.len(),
+        }
+    }
+
+    fn most(self) -> usize {
+        match self {
+            Self::Chars(most) | Self::Bytes(most) => most,
+        }
+    }
+
+    /// The size, in this cap's unit, of the characters `from..to` of `text` (a selection, stale or not).
+    fn span(self, text: &str, from: usize, to: usize) -> usize {
+        let (from, to) = (from.min(to), from.max(to));
+        match self {
+            Self::Chars(_) => to.saturating_sub(from).min(text.chars().count().saturating_sub(from)),
+            Self::Bytes(_) => text.chars().skip(from).take(to.saturating_sub(from)).map(char::len_utf8).sum(),
+        }
+    }
+
+    /// What the field says under itself when it refused something.
+    fn sentence(self) -> String {
+        match self {
+            Self::Chars(most) => tr!("Too long: this field holds at most {count} characters, and nothing was added.", count = most),
+            Self::Bytes(_) => tr!("Too long: this text holds at most 1 MiB, and nothing was added.").to_owned(),
+        }
+    }
+}
+
+/// Where a field keeps that it refused something, until its text next changes.
+fn refused_id(id: Id) -> Id {
+    id.with("refused-too-long")
+}
+
+/// Takes out of this frame's input, before the edit `id` sees them, the typing, pastes, IME text and screen-reader
+/// edits that would carry `text` past `cap`: each is refused whole, never cut, and the text stays as it was. Whether
+/// the field has something refused to say (now, or since before its text last changed).
+fn guard(ui: &Ui, id: Id, text: &str, cap: Cap) -> bool {
+    use egui::accesskit::{Action, ActionData};
+    use egui::{Event, ImeEvent};
+    let focused = ui.memory(|memory| memory.has_focus(id));
+    let target = id.accesskit_id();
+    let selection = TextEditState::load(ui.ctx(), id).and_then(|state| state.cursor.char_range());
+    let mut refused = false;
+    ui.input_mut(|input| {
+        // The text's size and its selection's, measured once when an edit asks for it.
+        let mut sizes: Option<(usize, usize)> = None;
+        input.events.retain(|event| {
+            let (insert, whole) = match event {
+                Event::Text(insert) | Event::Paste(insert) if focused => (insert.as_str(), false),
+                Event::Ime(ImeEvent::Commit(insert)) if focused => (insert.as_str(), false),
+                Event::Ime(ImeEvent::Preedit { text: insert, .. }) if focused => (insert.as_str(), false),
+                Event::AccessKitActionRequest(request) if request.target_node == target => match (&request.action, &request.data) {
+                    (Action::SetValue, Some(ActionData::Value(value))) => (&**value, true),
+                    (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => (&**value, false),
+                    _ => return true,
+                },
+                _ => return true,
+            };
+            let (now, selected) = *sizes.get_or_insert_with(|| {
+                let selected = selection.map_or(0, |range| cap.span(text, range.primary.index.0, range.secondary.index.0));
+                (cap.measure(text), selected)
+            });
+            let after = if whole { cap.measure(insert) } else { now.saturating_sub(selected).saturating_add(cap.measure(insert)) };
+            if after > cap.most() {
+                refused = true;
+                return false;
+            }
+            sizes = Some((after, 0));
+            true
+        });
+    });
+    if refused {
+        ui.data_mut(|data| data.insert_temp(refused_id(id), true));
+    }
+    refused || ui.data(|data| data.get_temp::<bool>(refused_id(id))).unwrap_or(false)
+}
+
+/// After the edit `id` drew: a change it took clears what the field had refused.
+fn settle(ui: &Ui, id: Id, response: &Response) {
+    if response.changed() {
+        ui.data_mut(|data| data.remove::<bool>(refused_id(id)));
+    }
+}
+
+/// What the field `id` says it refused, if it refused something since its text last changed: for a field shown
+/// without its own error line (the recipient line's).
+pub(crate) fn refusal(ctx: &egui::Context, id: Id) -> Option<String> {
+    ctx.data(|data| data.get_temp::<bool>(refused_id(id))).unwrap_or(false).then(|| Cap::Chars(MAX_LINE).sentence())
+}
+
 /// The kind of a one-line field.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
@@ -250,7 +361,8 @@ fn under(ui: &mut Ui, theme: &Theme, error: Option<&str>, note: Option<&str>, wi
     let mut job = LayoutJob::single_section(theme.fonts.caption.text(text), theme.fonts.caption.format(colour));
     job.wrap = TextWrapping { max_width: width.max(1.0), ..TextWrapping::default() };
     let text = ui.painter().layout_job(job);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, text.size().y), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, text.size().y), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text.text()));
     if ui.is_rect_visible(rect) {
         super::solid(ui).galley(rect.min, text, colour);
     }
@@ -343,6 +455,9 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         label_row(ui, theme, field.label, width);
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let cap = Cap::Chars(limit.min(MAX_LINE));
+        let refusal = guard(ui, id, text, cap).then(|| cap.sentence());
+        let field = &Field { error: field.error.or(refusal.as_deref()), ..*field };
         let seen = seen(ui, id, rect, field, shown);
         let (fill, edge, dashed) = box_look(theme, field, seen);
         let painter = super::solid(ui);
@@ -384,10 +499,11 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                     .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
                     .desired_width(f32::INFINITY)
                     .min_size(vec2(0.0, height))
-                    .char_limit(limit)
+                    .char_limit(cap.most())
                     .password(password)
                     .layouter(&mut layouter);
                 let output = edit.show(ui);
+                settle(ui, id, &output.response.response);
                 if password && let Some(mut state) = TextEditState::load(ui.ctx(), id) {
                     state.clear_undoer();
                     state.store(ui.ctx(), id);
@@ -431,6 +547,7 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
     let vertical = ((rect.height() - font.line) / 2.0).max(0.0);
     let inner = Rect::from_min_max(pos2(rect.left(), rect.top() + vertical), pos2(rect.right(), rect.bottom() - vertical));
     edit_scope(ui, seen.enabled);
+    guard(ui, id, text, Cap::Chars(MAX_LINE));
     let empty = text.is_empty();
     let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, false);
     let output = TextEdit::singleline(text)
@@ -438,8 +555,10 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
         .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
         .desired_width(f32::INFINITY)
         .min_size(vec2(0.0, rect.height()))
+        .char_limit(MAX_LINE)
         .layouter(&mut layouter)
         .show(ui);
+    settle(ui, id, &output.response.response);
     if empty && !field.hint.is_empty() {
         let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
         let hint = layout(ui, field.hint, font, p.muted, None, false);
@@ -486,10 +605,23 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = s.s2;
         label_row(ui, theme, field.label, width);
-        // Every row is a line high, the last one too.
-        let rows = layout(ui, text, font, p.ink, Some(wrap), false).rows.len().max(1) as f32 * font.line;
+        let cap = Cap::Bytes(MAX_TEXT);
+        let refusal = guard(ui, id, text, cap).then(|| cap.sentence());
+        let field = &Field { error: field.error.or(refusal.as_deref()), ..*field };
+        let colour = if field.enabled && ui.is_enabled() && !soon::is_soon(ui) { p.ink } else { p.muted };
+        // The text is laid out once per change: the measure here and the edit's own layout ask for the same job (same
+        // colour and wrap; the wrap of a text that scrolled last frame leaves the bar's room), which the font cache
+        // keeps. Every row is a line high, the last one too.
+        let scrolled = ui.data(|data| data.get_temp::<bool>(id.with("scrolled"))).unwrap_or(false);
+        let narrow = wrap - theme.sizes.scrollbar - s.s1 + s.s3;
+        let rows_at = |ui: &Ui, wrap: f32| layout(ui, text, font, colour, Some(wrap), false).rows.len().max(1) as f32 * font.line;
+        let mut rows = rows_at(ui, if scrolled { narrow } else { wrap });
+        if scrolled && rows + s.s2 * 2.0 + 2.0 <= most {
+            rows = rows_at(ui, wrap);
+        }
         let whole = rows + s.s2 * 2.0 + 2.0;
         let scrolls = whole > most;
+        ui.data_mut(|data| data.insert_temp(id.with("scrolled"), scrolls));
         let height = whole.clamp(least, most);
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let seen = seen(ui, id, rect, field, shown);
@@ -498,7 +630,6 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
         if ui.is_rect_visible(rect) {
             paint_box(&painter, rect, fill, edge, dashed);
         }
-        let colour = if seen.enabled { p.ink } else { p.muted };
         let inside = rect.shrink(1.0);
         // While it scrolls, the bar takes 12 at the right and the text keeps 4 from it.
         let right_pad = if scrolls { s.s1 } else { right - 1.0 };
@@ -524,6 +655,7 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
                         .min_size(vec2(0.0, if scrolls { 0.0 } else { inside.height() }))
                         .layouter(&mut layouter)
                         .show(ui);
+                    settle(ui, id, &output.response.response);
                     if empty {
                         paint_hint(ui, theme, field.hint, font, view.min, view, seen.focus);
                     }
@@ -564,16 +696,30 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
 }
 
 /// A plain one-line edit without a box, filling the width `ui` offers: the composer's subject until the composer is
-/// restyled. Its text is `body` in `ink`; `name` is its screen-reader name.
+/// restyled. Its text is `body` in `ink`; `name` is its screen-reader name. It holds at most [`MAX_LINE`] characters;
+/// what would pass them is refused whole, and a line under it says so.
 pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str) -> Response {
-    let edit = TextEdit::singleline(text).id(id).font(theme.fonts.body.id()).frame(egui::Frame::NONE).desired_width(ui.available_width());
+    let cap = Cap::Chars(MAX_LINE);
+    let refused = guard(ui, id, text, cap);
+    let edit = TextEdit::singleline(text)
+        .id(id)
+        .font(theme.fonts.body.id())
+        .frame(egui::Frame::NONE)
+        .char_limit(MAX_LINE)
+        .desired_width(ui.available_width());
     let response = ui.add(edit);
+    settle(ui, id, &response);
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+    if refused && !response.changed() {
+        let width = ui.available_width();
+        under(ui, theme, Some(&cap.sentence()), None, width);
+    }
     response
 }
 
 /// A plain edit of several lines without a box, `rows` rows high at least and laid out by `layouter`: the composer's
-/// message text until the composer is restyled. `name` is its screen-reader name.
+/// message text until the composer is restyled. `name` is its screen-reader name. It holds at most [`MAX_TEXT`]; what
+/// would pass it is refused whole, and a line over the text says so.
 pub fn plain_text(
     ui: &mut Ui,
     id: Id,
@@ -581,9 +727,17 @@ pub fn plain_text(
     rows: usize,
     layouter: &mut dyn FnMut(&Ui, &dyn TextBuffer, f32) -> Arc<Galley>,
     name: &str,
+    theme: &Theme,
 ) -> Response {
+    let cap = Cap::Bytes(MAX_TEXT);
+    // Said over the text, where it shows however long the text is.
+    if guard(ui, id, text, cap) {
+        let width = ui.available_width();
+        under(ui, theme, Some(&cap.sentence()), None, width);
+    }
     let edit = TextEdit::multiline(text).layouter(layouter).id(id).frame(egui::Frame::NONE).desired_width(ui.available_width()).desired_rows(rows);
     let response = ui.add(edit);
+    settle(ui, id, &response);
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
     response
 }

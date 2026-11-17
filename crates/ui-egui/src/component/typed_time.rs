@@ -307,15 +307,16 @@ pub fn short(at: Timestamp, now: Timestamp, offset: Offset) -> String {
     }
 }
 
-/// Whether `text` names a time that has passed at `now` in `offset`: it reads as a time from long ago (a date), but
-/// none ahead.
+/// Whether `text` names a time that has passed at `now` in `offset`: it reads as a time from the earliest time there
+/// is (a date, before 1970 too), but none ahead.
 #[must_use]
 pub fn passed(text: &str, now: Timestamp, offset: Offset) -> bool {
-    parse(text, now, offset).is_none() && parse(text, Timestamp::UNIX_EPOCH, offset).is_some()
+    parse(text, now, offset).is_none() && parse(text, Timestamp::MIN, offset).is_some()
 }
 
 /// The typed-time field (`typed-time`), filling the width `ui` offers: a box 36 high on `term` with the text in `mono`
-/// 13 in and its hint ("thu 9, 12 nov 17:00, in 3 days") while it is empty, at most [`MAX_TYPED`] bytes' worth; under
+/// 13 in and its hint ("thu 9, 12 nov 17:00, in 3 days") while it is empty, at most [`MAX_TYPED`] characters, more
+/// refused whole (the parser reads only [`MAX_TYPED`] bytes, so a longer text in another script reads as no time); under
 /// it, once something is typed, what it reads as at `now`: a tick and the time in full in `cyan_text`, or why there is
 /// none in `muted`. It counts as soon as it reads as a time: no Enter. `name` is what a screen reader calls it.
 #[allow(clippy::too_many_arguments)]

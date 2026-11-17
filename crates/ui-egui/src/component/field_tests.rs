@@ -286,6 +286,185 @@ fn hostile_text_in_a_field_never_panics() {
     }
 }
 
+/// The kinds of field a person types into, for the hostile tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Text,
+    Many,
+    Password,
+    Typed,
+    Recipient,
+    PlainLine,
+    PlainText,
+}
+
+const KINDS: [Kind; 7] = [Kind::Text, Kind::Many, Kind::Password, Kind::Typed, Kind::Recipient, Kind::PlainLine, Kind::PlainText];
+
+/// The name a screen reader hears for the field of `kind`.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Typed => "Type a time",
+        Kind::Recipient => "To",
+        Kind::PlainLine => "Subject",
+        Kind::PlainText => "Message text",
+        _ => "Hostile",
+    }
+}
+
+/// A field of `kind` holding the harness's text, focused.
+fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
+    let theme = theme();
+    let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
+        move |ui, text: &mut String| {
+            let field = Field::new("Hostile", "hint");
+            match kind {
+                Kind::Text => {
+                    text_field(ui, &theme, egui::Id::unique("one"), text, &field);
+                }
+                Kind::Many => {
+                    multiline_field(ui, &theme, egui::Id::unique("many"), text, &field);
+                }
+                Kind::Password => {
+                    password_field(ui, &theme, egui::Id::unique("secret"), text, &field, Secret::Typed);
+                }
+                Kind::Typed => {
+                    let now = crate::component::gallery::now();
+                    crate::component::typed_time::typed_time_field(ui, &theme, egui::Id::unique("typed"), "Type a time", text, now, inboxcraft_time::Offset::UTC);
+                }
+                Kind::Recipient => {
+                    let line = crate::component::recipient::Recipients { name: "To", chips: &[], hint: "Name or address", copies: false, error: None, enabled: true };
+                    crate::component::recipient::recipient_field(ui, &theme, egui::Id::unique("to"), text, &line);
+                }
+                Kind::PlainLine => {
+                    super::plain_line(ui, &theme, egui::Id::unique("subject"), text, "Subject");
+                }
+                Kind::PlainText => {
+                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, width: f32| {
+                        let mut job = egui::text::LayoutJob::single_section(text.as_str().to_owned(), theme.fonts.body.format(theme.palette.ink));
+                        job.wrap.max_width = width;
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
+                    super::plain_text(ui, egui::Id::unique("body"), text, 3, &mut layouter, "Message text", &theme);
+                }
+            }
+        },
+        text.to_owned(),
+    );
+    harness.run_ok();
+    harness.get_by_label(kind_name(kind)).focus();
+    harness.run_ok();
+    harness
+}
+
+/// The most a field of `kind` holds, and whether that counts bytes (else characters).
+fn cap_of(kind: Kind) -> (usize, bool) {
+    match kind {
+        Kind::Many | Kind::PlainText => (super::MAX_TEXT, true),
+        Kind::Password => (super::MAX_SECRET, false),
+        Kind::Typed => (crate::component::typed_time::MAX_TYPED, false),
+        _ => (super::MAX_LINE, false),
+    }
+}
+
+/// Whether the last frame says, somewhere, that something was refused as too long.
+fn says_too_long(harness: &Harness<'static, String>) -> bool {
+    drawn(harness).iter().any(|text| text.text.starts_with("Too long"))
+}
+
+#[test]
+fn a_paste_of_10_mib_is_refused_whole_in_every_field() {
+    let big = "x".repeat(10 << 20);
+    for kind in KINDS {
+        let mut harness = field_of(kind, "kept");
+        let started = std::time::Instant::now();
+        harness.event(egui::Event::Paste(big.clone()));
+        harness.run_ok();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{kind:?}: the frame returns");
+        assert_eq!(harness.state(), "kept", "{kind:?}: the text stays exactly as it was");
+        assert!(says_too_long(&harness), "{kind:?}: the field says it is too long");
+        // The next change that is taken clears the sentence.
+        harness.event(egui::Event::Text("!".to_owned()));
+        harness.run_ok();
+        assert!(harness.state().len() == 5 && !says_too_long(&harness), "{kind:?}: {:?}", harness.state().len());
+    }
+}
+
+#[test]
+fn a_paste_onto_the_cap_is_taken_and_one_past_it_is_refused() {
+    for kind in KINDS {
+        let (most, _) = cap_of(kind);
+        let mut harness = field_of(kind, "");
+        harness.event(egui::Event::Paste("y".repeat(most)));
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most, "{kind:?}: exactly the cap goes in");
+        harness.event(egui::Event::Paste("z".to_owned()));
+        harness.run_ok();
+        assert_eq!(harness.state().len(), most, "{kind:?}: one past the cap is refused");
+        assert!(says_too_long(&harness), "{kind:?}");
+        // With the whole text selected, a paste as long as the cap replaces it.
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_ok();
+        harness.event(egui::Event::Paste("w".repeat(most)));
+        harness.run_ok();
+        assert!(harness.state().starts_with('w') && harness.state().len() == most, "{kind:?}: a selection gives its room");
+    }
+}
+
+#[test]
+fn bidi_controls_ime_and_a_stale_selection_never_panic() {
+    for kind in KINDS {
+        let mut harness = field_of(kind, "Hello world");
+        harness.event(egui::Event::Paste("\u{202e}abc\u{2066}def\u{2069}\u{200f}ghi\u{202c}".to_owned()));
+        harness.run_ok();
+        // An IME composition in progress, then a commit far past the cap, then one that fits.
+        harness.event(egui::Event::Ime(egui::ImeEvent::Preedit { text: "ëñ".to_owned(), active_range_chars: Some(0..2) }));
+        harness.run_ok();
+        harness.event(egui::Event::Ime(egui::ImeEvent::Commit("x".repeat(10 << 20))));
+        harness.run_ok();
+        assert!(harness.state().len() < 1 << 20 || matches!(kind, Kind::Many | Kind::PlainText), "{kind:?}");
+        harness.event(egui::Event::Ime(egui::ImeEvent::Commit("ñë".to_owned())));
+        harness.run_ok();
+        // A selection made, then the text replaced from outside: the selection points past its end.
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_ok();
+        *harness.state_mut() = "x".to_owned();
+        harness.run_ok();
+        harness.event(egui::Event::Paste("y".repeat(10)));
+        harness.event(egui::Event::Text("z".to_owned()));
+        harness.key_press(egui::Key::Backspace);
+        harness.run_ok();
+        assert!(harness.state().chars().count() <= 12, "{kind:?}: {:?}", harness.state());
+    }
+}
+
+#[test]
+fn a_draft_of_1_mib_at_rest_is_laid_out_once() {
+    let text: String = (0..(1 << 20) / 32).map(|n| format!("Line {n:>8} of a long draft..\n")).collect();
+    assert!(text.len() <= super::MAX_TEXT);
+    let mut harness = field_of(Kind::Many, &text);
+    harness.step();
+    let galley = |harness: &Harness<'static, String>| {
+        fn walk(shape: &egui::Shape, found: &mut Option<std::sync::Arc<egui::Galley>>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+                egui::Shape::Text(text) if text.galley.job.text.len() > 1000 => *found = Some(text.galley.clone()),
+                _ => {}
+            }
+        }
+        let mut found = None;
+        harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+        found
+    };
+    let first = galley(&harness).unwrap_or_else(|| panic!("the draft is painted"));
+    let started = std::time::Instant::now();
+    for _ in 0..5 {
+        harness.step();
+        let now = galley(&harness).unwrap_or_else(|| panic!("the draft is painted"));
+        assert!(std::sync::Arc::ptr_eq(&first, &now), "a frame at rest laid the draft out again");
+    }
+    eprintln!("1 MiB draft at rest: {:?} a frame", started.elapsed() / 5);
+}
+
 /// The states of the multiline field's sheet, in its order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Many {

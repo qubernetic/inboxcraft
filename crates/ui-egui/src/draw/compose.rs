@@ -469,7 +469,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
         crate::component::scroll::show(ui, theme, egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]), |ui| {
             // A whole number of rows, fewer than a few hundred: the cast keeps it.
-            let response = field::plain_text(ui, text_id(), composer.text_mut(), rows as usize, &mut layouter, tr!("Message text"));
+            let response = field::plain_text(ui, text_id(), composer.text_mut(), rows as usize, &mut layouter, tr!("Message text"), theme);
             if response.changed() {
                 asked.push(Asked::Edited);
             }

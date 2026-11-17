@@ -331,6 +331,7 @@ fn a_typed_time_looks_as_its_sheet_says_in_every_state() {
 #[test]
 fn a_date_behind_now_has_passed_and_a_word_never_has() {
     assert!(super::passed("2026-11-02", now(), Offset::UTC));
+    assert!(super::passed("1960-01-01", now(), Offset::UTC), "before 1970 too");
     assert!(!super::passed("2026-11-20", now(), Offset::UTC));
     assert!(!super::passed("thu 9", now(), Offset::UTC));
     assert!(!super::passed("thursdy", now(), Offset::UTC));
