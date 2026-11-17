@@ -4,7 +4,8 @@
 //! The pill: a filter that is on or off, 24 high, its word in mono 11, 8 beside it, square corners, cut with an
 //! ellipsis at 240. Off: a 1 px `line` edge and a `muted` word; hovered, the `stage` fill, a `muted` edge and an `ink`
 //! word. Selected: the accent wash, the `cyan_edge` edge and a `cyan_text` word. Pressed: as a pressed secondary button
-//! (the `stage` fill, an `ink` edge and word), or, selected, the full accent with an `on_cyan` word. Focus is the ring
+//! (the `stage` fill, an `ink` edge and word), or, selected, the accent wash with the `cyan_edge` edge as every chosen
+//! control pressed, its word turning `ink`. Focus is the ring
 //! 2 px clear; disabled a dashed `line` edge with the word `muted`. Nothing moves (the design gives it no transition).
 
 use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
@@ -46,7 +47,7 @@ pub(crate) fn pill_with(ui: &mut Ui, theme: &Theme, text: &str, selected: bool, 
     let none = Color32::TRANSPARENT;
     let (fill, edge, ink) = match (enabled, selected, lit.pressed, lit.hover) {
         (false, ..) => (none, None, p.muted),
-        (true, true, true, _) => (p.cyan, Some(p.cyan_edge), p.on_cyan),
+        (true, true, true, _) => (p.cyan_muted, Some(p.cyan_edge), p.ink),
         (true, true, false, _) => (p.cyan_muted, Some(p.cyan_edge), p.cyan_text),
         (true, false, true, _) => (p.stage, Some(p.ink), p.ink),
         (true, false, false, true) => (p.stage, Some(p.muted), p.ink),

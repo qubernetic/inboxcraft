@@ -310,3 +310,14 @@ fn the_gallery_draws_forced_states_as_a_person_brings_them() {
     .2;
     assert_eq!(radio_forced.fill, hovered.fill);
 }
+
+#[test]
+fn a_chosen_radio_button_hovered_turns_to_ink_as_the_ticked_check_box_does() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let (_, mark, look) = toggle_in(mode, TextScale::default(), "Tell the guests", Shown::Hover, |ui, theme| {
+            radio(ui, theme, "Tell the guests", true);
+        });
+        assert_eq!((look.fill, look.edge), (Some(p.ink), None), "{mode:?} {look:#?} {mark:?}");
+    }
+}

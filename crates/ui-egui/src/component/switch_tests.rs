@@ -228,3 +228,25 @@ fn the_gallery_forces_a_hovered_switch() {
     let rect = harness.get_by_label("Notify me").rect();
     assert_eq!(own(&painted(&harness, "Notify me"), rect).fill, Some(p.stage));
 }
+
+#[test]
+fn an_on_switch_hovered_turns_to_ink_as_the_ticked_check_box_does() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let theme = Theme::new(mode, TextScale::default());
+        let mut harness = staged(
+            theme,
+            |p| p.surface,
+            vec2(200.0, 100.0),
+            |ui, theme| {
+                switch(ui, theme, "Notify me", true);
+            },
+        );
+        bring(&mut harness, "Notify me", Shown::Hover);
+        let rect = harness.get_by_label("Notify me").rect();
+        let paint = painted(&harness, "Notify me");
+        let look = own(&paint, rect);
+        assert_eq!((look.fill, look.edge), (Some(p.ink), None), "{mode:?} {look:#?}");
+        assert_eq!(knobs(&paint, rect), vec![(Rect::from_min_size(rect.min + vec2(14.0, 2.0), vec2(12.0, 12.0)), p.bg)], "{mode:?}");
+    }
+}

@@ -519,12 +519,17 @@ fn checkboxes(ui: &mut Ui, theme: &Theme) {
     });
 }
 
-/// The radio button's board: off, on, hover, focus, disabled.
+/// The radio button's board: off, on, hover, on-hover (which the sheet does not draw), focus, disabled.
 fn radios(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Radio"));
     let name = tr!("Tell the guests");
-    let states =
-        [(tr!("off"), false, Shown::Rest), (tr!("on"), true, Shown::Rest), (tr!("hover"), false, Shown::Hover), (tr!("focus"), true, Shown::Focus)];
+    let states = [
+        (tr!("off"), false, Shown::Rest),
+        (tr!("on"), true, Shown::Rest),
+        (tr!("hover"), false, Shown::Hover),
+        (tr!("on-hover"), true, Shown::Hover),
+        (tr!("focus"), true, Shown::Focus),
+    ];
     // Two rows: one is wider than the column.
     let (first, second) = states.split_at(3);
     cells(ui, theme, |ui| {
@@ -546,7 +551,8 @@ fn radios(ui: &mut Ui, theme: &Theme) {
     });
 }
 
-/// The switch's board: off, on, hover, focus, disabled, disabled-on, waiting, and unavailable with its reason.
+/// The switch's board: off, on, hover, on-hover (which the sheet does not draw), focus, disabled, disabled-on, waiting,
+/// and unavailable with its reason.
 fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     title(ui, theme, tr!("Switch"));
     let name = tr!("Start with the computer");

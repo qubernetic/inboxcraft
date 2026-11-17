@@ -166,10 +166,10 @@ fn a_long_pill_ends_at_240_and_its_box_at_256() {
 }
 
 #[test]
-fn a_pressed_pill_is_the_secondary_press_or_the_full_accent_when_selected() {
+fn a_pressed_pill_is_the_secondary_press_or_the_accent_wash_with_an_ink_word_when_selected() {
     for mode in [Mode::Dark, Mode::Light] {
         let p = Theme::new(mode, TextScale::default()).palette;
-        for (state, fill, edge, text) in [(State::Default, p.stage, p.ink, p.ink), (State::Selected, p.cyan, p.cyan_edge, p.on_cyan)] {
+        for (state, fill, edge, text) in [(State::Default, p.stage, p.ink, p.ink), (State::Selected, p.cyan_muted, p.cyan_edge, p.ink)] {
             let (_, look) = pill_in(mode, TextScale::default(), state, Shown::Pressed);
             assert_eq!((look.fill, look.edge), (Some(fill), Some((1.0, edge, false))), "{mode:?} {state:?} {look:#?}");
             assert_eq!(look.texts[0].1, text, "{mode:?} {state:?}");

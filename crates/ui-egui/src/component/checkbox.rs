@@ -50,8 +50,10 @@ fn look(theme: &Theme, kind: Kind, on: bool, enabled: bool, lit: super::Lit) -> 
         return Look { fill: p.cyan_muted, edge: Some((p.cyan_edge, false)), mark };
     }
     match (kind, on, lit.hover) {
+        // Hovered, a full box turns to `ink` (the check box's sheet; the radio button's says "hover as the checkbox").
         (Kind::Check, true, true) => Look { fill: p.ink, edge: None, mark: p.bg },
         (Kind::Check, true, false) => Look { fill: p.cyan, edge: Some((p.cyan_edge, false)), mark: p.on_cyan },
+        (Kind::Radio, true, true) => Look { fill: p.ink, edge: None, mark: p.bg },
         (Kind::Radio, true, false) => Look { fill: none, edge: Some((p.cyan_edge, false)), mark: p.cyan_edge },
         (_, _, true) => Look { fill: p.stage, edge: Some((p.ink, false)), mark: p.ink },
         (_, false, false) => Look { fill: none, edge: Some((p.muted, false)), mark: p.muted },

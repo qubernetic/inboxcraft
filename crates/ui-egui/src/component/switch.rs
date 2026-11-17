@@ -76,6 +76,8 @@ pub(crate) fn switch_with(ui: &mut Ui, theme: &Theme, name: &str, state: SwitchS
         _ if !enabled => (none, None, p.dim),
         SwitchState::Waiting => (none, Some(p.warn), p.warn),
         _ if lit.pressed => (p.cyan_muted, Some(p.cyan_edge), p.cyan_edge),
+        // On and hovered, it turns to `ink` as a ticked check box does; off, the `stage` fill (its sheet).
+        SwitchState::On if lit.hover => (p.ink, None, p.bg),
         _ if lit.hover => (p.stage, Some(p.ink), p.ink),
         SwitchState::On => (p.cyan, Some(p.cyan_edge), p.on_cyan),
         SwitchState::Off => (none, Some(p.muted), p.muted),
@@ -83,6 +85,9 @@ pub(crate) fn switch_with(ui: &mut Ui, theme: &Theme, name: &str, state: SwitchS
     match edge {
         Some(colour) => {
             painter.rect(rect, 0.0, fill, Stroke::new(1.0, colour), StrokeKind::Inside);
+        }
+        None if enabled => {
+            painter.rect_filled(rect, 0.0, fill);
         }
         None => paint::dashed(&painter, rect, p.muted),
     }
