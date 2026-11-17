@@ -630,14 +630,24 @@ fn refocus(ctx: &Context, opener: &Response, id: Id) {
     }
 }
 
+/// Where a menu keeps whether it was opened from the keyboard.
+fn by_key_id(id: Id) -> Id {
+    id.with("opened-by-key")
+}
+
 /// A menu `width` wide that `opener` opens and closes (a press, or Enter or Space on it): the [`float`] `id` hung
-/// under it while it is open, `add` drawing its rows and saying whether one was chosen, which closes it (and gives
-/// `opener` the keyboard back when the row was chosen by the keyboard); Esc or a press outside close it too and give
-/// `opener` the keyboard back. What `add` gave while it is open.
+/// under it while it is open, `add` drawing its rows and saying whether one was chosen, which closes it. Esc closes it
+/// and gives `opener` the keyboard. A menu opened from the keyboard (`opener` had it, and Enter, Space or a screen
+/// reader's press opened it) gives `opener` the keyboard back however it closes, whether a key or the pointer chose
+/// its row; one opened by the pointer, chosen or closed by a press outside, leaves the keyboard with nothing, as it
+/// was (the window's keys then act). What `add` gave while it is open.
 pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
     refocus(ctx, opener, id);
     if clicked(ctx, opener, id) {
-        set_open(ctx, id, !is_open(ctx, id));
+        let open = !is_open(ctx, id);
+        set_open(ctx, id, open);
+        let by_key = open && opener.has_focus() && !opener.clicked_by(egui::PointerButton::Primary);
+        ctx.data_mut(|data| data.insert_temp(by_key_id(id), by_key));
     }
     menu_at(ctx, theme, opener, opener.rect, id, width, add)
 }
@@ -649,13 +659,14 @@ pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, wid
     if row.secondary_clicked() {
         let pointer = row.interact_pointer_pos().unwrap_or(row.rect.left_bottom());
         ctx.data_mut(|data| data.insert_temp(at, pointer));
+        ctx.data_mut(|data| data.insert_temp(by_key_id(id), false));
         set_open(ctx, id, true);
     }
     let anchor = ctx.data(|data| data.get_temp::<Pos2>(at)).map_or(row.rect, |pointer| Rect::from_min_size(pointer - vec2(0.0, DROP), Vec2::ZERO));
     menu_at(ctx, theme, row, anchor, id, width, add)
 }
 
-/// The open menu `id` under `anchor`, giving `opener` the keyboard back when it closes.
+/// The open menu `id` under `anchor`, giving `opener` the keyboard back when it closes as [`menu`] says.
 fn menu_at<R>(
     ctx: &Context,
     theme: &Theme,
@@ -668,19 +679,23 @@ fn menu_at<R>(
     if !is_open(ctx, id) {
         return None;
     }
-    // A row with the keyboard: the choice is the keyboard's, and the keyboard goes back to the opener. A row chosen by
-    // the pointer leaves the keyboard where it was, with nothing (the window's keys then act, as before the menu).
-    let keyed = ctx.memory(|memory| memory.focused().is_some());
+    let by_key = ctx.data(|data| data.get_temp::<bool>(by_key_id(id))).unwrap_or(false);
     let shown = float(ctx, theme, &Float { id, anchor, width, returns_to: opener.id }, add);
     match shown {
         None => {
             set_open(ctx, id, false);
+            // The float gave the opener the keyboard; a press outside a menu the pointer opened takes it away again
+            // (Esc leaves it there).
+            let beside = ctx.data(|data| data.get_temp::<()>(id.with("closing-press"))).is_some();
+            if beside && !by_key {
+                ctx.memory_mut(|memory| memory.surrender_focus(opener.id));
+            }
             None
         }
         Some((inner, chosen)) => {
             if chosen {
                 set_open(ctx, id, false);
-                if keyed {
+                if by_key {
                     opener.request_focus();
                     ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
                 }

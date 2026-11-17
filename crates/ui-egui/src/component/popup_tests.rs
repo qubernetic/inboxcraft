@@ -1038,3 +1038,118 @@ fn esc_in_a_float_opened_from_a_float_closes_only_the_inner_one() {
     assert_eq!(*harness.state(), (false, false));
     assert!(harness.get_by_label("Open").is_focused());
 }
+
+/// A button "Actions" that opens a [`super::menu`] of "Archive" and "Delete"; the state is the row last chosen.
+fn menu_opener() -> Harness<'static, Option<&'static str>> {
+    let theme = theme();
+    let keymap = Keymap::default();
+    let mut harness = builder().with_size(egui::vec2(600.0, 400.0)).build_ui_state(
+        move |ui, chosen: &mut Option<&'static str>| {
+            motion::set_reduced(ui.ctx(), true);
+            let button = crate::component::button::TextButton::new("Actions").show(ui, &theme, &keymap);
+            super::menu(ui.ctx(), &theme, &button, Id::unique("actions"), 240.0, |ui| {
+                let mut picked = false;
+                for name in ["Archive", "Delete"] {
+                    if super::entry(ui, &theme, &keymap, name, None).clicked() {
+                        *chosen = Some(name);
+                        picked = true;
+                    }
+                }
+                ((), picked)
+            });
+        },
+        None,
+    );
+    harness.run_ok();
+    harness
+}
+
+/// How a menu is opened or a row chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum By {
+    Key,
+    Pointer,
+}
+
+#[test]
+fn a_menu_opened_by_the_keyboard_gives_it_back_after_any_choice_and_one_opened_by_the_pointer_does_not() {
+    for opened in [By::Key, By::Pointer] {
+        for chose in [By::Key, By::Pointer] {
+            let mut harness = menu_opener();
+            match opened {
+                By::Key => {
+                    harness.get_by_label("Actions").focus();
+                    harness.run_ok();
+                    harness.key_press(Key::Enter);
+                }
+                By::Pointer => harness.get_by_label("Actions").click(),
+            }
+            harness.run_ok();
+            assert!(harness.query_by_label("Delete").is_some(), "{opened:?}: open");
+            match chose {
+                By::Key => {
+                    harness.key_press(Key::Tab);
+                    harness.run_ok();
+                    harness.key_press(Key::Tab);
+                    harness.run_ok();
+                    assert!(harness.get_by_label("Delete").is_focused(), "{opened:?}/{chose:?}");
+                    harness.key_press(Key::Enter);
+                }
+                By::Pointer => harness.get_by_label("Delete").click(),
+            }
+            harness.run_ok();
+            assert_eq!(*harness.state(), Some("Delete"), "{opened:?}/{chose:?}: chosen");
+            assert!(harness.query_by_label("Archive").is_none(), "{opened:?}/{chose:?}: closed");
+            let focused = focused_node(&harness).and_then(|(_, name, _)| name);
+            match opened {
+                By::Key => assert_eq!(focused.as_deref(), Some("Actions"), "{opened:?}/{chose:?}: the keyboard is back on the opener"),
+                By::Pointer => assert_eq!(focused, None, "{opened:?}/{chose:?}: the keyboard stays where it was, with nothing"),
+            }
+        }
+    }
+}
+
+#[test]
+fn esc_gives_a_menu_s_opener_the_keyboard_however_it_opened() {
+    for opened in [By::Key, By::Pointer] {
+        let mut harness = menu_opener();
+        match opened {
+            By::Key => {
+                harness.get_by_label("Actions").focus();
+                harness.run_ok();
+                harness.key_press(Key::Space);
+            }
+            By::Pointer => harness.get_by_label("Actions").click(),
+        }
+        harness.run_ok();
+        assert!(harness.query_by_label("Delete").is_some(), "{opened:?}: open");
+        harness.key_press(Key::Escape);
+        harness.run_ok();
+        assert!(harness.query_by_label("Delete").is_none(), "{opened:?}: closed");
+        assert!(harness.get_by_label("Actions").is_focused(), "{opened:?}: Esc gives the opener the keyboard");
+    }
+}
+
+#[test]
+fn a_press_outside_a_menu_gives_the_keyboard_back_only_to_one_opened_by_the_keyboard() {
+    for opened in [By::Key, By::Pointer] {
+        let mut harness = menu_opener();
+        match opened {
+            By::Key => {
+                harness.get_by_label("Actions").focus();
+                harness.run_ok();
+                harness.key_press(Key::Enter);
+            }
+            By::Pointer => harness.get_by_label("Actions").click(),
+        }
+        harness.run_ok();
+        harness.hover_at(pos2(580.0, 380.0));
+        harness.run_ok();
+        harness.drag_at(pos2(580.0, 380.0));
+        harness.run_ok();
+        assert!(harness.query_by_label("Delete").is_none(), "{opened:?}: closed");
+        let focused = focused_node(&harness).and_then(|(_, name, _)| name);
+        let expected = (opened == By::Key).then(|| "Actions".to_owned());
+        assert_eq!(focused, expected, "{opened:?}");
+    }
+}
