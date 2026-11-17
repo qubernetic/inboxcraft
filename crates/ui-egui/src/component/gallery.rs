@@ -561,6 +561,7 @@ fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
             (tr!("off"), SwitchState::Off, Shown::Rest),
             (tr!("on"), SwitchState::On, Shown::Rest),
             (tr!("hover"), SwitchState::Off, Shown::Hover),
+            (tr!("on-hover"), SwitchState::On, Shown::Hover),
             (tr!("focus"), SwitchState::On, Shown::Focus),
         ];
         for (state, stands, shown) in states {
@@ -579,7 +580,8 @@ fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("unavailable"), |ui| {
-            switch::switch_in(ui, theme, name, SwitchState::Unavailable);
+            switch::switch_noted(ui, theme, name, SwitchState::Unavailable, Some(tr!("Not there in the Flatpak yet")));
+            // The tooltip the switch shows under the pointer, drawn in place as the sheet draws it.
             tooltip::bubble_noted(ui, theme, keymap, name, None, Some(tr!("Not there in the Flatpak yet")));
         });
     });

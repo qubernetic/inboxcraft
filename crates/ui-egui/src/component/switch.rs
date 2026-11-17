@@ -12,9 +12,10 @@
 use egui::{Color32, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
 use crate::draw::paint::{self, Ring};
+use crate::keymap::Keymap;
 use crate::theme::Theme;
 
-use super::{Hover, Shown, lit, solid, soon};
+use super::{Hover, Shown, lit, solid, soon, tooltip};
 
 /// The switch's width and height, in points.
 const SIZE: [f32; 2] = [28.0, 16.0];
@@ -98,6 +99,16 @@ pub(crate) fn switch_with(ui: &mut Ui, theme: &Theme, name: &str, state: SwitchS
         paint::focus_ring(&painter, theme, rect, Ring::Outside);
     }
     response
+}
+
+/// [`switch_in`] with a `note`: why it stands as it does (the reason an unavailable switch cannot be used), shown in
+/// its tooltip under its name, as the switch's sheet draws it.
+pub fn switch_noted(ui: &mut Ui, theme: &Theme, name: &str, state: SwitchState, note: Option<&str>) -> Response {
+    let response = switch_in(ui, theme, name, state);
+    match note {
+        Some(note) => tooltip::attach_note(response, theme, &Keymap::empty(), name, None, Some(note)),
+        None => response,
+    }
 }
 
 #[cfg(test)]

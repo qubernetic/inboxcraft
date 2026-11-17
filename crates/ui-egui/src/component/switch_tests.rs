@@ -6,7 +6,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use egui::{Rect, vec2};
 
-use super::{SwitchState, switch, switch_in, switch_with};
+use super::{SwitchState, switch, switch_in, switch_noted, switch_with};
 use crate::component::Shown;
 use crate::component::press_tests::{Part, keys_press_as_the_pointer};
 use crate::component::tests::{Look, Own, Paint, bring, builder, keyboard_walk, own, painted, rests, stage, staged, theme};
@@ -249,4 +249,44 @@ fn an_on_switch_hovered_turns_to_ink_as_the_ticked_check_box_does() {
         assert_eq!((look.fill, look.edge), (Some(p.ink), None), "{mode:?} {look:#?}");
         assert_eq!(knobs(&paint, rect), vec![(Rect::from_min_size(rect.min + vec2(14.0, 2.0), vec2(12.0, 12.0)), p.bg)], "{mode:?}");
     }
+}
+
+#[test]
+fn an_unavailable_switch_says_why_in_its_tooltip() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 200.0),
+        |ui, theme| {
+            switch_noted(ui, theme, "Start with the computer", SwitchState::Unavailable, Some("Not there in the Flatpak yet"));
+        },
+    );
+    assert!(harness.query_by_label_contains("Not there in the Flatpak yet").is_none(), "no reason before the pointer comes");
+    bring(&mut harness, "Start with the computer", Shown::Hover);
+    for _ in 0..90 {
+        harness.step();
+    }
+    let reason = harness.get_by_label_contains("Not there in the Flatpak yet").rect();
+    let switch = harness.get_by_role_and_label(Role::Switch, "Start with the computer").rect();
+    assert!(reason.top() >= switch.bottom(), "the reason under the switch: {reason:?} {switch:?}");
+    assert!(harness.get_by_role_and_label(Role::Switch, "Start with the computer").accesskit_node().is_disabled());
+}
+
+#[test]
+fn a_switch_without_a_note_shows_no_tooltip() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 200.0),
+        |ui, theme| {
+            switch_noted(ui, theme, "Start with the computer", SwitchState::On, None);
+        },
+    );
+    bring(&mut harness, "Start with the computer", Shown::Hover);
+    for _ in 0..90 {
+        harness.step();
+    }
+    assert_eq!(harness.query_all_by_label("Start with the computer").count(), 1, "only the switch");
 }
