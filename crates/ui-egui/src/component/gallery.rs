@@ -1050,6 +1050,8 @@ fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
                 });
             });
         });
+    });
+    cells(ui, theme, |ui| {
         cell(ui, theme, tr!("empty"), |ui| {
             popup::panel(ui, theme, 240.0, |ui| popup::empty(ui, theme, tr!("No other mailbox to move this to.")));
         });
