@@ -1395,6 +1395,12 @@ impl Mailbox {
         self.last
     }
 
+    /// Narrows to `account` whether or not the list holds it: a test's stale id, as one removed elsewhere would be.
+    #[cfg(test)]
+    pub(crate) fn narrow_stale(&mut self, account: u64) {
+        self.narrowed = Some(account);
+    }
+
     /// How many commands ran through [`Mailbox::run`] so far.
     #[cfg(test)]
     pub(crate) fn runs(&self) -> u64 {

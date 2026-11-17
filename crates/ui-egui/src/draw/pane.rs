@@ -188,7 +188,9 @@ fn spoken(text: &str, account: Option<&str>, unread: u64) -> String {
 /// The account picker: a select of All accounts and each account, the one shown in its field. Whether its list is open
 /// is the window's to keep, as a list of egui's own would be.
 fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Asked) {
-    let current = match mailbox.narrowed().and_then(|id| mailbox.account(id)) {
+    // An account no longer in the list is All accounts, in the field and in the list alike.
+    let narrowed = mailbox.narrowed().and_then(|id| mailbox.account(id));
+    let current = match narrowed {
         Some(account) => account.label.clone(),
         None => tr!("All accounts").to_owned(),
     };
@@ -204,7 +206,7 @@ fn account_picker(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Ask
         name: tr!("Accounts"),
         shown: &current,
         options: &options,
-        current: Some(mailbox.narrowed()),
+        current: Some(narrowed.map(|account| account.id)),
         icon: IconId::At,
         width: ui.available_width(),
     };

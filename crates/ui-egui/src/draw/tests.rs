@@ -779,3 +779,20 @@ fn the_error_banner_is_drawn_over_the_window_s_ground() {
         assert!(words, "{mode:?}: its words are drawn");
     }
 }
+
+#[test]
+fn the_account_picker_with_a_stale_account_shows_and_focuses_all_accounts() {
+    let mut harness = harness();
+    harness.state_mut().mailbox_mut().narrow_stale(4242);
+    harness.run();
+    let field = harness.get_by_role_and_label(Role::ComboBox, "Accounts");
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("All accounts"));
+    field.focus();
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    let first = harness.get_by_role_and_label(Role::MenuItemRadio, "All accounts");
+    assert!(first.accesskit_node().is_focused(), "the row the field shows takes the focus");
+    assert_eq!(first.accesskit_node().toggled(), Some(Toggled::True), "and is the chosen one");
+}
