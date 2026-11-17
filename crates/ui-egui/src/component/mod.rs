@@ -41,6 +41,7 @@ pub mod empty;
 pub mod facts;
 pub mod field;
 pub mod gallery;
+pub mod gallery_blocks;
 pub mod hover;
 pub mod icon;
 pub mod key;

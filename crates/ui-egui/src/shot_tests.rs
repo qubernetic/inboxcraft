@@ -831,3 +831,16 @@ fn an_icon_sits_in_its_box_as_the_board_draws_it() {
     assert_eq!((rows.first(), rows.last()), (Some(&9), Some(&21)), "rows {rows:?}");
     assert_eq!((columns.first(), columns.last()), (Some(&10), Some(&22)), "columns {columns:?}");
 }
+
+#[test]
+fn the_blocks_page_is_drawn_in_its_size_and_is_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "blocks": true}}"#))).unwrap();
+        let size = crate::component::gallery_blocks::size();
+        assert_eq!((picture.width(), picture.height()), (size.x as usize, size.y as usize));
+    }
+    for extra in [r#""select": "logo""#, r#""icons": true"#, r#""components": true"#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "blocks": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("x.png:"), "{error}");
+    }
+}

@@ -39,7 +39,7 @@ use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip}
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(WIDE + BLOCKS, TOP + BOARDS + CONTROLS + MARKS)
+    vec2(1800.0, TOP + BOARDS + CONTROLS + MARKS)
 }
 
 /// What draws a column of the page.
@@ -58,13 +58,6 @@ const CONTROLS: f32 = 807.0;
 
 /// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
 const MARKS: f32 = 480.0;
-
-/// The width of the page's first part, every band but the shared rows and blocks, in points.
-const WIDE: f32 = 1800.0;
-
-/// The width of the shared rows and blocks (row, hover actions, banner, empty state, progress, settings row, check
-/// step, facts) right of the rest, as high as the page, in points.
-const BLOCKS: f32 = 1800.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -263,14 +256,14 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
 }
 
 /// A board's title: the set's name.
-fn title(ui: &mut Ui, theme: &Theme, text: &str) {
+pub(super) fn title(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.s2);
     ui.label(galley(ui, text, theme.fonts.heading, theme.palette.ink));
     ui.add_space(theme.spacing.s1);
 }
 
 /// One state of a board: its name in `mono_s` and `muted` over the control `add` draws.
-fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s1;
         ui.label(galley(ui, state, theme.fonts.mono_s, theme.palette.muted));
@@ -279,7 +272,7 @@ fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
 }
 
 /// A row of a board's cells, apart enough that a focus ring never touches the next control.
-fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = theme.spacing.s4;
         add(ui);
@@ -834,294 +827,16 @@ fn marks_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     icons(ui, theme);
 }
 
-/// The row's board: the mail row's read, hover, selected and focus states, a row on the panel under the pointer, and
-/// the last row of a list, without its line.
-fn rows(ui: &mut Ui, theme: &Theme) {
-    use super::row::{RowGround, row_with};
-    title(ui, theme, tr!("Row"));
-    let p = &theme.palette;
-    let states = [
-        (tr!("read"), RowGround::Surface, false, false, Shown::Rest),
-        (tr!("hover"), RowGround::Surface, false, false, Shown::Hover),
-        (tr!("selected"), RowGround::Surface, true, false, Shown::Rest),
-        (tr!("focus"), RowGround::Surface, false, false, Shown::Focus),
-        (tr!("panel-hover"), RowGround::Panel, false, false, Shown::Hover),
-        (tr!("last"), RowGround::Surface, false, true, Shown::Rest),
-    ];
-    for pair in states.chunks(1) {
-        cells(ui, theme, |ui| {
-            for (state, ground, current, last, shown) in pair {
-                cell(ui, theme, state, |ui| {
-                    ui.allocate_ui(vec2(440.0, theme.boxes().mail_row), |ui| {
-                        ui.set_width(440.0);
-                        let fill = if *ground == RowGround::Panel { p.panel } else { p.surface };
-                        ui.painter().rect_filled(Rect::from_min_size(ui.cursor().min, vec2(440.0, theme.boxes().mail_row)), 0.0, fill);
-                        let id = Id::unique("gallery-row-board").with(*state);
-                        let drawn = row_with(ui, theme, id, 56.0, *ground, *current, *last, Some(*shown));
-                        let name = format!("{} {state}", tr!("Row"));
-                        drawn.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-                        let text = cut(ui, "Teodor Vasquez", theme.fonts.body, p.ink, 300.0);
-                        let at = drawn.rect.left_top() + vec2(34.0, 7.0);
-                        ui.painter().galley(at, text, p.ink);
-                        drawn.finish(ui, theme);
-                    });
-                });
-            }
-        });
-    }
-}
-
-/// The banner's board: remote pictures, bounce, error, failing, notice and careful, 640 wide, with the design
-/// board's words.
-fn banners(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use super::banner::{BannerKind, BannerLink, banner};
-    title(ui, theme, tr!("Banner"));
-    type State<'a> = (&'a str, BannerKind, &'a str, [(&'a str, &'a str); 2], usize);
-    let states: [State<'_>; 6] = [
-        (
-            tr!("remote-pictures"),
-            BannerKind::RemotePictures,
-            "3 remote pictures are not shown. Loading them tells the sender that you opened this message.",
-            [(tr!("load once"), "pictures.once"), ("always for news@brightshelf.example.org", "pictures.always")],
-            2,
-        ),
-        (
-            tr!("bounce"),
-            BannerKind::Bounce,
-            "This message did not arrive: 550 5.1.1 The address ansel@example.org does not exist.",
-            [(tr!("open the report"), "bounce.report"), (tr!("edit and send again"), "bounce.again")],
-            2,
-        ),
-        (
-            tr!("error"),
-            BannerKind::Error,
-            "The message could not be moved: the server refused (NO [CANNOT]).",
-            [(tr!("try again"), "error.again"), (tr!("dismiss"), "error.dismiss")],
-            2,
-        ),
-        (
-            tr!("failing"),
-            BannerKind::Failing,
-            "Studio refused the sign-in, and one message was not sent.",
-            [(tr!("open account"), "failing.account"), (tr!("open outbox"), "failing.outbox")],
-            2,
-        ),
-        (tr!("notice"), BannerKind::Notice, "The text is cut here: the rest is longer than the reader shows.", [("", ""); 2], 0),
-        (tr!("careful"), BannerKind::Careful, "The text says “example.org”, but the link goes to example.net.", [("", ""); 2], 0),
-    ];
-    for (state, kind, text, links, count) in states {
-        cells(ui, theme, |ui| {
-            cell(ui, theme, state, |ui| {
-                ui.set_width(640.0);
-                let links: Vec<BannerLink<'_>> = links.iter().take(count).map(|(name, id)| BannerLink { name, id }).collect();
-                banner(ui, theme, keymap, kind, text, &links);
-            });
-        });
-    }
-}
-
-/// The settings row's board: default, hover, focus, unavailable (coming soon) and with help, with the motion choice.
-fn settings_rows(ui: &mut Ui, theme: &Theme) {
-    use super::settings_row::{settings_row_soon, settings_row_with};
-    title(ui, theme, tr!("Settings row"));
-    let f = theme.fonts.button;
-    let choice = |ui: &mut Ui| {
-        segmented(ui, theme, &[(0, tr!("full"), f), (1, tr!("reduced"), f), (2, tr!("off"), f)], 1);
-    };
-    for (state, help, shown) in [
-        (tr!("default"), None, Shown::Rest),
-        (tr!("hover"), None, Shown::Hover),
-        (tr!("focus"), None, Shown::Focus),
-        (tr!("with-help"), Some(tr!("Reduced keeps what explains a change and drops the text effects. Off: everything at once.")), Shown::Rest),
-    ] {
-        cells(ui, theme, |ui| {
-            cell(ui, theme, state, |ui| {
-                ui.set_width(640.0);
-                settings_row_with(ui, theme, tr!("Motion"), help, false, Some(shown), choice);
-            });
-        });
-    }
-    cells(ui, theme, |ui| {
-        cell(ui, theme, tr!("unavailable"), |ui| {
-            ui.set_width(640.0);
-            settings_row_soon(ui, theme, tr!("Calendar alerts"), tr!("Comes with the Calendar settings page."));
-        });
-    });
-}
-
-/// The facts' board: default, details open and long text, with the design board's words.
-fn facts_board(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use super::facts::{Facts, facts_of};
-    title(ui, theme, tr!("Facts"));
-    let (from, to, date) = ("Teodor Vasquez  <teodor@example.org>", "studio@example.org", "Mon 16 Nov 2026, 14:02");
-    let open = Facts {
-        from,
-        to,
-        date,
-        cc: "Marit Solheim  <marit@example.org>",
-        reply_to: "teodor@example.org",
-        checked: "example.org · SPF pass · DKIM pass",
-        id: "<20261116.1402.7f3a@example.org>",
-        recipients: None,
-    };
-    let long = Facts {
-        from: "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio.example.org>",
-        to: "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Ada Brannock",
-        date,
-        recipients: Some(12),
-        ..Facts::default()
-    };
-    for (state, shown, opened) in
-        [(tr!("default"), Facts { from, to, date, ..Facts::default() }, false), (tr!("details-open"), open, true), (tr!("long-text"), long, false)]
-    {
-        cells(ui, theme, |ui| {
-            cell(ui, theme, state, |ui| {
-                ui.set_width(560.0);
-                facts_of(ui, theme, keymap, &shown, opened);
-            });
-        });
-    }
-}
-
-/// The left column of the shared rows and blocks.
-fn blocks_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    rows(ui, theme);
-    banners(ui, theme, keymap);
-    settings_rows(ui, theme);
-    facts_board(ui, theme, keymap);
-}
-
-/// The hover actions' board: default, action-hover, focus and unavailable, Done D, Snooze H, Read R and Delete Del.
-fn hover_actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use crate::keymap::SNOOZE;
-    title(ui, theme, tr!("Hover actions"));
-    // The page's keymap gives D, R and Del to its own actions; Snooze keeps the app's H, as the sheet shows.
-    let (done, read, delete) = ("mail.done", "mail.read", "mail.delete");
-    let group = |snooze: Option<&'static str>| {
-        [
-            Action { icon: IconId::Done, name: tr!("Done"), action: Some(done), unavailable: None },
-            Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(SNOOZE), unavailable: snooze },
-            Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some(read), unavailable: None },
-            Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(delete), unavailable: None },
-        ]
-    };
-    let states = [
-        (tr!("default"), None, None),
-        (tr!("action-hover"), None, Some((0, Shown::Hover))),
-        (tr!("focus"), None, Some((0, Shown::Focus))),
-        (tr!("unavailable"), Some(tr!("Not yet: the time picker comes with the pickers")), None),
-    ];
-    for pair in states.chunks(2) {
-        cells(ui, theme, |ui| {
-            for (state, snooze, forced) in pair {
-                cell(ui, theme, state, |ui| {
-                    let width = hover::width(ui, theme, keymap, &group(*snooze));
-                    let (_, line) = ui.allocate_space(vec2(width, theme.boxes().strip));
-                    let id = Id::unique("gallery-hover-actions").with(*state);
-                    hover::actions_with(ui, theme, keymap, id, line, true, &group(*snooze), *forced);
-                });
-            }
-        });
-    }
-}
-
-/// The empty state's board: the bare one, its lines centred, and the one with an action, its lines on the left.
-fn empty_states(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use super::empty::{empty_state, empty_state_with};
-    title(ui, theme, tr!("Empty state"));
-    cells(ui, theme, |ui| {
-        cell(ui, theme, tr!("default"), |ui| {
-            ui.allocate_ui(vec2(440.0, 216.0), |ui| {
-                empty_state(
-                    ui,
-                    theme,
-                    tr!("Inbox · nothing to read"),
-                    tr!("All read.\nNew mail lands here."),
-                    tr!("This folder holds no unread messages. “Show done” brings back what you finished."),
-                );
-            });
-        });
-    });
-    cells(ui, theme, |ui| {
-        cell(ui, theme, tr!("with-action"), |ui| {
-            ui.allocate_ui(vec2(440.0, 250.0), |ui| {
-                let action = TextButton::new(tr!("Add account")).primary().arrow();
-                empty_state_with(
-                    ui,
-                    theme,
-                    tr!("No accounts yet"),
-                    tr!("Add an account to read its mail here."),
-                    tr!("Nothing leaves this computer before you do."),
-                    action,
-                    keymap,
-                );
-            });
-        });
-    });
-}
-
-/// The progress line's board: running (the sheet's still frame: the page rests), done and failed.
-fn progresses(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    use super::progress::{ProgressState, progress_with};
-    title(ui, theme, tr!("Progress"));
-    cells(ui, theme, |ui| {
-        let states = [
-            (tr!("running"), tr!("syncing"), ProgressState::Running(0.54), "54 %"),
-            (tr!("done"), tr!("synced"), ProgressState::Done, "14:02"),
-            (tr!("failed"), tr!("sync failed"), ProgressState::Failed(0.54), tr!("open log")),
-        ];
-        for (state, word, stands, note) in states {
-            cell(ui, theme, state, |ui| {
-                progress_with(ui, theme, keymap, word, stands, note, true);
-            });
-        }
-    });
-}
-
-/// The check step's board: its eight states in the sheet's order, with the design board's words.
-fn check_steps(ui: &mut Ui, theme: &Theme) {
-    use super::check_step::{StepState, check_step};
-    title(ui, theme, tr!("Check step"));
-    let smtp = "smtp.example.org:465 · TLS";
-    let states = [
-        (tr!("waiting"), StepState::Waiting, "SMTP", smtp, tr!("waiting")),
-        (tr!("running"), StepState::Running, "SMTP", smtp, "0.2 s …"),
-        (tr!("passed"), StepState::Passed, "IMAP", tr!("sign-in, 6 folders, IDLE CONDSTORE QRESYNC MOVE"), "0.6 s"),
-        (tr!("failed"), StepState::Failed, "IMAP", tr!("sign-in"), "1.2 s"),
-        (tr!("skipped"), StepState::Skipped, "SMTP", smtp, tr!("skipped")),
-        (tr!("not-run"), StepState::NotRun, tr!("Clock"), tr!("compared with the server's"), tr!("not run")),
-        (tr!("no-server"), StepState::NoServer, "CalDAV", tr!("calendars"), tr!("no server set")),
-        (tr!("not-built"), StepState::NotBuilt, tr!("Push"), tr!("new mail without asking"), tr!("not built yet")),
-    ];
-    for (state, stands, step, detail, note) in states {
-        cells(ui, theme, |ui| {
-            cell(ui, theme, state, |ui| {
-                ui.set_width(560.0);
-                let message = (stands == StepState::Failed).then_some("refused: [AUTHENTICATIONFAILED] Invalid credentials.");
-                check_step(ui, theme, step, detail, note, stands, message);
-            });
-        });
-    }
-}
-
-/// The right column of the shared rows and blocks.
-fn blocks_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    hover_actions(ui, theme, keymap);
-    empty_states(ui, theme, keymap);
-    progresses(ui, theme, keymap);
-    check_steps(ui, theme);
-}
-
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
     ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
     let mut layers = Panes::begin(ui.painter());
-    let half = (WIDE - PICKER - s.s2 * 4.0) / 2.0;
-    let board = (WIDE - s.s2 * 3.0) / 2.0;
+    let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
+    let board = (whole.width() - s.s2 * 3.0) / 2.0;
     let top = TOP - s.s2 * 2.0;
-    let columns: [(f32, f32, f32, Draw); 11] = [
+    let columns: [(f32, f32, f32, Draw); 9] = [
         (s.s2, s.s2, half, left),
         (s.s2 * 2.0 + half, s.s2, half, right),
         (s.s2 * 3.0 + half * 2.0, s.s2, PICKER, picker),
@@ -1131,13 +846,9 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         (s.s2 * 2.0 + board, TOP + BOARDS, board, controls_right),
         (s.s2, TOP + BOARDS + CONTROLS, board, marks_left),
         (s.s2 * 2.0 + board, TOP + BOARDS + CONTROLS, board, marks_right),
-        (WIDE + s.s2, 0.0, board, blocks_left),
-        (WIDE + s.s2 * 2.0 + board, 0.0, board, blocks_right),
     ];
     for (x, y, width, draw) in columns {
-        let height = if x >= WIDE {
-            whole.height() - s.s2
-        } else if y < TOP {
+        let height = if y < TOP {
             top
         } else if y < TOP + BOARDS {
             BOARDS - s.s2
@@ -1148,7 +859,7 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         };
         let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            if y < TOP && x < WIDE {
+            if y < TOP {
                 layers.card(ui, super::margin(s.s4, s.s3), |ui| {
                     ui.set_min_size(ui.available_size());
                     draw(ui, theme, keymap);

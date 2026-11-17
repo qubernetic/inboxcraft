@@ -43,6 +43,10 @@
 # the time picker (E3.4) with a typed time.
 {"out": "docs/images/components-light.png", "mode": "light", "components": true}
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
+# The shared rows and blocks (#235): row, hover actions, banner, empty state, progress, settings row, check step,
+# facts, on a page of their own.
+{"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
+{"out": "docs/images/components-blocks-dark.png", "mode": "dark", "blocks": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
