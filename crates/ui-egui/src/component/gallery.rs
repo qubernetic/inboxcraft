@@ -44,7 +44,7 @@ type Draw = fn(&mut Ui, &Theme, &Keymap);
 const TOP: f32 = 660.0;
 
 /// The height of the boards under the columns, in points.
-const BOARDS: f32 = 640.0;
+const BOARDS: f32 = 700.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -276,14 +276,17 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cell(ui, theme, tr!("selected"), |ui| {
             pin().active(true).shown(Shown::Rest).show(ui, theme, keymap);
         });
-        cell(ui, theme, tr!("selected-pressed"), |ui| {
-            pin().active(true).shown(Shown::Pressed).show(ui, theme, keymap);
-        });
         cell(ui, theme, tr!("disabled"), |ui| {
             pin().enabled(false).show(ui, theme, keymap);
         });
         cell(ui, theme, tr!("unavailable"), |ui| {
             pin().unavailable(tr!("Not yet: choose a message first")).show(ui, theme, keymap);
+        });
+    });
+    // Not on the sheet: the pressed look of a selected button (see docs/gaps.md).
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("selected-pressed"), |ui| {
+            pin().active(true).shown(Shown::Pressed).show(ui, theme, keymap);
         });
     });
 }
@@ -390,6 +393,9 @@ fn section_labels(ui: &mut Ui, theme: &Theme) {
                 ui.add_space(4.0);
             });
         });
+    });
+    // Not on the sheet: the pressed look of a folding label (see docs/gaps.md).
+    cells(ui, theme, |ui| {
         cell(ui, theme, tr!("pressed"), |ui| {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
