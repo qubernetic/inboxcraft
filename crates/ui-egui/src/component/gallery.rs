@@ -615,9 +615,40 @@ fn segments(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The pill's board: default, hover, focus, selected, disabled; then pressed, off and selected, which the sheet does
+/// not draw.
+fn pills(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Pill"));
+    let name = tr!("New senders");
+    cells(ui, theme, |ui| {
+        let states = [
+            (tr!("default"), false, Shown::Rest),
+            (tr!("hover"), false, Shown::Hover),
+            (tr!("focus"), false, Shown::Focus),
+            (tr!("selected"), true, Shown::Rest),
+        ];
+        for (state, selected, shown) in states {
+            cell(ui, theme, state, |ui| {
+                pill::pill_with(ui, theme, name, selected, Some(shown));
+            });
+        }
+        cell(ui, theme, tr!("disabled"), |ui| {
+            ui.add_enabled_ui(false, |ui| pill::pill(ui, theme, name, false));
+        });
+    });
+    cells(ui, theme, |ui| {
+        for (state, selected) in [(tr!("pressed"), false), (tr!("selected-pressed"), true)] {
+            cell(ui, theme, state, |ui| {
+                pill::pill_with(ui, theme, name, selected, Some(Shown::Pressed));
+            });
+        }
+    });
+}
+
 /// The choices' column of boards.
 fn controls_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     segments(ui, theme);
+    pills(ui, theme);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

@@ -70,19 +70,19 @@ fn painted_finds_the_shapes_of_a_control() {
     let (fill, radius) = fill.unwrap_or_else(|| panic!("the chosen pill is filled: {paint:?}"));
     assert!(radius.abs() < f32::EPSILON, "the pill is square");
     assert!(paint.ground.is_some_and(|ground| ground != fill), "the pill stands out from its card: {paint:?}");
-    let muted = Theme::new(Mode::Light, TextScale::default()).palette.muted;
+    let line = Theme::new(Mode::Light, TextScale::default()).palette.line;
     let edge = painted(&harness, "Flagged");
     assert!(
         edge.rects().any(|shape| shape.inside
             && shape.look
                 == Look::Rect {
                     fill: egui::Color32::TRANSPARENT,
-                    stroke: Some((1.0, muted)),
+                    stroke: Some((1.0, line)),
                     stroke_kind: egui::StrokeKind::Inside,
                     radius: 0.0,
                     dashed: false
                 }),
-        "an unchosen pill has a 1 px muted edge inside: {edge:#?}"
+        "an unchosen pill has a 1 px line edge inside: {edge:#?}"
     );
     assert!(paint.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, .. } if text == "Unread")), "{paint:?}");
     assert!(paint.shapes.iter().all(|shape| rect.expand(4.0).contains_rect(shape.rect)), "{paint:?} outside {rect:?}");

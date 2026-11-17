@@ -244,9 +244,10 @@ fn every_text_inside_soon_is_muted() {
 fn every_box_inside_soon_has_a_dashed_edge() {
     let harness = board();
     let p = theme().palette;
-    // A button's disabled edge is `line` (its sheet); the other boxes keep the `muted` edge of coming soon.
-    let buttons = ["Send", "Reply all", "Block"];
-    for label in buttons.into_iter().chain(["Sync contacts", "Personal", "Daily", "Unread", "Flagged", "Repeat", "Scheduled", "coming soon"]) {
+    // A button's and a pill's disabled edge is `line` (their sheets); the other boxes keep the `muted` edge of coming
+    // soon.
+    let buttons = ["Send", "Reply all", "Block", "Unread", "Flagged"];
+    for label in buttons.into_iter().chain(["Sync contacts", "Personal", "Daily", "Repeat", "Scheduled", "coming soon"]) {
         let paint = painted(&harness, label);
         let want = if buttons.contains(&label) { p.line } else { p.muted };
         let edge = paint.rects().find(|shape| matches!(shape.look, Look::Rect { stroke: Some((_, colour)), dashed: true, .. } if colour == want));
