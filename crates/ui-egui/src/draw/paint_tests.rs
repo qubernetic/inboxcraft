@@ -489,3 +489,20 @@ fn a_run_painted_off_the_pixel_shows_the_glyphs_it_was_laid_out_with() {
         assert_eq!((whole.as_str(), painted), ("Liste", vec!["Liste".to_owned()]), "{ppp} {x}: a run that is not cut");
     }
 }
+
+#[test]
+fn a_cut_row_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let got = std::cell::RefCell::new(Vec::new());
+    frame_shapes(1.0, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        let (f, ink) = (theme.fonts.button, theme.palette.ink);
+        let cut = super::line(ui, &[("Zusammenfassung ", f, ink), ("des Posteingangs", theme.fonts.mono, ink)], 136.0);
+        let fits = super::line(ui, &[("Liste", f, ink)], 136.0);
+        *got.borrow_mut() = vec![shown(&cut), shown(&fits), cut.job.text.clone()];
+    });
+    let got = got.into_inner();
+    assert_eq!(got[0], "Zusammenfassung…", "as `cut` and the design cut a line");
+    assert_eq!(got[1], "Liste");
+    assert_eq!(got[2], "Zusammenfassung des Posteingangs", "the text stays whole");
+}

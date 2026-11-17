@@ -176,30 +176,10 @@ pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> 
 /// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:
 /// spaces the cut leaves before it are dropped.
 pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32) -> Arc<Galley> {
-    let cut_at = |width: f32| {
-        let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
-        job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
-        job.break_on_newline = false;
-        ui.painter().layout_job(job)
-    };
-    let galley = cut_at(width);
-    if !galley.elided {
-        return galley;
-    }
-    let shown: String = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
-    match shown.strip_suffix('…').map(str::trim_end) {
-        // Cut again just wide enough for the letters and the ellipsis, so the space no longer fits; the text stays
-        // the whole name.
-        Some(kept) if kept.len() < shown.len().saturating_sub('…'.len_utf8()) && !kept.is_empty() => {
-            let mut job = egui::text::LayoutJob::single_section(format!("{kept}…"), font.format(colour));
-            job.wrap.max_width = f32::INFINITY;
-            let tight = ui.painter().layout_job(job).size().x;
-            let again = cut_at(tight + 0.01);
-            let again_shown: String = again.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
-            if again_shown == format!("{kept}…") { again } else { galley }
-        }
-        _ => galley,
-    }
+    let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    job.break_on_newline = false;
+    crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job))
 }
 
 /// `text` as a label in `font` and `colour`. A style in capitals paints capitals, but a screen reader hears `text` as

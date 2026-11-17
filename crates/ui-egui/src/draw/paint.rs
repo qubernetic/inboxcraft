@@ -23,7 +23,29 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     for (text, font, colour) in sections {
         job.append(&font.text(text), 0.0, font.format(*colour));
     }
-    ui.painter().layout_job(job)
+    tight_cut(ui.painter(), ui.painter().layout_job(job))
+}
+
+/// A one-line `galley` cut with an ellipsis as the design cuts a line: the ellipsis follows the last letter kept, so
+/// the spaces a cut leaves before it are dropped. It is laid out again just wide enough for the letters and the
+/// ellipsis; the text stays whole. A galley that is not cut, or ends in a letter, is given back as it is.
+pub(crate) fn tight_cut(painter: &Painter, galley: Arc<Galley>) -> Arc<Galley> {
+    let shown = |galley: &Galley| -> String { galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect() };
+    if !galley.elided || galley.rows.len() != 1 {
+        return galley;
+    }
+    let Some((ellipsis, before)) = galley.rows.first().and_then(|row| row.glyphs.split_last()) else { return galley };
+    let Some(last) = before.iter().rposition(|glyph| !glyph.chr.is_whitespace()) else { return galley };
+    let Some(space) = before.get(last + 1) else { return galley };
+    if ellipsis.chr != '…' {
+        return galley;
+    }
+    let mut job = (*galley.job).clone();
+    // Half the space to spare: the space still does not fit, and rounding to pixels later cuts nothing.
+    job.wrap.max_width = space.pos.x + ellipsis.advance_width + space.advance_width / 2.0;
+    let want: String = before.iter().take(last + 1).map(|glyph| glyph.chr).chain(std::iter::once('…')).collect();
+    let again = painter.layout_job(job);
+    if shown(&again) == want { again } else { galley }
 }
 
 /// The width the design gives a run of text `wide` points long: its text box hugs the run, rounded up to a whole
