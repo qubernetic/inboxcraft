@@ -147,15 +147,19 @@ pub(crate) fn pane(painter: &Painter, theme: &Theme, rect: Rect) {
     painter.rect_filled(rect, 0.0, theme.palette.surface);
 }
 
-/// The shape of a [`hairline`].
-fn hairline_shape(a: Pos2, b: Pos2, colour: Color32) -> Shape {
-    let snap = |at: Pos2| pos2(at.x.floor() + 0.5, at.y.floor() + 0.5);
-    Shape::line_segment([snap(a), snap(b)], Stroke::new(1.0, colour))
+/// The shape of a [`hairline`] at `ppp` physical pixels per point: a line one point wide rounded to whole physical
+/// pixels (at least one), across the physical pixels the ends fall in, its edges on pixel boundaries.
+fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let pixels = ppp.round().max(1.0);
+    // The middle of a run of `pixels` physical pixels from the one `at` falls in.
+    let snap = |at: f32| ((at * ppp).floor() + pixels / 2.0) / ppp;
+    Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
 }
 
-/// A 1 px line in `colour` from `a` to `b`, on whole pixels.
+/// A line one point wide (whole physical pixels, at least one) in `colour` from `a` to `b`, on whole pixels.
 pub(crate) fn hairline(painter: &Painter, a: Pos2, b: Pos2, colour: Color32) {
-    painter.add(hairline_shape(a, b, colour));
+    painter.add(hairline_shape(a, b, colour, painter.pixels_per_point()));
 }
 
 /// The panes of one frame. [`Panes::begin`] keeps a place under everything drawn after it; each [`Panes::card`]
@@ -183,6 +187,7 @@ impl Panes {
     /// Puts the panes into the kept place of `painter`'s list.
     pub(crate) fn finish(self, painter: &Painter, theme: &Theme) {
         let window = painter.clip_rect();
+        let ppp = painter.pixels_per_point();
         let colour = theme.palette.line;
         let near = |a: f32, b: f32| (a - b).abs() < 0.5;
         let mut shapes: Vec<Shape> = self.rects.iter().map(|rect| Shape::rect_filled(*rect, 0.0, theme.palette.surface)).collect();
@@ -190,18 +195,18 @@ impl Panes {
             let (top, bottom) = (rect.top(), rect.bottom() - 1.0);
             let (left, right) = (rect.left(), rect.right() - 1.0);
             if !near(rect.left(), window.left()) {
-                shapes.push(hairline_shape(pos2(left, top), pos2(left, rect.bottom()), colour));
+                shapes.push(hairline_shape(pos2(left, top), pos2(left, rect.bottom()), colour, ppp));
             }
             // The next pane's left edge is this one's right edge: drawn once, by the next.
             let followed = self.rects.iter().any(|other| near(other.left(), rect.right()));
             if !near(rect.right(), window.right()) && !followed {
-                shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour));
+                shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
             }
             if !near(rect.top(), window.top()) {
-                shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour));
+                shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
             }
             if !near(rect.bottom(), window.bottom()) {
-                shapes.push(hairline_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour));
+                shapes.push(hairline_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour, ppp));
             }
         }
         painter.set(self.slot, Shape::Vec(shapes));

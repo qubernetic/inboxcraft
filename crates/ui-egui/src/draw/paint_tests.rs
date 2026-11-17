@@ -214,3 +214,35 @@ fn a_dashed_edge_on_any_rect_and_radius_returns_and_stays_small() {
         }
     }
 }
+
+/// The rect a hairline from (10.3, 20.7) to (200.3, 20.7) tessellates to at `ppp` physical pixels per point, in
+/// points: [`super::hairline`] painted in a pass of a context at that scale, its shapes tessellated without feathering.
+fn hairline_at(ppp: f32) -> egui::Rect {
+    let ctx = egui::Context::default();
+    let mut input = egui::RawInput::default();
+    input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+    let mut output = ctx.run_ui(input, |ui| super::hairline(ui.painter(), pos2(10.3, 20.7), pos2(200.3, 20.7), egui::Color32::WHITE));
+    output.textures_delta.clear();
+    assert_eq!(output.pixels_per_point, ppp, "the pass ran at {ppp}");
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let points: Vec<_> = tessellator
+        .tessellate_shapes(output.shapes)
+        .into_iter()
+        .filter_map(|clipped| if let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive { Some(mesh) } else { None })
+        .flat_map(|mesh| mesh.vertices.into_iter().map(|vertex| vertex.pos))
+        .collect();
+    assert!(!points.is_empty(), "{ppp}: the hairline was painted");
+    egui::Rect::from_points(&points)
+}
+
+#[test]
+fn a_hairline_stands_on_whole_pixels() {
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        let rect = hairline_at(ppp);
+        let (top, bottom) = (rect.top() * ppp, rect.bottom() * ppp);
+        let whole = |at: f32| (at - at.round()).abs() < 1e-3;
+        assert!(whole(top) && whole(bottom), "{ppp}: top {top} and bottom {bottom} in physical pixels");
+        assert!(((bottom - top) - ppp.round().max(1.0)).abs() < 1e-3, "{ppp}: {} physical pixels high", bottom - top);
+    }
+}
