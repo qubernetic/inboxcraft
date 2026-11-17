@@ -919,10 +919,40 @@ fn banners(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The settings row's board: default, hover, focus, unavailable (coming soon) and with help, with the motion choice.
+fn settings_rows(ui: &mut Ui, theme: &Theme) {
+    use super::settings_row::{settings_row_soon, settings_row_with};
+    title(ui, theme, tr!("Settings row"));
+    let f = theme.fonts.button;
+    let choice = |ui: &mut Ui| {
+        segmented(ui, theme, &[(0, tr!("full"), f), (1, tr!("reduced"), f), (2, tr!("off"), f)], 1);
+    };
+    for (state, help, shown) in [
+        (tr!("default"), None, Shown::Rest),
+        (tr!("hover"), None, Shown::Hover),
+        (tr!("focus"), None, Shown::Focus),
+        (tr!("with-help"), Some(tr!("Reduced keeps what explains a change and drops the text effects. Off: everything at once.")), Shown::Rest),
+    ] {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(640.0);
+                settings_row_with(ui, theme, tr!("Motion"), help, false, Some(shown), choice);
+            });
+        });
+    }
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("unavailable"), |ui| {
+            ui.set_width(640.0);
+            settings_row_soon(ui, theme, tr!("Calendar alerts"), tr!("Comes with the Calendar settings page."));
+        });
+    });
+}
+
 /// The left column of the shared rows and blocks.
 fn blocks_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     rows(ui, theme);
     banners(ui, theme, keymap);
+    settings_rows(ui, theme);
 }
 
 /// The hover actions' board: default, action-hover, focus and unavailable, Done D, Snooze H, Read R and Delete Del.

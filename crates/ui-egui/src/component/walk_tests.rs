@@ -46,8 +46,9 @@ fn every_control_of_the_gallery_is_reached_by_tab() {
     for (role, label) in [(Role::Button, "Export"), (Role::Switch, "Sync contacts"), (Role::MenuItem, "Scheduled messages")] {
         assert!(harness.get_by_role_and_label(role, label).accesskit_node().is_disabled(), "{label} is coming soon");
     }
-    // The tag once on the coming-soon board, and once on the tag's board as one of its states.
-    assert_eq!(harness.query_all_by_label("coming soon").count(), 2, "the tag once on each board");
+    // The tag once on the coming-soon board, once on the tag's board as one of its states, and once on the settings
+    // row's board, on its unavailable row.
+    assert_eq!(harness.query_all_by_label("coming soon").count(), 3, "the tag once on each board");
 }
 
 #[test]

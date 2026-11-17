@@ -50,6 +50,7 @@ pub mod row;
 pub mod scroll;
 pub mod segmented;
 pub mod select;
+pub mod settings_row;
 pub mod slider;
 pub mod soon;
 pub mod switch;
