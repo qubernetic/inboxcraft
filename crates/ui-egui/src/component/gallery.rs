@@ -23,7 +23,7 @@ use super::avatar::AvatarSize;
 use super::badge::BadgeKind;
 use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
-use super::field::{self, Field};
+use super::field::{self, Field, Secret};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
 use super::scroll::{self, Bar};
@@ -928,8 +928,36 @@ fn fields_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.push_id("multiline-field", |ui| multiline_fields(ui, theme));
 }
 
+/// The password field's board: empty, filled, focus, error, disabled, stored. The dots stand for an invented password.
+fn password_fields(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Password field"));
+    let typed = "kettle-on-12";
+    let password = Field::new(tr!("Password"), "");
+    let one = |ui: &mut Ui, value: &str, field: Field<'_>, secret: Secret, shown: Option<Shown>| {
+        let id = ui.make_persistent_id("field");
+        let mut text = value.to_owned();
+        field::password_field_with(ui, theme, id, &mut text, &field, secret, shown);
+    };
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("empty"), 320.0, |ui| one(ui, "", password, Secret::Typed, None));
+        field_cell(ui, theme, tr!("filled"), 320.0, |ui| one(ui, typed, password, Secret::Typed, None));
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("focus"), 320.0, |ui| one(ui, typed, password, Secret::Typed, Some(Shown::Focus)));
+        let refused = Field { error: Some(tr!("The server refused this password.")), ..password };
+        field_cell(ui, theme, tr!("error"), 320.0, |ui| one(ui, typed, refused, Secret::Typed, None));
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("disabled"), 320.0, |ui| one(ui, typed, Field { enabled: false, ..password }, Secret::Typed, None));
+        let stored = Field::new(tr!("New password"), tr!("empty keeps the stored one"));
+        field_cell(ui, theme, tr!("stored"), 320.0, |ui| one(ui, "", stored, Secret::Stored, None));
+    });
+}
+
 /// The fields' middle column of boards.
-fn fields_middle(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn fields_middle(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    ui.push_id("password-field", |ui| password_fields(ui, theme));
+}
 
 /// The fields' right column of boards.
 fn fields_right(_: &mut Ui, _: &Theme, _: &Keymap) {}

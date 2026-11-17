@@ -371,7 +371,10 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                 }
                 let clip = inner.expand2(vec2(caret_size(theme).x + theme.spacing.s1, vertical));
                 if empty {
-                    paint_hint(ui, theme, field.hint, if stored { theme.fonts.body } else { font }, inner.min, inner, seen.focus);
+                    // A stored password's hint is words, in `body`, centred as words are.
+                    let hint_font = if stored { theme.fonts.body } else { font };
+                    let at = pos2(inner.left(), rect.top() + ((height - hint_font.line) / 2.0).max(0.0));
+                    paint_hint(ui, theme, field.hint, hint_font, at, Rect::from_x_y_ranges(inner.x_range(), rect.shrink(1.0).y_range()), seen.focus);
                 }
                 if seen.focus && !field.read_only {
                     paint_caret(ui, theme, id, &output, clip.intersect(rect.shrink(1.0)), seen.forced);

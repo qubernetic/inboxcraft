@@ -500,3 +500,150 @@ fn a_multiline_field_grows_to_240_then_scrolls() {
         }
     }
 }
+
+/// The states of the password field's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    Empty,
+    Filled,
+    Focus,
+    Error,
+    Disabled,
+    Stored,
+}
+
+const PASSES: [Pass; 6] = [Pass::Empty, Pass::Filled, Pass::Focus, Pass::Error, Pass::Disabled, Pass::Stored];
+
+/// Not a real password: twelve characters for the twelve dots of the sheet.
+const TYPED: &str = "kettle-on-12";
+
+/// The password field of the sheet, 320 wide, in `state`.
+fn password_in(mode: Mode, state: Pass) -> (Rect, Own, crate::component::tests::Paint, Harness<'static>) {
+    let theme = Theme::new(mode, TextScale::default());
+    let label = if state == Pass::Stored { "New password" } else { "Password" };
+    let mut harness = staged(
+        theme,
+        |p| p.bg,
+        vec2(420.0, 200.0),
+        move |ui, theme| {
+            let mut text = if matches!(state, Pass::Empty | Pass::Stored) { String::new() } else { TYPED.to_owned() };
+            let field = Field {
+                label,
+                hint: if state == Pass::Stored { "empty keeps the stored one" } else { "" },
+                error: (state == Pass::Error).then_some("The server refused this password."),
+                enabled: state != Pass::Disabled,
+                read_only: false,
+            };
+            let secret = if state == Pass::Stored { Secret::Stored } else { Secret::Typed };
+            ui.vertical(|ui| {
+                ui.set_width(320.0);
+                password_field(ui, theme, egui::Id::unique("password"), &mut text, &field, secret);
+            });
+        },
+    );
+    if state == Pass::Focus {
+        bring(&mut harness, label, Shown::Focus);
+        harness.key_press(egui::Key::End);
+        harness.run();
+    }
+    let rect = harness.get_by_label(label).rect();
+    let paint = painted(&harness, label);
+    (rect, own(&paint, rect), paint, harness)
+}
+
+#[test]
+fn a_password_field_looks_as_its_sheet_says_in_every_state() {
+    let dots: String = std::iter::repeat_n(egui::epaint::text::PASSWORD_REPLACEMENT_CHAR, TYPED.chars().count()).collect();
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for state in PASSES {
+            let (rect, look, paint, harness) = password_in(mode, state);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert!((rect.width() - 320.0).abs() < 0.01 && (rect.height() - 36.0).abs() < 0.01, "{at} {rect:?}");
+            let (fill, edge) = match state {
+                Pass::Focus => (Some(p.term), (p.cyan_edge, false)),
+                Pass::Error => (Some(p.term), (p.minus, false)),
+                Pass::Disabled => (None, (p.line, true)),
+                _ => (Some(p.term), (p.line, false)),
+            };
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, Some((1.0, edge.0, edge.1)), "{at}");
+            let texts = drawn(&harness);
+            assert!(texts.iter().all(|text| !text.text.contains(TYPED)), "{at}: the password in clear");
+            // The dots 13 in and 8 down, Plex Mono 13/20 in `ink`; none while empty, disabled or stored.
+            let shown: Vec<_> = texts.iter().filter(|text| text.text.contains(egui::epaint::text::PASSWORD_REPLACEMENT_CHAR)).collect();
+            if matches!(state, Pass::Filled | Pass::Focus | Pass::Error) {
+                assert_eq!(shown.len(), 1, "{at}");
+                assert_eq!(shown[0].text, dots, "{at}");
+                assert_eq!(shown[0].rect.min, rect.min + vec2(13.0, 8.0), "{at}");
+                assert_eq!((shown[0].colour, shown[0].family.as_str(), shown[0].size, shown[0].row), (p.ink, "Monospace", 13.0, 20.0), "{at}");
+            } else {
+                assert!(shown.is_empty(), "{at}: {shown:?}");
+            }
+            // The mark at 291, 10: the password mark (`dim` when disabled), the lock when stored.
+            let (glyph, ink) = match state {
+                Pass::Stored => ("\u{e2fa}", p.muted),
+                Pass::Disabled => ("\u{e752}", p.dim),
+                _ => ("\u{e752}", p.muted),
+            };
+            let mark = one(&harness, glyph);
+            assert!((mark.rect.center() - (rect.min + vec2(299.0, 18.0))).length() < 1.5 && mark.colour == ink, "{at} {mark:?}");
+            let block = caret(&paint, p.cyan_edge);
+            if state == Pass::Focus {
+                let left = (shown[0].rect.right() + 2.0).round();
+                assert_eq!(block, Some(Rect::from_min_size(pos2(left, rect.top() + 10.0), vec2(7.0, 16.0))), "{at}");
+            } else {
+                assert_eq!(block, None, "{at}");
+            }
+            match state {
+                Pass::Error => {
+                    let message = one(&harness, "The server refused this password.");
+                    assert_eq!((message.rect.min, message.colour), (rect.left_bottom() + vec2(0.0, 8.0), p.minus), "{at}");
+                }
+                Pass::Stored => {
+                    let hint = one(&harness, "empty keeps the stored one");
+                    assert_eq!(hint.rect.min, rect.min + vec2(13.0, 7.0), "{at}");
+                    assert_eq!((hint.colour, hint.family.as_str(), hint.size), (p.muted, "Proportional", 14.0), "{at}");
+                    let note = one(&harness, "The stored password is in your system's credential store and is never shown.");
+                    assert_eq!((note.rect.min, note.colour, note.size), (rect.left_bottom() + vec2(0.0, 8.0), p.muted, 12.0), "{at}");
+                    assert!((note.rect.height() - 36.0).abs() < 0.01, "{at}: two lines in 320 {note:?}");
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn a_stored_password_shows_no_dots() {
+    let (rect, _, _, harness) = password_in(Mode::Light, Pass::Stored);
+    assert!(drawn(&harness).iter().all(|text| !text.text.contains(egui::epaint::text::PASSWORD_REPLACEMENT_CHAR)), "{rect:?}");
+    assert_eq!(harness.get_by_role(Role::PasswordInput).accesskit_node().value().as_deref().unwrap_or_default(), "");
+}
+
+#[test]
+fn a_password_never_reaches_a_screen_reader_nor_the_undo_history() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, text: &mut String| {
+            password_field(ui, &theme, egui::Id::unique("password"), text, &Field::new("Password", ""), Secret::Typed);
+        },
+        String::new(),
+    );
+    harness.run();
+    harness.get_by_role(Role::PasswordInput).focus();
+    harness.run();
+    harness.get_by_role(Role::PasswordInput).type_text(TYPED);
+    harness.run();
+    assert_eq!(harness.state(), TYPED);
+    let node = harness.get_by_role(Role::PasswordInput);
+    assert!(!node.accesskit_node().value().unwrap_or_default().contains(TYPED));
+    assert!(harness.root().children_recursive().all(|node| !format!("{:?}", node.accesskit_node()).contains(TYPED)), "a node holds the password");
+    // Undo brings nothing back.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.key_press(egui::Key::Backspace);
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run();
+    assert_eq!(harness.state(), "");
+}
