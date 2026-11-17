@@ -18,6 +18,7 @@ use crate::theme::{TextScale, Theme};
 use crate::tr;
 
 use super::Shown;
+use super::avatar::AvatarSize;
 use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
 use super::hover::{self, Action};
@@ -35,7 +36,7 @@ use super::{avatar, badge, card, cut, galley, label, pill, popup, tooltip};
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(1800.0, TOP + BOARDS + CONTROLS)
+    vec2(1800.0, TOP + BOARDS + CONTROLS + MARKS)
 }
 
 /// What draws a column of the page.
@@ -49,6 +50,9 @@ const BOARDS: f32 = 960.0;
 
 /// The height of the boards of the toggles and choices, under the other boards, in points.
 const CONTROLS: f32 = 860.0;
+
+/// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
+const MARKS: f32 = 400.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -723,6 +727,32 @@ fn controls_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     selects(ui, theme, keymap);
 }
 
+/// The avatar's board: default, small, large, unknown.
+fn avatars(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Avatar"));
+    cells(ui, theme, |ui| {
+        let people = [
+            (tr!("default"), "Tamsin Vale", "tamsin@example.org", AvatarSize::M),
+            (tr!("size-s"), "Odile Brannock", "odile@example.org", AvatarSize::S),
+            (tr!("size-l"), "Mira Solberg", "mira@example.org", AvatarSize::L),
+            (tr!("unknown"), "", "", AvatarSize::M),
+        ];
+        for (state, name, address, size) in people {
+            cell(ui, theme, state, |ui| {
+                avatar::avatar(ui, theme, name, address, size.side(theme));
+            });
+        }
+    });
+}
+
+/// The marks' left column.
+fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    avatars(ui, theme);
+}
+
+/// The marks' right column.
+fn marks_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
@@ -732,7 +762,7 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
     let board = (whole.width() - s.s2 * 3.0) / 2.0;
     let top = TOP - s.s2 * 2.0;
-    let columns: [(f32, f32, f32, Draw); 7] = [
+    let columns: [(f32, f32, f32, Draw); 9] = [
         (s.s2, s.s2, half, left),
         (s.s2 * 2.0 + half, s.s2, half, right),
         (s.s2 * 3.0 + half * 2.0, s.s2, PICKER, picker),
@@ -740,14 +770,18 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         (s.s2 * 2.0 + board, TOP, board, boards_right),
         (s.s2, TOP + BOARDS, board, controls_left),
         (s.s2 * 2.0 + board, TOP + BOARDS, board, controls_right),
+        (s.s2, TOP + BOARDS + CONTROLS, board, marks_left),
+        (s.s2 * 2.0 + board, TOP + BOARDS + CONTROLS, board, marks_right),
     ];
     for (x, y, width, draw) in columns {
         let height = if y < TOP {
             top
         } else if y < TOP + BOARDS {
             BOARDS - s.s2
-        } else {
+        } else if y < TOP + BOARDS + CONTROLS {
             CONTROLS - s.s2
+        } else {
+            MARKS - s.s2
         };
         let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {

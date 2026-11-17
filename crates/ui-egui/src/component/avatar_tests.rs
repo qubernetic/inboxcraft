@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::component::tests::builder;
+use crate::component::tests::{Own, builder, own, painted, staged};
 use egui::accesskit::Role;
 use egui::{Rect, pos2, vec2};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{CORNER, avatar, initials, paint};
+use super::{AvatarSize, CORNER, avatar, initials, paint};
 use crate::shot;
 use crate::theme::{Mode, TextScale, Theme, contrast, install_fonts};
 
@@ -80,5 +80,66 @@ fn the_avatar_paints_the_stage_with_the_muted_initials_in_the_middle() {
         });
         assert!(inked, "the initials are drawn in their ink");
         assert!(near(3, 3) && near(36, 36), "{:?}: the square reaches its corners", theme.mode);
+    }
+}
+
+/// The states of the avatar's sheet, in its order: the name and address shown, the size, the side at 100 %, the
+/// initials and whether the person is unknown.
+const STATES: [(&str, &str, AvatarSize, f32, &str, bool); 4] = [
+    ("Tamsin Vale", "tamsin@example.org", AvatarSize::M, 32.0, "TV", false),
+    ("Odile Brannock", "odile@example.org", AvatarSize::S, 24.0, "OB", false),
+    ("Mira Solberg", "mira@example.org", AvatarSize::L, 40.0, "MS", false),
+    ("", "", AvatarSize::M, 32.0, "?", true),
+];
+
+/// The avatar of `name` and `address` at `size`, on a `surface` stage: its rect and its own look.
+fn avatar_in(mode: Mode, scale: TextScale, name: &'static str, address: &'static str, size: AvatarSize) -> (Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(200.0, 120.0),
+        move |ui, theme| {
+            avatar(ui, theme, name, address, size.side(theme));
+        },
+    );
+    let label = if name.is_empty() { "Unknown sender" } else { name };
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+#[test]
+fn an_avatar_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (name, address, size, side, letters, unknown) in STATES {
+            let (rect, look) = avatar_in(mode, TextScale::default(), name, address, size);
+            let at = format!("{mode:?} {letters}: {look:#?}");
+            assert!((rect.width() - side).abs() < 0.01 && (rect.height() - side).abs() < 0.01, "{at} {rect:?}");
+            let font = if size == AvatarSize::L { theme.fonts.button.semibold() } else { theme.fonts.key };
+            assert_eq!(look.texts, vec![(letters.to_owned(), p.muted, font.id().family.to_string(), font.size)], "{at}");
+            if unknown {
+                assert_eq!(look.fill, None, "an unknown person has no square: {at}");
+                assert_eq!(look.edge, Some((1.0, p.line, true)), "a dashed line box: {at}");
+            } else {
+                assert_eq!(look.fill, Some(p.stage), "{at}");
+                assert_eq!(look.edge, None, "{at}");
+                assert_eq!(look.radius, CORNER, "{at}");
+            }
+            assert!(look.radius <= CORNER, "{at}");
+            assert_eq!(look.ring, None, "{at}");
+            assert!(!look.overflows, "{at}");
+        }
+    }
+}
+
+#[test]
+fn an_avatar_at_130_percent_is_the_scaled_side() {
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    for (name, address, size, side, ..) in STATES {
+        let (rect, look) = avatar_in(Mode::Light, TextScale::ALL[4], name, address, size);
+        assert!((rect.width() - theme.size(side)).abs() < 0.01 && (rect.height() - theme.size(side)).abs() < 0.01, "{rect:?}");
+        assert!(!look.overflows, "{look:#?}");
     }
 }

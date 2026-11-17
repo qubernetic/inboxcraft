@@ -758,8 +758,8 @@ impl Theme {
         (px * self.text_scale.factor() / 2.0).round() * 2.0
     }
 
-    /// The fixed heights at the text scale (each through [`Theme::size`]); the widths, the avatars and the scroll bar
-    /// stay as they are.
+    /// The fixed heights at the text scale (each through [`Theme::size`]), and the avatars' sides with them; the
+    /// widths and the scroll bar stay as they are.
     #[must_use]
     pub fn boxes(&self) -> Sizes {
         let z = self.sizes;
@@ -776,6 +776,7 @@ impl Theme {
             mark: self.size(z.mark),
             check: self.size(z.check),
             pill: self.size(z.pill),
+            avatar: z.avatar.map(|side| self.size(side)),
             ..z
         }
     }
