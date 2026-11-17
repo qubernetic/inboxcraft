@@ -284,12 +284,10 @@ pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint
         .filter(|(of, rect, ..)| *of == layer && grown.contains_rect(*rect))
         .map(|(_, rect, colour, radius)| (*rect, *colour, *radius))
         .collect();
-    // The pieces a dashed edge is drawn from: rects and arc rings of its colour lying in its box.
+    // The pieces a dashed edge is drawn from besides its mesh of straight dashes (which `read` skips): the arc rings
+    // of its colour lying in its box. A rect or a line of that colour inside the box is the control's own paint (a
+    // segmented control's hairlines), never a dash.
     let in_dash = |shape: &Shape| match shape {
-        Shape::LineSegment { points, stroke } => dashes
-            .iter()
-            .any(|(rect, colour, _)| stroke.color == *colour && rect.expand(0.5).contains(points[0]) && rect.expand(0.5).contains(points[1])),
-        Shape::Rect(piece) => dashes.iter().any(|(rect, colour, _)| piece.fill == *colour && rect.expand(0.01).contains_rect(piece.rect)),
         Shape::Path(piece) => {
             dashes.iter().any(|(rect, colour, _)| piece.fill == *colour && piece.points.iter().all(|at| rect.expand(0.01).contains(*at)))
         }
