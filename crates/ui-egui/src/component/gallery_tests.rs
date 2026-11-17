@@ -29,7 +29,8 @@ fn the_gallery_shows_every_component_in_both_modes() {
             for name in ["Newsletters", "Screener: 3 new senders", "Unpin", "Unread", "People", "Marked as done", "Move to a folder"] {
                 harness.get_by_label(name);
             }
-            assert!(harness.query_all_by_label("Archive").count() >= 1, "the archive button");
+            // The archive button itself: its two tooltips on the tooltip board carry the name too.
+            harness.get_by_role_and_label(Role::Button, "Archive");
             assert!(harness.query_all_by_label("Done").count() >= 2, "the button and the hover action");
             for name in ["Snooze until", "Later today, 17:30", "Tomorrow morning, Sat 08:00", "Thursday 12 November, 09:00"] {
                 harness.get_by_label(name);
