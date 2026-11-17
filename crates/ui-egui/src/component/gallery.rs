@@ -18,7 +18,7 @@ use crate::theme::Theme;
 use crate::tr;
 
 use super::Shown;
-use super::button::{IconButton, TextButton, Tone};
+use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::checkbox;
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
@@ -327,6 +327,25 @@ fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The link's board: a link of a line in default, hover, focus, pressed and disabled; a row's small link in default,
+/// hover, focus and disabled.
+fn links(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Link"));
+    let states = [(tr!("default"), Shown::Rest), (tr!("hover"), Shown::Hover), (tr!("focus"), Shown::Focus), (tr!("pressed"), Shown::Pressed)];
+    for (size, name) in [(LinkSize::Line, tr!("Show details")), (LinkSize::Small, tr!("open log"))] {
+        cells(ui, theme, |ui| {
+            for (state, shown) in states.into_iter().filter(|(_, shown)| size == LinkSize::Line || *shown != Shown::Pressed) {
+                cell(ui, theme, state, |ui| {
+                    button::link_with(ui, theme, keymap, name, size, true, Some(shown));
+                });
+            }
+            cell(ui, theme, tr!("disabled"), |ui| {
+                button::link_with(ui, theme, keymap, name, size, false, None);
+            });
+        });
+    }
+}
+
 /// The key chip's board: default, on cyan, capture, none, disabled.
 fn key_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Key chip"));
@@ -353,7 +372,8 @@ fn boards_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 }
 
 /// The boards' right column.
-fn boards_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+fn boards_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    links(ui, theme, keymap);
     key_chips(ui, theme);
 }
 

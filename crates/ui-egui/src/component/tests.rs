@@ -443,6 +443,8 @@ pub(crate) struct Own {
     pub ring: Option<(Rect, f32, Color32)>,
     /// Its texts, glyphs included: `(text, colour, family, size)`.
     pub texts: Vec<(String, Color32, String, f32)>,
+    /// The colours of the level hairlines inside it (a link's underline).
+    pub lines: Vec<Color32>,
     /// The largest corner radius it paints.
     pub radius: f32,
     /// Whether a text of it reaches past the 4 points around it.
@@ -452,12 +454,19 @@ pub(crate) struct Own {
 /// [`Own`] of the widget whose own rect is `rect`, from `paint`.
 pub(crate) fn own(paint: &Paint, rect: Rect) -> Own {
     let near = |a: Rect, b: Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
-    let mut found = Own { fill: None, edge: None, ring: None, texts: Vec::new(), radius: 0.0, overflows: false };
+    let mut found = Own { fill: None, edge: None, ring: None, texts: Vec::new(), lines: Vec::new(), radius: 0.0, overflows: false };
     for shape in &paint.shapes {
         found.overflows |= shape.overflows;
         match &shape.look {
             Look::Rect { fill, stroke, stroke_kind, radius, dashed } => {
                 found.radius = found.radius.max(*radius);
+                if let (Some((_, colour)), StrokeKind::Middle, false) = (stroke, stroke_kind, dashed)
+                    && shape.inside
+                    && shape.rect.height() == 0.0
+                {
+                    found.lines.push(*colour);
+                    continue;
+                }
                 if fill.a() > 0 && near(shape.rect, rect) {
                     found.fill = Some(*fill);
                 }

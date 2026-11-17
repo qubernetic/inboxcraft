@@ -200,6 +200,10 @@ pub struct Sizes {
     pub group_head: f32,
     /// A key chip's and a tag's height.
     pub chip: f32,
+    /// A link's height.
+    pub link: f32,
+    /// The height of a row's small link, as high as the row's text line.
+    pub row_link: f32,
     /// The avatar's sides: small, middle, large.
     pub avatar: [f32; 3],
     /// The mail list's width.
@@ -219,6 +223,8 @@ pub(crate) const SIZES: Sizes = Sizes {
     mail_row: 56.0,
     group_head: 32.0,
     chip: 20.0,
+    link: 24.0,
+    row_link: 16.0,
     avatar: [24.0, 32.0, 40.0],
     list: 440.0,
     scrollbar: 12.0,
@@ -735,6 +741,8 @@ impl Theme {
             mail_row: self.size(z.mail_row),
             group_head: self.size(z.group_head),
             chip: self.size(z.chip),
+            link: self.size(z.link),
+            row_link: self.size(z.row_link),
             icon: self.size(z.icon),
             mark: self.size(z.mark),
             ..z

@@ -376,27 +376,60 @@ pub fn unavailable(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, prim
 #[path = "button_tests.rs"]
 mod tests;
 
-/// The room a [`link`] leaves left and right of its text, in points.
+/// The room a [`link`] of a line leaves left and right of its text, in points.
 pub const LINK_PAD: f32 = 4.0;
 
-/// A link called `name`: the text in the accent colour on nothing, a hover fill under the pointer and a ring with the
-/// keyboard focus, with [`LINK_PAD`] points of room beside the text.
+/// The two sizes of a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkSize {
+    /// A link of its own: mono 13, 24 high, [`LINK_PAD`] beside the text.
+    Line,
+    /// The small link of a row (open, save, show all, undo): mono 11, 16 high, no room beside the text, so it stands
+    /// on the row's text line.
+    Small,
+}
+
+/// A link called `name` of a line: [`link_sized`] in [`LinkSize::Line`].
 pub fn link(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str) -> Response {
-    let s = &theme.spacing;
+    link_sized(ui, theme, keymap, name, LinkSize::Line)
+}
+
+/// A link called `name` in `size`: the accent as text on nothing, underlined under the pointer, underlined on the
+/// accent wash while pressed, the focus ring 2 px clear of it; `muted` when it cannot be used (coming soon).
+pub fn link_sized(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size: LinkSize) -> Response {
+    link_with(ui, theme, keymap, name, size, true, None)
+}
+
+/// [`link_sized`], `enabled` or not, drawn in `shown` when it is given (the gallery's boards).
+pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size: LinkSize, enabled: bool, shown: Option<Shown>) -> Response {
     let p = &theme.palette;
-    let soon = soon::is_soon(ui);
-    let ink = soon::ink(ui, theme, p.cyan_text);
-    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), ink);
-    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(2.0 * LINK_PAD, 2.0 * s.s1), soon::sense(ui, Sense::click()));
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, !soon, name));
+    let enabled = enabled && !soon::is_soon(ui) && ui.is_enabled();
+    let (font, pad, height) = match size {
+        LinkSize::Line => (theme.fonts.button, LINK_PAD, theme.boxes().link),
+        LinkSize::Small => (theme.fonts.mono_s, 0.0, theme.boxes().row_link),
+    };
+    let ink = if enabled { p.cyan_text } else { p.muted };
+    let galley = super::galley(ui, name, font, ink);
+    let width = galley.size().x.ceil();
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(vec2(width + pad * 2.0, height), sense);
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
+    let lit = lit(ui, theme, &response, enabled, shown);
     if ui.is_rect_visible(rect) {
-        if response.hovered() && !soon {
-            ui.painter().rect_filled(rect, 0.0, p.stage);
+        let painter = ui.painter();
+        if lit.pressed {
+            painter.rect_filled(rect, 0.0, p.cyan_muted);
         }
-        if response.has_focus() {
-            ui.painter().rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);
+        let top = (rect.center().y - galley.size().y / 2.0).round();
+        if lit.hover || lit.pressed {
+            // The underline: a hairline two points over the foot of the text's line.
+            let y = top + font.line - 2.0;
+            paint::hairline(painter, egui::pos2(rect.left() + pad, y), egui::pos2(rect.left() + pad + width - 1.0, y), p.cyan_text);
         }
-        ui.painter().galley(rect.min + vec2(LINK_PAD, s.s1), galley, ink);
+        painter.galley(egui::pos2(rect.left() + pad, top), galley, ink);
+        if lit.focus {
+            paint::focus_ring(painter, theme, rect, Ring::Outside);
+        }
     }
     tooltip::attach(response, theme, keymap, name, None)
 }

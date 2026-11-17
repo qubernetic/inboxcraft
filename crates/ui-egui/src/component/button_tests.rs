@@ -5,7 +5,7 @@ use egui::accesskit::{Role, Toggled};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::{IconButton, TextButton, Tone};
+use super::{IconButton, LinkSize, TextButton, Tone};
 use crate::component::Shown;
 use crate::component::control_side;
 use crate::component::tests::{Own, bring, builder, drew_icon, icons, own, painted, staged, theme};
@@ -519,5 +519,66 @@ fn a_pressed_button_differs_from_a_hovered_one() {
         let (_, hovered) = icon_button_in(mode, TextScale::default(), IconState::Hover);
         let (_, pressed) = icon_button_in(mode, TextScale::default(), IconState::Pressed);
         assert_ne!(hovered, pressed, "{mode:?} icon button");
+    }
+}
+
+/// The states of the link's sheet, in its order: the line size has all five, the small one no pressed.
+const LINK_STATES: [(Shown, bool); 5] =
+    [(Shown::Rest, true), (Shown::Hover, true), (Shown::Focus, true), (Shown::Pressed, true), (Shown::Rest, false)];
+
+/// The link `label` in `size`, `enabled` or not, on a `surface` stage, brought into `shown`: its rect and its look.
+fn link_in(mode: Mode, scale: TextScale, label: &'static str, size: LinkSize, enabled: bool, shown: Shown) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(300.0, 100.0),
+        move |ui, theme| {
+            super::link_with(ui, theme, &Keymap::default(), label, size, enabled, None);
+        },
+    );
+    if enabled {
+        bring(&mut harness, label, shown);
+    }
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+#[test]
+fn a_link_looks_as_its_sheet_says_in_every_size_and_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (size, label, width, height, font) in
+            [(LinkSize::Line, "Show details", 102.0, 24.0, theme.fonts.button), (LinkSize::Small, "open log", 53.0, 16.0, theme.fonts.mono_s)]
+        {
+            for (shown, enabled) in LINK_STATES {
+                if size == LinkSize::Small && shown == Shown::Pressed {
+                    continue;
+                }
+                let (rect, look) = link_in(mode, TextScale::default(), label, size, enabled, shown);
+                let at = format!("{mode:?} {size:?} {shown:?} {enabled}: {look:#?}");
+                assert!((rect.width() - width).abs() <= 1.0 && (rect.height() - height).abs() < 0.01, "{at} {rect:?}");
+                let ink = if enabled { p.cyan_text } else { p.muted };
+                assert_eq!(look.texts, vec![(label.to_owned(), ink, font.id().family.to_string(), font.size)], "{at}");
+                let underlined = enabled && matches!(shown, Shown::Hover | Shown::Pressed);
+                assert_eq!(look.lines, if underlined { vec![p.cyan_text] } else { Vec::new() }, "{at}");
+                assert_eq!(look.fill, (enabled && shown == Shown::Pressed).then_some(p.cyan_muted), "{at}");
+                assert_eq!(look.edge, None, "{at}");
+                let ring = (enabled && shown == Shown::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+                assert_eq!(look.ring, ring, "{at}");
+                assert!(!look.overflows, "{at}");
+                assert!(look.radius <= 0.0, "{at}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_link_at_130_percent_is_the_scaled_height() {
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    for (size, height) in [(LinkSize::Line, theme.boxes().link), (LinkSize::Small, theme.boxes().row_link)] {
+        let (rect, _) = link_in(Mode::Dark, TextScale::ALL[4], "open", size, true, Shown::Rest);
+        assert!((rect.height() - height).abs() < 0.01, "{size:?} {rect:?}");
     }
 }
