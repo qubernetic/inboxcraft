@@ -621,3 +621,60 @@ fn a_selected_icon_button_pressed_keeps_the_wash_and_takes_the_accent_edge() {
         }
     }
 }
+
+/// The widget `label` that `add` draws on a `surface` stage in `mode`, held down by the pointer (`key` is `None`) or by
+/// `key` while it has the focus: its rect and its look.
+fn held_by(mode: Mode, label: &'static str, key: Option<egui::Key>, add: impl Fn(&mut egui::Ui, &Theme) + 'static) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = staged(theme, |p| p.surface, egui::vec2(400.0, 120.0), add);
+    match key {
+        None => bring(&mut harness, label, Shown::Pressed),
+        Some(key) => {
+            bring(&mut harness, label, Shown::Focus);
+            harness.key_down(key);
+            harness.run();
+        }
+    }
+    let rect = harness.get_by_label(label).rect();
+    (rect, own(&painted(&harness, label), rect))
+}
+
+/// How a test draws one control.
+type Draw = Box<dyn Fn(&mut egui::Ui, &Theme)>;
+
+/// Every pressable control of these sets but the section label (its own test): its label and how to draw it.
+fn pressables() -> Vec<(&'static str, Draw)> {
+    let mut all: Vec<(&'static str, Draw)> = vec![
+        ("Pin", Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default())))),
+        ("Pinned", Box::new(|ui, theme| drop(IconButton::new(IconId::Pin, "Pinned").active(true).show(ui, theme, &Keymap::default())))),
+        ("Show details", Box::new(|ui, theme| drop(super::link_sized(ui, theme, &Keymap::default(), "Show details", LinkSize::Line)))),
+        ("open log", Box::new(|ui, theme| drop(super::link_sized(ui, theme, &Keymap::default(), "open log", LinkSize::Small)))),
+    ];
+    for (tone, label, _) in TONES {
+        all.push((label, Box::new(move |ui, theme| drop(TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default())))));
+    }
+    all
+}
+
+#[test]
+fn enter_and_space_each_give_the_pressed_look_to_the_focused_control() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for (index, (label, _)) in pressables().into_iter().enumerate() {
+            let draw = move |ui: &mut egui::Ui, theme: &Theme| (pressables().swap_remove(index).1)(ui, theme);
+            let (_, by_pointer) = held_by(mode, label, None, draw);
+            let (_, at_rest) = held_by(mode, label, Some(egui::Key::A), draw);
+            for key in [egui::Key::Enter, egui::Key::Space] {
+                let (rect, look) = held_by(mode, label, Some(key), draw);
+                let at = format!("{mode:?} {label} {key:?}: {look:#?} pointer {by_pointer:#?}");
+                assert_eq!(
+                    (look.fill, look.edge, &look.texts, &look.lines),
+                    (by_pointer.fill, by_pointer.edge, &by_pointer.texts, &by_pointer.lines),
+                    "{at}"
+                );
+                assert_ne!((look.fill, look.edge, &look.lines), (at_rest.fill, at_rest.edge, &at_rest.lines), "pressed differs from focus: {at}");
+                assert_eq!(look.ring, Some((rect.expand(3.0), 1.0, p.cyan_edge)), "{at}");
+            }
+        }
+    }
+}

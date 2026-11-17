@@ -134,3 +134,49 @@ fn a_pressed_folding_section_label_takes_a_muted_edge_round_the_hover_fill() {
         assert_ne!(pressed, rest, "{mode:?}");
     }
 }
+
+#[test]
+fn enter_and_space_press_a_focused_folding_label_and_its_ring_stands_round_the_reach() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let name = "[ 01 ] Mailboxes";
+        for key in [None, Some(egui::Key::Enter), Some(egui::Key::Space)] {
+            let mut harness = staged(
+                theme,
+                |p| p.panel,
+                egui::vec2(300.0, 100.0),
+                move |ui, theme| {
+                    section_label_with(ui, theme, "[ 01 ]", "Mailboxes", false, true, None);
+                },
+            );
+            bring(&mut harness, name, Shown::Focus);
+            if let Some(key) = key {
+                harness.key_down(key);
+                harness.run();
+            }
+            let rect = harness.get_by_label(name).rect();
+            let reach = rect.expand2(egui::vec2(4.0, 2.0));
+            let paint = painted(&harness, name);
+            // The ring stands past the 4 points `painted` looks round the label: read it from the whole frame.
+            let mut strokes = Vec::new();
+            for clipped in &harness.output().shapes {
+                let mut flat = vec![&clipped.shape];
+                while let Some(shape) = flat.pop() {
+                    match shape {
+                        egui::Shape::Vec(shapes) => flat.extend(shapes.iter()),
+                        egui::Shape::Rect(shape) if shape.stroke.width > 0.0 && reach.expand(4.0).contains_rect(shape.rect) => {
+                            strokes.push((shape.rect, shape.stroke.width, shape.stroke.color, shape.stroke_kind));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let at = format!("{mode:?} {key:?}: {strokes:?} {rect:?}");
+            assert!(strokes.contains(&(reach.expand(2.0), 1.0, p.cyan_edge, egui::StrokeKind::Outside)), "the ring, 2 px clear of the reach: {at}");
+            let edge = strokes.contains(&(reach, 1.0, p.muted, egui::StrokeKind::Inside));
+            let fill = paint.rects().any(|shape| shape.rect == reach && matches!(shape.look, Look::Rect { fill, .. } if fill == p.grid));
+            assert_eq!((edge, fill), (key.is_some(), key.is_some()), "pressed only while the key is down: {at}");
+        }
+    }
+}
