@@ -275,7 +275,7 @@ impl Composer {
 
     /// Reads the names of the templates of the draft's account. A refusal leaves none, shown in the error banner: the
     /// draft is made by then, and the composer stays open over it without the menu.
-    fn load_templates(&mut self, mailbox: &mut Mailbox) {
+    pub(crate) fn load_templates(&mut self, mailbox: &mut Mailbox) {
         self.templates = match mailbox.run("template.list", &json!({ "account": self.account })) {
             Ok(answer) => answer
                 .get("templates")

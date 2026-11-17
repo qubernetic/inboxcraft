@@ -167,3 +167,4 @@ fn the_template_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside()
         crate::component::popup::tests::walk_a_menu(&mut harness, (Role::Button, "Templates"), key);
     }
 }
+

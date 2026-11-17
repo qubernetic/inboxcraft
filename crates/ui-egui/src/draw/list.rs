@@ -247,6 +247,11 @@ fn act(message: &MessageRow, index: usize) -> Option<Act> {
     }
 }
 
+/// The id of the group menu of the message `id`'s row.
+pub(super) fn group_menu_id(id: u64) -> Id {
+    Id::unique("list-group-menu").with(id)
+}
+
 /// The width of the group menu, in body text sizes.
 const MENU_WIDTH: f32 = 18.0;
 
@@ -254,7 +259,7 @@ const MENU_WIDTH: f32 = 18.0;
 /// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
 pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str) -> Option<Act> {
     let mut chosen = None;
-    crate::component::label(ui, theme.fonts.label, tr!("Group"), theme.palette.muted);
+    popup::title(ui, theme, tr!("Group"), None);
     for kind in GroupKind::ALL {
         if popup::choice(ui, theme, kind.text(), current == Some(kind)).clicked() {
             chosen = Some(Act::Group(Some(kind)));
@@ -263,9 +268,11 @@ pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>,
     if popup::choice(ui, theme, tr!("Let InboxCraft sort it"), false).clicked() {
         chosen = Some(Act::Group(None));
     }
-    ui.add_space(theme.spacing.s1);
     let note = tr!("Moves all mail from {address}, kept and future.", address = address);
-    ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+    // 12 in, as a float's words stand (8 above, 10 below, as the time picker's note).
+    Frame::NONE.inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 10 }).show(ui, |ui| {
+        ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
+    });
     chosen
 }
 
@@ -308,7 +315,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
-        let menu = Id::unique("list-group-menu").with(message.id);
+        let menu = group_menu_id(message.id);
         popup::context_menu(ui.ctx(), theme, &response, menu, width, |ui| {
             let chosen = group_menu(ui, theme, message.group, &message.address);
             if chosen.is_some() {

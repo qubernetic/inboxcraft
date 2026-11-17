@@ -46,7 +46,8 @@
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
-//! or `parked`), `show_done` set to `true` lists the done mail in its old place, and `picker` opens the time picker
+//! or `parked`), `show_done` set to `true` lists the done mail in its old place, `menu` opens a menu (`more`, `move`,
+//! `from`, `templates`, `group`), and `picker` opens the time picker
 //! over the selected message with that text typed (`""` for none). `outbox` shows the sample with its first account
 //! able to send and its sent message bounced ([`sample::sending`]): `waiting` the outbox with a send counting down its
 //! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
@@ -230,6 +231,9 @@ pub struct Shot {
     /// Whether "Show done" lists the done mail in its old place.
     #[serde(default)]
     pub show_done: Option<bool>,
+    /// A menu open: the reader's `more` or `move`, the composer's `from` or `templates`, the selected row's `group`.
+    #[serde(default)]
+    pub menu: Option<String>,
     /// The time picker open over the selected message, with this text typed (`""` for none).
     #[serde(default)]
     pub picker: Option<String>,
@@ -491,6 +495,8 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
             "text": "Hi both,\n\nWe meet at the plot at {?time} and finish by noon. Bring gloves; the shed has spades and the wheelbarrow.\n",
         });
         mailbox.run("template.save", &params)?;
+        // The menu of templates knows the one just saved.
+        composer.load_templates(mailbox);
         return composer.use_template(mailbox, "Work party");
     }
     if scene != "new" {
@@ -607,6 +613,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.later.is_some()
         || shot.show_done.is_some()
         || shot.picker.is_some()
+        || shot.menu.is_some()
         || shot.outbox.is_some()
         || (shot.icons == Some(true) && shot.components == Some(true));
     if window {
@@ -1084,6 +1091,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
             return Err(bad(format!("{}: the time picker needs a selected row", shot.out)));
         }
         app.open_picker(typed);
+    }
+    if let Some(menu) = &shot.menu
+        && !app.open_menu(menu)
+    {
+        return Err(bad(format!("{}: there is no menu {menu:?} to open here", shot.out)));
     }
     if let Some(state) = &shot.onboard {
         app = onboard(app, &shot.out, state)?;

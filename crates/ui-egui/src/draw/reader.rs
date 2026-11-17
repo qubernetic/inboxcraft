@@ -185,7 +185,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         drawn.asked.push(Asked::Close);
     }
     paint::rule(ui, p.line);
-    crate::component::label(ui, theme.fonts.label, tr!("When a message leaves the list"), p.muted);
+    popup::title(ui, theme, tr!("When a message leaves the list"), None);
     for after in [After::Next, After::Previous, After::List] {
         let response = popup::choice(ui, theme, after_text(after), mailbox.after() == after);
         if response.clicked() {
@@ -208,7 +208,8 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
         let mut chosen = false;
         for folder in mailbox.move_targets(id) {
             // The full path, so a folder inside another says where it is.
-            if popup::entry(ui, theme, keymap, &folder.name, None).clicked() {
+            let item = popup::Item { icon: None, name: &folder.name, caption: None, action: None, state: popup::ItemState::Default };
+            if popup::menu_item(ui, theme, keymap, &item).clicked() {
                 drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
                 chosen = true;
             }

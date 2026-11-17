@@ -169,6 +169,8 @@ pub struct InboxApp {
     sending: Option<u64>,
     /// The composer's send-later picker opens in the next frame.
     later_picker: bool,
+    /// A menu that opens in the next frame (the `ui_shot` scripts).
+    menu: Option<egui::Id>,
 }
 
 impl std::fmt::Debug for InboxApp {
@@ -252,6 +254,7 @@ impl InboxApp {
             picker: None,
             sending: None,
             later_picker: false,
+            menu: None,
         }
     }
 
@@ -534,6 +537,24 @@ impl InboxApp {
         self.picker = Some(typed.to_owned());
     }
 
+    /// Opens the menu `name` in the next frame (the `ui_shot` scripts): the reader's `more` or `move`, the composer's
+    /// `from` or `templates`, or the selected row's `group` menu; whether there is such a menu.
+    pub fn open_menu(&mut self, name: &str) -> bool {
+        let id = match name {
+            "more" => reader::more_menu(),
+            "move" => reader::move_menu(),
+            "from" => compose::from_menu(),
+            "templates" => compose::templates_menu(),
+            "group" => match self.mailbox.selected() {
+                Some(row) => list::group_menu_id(row),
+                None => return false,
+            },
+            _ => return false,
+        };
+        self.menu = Some(id);
+        true
+    }
+
     /// Opens the composer's send-later picker in the next frame, its presets read now (the `ui_shot` scripts).
     pub fn open_send_later(&mut self) {
         self.mailbox.load_presets();
@@ -543,6 +564,9 @@ impl InboxApp {
     /// Opens the time picker asked for by [`InboxApp::open_picker`], before the reader is drawn, and the composer's
     /// send-later picker asked for by [`InboxApp::open_send_later`].
     fn show_picker(&mut self, ctx: &egui::Context) {
+        if let Some(menu) = self.menu.take() {
+            crate::component::popup::set_open(ctx, menu, true);
+        }
         if std::mem::take(&mut self.later_picker) {
             crate::component::popup::set_open(ctx, compose::later_popup(), true);
         }

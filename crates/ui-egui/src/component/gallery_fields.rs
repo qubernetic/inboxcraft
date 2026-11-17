@@ -27,7 +27,7 @@ use super::{galley, typed_time};
 const COLUMN: f32 = 760.0;
 
 /// The page's height, in points: its tallest column.
-const HEIGHT: f32 = 2800.0;
+const HEIGHT: f32 = 2400.0;
 
 /// The page's size in points.
 #[must_use]

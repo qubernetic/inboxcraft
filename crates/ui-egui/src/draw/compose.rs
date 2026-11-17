@@ -343,7 +343,8 @@ fn templates(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &Composer, a
         popup::title(ui, theme, tr!("Put in a template"), None);
         let mut chosen = false;
         for (at, name) in composer.templates().iter().enumerate() {
-            if popup::entry(ui, theme, keymap, name, None).clicked() {
+            let item = popup::Item { icon: None, name, caption: None, action: None, state: popup::ItemState::Default };
+            if popup::menu_item(ui, theme, keymap, &item).clicked() {
                 asked.push(Asked::Template(at));
                 chosen = true;
             }
