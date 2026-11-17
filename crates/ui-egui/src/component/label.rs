@@ -3,7 +3,7 @@
 
 //! The section label, `[ 01 ] MAIL`: the bracketed number in the accent and the word in `muted`, mono 11 in capitals
 //! with 8 % tracking, 8 between them; the word in `ink` while the keyboard is in its section, and in `ink` on the
-//! `grid` fill under the pointer when the label folds its section. And [`count`], the written form of a count.
+//! `grid` fill under the pointer when the label folds its section, with a `muted` edge round it while pressed. And [`count`], the written form of a count.
 
 use egui::{Color32, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
@@ -41,10 +41,15 @@ pub(crate) fn section_label_with(ui: &mut Ui, theme: &Theme, index: &str, word: 
     let lit = if folds { lit(ui, theme, &response, enabled, shown) } else { super::Lit::default() };
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        if lit.hover {
+        if lit.hover || lit.pressed {
             painter.rect_filled(rect.expand2(HOVER_REACH), 0.0, p.grid);
         }
-        let ink = if active || lit.hover { p.ink } else { p.muted };
+        if lit.pressed {
+            // Pressed: a muted edge round the hover fill, as a pressed icon button takes one (the sheet has no
+            // pressed state for the label).
+            painter.rect_stroke(rect.expand2(HOVER_REACH), 0.0, egui::Stroke::new(1.0, p.muted), egui::StrokeKind::Inside);
+        }
+        let ink = if active || lit.hover || lit.pressed { p.ink } else { p.muted };
         let top = (rect.center().y - number.size().y / 2.0).round();
         painter.galley(pos2(rect.left(), top), number, p.cyan_text);
         painter.galley(pos2(rect.left() + left + GAP, top), words, ink);

@@ -582,3 +582,42 @@ fn a_link_at_130_percent_is_the_scaled_height() {
         assert!((rect.height() - height).abs() < 0.01, "{size:?} {rect:?}");
     }
 }
+
+/// The icon button "Pin", selected, on a `surface` stage, in its rail ink when `ink` is given, brought into `shown`.
+fn selected_in(mode: Mode, ink: Option<egui::Color32>, shown: Shown) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        move |ui, theme| {
+            let button = IconButton::new(IconId::Pin, "Pin").active(true);
+            let button = match ink {
+                Some(ink) => button.ink(ink),
+                None => button,
+            };
+            button.show(ui, theme, &Keymap::default());
+        },
+    );
+    bring(&mut harness, "Pin", shown);
+    let rect = harness.get_by_label("Pin").rect();
+    (rect, own(&painted(&harness, "Pin"), rect))
+}
+
+#[test]
+fn a_selected_icon_button_pressed_keeps_the_wash_and_takes_the_accent_edge() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        for ink in [None, Some(p.ink)] {
+            let (_, rest) = selected_in(mode, ink, Shown::Rest);
+            let (_, hovered) = selected_in(mode, ink, Shown::Hover);
+            let (_, pressed) = selected_in(mode, ink, Shown::Pressed);
+            let at = format!("{mode:?} {ink:?}: {pressed:#?}");
+            assert_eq!(pressed.fill, Some(p.cyan_muted), "{at}");
+            assert_eq!(pressed.edge, Some((1.0, p.cyan_edge, false)), "{at}");
+            assert_eq!(pressed.texts[0].1, ink.unwrap_or(p.cyan_text), "{at}");
+            assert_ne!(pressed, rest, "{at}");
+            assert_ne!(pressed, hovered, "{at}");
+        }
+    }
+}

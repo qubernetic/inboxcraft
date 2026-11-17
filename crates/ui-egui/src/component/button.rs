@@ -112,7 +112,12 @@ impl<'a> IconButton<'a> {
             // `surface`, whose hover is `stage`.
             let hover = if self.ink.is_some() { p.grid } else { p.stage };
             if self.active && enabled {
+                // Selected and pressed: the wash keeps and takes the accent edge, as a pressed primary does (the
+                // sheet has no pressed state for a selected button).
                 painter.rect_filled(rect, 0.0, p.cyan_muted);
+                if lit.pressed {
+                    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+                }
             } else if lit.pressed {
                 painter.rect_filled(rect, 0.0, hover);
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);

@@ -276,6 +276,9 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cell(ui, theme, tr!("selected"), |ui| {
             pin().active(true).shown(Shown::Rest).show(ui, theme, keymap);
         });
+        cell(ui, theme, tr!("selected-pressed"), |ui| {
+            pin().active(true).shown(Shown::Pressed).show(ui, theme, keymap);
+        });
         cell(ui, theme, tr!("disabled"), |ui| {
             pin().enabled(false).show(ui, theme, keymap);
         });
@@ -384,6 +387,13 @@ fn section_labels(ui: &mut Ui, theme: &Theme) {
             ui.horizontal(|ui| {
                 ui.add_space(4.0);
                 label::section_label_with(ui, theme, "[ 01 ]", tr!("Mailboxes"), false, true, Some(Shown::Hover));
+                ui.add_space(4.0);
+            });
+        });
+        cell(ui, theme, tr!("pressed"), |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                label::section_label_with(ui, theme, "[ 01 ]", tr!("Mailboxes"), false, true, Some(Shown::Pressed));
                 ui.add_space(4.0);
             });
         });

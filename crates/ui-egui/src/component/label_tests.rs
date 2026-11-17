@@ -6,7 +6,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{count, section_label_with};
 use crate::component::Shown;
-use crate::component::tests::{bring, own, painted, staged};
+use crate::component::tests::{Look, bring, own, painted, staged};
 use crate::theme::{Mode, TextScale, Theme};
 
 #[test]
@@ -92,4 +92,45 @@ fn a_section_label_at_130_percent_is_one_scaled_line() {
     let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
     let (rect, ..) = label_in(Mode::Light, TextScale::ALL[4], false, false, Shown::Rest);
     assert!((rect.height() - theme.fonts.label.line.ceil()).abs() < 0.01, "{rect:?}");
+}
+
+#[test]
+fn a_pressed_folding_section_label_takes_a_muted_edge_round_the_hover_fill() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let name = "[ 01 ] Mailboxes";
+        let looks: Vec<_> = [Shown::Rest, Shown::Hover, Shown::Pressed]
+            .into_iter()
+            .map(|shown| {
+                let mut harness = staged(
+                    theme,
+                    |p| p.panel,
+                    egui::vec2(300.0, 100.0),
+                    move |ui, theme| {
+                        section_label_with(ui, theme, "[ 01 ]", "Mailboxes", false, true, None);
+                    },
+                );
+                bring(&mut harness, name, shown);
+                let rect = harness.get_by_label(name).rect();
+                let paint = painted(&harness, name);
+                let reach = rect.expand2(egui::vec2(4.0, 2.0));
+                let fill = paint.rects().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.grid)).map(|shape| shape.rect);
+                let edge = paint.rects().find_map(|shape| match shape.look {
+                    Look::Rect { stroke: Some((width, colour)), stroke_kind: egui::StrokeKind::Inside, dashed: false, .. } if shape.rect == reach => {
+                        Some((width, colour))
+                    }
+                    _ => None,
+                });
+                let word = own(&paint, rect).texts.iter().find(|(text, ..)| text == "MAILBOXES").map(|(_, colour, ..)| *colour);
+                (fill, edge, word, reach)
+            })
+            .collect();
+        let (rest, hovered, pressed) = (&looks[0], &looks[1], &looks[2]);
+        assert_eq!(pressed.0, Some(pressed.3), "{mode:?} the grid fill");
+        assert_eq!(pressed.1, Some((1.0, p.muted)), "{mode:?} the muted edge");
+        assert_eq!(pressed.2, Some(p.ink), "{mode:?}");
+        assert_ne!(pressed, hovered, "{mode:?}");
+        assert_ne!(pressed, rest, "{mode:?}");
+    }
 }
