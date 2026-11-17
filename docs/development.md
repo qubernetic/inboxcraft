@@ -280,8 +280,11 @@ from = "<its path in the source>"
 sha256 = "<64 hexadecimal digits>"
 ```
 
-- `roots` lists the folders the manifest governs: every file under one of them needs a `[[file]]`. A root that does
-  not exist yet is fine. Files outside the roots may be pinned too.
+- `roots` lists the folders the manifest governs: every file under one of them needs a `[[file]]`, whatever its
+  directory is called (hidden, `plan` and `target` directories count too). A root that does not exist yet is fine;
+  one that exists but is not a directory is a setup error naming it. Files outside the roots may be pinned too.
+- Symbolic links are never followed: a link under a root, a root or pinned path that is a link, or a pinned path
+  with a linked directory in it, each fails as `assets: <path> is a symbolic link, not followed`.
 - A `[[source]]` names where files come from: `id`, and `url` and `version` (the release tag) as they apply.
 - A `[[file]]` has `path` and `sha256`; `source` (the `id` of a `[[source]]`) and `from` (the file's path there) say
   where it came from. A path is relative to the repository root, `/`-separated, with no `.`, `..` or `\`.
@@ -294,7 +297,8 @@ line per problem:
 
 - `assets: <path> is not pinned in .config/assets.toml`: a file under a root has no `[[file]]`.
 - `assets: <path> differs from its pinned sha256`: the file's contents changed.
-- `assets: <path> is pinned but missing`: a `[[file]]` has no file.
+- `assets: <path> is pinned but missing`: a `[[file]]` has no regular file (nothing, or a directory).
+- `assets: <path> is a symbolic link, not followed`: see above.
 
 ## The dev Flatpak
 `contrib/flatpak/` builds InboxCraft as a Flatpak with the app id `io.github.qubernetic.inboxcraft`, from the

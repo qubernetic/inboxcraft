@@ -277,3 +277,78 @@ fn the_gate_reports_pin_problems_and_fails() {
     write(dir.path(), ".config/assets.toml", "roots = [");
     assert!(matches!(gate(dir.path(), &mut Vec::new()), Err(Error::Config { .. })));
 }
+
+#[test]
+fn every_file_under_a_root_counts_whatever_its_directory_is_called() {
+    let files = [("assets/brand/.cache/x.ttf", "x"), ("assets/brand/target/y.png", "y"), ("assets/brand/plan/z.png", "z")];
+    let dir = pinned_tree(EMPTY_MANIFEST, &files);
+    assert_eq!(
+        pins(dir.path()).unwrap(),
+        [
+            "assets: assets/brand/.cache/x.ttf is not pinned in .config/assets.toml",
+            "assets: assets/brand/plan/z.png is not pinned in .config/assets.toml",
+            "assets: assets/brand/target/y.png is not pinned in .config/assets.toml",
+        ]
+    );
+}
+
+#[test]
+fn a_root_that_is_a_file_is_an_error_naming_it() {
+    let dir = pinned_tree(EMPTY_MANIFEST, &[("assets/brand", "not a folder")]);
+    let error = pins(dir.path()).unwrap_err();
+    assert!(matches!(&error, Error::Config { .. }), "{error}");
+    assert!(error.to_string().contains("root `assets/brand` is not a directory"), "{error}");
+}
+
+#[test]
+fn a_pinned_directory_is_missing() {
+    let dir = pinned_tree(&manifest_pinning("assets/brand/mark.svg", ABC), &[("assets/brand/mark.svg/inner", "abc")]);
+    assert_eq!(
+        pins(dir.path()).unwrap(),
+        ["assets: assets/brand/mark.svg/inner is not pinned in .config/assets.toml", "assets: assets/brand/mark.svg is pinned but missing"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_is_a_problem_never_followed() {
+    use std::os::unix::fs::symlink;
+    let outside = tempfile::tempdir().unwrap();
+    write(outside.path(), "secret", "abc");
+    write(outside.path(), "dir/secret", "abc");
+    // A pinned link to a file outside, with the outside file's sha256.
+    let dir = pinned_tree(&manifest_pinning("assets/brand/mark.svg", ABC), &[]);
+    std::fs::create_dir_all(dir.path().join("assets/brand")).unwrap();
+    symlink(outside.path().join("secret"), dir.path().join("assets/brand/mark.svg")).unwrap();
+    assert_eq!(
+        pins(dir.path()).unwrap(),
+        ["assets: assets/brand/mark.svg is a symbolic link, not followed", "assets: assets/brand/mark.svg is a symbolic link, not followed",]
+    );
+    // A pin in a linked directory outside the roots.
+    let dir = pinned_tree(&manifest_pinning("assets/other/secret", ABC), &[]);
+    std::fs::create_dir_all(dir.path().join("assets")).unwrap();
+    symlink(outside.path().join("dir"), dir.path().join("assets/other")).unwrap();
+    assert_eq!(pins(dir.path()).unwrap(), ["assets: assets/other is a symbolic link, not followed"]);
+    // A root that is a link, and a linked directory under a root.
+    let dir = pinned_tree(EMPTY_MANIFEST, &[("assets/fonts/plex-sans/a.ttf", "a")]);
+    symlink(outside.path().join("dir"), dir.path().join("assets/brand")).unwrap();
+    symlink(outside.path().join("dir"), dir.path().join("assets/fonts/plex-sans/linked")).unwrap();
+    assert_eq!(
+        pins(dir.path()).unwrap(),
+        [
+            "assets: assets/brand is a symbolic link, not followed",
+            "assets: assets/fonts/plex-sans/a.ttf is not pinned in .config/assets.toml",
+            "assets: assets/fonts/plex-sans/linked is a symbolic link, not followed",
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_name_that_is_not_utf8_is_reported_not_a_panic() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = pinned_tree(EMPTY_MANIFEST, &[]);
+    std::fs::create_dir_all(dir.path().join("assets/brand")).unwrap();
+    std::fs::write(dir.path().join("assets/brand").join(std::ffi::OsStr::from_bytes(b"x\xff.ttf")), "").unwrap();
+    assert_eq!(pins(dir.path()).unwrap(), ["assets: assets/brand/x\u{fffd}.ttf is not pinned in .config/assets.toml"]);
+}

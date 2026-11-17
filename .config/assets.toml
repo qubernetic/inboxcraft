@@ -1,9 +1,10 @@
 # Asset files pinned by sha256, checked by `cargo xtask assets` (part of `cargo xtask ci`); see docs/development.md,
 # "Pinned asset files".
 #
-# `roots` lists the folders this file governs: every file under one of them needs a `[[file]]`. A root that does not
-# exist yet is fine. A `[[source]]` names where files come from (`id`, and `url` and `version` as they apply); a
-# `[[file]]` gives the `path` in the repository, its `source` (an `id` above), the path it has there (`from`) and its
-# `sha256` (64 hexadecimal digits). Paths are relative to the repository root, with `/` and no `.` or `..`.
+# `roots` lists the folders this file governs: every file under one of them needs a `[[file]]`, in any directory,
+# hidden ones included. A root that does not exist yet is fine. Symbolic links are never followed: they fail. A
+# `[[source]]` names where files come from (`id`, and `url` and `version` as they apply); a `[[file]]` gives the
+# `path` in the repository, its `source` (an `id` above), the path it has there (`from`) and its `sha256` (64
+# hexadecimal digits). Paths are relative to the repository root, with `/` and no `.` or `..`.
 
 roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide"]

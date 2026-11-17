@@ -12,7 +12,7 @@
 //! `sha256` it matches, and every `[[file]]` exists. See docs/development.md, "Pinned asset files".
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -246,29 +246,79 @@ fn sha256(path: &Path) -> Result<String, Error> {
 fn pinned(root: &Path, manifest: &Manifest) -> Result<Vec<String>, Error> {
     let mut problems = Vec::new();
     for folder in &manifest.roots {
-        let dir = root.join(folder);
-        if !dir.is_dir() {
+        if let Some(link) = link_in(root, folder) {
+            problems.push(format!("assets: {link} is a symbolic link, not followed"));
             continue;
         }
-        for rel in walk::files(&dir, &|_| true)? {
-            let name = std::iter::once(folder.clone())
-                .chain(rel.components().map(|part| part.as_os_str().to_string_lossy().into_owned()))
-                .collect::<Vec<_>>()
-                .join("/");
-            if !manifest.pins.iter().any(|pin| pin.path == name) {
+        let dir = root.join(folder);
+        match fs::symlink_metadata(&dir) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(source) => return Err(Error::Io { path: dir, source }),
+            Ok(meta) if !meta.is_dir() => {
+                return Err(Error::Config { path: root.join(MANIFEST), message: format!("root `{folder}` is not a directory") });
+            }
+            Ok(_) => {}
+        }
+        let mut found = Vec::new();
+        everything(root, folder, 0, &mut found)?;
+        for (name, is_link) in found {
+            if is_link {
+                problems.push(format!("assets: {name} is a symbolic link, not followed"));
+            } else if !manifest.pins.iter().any(|pin| pin.path == name) {
                 problems.push(format!("assets: {name} is not pinned in {MANIFEST}"));
             }
         }
     }
     for pin in &manifest.pins {
+        if let Some(link) = link_in(root, &pin.path) {
+            problems.push(format!("assets: {link} is a symbolic link, not followed"));
+            continue;
+        }
         let path = root.join(&pin.path);
-        if !path.is_file() {
+        if !fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) {
             problems.push(format!("assets: {} is pinned but missing", pin.path));
         } else if sha256(&path)? != pin.sha256 {
             problems.push(format!("assets: {} differs from its pinned sha256", pin.path));
         }
     }
     Ok(problems)
+}
+
+/// The first leading part of the relative path `rel` (`/`-separated) that is a symbolic link under `root`, if any.
+fn link_in(root: &Path, rel: &str) -> Option<String> {
+    let mut prefix = String::new();
+    for part in rel.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(part);
+        if fs::symlink_metadata(root.join(&prefix)).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+/// Every entry under the directory `rel` of `root` that is not a directory, whatever its directory is called, as its
+/// `/`-separated path and whether it is a symbolic link (never followed). Unlike [`walk::files`] it skips nothing.
+fn everything(root: &Path, rel: &str, depth: usize, found: &mut Vec<(String, bool)>) -> Result<(), Error> {
+    let dir = root.join(rel);
+    let io_error = |source| Error::Io { path: dir.clone(), source };
+    if depth > walk::MAX_DEPTH {
+        return Err(io_error(io::Error::other(format!("directory tree deeper than {} levels", walk::MAX_DEPTH))));
+    }
+    let mut entries = fs::read_dir(&dir).map_err(io_error)?.collect::<Result<Vec<_>, _>>().map_err(io_error)?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        let kind = entry.file_type().map_err(io_error)?;
+        let name = format!("{rel}/{}", entry.file_name().to_string_lossy());
+        if kind.is_dir() {
+            everything(root, &name, depth.saturating_add(1), found)?;
+        } else {
+            found.push((name, kind.is_symlink()));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
