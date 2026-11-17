@@ -7,7 +7,7 @@
 
 use egui::{Painter, Rect, Response, Role, Sense, Ui, WidgetInfo, vec2};
 
-use crate::draw::paint::dashed;
+use crate::draw::paint::dashed_round;
 use crate::theme::Theme;
 use crate::tr;
 
@@ -58,7 +58,7 @@ pub fn initials(name: &str, address: &str) -> String {
 
 /// Paints the avatar of `name` and `address` into the square inside `rect`: the initials in `muted` on a `stage`
 /// square with corners of 2, in the key style (Plex Mono SemiBold 11/14), and 13/16 from the large side up. A person
-/// with neither a name nor a usable address is a `?` in a dashed `line` box.
+/// with neither a name nor a usable address is a `?` in a dashed `line` box with the same corners.
 pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: &str) {
     let side = rect.width().min(rect.height());
     if !side.is_finite() || side <= 0.0 {
@@ -68,7 +68,7 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
     let square = Rect::from_center_size(rect.center(), vec2(side, side));
     let letters = initials(name, address);
     if letters == UNKNOWN {
-        dashed(painter, square, p.line);
+        dashed_round(painter, square, p.line, CORNER);
     } else {
         painter.rect_filled(square, CORNER, p.stage);
     }

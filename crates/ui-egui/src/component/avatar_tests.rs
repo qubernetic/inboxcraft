@@ -122,6 +122,7 @@ fn an_avatar_looks_as_its_sheet_says_in_every_state() {
             if unknown {
                 assert_eq!(look.fill, None, "an unknown person has no square: {at}");
                 assert_eq!(look.edge, Some((1.0, p.line, true)), "a dashed line box: {at}");
+                assert_eq!(look.radius, CORNER, "the dashed box has the square's corners of 2: {at}");
             } else {
                 assert_eq!(look.fill, Some(p.stage), "{at}");
                 assert_eq!(look.edge, None, "{at}");
