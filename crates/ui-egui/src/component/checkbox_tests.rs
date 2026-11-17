@@ -376,3 +376,44 @@ fn the_tick_s_cross_is_centred_in_its_box_as_the_design_centres_its_text_box() {
         assert!((x - left as f32 - 7.74).abs() <= 0.25, "{mode:?}: the × at {} of the box", x - left as f32);
     }
 }
+
+/// A name that wraps onto more lines in 160 points.
+const WRAPPING: &str = "Also ask the list of providers (tells the list the domain)";
+
+/// The box of a wrapping check box in its node `row`: 16 square at the left, in the middle of the name's first line.
+fn first_line_box(row: Rect, theme: &Theme) -> Rect {
+    let side = theme.size(16.0);
+    let line = theme.fonts.mono.line.max(side);
+    Rect::from_min_size(pos2(row.left(), row.top() + (line - side) / 2.0), vec2(side, side))
+}
+
+/// The ring round [`first_line_box`]: 2 clear, its 1 px line outside.
+fn first_line_ring(row: Rect, theme: &Theme) -> Rect {
+    first_line_box(row, theme).expand(3.0)
+}
+
+#[test]
+fn a_wrapping_check_box_stands_beside_the_first_line_with_its_ring_and_keys() {
+    let draw = |ui: &mut egui::Ui, theme: &Theme| {
+        ui.set_max_width(160.0);
+        drop(checkbox_wrapping(ui, theme, WRAPPING, false));
+    };
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        let harness = staged(theme, |p| p.surface, vec2(320.0, 200.0), draw);
+        let row = harness.get_by_role_and_label(Role::CheckBox, WRAPPING).rect();
+        assert!(row.height() >= theme.fonts.mono.line * 2.0, "{mode:?}: two lines at least: {row:?}");
+        let mark = first_line_box(row, &theme);
+        let look = own(&painted(&harness, WRAPPING), mark);
+        assert_eq!(look.edge, Some((1.0, p.muted, false)), "{mode:?}: the 16 px box with its muted edge beside the first line: {look:#?}");
+        let boxes: Vec<Rect> = painted(&harness, WRAPPING)
+            .rects()
+            .filter(|shape| (shape.rect.width() - 16.0).abs() < 0.01 && (shape.rect.height() - 16.0).abs() < 0.01)
+            .map(|shape| shape.rect)
+            .collect();
+        assert_eq!(boxes, vec![mark], "{mode:?}: one box, 16 by 16, at the first line");
+    }
+    // The ring round the box, not the row; Enter and Space press it as the pointer does.
+    keys_press_as_the_pointer(WRAPPING, vec2(320.0, 200.0), first_line_box, first_line_ring, draw);
+}
