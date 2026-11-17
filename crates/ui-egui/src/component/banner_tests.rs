@@ -308,3 +308,31 @@ fn a_cut_links_name_is_heard_whole() {
     let names: Vec<String> = harness.query_all_by_role(egui::accesskit::Role::Button).filter_map(|node| node.accesskit_node().label()).collect();
     assert_eq!(names, vec![link.to_owned()], "the link's name is the whole address");
 }
+
+#[test]
+fn a_link_name_is_capped_before_it_is_laid_out() {
+    // A sender's name of 100 000 characters: what is laid out to fit it is a capped beginning, never the whole.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let long = "a".repeat(100_000);
+    let mut harness = builder().build_ui_state(
+        move |ui, shown: &mut String| {
+            *shown = super::cut_name(ui, &theme, &long, 1.0e9);
+        },
+        String::new(),
+    );
+    harness.run();
+    let shown = harness.state();
+    assert!(shown.chars().count() <= super::MOST + 1, "{} characters", shown.chars().count());
+    assert!(shown.ends_with('…'), "the cap says the rest was left out");
+    // In a banner, the link draws a capped beginning and is heard whole.
+    let words: &'static str = Box::leak(format!("always for {}@example.org", "b".repeat(100_000)).into_boxed_str());
+    let harness = bounce("Not delivered.", words);
+    let link = harness.query_all_by_role(egui::accesskit::Role::Button).next().unwrap_or_else(|| panic!("no link"));
+    assert_eq!(link.accesskit_node().label().unwrap_or_default(), words, "heard whole");
+    let drawn = painted(&harness, words);
+    let text = drawn.shapes.iter().find_map(|shape| match &shape.look {
+        Look::Text { text, .. } => Some(text.clone()),
+        _ => None,
+    });
+    assert!(text.is_some_and(|text| text.chars().count() <= super::MOST + 1), "the drawn link is capped");
+}

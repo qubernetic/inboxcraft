@@ -174,12 +174,20 @@ pub(crate) fn words(ui: &Ui, theme: &Theme, text: &str, room: f32) -> std::sync:
 }
 
 /// A link's `name` as it fits in `room` points in the small link's face: whole, or cut between grapheme clusters in its
-/// written order with one ellipsis; empty when not even the ellipsis fits.
+/// written order with one ellipsis; empty when not even the ellipsis fits. At most [`MOST`] characters of it are laid
+/// out at all, so a name as long as a header costs no more than a line.
 pub(crate) fn cut_name(ui: &Ui, theme: &Theme, name: &str, room: f32) -> String {
     if room < 1.0 {
         return String::new();
     }
-    super::fit(ui, name, theme.fonts.mono_s, room)
+    let font = theme.fonts.mono_s;
+    let (kept, capped) = super::capped(name, MOST);
+    let shown = super::fit(ui, kept, font, room);
+    if capped && !shown.ends_with('…') {
+        // The room held all it was given: the ellipsis says the rest was left out.
+        return super::fit(ui, &format!("{}…", kept.trim_end()), font, room);
+    }
+    shown
 }
 
 #[cfg(test)]
