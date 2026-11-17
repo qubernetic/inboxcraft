@@ -318,30 +318,32 @@ fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
 }
 
 #[test]
-fn the_hover_actions_cover_the_row_text_on_a_solid_float() {
-    /// Whether `shape` holds an opaque rectangle under `point`.
-    fn solid_under(shape: &egui::Shape, point: egui::Pos2) -> bool {
-        match shape {
-            egui::Shape::Rect(rect) => rect.fill.a() == 255 && rect.rect.contains(point),
-            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| solid_under(shape, point)),
-            _ => false,
-        }
-    }
+fn the_hover_actions_stand_clear_of_the_row_text_and_the_time_gives_way() {
+    // The design's group has no float of its own: the row cuts its sender short of it and hides its time.
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
-    let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
     let row = harness.get_by_label(ODILE).rect();
-    let shapes = &harness.output().shapes;
-    let float = shapes.iter().rposition(|clipped| solid_under(&clipped.shape, done.center()));
-    let float = float.expect("the float under the Done button");
+    let buttons: Vec<egui::Rect> = ["Done", "Mark as read", "Delete", "Snooze"]
+        .iter()
+        .flat_map(|name| harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).collect::<Vec<_>>())
+        .filter(|rect| row.contains(rect.center()))
+        .collect();
+    assert_eq!(buttons.len(), 4, "the row's group");
     let mut seen = 0;
-    for (index, clipped) in shapes.iter().enumerate() {
+    for clipped in &harness.output().shapes {
         let egui::Shape::Text(text) = &clipped.shape else { continue };
         let rect = text.visual_bounding_rect();
-        if row.contains(rect.left_center()) && (text.galley.job.text.starts_with("Odile") || text.galley.job.text.starts_with("Allotment")) {
+        if !row.contains(rect.left_center()) {
+            continue;
+        }
+        let words = &text.galley.job.text;
+        assert!(words != "08:35", "the time is hidden while the actions show");
+        if words.starts_with("Odile") || words.starts_with("Allotment") {
             seen += 1;
-            assert!(index < float, "{:?} is drawn over the float", text.galley.job.text);
+            for button in &buttons {
+                assert!(!rect.intersects(*button), "{words:?} at {rect:?} runs under an action at {button:?}");
+            }
         }
     }
     assert!(seen >= 2, "the sender and the subject were drawn");
