@@ -75,8 +75,11 @@ impl Tray for InboxTray {
         Status::Active
     }
 
+    /// No themed name while the tray has its own pixmaps: a host that finds a themed icon draws it instead of the
+    /// pixmap, and would show the app icon's tile without the cyan flap. Only with no pixmap at all is the name
+    /// [`APP_ID`], so the tray is never blank.
     fn icon_name(&self) -> String {
-        APP_ID.to_owned()
+        if self.icon_pixmap().is_empty() { APP_ID.to_owned() } else { String::new() }
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {

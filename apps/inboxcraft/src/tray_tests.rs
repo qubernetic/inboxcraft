@@ -32,7 +32,6 @@ fn the_tray_icon_is_inboxcraft_s() {
     let (tray, _heard, _woken) = tray();
     assert_eq!(tray.id(), APP_ID);
     assert_eq!(tray.title(), "InboxCraft");
-    assert_eq!(tray.icon_name(), APP_ID);
     assert_eq!(tray.status(), Status::Active);
     let pixmap = tray.icon_pixmap();
     let icon = pixmap.first().unwrap();
@@ -61,6 +60,27 @@ fn the_flap_turns_cyan_with_unread_mail() {
     assert_eq!(sizes(&read), [(16, 16), (22, 22), (24, 24)]);
     tray.show(0);
     assert!(!shows_cyan(&tray.icon_pixmap()), "and plain again once it is read");
+}
+
+#[test]
+fn the_tray_names_no_themed_icon_while_it_has_its_own_pixmaps() {
+    let (mut tray, _heard, _woken) = tray();
+    for unread in [0, 3] {
+        tray.show(unread);
+        assert!(!tray.icon_pixmap().is_empty());
+        assert_eq!(tray.icon_name(), "", "the host draws the pixmap, with {unread} unread");
+    }
+}
+
+#[test]
+fn without_a_pixmap_the_tray_names_the_app_s_themed_icon() {
+    let (mut tray, _heard, _woken) = tray();
+    tray.read.clear();
+    tray.unread_icon.clear();
+    for unread in [0, 3] {
+        tray.show(unread);
+        assert_eq!(tray.icon_name(), APP_ID, "never blank, with {unread} unread");
+    }
 }
 
 #[test]

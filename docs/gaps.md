@@ -643,7 +643,9 @@ time from the code as it is, not measured.
 - The tray's tooltip counts the unread mail of every account's inbox; the icon only shows that mail is unread (its
   flap turns cyan), not how much, and its menu has no entries per account (#137, #232). The icon is always the
   light drawing meant for a dark panel: the app does not know the panel's colour, and the symbolic icons the brand
-  ships for desktops that recolour tray icons are not used yet (#232).
+  ships for desktops that recolour tray icons are not used yet. The tray gives the panel only its own pixmaps and
+  no themed icon name (the name only when no pixmap could be read), so a host that draws only themed names shows
+  no different icon for unread mail; this is not checked on a real panel yet (#232).
 - No notifications outside Linux. New mail notifies also while the window is open and in front. A click on a
   notification reaches InboxCraft only while it runs (it is not D-Bus activatable), and without a window it is
   answered within half a second. A desktop that shows no actions shows no buttons and may send no click either (#138).
