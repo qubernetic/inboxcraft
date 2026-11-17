@@ -839,7 +839,13 @@ pub(crate) fn walk_an_open_menu<State>(harness: &mut Harness<'_, State>, opener:
     assert_eq!(focused_node(harness).map(|(.., id)| id), seen.last().copied(), "{label}: Shift Tab from the first is the last");
     harness.key_press(Key::Escape);
     harness.run_ok();
-    assert!(harness.query_all_by_role(Role::MenuItem).chain(harness.query_all_by_role(Role::MenuItemRadio)).all(|row| !seen.contains(&row.accesskit_node().locate().0)), "{label}: Esc closed it");
+    assert!(
+        harness
+            .query_all_by_role(Role::MenuItem)
+            .chain(harness.query_all_by_role(Role::MenuItemRadio))
+            .all(|row| !seen.contains(&row.accesskit_node().locate().0)),
+        "{label}: Esc closed it"
+    );
     assert!(harness.get_by_role_and_label(role, label).is_focused(), "{label}: the keyboard is back on the opener");
 }
 
@@ -848,30 +854,64 @@ fn every_row_pressed_by_the_pointer_enter_or_space_takes_the_decided_colours() {
     use crate::component::press_tests::{Draw, Part, held_by};
     let whole: Part = |rect, _| rect;
     let rows: [(&str, Draw, bool); 6] = [
-        ("Archive", |ui, theme| {
-            ui.set_width(240.0);
-            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default });
-        }, false),
-        ("Chosen", |ui, theme| {
-            ui.set_width(240.0);
-            super::menu_item(ui, theme, &Keymap::default(), &super::Item { icon: Some(IconId::Archive), name: "Chosen", caption: None, action: None, state: super::ItemState::Chosen });
-        }, true),
-        ("Every week", |ui, theme| {
-            ui.set_width(240.0);
-            super::menu_choice(ui, theme, "Every week", false, true);
-        }, false),
-        ("Every month", |ui, theme| {
-            ui.set_width(240.0);
-            super::menu_choice(ui, theme, "Every month", true, true);
-        }, true),
-        ("Teodor Vasquez, teodor@example.org", |ui, theme| {
-            ui.set_width(320.0);
-            super::suggestion_row(ui, theme, "Teodor Vasquez", "teodor@example.org", false);
-        }, false),
-        ("Mirela Anton, mirela@example.org", |ui, theme| {
-            ui.set_width(320.0);
-            super::suggestion_row(ui, theme, "Mirela Anton", "mirela@example.org", true);
-        }, true),
+        (
+            "Archive",
+            |ui, theme| {
+                ui.set_width(240.0);
+                super::menu_item(
+                    ui,
+                    theme,
+                    &Keymap::default(),
+                    &super::Item { icon: Some(IconId::Archive), name: "Archive", caption: None, action: None, state: super::ItemState::Default },
+                );
+            },
+            false,
+        ),
+        (
+            "Chosen",
+            |ui, theme| {
+                ui.set_width(240.0);
+                super::menu_item(
+                    ui,
+                    theme,
+                    &Keymap::default(),
+                    &super::Item { icon: Some(IconId::Archive), name: "Chosen", caption: None, action: None, state: super::ItemState::Chosen },
+                );
+            },
+            true,
+        ),
+        (
+            "Every week",
+            |ui, theme| {
+                ui.set_width(240.0);
+                super::menu_choice(ui, theme, "Every week", false, true);
+            },
+            false,
+        ),
+        (
+            "Every month",
+            |ui, theme| {
+                ui.set_width(240.0);
+                super::menu_choice(ui, theme, "Every month", true, true);
+            },
+            true,
+        ),
+        (
+            "Teodor Vasquez, teodor@example.org",
+            |ui, theme| {
+                ui.set_width(320.0);
+                super::suggestion_row(ui, theme, "Teodor Vasquez", "teodor@example.org", false);
+            },
+            false,
+        ),
+        (
+            "Mirela Anton, mirela@example.org",
+            |ui, theme| {
+                ui.set_width(320.0);
+                super::suggestion_row(ui, theme, "Mirela Anton", "mirela@example.org", true);
+            },
+            true,
+        ),
     ];
     for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
         let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
@@ -893,11 +933,23 @@ fn a_float_larger_than_the_window_stays_inside_and_scrolls() {
         move |ui, chosen: &mut Option<usize>| {
             motion::set_reduced(ui.ctx(), true);
             let keymap = Keymap::default();
-            let float = super::Float { id: Id::unique("tall"), anchor: egui::Rect::from_min_size(pos2(40.0, 20.0), egui::vec2(8.0, 8.0)), width: 1000.0, returns_to: Id::unique("x") };
+            let float = super::Float {
+                id: Id::unique("tall"),
+                anchor: egui::Rect::from_min_size(pos2(40.0, 20.0), egui::vec2(8.0, 8.0)),
+                width: 1000.0,
+                returns_to: Id::unique("x"),
+            };
             super::float(ui.ctx(), &theme, &float, |ui| {
                 for n in 0..40 {
                     let name = format!("Row {n}");
-                    if super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name: &name, caption: None, action: None, state: super::ItemState::Default }).clicked() {
+                    if super::menu_item(
+                        ui,
+                        &theme,
+                        &keymap,
+                        &super::Item { icon: None, name: &name, caption: None, action: None, state: super::ItemState::Default },
+                    )
+                    .clicked()
+                    {
                         *chosen = Some(n);
                     }
                 }
@@ -909,7 +961,10 @@ fn a_float_larger_than_the_window_stays_inside_and_scrolls() {
     let (found, _) = rects(&harness);
     let float = found.iter().find(|(_, fill, _)| *fill == theme.palette.surface).map(|(rect, ..)| *rect).unwrap_or(egui::Rect::NOTHING);
     assert!(float.left() >= 3.0 && float.top() >= 3.0 && float.right() <= width - 3.0 && float.bottom() <= height - 3.0, "{float:?}");
-    assert!(found.iter().any(|(rect, fill, _)| *fill == theme.palette.muted && rect.width() == 2.0 && float.contains_rect(*rect)), "its rows scroll: the thumb");
+    assert!(
+        found.iter().any(|(rect, fill, _)| *fill == theme.palette.muted && rect.width() == 2.0 && float.contains_rect(*rect)),
+        "its rows scroll: the thumb"
+    );
     // The last row is reached by scrolling.
     harness.get_by_label("Row 39").scroll_to_me();
     harness.run();
@@ -935,7 +990,12 @@ fn esc_in_a_float_opened_from_a_float_closes_only_the_inner_one() {
             }
             let float = super::Float { id: Id::unique("outer"), anchor: open.rect, width: 240.0, returns_to: open.id };
             let shown = super::float(ui.ctx(), &theme, &float, |ui| {
-                let more = super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name: "More", caption: None, action: None, state: super::ItemState::Default });
+                let more = super::menu_item(
+                    ui,
+                    &theme,
+                    &keymap,
+                    &super::Item { icon: None, name: "More", caption: None, action: None, state: super::ItemState::Default },
+                );
                 if more.clicked() {
                     *inner = true;
                 }
@@ -943,7 +1003,12 @@ fn esc_in_a_float_opened_from_a_float_closes_only_the_inner_one() {
                     let float = super::Float { id: Id::unique("inner"), anchor: more.rect, width: 200.0, returns_to: more.id };
                     let shown = super::float(ui.ctx(), &theme, &float, |ui| {
                         for name in ["Inner first", "Inner second"] {
-                            super::menu_item(ui, &theme, &keymap, &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default });
+                            super::menu_item(
+                                ui,
+                                &theme,
+                                &keymap,
+                                &super::Item { icon: None, name, caption: None, action: None, state: super::ItemState::Default },
+                            );
                         }
                     });
                     *inner = shown.is_some();

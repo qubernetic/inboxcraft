@@ -517,7 +517,6 @@ fn fields_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.push_id("time-picker", |ui| time_pickers(ui, theme));
 }
 
-
 /// What draws a column of the page.
 type Draw = fn(&mut Ui, &Theme, &Keymap);
 

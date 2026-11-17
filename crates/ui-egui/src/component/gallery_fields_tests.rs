@@ -64,6 +64,9 @@ fn the_fields_boards_say_what_the_design_boards_say_on_their_ground() {
         harness.get_by_label("That time has passed: type one still ahead");
         harness.get_by_label("It counts as soon as it reads as a time: no Enter needed.");
         harness.get_by_label("teodor@ is not an address");
-        assert_eq!(harness.query_all_by_role(Role::ListItem).filter(|chip| chip.accesskit_node().label().as_deref() == Some("Studio, everyone")).count(), 1);
+        assert_eq!(
+            harness.query_all_by_role(Role::ListItem).filter(|chip| chip.accesskit_node().label().as_deref() == Some("Studio, everyone")).count(),
+            1
+        );
     }
 }

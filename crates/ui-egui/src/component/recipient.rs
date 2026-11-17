@@ -200,7 +200,8 @@ pub(crate) fn recipient_field_with(
         ui.spacing_mut().item_spacing.y = s.s2;
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let focused = shown == Some(Shown::Focus) || (enabled && ui.memory(|memory| memory.has_focus(id)));
-        let invalid = line.error.is_some() || field::refusal(ui.ctx(), id).is_some() || line.chips.iter().any(|chip| chip.state == RecipientState::Invalid);
+        let invalid =
+            line.error.is_some() || field::refusal(ui.ctx(), id).is_some() || line.chips.iter().any(|chip| chip.state == RecipientState::Invalid);
         let painter = solid(ui);
         if ui.is_rect_visible(rect) {
             if !enabled {

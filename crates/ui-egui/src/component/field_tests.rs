@@ -329,10 +329,25 @@ fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
                 }
                 Kind::Typed => {
                     let now = crate::component::gallery::now();
-                    crate::component::typed_time::typed_time_field(ui, &theme, egui::Id::unique("typed"), "Type a time", text, now, inboxcraft_time::Offset::UTC);
+                    crate::component::typed_time::typed_time_field(
+                        ui,
+                        &theme,
+                        egui::Id::unique("typed"),
+                        "Type a time",
+                        text,
+                        now,
+                        inboxcraft_time::Offset::UTC,
+                    );
                 }
                 Kind::Recipient => {
-                    let line = crate::component::recipient::Recipients { name: "To", chips: &[], hint: "Name or address", copies: false, error: None, enabled: true };
+                    let line = crate::component::recipient::Recipients {
+                        name: "To",
+                        chips: &[],
+                        hint: "Name or address",
+                        copies: false,
+                        error: None,
+                        enabled: true,
+                    };
                     crate::component::recipient::recipient_field(ui, &theme, egui::Id::unique("to"), text, &line);
                 }
                 Kind::PlainLine => {
@@ -376,10 +391,11 @@ fn a_paste_of_10_mib_is_refused_whole_in_every_field() {
     let big = "x".repeat(10 << 20);
     for kind in KINDS {
         let mut harness = field_of(kind, "kept");
-        let started = std::time::Instant::now();
+        let clock = inboxcraft_time::SystemClock::new();
+        let started = inboxcraft_time::Clock::monotonic(&clock);
         harness.event(egui::Event::Paste(big.clone()));
         harness.run_ok();
-        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{kind:?}: the frame returns");
+        assert!(inboxcraft_time::Clock::monotonic(&clock).saturating_sub(started) < std::time::Duration::from_secs(5), "{kind:?}: the frame returns");
         assert_eq!(harness.state(), "kept", "{kind:?}: the text stays exactly as it was");
         assert!(says_too_long(&harness), "{kind:?}: the field says it is too long");
         // The next change that is taken clears the sentence.
@@ -456,13 +472,14 @@ fn a_draft_of_1_mib_at_rest_is_laid_out_once() {
         found
     };
     let first = galley(&harness).unwrap_or_else(|| panic!("the draft is painted"));
-    let started = std::time::Instant::now();
+    let clock = inboxcraft_time::SystemClock::new();
+    let started = inboxcraft_time::Clock::monotonic(&clock);
     for _ in 0..5 {
         harness.step();
         let now = galley(&harness).unwrap_or_else(|| panic!("the draft is painted"));
         assert!(std::sync::Arc::ptr_eq(&first, &now), "a frame at rest laid the draft out again");
     }
-    eprintln!("1 MiB draft at rest: {:?} a frame", started.elapsed() / 5);
+    eprintln!("1 MiB draft at rest: {:?} a frame", inboxcraft_time::Clock::monotonic(&clock).saturating_sub(started) / 5);
 }
 
 /// The states of the multiline field's sheet, in its order.
@@ -846,14 +863,19 @@ fn a_password_never_reaches_a_screen_reader_nor_the_undo_history() {
 fn a_disabled_stored_password_is_an_empty_box() {
     for mode in [Mode::Dark, Mode::Light] {
         let theme = Theme::new(mode, TextScale::default());
-        let harness = staged(theme, |p| p.bg, vec2(420.0, 200.0), |ui, theme| {
-            let mut text = String::new();
-            let field = Field { enabled: false, ..Field::new("New password", "empty keeps the stored one") };
-            ui.vertical(|ui| {
-                ui.set_width(320.0);
-                password_field(ui, theme, egui::Id::unique("stored"), &mut text, &field, Secret::Stored);
-            });
-        });
+        let harness = staged(
+            theme,
+            |p| p.bg,
+            vec2(420.0, 200.0),
+            |ui, theme| {
+                let mut text = String::new();
+                let field = Field { enabled: false, ..Field::new("New password", "empty keeps the stored one") };
+                ui.vertical(|ui| {
+                    ui.set_width(320.0);
+                    password_field(ui, theme, egui::Id::unique("stored"), &mut text, &field, Secret::Stored);
+                });
+            },
+        );
         let texts = drawn(&harness);
         assert!(texts.iter().all(|text| text.text != "empty keeps the stored one"), "{mode:?}: no hint");
         assert!(texts.iter().all(|text| text.text != "\u{e2fa}"), "{mode:?}: no lock");

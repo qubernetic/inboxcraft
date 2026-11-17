@@ -189,23 +189,18 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     ctx.memory_mut(|memory| memory.set_modal_layer(mine));
     // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
     ctx.move_to_top(mine);
-    let shown = Area::new(float.id)
-        .order(Order::Foreground)
-        .pivot(Align2::LEFT_TOP)
-        .fixed_pos(at)
-        .fade_in(false)
-        .show(ctx, |ui| {
-            unfolding(ui, theme, width, opened, |ui| {
-                // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
-                if size.y >= room.y - 0.5 {
-                    let area = ScrollArea::vertical().id_salt(float.id.with("rows")).max_height(room.y - 2.0);
-                    super::scroll::show_thin(ui, theme, area, THUMB, BAR, add).inner
-                } else {
-                    ui.set_max_height(room.y - 2.0);
-                    add(ui)
-                }
-            })
-        });
+    let shown = Area::new(float.id).order(Order::Foreground).pivot(Align2::LEFT_TOP).fixed_pos(at).fade_in(false).show(ctx, |ui| {
+        unfolding(ui, theme, width, opened, |ui| {
+            // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
+            if size.y >= room.y - 0.5 {
+                let area = ScrollArea::vertical().id_salt(float.id.with("rows")).max_height(room.y - 2.0);
+                super::scroll::show_thin(ui, theme, area, THUMB, BAR, add).inner
+            } else {
+                ui.set_max_height(room.y - 2.0);
+                add(ui)
+            }
+        })
+    });
     ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
     let (inner, rows) = shown.inner;
     // Home and End go to the first and the last row, from a row (a field in the float keeps them for its text).
@@ -661,7 +656,15 @@ pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, wid
 }
 
 /// The open menu `id` under `anchor`, giving `opener` the keyboard back when it closes.
-fn menu_at<R>(ctx: &Context, theme: &Theme, opener: &Response, anchor: Rect, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+fn menu_at<R>(
+    ctx: &Context,
+    theme: &Theme,
+    opener: &Response,
+    anchor: Rect,
+    id: Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> (R, bool),
+) -> Option<R> {
     if !is_open(ctx, id) {
         return None;
     }
