@@ -620,6 +620,8 @@ fn component_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
     paint(gallery::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
         if std::mem::take(&mut fonts) {
             theme::install_fonts(ui.ctx());
+            // The app's own style, so the boards' text is drawn as the app draws it (coverage, hinting).
+            Theme::apply(ui.ctx(), &theme::Look::default());
         }
         gallery::page(ui, &theme, &keymap);
     })
@@ -633,6 +635,7 @@ fn icon_sheet(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
     paint(iconset::sheet_size(), shot.scale.unwrap_or(1.0), mode, |ui| {
         if std::mem::take(&mut fonts) {
             theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
         }
         iconset::sheet(ui.painter(), &theme);
     })
