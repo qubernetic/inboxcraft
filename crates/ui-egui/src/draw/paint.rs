@@ -241,11 +241,18 @@ pub(crate) fn pane(painter: &Painter, theme: &Theme, rect: Rect) {
     painter.rect_filled(rect, 0.0, theme.palette.surface);
 }
 
+/// The scale `ppp` made safe (a scale that is not a positive number counts as 1), and how many whole physical pixels a
+/// line one point wide takes there: one point rounded, at least one (1, 1, 2, 2 at 1, 1.25, 1.5 and 2). What a
+/// [`hairline`] and a [`focus_ring`] share.
+fn line_pixels(ppp: f32) -> (f32, f32) {
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    (ppp, ppp.round().max(1.0))
+}
+
 /// The shape of a [`hairline`] at `ppp` physical pixels per point: a line one point wide rounded to whole physical
 /// pixels (at least one), across the physical pixels the ends fall in, its edges on pixel boundaries.
 fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
-    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
-    let pixels = ppp.round().max(1.0);
+    let (ppp, pixels) = line_pixels(ppp);
     // The middle of a run of `pixels` physical pixels from the one `at` falls in.
     let snap = |at: f32| ((at * ppp).floor() + pixels / 2.0) / ppp;
     Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
@@ -349,12 +356,18 @@ pub(crate) enum Ring {
     Inside,
 }
 
-/// The focus ring of a control over `rect`: a 1 px `cyan_edge` line, square, 2 px clear of the control (`place`).
+/// The focus ring of a control over `rect`: a `cyan_edge` line one point wide, square, 2 points clear of the control
+/// (`place`), on whole physical pixels at every scale: its clear edge put on the pixel nearest 2 points from the
+/// control, its weight one point rounded to whole pixels, as a [`hairline`]'s (2 px at 1.5, where a 1 point line would
+/// be 1.5 px and no pixel of it whole). At 1.0 a control on whole points keeps the ring it always had.
 pub(crate) fn focus_ring(painter: &Painter, theme: &Theme, rect: Rect, place: Ring) {
-    let stroke = Stroke::new(1.0, theme.palette.cyan_edge);
+    let (ppp, pixels) = line_pixels(painter.pixels_per_point());
+    let snap = |at: f32| (at * ppp).round() / ppp;
+    let on_pixels = |r: Rect| Rect::from_min_max(pos2(snap(r.left()), snap(r.top())), pos2(snap(r.right()), snap(r.bottom())));
+    let stroke = Stroke::new(pixels / ppp, theme.palette.cyan_edge);
     match place {
-        Ring::Outside => painter.rect_stroke(rect.expand(2.0), 0.0, stroke, StrokeKind::Outside),
-        Ring::Inside => painter.rect_stroke(rect.shrink(2.0), 0.0, stroke, StrokeKind::Inside),
+        Ring::Outside => painter.rect_stroke(on_pixels(rect.expand(2.0)), 0.0, stroke, StrokeKind::Outside),
+        Ring::Inside => painter.rect_stroke(on_pixels(rect.shrink(2.0)), 0.0, stroke, StrokeKind::Inside),
     };
 }
 

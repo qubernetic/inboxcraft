@@ -506,3 +506,57 @@ fn a_cut_row_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() 
     assert_eq!(got[1], "Liste");
     assert_eq!(got[2], "Zusammenfassung des Posteingangs", "the text stays whole");
 }
+
+/// The ring [`super::focus_ring`] paints round `rect` in `place` at `ppp`: its rect, stroke width and colour, and kind.
+fn ring_at(rect: egui::Rect, place: super::Ring, ppp: f32) -> Vec<RectShape> {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(ppp);
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
+    let mut output = ctx.run_ui(input, |ui| super::focus_ring(ui.painter(), &theme, rect, place));
+    output.textures_delta.clear();
+    let shapes: Vec<Shape> = output.shapes.into_iter().map(|clipped| clipped.shape).collect();
+    rects(&shapes).into_iter().cloned().collect()
+}
+
+#[test]
+fn a_focus_ring_stands_on_whole_pixels_at_every_scale_its_clearance_kept() {
+    let edge = Theme::new(Mode::Dark, TextScale::default()).palette.cyan_edge;
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        for rect in [egui::Rect::from_min_size(pos2(10.0, 10.0), vec2(40.0, 20.0)), egui::Rect::from_min_size(pos2(10.5, 11.25), vec2(33.5, 17.75))] {
+            for place in [super::Ring::Inside, super::Ring::Outside] {
+                let at = format!("{ppp} {rect:?} {place:?}");
+                let rings = ring_at(rect, place, ppp);
+                assert_eq!(rings.len(), 1, "{at}");
+                let ring = &rings[0];
+                assert_eq!(ring.stroke.color, edge, "{at}");
+                let thick = ring.stroke.width * ppp;
+                assert!(thick >= 1.0 && (thick - thick.round()).abs() < 1e-3, "{at}: {thick} pixels thick");
+                for side in [ring.rect.left(), ring.rect.top(), ring.rect.right(), ring.rect.bottom()] {
+                    assert!((side * ppp - (side * ppp).round()).abs() < 1e-3, "{at}: {:?} off the pixel grid", ring.rect);
+                }
+                // Inside: the line starts 2 in from the control; outside: it ends 2 clear of it (half a pixel either way).
+                let (inner, gap) = match place {
+                    super::Ring::Inside => {
+                        assert_eq!(ring.stroke_kind, egui::StrokeKind::Inside, "{at}");
+                        (ring.rect, ring.rect.min - rect.min)
+                    }
+                    super::Ring::Outside => {
+                        assert_eq!(ring.stroke_kind, egui::StrokeKind::Outside, "{at}");
+                        (ring.rect, rect.min - ring.rect.min)
+                    }
+                };
+                let _ = inner;
+                assert!((gap.x - 2.0).abs() <= 0.5 / ppp + 1e-3 && (gap.y - 2.0).abs() <= 0.5 / ppp + 1e-3, "{at}: {gap:?}");
+                if ppp == 1.0 && rect.min.x.fract() == 0.0 {
+                    // Nothing moves at 1.0 on a whole-point control: the ring of before, exactly.
+                    let before = match place {
+                        super::Ring::Inside => rect.shrink(2.0),
+                        super::Ring::Outside => rect.expand(2.0),
+                    };
+                    assert_eq!((ring.rect, ring.stroke.width), (before, 1.0), "{at}");
+                }
+            }
+        }
+    }
+}

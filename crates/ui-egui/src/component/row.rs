@@ -110,19 +110,7 @@ impl Row {
             return;
         }
         let above = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - 1.0));
-        let painter = ui.painter();
-        let ppp = painter.pixels_per_point();
-        if (ppp - 1.0).abs() < f32::EPSILON || !ppp.is_finite() || ppp <= 0.0 {
-            paint::focus_ring(painter, theme, above, Ring::Inside);
-            return;
-        }
-        // At another scale [`paint::focus_ring`]'s 1 point line falls between pixels (1.5 px at 1.5): the edge is laid on
-        // whole pixels instead, as a hairline is, its line one point rounded to whole pixels.
-        let ring = above.shrink(2.0);
-        let snap = |at: f32| (at * ppp).round() / ppp;
-        let ring = Rect::from_min_max(pos2(snap(ring.left()), snap(ring.top())), pos2(snap(ring.right()), snap(ring.bottom())));
-        let width = (ppp.round().max(1.0)) / ppp;
-        painter.rect_stroke(ring, 0.0, egui::Stroke::new(width, theme.palette.cyan_edge), egui::StrokeKind::Inside);
+        paint::focus_ring(ui.painter(), theme, above, Ring::Inside);
     }
 }
 
