@@ -98,12 +98,23 @@ impl<T: Copy + PartialEq> Select<'_, T> {
             ..WidgetInfo::labeled(Role::ComboBox, enabled, self.name)
         });
         // Enter and Space open it when they come up, so that the field shows itself pressed while they are down; a press
-        // of the pointer or a screen reader's opens it at once.
-        let (held, released) = ui.input(|input| {
-            let keys = [Key::Enter, Key::Space];
-            (keys.iter().any(|key| input.key_down(*key)), keys.iter().any(|key| input.key_released(*key)))
+        // of the pointer or a screen reader's opens it at once. Only a key that went down on the closed field opens it:
+        // the key that takes a choice in the list goes down on a row, and comes up after the focus is back here.
+        let keys = [Key::Enter, Key::Space];
+        let (went_down, held, released) = ui.input(|input| {
+            (
+                keys.iter().any(|key| input.key_pressed(*key)),
+                keys.iter().any(|key| input.key_down(*key)),
+                keys.iter().any(|key| input.key_released(*key)),
+            )
         });
-        let pressed = (response.clicked() && !held) || (response.has_focus() && released);
+        let armed = id.with("key-down");
+        let focused = response.has_focus() && !*open;
+        if focused && went_down {
+            ui.data_mut(|data| data.insert_temp(armed, ()));
+        }
+        let was_armed = if !focused || released || !held { ui.data_mut(|data| data.remove_temp::<()>(armed)).is_some() } else { false };
+        let pressed = (response.clicked() && !held) || (focused && released && was_armed);
         if enabled && pressed {
             *open = !*open;
             if *open {

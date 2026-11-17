@@ -268,3 +268,42 @@ fn enter_opens_the_choices_when_it_comes_up() {
     assert!(harness.state().0, "let go, it opens");
     assert!(harness.get_by_role_and_label(Role::MenuItemRadio, "Never").is_focused());
 }
+
+#[test]
+fn a_choice_taken_by_enter_or_space_leaves_the_choices_closed_when_the_key_comes_up() {
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = harness(240.0, &OPTIONS);
+        harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItemRadio, "Weekly").focus();
+        harness.run();
+        harness.key_down(key);
+        harness.run();
+        assert_eq!(*harness.state(), (false, 2), "{key:?} down takes the row and closes the list");
+        harness.key_up(key);
+        harness.run();
+        for _ in 0..4 {
+            harness.step();
+        }
+        assert_eq!(*harness.state(), (false, 2), "{key:?} up opens nothing");
+        assert!(harness.get_by_role_and_label(Role::ComboBox, "Repeat").is_focused(), "the focus is back on the field");
+    }
+}
+
+#[test]
+fn a_key_held_on_the_closed_field_shows_it_pressed_and_opens_it_once_when_it_comes_up() {
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = harness(240.0, &OPTIONS);
+        harness.get_by_role_and_label(Role::ComboBox, "Repeat").focus();
+        harness.run();
+        harness.key_down(key);
+        harness.run();
+        assert!(!harness.state().0, "{key:?} held: pressed, not open");
+        harness.key_up(key);
+        harness.run();
+        for _ in 0..4 {
+            harness.step();
+        }
+        assert!(harness.state().0, "{key:?} up: open, and it stays open");
+    }
+}
