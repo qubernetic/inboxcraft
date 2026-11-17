@@ -299,3 +299,80 @@ fn panes_that_meet_share_one_line_side_by_side_and_stacked() {
         assert_eq!(stacked.len(), wide, "{ppp}: one line between stacked panes: {stacked:?}");
     }
 }
+
+#[test]
+fn a_text_box_hugs_its_run_rounded_up_to_a_whole_point() {
+    assert_eq!(super::run_box(6.6), 7.0);
+    assert_eq!(super::run_box(13.2), 14.0);
+    assert_eq!(super::run_box(14.0), 14.0);
+    assert_eq!(super::run_box(39.6), 40.0);
+    assert_eq!(super::run_box(0.0), 0.0);
+    assert_eq!(super::run_box(f32::NAN), 0.0);
+    assert_eq!(super::run_box(f32::INFINITY), 0.0);
+}
+
+/// The text shapes of one frame at `ppp` that paints `"7"` with [`super::run_at`] at `x`: their origins and the
+/// leading space of each one's first section.
+fn run_origins(ppp: f32, x: f32) -> Vec<(f32, f32)> {
+    let shapes = frame_shapes(ppp, |ui| {
+        let job = egui::text::LayoutJob::simple_singleline("7".to_owned(), egui::FontId::monospace(11.0), egui::Color32::WHITE);
+        let galley = ui.painter().layout_job(job);
+        super::run_at(ui.painter(), pos2(x, 3.0), galley, egui::Color32::WHITE);
+    });
+    shapes
+        .iter()
+        .filter_map(|shape| if let Shape::Text(text) = shape { Some(text) } else { None })
+        .map(|text| (text.pos.x, text.galley.job.sections.first().map_or(f32::NAN, |first| first.leading_space)))
+        .collect()
+}
+
+#[test]
+fn a_run_at_a_fraction_of_a_pixel_stands_on_the_whole_pixel_with_the_rest_laid_out_before_it() {
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    let one = run_origins(1.0, 4.5);
+    assert!(one.len() == 1 && near(one[0].0, 4.0) && near(one[0].1, 0.5), "{one:?}");
+    let whole = run_origins(1.0, 5.0);
+    assert!(whole.len() == 1 && near(whole[0].0, 5.0) && near(whole[0].1, 0.0), "{whole:?}");
+    // 4.6 points at 1.5 pixels a point: 6.9 pixels, so the origin is pixel 6 (4.0 points) and 0.6 points follow.
+    let more = run_origins(1.5, 4.6);
+    assert!(more.len() == 1 && near(more[0].0, 4.0) && near(more[0].1, 0.6), "{more:?}");
+    assert!(run_origins(1.0, f32::NAN).is_empty() && run_origins(1.0, f32::INFINITY).is_empty(), "nothing at no place");
+}
+
+#[test]
+fn a_run_at_half_a_pixel_is_drawn_half_way_between_the_two_whole_pixels() {
+    use crate::component::tests::ink_centre;
+    let mode = Mode::Dark;
+    let theme = Theme::new(mode, TextScale::default());
+    let centre = |x: f32| {
+        let picture = crate::shot::paint(vec2(24.0, 20.0), 1.0, mode, |ui| {
+            crate::theme::install_fonts(ui.ctx());
+            let galley = crate::component::galley(ui, "7", theme.fonts.mono_s, theme.palette.ink);
+            super::run_at(ui.painter(), pos2(x, 2.0), galley, theme.palette.ink);
+        })
+        .unwrap();
+        let ground = picture.pixel(0, 0).unwrap();
+        ink_centre(&picture, 0..24, 0..20, ground, theme.palette.ink).unwrap().0
+    };
+    let (left, half, right) = (centre(4.0), centre(4.5), centre(5.0));
+    assert!((right - left - 1.0).abs() < 0.05, "{left} {right}");
+    assert!((half - (left + 0.5)).abs() < 0.1, "x.5 is drawn at x.5: {left} {half} {right}");
+}
+
+#[test]
+fn a_centred_run_s_box_is_in_the_middle_on_a_half_pixel_when_the_room_left_is_odd() {
+    let shapes = frame_shapes(1.0, |ui| {
+        let job = egui::text::LayoutJob::simple_singleline("7".to_owned(), egui::FontId::monospace(11.0), egui::Color32::WHITE);
+        let galley = ui.painter().layout_job(job);
+        let wide = galley.size().x;
+        assert!(wide.fract() > 0.01, "a run of a fraction of a point: {wide}");
+        super::run_centred(ui.painter(), egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(16.0, 16.0)), galley, egui::Color32::WHITE);
+    });
+    let texts: Vec<_> = shapes.iter().filter_map(|shape| if let Shape::Text(text) = shape { Some(text) } else { None }).collect();
+    assert_eq!(texts.len(), 1);
+    let text = texts[0];
+    let lead = text.galley.job.sections.first().map_or(f32::NAN, |first| first.leading_space);
+    let wide = text.galley.size().x - lead;
+    let left = 8.0 - super::run_box(wide) / 2.0;
+    assert!((text.pos.x + lead - left).abs() < 1e-4, "the box's left at {left}: {} + {lead}", text.pos.x);
+}

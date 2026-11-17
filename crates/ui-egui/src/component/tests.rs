@@ -242,7 +242,11 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
                 size: font.size,
                 row_height,
             };
-            Some((text.galley.rect.translate(text.pos.to_vec2()), look))
+            // The run itself: a fraction of a pixel laid out before it (`paint::run_at`) is not text.
+            let lead = text.galley.job.sections.first().map_or(0.0, |section| section.leading_space.max(0.0));
+            let mut rect = text.galley.rect.translate(text.pos.to_vec2());
+            rect.min.x = (rect.min.x + lead).min(rect.max.x);
+            Some((rect, look))
         }
         _ => None,
     }
@@ -593,4 +597,34 @@ pub(crate) fn strictly_between(mid: Color32, a: Color32, b: Color32) -> bool {
 /// The family name of the icons.
 pub(crate) fn icons() -> String {
     crate::theme::icon_font(1.0).family.to_string()
+}
+
+/// The centre of the ink in `picture` inside the whole pixels `x` and `y` (start inclusive, end exclusive): every
+/// pixel weighted by how far it stands from `ground` towards `ink`, a pixel's centre at its index + 0.5.
+pub(crate) fn ink_centre(
+    picture: &crate::shot::Picture,
+    x: std::ops::Range<usize>,
+    y: std::ops::Range<usize>,
+    ground: Color32,
+    ink: Color32,
+) -> Option<(f32, f32)> {
+    let channels = |colour: Color32| [f32::from(colour.r()), f32::from(colour.g()), f32::from(colour.b())];
+    let (g, i) = (channels(ground), channels(ink));
+    let towards = [i[0] - g[0], i[1] - g[1], i[2] - g[2]];
+    let length = towards.iter().map(|d| d * d).sum::<f32>();
+    if length <= 0.0 {
+        return None;
+    }
+    let (mut mass, mut sx, mut sy) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for py in y {
+        for px in x.clone() {
+            let p = channels(picture.pixel(px, py)?);
+            let cover = ((p[0] - g[0]) * towards[0] + (p[1] - g[1]) * towards[1] + (p[2] - g[2]) * towards[2]) / length;
+            let cover = cover.clamp(0.0, 1.0);
+            mass += cover;
+            sx += cover * (px as f32 + 0.5);
+            sy += cover * (py as f32 + 0.5);
+        }
+    }
+    (mass > 0.0).then(|| (sx / mass, sy / mass))
 }

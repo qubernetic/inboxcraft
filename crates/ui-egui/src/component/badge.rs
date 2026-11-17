@@ -86,7 +86,8 @@ fn paint(ui: &Ui, theme: &Theme, rect: Rect, text: Arc<Galley>, kind: BadgeKind)
     if let Some(fill) = fill {
         ui.painter().rect_filled(rect, 0.0, fill);
     }
-    ui.painter().galley(rect.center() - text.size() / 2.0, text, ink);
+    // In the middle as the design centres its text box: a single digit stands on a half pixel.
+    crate::draw::paint::run_centred(ui.painter(), rect, text, ink);
 }
 
 /// The width of a count badge for `count`; 0 for 0.

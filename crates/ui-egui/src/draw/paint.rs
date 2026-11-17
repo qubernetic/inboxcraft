@@ -26,6 +26,46 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     ui.painter().layout_job(job)
 }
 
+/// The width the design gives a run of text `wide` points long: its text box hugs the run, rounded up to a whole
+/// point.
+pub(crate) fn run_box(wide: f32) -> f32 {
+    if wide.is_finite() { (wide - 0.01).ceil().max(0.0) } else { 0.0 }
+}
+
+/// Paints `galley` with its left edge at `at.x` exactly, a fraction of a pixel included, and its top at `at.y`.
+///
+/// epaint puts a galley's origin on a whole physical pixel, but places the glyphs inside it on quarter pixels. So the
+/// origin goes on the whole pixel at or left of `at.x` and the rest is laid out as leading space before the run: a
+/// text box of the design at x.5 is drawn at x.5, as the design draws it, and every other run keeps its sharp edges.
+pub(crate) fn run_at(painter: &Painter, at: Pos2, galley: Arc<Galley>, colour: Color32) {
+    if !at.x.is_finite() || !at.y.is_finite() {
+        return;
+    }
+    let ppp = painter.pixels_per_point();
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let whole = (at.x * ppp).floor() / ppp;
+    let rest = at.x - whole;
+    let galley = match galley.job.sections.first() {
+        Some(_) if rest > 0.01 => {
+            let mut job = (*galley.job).clone();
+            if let Some(first) = job.sections.first_mut() {
+                first.leading_space += rest;
+            }
+            painter.layout_job(job)
+        }
+        _ => galley,
+    };
+    painter.galley(pos2(whole, at.y), galley, colour);
+}
+
+/// Paints `galley` in the middle of `rect` as the design centres a text box: the box ([`run_box`]) in the middle,
+/// on a half pixel when the room left over is odd, and the run at the box's left ([`run_at`]).
+pub(crate) fn run_centred(painter: &Painter, rect: Rect, galley: Arc<Galley>, colour: Color32) {
+    let size = galley.size();
+    let at = pos2(rect.center().x - run_box(size.x) / 2.0, rect.center().y - size.y / 2.0);
+    run_at(painter, at, galley, colour);
+}
+
 /// The edge of a float: whether it takes the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FloatEdge {

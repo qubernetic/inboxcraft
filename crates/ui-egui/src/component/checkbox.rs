@@ -135,7 +135,7 @@ fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: O
         match kind {
             Kind::Check => {
                 let cross = super::galley(ui, "×", theme.fonts.check_mark(), look.mark);
-                painter.galley(mark.center() - cross.size() / 2.0, cross, look.mark);
+                paint::run_centred(&painter, mark, cross, look.mark);
             }
             Kind::Radio => {
                 painter.rect_filled(mark.shrink(DOT_INSET), 0.0, look.mark);
