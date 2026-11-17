@@ -126,6 +126,56 @@ pub fn appear(ctx: &Context, id: Id, seconds: f32) -> f32 {
     easing::cubic_out(shown)
 }
 
+/// One turn of the caret's blink, in seconds (the `caret` token, 1 000 ms): on for the first half, off for the second.
+pub const CARET: f64 = 1.0;
+
+/// From one line of an unfolding list to the next, in seconds (the `stagger` token, 30 ms).
+pub const STAGGER: f32 = 0.03;
+
+/// The longest wait [`blink`] asks a repaint after, in milliseconds: half a turn of [`CARET`].
+const HALF_TURN_MS: f64 = 500.0;
+
+/// Whether a caret that last moved at `since` (an input time, in seconds) shows now: on for the first half of each
+/// turn of [`CARET`], off for the second, at every level the app has (the design's caret blinks at full and at
+/// reduced). A repaint is asked for at its next change, never sooner. `still` keeps it on and asks for nothing (a
+/// caret drawn on a board, or the design's `off` level once the app has it).
+pub fn blink(ctx: &Context, since: f64, still: bool) -> bool {
+    if still {
+        return true;
+    }
+    let now = ctx.input(|input| input.time);
+    let age = if (now - since).is_finite() { (now - since).max(0.0) } else { 0.0 };
+    let phase = age.rem_euclid(CARET) * 1000.0;
+    let (on, next) = if phase < HALF_TURN_MS { (true, HALF_TURN_MS - phase) } else { (false, HALF_TURN_MS * 2.0 - phase) };
+    // Between 1 and 500 ms, so the cast keeps it.
+    let wait = next.ceil().clamp(1.0, HALF_TURN_MS) as u64;
+    ctx.request_repaint_after(std::time::Duration::from_millis(wait));
+    on
+}
+
+/// How far line `index` of a list that opened at `opened` (an input time, in seconds) has come in, 0 to 1: each line
+/// [`STAGGER`] after the one above, over `seconds` (the `fast` token), eased (the presentation's `line-in`). A
+/// repaint is asked for until it is in. With reduced motion every line is in at once.
+pub fn unfold(ctx: &Context, opened: f64, index: usize, seconds: f32) -> f32 {
+    let seconds = duration(ctx, seconds);
+    if seconds <= 0.0 {
+        return 1.0;
+    }
+    let now = ctx.input(|input| input.time);
+    // A list has a few dozen lines at most; past 1 000 they all start together.
+    let delay = f64::from(STAGGER) * index.min(1000) as f64;
+    let age = now - opened - delay;
+    if !age.is_finite() {
+        return 1.0;
+    }
+    // A share of a fraction of a second: the cast loses nothing that shows.
+    let shown = ((age / f64::from(seconds)) as f32).clamp(0.0, 1.0);
+    if shown < 1.0 {
+        ctx.request_repaint();
+    }
+    easing::cubic_out(shown)
+}
+
 #[cfg(test)]
 #[path = "motion_tests.rs"]
 pub(crate) mod tests;

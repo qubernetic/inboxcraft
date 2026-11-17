@@ -5,7 +5,7 @@
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
 //! a tooltip, a popup menu, a toast, a board of controls that are coming soon, and the time picker as a float at
 //! [`now`] with `thu 9` typed; under them the boards of the sets drawn as their sheets say, every state labelled in the
-//! sheet's order, and under them the marks: avatar, badge, scroll bar, account bar and the icons. The data is
+//! sheet's order, and under them the marks: avatar, badge, scroll bar, account bar and the icons; beside them all the fields, pickers and menus. The data is
 //! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
@@ -23,6 +23,7 @@ use super::avatar::AvatarSize;
 use super::badge::BadgeKind;
 use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
+use super::field::{self, Field};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
 use super::scroll::{self, Bar};
@@ -39,7 +40,7 @@ use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip}
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(1800.0, TOP + BOARDS + CONTROLS + MARKS)
+    vec2(FIELDS_LEFT + FIELDS * 3.0, TOP + BOARDS + CONTROLS + MARKS)
 }
 
 /// What draws a column of the page.
@@ -58,6 +59,14 @@ const CONTROLS: f32 = 807.0;
 
 /// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
 const MARKS: f32 = 480.0;
+
+/// The width of each of the three columns of the fields, pickers and menus, right of the other boards from the top to
+/// the bottom of the page (a picture is at most 4 096 pixels a side, so they stand beside the bands, not under them),
+/// in points.
+const FIELDS: f32 = 760.0;
+
+/// Where the columns of the fields, pickers and menus start: the width of the page left of them, in points.
+const FIELDS_LEFT: f32 = 1800.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -824,16 +833,68 @@ fn marks_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     icons(ui, theme);
 }
 
+/// A cell of a field's board, `width` wide.
+fn field_cell(ui: &mut Ui, theme: &Theme, state: &str, width: f32, add: impl FnOnce(&mut Ui)) {
+    cell(ui, theme, state, |ui| {
+        ui.push_id(state, |ui| {
+            ui.set_width(width);
+            add(ui);
+        });
+    });
+}
+
+/// The text field's board: empty, filled, hover, focus, error, disabled, read-only, long, with the sheet's words.
+fn text_fields(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Text field"));
+    let name = tr!("Name on sent mail");
+    let one = |ui: &mut Ui, value: &str, field: Field<'_>, shown: Option<Shown>| {
+        let mut text = value.to_owned();
+        let id = ui.make_persistent_id("field");
+        field::text_field_with(ui, theme, id, &mut text, &field, shown);
+    };
+    let field = Field::new(name, tr!("optional"));
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("empty"), 320.0, |ui| one(ui, "", field, None));
+        field_cell(ui, theme, tr!("filled"), 320.0, |ui| one(ui, "Odile Brannock", field, None));
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("hover"), 320.0, |ui| one(ui, "Odile Brannock", field, Some(Shown::Hover)));
+        field_cell(ui, theme, tr!("focus"), 320.0, |ui| one(ui, "Odile Brannock", field, Some(Shown::Focus)));
+    });
+    cells(ui, theme, |ui| {
+        let port = Field { error: Some(tr!("A port is a number from 1 to 65535.")), ..Field::new(tr!("Port"), "") };
+        field_cell(ui, theme, tr!("error"), 320.0, |ui| one(ui, "99999", port, None));
+        field_cell(ui, theme, tr!("disabled"), 320.0, |ui| one(ui, "Odile Brannock", Field { enabled: false, ..field }, None));
+    });
+    cells(ui, theme, |ui| {
+        let address = Field { read_only: true, ..Field::new(tr!("Address"), "") };
+        field_cell(ui, theme, tr!("read-only"), 320.0, |ui| one(ui, "odile@example.org", address, None));
+        let caldav = Field::new(tr!("CalDAV address, for calendars"), "");
+        field_cell(ui, theme, tr!("long"), 320.0, |ui| one(ui, "https://dav.example.org/calendars/odile/shared-with-the-studio/", caldav, None));
+    });
+}
+
+/// The fields' left column of boards.
+fn fields_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    text_fields(ui, theme);
+}
+
+/// The fields' middle column of boards.
+fn fields_middle(_: &mut Ui, _: &Theme, _: &Keymap) {}
+
+/// The fields' right column of boards.
+fn fields_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
     ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
     let mut layers = Panes::begin(ui.painter());
-    let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
-    let board = (whole.width() - s.s2 * 3.0) / 2.0;
+    let half = (FIELDS_LEFT - PICKER - s.s2 * 4.0) / 2.0;
+    let board = (FIELDS_LEFT - s.s2 * 3.0) / 2.0;
     let top = TOP - s.s2 * 2.0;
-    let columns: [(f32, f32, f32, Draw); 9] = [
+    let columns: [(f32, f32, f32, Draw); 12] = [
         (s.s2, s.s2, half, left),
         (s.s2 * 2.0 + half, s.s2, half, right),
         (s.s2 * 3.0 + half * 2.0, s.s2, PICKER, picker),
@@ -843,9 +904,14 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         (s.s2 * 2.0 + board, TOP + BOARDS, board, controls_right),
         (s.s2, TOP + BOARDS + CONTROLS, board, marks_left),
         (s.s2 * 2.0 + board, TOP + BOARDS + CONTROLS, board, marks_right),
+        (FIELDS_LEFT, 0.0, FIELDS - s.s2, fields_left),
+        (FIELDS_LEFT + FIELDS, 0.0, FIELDS - s.s2, fields_middle),
+        (FIELDS_LEFT + FIELDS * 2.0, 0.0, FIELDS - s.s2, fields_right),
     ];
     for (x, y, width, draw) in columns {
-        let height = if y < TOP {
+        let height = if x >= FIELDS_LEFT {
+            whole.height() - s.s2
+        } else if y < TOP {
             top
         } else if y < TOP + BOARDS {
             BOARDS - s.s2
@@ -856,7 +922,7 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         };
         let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            if y < TOP {
+            if y < TOP && x < FIELDS_LEFT {
                 layers.card(ui, super::margin(s.s4, s.s3), |ui| {
                     ui.set_min_size(ui.available_size());
                     draw(ui, theme, keymap);
