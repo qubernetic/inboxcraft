@@ -862,3 +862,66 @@ fn a_disabled_stored_password_is_an_empty_box() {
         assert_eq!(mark.colour, theme.palette.dim, "{mode:?}: the password mark in `dim`");
     }
 }
+
+#[test]
+fn copy_and_cut_in_a_password_field_put_nothing_on_the_clipboard() {
+    for event in [egui::Event::Copy, egui::Event::Cut] {
+        let theme = theme();
+        let mut harness = builder().build_ui_state(
+            move |ui, text: &mut String| {
+                password_field(ui, &theme, egui::Id::unique("password"), text, &Field::new("Password", ""), Secret::Typed);
+            },
+            String::new(),
+        );
+        harness.run();
+        harness.get_by_role(Role::PasswordInput).focus();
+        harness.run();
+        harness.get_by_role(Role::PasswordInput).type_text(TYPED);
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.event(event.clone());
+        harness.step();
+        let copied: Vec<String> = harness
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(copied.iter().all(|text| text.is_empty() || !text.contains('k')), "{event:?}: {copied:?}");
+        assert!(copied.is_empty(), "{event:?}: nothing goes to the clipboard: {copied:?}");
+    }
+}
+
+#[test]
+fn a_caret_blinks_at_full_motion_too_and_comes_back_on() {
+    for reduced in [false, true] {
+        let theme = theme();
+        let mut harness = builder().with_size(vec2(400.0, 120.0)).build_ui(move |ui| {
+            crate::motion::set_reduced(ui.ctx(), reduced);
+            crate::component::tests::stage(ui, theme.palette.bg, |ui| {
+                let mut text = "Odile".to_owned();
+                text_field(ui, &theme, egui::Id::unique("name"), &mut text, &Field::new("Name", ""));
+            });
+        });
+        harness.run_ok();
+        harness.get_by_role_and_label(Role::TextInput, "Name").focus();
+        harness.run_ok();
+        let shown = |harness: &Harness<'static>| caret(&painted(harness, "Name"), theme.palette.cyan_edge).is_some();
+        let mut seen = Vec::new();
+        // Frames of 1/60 s over a second and a half: on, off, on again.
+        for _ in 0..90 {
+            harness.step();
+            seen.push(shown(&harness));
+        }
+        let changes = seen.windows(2).filter(|pair| pair[0] != pair[1]).count();
+        assert!(seen.first() == Some(&true) && changes >= 2, "reduced {reduced}: on, then off and on again: {seen:?}");
+        assert!(seen.iter().filter(|on| **on).count() > 30 && seen.iter().filter(|on| !**on).count() > 20, "reduced {reduced}: {seen:?}");
+        let off = seen.iter().position(|on| !on).unwrap_or(0);
+        assert!(seen.iter().skip(off).any(|on| *on), "reduced {reduced}: it comes back on");
+    }
+}
