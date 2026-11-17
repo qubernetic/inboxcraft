@@ -1153,3 +1153,17 @@ fn a_press_outside_a_menu_gives_the_keyboard_back_only_to_one_opened_by_the_keyb
         assert_eq!(focused, expected, "{opened:?}");
     }
 }
+
+#[test]
+fn a_screen_reader_s_press_opens_a_menu_from_the_keyboard() {
+    let mut harness = menu_opener();
+    assert!(!harness.get_by_label("Actions").is_focused(), "the opener does not have the keyboard first");
+    harness.get_by_label("Actions").click_accesskit();
+    harness.run_ok();
+    assert!(harness.query_by_label("Delete").is_some(), "open");
+    harness.get_by_label("Delete").click();
+    harness.run_ok();
+    assert_eq!(*harness.state(), Some("Delete"));
+    let focused = focused_node(&harness).and_then(|(_, name, _)| name);
+    assert_eq!(focused.as_deref(), Some("Actions"), "the keyboard is back on the opener, as after Enter");
+}
