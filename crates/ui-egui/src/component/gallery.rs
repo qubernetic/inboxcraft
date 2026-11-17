@@ -44,7 +44,7 @@ type Draw = fn(&mut Ui, &Theme, &Keymap);
 const TOP: f32 = 660.0;
 
 /// The height of the boards under the columns, in points.
-const BOARDS: f32 = 560.0;
+const BOARDS: f32 = 640.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -390,6 +390,22 @@ fn section_labels(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The tooltip's board: default, with its key, with the reason a control cannot be used, and long words that wrap.
+fn tooltips(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Tooltip"));
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("default"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Print"), None));
+        cell(ui, theme, tr!("with-key"), |ui| tooltip::bubble(ui, theme, keymap, tr!("Done"), Some("mail.done")));
+        cell(ui, theme, tr!("unavailable-reason"), |ui| {
+            tooltip::bubble_noted(ui, theme, keymap, tr!("Snooze"), None, Some(tr!("Not yet: choose a message first")));
+        });
+    });
+    cells(ui, theme, |ui| {
+        let long = tr!("Snooze is not there for a message that is still being sent. Wait until it has left the outbox, then try again.");
+        cell(ui, theme, tr!("long"), |ui| tooltip::bubble(ui, theme, keymap, long, None));
+    });
+}
+
 /// The key chip's board: default, on cyan, capture, none, disabled.
 fn key_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Key chip"));
@@ -421,6 +437,7 @@ fn boards_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     key_chips(ui, theme);
     tags(ui, theme);
     section_labels(ui, theme);
+    tooltips(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
