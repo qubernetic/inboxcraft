@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_model::{CheckStep, ErrorKind, StepStatus};
 use inboxcraft_time::{FakeClock, Timestamp};
 
@@ -414,4 +414,23 @@ fn the_back_link_rings_itself_outside_2_px_clear() {
         );
         assert!(!strokes.iter().any(|(ring, ..)| rect.contains_rect(*ring)), "{theme:?} no ring inside: {strokes:?} {rect:?}");
     }
+}
+
+#[test]
+fn the_box_to_ask_mozilla_s_list_ticks_by_pointer_and_by_space() {
+    const NAME: &str = "Also ask Mozilla's list of providers (tells Mozilla the domain)";
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Light);
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    let ticked = |harness: &Harness<'static, InboxApp>| harness.state().onboarding().form().ispdb;
+    assert!(!ticked(&harness), "it starts off");
+    harness.get_by_role_and_label(Role::CheckBox, NAME).click();
+    harness.run();
+    assert!(ticked(&harness), "a click ticks it");
+    assert_eq!(harness.get_by_role_and_label(Role::CheckBox, NAME).accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
+    harness.get_by_role_and_label(Role::CheckBox, NAME).focus();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run();
+    assert!(!ticked(&harness), "Space takes the tick off");
 }

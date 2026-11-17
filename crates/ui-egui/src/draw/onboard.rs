@@ -8,6 +8,7 @@ use egui::text_edit::TextEditState;
 use egui::{CollapsingHeader, Color32, Frame, Response, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 
 use crate::component::button::{self, TextButton};
+use crate::component::checkbox::checkbox_wrapping;
 use crate::component::{field as field_style, margin, pill};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
@@ -122,7 +123,9 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
             detect = true;
         }
     });
-    ui.checkbox(&mut form.ispdb, tr!("Also ask Mozilla's list of providers (tells Mozilla the domain)"));
+    if checkbox_wrapping(ui, theme, tr!("Also ask Mozilla's list of providers (tells Mozilla the domain)"), form.ispdb).clicked() {
+        form.ispdb = !form.ispdb;
+    }
     note(
         ui,
         theme,

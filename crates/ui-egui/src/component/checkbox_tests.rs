@@ -6,7 +6,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use egui::{Rect, pos2, vec2};
 
-use super::{checkbox, checkbox_with, radio, radio_with};
+use super::{checkbox, checkbox_with, checkbox_wrapping, radio, radio_with};
 use crate::component::Shown;
 use crate::component::press_tests::keys_press_as_the_pointer;
 use crate::component::tests::{Look, Own, bring, builder, own, painted, staged, theme};
@@ -68,6 +68,35 @@ fn the_name_is_cut_in_too_little_room_and_the_box_keeps_its_size() {
     harness.run();
     let long = harness.get_by_role_and_label(Role::CheckBox, "A calendar with a very long name indeed").rect();
     assert!(long.width() <= 61.0 && long.height() >= 18.0, "{long:?}");
+}
+
+#[test]
+fn a_wrapping_name_goes_onto_more_lines_whole_beside_a_box_of_its_size() {
+    const NAME: &str = "Also ask the list of providers (tells the list the domain)";
+    let theme = theme();
+    let side = theme.boxes().check;
+    let line = theme.fonts.mono.line;
+    let mut harness = builder().build_ui(move |ui| {
+        ui.set_max_width(160.0);
+        checkbox_wrapping(ui, &theme, NAME, false);
+        checkbox_wrapping(ui, &theme, "Short", false);
+    });
+    harness.run();
+    let long = harness.get_by_role_and_label(Role::CheckBox, NAME).rect();
+    assert!(long.width() <= 161.0 && long.height() >= line * 2.0, "{long:?}");
+    let short = harness.get_by_role_and_label(Role::CheckBox, "Short").rect();
+    assert!((short.height() - line.max(side)).abs() < 0.5, "a name that fits keeps one line: {short:?}");
+    let texts: Vec<String> = harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.iter().any(|text| text == NAME), "the name is drawn whole: {texts:?}");
+    assert!(texts.iter().all(|text| !text.contains('…')), "nothing is cut: {texts:?}");
 }
 
 /// The states of the check box's sheet, in its order.

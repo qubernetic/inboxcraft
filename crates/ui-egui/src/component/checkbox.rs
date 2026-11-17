@@ -9,10 +9,13 @@
 //! disabled is a dashed `muted` edge, the name and the cross in `muted`, the chosen square in `dim`. The whole row answers a press; none
 //! of it moves (the design gives these no transition).
 
-use egui::{Color32, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::text::LayoutJob;
+use egui::{Color32, Galley, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, Ring};
-use crate::theme::Theme;
+use crate::theme::{Font, Theme};
 
 use super::{Hover, Shown, cut, lit, solid, soon};
 
@@ -60,17 +63,37 @@ fn look(theme: &Theme, kind: Kind, on: bool, enabled: bool, lit: super::Lit) -> 
     }
 }
 
-/// The box and `name` after it, in the room there is, drawn in `shown` when a board asks; clicked when it was pressed.
-fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: Option<Shown>) -> Response {
+/// What a name too long for its room does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fit {
+    /// It is cut with an ellipsis on its one line (a calendar's name in a narrow panel).
+    Cut,
+    /// It wraps onto the lines under its first, the box beside the first: a sentence that must be read whole.
+    Wrap,
+}
+
+/// `text` in `font` and `colour`, wrapped at `width`.
+fn wrapped(ui: &Ui, text: &str, font: Font, colour: Color32, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap.max_width = width.max(1.0);
+    ui.painter().layout_job(job)
+}
+
+/// The box and `name` after it, in the room there is, the name cut or wrapped as `fit` says, drawn in `shown` when a
+/// board asks; clicked when it was pressed.
+fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: Option<Shown>, fit: Fit) -> Response {
     let p = &theme.palette;
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
     let side = theme.boxes().check;
     let font = theme.fonts.mono;
-    let high = font.line.max(side);
+    let line = font.line.max(side);
     let ink = if enabled { p.ink } else { p.muted };
     let text = cut(ui, name, font, ink, f32::INFINITY);
     let wanted = side + GAP + text.size().x.ceil();
-    let wide = wanted.min(ui.available_width().max(side));
+    let room = ui.available_width().max(side);
+    let wide = wanted.min(room);
+    let lines = (fit == Fit::Wrap && wanted > room).then(|| wrapped(ui, name, font, ink, room - side - GAP));
+    let high = lines.as_ref().map_or(line, |lines| lines.size().y.max(line));
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(wide, high), sense);
     let role = if kind == Kind::Check { Role::CheckBox } else { Role::RadioButton };
@@ -80,9 +103,21 @@ fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: O
         return response;
     }
     let painter = solid(ui);
-    let mark = Rect::from_min_size(pos2(rect.left(), rect.center().y - side / 2.0), vec2(side, side));
-    let text = if wide < wanted { cut(ui, name, font, ink, rect.right() - mark.right() - GAP) } else { text };
-    painter.galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, ink);
+    // The box stands beside the name's first line.
+    let mark = Rect::from_min_size(pos2(rect.left(), rect.top() + (line - side) / 2.0), vec2(side, side));
+    let (text, top) = match lines {
+        Some(lines) => (lines, rect.top()),
+        None if wide < wanted => {
+            let text = cut(ui, name, font, ink, rect.right() - mark.right() - GAP);
+            let top = rect.top() + (line - text.size().y) / 2.0;
+            (text, top)
+        }
+        None => {
+            let top = rect.top() + (line - text.size().y) / 2.0;
+            (text, top)
+        }
+    };
+    painter.galley(pos2(mark.right() + GAP, top), text, ink);
     let look = look(theme, kind, on, enabled, lit);
     match look.edge {
         Some((colour, true)) => {
@@ -115,22 +150,28 @@ fn toggle(ui: &mut Ui, theme: &Theme, kind: Kind, name: &str, on: bool, shown: O
 
 /// A check box named `name`; clicked when it was pressed.
 pub fn checkbox(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    toggle(ui, theme, Kind::Check, name, on, None)
+    toggle(ui, theme, Kind::Check, name, on, None, Fit::Cut)
+}
+
+/// A check box like [`checkbox`] whose name, when it is too long for its room, wraps onto more lines instead of being
+/// cut: a sentence that must be read whole, such as what ticking it tells someone else.
+pub fn checkbox_wrapping(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
+    toggle(ui, theme, Kind::Check, name, on, None, Fit::Wrap)
 }
 
 /// [`checkbox`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
 pub(crate) fn checkbox_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
-    toggle(ui, theme, Kind::Check, name, on, shown)
+    toggle(ui, theme, Kind::Check, name, on, shown, Fit::Cut)
 }
 
 /// A radio button named `name`, the chosen one of its row or not; clicked when it was pressed.
 pub fn radio(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
-    toggle(ui, theme, Kind::Radio, name, on, None)
+    toggle(ui, theme, Kind::Radio, name, on, None, Fit::Cut)
 }
 
 /// [`radio`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
 pub(crate) fn radio_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool, shown: Option<Shown>) -> Response {
-    toggle(ui, theme, Kind::Radio, name, on, shown)
+    toggle(ui, theme, Kind::Radio, name, on, shown, Fit::Cut)
 }
 
 #[cfg(test)]
