@@ -127,13 +127,14 @@ fn paint_slider(ui: &Ui, theme: &Theme, rect: Rect, (now, held): (usize, Option<
             (true, None) if index == now => p.ink,
             (true, None) => p.muted,
         };
-        // Never cut: centred on its tick, kept inside the slider at the ends. Ticks are 50 apart and the widest name is
-        // about 43 at 130 %, so two never meet.
+        // Never cut: the run centred on the tick's left edge, as the sheet's fixed 40 wide slots centre their text (its
+        // own width, a fraction of a pixel included), kept inside the slider at the ends. Ticks are 50 apart and the
+        // widest name is about 43 at 130 %, so two never meet.
         let text = galley(ui, &tr!("{percent} %", percent = scale.percent()), theme.fonts.mono_s, colour);
         let wide = text.size().x;
         // `max` then `min`, never `clamp`: a NaN or inverted rect would make `clamp` panic.
-        let left = (mark.center().x - wide / 2.0).max(rect.left()).min((rect.right() - wide).max(rect.left()));
-        painter.galley(pos2(on_grid(left), rect.top() + NAMES), text, colour);
+        let left = (mark.left() - wide / 2.0).max(rect.left()).min((rect.right() - wide).max(rect.left()));
+        paint::run_at(&painter, pos2(left, rect.top() + NAMES), text, colour);
     }
     let (at, top, high) = match held {
         Some(at) => (at, HANDLE[3], HANDLE[4]),
