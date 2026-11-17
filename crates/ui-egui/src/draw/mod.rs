@@ -1271,7 +1271,8 @@ impl InboxApp {
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
         ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
-        let (dismiss, banner) = self.error_banner(ui, &theme, corner);
+        // In the app's own frame the banner stands under the strip and beside the rail, so it comes after them.
+        let early = self.error_banner(ui, &theme, corner, false);
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
@@ -1287,9 +1288,6 @@ impl InboxApp {
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         let mut layers = Panes::begin(ui.painter());
-        if let Some(banner) = banner {
-            layers.capped(banner);
-        }
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
         let rail = Panel::left("rail")
@@ -1302,6 +1300,9 @@ impl InboxApp {
         layers.edged(rail.response.rect);
         let clicked_rail = rail.inner;
         self.own_frame_parts(ui, &theme, corner);
+        let late = self.error_banner(ui, &theme, corner, true);
+        let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
+        layers.capped(banner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
         if self.screen == Screen::Calendar {
@@ -1505,21 +1506,26 @@ impl InboxApp {
     }
 
     /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
-    /// sides, its act a small link, a `minus` hairline on its top and sides. Its last row holds the one `line` hairline
-    /// between it and what stands under it; the panes there draw no line of their own ([`Panes::capped`]). Whether
-    /// Dismiss was pressed, and the banner's rect. Its top corners follow the window's `corner`.
-    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32) -> (bool, Option<Rect>) {
-        let Some(error) = self.mailbox.error() else { return (false, None) };
+    /// sides, its act a small link. Its last row holds the one `line` hairline between it and what stands under it;
+    /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
+    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
+    /// beside the rail, whose lines are its top and left edges, and the frame's outline its right one; where it
+    /// reaches the window's top (the top row) its top right corner is the window's `corner`. Whether Dismiss was
+    /// pressed, and the banner's rect. Called twice a frame, before the rail and strip and after them; it draws in
+    /// the call `framed` names (the own frame's or not).
+    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
+        let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
         let p = theme.palette;
         let mut dismiss = false;
         // A corner of a few points; the clamp keeps the cast inside u8.
         let round = corner.clamp(0.0, 255.0) as u8;
-        let ground = Frame::new().fill(p.panel).corner_radius(egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 }).inner_margin(Margin {
-            left: 12,
-            right: 12,
-            top: 8,
-            bottom: 8,
-        });
+        let on_top = (ui.available_rect_before_wrap().top() - ui.ctx().content_rect().top()).abs() < 0.5;
+        let corners = match (framed, on_top) {
+            (false, _) => egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 },
+            (true, true) => egui::CornerRadius { nw: 0, ne: round, sw: 0, se: 0 },
+            (true, false) => egui::CornerRadius::ZERO,
+        };
+        let ground = Frame::new().fill(p.panel).corner_radius(corners).inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 });
         let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
@@ -1529,9 +1535,11 @@ impl InboxApp {
         let r = shown.response.rect;
         let painter = ui.painter();
         let (right, bottom) = (r.right() - 1.0, r.bottom() - 1.0);
-        paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
-        paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
-        paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
+        if !framed {
+            paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
+            paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
+            paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
+        }
         paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.line);
         (dismiss, Some(r))
     }

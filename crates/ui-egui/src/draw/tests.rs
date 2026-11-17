@@ -713,7 +713,12 @@ fn the_error_banner_s_dismiss_is_a_link_that_enter_presses() {
 
 /// The physical rows that long level lines in `colours` cover between `from` and `to` (points) in the last frame of
 /// `harness`, tessellated without feathering.
-fn level_line_rows(harness: &Harness<'static, InboxApp>, colours: &[egui::Color32], from: f32, to: f32) -> std::collections::BTreeSet<i32> {
+pub(super) fn level_line_rows(
+    harness: &Harness<'static, InboxApp>,
+    colours: &[egui::Color32],
+    from: f32,
+    to: f32,
+) -> std::collections::BTreeSet<i32> {
     let output = harness.output();
     let ppp = output.pixels_per_point;
     let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };

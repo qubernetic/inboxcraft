@@ -284,8 +284,8 @@ impl Panes {
 
     /// Notes `rect`, a strip above the panes that draws the line on its bottom edge itself (the error banner): a pane
     /// that starts under it draws no line on its top.
-    pub(crate) fn capped(&mut self, rect: Rect) {
-        self.capped.push(rect);
+    pub(crate) fn capped(&mut self, rect: Option<Rect>) {
+        self.capped.extend(rect);
     }
 
     /// Notes `rect`, a strip beside the panes that draws the line on its right edge itself (the rail, whose edge
