@@ -628,3 +628,24 @@ pub(crate) fn ink_centre(
     }
     (mass > 0.0).then(|| (sx / mass, sy / mass))
 }
+
+#[test]
+fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, shown: &mut Vec<String>| {
+            let font = theme.fonts.button;
+            let show = |text: &str, width: f32| -> String {
+                let galley = super::cut(ui, text, font, theme.palette.ink, width);
+                galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect()
+            };
+            *shown = vec![show("Zusammenfassung des Posteingangs", 136.0), show("Keep a copy", 400.0), show("ab cd", 1.0)];
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let shown = harness.state();
+    assert_eq!(shown[0], "Zusammenfassung…", "the design drops the space the cut leaves before the ellipsis");
+    assert_eq!(shown[1], "Keep a copy", "a name that fits is not touched");
+    assert!(shown[2].chars().count() <= 2, "{:?}", shown[2]);
+}
