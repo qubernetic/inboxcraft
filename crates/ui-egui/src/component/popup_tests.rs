@@ -635,3 +635,83 @@ fn enter_and_space_press_a_menu_choice_as_the_pointer_does() {
         });
     }
 }
+
+/// The states of the suggestion row's sheet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Suggest {
+    Default,
+    Hover,
+    Focus,
+    Selected,
+    Long,
+}
+
+#[test]
+fn a_suggestion_row_looks_as_its_sheet_says_in_every_state() {
+    use crate::component::Shown;
+    use crate::component::field::tests::{drawn, one};
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        let p = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette;
+        for state in [Suggest::Default, Suggest::Hover, Suggest::Focus, Suggest::Selected, Suggest::Long] {
+            let theme = crate::theme::Theme::new(mode, crate::theme::TextScale::default());
+            let (name, address) = if state == Suggest::Long {
+                ("Bakery on the corner, orders and deliveries", "orders-and-deliveries@bakery-on-the-corner.example.org")
+            } else {
+                ("Teodor Vasquez", "teodor@example.org")
+            };
+            let mut harness = crate::component::tests::staged(theme, |p| p.surface, egui::vec2(420.0, 120.0), move |ui, theme| {
+                ui.vertical(|ui| {
+                    ui.set_width(320.0);
+                    super::suggestion_row(ui, theme, name, address, state == Suggest::Selected);
+                });
+            });
+            let spoken = format!("{name}, {address}");
+            match state {
+                Suggest::Hover => crate::component::tests::bring(&mut harness, &spoken, Shown::Hover),
+                Suggest::Focus => crate::component::tests::bring(&mut harness, &spoken, Shown::Focus),
+                _ => {}
+            }
+            let rect = harness.get_by_label(&spoken).rect();
+            let paint = crate::component::tests::painted(&harness, &spoken);
+            let look = crate::component::tests::own(&paint, rect);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert_eq!(rect.size(), egui::vec2(320.0, 40.0), "{at}");
+            let lit = matches!(state, Suggest::Hover | Suggest::Selected);
+            assert_eq!(look.fill, lit.then_some(p.stage), "{at}");
+            assert_eq!(look.edge, (state == Suggest::Focus).then_some((1.0, p.cyan_edge, false)), "{at}");
+            let shift = if state == Suggest::Focus { 1.0 } else { 0.0 };
+            // The avatar: 24, corners of 2, on `stage`, on `surface` when the row is lit.
+            let face = egui::Rect::from_min_size(rect.min + egui::vec2(12.0 + shift, 8.0), egui::vec2(24.0, 24.0));
+            let ground = if lit { p.surface } else { p.stage };
+            assert!(
+                paint.rects().any(|shape| shape.rect == face && matches!(shape.look, crate::component::tests::Look::Rect { fill, radius, .. } if fill == ground && radius == 2.0)),
+                "{at}: the avatar"
+            );
+            let shown = one(&harness, name);
+            assert_eq!((shown.rect.min, shown.colour, shown.size), (rect.min + egui::vec2(44.0 + shift, 9.0), p.ink, 14.0), "{at}");
+            let mail = drawn(&harness).into_iter().find(|text| text.text == address).unwrap_or_else(|| panic!("{at}: no address"));
+            assert!((mail.rect.left() - (shown.rect.right().round() + 8.0)).abs() < 0.01 && mail.rect.top() == rect.top() + 12.0, "{at} {mail:?} after {shown:?}");
+            assert_eq!((mail.colour, mail.family.as_str(), mail.size), (p.muted, "Monospace", 11.0), "{at}");
+            let right = if state == Suggest::Selected { 257.0 } else { 308.0 - shift };
+            assert!(mail.rect.right() <= rect.left() + right + 0.5, "{at} {mail:?}");
+            if state == Suggest::Long {
+                assert!(shown.rect.width() <= 144.0 + 0.01, "{at} {shown:?}");
+            }
+            let (found, _) = rects(&harness);
+            let bar = found.iter().find(|(r, fill, _)| *fill == p.cyan_edge && r.width() == 2.0).map(|(r, ..)| *r);
+            assert_eq!(bar, (state == Suggest::Selected).then_some(egui::Rect::from_min_size(rect.min, egui::vec2(2.0, 40.0))), "{at}");
+            let chip = found.iter().find(|(r, _, stroke)| *stroke == Some((1.0, p.line)) && r.height() == 20.0).map(|(r, ..)| *r);
+            assert_eq!(chip, (state == Suggest::Selected).then_some(egui::Rect::from_min_size(rect.min + egui::vec2(265.0, 10.0), egui::vec2(43.0, 20.0))), "{at}");
+        }
+    }
+}
+
+#[test]
+fn enter_and_space_press_a_suggestion_as_the_pointer_does() {
+    for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+        held(mode, "Teodor Vasquez, teodor@example.org", |ui, theme| {
+            ui.set_width(320.0);
+            super::suggestion_row(ui, theme, "Teodor Vasquez", "teodor@example.org", false);
+        });
+    }
+}

@@ -1036,6 +1036,35 @@ fn fields_middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.push_id("popup-panel", |ui| popup_panels(ui, theme, keymap));
     ui.push_id("menu-item", |ui| menu_items(ui, theme, keymap));
     ui.push_id("menu-choice", |ui| menu_choices(ui, theme));
+    ui.push_id("suggestion-row", |ui| suggestion_rows(ui, theme));
+}
+
+/// The suggestion row's board: default, hover, focus, selected, long; and pressed, which the sheet does not draw.
+fn suggestion_rows(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Suggestion row"));
+    let (name, address) = ("Teodor Vasquez", "teodor@example.org");
+    let rows: [[(&str, bool, Option<Shown>); 2]; 2] = [
+        [(tr!("default"), false, None), (tr!("hover"), false, Some(Shown::Hover))],
+        [(tr!("focus"), false, Some(Shown::Focus)), (tr!("selected"), true, None)],
+    ];
+    for row in rows {
+        cells(ui, theme, |ui| {
+            for (state, selected, shown) in row {
+                field_cell(ui, theme, state, 320.0, |ui| {
+                    popup::suggestion_row_with(ui, theme, name, address, selected, shown);
+                });
+            }
+        });
+    }
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("long"), 320.0, |ui| {
+            let long = ("Bakery on the corner, orders and deliveries", "orders-and-deliveries@bakery-on-the-corner.example.org");
+            popup::suggestion_row_with(ui, theme, long.0, long.1, false, None);
+        });
+        field_cell(ui, theme, tr!("pressed"), 320.0, |ui| {
+            popup::suggestion_row_with(ui, theme, name, address, false, Some(Shown::Pressed));
+        });
+    });
 }
 
 /// The menu choice's board: off, on, hover, unavailable with its reason; and pressed off and on, which the sheet does
