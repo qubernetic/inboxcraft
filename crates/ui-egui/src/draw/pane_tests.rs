@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The navigation rail: the preset's gradient at full strength down the window's left edge, with the views and the
+//! The navigation rail: the flat panel down the window's left edge, with the views and the
 //! appearance settings on it.
 
 use egui::accesskit::{Role, Toggled};
@@ -16,7 +16,7 @@ use inboxcraft_model::Role as FolderRole;
 use crate::mailbox::{Mailbox, Pile, Place};
 use crate::sample;
 use crate::shot::render;
-use crate::theme::{Mode, PRESETS, Theme, contrast, install_fonts};
+use crate::theme::{Mode, TextScale, Theme, contrast, install_fonts};
 
 fn clock() -> Box<FakeClock> {
     Box::new(FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap()))
@@ -31,22 +31,19 @@ fn close(a: egui::Color32, b: egui::Color32) -> bool {
 }
 
 #[test]
-fn the_rail_runs_its_own_stops_down_the_left_edge() {
-    for preset in PRESETS {
-        for mode in [Mode::Light, Mode::Dark] {
-            let mut app = app();
-            app.set_preset(preset);
-            let picture = render(&mut app, vec2(1100.0, 700.0), 1.0, mode).unwrap();
-            let [first, _, last] = Theme::new(mode, &preset).palette.rail;
-            let (top, bottom) = (picture.pixel(2, 1).unwrap(), picture.pixel(2, 698).unwrap());
-            assert!(close(top, first), "{} {mode:?}: top {top:?}, first stop {first:?}", preset.id);
-            assert!(close(bottom, last), "{} {mode:?}: bottom {bottom:?}, last stop {last:?}", preset.id);
-        }
+fn the_rail_is_the_flat_panel_down_the_left_edge() {
+    for mode in [Mode::Light, Mode::Dark] {
+        let mut app = app();
+        let picture = render(&mut app, vec2(1100.0, 700.0), 1.0, mode).unwrap();
+        let panel = Theme::new(mode, TextScale::default()).palette.panel;
+        let (top, bottom) = (picture.pixel(2, 1).unwrap(), picture.pixel(2, 698).unwrap());
+        assert!(close(top, panel), "{mode:?}: top {top:?}, panel {panel:?}");
+        assert!(close(bottom, panel), "{mode:?}: bottom {bottom:?}, panel {panel:?}");
     }
 }
 
 #[test]
-fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_gradient() {
+fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_panel() {
     let mut harness = Harness::builder()
         .with_size(vec2(1100.0, 700.0))
         .with_context_setup(install_fonts)
@@ -62,14 +59,10 @@ fn the_rail_s_buttons_say_where_the_window_is_and_read_on_the_gradient() {
     harness.run();
     assert_eq!(toggled(&harness, "Mail"), Some(Toggled::False));
     assert_eq!(toggled(&harness, "Appearance settings"), Some(Toggled::True));
-    for preset in PRESETS {
-        for mode in [Mode::Light, Mode::Dark] {
-            let theme = Theme::new(mode, &preset);
-            let ink = super::pane::rail_ink(&theme);
-            for stop in theme.palette.rail {
-                assert!(contrast(ink, stop) >= 3.0, "{} {mode:?}: {ink:?} on {stop:?}", preset.id);
-            }
-        }
+    for mode in [Mode::Light, Mode::Dark] {
+        let theme = Theme::new(mode, TextScale::default());
+        let ink = super::pane::rail_ink(&theme);
+        assert!(contrast(ink, theme.palette.panel) >= 4.5, "{mode:?}: {ink:?} on the panel");
     }
 }
 

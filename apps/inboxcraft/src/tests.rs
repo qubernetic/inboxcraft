@@ -139,11 +139,11 @@ fn only_the_empty_window_adds_accounts() {
 
 #[test]
 fn both_windows_start_with_the_kept_appearance() {
-    use inboxcraft_engine::appearance::{Appearance, Typeface};
+    use inboxcraft_engine::appearance::{Appearance, Motion};
     use inboxcraft_ui_egui::keep::{FILE, Keep, KeepFile};
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join(FILE);
-    let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
+    let chosen = Appearance { motion: Motion::Reduce, ..Appearance::default() };
     KeepFile::new(file.clone()).store(&chosen).unwrap();
     for source in [Source::Sample, Source::Owner] {
         let window = app(mail(source), clock, None, Box::new(KeepFile::new(file.clone()))).unwrap();
@@ -183,7 +183,7 @@ fn the_sample_acts_in_memory_writes_nothing_and_starts_no_account_worker() {
 /// Set in the child run of [`child_opens_both_windows_with_the_owner_s_keep`]; without it that test does nothing.
 const CHILD_VAR: &str = "INBOXCRAFT_APP_CHILD";
 
-/// In a child run: opens both windows on [`owner_keep`] and prints the typeface each starts with as `font=<name>`.
+/// In a child run: opens both windows on [`owner_keep`] and prints the motion each starts with as `motion=<name>`.
 #[test]
 fn child_opens_both_windows_with_the_owner_s_keep() {
     if std::env::var_os(CHILD_VAR).is_none() {
@@ -191,7 +191,7 @@ fn child_opens_both_windows_with_the_owner_s_keep() {
     }
     for source in [Source::Sample, Source::Owner] {
         let window = app(mail(source), clock, None, owner_keep()).unwrap();
-        println!("font={:?}", window.appearance().font);
+        println!("motion={:?}", window.appearance().motion);
     }
 }
 
@@ -205,21 +205,21 @@ fn child_with(vars: &[(&str, &str)]) -> Vec<String> {
     command.envs(vars.iter().copied());
     let output = command.output().unwrap();
     assert!(output.status.success(), "{output:?}");
-    String::from_utf8(output.stdout).unwrap().lines().filter_map(|line| line.rsplit_once("font=").map(|(_, font)| font.to_owned())).collect()
+    String::from_utf8(output.stdout).unwrap().lines().filter_map(|line| line.rsplit_once("motion=").map(|(_, motion)| motion.to_owned())).collect()
 }
 
 #[test]
 fn the_owner_s_keep_is_the_file_in_the_config_folder_or_nothing_without_one() {
-    use inboxcraft_engine::appearance::{Appearance, Typeface};
+    use inboxcraft_engine::appearance::{Appearance, Motion};
     use inboxcraft_ui_egui::keep::{FILE, Keep, KeepFile};
     let dir = tempfile::tempdir().unwrap();
-    let chosen = Appearance { font: Typeface::Inter, ..Appearance::default() };
+    let chosen = Appearance { motion: Motion::Reduce, ..Appearance::default() };
     KeepFile::new(dir.path().join("inboxcraft").join(FILE)).store(&chosen).unwrap();
-    let inter = format!("{:?}", Typeface::Inter);
-    assert_eq!(child_with(&[("XDG_CONFIG_HOME", dir.path().to_str().unwrap())]), [inter.clone(), inter.clone()]);
+    let reduce = format!("{:?}", Motion::Reduce);
+    assert_eq!(child_with(&[("XDG_CONFIG_HOME", dir.path().to_str().unwrap())]), [reduce.clone(), reduce.clone()]);
     // Without a config folder nothing is kept, and without a downloads folder the windows still open.
-    let default = format!("{:?}", Appearance::default().font);
-    assert_ne!(default, inter);
+    let default = format!("{:?}", Appearance::default().motion);
+    assert_ne!(default, reduce);
     assert_eq!(child_with(&[]), [default.clone(), default]);
 }
 

@@ -42,13 +42,13 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
             }
             any = true;
             let name = if day == calendar.today() { tr!("Today · {day}", day = day::dated(day)) } else { day::dated(day) };
-            ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.text));
+            ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.ink));
             for event in held {
                 row(ui, theme, calendar, event, day, offset, asked);
             }
         }
         if !any {
-            ui.add_space(s.l);
+            ui.add_space(s.s4);
             let text = tr!("Nothing in these {count} days.", count = AGENDA_DAYS);
             ui.label(RichText::new(text).font(theme.fonts.body.id()).color(p.muted));
         }
@@ -72,10 +72,10 @@ fn row(ui: &mut Ui, theme: &Theme, calendar: &Calendar, event: &EventRow, day: D
     ui.painter().galley(rect.left_center() - vec2(0.0, galley.size().y / 2.0), galley, p.muted);
     let zone = event.zone.as_ref().map(|zone| format!("{} {}", zone.name, zone.start.clock()));
     let zone_width = zone.as_ref().map_or(0.0, |zone| {
-        let galley = line(ui, &[(zone, caption_strong(theme), p.text)], width / 3.0);
+        let galley = line(ui, &[(zone, caption_strong(theme), p.ink)], width / 3.0);
         let wide = galley.size().x;
         let at = rect.right_center() - vec2(wide + NOTE, galley.size().y / 2.0);
-        ui.painter().galley(at, galley, p.text);
+        ui.painter().galley(at, galley, p.ink);
         wide + NOTE * 2.0 + 12.0
     });
     let area = Rect::from_min_max(rect.min + vec2(TIME, 0.0), rect.max - vec2(zone_width, 0.0));

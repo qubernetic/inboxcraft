@@ -32,14 +32,14 @@ pub(super) enum Asked {
 
 /// The room between the fields of a row, in points.
 fn between(theme: &Theme) -> f32 {
-    theme.spacing.s
+    theme.spacing.s2
 }
 
 /// A field `width` points wide under its `label` (the caption in the muted colour); `add` draws the field.
 fn labelled(ui: &mut Ui, theme: &Theme, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> Response) -> Response {
     ui.vertical(|ui| {
         ui.set_width(width);
-        ui.spacing_mut().item_spacing.y = theme.spacing.xs;
+        ui.spacing_mut().item_spacing.y = theme.spacing.s1;
         let label = ui.label(RichText::new(label).font(theme.fonts.caption.id()).color(theme.palette.muted));
         add(ui).labelled_by(label.id)
     })
@@ -81,17 +81,17 @@ fn note(ui: &mut Ui, theme: &Theme, text: &str, colour: Color32) {
 fn found_box(ui: &mut Ui, theme: &Theme, found: &Found) {
     let p = theme.palette;
     let s = theme.spacing;
-    Frame::new().fill(p.hover).corner_radius(s.corner).inner_margin(margin(s.s, s.s)).show(ui, |ui| {
+    Frame::new().fill(p.grid).corner_radius(0.0).inner_margin(margin(s.s2, s.s2)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         match found.source {
-            Some(source) => note(ui, theme, source.text(), if source.doubtful() { p.flag } else { p.muted }),
-            None => note(ui, theme, tr!("Detect found no server: type the settings in."), p.flag),
+            Some(source) => note(ui, theme, source.text(), if source.doubtful() { p.ink } else { p.muted }),
+            None => note(ui, theme, tr!("Detect found no server: type the settings in."), p.ink),
         }
         if let Some((host, _)) = found.outgoing.as_ref().filter(|(_, source)| source.doubtful()) {
-            note(ui, theme, &tr!("{host} was a guess from common names: check it.", host = host), p.flag);
+            note(ui, theme, &tr!("{host} was a guess from common names: check it.", host = host), p.ink);
         }
         CollapsingHeader::new(
-            RichText::new(tr!("What Detect asked ({count})", count = found.asked.len())).font(theme.fonts.caption.id()).color(p.accent),
+            RichText::new(tr!("What Detect asked ({count})", count = found.asked.len())).font(theme.fonts.caption.id()).color(p.cyan_text),
         )
         .id_salt("detect-asked")
         .show(ui, |ui| {
@@ -99,7 +99,7 @@ fn found_box(ui: &mut Ui, theme: &Theme, found: &Found) {
                 note(ui, theme, line, p.muted);
             }
             for line in found.failed.iter().take(32) {
-                note(ui, theme, line, p.flag);
+                note(ui, theme, line, p.ink);
             }
         });
     });
@@ -115,7 +115,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let label = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
     ui.horizontal(|ui| {
         let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
-        let room = width - ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.text).size().x) - 64.0;
+        let room = width - ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.ink).size().x) - 64.0;
         ui.add(line_edit(theme, &mut form.address, "you@example.org", room.max(120.0))).labelled_by(label.id);
         let button = TextButton::new(name).secondary().icon(IconId::Search);
         if ui.add_enabled_ui(!detecting, |ui| button.show(ui, theme, keymap)).inner.clicked() {
@@ -161,15 +161,15 @@ fn server_row(
     let s = theme.spacing;
     let gap = between(theme);
     let chosen = security.unwrap_or(Security::Tls);
-    let port = s.xl * 3.0;
-    let choices = s.xl * 6.0;
+    let port = s.s6 * 3.0;
+    let choices = s.s6 * 6.0;
     let room = (width - port - choices - 2.0 * gap).max(120.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
         labelled(ui, theme, caption, room, |ui| ui.add(line_edit(theme, host, placeholder, room)));
         labelled(ui, theme, tr!("Port"), port, |ui| ui.add(line_edit(theme, port_text, &usual(chosen).to_string(), port)));
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = s.xs;
+            ui.spacing_mut().item_spacing.y = s.s1;
             ui.label(RichText::new(tr!("Security")).font(theme.fonts.caption.id()).color(theme.palette.muted));
             ui.horizontal(|ui| {
                 for choice in [Security::Tls, Security::StartTls] {
@@ -203,7 +203,7 @@ fn lock_note(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.horizontal(|ui| {
         let side = theme.fonts.caption.size * 1.2;
         let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), at, IconId::Lock, Style::Regular, theme.palette.muted);
+        crate::iconset::paint(ui.painter(), at, IconId::Lock, Style::Regular, theme.palette.muted);
         note(ui, theme, text, theme.palette.muted);
     });
 }
@@ -215,23 +215,23 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
     let s = theme.spacing;
     let mut asked = None;
     let width = ui.available_width().min(FORM_WIDTH);
-    ui.spacing_mut().item_spacing.y = s.s;
-    ui.label(RichText::new(tr!("Account settings")).font(theme.fonts.title.id()).color(p.text));
-    ui.add_space(s.s);
+    ui.spacing_mut().item_spacing.y = s.s2;
+    ui.label(RichText::new(tr!("Account settings")).font(theme.fonts.title.id()).color(p.ink));
+    ui.add_space(s.s2);
     let address = onboarding.form().address.clone();
     let caption = ui.label(RichText::new(tr!("Address")).font(theme.fonts.caption.id()).color(p.muted));
-    ui.add(egui::Label::new(RichText::new(address).font(theme.fonts.body.id()).color(p.text)).wrap()).labelled_by(caption.id);
-    ui.add_space(s.xs);
+    ui.add(egui::Label::new(RichText::new(address).font(theme.fonts.body.id()).color(p.ink)).wrap()).labelled_by(caption.id);
+    ui.add_space(s.s1);
     let form = onboarding.form_mut();
     names(ui, theme, form, width);
     password(ui, theme, tr!("New password"), tr!("empty keeps the stored one"), &mut form.password, width);
     servers(ui, theme, form, width);
-    ui.add_space(s.xs);
+    ui.add_space(s.s1);
     lock_note(ui, theme, tr!("A new password goes into your system's credential store. The stored one is never shown."));
     if let Some(text) = onboarding.sign_in_note() {
-        note(ui, theme, &text, p.flag);
+        note(ui, theme, &text, p.ink);
     }
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     let label = if onboarding.save_checks() { tr!("Save and check") } else { tr!("Save") };
     ui.horizontal(|ui| {
         if TextButton::new(label).primary().show(ui, theme, keymap).clicked() {
@@ -249,21 +249,21 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     let s = theme.spacing;
     let mut asked = None;
     let width = ui.available_width().min(FORM_WIDTH);
-    ui.spacing_mut().item_spacing.y = s.s;
-    ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.text));
-    ui.add_space(s.s);
+    ui.spacing_mut().item_spacing.y = s.s2;
+    ui.label(RichText::new(tr!("Add an account")).font(theme.fonts.title.id()).color(p.ink));
+    ui.add_space(s.s2);
     if detect_part(ui, theme, keymap, onboarding, width) {
         asked = Some(Asked::Detect);
     }
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     let form = onboarding.form_mut();
     names(ui, theme, form, width);
     password(ui, theme, tr!("Password"), "", &mut form.password, width);
     servers(ui, theme, form, width);
-    ui.add_space(s.xs);
+    ui.add_space(s.s1);
     lock_note(ui, theme, tr!("The password goes into your system's credential store, never into InboxCraft's files."));
     note(ui, theme, tr!("Accounts are not kept yet: when InboxCraft closes, it removes their passwords from the store again."), p.muted);
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     ui.horizontal(|ui| {
         if TextButton::new(tr!("Check and add")).primary().show(ui, theme, keymap).clicked() {
             asked = Some(Asked::Add);
@@ -282,12 +282,12 @@ fn mark(ui: &mut Ui, theme: &Theme, state: StepState) {
     let size = super::paint::line_height(ui, theme.fonts.body);
     let (rect, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
     let (id, style, colour) = match state {
-        StepState::Passed => (IconId::Done, Style::Fill, p.accent),
-        StepState::Failed => (IconId::Failed, Style::Fill, p.error),
-        StepState::Pending => (IconId::Waiting, Style::Regular, p.accent),
+        StepState::Passed => (IconId::Done, Style::Fill, p.cyan_text),
+        StepState::Failed => (IconId::Failed, Style::Fill, p.minus),
+        StepState::Pending => (IconId::Waiting, Style::Regular, p.cyan_text),
         StepState::Skipped | StepState::Held | StepState::NotSet | StepState::NotBuilt => (IconId::Skipped, Style::Regular, p.muted),
     };
-    theme.icons.paint(ui.painter(), rect, id, style, colour);
+    crate::iconset::paint(ui.painter(), rect, id, style, colour);
 }
 
 fn state_text(state: StepState) -> &'static str {
@@ -307,7 +307,7 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
     ui.horizontal(|ui| {
         mark(ui, theme, row.state);
         ui.vertical(|ui| {
-            let colour = if matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt) { p.muted } else { p.text };
+            let colour = if matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt) { p.muted } else { p.ink };
             ui.label(
                 RichText::new(tr!("{step}: {state}", step = row.name(), state = state_text(row.state))).font(theme.fonts.body.id()).color(colour),
             );
@@ -323,11 +323,11 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow) {
                 note(ui, theme, &details.join(" · "), p.muted);
             }
             if let Some(message) = row.message.as_deref().filter(|_| matches!(row.state, StepState::Failed | StepState::Held)) {
-                note(ui, theme, message, if row.state == StepState::Failed { p.error } else { p.flag });
+                note(ui, theme, message, if row.state == StepState::Failed { p.minus } else { p.ink });
             }
         });
     });
-    ui.add_space(theme.spacing.s);
+    ui.add_space(theme.spacing.s2);
 }
 
 /// Why the check failed, in the error colour with a cross before it: the first failed step and its reason, or a plain
@@ -342,8 +342,8 @@ fn failure(ui: &mut Ui, theme: &Theme, onboarding: &Onboarding) {
     ui.horizontal(|ui| {
         let side = super::paint::line_height(ui, theme.fonts.body);
         let (at, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-        theme.icons.paint(ui.painter(), at, IconId::Failed, Style::Fill, p.error);
-        ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.error)).wrap());
+        crate::iconset::paint(ui.painter(), at, IconId::Failed, Style::Fill, p.minus);
+        ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.minus)).wrap());
     });
 }
 
@@ -351,22 +351,22 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
     let p = theme.palette;
     let mut asked = None;
     let address = mailbox.account(account).map(|row| row.address.clone()).unwrap_or_default();
-    ui.label(RichText::new(tr!("Checking {address}", address = address)).font(theme.fonts.title.id()).color(p.text));
+    ui.label(RichText::new(tr!("Checking {address}", address = address)).font(theme.fonts.title.id()).color(p.ink));
     match onboarding.outcome() {
         Outcome::Running => note(ui, theme, tr!("Each step shows as it ends."), p.muted),
-        Outcome::Passed => note(ui, theme, tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.accent),
+        Outcome::Passed => note(ui, theme, tr!("Signed in. InboxCraft now fetches the folders and the mail."), p.cyan_text),
         Outcome::Failed => failure(ui, theme, onboarding),
     }
-    ui.add_space(theme.spacing.m);
+    ui.add_space(theme.spacing.s3);
     // The steps on a card of their own.
     let s = theme.spacing;
-    Frame::new().fill(p.card).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.l, s.m)).show(ui, |ui| {
+    Frame::new().fill(p.surface).stroke(egui::Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s4, s.s3)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         for row in onboarding.steps() {
             step(ui, theme, row);
         }
     });
-    ui.add_space(theme.spacing.m);
+    ui.add_space(theme.spacing.s3);
     ui.horizontal(|ui| match onboarding.outcome() {
         Outcome::Passed => {
             if TextButton::new(tr!("Done")).primary().show(ui, theme, keymap).clicked() {
@@ -394,8 +394,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width(FORM_WIDTH);
         if let Some(error) = onboarding.error() {
-            note(ui, theme, error, p.error);
-            ui.add_space(theme.spacing.s);
+            note(ui, theme, error, p.minus);
+            ui.add_space(theme.spacing.s2);
         }
         asked = match onboarding.stage() {
             Stage::Form => form(ui, theme, keymap, onboarding),

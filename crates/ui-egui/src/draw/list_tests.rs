@@ -448,11 +448,11 @@ fn show_all_is_an_accent_link_a_little_left_of_the_rows_text() {
     let harness = harness(true);
     let (text, colour) = painted(&harness, "Show all (7)").expect("Show all is drawn");
     let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
-    assert_eq!(colour, theme.palette.accent, "Show all is in the accent colour");
+    assert_eq!(colour, theme.palette.cyan_text, "Show all is in the accent colour");
     let row = harness.get_by_label(ODILE).rect();
     let sender = painted(&harness, "Odile Brannock").expect("the sender is drawn").0;
     assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
-    let wanted = sender.left() - theme.spacing.l;
+    let wanted = sender.left() - theme.spacing.s4;
     assert!((text.left() - wanted).abs() <= 1.5, "Show all starts at {}, a step left of the rows' text at {}", text.left(), sender.left());
 }
 

@@ -31,40 +31,40 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
     let width = ui.available_width().max(1.0);
-    let header_height = line_height(ui, theme.fonts.heading) + s.m * 2.0;
+    let header_height = line_height(ui, theme.fonts.heading) + s.s3 * 2.0;
     let (header_rect, header) = ui.allocate_exact_size(vec2(width, header_height), Sense::click());
     header.widget_info(|| WidgetInfo::selected(Role::Button, true, open, title));
     let lit = header.hovered() || header.has_focus();
     let hover = motion::toggle(ui.ctx(), id.with("hover"), lit, theme.motion.hover_fade);
-    let text = galley(ui, title, theme.fonts.heading, p.text);
-    let text_at = pos2(header_rect.left() + s.l, header_rect.center().y - text.size().y / 2.0);
+    let text = galley(ui, title, theme.fonts.heading, p.ink);
+    let text_at = pos2(header_rect.left() + s.s4, header_rect.center().y - text.size().y / 2.0);
     let openness = motion::toggle(ui.ctx(), id.with("open"), open, theme.motion.card);
     let mut inner = None;
     let mut body_height = 0.0;
     if openness > 0.0 {
         let top = header_rect.bottom();
-        let room = Rect::from_min_size(pos2(header_rect.left() + s.l, top), vec2((width - s.l * 2.0).max(1.0), f32::INFINITY));
+        let room = Rect::from_min_size(pos2(header_rect.left() + s.s4, top), vec2((width - s.s4 * 2.0).max(1.0), f32::INFINITY));
         let mut child = ui.new_child(UiBuilder::new().id_salt(id.with("body")).max_rect(room));
         // Unrolling, the body shows as far as the height it had when last drawn whole allows.
         let remembered: f32 = ui.data(|data| data.get_temp(id.with("height"))).unwrap_or(0.0);
         let shown = if openness >= 1.0 { f32::INFINITY } else { remembered * openness };
         child.shrink_clip_rect(Rect::from_min_max(pos2(header_rect.left(), top), pos2(header_rect.right(), top + shown)));
         inner = Some(body(&mut child));
-        let full_height = child.min_rect().height() + s.l;
+        let full_height = child.min_rect().height() + s.s4;
         ui.data_mut(|data| data.insert_temp(id.with("height"), full_height));
         body_height = if openness >= 1.0 { full_height } else { full_height * openness };
         ui.allocate_exact_size(vec2(width, body_height), Sense::hover());
     }
     let rect = Rect::from_min_max(header_rect.min, Pos2::new(header_rect.right(), header_rect.bottom() + body_height));
-    let mut shapes = vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)];
+    let mut shapes = vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside)];
     if hover > 0.0 {
-        let round = egui::CornerRadius { nw: super::corner(s.card).nw, ne: super::corner(s.card).ne, sw: 0, se: 0 };
-        let round = if openness > 0.0 { round } else { super::corner(s.card) };
-        shapes.push(Shape::rect_filled(header_rect, round, p.hover.gamma_multiply(hover)));
+        let round = egui::CornerRadius { nw: super::corner(0.0).nw, ne: super::corner(0.0).ne, sw: 0, se: 0 };
+        let round = if openness > 0.0 { round } else { super::corner(0.0) };
+        shapes.push(Shape::rect_filled(header_rect, round, p.stage));
     }
-    shapes.push(Shape::galley(text_at, text, p.text));
+    shapes.push(Shape::galley(text_at, text, p.ink));
     if header.has_focus() {
-        shapes.push(Shape::rect_stroke(header_rect.shrink(1.0), s.card, Stroke::new(2.0, p.focus), StrokeKind::Inside));
+        shapes.push(Shape::rect_stroke(header_rect.shrink(1.0), 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Inside));
     }
     ui.painter().set(slot, Shape::Vec(shapes));
     Card { header, inner, openness, rect }

@@ -56,7 +56,7 @@ fn mini_month(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, 
     let month = calendar.month();
     ui.horizontal(|ui| {
         let name = tr!("{month} {year}", month = day::month_name(month.month()), year = month.year());
-        ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.text));
+        ui.label(RichText::new(name).font(theme.fonts.heading.id()).color(p.ink));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if IconButton::new(IconId::Next, tr!("Month after")).show(ui, theme, keymap).clicked() {
                 asked.push(Asked::Month(true));
@@ -109,18 +109,18 @@ fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: 
     let response = ui.interact(spot, ui.scope_id().with(("calendar-mini", day)), Sense::click());
     response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, shown || day == today, day::long(day)));
     let colour = if day == today {
-        p.on_accent
+        p.on_cyan
     } else if day.month() == month {
-        p.text
+        p.ink
     } else {
         p.muted
     };
     if day == today {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.accent);
+        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.cyan);
     } else if shown {
         selection(ui.painter(), theme, spot, spot.height() / 2.0);
     } else if response.hovered() {
-        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.hover);
+        ui.painter().circle_filled(spot.center(), spot.height() / 2.0, p.stage);
     }
     let font = if day == today { caption_bold(theme) } else { theme.fonts.caption };
     let galley = line(ui, &[(&day.date().to_string(), font, colour)], spot.width() + 8.0);
@@ -133,14 +133,14 @@ fn mini_day(ui: &mut Ui, theme: &Theme, day: Day, month: u8, spot: Rect, shown: 
 fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    ui.add_space(s.m);
+    ui.add_space(s.s3);
     ui.label(RichText::new(tr!("Calendars").to_uppercase()).font(caption_strong(theme).id()).color(p.muted).extra_letter_spacing(0.6));
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     for row in calendar.calendars() {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             // The dot's room stays beside even a name that fills the panel.
-            ui.set_max_width(ui.available_width() - DOT - s.s);
+            ui.set_max_width(ui.available_width() - DOT - s.s2);
             if checkbox(ui, theme, &row.name, calendar.is_shown(row.id)).clicked() {
                 asked.push(Asked::Toggle(row.id));
             }
@@ -155,9 +155,9 @@ fn calendars(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<As
 fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, event: &EventRow, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    ui.add_space(s.l);
+    ui.add_space(s.s4);
     ui.separator();
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     ui.horizontal(|ui| {
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
         ui.painter().circle_filled(dot.center(), 5.0, tint(theme, calendar, event.calendar));
@@ -166,13 +166,13 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
                 asked.push(Asked::Pick(None));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.heading.id()).color(p.text)).wrap());
+                ui.add(egui::Label::new(RichText::new(&event.summary).font(theme.fonts.heading.id()).color(p.ink)).wrap());
             });
         });
     });
-    ui.add_space(s.xs);
+    ui.add_space(s.s1);
     let body = |ui: &mut Ui, text: &str, muted: bool| {
-        let colour = if muted { p.muted } else { p.text };
+        let colour = if muted { p.muted } else { p.ink };
         ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(colour)).wrap());
     };
     body(ui, &event.when(), false);
@@ -180,7 +180,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
         ui.horizontal(|ui| {
             let side = line_height(ui, theme.fonts.caption);
             let (spot, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), spot, IconId::Globe, Style::Regular, p.muted);
+            crate::iconset::paint(ui.painter(), spot, IconId::Globe, Style::Regular, p.muted);
             ui.add(egui::Label::new(RichText::new(zone).font(theme.fonts.caption.id()).color(p.muted)).wrap());
         });
     }
@@ -199,7 +199,7 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     if let Some(more) = event.guests.len().checked_sub(GUESTS).filter(|more| *more > 0) {
         body(ui, &tr!("and {count} more", count = more), true);
     }
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     ui.horizontal(|ui| {
         if TextButton::new(tr!("Edit")).secondary().icon(IconId::Compose).show(ui, theme, keymap).clicked() {
             asked.push(Asked::Edit);

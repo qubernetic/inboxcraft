@@ -358,39 +358,31 @@ time from the code as it is, not measured.
   bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
   which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
   for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
-- Text size and typeface (#83, #86, #87): the text scale (90 % to 130 %) and the typeface (Figtree or Inter) are
-  set on the appearance settings page or through `ui.text_scale.set` and `ui.font.set`, and kept on disk. The fit
-  test draws the list, the reader, the add-account page and the settings page in both typefaces at 90 %, 100 % and
-  130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
+- Text size (#83, #86, #87, #231): the text scale (90 % to 130 %) is set on the appearance settings page or through
+  `ui.text_scale.set`, and kept on disk; the typeface is Figtree, with no choice. The fit test draws the list, the
+  reader, the add-account page and the settings page at 90 %, 100 % and 130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
   Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
-- Icons (#84, #86): Phosphor and Lucide, chosen with `ui.icons.set`; the settings control comes with E1.16b. Lucide
-  has no solid icons, so its Fill is the line glyph (an active or selected one reads by its colour and the selection
-  behind it, less boldly than Phosphor's solid shape) and its Duotone draws a faint disc behind the lines. The set has
-  the ids the window and the triage actions need so far; a toolbar or a view that needs another meaning adds an id
-  and its glyph (in both sets). Only the flag, the attachment tile and the add-account steps use icons yet; the
+- Icons (#84, #86, #231): Phosphor, with no choice. The set has the ids the window and the triage actions need so
+  far; a toolbar or a view that needs another meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
   whole (about 1.5 MB, every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new
-  font file. An icon is one colour token (Duotone's back at 20 % of it); a gradient through a glyph (the gradient
-  helper on the icon's text) is not done. The unread dot and the account dots and
+  font file. An icon is one colour token (Duotone's back at 20 % of it). The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
-- Appearance (#86, #87): the six `ui.*.set` commands, the file that keeps their result and the settings sheet that
+- Appearance (#86, #87, #231): the four `ui.*.set` commands, the file that keeps their result and the settings sheet that
   runs them exist; of the sheet's sections only Appearance, Accounts and Shortcuts (#130) are built, the others are faded and say so (#104). The Accounts page lists the accounts and adds one; an account's own page (the check on demand, its folder roles, removing it) and the account colours switch are not built, and a row shows no sign-in state. The page has no command of its own: it opens from the rail's settings button, Ctrl+Comma (#88)
-  or `InboxApp::open_settings`. The custom accent is typed as `#rrggbb` or picked with egui's own
-  colour picker, which shows its controls in English and with no accessible names of its own beyond the field's
-  label. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
+  or `InboxApp::open_settings`. The preview shows invented rows, not the owner's mail. Reduced motion has an on/off switch; going back to
   "follow the system" after a choice is possible only through `ui.motion.set` with `reduce: system`. Loading the
   owner's own font file or icon pack is an idea only and the page offers neither: both are outside files, needing
   the hostile-input rules (safe parsing, size caps, a fuzz target, an SVG rasteriser for icons) and handling of
   missing glyphs. The file sits in the config folder and is written in the sample window too: it
   holds no mail and nothing about an account, so the sample mode writes these files (the look, the keys and the inbox
-  view of `triage.json`, never the screener's mode) and nothing else. A custom
-  accent is checked only as accent text on the dark surfaces; every other token derived from the four colours is
-  made readable by the theme itself, which may move it further than the answer of `ui.accent.set` says. Two windows
-  open at once each keep their own last change; the later write wins.
+  view of `triage.json`, never the screener's mode) and nothing else. A file kept by
+  an older version that names an accent, a typeface or an icon set loads, and those fields are dropped at the next
+  write. Two windows open at once each keep their own last change; the later write wins.
 - Message list (#88, #134): the screener card and the grouped inbox show the engine's data (#134); "Done all" on a
   group card marks the whole group done with one Undo, but none for a group that takes more than the 100 acts the
   undo history holds (#135). In the grouped inbox (cards or grouped list) the arrow keys still step through
@@ -425,22 +417,14 @@ time from the code as it is, not measured.
   The row slide-out token waits for the Done of E1.17. A menu row shows its key as text, which a screen reader does
   not read with the row's name. Avatars show initials only; pictures of people (from a vCard or a sender's own
   picture) are not read.
-- The mode and the accent preset can be changed only from code (`InboxApp::set_mode`, `set_preset`) and the
-  `ui_shot` scripts: the commands, the settings page and keeping the choice on disk come with E1.16, so the window
-  follows the system's mode in Electric. The error colours are fixed per mode, not derived from
-  the preset. The app icon keeps its own teal tile and orange dot, the same in every preset (#81).
-- Account colours are the preset's three stops, its accent and two mixes, moved in lightness to 3:1; with Aurora in
-  light mode the accent becomes a dark cyan, and in a preset two of them can look alike at a glance. The stripe
-  repeats what the folder pane says in words (#81).
+- Account colours are six fixed bar colours per mode, the design file's, repeating from the seventh account; two
+  of them can look alike at a glance. The stripe repeats what the folder pane says in words
+  (#81, #231).
 - `ui_shot` fills egui's triangles on the CPU and blends in gamma space, close to but not pixel-identical with the
   GPU window. The window itself was never opened in the agent sandbox (no display); the owner's first launch is
   E1.13c (#30).
-- Glass and floats (#82, #205): egui's own menus and tooltips cast no shadow (egui's own shadow is a gradient
-  outside the helper, so it is off), so they stand out by their colour and edge alone. A yellow field over a
-  near-black background reads olive rather than amber (Citrus in dark), because the fields are mixed in sRGB. Layer
-  shadows reach under the neighbouring layer's edge by a few points. A resize still rasterises the colour fields
-  again each time the window crosses a step of 128 pixels; layer shadows are size-free nine-slices, but their edges
-  repeat a 32-pixel strip, dither noise included.
+- Floats (#82, #205, #231): egui's own menus and tooltips cast no shadow (egui's own shadow is off), so they stand
+  out by their colour and edge alone.
 - `cargo xtask side-by-side` matches only the height: a picture and its sketch keep their own widths and window
   sizes, the pair carries no labels, and the sketch is averaged down (or stretched up) without colour management.
   It needs the owner's mood sketches in `plan/mood/`; CI has none and does not run it (#81).

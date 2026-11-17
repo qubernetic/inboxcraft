@@ -211,18 +211,18 @@ fn a_day_of_the_month_or_the_mini_month_opens_its_days() {
 }
 
 #[test]
-fn an_event_is_a_tint_of_the_token_with_its_colour_at_full_strength_on_the_edge() {
+fn an_event_is_on_the_stage_with_its_colour_on_the_edge() {
     use super::colours;
-    use crate::theme::{Mode, Preset, Theme};
+    use crate::theme::{Mode, TextScale, Theme};
 
-    let theme = Theme::new(Mode::Light, &Preset::default());
+    let theme = Theme::new(Mode::Light, TextScale::default());
     let p = &theme.palette;
-    assert_eq!(colours(&theme, None, 1), (p.events[1], p.accounts[1]), "without a colour from the server, the tokens of the place");
-    assert_eq!(colours(&theme, None, 7), (p.events[1], p.accounts[1]), "the places go round");
+    assert_eq!(colours(&theme, None, 1), (p.stage, p.accounts[1]), "without a colour from the server, the account colour of the place");
+    assert_eq!(colours(&theme, None, 7), (p.stage, p.accounts[1]), "the places go round");
     let [r, g, b] = [200, 40, 120];
     let (fill, edge) = colours(&theme, Some([r, g, b]), 0);
     assert_eq!(edge, egui::Color32::from_rgb(r, g, b), "the server's colour at full strength");
-    assert!((i32::from(fill.a()) - i32::from(p.events[0].a())).abs() <= 1, "the fill as strong as the token: {fill:?}");
+    assert_eq!(fill, p.stage, "never a tinted fill");
 }
 
 #[test]
@@ -293,4 +293,39 @@ fn a_click_on_an_alert_opens_the_calendar_on_the_event_with_its_details() {
     assert_eq!(harness.state().screen(), Screen::Calendar);
     assert_eq!(harness.state().calendar().focus(), Day::new(2026, 11, 9).unwrap());
     assert_eq!(harness.state().calendar().picked().map(|event| event.id), Some(id));
+}
+
+#[test]
+fn the_picked_day_is_the_cyan_fill_with_its_number_in_on_cyan_in_light_mode() {
+    let p = crate::theme::Palette::of(crate::theme::Mode::Light);
+    let mut harness = on_calendar(egui::Theme::Light);
+    press(&mut harness, "Month");
+    let mut shapes = Vec::new();
+    fn open(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().for_each(|shape| open(shape, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, &mut shapes));
+    let rects: Vec<egui::Color32> =
+        shapes.iter().filter_map(|shape| if let egui::Shape::Rect(rect) = shape { Some(rect.fill) } else { None }).collect();
+    let circles: Vec<egui::Color32> =
+        shapes.iter().filter_map(|shape| if let egui::Shape::Circle(circle) = shape { Some(circle.fill) } else { None }).collect();
+    assert!(rects.contains(&p.cyan), "today in the month is on cyan");
+    assert!(circles.contains(&p.cyan), "today in the mini month is on cyan");
+    assert!(!rects.contains(&p.cyan_text) && !circles.contains(&p.cyan_text), "the accent as a fill is cyan");
+    // Today is the 5th: its number in the month and in the mini month is in `on_cyan`.
+    let fives = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) if text.galley.text() == "5" => {
+                text.galley.rows.iter().flat_map(|row| row.visuals.mesh.vertices.iter()).map(|vertex| vertex.color).next()
+            }
+            _ => None,
+        })
+        .filter(|colour| *colour == p.on_cyan)
+        .count();
+    assert!(fives >= 2, "today's number on cyan in on_cyan, in both months: {fives}");
+    assert!(crate::theme::contrast(p.on_cyan, p.cyan) >= 4.5);
 }

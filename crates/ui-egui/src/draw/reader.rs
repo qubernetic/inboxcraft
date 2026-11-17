@@ -51,7 +51,7 @@ use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
 use crate::component::{badge, popup};
 use crate::compose::Answer;
-use crate::glass;
+use crate::draw::paint::{self, FloatEdge};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, GroupKind, Mailbox};
@@ -135,7 +135,7 @@ const MENU_WIDTH: f32 = 18.0;
 /// A thin upright line between groups of the toolbar.
 fn divider(ui: &mut Ui, theme: &Theme) {
     let side = crate::component::control_side(ui, theme);
-    let (rect, _) = ui.allocate_exact_size(vec2(theme.spacing.s, side), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(theme.spacing.s2, side), Sense::hover());
     ui.painter().vline(rect.center().x, rect.shrink2(vec2(0.0, side / 4.0)).y_range(), Stroke::new(1.0, theme.palette.line));
 }
 
@@ -167,7 +167,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         if popup::entry(ui, theme, keymap, name, None).clicked() {
             drawn.asked.push(Asked::Details(row.id));
         }
-        ui.add_space(theme.spacing.xs);
+        ui.add_space(theme.spacing.s1);
         ui.separator();
         if row.group.is_some()
             && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
@@ -175,7 +175,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
             drawn.asked.push(Asked::Act(row.id, act));
         }
         if row.group.is_some() {
-            ui.add_space(theme.spacing.xs);
+            ui.add_space(theme.spacing.s1);
             ui.separator();
         }
     }
@@ -186,7 +186,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     if popup::entry(ui, theme, keymap, tr!("Close"), None).clicked() {
         drawn.asked.push(Asked::Close);
     }
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
     ui.separator();
     ui.label(RichText::new(tr!("When a message leaves the list")).font(theme.fonts.caption.id()).color(p.muted));
     for after in [After::Next, After::Previous, After::List] {
@@ -253,7 +253,7 @@ fn picker(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: 
         ui.data_mut(|data| data.get_temp_mut_or_default::<TimePicker>(picker_id()).open());
     }
     let width = theme.fonts.body.size * PICKER_WIDTH;
-    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).gap(theme.spacing.m).frame(Frame::NONE).show(
+    Popup::menu(&response).id(picker_popup()).close_behavior(PopupCloseBehavior::CloseOnClickOutside).gap(theme.spacing.s3).frame(Frame::NONE).show(
         |ui| {
             popup::panel(ui, theme, width, |ui| {
                 let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
@@ -313,9 +313,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
     // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
     // In the top row the window controls sit at the end of the actions' line.
     super::frame::beside(ui, theme, |ui| {
-        Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).corner_radius(s.card).inner_margin(margin(s.xs)).show(ui, |ui| {
+        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s1)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = s.xs;
+                ui.spacing_mut().item_spacing.x = s.s1;
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
                     let button = IconButton::new(icon, name);
                     let button = match (act, open) {
@@ -355,8 +355,8 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .map(|opened| opened.header.subject.clone())
         .filter(|subject| !subject.is_empty())
         .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    ui.add_space(s.xl);
-    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.text)).wrap());
+    ui.add_space(s.s6);
+    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.display.id()).color(p.ink)).wrap());
     // Held mail is in no group until its sender is let in.
     let group = reader.open_id().filter(|id| !mailbox.held(*id)).and_then(|id| {
         let row = mailbox.messages().iter().find(|row| row.id == id);
@@ -376,9 +376,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         .or_else(|| (count > 1).then(|| tr!("{writers} · {count} messages", writers = reader.writers().join(", "), count = count)));
     if group.is_some() || line.is_some() || !chips.is_empty() {
         // The message's group and its state as chips, then the line.
-        let near = pointer_near(ui, super::paint::line_height(ui, theme.fonts.button) + s.s);
+        let near = pointer_near(ui, super::paint::line_height(ui, theme.fonts.button) + s.s2);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             if let Some(group) = &group {
                 badge::chip(ui, theme, group, &tr!("In {group}", group = group));
             }
@@ -469,7 +469,7 @@ fn quiet(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, salt: (&str, u
 
 /// A card's frame: the translucent card colour with a line round it.
 fn card_frame(theme: &Theme, inner: f32) -> Frame {
-    Frame::new().fill(theme.palette.card).stroke(Stroke::new(1.0, theme.palette.line)).corner_radius(theme.spacing.card).inner_margin(margin(inner))
+    Frame::new().fill(theme.palette.surface).stroke(Stroke::new(1.0, theme.palette.line)).corner_radius(0.0).inner_margin(margin(inner))
 }
 
 /// One folded message of the thread, a card of one line: the avatar, the sender, the first words and the date; a
@@ -482,25 +482,25 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
     let f = &theme.fonts;
     let line = super::paint::line_height(ui, f.sender).max(super::paint::line_height(ui, f.caption));
     let side = line * 1.5;
-    let height = side + s.m * 2.0;
+    let height = side + s.s3 * 2.0;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, s.card, p.card);
+        painter.rect_filled(rect, 0.0, p.surface);
         if response.hovered() {
-            painter.rect_filled(rect, s.card, p.hover);
+            painter.rect_filled(rect, 0.0, p.stage);
         }
-        painter.rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
-        let face = Rect::from_min_size(pos2(rect.left() + s.m, rect.center().y - side / 2.0), vec2(side, side));
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
+        let face = Rect::from_min_size(pos2(rect.left() + s.s3, rect.center().y - side / 2.0), vec2(side, side));
         crate::component::avatar::paint(painter, theme, face, &row.sender, &row.address);
-        let left = face.right() + s.m;
+        let left = face.right() + s.s3;
         let date_galley = super::paint::line(ui, &[(&date, f.caption, p.muted)], f32::INFINITY);
-        let date_left = rect.right() - s.l - date_galley.size().x;
+        let date_left = rect.right() - s.s4 - date_galley.size().x;
         ui.painter().galley(pos2(date_left, rect.center().y - date_galley.size().y / 2.0), date_galley, p.muted);
         let preview = format!("   {}", row.preview);
-        let text = super::paint::line(ui, &[(&row.sender, f.sender, p.text), (&preview, f.preview, p.muted)], date_left - s.m - left);
-        ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.text);
+        let text = super::paint::line(ui, &[(&row.sender, f.sender, p.ink), (&preview, f.preview, p.muted)], date_left - s.s3 - left);
+        ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
         super::paint::focus_ring(ui, theme, &response);
     }
     if response.clicked() {
@@ -510,7 +510,7 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
 
 /// The side of the header's avatar: as tall as the two lines beside it, with a little room.
 fn header_side(ui: &Ui, theme: &Theme) -> f32 {
-    super::paint::line_height(ui, theme.fonts.heading) + super::paint::line_height(ui, theme.fonts.caption) + theme.spacing.s
+    super::paint::line_height(ui, theme.fonts.heading) + super::paint::line_height(ui, theme.fonts.caption) + theme.spacing.s2
 }
 
 /// The header: the avatar, the sender with whom it went to under them, and the date at the right; Details and Fold,
@@ -524,7 +524,7 @@ fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader
     let side = header_side(ui, theme);
     let near = pointer_near(ui, side);
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.gap;
+        ui.spacing_mut().item_spacing.x = s.s2;
         if let Some(person) = from.first() {
             crate::component::avatar::avatar(ui, theme, &person.name, &person.address, side);
         }
@@ -548,7 +548,7 @@ fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let sender = from.first().map_or_else(|| tr!("(no sender)").to_owned(), |person| person.shown().to_owned());
-                let name = ui.add(egui::Label::new(RichText::new(sender).font(f.heading.id()).color(p.text)).truncate());
+                let name = ui.add(egui::Label::new(RichText::new(sender).font(f.heading.id()).color(p.ink)).truncate());
                 // The address, one hover away, for whoever wonders who this really is.
                 if let Some(person) = from.first().filter(|person| !person.name.is_empty()) {
                     name.on_hover_text(&person.address);
@@ -566,12 +566,12 @@ fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader
     if !details {
         return;
     }
-    Frame::new().fill(p.panel).corner_radius(s.corner).inner_margin(margin(s.m)).show(ui, |ui| {
+    Frame::new().fill(p.panel).corner_radius(0.0).inner_margin(margin(s.s3)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        Grid::new(("details", opened.id)).num_columns(2).spacing(vec2(s.xl, s.xs)).show(ui, |ui| {
+        Grid::new(("details", opened.id)).num_columns(2).spacing(vec2(s.s6, s.s1)).show(ui, |ui| {
             let row = |ui: &mut Ui, name: &str, value: String| {
                 ui.label(RichText::new(name).font(f.caption.id()).color(p.muted));
-                ui.add(egui::Label::new(RichText::new(value).font(f.caption.id()).color(p.text)).wrap());
+                ui.add(egui::Label::new(RichText::new(value).font(f.caption.id()).color(p.ink)).wrap());
                 ui.end_row();
             };
             let full = |people: &[Person]| people.iter().map(Person::full).collect::<Vec<_>>().join(", ");
@@ -594,18 +594,15 @@ fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader
 fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {
     let p = &theme.palette;
     let text = tr!("Not delivered: {reason}", reason = reason);
-    Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.error)).inner_margin(margin(theme.spacing.m)).corner_radius(theme.spacing.corner).show(
-        ui,
-        |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let side = super::paint::line_height(ui, theme.fonts.body);
-                let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                theme.icons.paint(ui.painter(), rect, IconId::Failed, Style::Regular, p.error);
-                ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.text)).wrap());
-            });
-        },
-    );
+    Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.minus)).inner_margin(margin(theme.spacing.s3)).corner_radius(0.0).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let side = super::paint::line_height(ui, theme.fonts.body);
+            let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+            crate::iconset::paint(ui.painter(), rect, IconId::Failed, Style::Regular, p.minus);
+            ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.body.id()).color(p.ink)).wrap());
+        });
+    });
 }
 
 /// The remote-content banner, while remote pictures of the message are blocked.
@@ -617,7 +614,7 @@ fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: 
     let p = &theme.palette;
     let s = &theme.spacing;
     let f = &theme.fonts;
-    Frame::new().fill(p.panel).inner_margin(egui::Margin::symmetric(margin(s.m).left, margin(s.s).top)).corner_radius(s.card).show(ui, |ui| {
+    Frame::new().fill(p.panel).inner_margin(egui::Margin::symmetric(margin(s.s3).left, margin(s.s2).top)).corner_radius(0.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let count = document.remote_blocked;
         let text = if count == 1 {
@@ -629,19 +626,19 @@ fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: 
         let mut links: Vec<(&str, Asked)> = vec![(tr!("Load once"), Asked::Once(opened.id))];
         links.extend(always.as_deref().map(|always| (always, Asked::Always(opened.id))));
         let side = super::paint::line_height(ui, f.body);
-        let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.text)], f32::INFINITY).size().x;
-        let wanted = side + width(ui, &text, f.body) + links.iter().map(|(name, _)| width(ui, name, f.button) + s.l).sum::<f32>();
-        let beside = wanted + s.l * 2.0 <= ui.available_width();
+        let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.ink)], f32::INFINITY).size().x;
+        let wanted = side + width(ui, &text, f.body) + links.iter().map(|(name, _)| width(ui, name, f.button) + s.s4).sum::<f32>();
+        let beside = wanted + s.s4 * 2.0 <= ui.available_width();
         let mut link = |ui: &mut Ui, name: &str, asked: &Asked| {
             if button::link(ui, theme, keymap, name).clicked() {
                 drawn.asked.push(asked.clone());
             }
         };
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            theme.icons.paint(ui.painter(), rect, IconId::Shield, Style::Regular, p.accent);
-            ui.add(egui::Label::new(RichText::new(text).font(f.body.id()).color(p.text)).wrap());
+            crate::iconset::paint(ui.painter(), rect, IconId::Shield, Style::Regular, p.cyan_text);
+            ui.add(egui::Label::new(RichText::new(text).font(f.body.id()).color(p.ink)).wrap());
             if beside {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     for (name, asked) in links.iter().rev() {
@@ -652,7 +649,7 @@ fn banner(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, opened: 
         });
         if !beside {
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = s.s;
+                ui.spacing_mut().item_spacing.x = s.s2;
                 for (name, asked) in &links {
                     link(ui, name, asked);
                 }
@@ -760,7 +757,7 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
         (_, Some(PictureState::Waiting) | None) => tr!("Loading picture…").to_owned(),
         (_, Some(PictureState::Ready(_))) => tr!("Picture could not be shown").to_owned(),
     };
-    Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s)).corner_radius(theme.spacing.corner).show(ui, |ui| {
+    Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s2)).corner_radius(0.0).show(ui, |ui| {
         let text = if image.alt.is_empty() { why } else { format!("{why}: {}", image.alt) };
         ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(p.muted));
     });
@@ -791,7 +788,7 @@ fn wanted_width(theme: &Theme, reader: &Reader, id: u64, block: &Block, depth: u
             }
         }
         Block::Table { rows, .. } if depth < MAX_DEPTH => {
-            wanted_columns(theme, reader, id, rows, depth.saturating_add(1)).iter().sum::<f32>() + theme.spacing.m
+            wanted_columns(theme, reader, id, rows, depth.saturating_add(1)).iter().sum::<f32>() + theme.spacing.s3
         }
         Block::Table { .. } => 0.0,
     }
@@ -860,7 +857,7 @@ pub(super) fn blocks(
         } else if !quotes {
             continue;
         }
-        let indent = f32::from(quote.min(4)) * theme.spacing.l;
+        let indent = f32::from(quote.min(4)) * theme.spacing.s4;
         ui.horizontal(|ui| {
             ui.add_space(indent);
             ui.vertical(|ui| match block {
@@ -878,7 +875,7 @@ pub(super) fn blocks(
                         TextKind::Preformatted => (f.mono, String::new()),
                         TextKind::Paragraph => (f.body, String::new()),
                     };
-                    let colour = if quote > 0 { p.muted } else { p.text };
+                    let colour = if quote > 0 { p.muted } else { p.ink };
                     let mut run = Run::new(ui.available_width());
                     if !prefix.is_empty() {
                         run.push(&prefix, TextFormat::simple(font.id(), colour), None);
@@ -893,16 +890,16 @@ pub(super) fn blocks(
                             font.face
                         };
                         let span_font = Font { face, ..font };
-                        let mut format = TextFormat::simple(span_font.id(), if span.link.is_some() { p.accent } else { colour });
+                        let mut format = TextFormat::simple(span_font.id(), if span.link.is_some() { p.cyan_text } else { colour });
                         format.italics = span.italic;
                         if span.underline || span.link.is_some() {
-                            format.underline = Stroke::new(1.0, if span.link.is_some() { p.accent } else { colour });
+                            format.underline = Stroke::new(1.0, if span.link.is_some() { p.cyan_text } else { colour });
                         }
                         if span.strike {
                             format.strikethrough = Stroke::new(1.0, colour);
                         }
                         if span.bold && span.link.is_none() {
-                            format.color = p.text;
+                            format.color = p.ink;
                         }
                         run.push(&span.text, format, span.link);
                     }
@@ -913,7 +910,7 @@ pub(super) fn blocks(
                 }
                 Block::Image { image, .. } => picture(ui, theme, reader, id, image, document, textures, drawn),
                 Block::Table { rows, .. } if depth < MAX_DEPTH => {
-                    let gap = theme.spacing.m;
+                    let gap = theme.spacing.s3;
                     let widths = column_widths(&wanted_columns(theme, reader, id, rows, depth), ui.available_width(), gap);
                     let spacing = ui.spacing().item_spacing.x;
                     for row in rows {
@@ -932,7 +929,7 @@ pub(super) fn blocks(
                 Block::Table { .. } => {}
             });
         });
-        ui.add_space(theme.spacing.s);
+        ui.add_space(theme.spacing.s2);
     }
 }
 
@@ -943,7 +940,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
     for segment in segments {
         match segment {
             Segment::Text(text) => {
-                ui.label(RichText::new(text).font(f.body.id()).color(p.text));
+                ui.label(RichText::new(text).font(f.body.id()).color(p.ink));
             }
             Segment::Quote { attribution, text, lines } => {
                 let shown = reader.shows_quotes(id);
@@ -958,7 +955,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
                     drawn.asked.push(Asked::Quotes(id));
                 }
                 if shown {
-                    let (bar, inner) = (p.muted, margin(theme.spacing.s));
+                    let (bar, inner) = (p.muted, margin(theme.spacing.s2));
                     let response = Frame::new().inner_margin(Margin { left: inner.left.saturating_add(4), ..inner }).show(ui, |ui| {
                         if let Some(attribution) = attribution {
                             ui.label(RichText::new(attribution).font(f.caption.id()).color(p.muted));
@@ -970,7 +967,7 @@ fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segmen
                 }
             }
         }
-        ui.add_space(theme.spacing.s);
+        ui.add_space(theme.spacing.s2);
     }
 }
 
@@ -983,25 +980,25 @@ fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files: &[File], d
     let p = &theme.palette;
     let f = &theme.fonts;
     let s = &theme.spacing;
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     let gap = ui.spacing().item_spacing.x;
     let side = super::paint::line_height(ui, f.body) * 1.5;
-    let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.text)], f32::INFINITY).size().x;
+    let width = |ui: &Ui, text: &str, font: Font| super::paint::line(ui, &[(text, font, p.ink)], f32::INFINITY).size().x;
     let save = width(ui, tr!("Save"), f.button) + button::LINK_PAD * 2.0;
     let row = ui.available_width();
     ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
         for file in files {
             let size = size_text(file.size);
             let text = width(ui, &file.name, f.body).max(width(ui, &size, f.caption));
-            let tile = (side + text + save + gap * 2.0 + s.s * 2.0 + 2.0).min(row);
+            let tile = (side + text + save + gap * 2.0 + s.s2 * 2.0 + 2.0).min(row);
             ui.allocate_ui(vec2(tile, side), |ui| {
-                Frame::new().fill(p.card).stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s)).corner_radius(s.card).show(ui, |ui| {
+                Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s2)).corner_radius(0.0).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                        theme.icons.paint(ui.painter(), rect, IconId::File, Style::Regular, p.accent);
+                        crate::iconset::paint(ui.painter(), rect, IconId::File, Style::Regular, p.cyan_text);
                         ui.vertical(|ui| {
                             ui.set_max_width((ui.available_width() - save - gap).max(1.0));
-                            ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.text)).truncate());
+                            ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.ink)).truncate());
                             ui.label(RichText::new(&size).font(f.caption.id()).color(p.muted));
                         });
                         let response = button::link(ui, theme, keymap, tr!("Save"));
@@ -1038,7 +1035,7 @@ fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, textures: 
 /// Reply, Reply all and Forward, under the open message.
 fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, drawn: &mut Drawn) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = theme.spacing.s;
+        ui.spacing_mut().item_spacing.x = theme.spacing.s2;
         let answers = [
             (TextButton::new(tr!("Reply")).primary().icon(IconId::Reply), Answer::Reply),
             (TextButton::new(tr!("Reply all")).secondary().icon(IconId::ReplyAll), Answer::ReplyAll),
@@ -1077,29 +1074,29 @@ fn message(
     if bare {
         banner(ui, theme, keymap, reader, opened, drawn);
     }
-    card_frame(theme, s.l).show(ui, |ui| {
+    card_frame(theme, s.s4).show(ui, |ui| {
         ui.set_width(ui.available_width());
         if !bare {
             header(ui, theme, keymap, mailbox, reader, opened, drawn);
-            ui.add_space(s.s);
+            ui.add_space(s.s2);
             banner(ui, theme, keymap, reader, opened, drawn);
         }
         if held && bare {
             let subject = if opened.header.subject.is_empty() { tr!("(no subject)") } else { opened.header.subject.as_str() };
-            ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.heading.id()).color(theme.palette.text)).wrap());
+            ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.heading.id()).color(theme.palette.ink)).wrap());
         }
         if let Some(invite) = &opened.invite {
             super::invite::card(ui, theme, keymap, reader, invite, drawn);
-            ui.add_space(s.s);
+            ui.add_space(s.s2);
         }
-        let indent = if bare || reader.shows_details(opened.id) { 0 } else { margin(header_side(ui, theme) + s.gap).left };
+        let indent = if bare || reader.shows_details(opened.id) { 0 } else { margin(header_side(ui, theme) + s.s2).left };
         Frame::new().inner_margin(Margin { left: indent, ..Margin::ZERO }).show(ui, |ui| {
             body(ui, theme, reader, opened, textures, drawn);
             if !bare {
                 files(ui, theme, keymap, opened.id, &opened.files, drawn);
             }
             if open && !held {
-                ui.add_space(s.s);
+                ui.add_space(s.s2);
                 answers(ui, theme, keymap, opened.id, drawn);
             }
         });
@@ -1129,7 +1126,7 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
     let near = pointer_near(ui, side);
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.m;
+            ui.spacing_mut().item_spacing.x = s.s3;
             crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // A reader that fills the window has no list beside it to go back to.
@@ -1141,7 +1138,7 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
                 }
                 ui.with_layout(Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.title.id()).color(p.text)).truncate());
+                    ui.add(egui::Label::new(RichText::new(&row.sender).font(f.title.id()).color(p.ink)).truncate());
                     ui.add(egui::Label::new(RichText::new(parts.join(" · ")).font(f.caption.id()).color(p.muted)).truncate());
                 });
             });
@@ -1157,12 +1154,12 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
     let chosen_id = egui::Id::unique("screen-into").with(id);
     let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    super::invite::edged(ui, theme, super::invite::Edge::Gradient, |ui| {
-        ui.spacing_mut().item_spacing.y = s.m;
+    super::invite::edged(ui, theme, super::invite::Edge::Asks, |ui| {
+        ui.spacing_mut().item_spacing.y = s.s3;
         let title = tr!("Let {sender} in?", sender = row.sender);
-        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.text)).wrap());
+        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.ink)).wrap());
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.xs;
+            ui.spacing_mut().item_spacing.x = s.s1;
             ui.label(RichText::new(tr!("Into")).font(theme.fonts.caption.id()).color(p.muted));
             for kind in GroupKind::ALL {
                 if pill(ui, theme, kind.text(), into == Some(kind)).clicked() {
@@ -1172,7 +1169,7 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
             }
         });
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
+            ui.spacing_mut().item_spacing.x = s.s2;
             if TextButton::new(tr!("Accept")).primary().icon(IconId::Done).show(ui, theme, keymap).clicked() {
                 drawn.asked.push(Asked::Act(id, Act::Accept { group: into, open: false }));
             }
@@ -1194,20 +1191,20 @@ fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, id:
 fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let colour = if text.starts_with(tr!("Careful")) { p.error } else { p.text };
+    let colour = if text.starts_with(tr!("Careful")) { p.minus } else { p.ink };
     Area::new(ui.scope_id().with("link-status"))
         .order(Order::Foreground)
         .interactable(false)
         .pivot(Align2::LEFT_BOTTOM)
-        .fixed_pos(rect.left_bottom() + vec2(s.m, -s.m))
+        .fixed_pos(rect.left_bottom() + vec2(s.s3, -s.s3))
         .fade_in(false)
         .show(ui.ctx(), |ui| {
             let slot = ui.painter().add(Shape::Noop);
-            let inner = Frame::new().inner_margin(margin(s.s)).show(ui, |ui| {
-                ui.set_max_width((rect.width() - s.m * 2.0 - s.s * 2.0).max(1.0));
+            let inner = Frame::new().inner_margin(margin(s.s2)).show(ui, |ui| {
+                ui.set_max_width((rect.width() - s.s3 * 2.0 - s.s2 * 2.0).max(1.0));
                 ui.add(egui::Label::new(RichText::new(text).font(theme.fonts.caption.id()).color(colour)).truncate());
             });
-            let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
+            let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Quiet);
             ui.painter().set(slot, Shape::Vec(shapes));
         });
 }
@@ -1226,9 +1223,9 @@ pub(super) fn show(
     let p = &theme.palette;
     let whole = ui.max_rect();
     if let Some(notice) = reader.notice() {
-        egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s))).show(ui, |ui| {
+        egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s2))).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.text));
+                ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.ink));
                 if ui.button(tr!("Dismiss")).clicked() {
                     drawn.asked.push(Asked::Dismiss);
                 }
@@ -1236,7 +1233,7 @@ pub(super) fn show(
         });
     }
     let held = reader.open_id().filter(|id| mailbox.held(*id));
-    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.l))).show(
+    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s4))).show(
         ui,
         |ui| match held {
             Some(id) => sender_header(ui, theme, keymap, mailbox, reader, id, &mut drawn),
@@ -1244,13 +1241,13 @@ pub(super) fn show(
         },
     );
     ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader").show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = theme.spacing.s;
+        ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         Frame::new()
             .inner_margin(Margin {
-                left: margin(theme.spacing.l).left,
-                right: margin(theme.spacing.l).right,
+                left: margin(theme.spacing.s4).left,
+                right: margin(theme.spacing.s4).right,
                 top: 0,
-                bottom: margin(theme.spacing.l).bottom,
+                bottom: margin(theme.spacing.s4).bottom,
             })
             .show(ui, |ui| {
                 if let Some(id) = held {

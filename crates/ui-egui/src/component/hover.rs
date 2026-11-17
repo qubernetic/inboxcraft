@@ -5,9 +5,8 @@
 //! the row is hovered or selected by keyboard, and out again after. The group is drawn after the row's text, and the
 //! float is solid, so no letter shows through it.
 
-use egui::{Align, Id, Layout, Rect, Shape, Ui, UiBuilder, vec2};
+use egui::{Align, Id, Layout, Rect, Shape, Stroke, StrokeKind, Ui, UiBuilder, vec2};
 
-use crate::glass;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
@@ -45,9 +44,9 @@ fn place(ui: &Ui, theme: &Theme, row: Rect, count: usize) -> Rect {
     let s = &theme.spacing;
     let side = control_side(ui, theme);
     let count = u16::try_from(count.min(16)).unwrap_or(16);
-    let width = f32::from(count) * side + f32::from(count.saturating_sub(1)) * s.xs + s.xs * 2.0;
-    let height = side + s.xs * 2.0;
-    Rect::from_min_size(egui::pos2(row.right() - s.s - width, row.center().y - height / 2.0), vec2(width, height))
+    let width = f32::from(count) * side + f32::from(count.saturating_sub(1)) * s.s1 + s.s1 * 2.0;
+    let height = side + s.s1 * 2.0;
+    Rect::from_min_size(egui::pos2(row.right() - s.s2 - width, row.center().y - height / 2.0), vec2(width, height))
 }
 
 /// The group `id` of `actions` over the right end of `row`, shown or hidden.
@@ -60,10 +59,12 @@ pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, row: Rect, s
     let mut child = ui.new_child(UiBuilder::new().id_salt(id).max_rect(group).layout(Layout::left_to_right(Align::Center)));
     child.multiply_opacity(openness);
     let slot = child.painter().add(Shape::Noop);
-    let shapes = glass::float_shapes(child.painter(), theme, group);
+    // Flat in its row: the surface and a hairline, no shadow over the rows beside it.
+    let p = theme.palette;
+    let shapes = vec![Shape::rect_filled(group, 0.0, p.surface), Shape::rect_stroke(group, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside)];
     child.painter().set(slot, Shape::Vec(shapes));
-    child.add_space(theme.spacing.xs);
-    child.spacing_mut().item_spacing.x = theme.spacing.xs;
+    child.add_space(theme.spacing.s1);
+    child.spacing_mut().item_spacing.x = theme.spacing.s1;
     let mut clicked = None;
     for (index, action) in actions.iter().take(16).enumerate() {
         let mut button = IconButton::new(action.icon, action.name);

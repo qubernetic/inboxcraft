@@ -54,7 +54,7 @@ fn harness_of(app: InboxApp, theme: egui::Theme) -> Harness<'static, InboxApp> {
 }
 
 fn on_the_page(mut app: InboxApp) -> Harness<'static, InboxApp> {
-    app.settings_mut().open_at(Section::Notifications, &Appearance::default());
+    app.settings_mut().open_at(Section::Notifications);
     harness_of(app, egui::Theme::Light)
 }
 
@@ -217,7 +217,7 @@ fn starting_with_the_computer_waits_for_the_desktop_and_says_why_it_was_not_done
     // The note goes with the sheet.
     harness.state_mut().close_settings();
     harness.run();
-    harness.state_mut().settings_mut().open_at(Section::Notifications, &Appearance::default());
+    harness.state_mut().settings_mut().open_at(Section::Notifications);
     harness.run();
     assert!(harness.query_by_label("Not changed: the desktop did not allow InboxCraft to start at login.").is_none());
 }
@@ -247,7 +247,7 @@ fn without_accounts_the_page_says_to_add_one_first() {
 fn every_control_on_the_page_has_an_accessible_name_in_both_modes() {
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let mut app = app().with_desk(Box::new(Fake::with(Some(true), Some(false))));
-        app.settings_mut().open_at(Section::Notifications, &Appearance::default());
+        app.settings_mut().open_at(Section::Notifications);
         let harness = harness_of(app, theme);
         harness.check_accessibility();
     }

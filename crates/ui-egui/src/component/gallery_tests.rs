@@ -9,7 +9,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use super::{keymap, page, size};
 use crate::motion;
 use crate::sample;
-use crate::theme::{Mode, PRESETS, Theme};
+use crate::theme::{Mode, TextScale, Theme};
 
 fn harness(theme: Theme) -> Harness<'static> {
     let keymap = keymap();
@@ -22,10 +22,10 @@ fn harness(theme: Theme) -> Harness<'static> {
 }
 
 #[test]
-fn the_gallery_shows_every_component_in_every_preset_and_mode() {
-    for preset in &PRESETS {
+fn the_gallery_shows_every_component_in_both_modes() {
+    {
         for mode in [Mode::Light, Mode::Dark] {
-            let harness = harness(Theme::new(mode, preset));
+            let harness = harness(Theme::new(mode, TextScale::default()));
             for name in ["Newsletters", "Screener: 3 new senders", "Archive", "Unpin", "Unread", "People", "Marked as done", "Move to a folder"] {
                 harness.get_by_label(name);
             }
@@ -46,7 +46,7 @@ fn the_gallery_shows_every_component_in_every_preset_and_mode() {
 
 #[test]
 fn every_control_of_the_gallery_has_a_name_and_fits_the_page() {
-    let harness = harness(Theme::new(Mode::Dark, &PRESETS[0]));
+    let harness = harness(Theme::new(Mode::Dark, TextScale::default()));
     let page = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size());
     for role in [Role::Button, Role::MenuItem, Role::Image, Role::Switch, Role::TextInput] {
         for node in harness.query_all_by_role(role) {

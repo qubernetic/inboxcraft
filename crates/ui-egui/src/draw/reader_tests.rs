@@ -48,21 +48,20 @@ fn opened(fetch: &Recorder, folder: Option<u64>, subject: &str) -> Harness<'stat
 }
 
 #[test]
-fn the_reader_shows_the_sender_s_avatar_in_the_avatar_palette() {
+fn the_reader_shows_the_sender_s_avatar_on_the_stage() {
     let fetch = Recorder::default();
     let harness = opened(&fetch, None, "Allotment rota for November");
     assert!(harness.query_all_by_role(Role::Image).any(|node| node.accesskit_node().label().as_deref() == Some("Odile Brannock")));
-    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::Preset::default());
-    let colour = crate::component::avatar::colour(&theme, "odile@example.org");
-    assert!(crate::theme::AVATARS.contains(&colour));
-    let filled = |shape: &egui::Shape| matches!(shape, egui::Shape::Circle(circle) if circle.fill == colour);
+    let stages = [crate::theme::Mode::Light, crate::theme::Mode::Dark].map(|mode| crate::theme::Palette::of(mode).stage);
+    let square = egui::CornerRadius::same(2);
+    let filled = |shape: &egui::Shape| matches!(shape, egui::Shape::Rect(rect) if stages.contains(&rect.fill) && rect.corner_radius == square);
     fn any(shape: &egui::Shape, found: &dyn Fn(&egui::Shape) -> bool) -> bool {
         match shape {
             egui::Shape::Vec(shapes) => shapes.iter().any(|shape| any(shape, found)),
             other => found(other),
         }
     }
-    assert!(harness.output().shapes.iter().any(|clipped| any(&clipped.shape, &filled)), "the avatar is painted in its colour");
+    assert!(harness.output().shapes.iter().any(|clipped| any(&clipped.shape, &filled)), "the avatar is a stage square with corners of 2");
 }
 
 #[test]
@@ -577,7 +576,7 @@ fn the_reader_keeps_to_a_narrow_window() {
 fn drawn_text(html: &str, label: &str) -> (f32, f32) {
     let options = inboxcraft_html::Options::default();
     let document = inboxcraft_html::display(html, &options);
-    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::PRESETS[0]);
+    let theme = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default());
     let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
     let mut harness = Harness::builder().with_size(vec2(800.0, 400.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
         let mut textures = super::reader::Textures::default();

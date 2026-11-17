@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The window at the smallest and the largest text scale, in every typeface: every text fits the control it belongs to, is not cut by
+//! The window at the smallest and the largest text scale: every text fits the control it belongs to, is not cut by
 //! the pane it sits in, and lies over no other text.
 
 use egui::accesskit::Role;
 use egui::{Rect, Shape, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::NodeT as _;
-use inboxcraft_engine::appearance::Typeface;
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
@@ -42,10 +41,9 @@ enum Scene {
 
 const SCENES: [Scene; 6] = [Scene::List, Scene::Thread, Scene::Details, Scene::Full, Scene::Onboard, Scene::Settings];
 
-fn app(scene: Scene, scale: TextScale, typeface: Typeface) -> InboxApp {
+fn app(scene: Scene, scale: TextScale) -> InboxApp {
     let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
     app.set_text_scale(scale);
-    app.set_typeface(typeface);
     let (folder, subject) = match scene {
         Scene::List | Scene::Onboard | Scene::Settings => (None, "Photos from the coast walk"),
         Scene::Thread => (Some(3), "Re: Allotment rota for November"),
@@ -142,20 +140,18 @@ fn misfits<S>(harness: &Harness<'_, S>) -> Vec<String> {
 }
 
 #[test]
-fn the_list_the_reader_and_the_settings_fit_at_90_and_130_percent_in_every_typeface() {
-    for typeface in Typeface::ALL {
-        for percent in [90, 100, 130] {
-            let scale = TextScale::from_percent(percent).unwrap();
-            for scene in SCENES {
-                let mut harness = Harness::builder()
-                    .with_size(vec2(1200.0, 760.0))
-                    .with_theme(egui::Theme::Light)
-                    .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(scene, scale, typeface));
-                harness.run();
-                assert_eq!((harness.state().text_scale(), harness.state().typeface()), (scale, typeface));
-                let found = misfits(&harness);
-                assert!(found.is_empty(), "{scene:?} in {typeface:?} at {percent} %:\n{}", found.join("\n"));
-            }
+fn the_list_the_reader_and_the_settings_fit_at_90_and_130_percent() {
+    for percent in [90, 100, 130] {
+        let scale = TextScale::from_percent(percent).unwrap();
+        for scene in SCENES {
+            let mut harness = Harness::builder()
+                .with_size(vec2(1200.0, 760.0))
+                .with_theme(egui::Theme::Light)
+                .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(scene, scale));
+            harness.run();
+            assert_eq!(harness.state().text_scale(), scale);
+            let found = misfits(&harness);
+            assert!(found.is_empty(), "{scene:?} at {percent} %:\n{}", found.join("\n"));
         }
     }
 }
@@ -167,7 +163,7 @@ fn the_settings_fit_a_narrow_window() {
         let mut harness = Harness::builder()
             .with_size(vec2(820.0, 760.0))
             .with_theme(egui::Theme::Dark)
-            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(Scene::Settings, scale, Typeface::Inter));
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(Scene::Settings, scale));
         harness.run();
         let found = misfits(&harness);
         assert!(found.is_empty(), "narrow at {percent} %:\n{}", found.join("\n"));
@@ -177,7 +173,7 @@ fn the_settings_fit_a_narrow_window() {
 #[test]
 fn the_fit_check_finds_text_that_does_not_fit() {
     let mut harness = Harness::builder().with_size(vec2(400.0, 200.0)).build_ui(|ui| {
-        let font = crate::theme::Theme::new(crate::theme::Mode::Light, &crate::theme::Preset::default()).fonts.body.id();
+        let font = crate::theme::Theme::new(crate::theme::Mode::Light, crate::theme::TextScale::default()).fonts.body.id();
         let painter = ui.painter();
         let colour = ui.visuals().text_color();
         painter.text(egui::pos2(10.0, 10.0), egui::Align2::LEFT_TOP, "one text", font.clone(), colour);

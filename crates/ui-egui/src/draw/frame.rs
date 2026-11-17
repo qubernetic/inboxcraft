@@ -19,7 +19,7 @@ use crate::tr;
 
 /// The strip's height, in points: a control's hover fill with a cards' gap above and below it, so the fill of Close,
 /// one gap from the window's right edge too, ends where the cards end.
-pub(super) const STRIP: f32 = CONTROL[1] - 2.0 * HOVER_INSET + 2.0 * SPACING.gap;
+pub(super) const STRIP: f32 = CONTROL[1] - 2.0 * HOVER_INSET + 2.0 * SPACING.s2;
 
 /// A window control's width and height, in points.
 const CONTROL: [f32; 2] = [34.0, 28.0];
@@ -63,11 +63,11 @@ fn control(ui: &mut Ui, theme: &Theme, keymap: &Keymap, which: Control) -> Respo
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
     if ui.is_rect_visible(rect) {
         let lit = response.hovered() || response.has_focus();
-        let ink = if lit && which == Control::Close { p.on_close } else { p.text };
+        let ink = if lit && which == Control::Close { p.bg } else { p.ink };
         if lit {
-            let fill = if which == Control::Close { p.close } else { p.hover };
+            let fill = if which == Control::Close { p.minus } else { p.stage };
             // A little smaller than the control, so the fill keeps clear of the strip's edges and the window's corner.
-            ui.painter().rect_filled(rect.shrink2(vec2(HOVER_INSET, HOVER_INSET)), theme.spacing.corner, fill);
+            ui.painter().rect_filled(rect.shrink2(vec2(HOVER_INSET, HOVER_INSET)), 0.0, fill);
         }
         let c = rect.center();
         let r = 5.0;
@@ -141,13 +141,13 @@ fn moves_the_window(ctx: &Context, response: &Response) {
 /// The width of the three controls and the room between them.
 const CONTROLS: f32 = CONTROL[0] * 3.0 + 4.0;
 
-/// The strip over the whole of `ui`: a band of glass with a line under it, `title` in the middle in the muted
+/// The strip over the whole of `ui`: a flat band with a line under it, `title` in the middle in the muted
 /// colour, the controls at the right; pressing anywhere else on it moves the window. Its top right corner follows the
 /// window's `corner`.
 pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, corner: f32) {
     let p = &theme.palette;
     let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, top_right_corner(corner), p.glass);
+    ui.painter().rect_filled(rect, top_right_corner(corner), p.surface);
     let width = 1.0 / ui.ctx().pixels_per_point();
     ui.painter().hline(rect.x_range(), rect.bottom() - width / 2.0, Stroke::new(width, p.line));
     let handle = ui.interact(rect, Id::unique("window-strip"), Sense::click_and_drag());
@@ -202,7 +202,7 @@ pub(super) fn beside<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) ->
     if !on || whole.right() < ui.ctx().content_rect().right() - REACH {
         return add(ui);
     }
-    let room = float_width() + theme.spacing.s;
+    let room = float_width() + theme.spacing.s2;
     let inner = ui.scope(|ui| {
         ui.set_max_width((ui.available_width() - room).max(0.0));
         add(ui)
@@ -226,7 +226,7 @@ pub(super) fn top_row(ctx: &Context, theme: &Theme, keymap: &Keymap) {
     let area = match place {
         Some(place) => area.pivot(Align2::RIGHT_CENTER).fixed_pos(place.right_center()),
         None => {
-            let gap = theme.spacing.gap;
+            let gap = theme.spacing.s2;
             area.anchor(Align2::RIGHT_TOP, vec2(-gap * 2.0, gap * 2.0))
         }
     };
@@ -322,7 +322,7 @@ pub(super) fn outline(ctx: &Context, theme: &Theme, corner: f32) {
     }
     let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("window-outline")));
     let width = 1.0 / ctx.pixels_per_point();
-    painter.rect_stroke(ctx.content_rect(), round(corner), Stroke::new(width, theme.palette.window_edge), StrokeKind::Inside);
+    painter.rect_stroke(ctx.content_rect(), round(corner), Stroke::new(width, theme.palette.line), StrokeKind::Inside);
 }
 
 /// `corner` as egui's radius, all four corners.
@@ -358,10 +358,9 @@ struct Frame;
 impl Frame {
     fn float(theme: &Theme) -> egui::Frame {
         egui::Frame::new()
-            .fill(theme.palette.float)
-            .stroke(Stroke::new(1.0, theme.palette.glass_edge))
-            // A few points; the clamp keeps the cast inside u8.
-            .corner_radius(theme.spacing.corner.clamp(0.0, 255.0) as u8)
+            .fill(theme.palette.surface)
+            .stroke(Stroke::new(1.0, theme.palette.line))
+            .corner_radius(0)
             .inner_margin(egui::Margin::same(FLOAT_MARGIN))
     }
 }

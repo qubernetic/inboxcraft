@@ -57,16 +57,12 @@ What is missing or rough is listed, ranked, in [docs/gaps.md](docs/gaps.md).
 
 ## What it looks like
 
-The message list with the reader and a thread in the full-width reader, in the three accent presets, light and dark.
+The message list with the reader and a thread in the full-width reader, light and dark.
 
-| Preset | Light | Dark |
-|---|---|---|
-| Electric | ![The message list of the sample mailbox with a message open in the reader, Electric accent, light](docs/images/list-light.png) | ![The message list of the sample mailbox with a message open in the reader, Electric accent, dark](docs/images/list-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Electric accent, light](docs/images/reader-full-light.png) | ![A thread with three attachments in the full-width reader, Electric accent, dark](docs/images/reader-full-dark.png) |
-| Aurora | ![The message list of the sample mailbox with a message open in the reader, Aurora accent, light](docs/images/list-aurora-light.png) | ![The message list of the sample mailbox with a message open in the reader, Aurora accent, dark](docs/images/list-aurora-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Aurora accent, light](docs/images/reader-full-aurora-light.png) | ![A thread with three attachments in the full-width reader, Aurora accent, dark](docs/images/reader-full-aurora-dark.png) |
-| Citrus | ![The message list of the sample mailbox with a message open in the reader, Citrus accent, light](docs/images/list-citrus-light.png) | ![The message list of the sample mailbox with a message open in the reader, Citrus accent, dark](docs/images/list-citrus-dark.png) |
-| | ![A thread with three attachments in the full-width reader, Citrus accent, light](docs/images/reader-full-citrus-light.png) | ![A thread with three attachments in the full-width reader, Citrus accent, dark](docs/images/reader-full-citrus-dark.png) |
+| Light | Dark |
+|---|---|
+| ![The message list of the sample mailbox with a message open in the reader, light](docs/images/list-light.png) | ![The message list of the sample mailbox with a message open in the reader, dark](docs/images/list-dark.png) |
+| ![A thread with three attachments in the full-width reader, light](docs/images/reader-full-light.png) | ![A thread with three attachments in the full-width reader, dark](docs/images/reader-full-dark.png) |
 
 The pictures show the sample mailbox (`--sample`): invented people and invented mail. They are made with
 `just shot` (`cargo run -p inboxcraft-ui-egui --example ui_shot -- crates/ui-egui/shots.jsonl`).

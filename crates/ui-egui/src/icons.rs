@@ -13,7 +13,6 @@ use egui::epaint::{CornerRadiusF32, RectShape};
 use egui::{Color32, IconData, Pos2, Rect, Shape, Vec2, pos2, vec2};
 
 use crate::UiError;
-use crate::gradient;
 use crate::shot::{self, Picture};
 use crate::theme::Mode;
 use crate::theme::app_icon::{EDGE, GRADIENT, GRADIENT_LINE, TILE};
@@ -229,7 +228,7 @@ pub fn shapes(parts: &[Part], rect: Rect) -> Vec<Shape> {
             };
             match fill {
                 Fill::Solid(_) => shape,
-                Fill::Gradient => gradient::recoloured(shape, |pos| {
+                Fill::Gradient => recoloured(shape, |pos| {
                     gradient_at([(pos.x - rect.min.x) / scale.x.max(f32::EPSILON), (pos.y - rect.min.y) / scale.y.max(f32::EPSILON)])
                 }),
             }
@@ -266,6 +265,55 @@ pub fn window_icon() -> Result<IconData, UiError> {
     let side = |pixels: usize| u32::try_from(pixels).map_err(|_| UiError::Shot("the icon is too large".to_owned()));
     Ok(IconData { rgba, width: side(picture.width())?, height: side(picture.height())? })
 }
+
+/// `shape` tessellated at one pixel a point, each vertex coloured by `colour_at` its place, keeping the coverage of
+/// the soft edge: a gradient of any direction over any convex shape (the app icon's mark).
+fn recoloured(shape: Shape, colour_at: impl Fn(Pos2) -> Color32) -> Shape {
+    let mut tessellator = egui::epaint::Tessellator::new(1.0, egui::epaint::TessellationOptions::default(), [1, 1], Vec::new());
+    let mut mesh = egui::epaint::Mesh::default();
+    tessellator.tessellate_shape(shape, &mut mesh);
+    // Each triangle cut into four until its edges are short, so the colours between the vertices follow the
+    // gradient's stops rather than a straight line across a large triangle.
+    let mut out = egui::epaint::Mesh::default();
+    let mut todo: Vec<([egui::epaint::Vertex; 3], u8)> = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter_map(|[a, b, c]| {
+            let vertex = |index: u32| usize::try_from(index).ok().and_then(|at| mesh.vertices.get(at)).copied();
+            Some(([vertex(*a)?, vertex(*b)?, vertex(*c)?], 0))
+        })
+        .collect();
+    while let Some(([a, b, c], depth)) = todo.pop() {
+        let longest = a.pos.distance(b.pos).max(b.pos.distance(c.pos)).max(c.pos.distance(a.pos));
+        if longest > RECOLOURED_EDGE && depth < RECOLOURED_DEPTH && out.vertices.len() < MAX_VERTICES {
+            let mid = |p: egui::epaint::Vertex, q: egui::epaint::Vertex| egui::epaint::Vertex {
+                pos: p.pos + (q.pos - p.pos) / 2.0,
+                uv: p.uv,
+                color: p.color.lerp_to_gamma(q.color, 0.5),
+            };
+            let (ab, bc, ca) = (mid(a, b), mid(b, c), mid(c, a));
+            todo.extend([([a, ab, ca], depth + 1), ([ab, b, bc], depth + 1), ([ca, bc, c], depth + 1), ([ab, bc, ca], depth + 1)]);
+            continue;
+        }
+        let first = u32::try_from(out.vertices.len()).unwrap_or(u32::MAX);
+        for vertex in [a, b, c] {
+            out.vertices.push(egui::epaint::Vertex { color: colour_at(vertex.pos).gamma_multiply_u8(vertex.color.a()), ..vertex });
+        }
+        out.indices.extend([first, first.saturating_add(1), first.saturating_add(2)]);
+    }
+    Shape::mesh(out)
+}
+
+/// The longest edge of a triangle [`recoloured`] keeps, in points.
+const RECOLOURED_EDGE: f32 = 6.0;
+
+/// How many times [`recoloured`] cuts a triangle at most.
+const RECOLOURED_DEPTH: u8 = 6;
+
+/// The most vertices [`recoloured`] makes before it stops cutting: a bound on what one shape costs.
+const MAX_VERTICES: usize = 300_000;
 
 #[cfg(test)]
 #[path = "icons_tests.rs"]

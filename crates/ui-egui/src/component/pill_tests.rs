@@ -70,11 +70,11 @@ fn a_selected_pill_is_one_even_tone_and_another_has_no_fill_and_a_quiet_edge() {
         rects(harness.output())
     };
     let plain = draw(false);
-    assert!(plain.iter().any(|(_, stroke)| *stroke == palette.control_edge), "{plain:?}");
-    assert!(plain.iter().all(|(fill, _)| *fill != palette.panel && *fill != palette.selection), "{plain:?}");
+    assert!(plain.iter().any(|(_, stroke)| *stroke == palette.muted), "{plain:?}");
+    assert!(plain.iter().all(|(fill, _)| *fill != palette.panel && *fill != palette.stage), "{plain:?}");
     let chosen = draw(true);
-    assert!(chosen.iter().any(|(fill, _)| *fill == palette.selection), "{chosen:?}");
-    assert!(chosen.iter().all(|(_, stroke)| *stroke != palette.control_edge), "{chosen:?}");
+    assert!(chosen.iter().any(|(fill, _)| *fill == palette.stage), "{chosen:?}");
+    assert!(chosen.iter().all(|(_, stroke)| *stroke != palette.muted), "{chosen:?}");
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn a_hovered_pill_fades_its_hover_in_and_a_focused_one_shows_its_ring() {
         pill(ui, &theme, "Unread", false);
     });
     harness.run();
-    let hover_fill = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(fill, _)| *fill == palette.hover);
-    let ring = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(_, stroke)| *stroke == palette.focus);
+    let hover_fill = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(fill, _)| *fill == palette.stage);
+    let ring = |harness: &egui_kittest::Harness<'_>| rects(harness.output()).iter().any(|(_, stroke)| *stroke == palette.cyan_edge);
     assert!(!hover_fill(&harness) && !ring(&harness));
     harness.get_by_label("Unread").hover();
     harness.run();

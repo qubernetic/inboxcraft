@@ -14,10 +14,10 @@ use inboxcraft_store::{Memory, StoreConfig};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
-use crate::iconset::{IconId, IconSet, Style};
+use crate::iconset::{IconId, Style};
 use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
-use crate::theme::{Mode, ModePreference, PRESETS, Preset, TextScale, Theme};
+use crate::theme::{Mode, ModePreference, TextScale, Theme, contrast};
 
 /// 2026-11-05T09:00:00Z.
 fn clock() -> Box<FakeClock> {
@@ -38,7 +38,7 @@ fn harness() -> Harness<'static, InboxApp> {
     harness_with(sample_app(), egui::Theme::Light)
 }
 
-/// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
+/// Whether the last frame of `output` drew `id` in `style`: its front glyph in its font.
 pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {
@@ -47,7 +47,7 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = IconSet::default().glyph(id, style);
+    let glyph = crate::iconset::glyph(id, style);
     let Some((front, _)) = glyph.layers.last() else { return false };
     let family = glyph.face.id(1.0).family;
     let mut found = Vec::new();
@@ -98,20 +98,17 @@ fn the_theme_follows_the_mode() {
     let harness = harness_with(sample_app(), egui::Theme::Dark);
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
     assert_eq!(harness.state().mode(), ModePreference::System);
-    assert_eq!(harness.state().preset(), Preset::default());
-    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &Preset::default()).palette.panel);
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, TextScale::default()).palette.bg);
 }
 
 #[test]
-fn a_new_preset_and_mode_show_from_the_next_frame() {
+fn a_new_mode_shows_from_the_next_frame() {
     let mut harness = harness_with(sample_app(), egui::Theme::Light);
-    let citrus = *Preset::named("citrus").unwrap();
-    harness.state_mut().set_preset(citrus);
     harness.state_mut().set_mode(ModePreference::Dark);
     harness.run();
     assert_eq!(Mode::of(&harness.ctx), Mode::Dark);
-    assert_eq!(harness.ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, &citrus).palette.panel);
-    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, &citrus).palette.panel);
+    assert_eq!(harness.ctx.style_of(egui::Theme::Light).visuals.panel_fill, Theme::new(Mode::Light, TextScale::default()).palette.bg);
+    assert_eq!(harness.ctx.style_of(egui::Theme::Dark).visuals.panel_fill, Theme::new(Mode::Dark, TextScale::default()).palette.bg);
     harness.state_mut().set_mode(ModePreference::Light);
     harness.run();
     assert_eq!(Mode::of(&harness.ctx), Mode::Light);
@@ -142,7 +139,7 @@ pub(super) fn font_of(harness: &Harness<'static, InboxApp>, start: &str) -> egui
 #[test]
 fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     let harness = harness();
-    let fonts = Theme::new(Mode::Light, &Preset::default()).fonts;
+    let fonts = Theme::new(Mode::Light, TextScale::default()).fonts;
     // Odile's row is unread, Teodor's is read.
     assert_eq!(font_of(&harness, "Odile Brannock"), fonts.sender_unread.id());
     assert_eq!(font_of(&harness, "Allotment rota for November"), fonts.subject_unread.id());
@@ -158,7 +155,7 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     });
     let preview = preview.unwrap();
     assert_eq!(preview.font_id, fonts.preview.id());
-    assert_eq!(preview.color, Theme::new(Mode::Light, &Preset::default()).palette.muted);
+    assert_eq!(preview.color, Theme::new(Mode::Light, TextScale::default()).palette.muted);
 }
 
 #[test]
@@ -171,8 +168,11 @@ fn a_new_text_scale_shows_from_the_next_frame_and_the_rows_grow_with_it() {
     harness.state_mut().set_text_scale(large);
     harness.run();
     let body = harness.ctx.style_of(egui::Theme::Light).text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
-    assert_eq!(body, Some(Theme::new(Mode::Light, &Preset::default()).with_text_scale(large).fonts.body.size));
-    assert_eq!(font_of(&harness, "Odile Brannock").size, Theme::new(Mode::Light, &Preset::default()).with_text_scale(large).fonts.sender_unread.size);
+    assert_eq!(body, Some(Theme::new(Mode::Light, TextScale::default()).with_text_scale(large).fonts.body.size));
+    assert_eq!(
+        font_of(&harness, "Odile Brannock").size,
+        Theme::new(Mode::Light, TextScale::default()).with_text_scale(large).fonts.sender_unread.size
+    );
     let after = harness.get_by_label(row).rect().height();
     // The two lines grow by 30 %, the air around them stays.
     assert!(after > before * 1.15, "the row follows the font: {before} then {after}");
@@ -354,32 +354,22 @@ fn the_app_shows_its_debug_form_without_message_text() {
     assert!(!shown.contains("Allotment"), "{shown}");
 }
 
-fn preset_app(preset: Preset) -> InboxApp {
-    let mut app = sample_app();
-    app.set_preset(preset);
-    app
-}
-
 #[test]
 fn nothing_repaints_while_nothing_moves() {
-    for preset in PRESETS {
-        for theme in [egui::Theme::Light, egui::Theme::Dark] {
-            let mut harness = harness_with(preset_app(preset), theme);
-            // Settled: one more run is a single frame that asks for no other.
-            assert_eq!(harness.run(), 1, "{} {theme:?}: idle frames", preset.id);
-            let kept = crate::gradient::kept(&harness.ctx);
-            let mut asked = 0;
-            for _ in 0..10 {
-                harness.step();
-                asked += usize::from(harness.ctx.has_requested_repaint());
-            }
-            assert_eq!(asked, 0, "{} {theme:?}: repaints asked for while idle", preset.id);
-            assert_eq!(crate::gradient::kept(&harness.ctx), kept, "no picture rasterised again");
-            // The same with a message open in the reader.
-            harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
-            harness.run();
-            assert_eq!(harness.run(), 1, "{} {theme:?}: idle with the reader", preset.id);
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = harness_with(sample_app(), theme);
+        // Settled: one more run is a single frame that asks for no other.
+        assert_eq!(harness.run(), 1, "{theme:?}: idle frames");
+        let mut asked = 0;
+        for _ in 0..10 {
+            harness.step();
+            asked += usize::from(harness.ctx.has_requested_repaint());
         }
+        assert_eq!(asked, 0, "{theme:?}: repaints asked for while idle");
+        // The same with a message open in the reader.
+        harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+        harness.run();
+        assert_eq!(harness.run(), 1, "{theme:?}: idle with the reader");
     }
 }
 
@@ -389,7 +379,7 @@ fn texture_bytes(harness: &Harness<'static, InboxApp>) -> usize {
 }
 
 #[test]
-fn resizing_the_window_rasterises_little_and_gives_the_memory_back() {
+fn resizing_the_window_gives_the_memory_back() {
     for scale in [1.0, 2.0] {
         let mut harness = Harness::builder()
             .with_size(vec2(1100.0, 720.0))
@@ -399,14 +389,10 @@ fn resizing_the_window_rasterises_little_and_gives_the_memory_back() {
         harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
         harness.run();
         let idle = texture_bytes(&harness);
-        let mut most = 0;
         for step in 0..20 {
-            let before = crate::gradient::rasterised(&harness.ctx);
             harness.set_size(vec2(1100.0 + 3.0 * step as f32, 720.0 + 2.0 * step as f32));
             harness.step();
-            most = most.max(crate::gradient::rasterised(&harness.ctx) - before);
         }
-        assert!(most <= 2, "at scale {scale}: {most} pictures rasterised in one frame of the resize");
         harness.set_size(vec2(1100.0, 720.0));
         harness.run();
         let after = texture_bytes(&harness);
@@ -491,10 +477,10 @@ fn translucency_over_text(harness: &Harness<'static, InboxApp>) -> Vec<String> {
 
 #[test]
 fn translucency_is_never_laid_over_text() {
-    for preset in PRESETS {
+    {
         for theme in [egui::Theme::Light, egui::Theme::Dark] {
-            let mut harness = harness_with(preset_app(preset), theme);
-            let name = format!("{} {theme:?}", preset.id);
+            let mut harness = harness_with(sample_app(), theme);
+            let name = format!("{theme:?}");
             assert_eq!(translucency_over_text(&harness), Vec::<String>::new(), "{name}: the list");
             harness.hover_at(harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread").rect().center());
             harness.run();
@@ -511,15 +497,54 @@ fn translucency_is_never_laid_over_text() {
 }
 
 #[test]
-fn the_window_is_glass_over_colour_fields() {
+fn the_window_is_flat() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = harness_with(sample_app(), theme);
+        harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+        harness.run();
+        let shapes = flat(&harness.output().shapes);
+        let round: Vec<String> = shapes
+            .iter()
+            .filter_map(|(_, shape)| match shape {
+                egui::Shape::Rect(rect)
+                    if [rect.corner_radius.nw, rect.corner_radius.ne, rect.corner_radius.sw, rect.corner_radius.se].into_iter().any(|r| r > 2)
+                        || rect.brush.is_some() =>
+                {
+                    Some(format!("{rect:?}"))
+                }
+                egui::Shape::Mesh(_) => Some("a mesh".to_owned()),
+                _ => None,
+            })
+            .collect();
+        assert!(round.is_empty(), "{theme:?}: square, flat shapes only:\n{}", round.join("\n"));
+        let surface = Theme::new(Mode::of(&harness.ctx), TextScale::default()).palette.surface;
+        let panes = shapes.iter().filter(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == surface)).count();
+        assert!(panes >= 3, "{theme:?}: the folder pane, the list and the reader are flat panes: {panes}");
+    }
+}
+
+/// Whether a flat rect in `fill` covers `at` in the last frame.
+fn filled_at(harness: &Harness<'static, InboxApp>, at: egui::Pos2, fill: egui::Color32) -> bool {
+    flat(&harness.output().shapes).iter().any(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == fill && rect.rect.contains(at)))
+}
+
+#[test]
+fn a_hovered_row_takes_the_fill_of_its_ground() {
     let mut harness = harness_with(sample_app(), egui::Theme::Dark);
-    harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
+    let p = Theme::new(Mode::Dark, TextScale::default()).palette;
+    assert!(contrast(p.stage, p.surface) >= 1.15, "hover on a pane shows: {}", contrast(p.stage, p.surface));
+    assert!(contrast(p.grid, p.panel) >= 1.05, "hover on the panel shows: {}", contrast(p.grid, p.panel));
+    // A list row stands on a pane's `surface`: its hover is the `stage`.
+    let row = harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, unread").rect().center();
+    assert!(!filled_at(&harness, row, p.stage), "not hovered yet");
+    harness.hover_at(row);
     harness.run();
-    let shapes = flat(&harness.output().shapes);
-    let fields = shapes.iter().position(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.brush.is_some()));
-    let text = shapes.iter().position(|(_, shape)| matches!(shape, egui::Shape::Text(_)));
-    assert!(fields.is_some() && fields < text, "the colour fields come before any text: {fields:?} {text:?}");
-    let glass = Theme::new(Mode::Dark, &Preset::default()).palette.glass;
-    let layers = shapes.iter().filter(|(_, shape)| matches!(shape, egui::Shape::Rect(rect) if rect.fill == glass)).count();
-    assert_eq!(layers, 3, "the folder pane, the list and the reader are glass");
+    assert!(filled_at(&harness, row, p.stage), "a hovered list row is the stage");
+    assert!(!filled_at(&harness, row, p.grid));
+    // A rail button stands on the `panel`: its hover is the `grid`.
+    let calendar = harness.get_by_role_and_label(Role::Button, "Calendar").rect().center();
+    harness.hover_at(calendar);
+    harness.run();
+    assert!(filled_at(&harness, calendar, p.grid), "a hovered rail button is the grid");
+    assert!(!filled_at(&harness, calendar, p.stage));
 }

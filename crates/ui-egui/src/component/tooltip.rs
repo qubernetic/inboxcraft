@@ -8,7 +8,7 @@
 
 use egui::{Frame, Response, Shape, Tooltip, Ui};
 
-use crate::glass;
+use crate::draw::paint::{self, FloatEdge};
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
@@ -20,10 +20,10 @@ pub fn key_chip(ui: &mut Ui, theme: &Theme, key: &str) -> Response {
     let s = &theme.spacing;
     Frame::new()
         .fill(p.panel)
-        .stroke(egui::Stroke::new(1.0, p.field_border))
-        .corner_radius(super::corner(s.corner))
-        .inner_margin(super::margin(s.xs * 1.5, 1.0))
-        .show(ui, |ui| ui.label(egui::RichText::new(key).font(theme.fonts.caption.id()).color(p.text)))
+        .stroke(egui::Stroke::new(1.0, p.line))
+        .corner_radius(super::corner(0.0))
+        .inner_margin(super::margin(s.s1 * 1.5, 1.0))
+        .show(ui, |ui| ui.label(egui::RichText::new(key).font(theme.fonts.caption.id()).color(p.ink)))
         .inner
 }
 
@@ -37,10 +37,10 @@ fn noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option
     let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
     let chip = action.and_then(|action| keymap.chip(ui.ctx(), action));
-    let inner = Frame::new().inner_margin(super::margin(s.m, s.xs * 1.5)).show(ui, |ui| {
+    let inner = Frame::new().inner_margin(super::margin(s.s3, s.s1 * 1.5)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s;
-            let text = galley(ui, name, theme.fonts.body, theme.palette.text);
+            ui.spacing_mut().item_spacing.x = s.s2;
+            let text = galley(ui, name, theme.fonts.body, theme.palette.ink);
             ui.label(text);
             if let Some(chip) = chip {
                 key_chip(ui, theme, &chip);
@@ -50,7 +50,7 @@ fn noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option
             ui.label(galley(ui, note, theme.fonts.caption, theme.palette.muted));
         }
     });
-    let shapes = glass::float_shapes(ui.painter(), theme, inner.response.rect);
+    let shapes = paint::float_shapes(theme, inner.response.rect, FloatEdge::Quiet);
     ui.painter().set(slot, Shape::Vec(shapes));
 }
 

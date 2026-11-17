@@ -41,7 +41,6 @@ use inboxcraft_engine::ScreenerMode;
 use crate::component::hover::{self, Action};
 use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
-use crate::gradient::{self, Gradient, Stop};
 use crate::iconset::{IconId, Style};
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState};
@@ -119,11 +118,11 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
     if !mailbox.query().is_empty() || matches!(mailbox.place(), Place::Senders | Place::Outbox) {
         return;
     }
-    ui.add_space(theme.spacing.m);
+    ui.add_space(theme.spacing.s3);
     let reach = Margin { left: -PILL_PULL, right: -PILL_PULL, top: 0, bottom: -PILL_PULL };
     Frame::new().outer_margin(reach).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(theme.spacing.s, theme.spacing.xs);
+            ui.spacing_mut().item_spacing = vec2(theme.spacing.s2, theme.spacing.s1);
             if let Place::Later(shown) = mailbox.place() {
                 for pile in Pile::ALL {
                     let text = tr!("{pile} ({count})", pile = pile.text(), count = mailbox.pile_count(pile));
@@ -155,10 +154,10 @@ fn pills(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, asked: &mut Header) {
 pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, search: &mut String) -> Header {
     let p = &theme.palette;
     let mut changed = None;
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.text));
+            ui.label(RichText::new(mailbox.title()).font(theme.fonts.title.id()).color(p.ink));
             let line = match mailbox.outbox_summary().filter(|_| mailbox.place() == Place::Outbox && mailbox.query().is_empty()) {
                 Some(summary) => summary,
                 None => tr!("{whose} · {shown}", whose = mailbox.subtitle(), shown = mailbox.list_count()),
@@ -170,7 +169,7 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
                 search.clear();
                 changed = Some(String::new());
             }
-            let field = field::search(ui, theme, search_id(), search, tr!("Search"), theme.spacing.folder_pane * 0.75);
+            let field = field::search(ui, theme, search_id(), search, tr!("Search"), super::FOLDER_PANE * 0.75);
             let response = tooltip::attach(field, theme, keymap, tr!("Search mail"), Some(keymap::FIND));
             if response.changed() {
                 changed = Some(search.clone());
@@ -188,9 +187,9 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
 
 fn empty(ui: &mut Ui, theme: &Theme, title: &str, detail: &str) {
     ui.vertical_centered(|ui| {
-        ui.add_space(theme.spacing.xl * 3.0);
-        ui.label(RichText::new(title).font(theme.fonts.heading.id()).color(theme.palette.text));
-        ui.add_space(theme.spacing.xs);
+        ui.add_space(theme.spacing.s6 * 3.0);
+        ui.label(RichText::new(title).font(theme.fonts.heading.id()).color(theme.palette.ink));
+        ui.add_space(theme.spacing.s1);
         ui.label(RichText::new(detail).font(theme.fonts.body.id()).color(theme.palette.muted));
     });
 }
@@ -206,28 +205,28 @@ fn row_lines(ui: &Ui, theme: &Theme) -> (f32, f32) {
 /// The side of a row's avatar: a little under its two lines.
 fn face_side(ui: &Ui, theme: &Theme) -> f32 {
     let (first, second) = row_lines(ui, theme);
-    (first + second - theme.spacing.xs / 2.0).max(1.0)
+    (first + second - theme.spacing.s1 / 2.0).max(1.0)
 }
 
 /// How far right of a row's left edge the avatar starts: past the room for the unread dot.
 fn face_indent(theme: &Theme) -> f32 {
-    theme.spacing.l + theme.spacing.s
+    theme.spacing.s4 + theme.spacing.s2
 }
 
 /// How far right of a row's left edge its text starts: past the room for the unread dot and the avatar.
 fn text_indent(ui: &Ui, theme: &Theme) -> f32 {
-    face_indent(theme) + face_side(ui, theme) + theme.spacing.m
+    face_indent(theme) + face_side(ui, theme) + theme.spacing.s3
 }
 
 /// The gap between a row's two lines.
 fn line_gap(theme: &Theme) -> f32 {
-    theme.spacing.xs / 2.0
+    theme.spacing.s1 / 2.0
 }
 
 /// The height of a message row: its two lines and air, from the font's metrics at the current text scale.
 pub(super) fn row_height(ui: &Ui, theme: &Theme) -> f32 {
     let (first, second) = row_lines(ui, theme);
-    theme.spacing.s * 2.0 + first + line_gap(theme) + second
+    theme.spacing.s2 * 2.0 + first + line_gap(theme) + second
 }
 
 /// How far the account's stripe stands from a row's left edge, and how much further in it pushes the row's content.
@@ -278,7 +277,7 @@ pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>,
     if popup::choice(ui, theme, tr!("Let InboxCraft sort it"), false).clicked() {
         chosen = Some(Act::Group(None));
     }
-    ui.add_space(theme.spacing.xs);
+    ui.add_space(theme.spacing.s1);
     let note = tr!("Moves all mail from {address}, kept and future.", address = address);
     ui.add(egui::Label::new(RichText::new(note).font(theme.fonts.caption.id()).color(theme.palette.muted)).wrap());
     chosen
@@ -355,30 +354,30 @@ fn paint_row(
     let height = rect.height();
     let selected = mailbox.selected() == Some(message.id);
     if selected {
-        selection(ui.painter(), theme, rect, s.corner);
+        selection(ui.painter(), theme, rect, 0.0);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, s.corner, p.hover);
+        ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     let (first_height, second_height) = row_lines(ui, theme);
-    let first = rect.top() + s.s;
+    let first = rect.top() + s.s2;
     let second = first + first_height + line_gap(theme);
     // With the account's stripe the dot, the avatar and the text stand further in.
     let inset = if account_marker {
         let index = mailbox.account(message.account).map_or(0, |account| account.index);
-        let marker = Rect::from_min_size(pos2(rect.left() + STRIPE_INSET, rect.top() + s.s), vec2(STRIPE_WIDTH, (height - 2.0 * s.s).max(1.0)));
+        let marker = Rect::from_min_size(pos2(rect.left() + STRIPE_INSET, rect.top() + s.s2), vec2(STRIPE_WIDTH, (height - 2.0 * s.s2).max(1.0)));
         ui.painter().rect_filled(marker, 1.0, theme.account_colour(u64::try_from(index).unwrap_or(0)));
         STRIPE_ROOM
     } else {
         0.0
     };
     if !message.seen {
-        ui.painter().circle_filled(pos2(rect.left() + inset + s.s, rect.center().y), 3.0, p.unread);
+        ui.painter().circle_filled(pos2(rect.left() + inset + s.s2, rect.center().y), 3.0, p.cyan_edge);
     }
     let side = face_side(ui, theme);
     let face = Rect::from_center_size(pos2(rect.left() + inset + face_indent(theme) + side / 2.0, rect.center().y), vec2(side, side));
     avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
     let left = rect.left() + inset + text_indent(ui, theme);
-    let right = rect.right() - s.m;
+    let right = rect.right() - s.s3;
     let (sender_font, subject_font) = if message.seen { (f.sender, f.subject) } else { (f.sender_unread, f.subject_unread) };
     // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
     let date = line(ui, &[(&mailbox.row_date(message), f.caption, p.muted)], f32::INFINITY);
@@ -386,35 +385,35 @@ fn paint_row(
     ui.painter().galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
     // The flag next to the date, the pin left of it, on the sender's line.
     let flag_size = (first_height - 2.0).max(1.0);
-    let mut end = date_left - s.s;
-    for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.flag), (message.pinned, IconId::Pin, p.accent)] {
+    let mut end = date_left - s.s2;
+    for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
         if shown {
             let at = Rect::from_min_size(pos2(end - flag_size, first + (first_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-            theme.icons.paint(ui.painter(), at, icon, Style::Fill, colour);
-            end -= flag_size + s.s;
+            crate::iconset::paint(ui.painter(), at, icon, Style::Fill, colour);
+            end -= flag_size + s.s2;
         }
     }
     let mark = if message.bounced.is_some() {
-        Some((tr!("Not delivered"), p.error))
+        Some((tr!("Not delivered"), p.minus))
     } else if message.new_sender {
-        Some((tr!("New sender"), p.accent))
+        Some((tr!("New sender"), p.cyan_text))
     } else if mailbox.returned(message) {
-        Some((tr!("Returned"), p.accent))
+        Some((tr!("Returned"), p.cyan_text))
     } else {
         None
     };
     let sender = match mark {
         Some((mark, ink)) => {
             let mark = format!("  {mark}");
-            line(ui, &[(&message.sender, sender_font, p.text), (&mark, f.caption, ink)], end - s.xs - left)
+            line(ui, &[(&message.sender, sender_font, p.ink), (&mark, f.caption, ink)], end - s.s1 - left)
         }
-        None => line(ui, &[(&message.sender, sender_font, p.text)], end - s.xs - left),
+        None => line(ui, &[(&message.sender, sender_font, p.ink)], end - s.s1 - left),
     };
-    ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.text);
+    ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.ink);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let preview = after_subject(&message.preview);
-    let text = line(ui, &[(subject, subject_font, p.text), (&preview, f.preview, p.muted)], right - left);
-    ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.text);
+    let text = line(ui, &[(subject, subject_font, p.ink), (&preview, f.preview, p.muted)], right - left);
+    ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
     let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
     let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), rect, reach, &actions(message));
@@ -426,34 +425,20 @@ pub(super) fn after_subject(preview: &str) -> String {
     if preview.trim().is_empty() { String::new() } else { format!("  · {preview}") }
 }
 
-/// A rounded card across `ui`'s width with `add` drawn inside; `edge` rings it with the preset's gradient.
+/// A square card across `ui`'s width with `add` drawn inside; `edge` rings it with the accent's edge.
 fn sheet<R>(ui: &mut Ui, theme: &Theme, edge: bool, add: impl FnOnce(&mut Ui) -> R) -> R {
     let p = &theme.palette;
-    let s = &theme.spacing;
     let slot = ui.painter().add(Shape::Noop);
     let inner = Frame::new().inner_margin(margin(ROW_INSET, ROW_INSET)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
     });
     let rect = inner.response.rect;
-    let shapes = if edge {
-        let [first, middle, last] = p.gradient;
-        let ring = Gradient::Linear {
-            from: pos2(0.0, 0.0),
-            to: pos2(1.0, 1.0),
-            stops: vec![Stop::new(0.0, first), Stop::new(0.5, middle), Stop::new(1.0, last)],
-        };
-        let width = EDGE;
-        vec![gradient::filled(ui.painter(), rect, s.card, &ring), Shape::rect_filled(rect.shrink(width), s.card - width, p.surface)]
-    } else {
-        vec![Shape::rect_filled(rect, s.card, p.card), Shape::rect_stroke(rect, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside)]
-    };
+    let colour = if edge { p.cyan_edge } else { p.line };
+    let shapes = vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, colour), StrokeKind::Inside)];
     ui.painter().set(slot, Shape::Vec(shapes));
     inner.inner
 }
-
-/// The width of the screener card's gradient edge.
-const EDGE: f32 = 1.5;
 
 /// What the list asked for this frame.
 #[derive(Debug, Default)]
@@ -490,7 +475,7 @@ fn standing_look(theme: &Theme, state: &SendState) -> (IconId, Color32) {
     match state {
         SendState::Waiting(_) => (IconId::Snooze, theme.palette.muted),
         SendState::Sending => (IconId::Send, theme.palette.muted),
-        SendState::Refused { .. } => (IconId::Failed, theme.palette.error),
+        SendState::Refused { .. } => (IconId::Failed, theme.palette.minus),
     }
 }
 
@@ -507,27 +492,27 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
         SendState::Refused { reply, .. } => Some(reply.as_str()),
         _ => None,
     };
-    let tall = height + if refused.is_some() { line_height(ui, f.caption) + s.xs } else { 0.0 };
+    let tall = height + if refused.is_some() { line_height(ui, f.caption) + s.s1 } else { 0.0 };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::hover());
     let spoken = mailbox.spoken_outbox(row);
     response.widget_info(|| WidgetInfo::labeled(WidgetRole::ListItem, true, &spoken));
     let side = face_side(ui, theme);
     // A send has no unread dot, so its avatar stands further out than a message's.
-    let indent = s.m + 2.0;
+    let indent = s.s3 + 2.0;
     let face = Rect::from_min_size(pos2(rect.left() + indent, rect.top() + (height - side) / 2.0), vec2(side, side));
     let whom = mailbox.recipients(row);
     avatar::paint(ui.painter(), theme, face, row.to.first().map_or(whom.as_str(), String::as_str), &row.address);
-    let left = rect.left() + indent + side + s.m;
+    let left = rect.left() + indent + side + s.s3;
     let subject = if row.subject.is_empty() { tr!("(no subject)") } else { row.subject.as_str() };
     let subject_label = row.subject.clone();
     // The buttons and where it stands, from the right; the text takes what is left.
-    let mut right = rect.right() - s.m;
+    let mut right = rect.right() - s.s3;
     let mut controls = ui.new_child(
         UiBuilder::new()
             .max_rect(Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.top() + height)))
             .layout(Layout::right_to_left(Align::Center)),
     );
-    controls.spacing_mut().item_spacing.x = s.xs;
+    controls.spacing_mut().item_spacing.x = s.s1;
     let mut press = |ui: &mut Ui, name: &str, spoken: String, primary: bool, pressed: Outbox| {
         let button = if primary { button::TextButton::new(name).primary() } else { button::TextButton::new(name).secondary() };
         let response = button.show(ui, theme, keymap);
@@ -555,22 +540,22 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     let (icon, ink) = standing_look(theme, &row.state);
     let standing = line(&controls, &[(&mailbox.standing(row), f.caption, ink)], f32::INFINITY);
     let mark = line_height(&controls, f.caption);
-    let (chip, _) = controls.allocate_exact_size(vec2(standing.size().x + mark + s.xs + s.s * 2.0, mark + s.xs * 2.0), Sense::hover());
-    controls.painter().rect_filled(chip, s.corner, p.panel);
-    let at = Rect::from_min_size(pos2(chip.left() + s.s, chip.center().y - mark / 2.0), vec2(mark, mark));
-    theme.icons.paint(controls.painter(), at, icon, Style::Regular, ink);
-    controls.painter().galley(pos2(at.right() + s.xs, chip.center().y - standing.size().y / 2.0), standing, ink);
-    right = right.min(controls.min_rect().left() - s.m);
-    let top = rect.top() + s.s;
+    let (chip, _) = controls.allocate_exact_size(vec2(standing.size().x + mark + s.s1 + s.s2 * 2.0, mark + s.s1 * 2.0), Sense::hover());
+    controls.painter().rect_filled(chip, 0.0, p.panel);
+    let at = Rect::from_min_size(pos2(chip.left() + s.s2, chip.center().y - mark / 2.0), vec2(mark, mark));
+    crate::iconset::paint(controls.painter(), at, icon, Style::Regular, ink);
+    controls.painter().galley(pos2(at.right() + s.s1, chip.center().y - standing.size().y / 2.0), standing, ink);
+    right = right.min(controls.min_rect().left() - s.s3);
+    let top = rect.top() + s.s2;
     let to = tr!("To {whom}", whom = whom);
-    let to = line(ui, &[(&to, f.sender, p.text)], (right - left).max(1.0));
-    ui.painter().galley(pos2(left, top + (first - to.size().y) / 2.0), to, p.text);
-    let second_top = top + first + s.xs;
-    let subject = line(ui, &[(subject, f.subject, p.text)], (right - left).max(1.0));
-    ui.painter().galley(pos2(left, second_top + (second - subject.size().y) / 2.0), subject, p.text);
+    let to = line(ui, &[(&to, f.sender, p.ink)], (right - left).max(1.0));
+    ui.painter().galley(pos2(left, top + (first - to.size().y) / 2.0), to, p.ink);
+    let second_top = top + first + s.s1;
+    let subject = line(ui, &[(subject, f.subject, p.ink)], (right - left).max(1.0));
+    ui.painter().galley(pos2(left, second_top + (second - subject.size().y) / 2.0), subject, p.ink);
     if let Some(reply) = refused {
-        let reply = line(ui, &[(reply, f.caption, p.error)], (rect.right() - s.m - left).max(1.0));
-        ui.painter().galley(pos2(left, second_top + second + s.xs), reply, p.error);
+        let reply = line(ui, &[(reply, f.caption, p.minus)], (rect.right() - s.s3 - left).max(1.0));
+        ui.painter().galley(pos2(left, second_top + second + s.s1), reply, p.minus);
     }
     asked
 }
@@ -633,9 +618,9 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> b
     let waiting = mailbox.waiting();
     let mut review = false;
     sheet(ui, theme, true, |ui| {
-        Frame::new().inner_margin(margin(s.s, s.xs)).show(ui, |ui| {
+        Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                let side = line_height(ui, theme.fonts.strong) + s.xs + line_height(ui, theme.fonts.caption);
+                let side = line_height(ui, theme.fonts.strong) + s.s1 + line_height(ui, theme.fonts.caption);
                 let shown = waiting.iter().take(3);
                 let count = u16::try_from(shown.len()).unwrap_or(3);
                 let overlap = side * 0.3;
@@ -647,16 +632,16 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> b
                     ui.painter().circle_filled(face.center(), side / 2.0 + 1.5, p.surface);
                     avatar::paint(ui.painter(), theme, face, &waiting.name, &waiting.address);
                 }
-                ui.add_space(s.s);
+                ui.add_space(s.s2);
                 // Review first, at the right end; the two lines take what is left, cut rather than running under it.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     review = button::text(ui, theme, keymap, tr!("Review"), Some("screener.review"), true).clicked();
-                    ui.add_space(s.s);
+                    ui.add_space(s.s2);
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let count = waiting.len();
                         let title = if count == 1 { tr!("1 new sender").to_owned() } else { tr!("{count} new senders", count = count) };
-                        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.strong.id()).color(p.text)).truncate());
+                        ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.strong.id()).color(p.ink)).truncate());
                         let note = RichText::new(tr!("Held back until you let them in")).font(theme.fonts.caption.id()).color(p.muted);
                         ui.add(egui::Label::new(note).truncate());
                     });
@@ -676,19 +661,19 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
     let all = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
     let mut clicked = None;
     sheet(ui, theme, false, |ui| {
-        Frame::new().inner_margin(margin(s.s, s.xs)).show(ui, |ui| {
+        Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let side = line_height(ui, theme.fonts.heading) * 1.4;
                 badge::group(ui, theme, group.icon, &group.name, side);
-                ui.add_space(s.xs);
+                ui.add_space(s.s1);
                 let unread = messages.iter().filter(|message| !message.seen).count();
                 let unread = u64::try_from(unread).unwrap_or(u64::MAX);
-                let name = line(ui, &[(&group.name, theme.fonts.heading, p.text)], f32::INFINITY);
-                let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s } else { 0.0 };
+                let name = line(ui, &[(&group.name, theme.fonts.heading, p.ink)], f32::INFINITY);
+                let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s2 } else { 0.0 };
                 let (rect, response) = ui.allocate_exact_size(vec2(name.size().x + count, side), Sense::hover());
                 let spoken = if unread > 0 { tr!("{name}, {count} unread", name = group.name, count = unread) } else { group.name.clone() };
                 response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
-                ui.painter().galley(pos2(rect.left(), rect.center().y - name.size().y / 2.0), name, p.text);
+                ui.painter().galley(pos2(rect.left(), rect.center().y - name.size().y / 2.0), name, p.ink);
                 if unread > 0 {
                     badge::count(ui, theme, unread, rect.right(), rect.center().y);
                 }
@@ -704,7 +689,7 @@ fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageR
         if messages.len() > GROUP_ROWS {
             // A link under the rows' text, as far in as the text.
             ui.horizontal(|ui| {
-                ui.add_space((text_indent(ui, theme) - s.l - button::LINK_PAD).max(0.0));
+                ui.add_space((text_indent(ui, theme) - s.s4 - button::LINK_PAD).max(0.0));
                 let label = if all { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = messages.len()) };
                 if button::link(ui, theme, rows.keymap, &label).clicked() {
                     ui.data_mut(|data| data.insert_temp(id, !all));
@@ -732,7 +717,7 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Optio
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
     scrolled(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, s.s);
+        ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
         }
@@ -754,18 +739,18 @@ fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Optio
 fn heading(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, messages: &[&MessageRow]) {
     let s = &theme.spacing;
     let p = &theme.palette;
-    Frame::new().inner_margin(margin(s.s, s.xs)).show(ui, |ui| {
+    Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
         ui.horizontal(|ui| {
             let side = line_height(ui, theme.fonts.strong) * 1.2;
             badge::group(ui, theme, icon, name, side);
-            ui.add_space(s.xs);
+            ui.add_space(s.s1);
             let unread = u64::try_from(messages.iter().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
-            let galley = line(ui, &[(name, theme.fonts.strong, p.text)], f32::INFINITY);
-            let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s } else { 0.0 };
+            let galley = line(ui, &[(name, theme.fonts.strong, p.ink)], f32::INFINITY);
+            let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s2 } else { 0.0 };
             let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + count, side), Sense::hover());
             let spoken = if unread > 0 { tr!("{name}, {count} unread", name = name, count = unread) } else { name.to_owned() };
             response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
-            ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, p.text);
+            ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, p.ink);
             if unread > 0 {
                 badge::count(ui, theme, unread, rect.right(), rect.center().y);
             }
@@ -780,7 +765,7 @@ fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option
     let mailbox = rows.mailbox;
     let (mut clicked, mut review) = (None, false);
     scrolled(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, s.s);
+        ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
         if wait {
             review = screener(ui, rows.theme, rows.keymap, mailbox);
         }
@@ -807,15 +792,14 @@ fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option
 /// The rows of the list on one card that fits them, scrolling inside it.
 fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
     let theme = rows.theme;
-    let s = &theme.spacing;
     let p = &theme.palette;
     let count = rows.mailbox.messages().len();
     let height = row_height(ui, theme);
     let room = ui.available_rect_before_wrap();
     let content = height * count as f32 + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
-    ui.painter().rect_filled(card, s.card, p.card);
-    ui.painter().rect_stroke(card, s.card, Stroke::new(1.0, p.line), StrokeKind::Inside);
+    super::paint::pane(ui.painter(), theme, card);
+    ui.painter().rect_stroke(card, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
     // The bar's room is kept only when the rows do not all fit, so a short list runs the card's whole width.
     let overflows = content > room.height();
@@ -839,10 +823,10 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
     let s = &theme.spacing;
     let side = line_height(ui, theme.fonts.body) * 3.6;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    theme.icons.paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.accent);
-    ui.add_space(s.m);
-    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.text));
-    ui.add_space(s.xs);
+    crate::iconset::paint(ui.painter(), rect, IconId::Inbox, Style::Duotone, p.cyan_text);
+    ui.add_space(s.s3);
+    ui.label(RichText::new(tr!("No accounts yet")).font(theme.fonts.title.id()).color(p.ink));
+    ui.add_space(s.s1);
     let about = if can_add {
         tr!("Add an account to read its mail here. Nothing leaves this computer before you do.")
     } else {
@@ -852,9 +836,9 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
     if !can_add {
         return false;
     }
-    ui.add_space(s.l);
+    ui.add_space(s.s4);
     let add = button::TextButton::new(tr!("Add account")).icon(IconId::Add).primary().show(ui, theme, keymap).clicked();
-    ui.add_space(s.xs);
+    ui.add_space(s.s1);
     ui.label(RichText::new(tr!("Opens Settings · Accounts")).font(theme.fonts.caption.id()).color(p.muted));
     add
 }
@@ -865,13 +849,13 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) 
     let s = &theme.spacing;
     let room = ui.available_rect_before_wrap();
     let lines = if room.width() < 360.0 { 2.0 } else { 1.0 };
-    let bar = (line_height(ui, theme.fonts.button) + s.s) * lines + s.s * 2.0;
+    let bar = (line_height(ui, theme.fonts.button) + s.s2) * lines + s.s2 * 2.0;
     let list = Rect::from_min_max(room.min, pos2(room.right(), (room.bottom() - bar).max(room.top())));
     let clicked = ui.scope_builder(UiBuilder::new().max_rect(list), |ui| plain(ui, rows)).inner;
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     let mut mode = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(s.xs, s.xs);
+        ui.spacing_mut().item_spacing = vec2(s.s1, s.s1);
         ui.label(RichText::new(tr!("Screener")).font(theme.fonts.caption.id()).color(theme.palette.muted));
         for choice in ScreenerMode::ALL {
             if pill(ui, theme, super::settings::screener_name(choice), rows.mailbox.screener_mode() == choice).clicked() {
@@ -929,7 +913,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         InboxView::Simple => {
             let review = wait && screener(ui, theme, keymap, mailbox);
             if wait {
-                ui.add_space(theme.spacing.s);
+                ui.add_space(theme.spacing.s2);
             }
             (plain(ui, &rows), review)
         }

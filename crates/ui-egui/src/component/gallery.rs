@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Every component on one page for `ui_shot` (`"components": true`), in the theme's colours over its colour fields:
+//! Every component on one page for `ui_shot` (`"components": true`), in the theme's colours on flat panes:
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
 //! a tooltip, a popup menu, a toast, and the time picker as a float at [`now`] with `thu 9` typed. The data is
 //! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
@@ -9,7 +9,7 @@
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
-use crate::glass::{self, Layers};
+use crate::draw::paint::Panes;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::sample;
@@ -66,7 +66,7 @@ pub fn keymap() -> Keymap {
 
 /// A section's caption.
 fn caption(ui: &mut Ui, theme: &Theme, text: &str) {
-    ui.add_space(theme.spacing.s);
+    ui.add_space(theme.spacing.s2);
     ui.label(galley(ui, text, theme.fonts.caption, theme.palette.muted));
 }
 
@@ -78,16 +78,16 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     card::card(ui, theme, Id::unique("gallery-card-open"), tr!("Newsletters"), true, |ui| {
         for (sender, subject) in [("Studio Collective news", "The autumn programme is out"), ("Riverside Library", "Two loans are due on Friday")] {
             ui.horizontal(|ui| {
-                ui.label(galley(ui, sender, theme.fonts.sender, p.text));
+                ui.label(galley(ui, sender, theme.fonts.sender, p.ink));
                 ui.label(galley(ui, subject, theme.fonts.preview, p.muted));
             });
         }
     });
-    ui.add_space(s.s);
+    ui.add_space(s.s2);
     card::card(ui, theme, Id::unique("gallery-card-closed"), tr!("Screener: 3 new senders"), false, |_| ());
     caption(ui, theme, tr!("Avatars"));
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(s.s, s.s);
+        ui.spacing_mut().item_spacing = vec2(s.s2, s.s2);
         let side = line_height(ui, theme.fonts.body) * 2.0;
         for (name, address) in sample::people() {
             avatar::avatar(ui, theme, name, address, side);
@@ -101,18 +101,18 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = line_height(ui, theme.fonts.sender) + s.m * 2.0;
+    let height = line_height(ui, theme.fonts.sender) + s.s3 * 2.0;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, s.corner, p.card);
-    ui.painter().rect_filled(rect, s.corner, p.hover);
+    ui.painter().rect_filled(rect, 0.0, p.surface);
+    ui.painter().rect_filled(rect, 0.0, p.stage);
     let actions = [
         Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.sender, p.text, f32::INFINITY);
-    let at = pos2(rect.left() + s.m, rect.center().y - text.size().y / 2.0);
-    ui.painter().galley(at, text, p.text);
+    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.sender, p.ink, f32::INFINITY);
+    let at = pos2(rect.left() + s.s3, rect.center().y - text.size().y / 2.0);
+    ui.painter().galley(at, text, p.ink);
     hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
 }
 
@@ -121,7 +121,7 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = &theme.spacing;
     caption(ui, theme, tr!("Icon buttons"));
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = s.xs;
+        ui.spacing_mut().item_spacing.x = s.s1;
         IconButton::new(IconId::Done, tr!("Done")).action("mail.done").show(ui, theme, keymap);
         IconButton::new(IconId::Archive, tr!("Archive")).action("mail.archive").show(ui, theme, keymap);
         IconButton::new(IconId::Delete, tr!("Delete")).action("mail.delete").show(ui, theme, keymap);
@@ -141,7 +141,7 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         let font = theme.fonts.button;
         segmented(ui, theme, &[(0, tr!("Day"), font), (1, tr!("Week"), font), (2, tr!("Month"), font)], 1);
         let names = [(0, tr!("Never")), (1, tr!("Daily"))];
-        Select { name: tr!("Repeat"), shown: tr!("Never"), options: &names, current: Some(0), icon: IconId::Changed, width: s.xl * 7.0 }
+        Select { name: tr!("Repeat"), shown: tr!("Never"), options: &names, current: Some(0), icon: IconId::Changed, width: s.s6 * 7.0 }
             .show(ui, theme, &mut false);
         checkbox(ui, theme, tr!("Personal"), true);
         checkbox(ui, theme, tr!("Private"), false);
@@ -152,16 +152,16 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         badge::group(ui, theme, IconId::People, tr!("People"), side);
         badge::group(ui, theme, IconId::Notify, tr!("Updates"), side);
         badge::group(ui, theme, IconId::Calendar, tr!("Events"), side);
-        let (rect, _) = ui.allocate_exact_size(vec2(s.xl * 4.0, side), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(s.s6 * 4.0, side), egui::Sense::hover());
         let left = badge::count(ui, theme, 128, rect.right(), rect.center().y);
-        badge::count(ui, theme, 3, left - s.s, rect.center().y);
+        badge::count(ui, theme, 3, left - s.s2, rect.center().y);
     });
     caption(ui, theme, tr!("Hover actions"));
     row(ui, theme, keymap);
     caption(ui, theme, tr!("Tooltip and popup"));
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| tooltip::bubble(ui, theme, keymap, tr!("Search"), Some(crate::keymap::FIND)));
-        ui.add_space(s.l);
+        ui.add_space(s.s4);
         popup::panel(ui, theme, 220.0, |ui| {
             popup::item(ui, theme, keymap, IconId::Snooze, tr!("Snooze"), Some("mail.snooze"));
             popup::item(ui, theme, keymap, IconId::Move, tr!("Move to a folder"), Some("mail.move"));
@@ -198,19 +198,19 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
-    glass::backdrop(ui.painter(), theme, whole);
-    let mut layers = Layers::begin(ui.painter());
-    let half = (whole.width() - PICKER - s.gap * 4.0) / 2.0;
-    let mut x = s.gap;
+    ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
+    let mut layers = Panes::begin(ui.painter());
+    let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
+    let mut x = s.s2;
     for (width, draw) in [(half, left as fn(&mut Ui, &Theme, &Keymap)), (half, right), (PICKER, picker)] {
-        let column = Rect::from_min_size(pos2(x, s.gap), vec2(width, whole.height() - s.gap * 2.0));
+        let column = Rect::from_min_size(pos2(x, s.s2), vec2(width, whole.height() - s.s2 * 2.0));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            layers.card(ui, super::margin(s.l, s.m), |ui| {
+            layers.card(ui, super::margin(s.s4, s.s3), |ui| {
                 ui.set_min_size(ui.available_size());
                 draw(ui, theme, keymap);
             });
         });
-        x += width + s.gap;
+        x += width + s.s2;
     }
     layers.finish(ui.painter(), theme);
 }

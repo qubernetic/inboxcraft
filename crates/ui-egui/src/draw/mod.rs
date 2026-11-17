@@ -5,7 +5,7 @@
 //! reader of the selected message on the right, and an error banner on top while a command's error stands. The
 //! reader can fill the window (full width); Escape leaves that. A window that can add accounts shows "Add account"
 //! in the empty window, which opens the settings sheet on Accounts; accounts are added and listed there.
-//! The navigation rail runs down the window's left edge in the preset's gradient: its settings button (or its key)
+//! The navigation rail runs down the window's left edge on the flat panel: its settings button (or its key)
 //! opens the settings sheet over the window; Escape, its close button or the rail's Mail button leave it, and an
 //! account being added with it.
 //!
@@ -41,7 +41,7 @@ mod frame;
 mod invite;
 mod list;
 mod onboard;
-mod paint;
+pub(crate) mod paint;
 mod palette;
 mod pane;
 mod reader;
@@ -50,7 +50,7 @@ mod settings;
 use std::sync::Arc;
 
 use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
-use inboxcraft_engine::appearance::{Accent, Appearance, CustomAccent, Icons, Motion, Rgb, WindowFrame};
+use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
@@ -60,9 +60,6 @@ use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
 use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
-use crate::glass::{self, Layers};
-use crate::gradient;
-use crate::iconset::IconSet;
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
 use crate::mailbox::{Act, Mailbox, Pile, Place};
@@ -72,12 +69,16 @@ use crate::palette::Palette;
 use crate::reader::{PictureState, Reader};
 use crate::save::{NoSave, Save};
 use crate::settings::{Section, Settings};
-use crate::theme::{self, Look, ModePreference, Preset, TextScale, Theme, Typeface};
+use crate::theme::{self, Look, ModePreference, TextScale, Theme};
 use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
+use paint::Panes;
 
 /// The width of the list beside the reader, in points.
 const LIST_WIDTH: f32 = 380.0;
+
+/// The default width of the folder pane, in points.
+pub(super) const FOLDER_PANE: f32 = 240.0;
 
 /// The widest the card of the window with no account gets, in points.
 const WELCOME_WIDTH: f32 = 640.0;
@@ -181,8 +182,7 @@ fn margin(points: f32) -> Margin {
     Margin::same(points.clamp(0.0, 100.0) as i8)
 }
 
-/// A pane's frame: no fill, so the colour fields show `left` and `right` of its glass layer and `gap` above and
-/// below it.
+/// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let side = |points: f32| points.clamp(0.0, 100.0) as i8;
@@ -190,13 +190,13 @@ fn around(left: f32, right: f32, gap: f32) -> Frame {
 }
 
 /// One card in the middle of the window, as tall as what `add` draws in it; what `add` gave.
-fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Layers, mut add: impl FnMut(&mut Ui) -> R) -> R {
+fn middle_card<R>(ui: &mut Ui, theme: &Theme, layers: &mut Panes, mut add: impl FnMut(&mut Ui) -> R) -> R {
     let s = theme.spacing;
     CentralPanel::no_frame()
-        .frame(around(s.gap, s.gap, s.gap))
+        .frame(around(s.s2, s.s2, s.s2))
         .show(ui, |ui| {
             let room = ui.max_rect();
-            let pad = s.xl * 2.0;
+            let pad = s.s6 * 2.0;
             let width = WELCOME_WIDTH.min(room.width());
             let inside = Rect::from_min_size(room.min, egui::vec2((width - 2.0 * pad).max(1.0), room.height()));
             let mut sizing = ui.new_child(UiBuilder::new().max_rect(inside).layout(Layout::top_down(Align::Center)).sizing_pass().invisible());
@@ -591,7 +591,7 @@ impl InboxApp {
     /// Opens the settings sheet on Shortcuts, closing the add-account form.
     pub fn open_shortcuts(&mut self) {
         self.onboarding.close();
-        self.settings.open_at(Section::Shortcuts, self.mailbox.appearance());
+        self.settings.open_at(Section::Shortcuts);
     }
 
     /// Shows the mail, leaving the settings sheet and the calendar.
@@ -695,8 +695,7 @@ impl InboxApp {
         &self.settings
     }
 
-    /// The appearance settings page, to type a custom accent from outside (the `ui_shot` scripts, later the control
-    /// channel).
+    /// The settings sheet, to drive from outside (the `ui_shot` scripts, later the control channel).
     pub fn settings_mut(&mut self) -> &mut Settings {
         &mut self.settings
     }
@@ -704,12 +703,12 @@ impl InboxApp {
     /// Opens the settings sheet on Appearance, closing the add-account form.
     pub fn open_settings(&mut self) {
         self.onboarding.close();
-        self.settings.open(self.mailbox.appearance());
+        self.settings.open();
     }
 
     /// Opens the settings sheet on Accounts, where accounts are added.
     pub fn open_accounts(&mut self) {
-        self.settings.open_at(Section::Accounts, self.mailbox.appearance());
+        self.settings.open_at(Section::Accounts);
     }
 
     /// Closes the settings sheet and the add-account form on it.
@@ -1052,11 +1051,11 @@ impl InboxApp {
     }
 
     /// The composer on a card in the reader's place; what was asked in it.
-    fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Layers, left: f32) -> Vec<compose::Asked> {
+    fn composer_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> Vec<compose::Asked> {
         let (keymap, mailbox) = (&self.keymap, &self.mailbox);
         let Some(composer) = self.composer.as_mut() else { return Vec::new() };
         CentralPanel::no_frame()
-            .frame(around(left, theme.spacing.gap, theme.spacing.gap))
+            .frame(around(left, theme.spacing.s2, theme.spacing.s2))
             .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)))
             .inner
     }
@@ -1086,7 +1085,7 @@ impl InboxApp {
     fn toast_bottom(ui: &Ui, theme: &Theme) -> egui::Pos2 {
         let window = ui.max_rect();
         let content = window.with_min_x((window.left() + pane::rail_width(theme)).min(window.right()));
-        content.center_bottom() - egui::vec2(0.0, theme.spacing.xl + theme.spacing.xs)
+        content.center_bottom() - egui::vec2(0.0, theme.spacing.s6 + theme.spacing.s1)
     }
 
     /// The toast of the composer's last step, while no act's toast and no countdown shows.
@@ -1142,24 +1141,6 @@ impl InboxApp {
         self.appear("ui.theme.set", &json!({ "mode": mode.id() }));
     }
 
-    /// The accent preset the colours come from.
-    #[must_use]
-    pub fn preset(&self) -> Preset {
-        Preset::of(&self.appearance().accent)
-    }
-
-    /// Takes the colours from `preset`, from the next frame (`ui.accent.set`): a shipped preset by id, otherwise its
-    /// four colours as the owner's own.
-    pub fn set_preset(&mut self, preset: Preset) {
-        if Accent::preset(preset.id).is_some() {
-            self.appear("ui.accent.set", &json!({ "preset": preset.id }));
-        } else {
-            let rgb = |colour: egui::Color32| Rgb(colour.r(), colour.g(), colour.b());
-            let custom = CustomAccent { gradient: preset.gradient.map(rgb), accent: rgb(preset.accent) };
-            self.appear("ui.accent.set", &json!({ "custom": custom.hex() }));
-        }
-    }
-
     /// The text scale every font token is at.
     #[must_use]
     pub fn text_scale(&self) -> TextScale {
@@ -1170,28 +1151,6 @@ impl InboxApp {
     /// (`ui.text_scale.set`).
     pub fn set_text_scale(&mut self, scale: TextScale) {
         self.appear("ui.text_scale.set", &json!({ "percent": scale.percent() }));
-    }
-
-    /// The typeface every font token is in.
-    #[must_use]
-    pub fn typeface(&self) -> Typeface {
-        self.appearance().font
-    }
-
-    /// Draws every text in `typeface`, from the next frame (`ui.font.set`).
-    pub fn set_typeface(&mut self, typeface: Typeface) {
-        self.appear("ui.font.set", &json!({ "font": typeface.id() }));
-    }
-
-    /// The icon set the icons come from.
-    #[must_use]
-    pub fn icons(&self) -> IconSet {
-        IconSet::of(self.appearance().icons)
-    }
-
-    /// Draws the icons from `icons`, from the next frame (`ui.icons.set`).
-    pub fn set_icons(&mut self, icons: Icons) {
-        self.appear("ui.icons.set", &json!({ "icons": icons.id() }));
     }
 
     /// Who draws the window's frame, from the next frame (`ui.frame.set`).
@@ -1303,9 +1262,9 @@ impl InboxApp {
         }
         let mut dismiss = false;
         if let Some(error) = self.mailbox.error() {
-            Panel::top("error").show_separator_line(false).frame(Frame::new().fill(p.error).inner_margin(margin(s.s))).show(ui, |ui| {
+            Panel::top("error").show_separator_line(false).frame(Frame::new().fill(p.minus).inner_margin(margin(s.s2))).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(error).color(p.on_error));
+                    ui.label(RichText::new(error).color(p.bg));
                     dismiss = ui.button(tr!("Dismiss")).clicked();
                 });
             });
@@ -1324,18 +1283,19 @@ impl InboxApp {
         let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
-        // The colour fields first, then the place for the glass layers, then everything else.
+        // The window's ground first, then the place for the panes, then everything else. The panes touch; a hairline
+        // divides them.
         let corner = self.window_corner(ui.ctx());
-        glass::backdrop_rounded(ui.painter(), &theme, ui.max_rect(), corner);
-        let mut layers = Layers::begin(ui.painter());
-        let (gap, half) = (s.gap, s.gap / 2.0);
+        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
+        let mut layers = Panes::begin(ui.painter());
+        let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
         let clicked_rail = Panel::left("rail")
             .resizable(false)
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, gap)))
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)))
             .inner;
         self.own_frame_parts(ui, &theme, corner);
         ran.extend(clicked_rail.actions());
@@ -1348,19 +1308,19 @@ impl InboxApp {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers);
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
-            let mut list = |ui: &mut Ui, layers: &mut Layers| {
+            let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
-                        .frame(Frame::new().inner_margin(margin(s.l)))
+                        .frame(Frame::new().inner_margin(margin(s.s4)))
                         .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, keymap, mailbox, search)))
                         .inner;
                     let listed = CentralPanel::no_frame()
                         .frame(Frame::new().inner_margin(Margin {
-                            left: margin(s.m).left,
-                            right: margin(s.m).right,
+                            left: margin(s.s3).left,
+                            right: margin(s.s3).right,
                             top: 0,
-                            bottom: margin(s.m).bottom,
+                            bottom: margin(s.s3).bottom,
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
@@ -1421,8 +1381,6 @@ impl InboxApp {
                 .map(|composer| compose::floating(ui.ctx(), &theme, &self.keymap, composer, ui.max_rect()))
                 .unwrap_or_default(),
         );
-        // Every gradient of the frame is painted by now: the pictures it left out go.
-        gradient::sweep(ui.ctx());
         let (undone, unsent) = self.toasts(ui, &theme, quiet);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
@@ -1555,28 +1513,28 @@ impl InboxApp {
 
     /// The folder pane on a card at the left, when there is an account: without one it would hold only the app's
     /// name. What was asked on it, and how far right of it the next card starts (a full gap from the rail without it).
-    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> (pane::Asked, f32) {
+    fn folders(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> (pane::Asked, f32) {
         let s = theme.spacing;
         if self.mailbox.accounts().is_empty() {
-            return (pane::Asked::default(), s.gap);
+            return (pane::Asked::default(), 0.0);
         }
         let shown = Panel::left("folders")
             .resizable(true)
-            .default_size(s.folder_pane)
+            .default_size(FOLDER_PANE)
             .show_separator_line(false)
-            .frame(around(s.gap, s.gap / 2.0, s.gap))
-            .show(ui, |ui| layers.card(ui, margin(s.m), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
-        (shown.inner, s.gap / 2.0)
+            .frame(around(0.0, 0.0, 0.0))
+            .show(ui, |ui| layers.card(ui, margin(s.s3), |ui| pane::show(ui, theme, &self.keymap, &self.mailbox)));
+        (shown.inner, 0.0)
     }
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
-    fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> bool {
+    fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> bool {
         let (keymap, can_add) = (&self.keymap, self.can_add);
         middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
     }
 
     /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
-    fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Layers) -> Vec<calendar::Asked> {
+    fn calendar_screen(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> Vec<calendar::Asked> {
         if self.calendar.is_empty() {
             middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
             return Vec::new();
@@ -1768,16 +1726,6 @@ impl InboxApp {
     fn apply_settings(&mut self, asked: settings::Asked) {
         match asked {
             settings::Asked::Mode(mode) => self.set_mode(mode),
-            settings::Asked::Preset(id) => {
-                self.appear("ui.accent.set", &json!({ "preset": id }));
-                self.settings.follow(self.mailbox.appearance());
-            }
-            settings::Asked::Custom(colours) => match self.set_appearance("ui.accent.set", &json!({ "custom": colours })) {
-                Ok(answer) => self.settings.took(&answer, self.mailbox.appearance()),
-                Err(error) => self.mailbox.fail(error),
-            },
-            settings::Asked::Font(typeface) => self.set_typeface(typeface),
-            settings::Asked::Icons(icons) => self.set_icons(icons),
             settings::Asked::Scale(scale) => self.set_text_scale(scale),
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),

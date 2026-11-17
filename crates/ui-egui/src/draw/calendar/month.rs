@@ -67,7 +67,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
     let width = ui.available_width();
     let column = (width / 7.0).max(1.0);
 
-    let head = line_height(ui, theme.fonts.caption) + s.m;
+    let head = line_height(ui, theme.fonts.caption) + s.s3;
     let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
     for index in 0..7_i64 {
         let name = day::weekday_short(first.plus(index).weekday());
@@ -82,7 +82,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut 
     let pitch = row + WEEK_GAP;
     let lane = line_height(ui, theme.fonts.caption) + LANE_ROOM;
     // The number and the room under it; today's disc is as tall.
-    let number = line_height(ui, theme.fonts.caption) + CELL_PAD + s.xs;
+    let number = line_height(ui, theme.fonts.caption) + CELL_PAD + s.s1;
     // A count of lines, never negative.
     let room = ((row - number) / lane).floor().max(0.0) as usize;
     let grid = Grid { left: rect.left(), top: rect.top(), column, row, pitch, lane, number, room, month: calendar.focus().month() };
@@ -160,7 +160,7 @@ fn day_events(
     let spoken = tr!("{count} more on {day}", count = left_out, day = day::long(day));
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &spoken));
     let galley = line(ui, &[(&tr!("+{count} more", count = left_out), theme.fonts.caption, p.muted)], area.width());
-    ui.painter().galley(pos2(area.left() + theme.spacing.xs, area.top()), galley, p.muted);
+    ui.painter().galley(pos2(area.left() + theme.spacing.s1, area.top()), galley, p.muted);
     if response.clicked() {
         asked.push(Asked::Open(day));
     }
@@ -173,23 +173,23 @@ fn day_number(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, grid: &
     let s = &theme.spacing;
     let today = day == calendar.today();
     let colour = if today {
-        p.on_accent
+        p.on_cyan
     } else if day.month() == grid.month {
-        p.text
+        p.ink
     } else {
         p.muted
     };
     let font = if today { caption_bold(theme) } else { theme.fonts.caption };
     let galley = line(ui, &[(&day.date().to_string(), font, colour)], cell.width());
     // Today's disc is 20 points tall; a day's number sits inside the cell's room.
-    let side = (grid.number - s.xs + 1.0).max(1.0);
-    let spot = Rect::from_min_size(pos2(cell.left() + CELL_PAD, cell.top() + CELL_PAD - 2.0), vec2(side.max(galley.size().x + s.xs), side));
+    let side = (grid.number - s.s1 + 1.0).max(1.0);
+    let spot = Rect::from_min_size(pos2(cell.left() + CELL_PAD, cell.top() + CELL_PAD - 2.0), vec2(side.max(galley.size().x + s.s1), side));
     let response = ui.interact(spot, ui.scope_id().with(("calendar-number", day)), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, day::long(day)));
     if today {
-        ui.painter().rect_filled(spot, side / 2.0, p.accent);
+        ui.painter().rect_filled(spot, side / 2.0, p.cyan);
     } else if response.hovered() {
-        ui.painter().rect_filled(spot, side / 2.0, p.hover);
+        ui.painter().rect_filled(spot, side / 2.0, p.stage);
     }
     let at = if today { spot.center() - galley.size() / 2.0 } else { pos2(spot.left() + 1.0, spot.center().y - galley.size().y / 2.0) };
     ui.painter().galley(at, galley, colour);

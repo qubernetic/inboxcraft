@@ -124,7 +124,7 @@ fn a_button_on_a_gradient_draws_its_icon_in_the_ink_it_is_given() {
 }
 
 #[test]
-fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_the_text_gradient() {
+fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_is_on_cyan() {
     let theme = theme();
     let mut harness = builder().build_ui_state(
         move |ui, presses: &mut [u32; 2]| {
@@ -140,8 +140,8 @@ fn a_text_button_is_a_named_button_with_a_tooltip_and_the_primary_one_reads_on_t
     harness.run();
     let colours = text_colours(harness.output());
     let colour = |name: &str| colours.iter().find(|(text, _)| text == name).map(|(_, colour)| *colour);
-    assert_eq!(colour("Done all"), Some(theme.palette.text));
-    assert_eq!(colour("Review"), Some(crate::theme::text_gradient(theme.palette.gradient).1));
+    assert_eq!(colour("Done all"), Some(theme.palette.ink));
+    assert_eq!(colour("Review"), Some(theme.palette.on_cyan));
     harness.get_by_role_and_label(Role::Button, "Review").click();
     harness.run();
     harness.get_by_role_and_label(Role::Button, "Done all").click();
@@ -240,6 +240,6 @@ fn a_danger_button_is_filled_with_the_error_colour_and_reads_on_it() {
     });
     harness.run();
     let colours = text_colours(harness.output());
-    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.on_error));
+    assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.bg));
     harness.get_by_role_and_label(Role::Button, "Block");
 }

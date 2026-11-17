@@ -91,9 +91,10 @@ fetches a remote picture: the front end asks its fetch for the pictures the owne
 fetch is `net::picture` on threads of its own (HTTPS only, a fixed user agent, no cookies or referrer, public
 addresses only), so the engine stays free of network I/O.
 
-The appearance commands (`ui.theme.set`, `ui.accent.set`, `ui.font.set`, `ui.icons.set`, `ui.text_scale.set`,
-`ui.motion.set`, all `safe`) change one choice each of the session's `Appearance` (`engine::appearance`) and
-answer the whole of it. The engine checks the values and makes a custom accent readable; it keeps nothing on disk.
+The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change
+one choice each of the session's `Appearance` (`engine::appearance`) and answer the whole of it. The colours, the
+typeface and the icons are fixed, so there is no command for them. The engine checks the values; it keeps nothing
+on disk.
 The front end installs a changed appearance in the frame it finds it and keeps it in a file of the config folder
 (`ui-egui::keep`), handing it back to the session with `Session::set_appearance` at the next start.
 

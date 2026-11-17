@@ -11,10 +11,10 @@ use super::card::card;
 use super::hover::{self, Action};
 use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
-use crate::iconset::{IconId, IconSet, Style};
+use crate::iconset::{IconId, Style};
 use crate::keymap::Keymap;
 use crate::motion::{self, tests::FRAME};
-use crate::theme::{Mode, Preset, Theme, install_fonts};
+use crate::theme::{Mode, TextScale, Theme, install_fonts};
 
 /// A harness whose context has the bundled fonts from its first frame, stepping a frame at a time.
 pub(super) fn builder<State>() -> egui_kittest::HarnessBuilder<State> {
@@ -30,7 +30,7 @@ pub(super) fn quick_tooltips(ctx: &Context) {
 }
 
 pub(super) fn theme() -> Theme {
-    Theme::new(Mode::Light, &Preset::default())
+    Theme::new(Mode::Light, TextScale::default())
 }
 
 /// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
@@ -42,7 +42,7 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = IconSet::default().glyph(id, style);
+    let glyph = crate::iconset::glyph(id, style);
     let Some((front, _)) = glyph.layers.last() else { return false };
     let family = glyph.face.id(1.0).family;
     let mut found = Vec::new();

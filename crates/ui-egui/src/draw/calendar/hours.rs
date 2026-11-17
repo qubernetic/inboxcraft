@@ -38,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
     let x = |left: f32, index: i64| left + GUTTER + column * index as f32;
     ui.spacing_mut().item_spacing.y = 0.0;
 
-    let head = line_height(ui, theme.fonts.caption) + s.m;
+    let head = line_height(ui, theme.fonts.caption) + s.s3;
     let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
     for index in 0..days {
         let day = first.plus(index);
@@ -46,13 +46,13 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
         let text = if days == 1 { weekday_text(day.weekday()).to_owned() } else { format!("{} {}", day::weekday_short(day.weekday()), day.date()) };
         let today = day == calendar.today();
         let font = if today { caption_strong(theme) } else { theme.fonts.caption };
-        let galley = line(ui, &[(&text, font, p.text)], column);
+        let galley = line(ui, &[(&text, font, p.ink)], column);
         let at = cell.center() - galley.size() / 2.0;
         if today {
             let pill = Rect::from_center_size(cell.center(), galley.size() + vec2(20.0, 6.0));
             selection(ui.painter(), theme, pill, pill.height() / 2.0);
         }
-        ui.painter().galley(at, galley, p.text);
+        ui.painter().galley(at, galley, p.ink);
         // In the week a day's name opens the day; the day view's own name is no button.
         if days > 1 {
             let response = ui.interact(cell, ui.scope_id().with(("calendar-day", index)), Sense::click());
@@ -67,7 +67,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
     let bars = layout::bars(&events, first, usize::try_from(days).unwrap_or(1));
     let lanes = layout::lanes(&bars);
     if lanes > 0 {
-        let lane = line_height(ui, caption_strong(theme)) + s.xs * 2.0 - 2.0;
+        let lane = line_height(ui, caption_strong(theme)) + s.s1 * 2.0 - 2.0;
         let (rect, _) = ui.allocate_exact_size(vec2(width, lane * lanes as f32), Sense::hover());
         for bar in &bars {
             let Some(event) = events.get(bar.event) else { continue };
@@ -97,8 +97,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
             let y = at(hour * 60);
             painter.hline(rect.left() + GUTTER..=rect.right(), y, Stroke::new(1.0, p.line));
             if hour > 0 {
-                let label = line(ui, &[(&format!("{hour:02}:00"), theme.fonts.caption, p.text)], GUTTER);
-                painter.galley(pos2(rect.left() + s.xs, y - label.size().y / 2.0), label, p.text);
+                let label = line(ui, &[(&format!("{hour:02}:00"), theme.fonts.caption, p.ink)], GUTTER);
+                painter.galley(pos2(rect.left() + s.s1, y - label.size().y / 2.0), label, p.ink);
             }
         }
         for index in 0..=days {
@@ -110,8 +110,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
             let left = rect.left() + GUTTER + column * index as f32;
             if let Some(now) = calendar.now().filter(|now| now.day == day) {
                 let y = at(now.minute);
-                painter.hline(left..=left + column, y, Stroke::new(2.0, p.text));
-                painter.circle_filled(pos2(left, y), 4.0, p.text);
+                painter.hline(left..=left + column, y, Stroke::new(2.0, p.ink));
+                painter.circle_filled(pos2(left, y), 4.0, p.ink);
             }
             for piece in layout::pieces(&events, day) {
                 let Some(event) = events.get(piece.event) else { continue };
