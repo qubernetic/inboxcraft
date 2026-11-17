@@ -100,4 +100,8 @@ pub(crate) fn corner(points: f32) -> CornerRadius {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "walk_tests.rs"]
+mod walk_tests;

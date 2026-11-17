@@ -123,6 +123,19 @@ The same acts work on a real account, through the same engine commands (`mail.se
 change also goes to the server. The sample's own
 command, `sample.mail.set`, is refused in any other session.
 
+### The frame bench (`just bench-ui`)
+`just bench-ui` builds the `ui_bench` example in the release profile in the container and measures how long the
+sample window takes to build a frame (its `ui` and the tessellation, on the CPU; nothing is drawn on a GPU) over the
+sample grown to 10 000 invented messages (`sample::grown`; the list shows the engine's 1 000 newest). Three scenes
+of 300 frames each, after 30 to warm up: the inbox at rest, the inbox scrolling 40 points a frame, and the reader
+open on an HTML message, the inbox as the grouped list (`--view cards` or `--view simple` for the others). For each
+it prints `median_ms`, `p95_ms`, the `shapes` and the list's `rows_built` of the last frame, and it starts with the
+CPU's model, its core count and the first core's frequency governor, so numbers from two machines are never mixed
+up. It runs twice: with every core free, where the budget is a p95 of at most 4 ms, and pinned to one core with
+`taskset -c 0`, where it is one frame at 60 Hz, 16.6 ms; a scene that misses either is a miss. Without `taskset` the
+pinned run is skipped with a line saying so; the governor is printed, not set, as setting it needs root. The bench
+is not a gate: a MISS never makes it fail.
+
 ## The gates (`cargo xtask`)
 | Command | What it checks |
 |---|---|

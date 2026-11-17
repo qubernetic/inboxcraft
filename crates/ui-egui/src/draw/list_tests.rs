@@ -514,3 +514,12 @@ fn a_row_without_a_preview_has_no_dot_after_its_subject() {
     assert_eq!(super::list::after_subject("  \t"), "");
     assert_eq!(super::list::after_subject("Hi all"), "  · Hi all");
 }
+
+#[test]
+fn the_list_counts_the_rows_it_built_for_the_bench() {
+    let harness = harness(false);
+    let built = crate::rows_built(&harness.ctx).unwrap();
+    let all = harness.state().mailbox().messages().len();
+    assert!(built > 0 && built <= all, "{built} of {all}");
+    assert_eq!(crate::rows_built(&harness.ctx), None, "read once");
+}

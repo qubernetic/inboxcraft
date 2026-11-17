@@ -5,7 +5,7 @@ use inboxcraft_store::Storage;
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{FOLDERS, INVITATIONS, MESSAGES, invitations, mailbox, people, session, session_over};
+use super::{FOLDERS, INVITATIONS, MESSAGES, grown, invitations, mailbox, people, session, session_over};
 use crate::component::avatar;
 
 /// 2026-11-05T09:00:00Z.
@@ -260,4 +260,28 @@ fn the_sample_invitations_are_two_versions_of_one_lunch() {
     let listed = session.run("mail.list", &json!({ "account": 1, "group": "invitations" })).unwrap();
     assert_eq!(listed["messages"].as_array().unwrap().len(), 2);
     assert!(session.take_jobs().is_empty(), "the sample fetches nothing");
+}
+
+#[test]
+fn the_grown_mailbox_holds_as_many_messages_as_asked_all_invented_and_readable() {
+    let store = grown(now(), 400).unwrap();
+    let mut count = 0;
+    for account in store.accounts().unwrap() {
+        for folder in store.folders(account.id()).unwrap() {
+            for entry in store.messages(folder.id()).unwrap() {
+                count += 1;
+                let envelope = entry.message().summary().envelope();
+                for address in envelope.from().iter().chain(envelope.to()) {
+                    assert!(address.email().as_str().ends_with("@example.org"), "{}", address.email());
+                }
+            }
+        }
+    }
+    assert_eq!(count, 400);
+    let mut session = session_over(store, Box::new(FakeClock::new(now()))).unwrap();
+    for id in [MESSAGES.len() + 1, 400] {
+        let answer = session.run("mail.read", &json!({ "id": id })).unwrap();
+        assert_eq!(answer["message"]["body"]["readable"], json!(true), "message {id}");
+    }
+    assert_eq!(grown(now(), 3).unwrap().accounts().unwrap().len(), 2, "never fewer than the sample's own");
 }

@@ -594,6 +594,8 @@ struct Rows<'a> {
     leaving: Cell<(bool, bool)>,
     /// "Done all" pressed this frame: the group's messages.
     done_all: Cell<Option<Vec<u64>>>,
+    /// How many rows this frame laid out, seen or not: what the frame bench reads ([`rows_built`]).
+    built: Cell<usize>,
 }
 
 impl Rows<'_> {
@@ -602,6 +604,7 @@ impl Rows<'_> {
         let mut clicked = None;
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         for message in messages {
+            self.built.set(self.built.get().saturating_add(1));
             let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker);
             if drawn.clicked {
                 clicked = Some(message.id);
@@ -872,6 +875,19 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) 
     (clicked, mode)
 }
 
+/// Where the rows a frame built are kept for [`rows_built`].
+fn rows_built_id() -> Id {
+    Id::unique("list-rows-built")
+}
+
+/// How many message rows the list laid out in the last frame that drew rows (each row allocated, whether it was on
+/// screen or not), taken out so the next read sees only a later frame's: `None` when no frame drew rows since. For
+/// the frame bench (`ui_bench`).
+#[must_use]
+pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
+    ctx.data_mut(|data| data.remove_temp::<usize>(rows_built_id()))
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
@@ -906,6 +922,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
+        built: Cell::new(0),
     };
     let mut screener_mode = None;
     let (clicked, review) = match view {
@@ -925,5 +942,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         }
     };
     let (drawn, out) = rows.leaving.get();
+    let built = rows.built.get();
+    ui.ctx().data_mut(|data| data.insert_temp(rows_built_id(), built));
     Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None, screener: screener_mode }
 }

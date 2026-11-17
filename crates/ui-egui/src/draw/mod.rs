@@ -47,6 +47,8 @@ mod pane;
 mod reader;
 mod settings;
 
+pub use list::rows_built;
+
 use std::sync::Arc;
 
 use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Ui, UiBuilder};
