@@ -81,12 +81,22 @@ fn a_press_beside_the_popup_closes_it_and_a_press_on_the_field_does_too() {
     harness.run();
     assert!(!harness.state().0, "a press beside it");
 
+    harness.drop_at(pos2(480.0, 380.0));
+    harness.run();
     harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
     harness.run();
     assert!(harness.state().0);
-    harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
+    // A press of the pointer on the field, which lies outside the open choices: they close, and the release on the
+    // field does not open them again.
+    let field = harness.get_by_role_and_label(Role::ComboBox, "Repeat").rect().center();
+    harness.hover_at(field);
+    harness.run();
+    harness.drag_at(field);
+    harness.run();
+    harness.drop_at(field);
     harness.run();
     assert!(!harness.state().0, "the field closes what it opened");
+    assert!(harness.get_by_role_and_label(Role::ComboBox, "Repeat").is_focused(), "and has the keyboard back");
 }
 
 #[test]
@@ -395,5 +405,28 @@ fn an_open_select_too_long_for_the_window_shows_the_sheets_scroll_thumb_beside_i
         assert!(rows.iter().all(|row| !thumb.intersects(row.shrink(0.01))), "{mode:?}: the thumb over a row, {thumb:?}");
         // A focused row in the list is lit to its edge: the thumb stands clear of that edge.
         assert!(thumb.left() >= focused.right() - 0.01, "{mode:?}: the thumb over the focused row's edge, {thumb:?} {focused:?}");
+    }
+}
+
+#[test]
+fn a_held_key_repeating_on_a_row_never_opens_the_choices_again() {
+    for key in [Key::Enter, Key::Space] {
+        let mut harness = harness(240.0, &OPTIONS);
+        harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItemRadio, "Weekly").focus();
+        harness.run();
+        harness.key_down(key);
+        harness.run();
+        assert_eq!(*harness.state(), (false, 2), "{key:?} takes the row");
+        // The key held: the system repeats its press.
+        for _ in 0..3 {
+            harness.event(egui::Event::Key { key, physical_key: None, pressed: true, repeat: true, modifiers: egui::Modifiers::NONE });
+            harness.run();
+        }
+        harness.key_up(key);
+        harness.run();
+        harness.run_steps(4);
+        assert_eq!(*harness.state(), (false, 2), "{key:?}: the repeats and the release open nothing");
     }
 }

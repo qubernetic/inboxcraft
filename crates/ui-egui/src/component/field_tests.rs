@@ -39,7 +39,7 @@ fn a_form_field_has_room_around_its_text() {
 
 /// One text the last frame painted: its words, rect, colour, family, size and first row's height.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Drawn {
+pub(crate) struct Drawn {
     pub text: String,
     pub rect: Rect,
     pub colour: Color32,
@@ -49,7 +49,7 @@ pub(super) struct Drawn {
 }
 
 /// Every text the last frame of `harness` painted, glyphs included.
-pub(super) fn drawn<State>(harness: &Harness<'_, State>) -> Vec<Drawn> {
+pub(crate) fn drawn<State>(harness: &Harness<'_, State>) -> Vec<Drawn> {
     fn walk(shape: &Shape, found: &mut Vec<Drawn>) {
         match shape {
             Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
@@ -76,14 +76,14 @@ pub(super) fn drawn<State>(harness: &Harness<'_, State>) -> Vec<Drawn> {
 }
 
 /// The one text `text` painted in the last frame.
-pub(super) fn one(harness: &Harness<'_, impl Sized>, text: &str) -> Drawn {
+pub(crate) fn one(harness: &Harness<'_, impl Sized>, text: &str) -> Drawn {
     let all: Vec<Drawn> = drawn(harness).into_iter().filter(|drawn| drawn.text == text).collect();
     assert_eq!(all.len(), 1, "{text}: {all:#?}");
     all.into_iter().next().unwrap_or_else(|| panic!("{text}"))
 }
 
 /// The caret a field painted: a filled 7 × 16 block in `cyan_edge`.
-pub(super) fn caret(own_paint: &crate::component::tests::Paint, colour: Color32) -> Option<Rect> {
+pub(crate) fn caret(own_paint: &crate::component::tests::Paint, colour: Color32) -> Option<Rect> {
     own_paint.rects().find_map(|shape| match shape.look {
         Look::Rect { fill, stroke: None, .. } if fill == colour && (shape.rect.width() - 7.0).abs() < 0.01 => Some(shape.rect),
         _ => None,

@@ -26,6 +26,7 @@ use super::checkbox::{self, checkbox};
 use super::field::{self, Field, Secret};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
+use super::popup::{Item, ItemState};
 use super::scroll::{self, Bar};
 use super::segmented::{self, segmented};
 use super::select::Select;
@@ -954,9 +955,49 @@ fn password_fields(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// A menu row of the boards: `icon`, `name` and the key of `action`, in `state`, drawn in `shown`.
+fn menu_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: (Option<IconId>, &str, Option<&str>, Option<&str>, ItemState), shown: Option<Shown>) {
+    let (icon, name, caption, action, state) = row;
+    popup::menu_item_with(ui, theme, keymap, &Item { icon, name, caption, action, state }, false, shown);
+}
+
+/// The popup panel's board: default (a hovered row, a hairline, a danger row), scrolling (a title with the count and
+/// a thumb), empty.
+fn popup_panels(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Popup panel"));
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("default"), |ui| {
+            popup::panel(ui, theme, 240.0, |ui| {
+                menu_row(ui, theme, keymap, (Some(IconId::Mail), tr!("Mark as read"), None, None, ItemState::Default), None);
+                menu_row(ui, theme, keymap, (Some(IconId::Archive), tr!("Archive"), None, Some("mail.archive"), ItemState::Default), Some(Shown::Hover));
+                menu_row(ui, theme, keymap, (Some(IconId::Snooze), tr!("Snooze…"), None, None, ItemState::Default), None);
+                menu_row(ui, theme, keymap, (Some(IconId::Move), tr!("Move to…"), None, None, ItemState::Default), None);
+                popup::hairline(ui, theme);
+                menu_row(ui, theme, keymap, (Some(IconId::Delete), tr!("Delete"), None, None, ItemState::Danger), None);
+            });
+        });
+        cell(ui, theme, tr!("scrolling"), |ui| {
+            popup::panel(ui, theme, 240.0, |ui| {
+                popup::title(ui, theme, tr!("Move to"), Some("40"));
+                popup::scrolled(ui, theme, Id::unique("gallery-move-to"), 147.0, |ui| {
+                    let names = [tr!("Archive"), tr!("Clients"), tr!("Clients / Bakery"), tr!("Invoices 2026"), tr!("Newsletters"), tr!("Receipts"), tr!("Studio")];
+                    for (index, name) in names.into_iter().enumerate() {
+                        let shown = (index == 2).then_some(Shown::Hover);
+                        ui.push_id(index, |ui| menu_row(ui, theme, keymap, (None, name, None, None, ItemState::Default), shown));
+                    }
+                });
+            });
+        });
+        cell(ui, theme, tr!("empty"), |ui| {
+            popup::panel(ui, theme, 240.0, |ui| popup::empty(ui, theme, tr!("No other mailbox to move this to.")));
+        });
+    });
+}
+
 /// The fields' middle column of boards.
-fn fields_middle(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+fn fields_middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.push_id("password-field", |ui| password_fields(ui, theme));
+    ui.push_id("popup-panel", |ui| popup_panels(ui, theme, keymap));
 }
 
 /// The fields' right column of boards.

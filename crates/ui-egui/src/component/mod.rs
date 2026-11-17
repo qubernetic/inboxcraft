@@ -198,7 +198,9 @@ pub(crate) fn margin(x: f32, y: f32) -> Margin {
     Margin::symmetric(points(x), points(y))
 }
 
-/// A plain tick in `colour` over `rect`, drawn in code: the mark of a ticked box and of a select's current choice.
+/// A plain tick in `colour` over `rect`, drawn in code: the mark of a ticked box (a select's choice now takes the
+/// design's check glyph).
+#[allow(dead_code)]
 pub(crate) fn tick(painter: &egui::Painter, rect: egui::Rect, colour: egui::Color32) {
     let at = |x: f32, y: f32| rect.lerp_inside(egui::vec2(x, y));
     painter.line(vec![at(0.15, 0.55), at(0.4, 0.8), at(0.85, 0.2)], egui::Stroke::new(1.5, colour));

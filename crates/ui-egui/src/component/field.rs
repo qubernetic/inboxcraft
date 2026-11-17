@@ -112,9 +112,12 @@ pub const MAX_SECRET: usize = 256;
 const LOCK: char = '\u{e2fa}';
 const PASSWORD: char = '\u{e752}';
 
+/// The caret's width at 100 %, in points.
+const CARET_WIDTH: f32 = 7.0;
+
 /// The caret's block, 7 × 16 at 100 %, in points at the text scale.
 fn caret_size(theme: &Theme) -> Vec2 {
-    vec2((7.0 * theme.text_scale.factor()).round(), theme.size(16.0))
+    vec2((CARET_WIDTH * theme.text_scale.factor()).round(), theme.boxes().caret)
 }
 
 /// The room between the box's outer edge and its text, left and right: the 12 the sheet pads and the 1 px edge.
@@ -408,9 +411,6 @@ fn margin_of(outer: Rect, inner: Rect) -> Margin {
     }
 }
 
-/// The least and most height of a multiline field's box, at 100 %.
-const MULTILINE: [f32; 2] = [96.0, 240.0];
-
 /// A field of several lines filling the width `ui` offers: its label, a box that grows with its text from 96 to 240
 /// high and then scrolls, its scroll bar 12 wide inside the right edge, and the error under it; otherwise as
 /// [`text_field`]. Enter starts a new line.
@@ -424,7 +424,7 @@ pub(crate) fn multiline_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut Stri
     let s = &theme.spacing;
     let width = if ui.available_width().is_finite() { ui.available_width().max(theme.boxes().field * 2.0) } else { theme.boxes().field * 2.0 };
     let font = theme.fonts.body;
-    let [least, most] = MULTILINE.map(|height| theme.size(height));
+    let [least, most] = theme.boxes().multiline;
     let pad = inset(theme);
     let lock = field.read_only;
     let side = theme.boxes().icon;
@@ -538,4 +538,4 @@ pub fn plain_text(
 
 #[cfg(test)]
 #[path = "field_tests.rs"]
-mod tests;
+pub(crate) mod tests;

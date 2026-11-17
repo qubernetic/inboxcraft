@@ -116,6 +116,21 @@ pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&m
     output
 }
 
+/// Shows `area` in `ui` with `add` drawing its content and no bar of egui's: a thin thumb, `thumb` (width, length)
+/// in `muted`, `inset` in from the area's right edge, over the content (a float's rows, which keep the room clear).
+pub fn show_thin<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, thumb: [f32; 2], inset: f32, add: impl FnOnce(&mut Ui) -> R) -> ScrollAreaOutput<R> {
+    let output = area.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, add);
+    let (inner, content) = (output.inner_rect, output.content_size.y);
+    if content > inner.height() && inner.height() > 0.0 && content.is_finite() {
+        let length = thumb[1].min(inner.height());
+        let share = (output.state.clamped_offset().y / (content - inner.height())).clamp(0.0, 1.0);
+        let top = inner.top() + share * (inner.height() - length);
+        let rect = Rect::from_min_size(egui::pos2(inner.right() - inset - thumb[0], top), egui::vec2(thumb[0], length));
+        ui.painter().rect_filled(rect, 0.0, theme.palette.muted);
+    }
+    output
+}
+
 /// Shows `area` in `ui` as `rows` rows `height` high, `add` drawing the rows in sight, and paints its bar.
 pub fn show_rows<R>(
     ui: &mut Ui,

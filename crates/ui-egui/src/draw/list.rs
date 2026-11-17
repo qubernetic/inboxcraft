@@ -30,7 +30,7 @@
 use std::cell::Cell;
 
 use egui::{
-    Align, Color32, Frame, Id, Key, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
+    Align, Color32, Frame, Id, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
     StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_model::Role;
@@ -154,7 +154,8 @@ pub(super) fn header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mail
             if response.changed() {
                 changed = Some(search.clone());
             }
-            if (response.has_focus() || response.lost_focus()) && ui.input(|input| input.key_pressed(Key::Escape)) {
+            // Esc empties the field, unless a float over it takes the key.
+            if (response.has_focus() || response.lost_focus()) && popup::escape(ui.ctx()) {
                 search.clear();
                 changed = Some(String::new());
             }
