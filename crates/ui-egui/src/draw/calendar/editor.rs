@@ -9,13 +9,14 @@
 //! was refused, and Cancel and Save. The fields and choices change the [`Editor`] as they are used; Save and Cancel
 //! come back as [`Asked`].
 
-use egui::{Align, Align2, Area, Frame, Id, Layout, Margin, Order, Rect, Response, RichText, TextEdit, Ui, vec2};
+use egui::{Align, Align2, Area, Frame, Id, Layout, Margin, Order, Rect, Response, RichText, Ui, vec2};
 
 use super::Asked;
 use crate::calendar::Editor;
 use crate::calendar::editor::{MAX_FIELD, MAX_GUESTS_TEXT, Menu, REPEATS, repeat_text};
 use crate::component::button::TextButton;
 use crate::component::checkbox::{checkbox, radio};
+use crate::component::field::{self, Field};
 use crate::component::margin;
 use crate::component::popup;
 use crate::component::segmented::{self, segmented};
@@ -37,8 +38,6 @@ const LABEL_GAP: f32 = 6.0;
 /// Between Repeat and Show as, in points.
 const CHOICE_GAP: f32 = 14.0;
 
-/// The room around the text of a field: the height of a [`select`] field, as the design draws it.
-const FIELD_MARGIN: Margin = Margin { left: 10, right: 10, top: 9, bottom: 9 };
 
 /// The editor over the top right of `screen`; what was pressed in it.
 pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, editor: &mut Editor, screen: Rect) -> Vec<Asked> {
@@ -83,9 +82,15 @@ fn captioned(ui: &mut Ui, theme: &Theme, text: &str, width: f32, add: impl FnOnc
     });
 }
 
-/// A one-line field `width` points wide holding `text`, `hint` while it is empty.
-fn line<'t>(salt: &str, text: &'t mut String, hint: &str, width: f32) -> TextEdit<'t> {
-    TextEdit::singleline(text).id_salt(("event-editor", salt)).hint_text(hint).char_limit(MAX_FIELD).margin(FIELD_MARGIN).desired_width(width)
+/// A one-line field `width` points wide under its `label`, holding `text` (at most `limit` characters), `hint` while it
+/// is empty.
+fn line(ui: &mut Ui, theme: &Theme, (salt, label): (&str, &str), text: &mut String, hint: &str, (width, limit): (f32, usize)) -> Response {
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        let id = ui.make_persistent_id(("event-editor", salt));
+        field::text_field_limited(ui, theme, id, text, &Field::new(label, hint), limit)
+    })
+    .inner
 }
 
 /// Writes back the state of a select's list: `open` for `menu`, leaving another list that is open alone.
@@ -106,13 +111,13 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     {
         let form = editor.form_mut();
-        labelled(ui, theme, tr!("Title"), width, |ui| ui.add(line("title", &mut form.summary, tr!("(No title)"), width)));
+        line(ui, theme, ("title", tr!("Title")), &mut form.summary, tr!("(No title)"), (width, MAX_FIELD));
         let gap = 10.0;
         let half = ((width - gap) / 2.0).max(1.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            labelled(ui, theme, tr!("Starts"), half, |ui| ui.add(line("starts", &mut form.start, hint, half)));
-            labelled(ui, theme, tr!("Ends"), half, |ui| ui.add(line("ends", &mut form.end, hint, half)));
+            line(ui, theme, ("starts", tr!("Starts")), &mut form.start, hint, (half, MAX_FIELD));
+            line(ui, theme, ("ends", tr!("Ends")), &mut form.end, hint, (half, MAX_FIELD));
         });
     }
     ui.horizontal(|ui| {
@@ -128,9 +133,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     });
     repeat_and_show_as(ui, theme, editor, width);
     calendar_choice(ui, theme, editor, width);
-    labelled(ui, theme, tr!("Guests"), width, |ui| {
-        ui.add(line("guests", &mut editor.form_mut().guests, "name@example.org, …", width).char_limit(MAX_GUESTS_TEXT))
-    });
+    line(ui, theme, ("guests", tr!("Guests")), &mut editor.form_mut().guests, "name@example.org, …", (width, MAX_GUESTS_TEXT));
     if editor.asks_notify() {
         notify(ui, theme, editor);
     }

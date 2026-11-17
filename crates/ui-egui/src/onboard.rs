@@ -296,7 +296,7 @@ impl Detect for Proposed {
 }
 
 /// The most characters the password field takes.
-pub const MAX_PASSWORD_CHARS: usize = 256;
+pub const MAX_PASSWORD_CHARS: usize = crate::component::field::MAX_SECRET;
 
 /// The bytes a password of [`MAX_PASSWORD_CHARS`] characters can take.
 const SECRET_CAPACITY: usize = MAX_PASSWORD_CHARS * 4;
