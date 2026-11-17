@@ -14,6 +14,7 @@
 //! - [`tooltip`]: the bubble with the action's name and its key chip.
 //! - [`key`]: the chip of a key, its words read from a shortcut.
 //! - [`tag`]: a short mark in a 1 px box, and the coming-soon mark.
+//! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
@@ -34,6 +35,7 @@ pub mod field;
 pub mod gallery;
 pub mod hover;
 pub mod key;
+pub mod label;
 pub mod pill;
 pub mod popup;
 pub mod segmented;

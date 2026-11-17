@@ -29,7 +29,7 @@ use super::switch::switch;
 use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
-use super::{avatar, badge, card, cut, galley, pill, popup, tooltip};
+use super::{avatar, badge, card, cut, galley, label, pill, popup, tooltip};
 
 /// The page's size in points.
 #[must_use]
@@ -369,6 +369,27 @@ fn tags(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The section label's board: default, active, hover (a label that folds its section).
+fn section_labels(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Section label"));
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("default"), |ui| {
+            label::section_label(ui, theme, "[ 01 ]", tr!("Mailboxes"), false);
+        });
+        cell(ui, theme, tr!("active"), |ui| {
+            label::section_label(ui, theme, "[ 01 ]", tr!("Mailboxes"), true);
+        });
+        cell(ui, theme, tr!("hover"), |ui| {
+            // The fill reaches 4 beside the label: room for it in the cell.
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                label::section_label_with(ui, theme, "[ 01 ]", tr!("Mailboxes"), false, true, Some(Shown::Hover));
+                ui.add_space(4.0);
+            });
+        });
+    });
+}
+
 /// The key chip's board: default, on cyan, capture, none, disabled.
 fn key_chips(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Key chip"));
@@ -399,6 +420,7 @@ fn boards_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     links(ui, theme, keymap);
     key_chips(ui, theme);
     tags(ui, theme);
+    section_labels(ui, theme);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
