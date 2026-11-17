@@ -22,7 +22,7 @@ use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
-use super::segmented::segmented;
+use super::segmented::{self, segmented};
 use super::select::Select;
 use super::soon::{soon, soon_tag};
 use super::switch::{self, SwitchState, switch};
@@ -490,17 +490,26 @@ fn boards_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 fn checkboxes(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Checkbox"));
     let name = tr!("Keep a copy");
+    let states = [
+        (tr!("off"), false, Shown::Rest),
+        (tr!("on"), true, Shown::Rest),
+        (tr!("off-hover"), false, Shown::Hover),
+        (tr!("on-hover"), true, Shown::Hover),
+        (tr!("focus"), true, Shown::Focus),
+    ];
+    // Two rows: one is wider than the column.
+    let (first, second) = states.split_at(4);
     cells(ui, theme, |ui| {
-        let states = [
-            (tr!("off"), false, Shown::Rest),
-            (tr!("on"), true, Shown::Rest),
-            (tr!("off-hover"), false, Shown::Hover),
-            (tr!("on-hover"), true, Shown::Hover),
-            (tr!("focus"), true, Shown::Focus),
-        ];
-        for (state, on, shown) in states {
+        for (state, on, shown) in first {
             cell(ui, theme, state, |ui| {
-                checkbox::checkbox_with(ui, theme, name, on, Some(shown));
+                checkbox::checkbox_with(ui, theme, name, *on, Some(*shown));
+            });
+        }
+    });
+    cells(ui, theme, |ui| {
+        for (state, on, shown) in second {
+            cell(ui, theme, state, |ui| {
+                checkbox::checkbox_with(ui, theme, name, *on, Some(*shown));
             });
         }
         cell(ui, theme, tr!("disabled"), |ui| {
@@ -513,16 +522,21 @@ fn checkboxes(ui: &mut Ui, theme: &Theme) {
 fn radios(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Radio"));
     let name = tr!("Tell the guests");
+    let states =
+        [(tr!("off"), false, Shown::Rest), (tr!("on"), true, Shown::Rest), (tr!("hover"), false, Shown::Hover), (tr!("focus"), true, Shown::Focus)];
+    // Two rows: one is wider than the column.
+    let (first, second) = states.split_at(3);
     cells(ui, theme, |ui| {
-        let states = [
-            (tr!("off"), false, Shown::Rest),
-            (tr!("on"), true, Shown::Rest),
-            (tr!("hover"), false, Shown::Hover),
-            (tr!("focus"), true, Shown::Focus),
-        ];
-        for (state, on, shown) in states {
+        for (state, on, shown) in first {
             cell(ui, theme, state, |ui| {
-                checkbox::radio_with(ui, theme, name, on, Some(shown));
+                checkbox::radio_with(ui, theme, name, *on, Some(*shown));
+            });
+        }
+    });
+    cells(ui, theme, |ui| {
+        for (state, on, shown) in second {
+            cell(ui, theme, state, |ui| {
+                checkbox::radio_with(ui, theme, name, *on, Some(*shown));
             });
         }
         cell(ui, theme, tr!("disabled"), |ui| {
@@ -571,8 +585,40 @@ fn controls_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     switches(ui, theme, keymap);
 }
 
+/// The segmented control's board: default, hover (the second option), focus, pressed (the second option), disabled,
+/// and a long option cut at its widest.
+fn segments(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Segmented"));
+    let font = theme.fonts.button;
+    let views = [(0, tr!("Grouped"), font), (1, tr!("Smart"), font), (2, tr!("List"), font)];
+    cells(ui, theme, |ui| {
+        let states = [(tr!("default"), None), (tr!("hover"), Some((Shown::Hover, 1))), (tr!("focus"), Some((Shown::Focus, 0)))];
+        for (state, shown) in states {
+            cell(ui, theme, state, |ui| {
+                segmented::segmented_with(ui, theme, &views, 0, None, shown);
+            });
+        }
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("pressed"), |ui| {
+            segmented::segmented_with(ui, theme, &views, 0, None, Some((Shown::Pressed, 1)));
+        });
+        cell(ui, theme, tr!("disabled"), |ui| {
+            ui.add_enabled_ui(false, |ui| segmented(ui, theme, &views, 0));
+        });
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("long-label"), |ui| {
+            let long = [(0, tr!("Grouped"), font), (1, tr!("A summary of everything in the inbox"), font), (2, tr!("List"), font)];
+            segmented(ui, theme, &long, 0);
+        });
+    });
+}
+
 /// The choices' column of boards.
-fn controls_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn controls_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    segments(ui, theme);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
