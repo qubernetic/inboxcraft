@@ -1,21 +1,25 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The icon button: an icon in a square as tall as a line of button text with a little room, a flat hover fill, and
-//! always a tooltip with its name and key. Active (a pinned pin) it shows its icon in the accent on the
-//! `stage`; disabled (an action without a command yet) its glyph is `dim`, it takes no click and still explains itself
-//! in its tooltip, with a note that says why when it is unavailable. On the navigation rail it is drawn in one ink.
-//! A text button that is unavailable fades and says why too. Everything is square.
+//! The buttons of the design, each drawn as its sheet says in every state, square and at full strength:
+//!
+//! - [`IconButton`]: a 16 px glyph in a 32 × 32 square, no box. `muted` at rest; hovered the `stage` fill and an `ink`
+//!   glyph; pressed a `muted` edge as well; selected (pinned, flagged) the accent wash and the accent glyph; disabled
+//!   or unavailable only the glyph in `dim`, the tooltip saying why. On the navigation rail it is drawn in one ink.
+//! - [`TextButton`]: words in mono 13, 32 high, 12 beside the text, in one of four [`Tone`]s.
+//! - [`link`] and [`link_sized`]: the accent as text, underlined under the pointer.
+//!
+//! Disabled is never a fade: a box gets a dashed `line` edge and `muted` text, a glyph `dim`.
 
 use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
-use crate::draw::paint;
+use crate::draw::paint::{self, Ring};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{control_side, soon, tooltip};
+use super::{Shown, control_side, lit, soon, tooltip};
 
 /// An icon button.
 #[derive(Debug, Clone, Copy)]
@@ -28,16 +32,14 @@ pub struct IconButton<'a> {
     note: Option<&'a str>,
     ink: Option<Color32>,
     side: Option<f32>,
+    shown: Option<Shown>,
 }
-
-/// How far a disabled button is faded.
-pub(crate) const DISABLED: f32 = 0.45;
 
 impl<'a> IconButton<'a> {
     /// A button showing `icon`, called `name` (its accessible name and the text of its tooltip).
     #[must_use]
     pub fn new(icon: IconId, name: &'a str) -> Self {
-        Self { icon, name, action: None, active: false, enabled: true, note: None, ink: None, side: None }
+        Self { icon, name, action: None, active: false, enabled: true, note: None, ink: None, side: None, shown: None }
     }
 
     /// The action it runs, whose key its tooltip shows.
@@ -47,7 +49,7 @@ impl<'a> IconButton<'a> {
         self
     }
 
-    /// Shown as active (pinned, flagged).
+    /// Shown as selected (pinned, flagged): the accent wash and the accent glyph.
     #[must_use]
     pub fn active(mut self, active: bool) -> Self {
         self.active = active;
@@ -83,45 +85,60 @@ impl<'a> IconButton<'a> {
         self
     }
 
+    /// Drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
+    #[must_use]
+    pub fn shown(mut self, shown: Shown) -> Self {
+        self.shown = Some(shown);
+        self
+    }
+
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
         let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(theme)).min(512.0);
         // Coming soon, it is drawn and explains itself like a disabled one.
         let soon = soon::is_soon(ui);
-        let enabled = self.enabled && !soon;
+        let enabled = self.enabled && !soon && ui.is_enabled();
         if let Some(action) = self.action {
             soon::offer(ui, action);
         }
         let sense = if enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
         response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, self.active, self.name));
-        let lit = enabled && (response.hovered() || response.has_focus());
-        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
+        let lit = lit(ui, theme, &response, enabled, self.shown);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
-            if self.active {
-                painter.rect_filled(rect, 0.0, p.stage);
-            } else if hover > 0.0 {
-                // The rail's buttons (drawn in its ink) stand on the `panel`; every other on a `surface`.
-                painter.rect_filled(rect, 0.0, if self.ink.is_some() { p.grid } else { p.stage });
+            // The rail's buttons (drawn in its ink) stand on the `panel`, whose hover is `grid`; every other on a
+            // `surface`, whose hover is `stage`.
+            let hover = if self.ink.is_some() { p.grid } else { p.stage };
+            if self.active && enabled {
+                painter.rect_filled(rect, 0.0, p.cyan_muted);
+            } else if lit.pressed {
+                painter.rect_filled(rect, 0.0, hover);
+                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
+            } else if lit.hover {
+                painter.rect_filled(rect, 0.0, hover);
             }
-            let colour = match (self.ink, self.active) {
-                (Some(ink), _) => ink,
-                (None, true) => p.cyan_text,
-                (None, false) => p.ink,
+            let colour = match (self.ink, enabled, self.active, lit.hover || lit.pressed) {
+                (_, false, _, _) => p.dim,
+                (Some(ink), true, _, _) => ink,
+                (None, true, true, _) => p.cyan_text,
+                (None, true, false, true) => p.ink,
+                (None, true, false, false) => p.muted,
             };
-            let colour = if enabled { colour } else { p.dim };
             let icon = if self.side.is_some() { side * 0.5 } else { theme.icon_side() };
             crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, colour);
-            if response.has_focus() {
-                painter.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+            if lit.focus {
+                paint::focus_ring(painter, theme, rect, Ring::Outside);
             }
         }
         // Coming soon, its key would do nothing: the tooltip shows none.
         tooltip::attach_note(response, theme, keymap, self.name, self.action.filter(|_| !soon), self.note)
     }
 }
+
+/// How far a disabled text button is faded.
+const DISABLED: f32 = 0.45;
 
 /// How a text button stands out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

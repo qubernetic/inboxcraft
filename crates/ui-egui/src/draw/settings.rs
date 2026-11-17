@@ -21,7 +21,7 @@ use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
-use super::paint::{NavRow, focus_ring, line, nav_row, selection};
+use super::paint::{NavRow, Ring, focus_ring, line, nav_row, selection};
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::field;
@@ -277,7 +277,9 @@ fn card(ui: &mut Ui, theme: &Theme, name: &str, on: bool, swatch: [f32; 2], pain
         let picture = Rect::from_min_size(pos2(rect.center().x - swatch[0] / 2.0, rect.top() + s.s2), vec2(swatch[0], swatch[1]));
         paint(painter, picture);
         painter.galley(pos2(rect.center().x - galley.size().x / 2.0, picture.bottom() + s.s1), galley, p.ink);
-        focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+        }
     }
     response
 }
@@ -521,7 +523,9 @@ fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool
         let edge = if waits { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
-        focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+        }
     }
     response
 }

@@ -328,7 +328,9 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
         crate::iconset::paint(ui.painter(), mark, IconId::Caret, p.muted);
-        super::paint::focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
+        }
         Popup::menu(&response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, body * MENU, |ui| {
                 for choice in mailbox.accounts() {

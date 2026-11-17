@@ -35,7 +35,7 @@ use egui::{
 };
 use inboxcraft_model::Role;
 
-use super::paint::{focus_ring, line, selection};
+use super::paint::{Ring, focus_ring, line, selection};
 use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::{self, Action};
@@ -322,7 +322,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
     let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
-    focus_ring(ui, theme, &response);
+    if response.has_focus() {
+        focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+    }
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
         Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {

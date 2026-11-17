@@ -10,7 +10,6 @@ use egui::layers::ShapeIdx;
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
-use crate::component::button::DISABLED;
 use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
@@ -127,11 +126,22 @@ pub(super) fn selection(painter: &Painter, theme: &Theme, rect: Rect, corner: f3
     painter.rect_filled(rect, corner, theme.palette.stage);
 }
 
-/// The focus ring around a control that has the keyboard focus.
-pub(super) fn focus_ring(ui: &Ui, theme: &Theme, response: &Response) {
-    if response.has_focus() {
-        ui.painter().rect_stroke(response.rect.shrink(1.0), 0.0, Stroke::new(2.0, theme.palette.cyan_edge), StrokeKind::Inside);
-    }
+/// Where a [`focus_ring`] stands against its control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ring {
+    /// 2 px clear outside the control: buttons, links, chips, toggles.
+    Outside,
+    /// 2 px inside the control's box, where there is no room outside: fields, cells, rows.
+    Inside,
+}
+
+/// The focus ring of a control over `rect`: a 1 px `cyan_edge` line, square, 2 px clear of the control (`place`).
+pub(crate) fn focus_ring(painter: &Painter, theme: &Theme, rect: Rect, place: Ring) {
+    let stroke = Stroke::new(1.0, theme.palette.cyan_edge);
+    match place {
+        Ring::Outside => painter.rect_stroke(rect.expand(2.0), 0.0, stroke, StrokeKind::Outside),
+        Ring::Inside => painter.rect_stroke(rect.shrink(2.0), 0.0, stroke, StrokeKind::Inside),
+    };
 }
 
 /// A pill with `count` in it, its right edge at `right`, centred on `centre_y`; returns its left edge.
@@ -147,9 +157,9 @@ pub(super) struct NavRow<'a> {
     pub(super) badge: u64,
     pub(super) selected: bool,
     pub(super) depth: usize,
-    /// The icon before the text, in the muted colour (the accent while selected).
+    /// The icon before the text: `muted`, `ink` while selected.
     pub(super) icon: Option<IconId>,
-    /// Whether it can be pressed; one that cannot is faded and takes no press.
+    /// Whether it can be pressed; one that cannot has `muted` text and a `dim` icon and takes no press.
     pub(super) enabled: bool,
 }
 
@@ -162,27 +172,33 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), sense);
     response.widget_info(|| WidgetInfo::selected(Role::Button, row.enabled, row.selected, &row.spoken));
     if ui.is_rect_visible(rect) {
-        let mut faded = ui.painter().clone();
-        faded.multiply_opacity(if row.enabled { 1.0 } else { DISABLED });
-        let painter = &faded;
+        let painter = ui.painter();
         if row.selected {
-            selection(ui.painter(), theme, rect, 0.0);
-        } else if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, p.stage);
+            selection(painter, theme, rect, 0.0);
+        } else if response.hovered() && row.enabled {
+            painter.rect_filled(rect, 0.0, p.stage);
         }
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
         let mut left = rect.left() + s.s2 + f32::from(depth) * s.s3;
         if let Some(icon) = row.icon {
             let side = theme.icon_side();
             let at = Rect::from_center_size(pos2(left + side / 2.0, rect.center().y), vec2(side, side));
-            let ink = if row.selected { p.cyan_text } else { p.muted };
+            // An icon is `muted`, `ink` on the current row, `dim` when the row cannot be pressed: never faded.
+            let ink = match (row.enabled, row.selected) {
+                (false, _) => p.dim,
+                (true, true) => p.ink,
+                (true, false) => p.muted,
+            };
             crate::iconset::paint(painter, at, icon, ink);
             left += side + s.s2;
         }
         let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s2, rect.center().y) - s.s2 } else { rect.right() - s.s2 };
-        let galley = line(ui, &[(row.text, theme.fonts.body, p.ink)], right - left);
-        painter.galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, p.ink);
-        focus_ring(ui, theme, &response);
+        let ink = if row.enabled { p.ink } else { p.muted };
+        let galley = line(ui, &[(row.text, theme.fonts.body, ink)], right - left);
+        ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, ink);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, rect, Ring::Inside);
+        }
     }
     response
 }

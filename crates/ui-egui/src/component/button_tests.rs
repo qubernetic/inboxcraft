@@ -6,11 +6,12 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{IconButton, TextButton};
+use crate::component::Shown;
 use crate::component::control_side;
-use crate::component::tests::{builder, drew_icon, theme};
+use crate::component::tests::{Own, bring, builder, drew_icon, icons, own, painted, staged, theme};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::TextScale;
+use crate::theme::{Mode, TextScale, Theme};
 
 /// How often each of the three buttons was pressed.
 type Presses = [u32; 3];
@@ -241,4 +242,107 @@ fn a_danger_button_is_filled_with_the_error_colour_and_reads_on_it() {
     let colours = text_colours(harness.output());
     assert_eq!(colours.iter().find(|(text, _)| text == "Block").map(|(_, colour)| *colour), Some(theme.palette.bg));
     harness.get_by_role_and_label(Role::Button, "Block");
+}
+
+/// The states of the icon button's sheet, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconState {
+    Default,
+    Hover,
+    Focus,
+    Pressed,
+    Selected,
+    Disabled,
+    Unavailable,
+}
+
+const ICON_STATES: [IconState; 7] =
+    [IconState::Default, IconState::Hover, IconState::Focus, IconState::Pressed, IconState::Selected, IconState::Disabled, IconState::Unavailable];
+
+/// The icon button "Pin" in `state` on a `surface` stage, at `scale`, in `mode`: its rect and its own look.
+fn icon_button_in(mode: Mode, scale: TextScale, state: IconState) -> (egui::Rect, Own) {
+    let theme = Theme::new(mode, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        move |ui, theme| {
+            let button = IconButton::new(IconId::Pin, "Pin");
+            let button = match state {
+                IconState::Selected => button.active(true),
+                IconState::Disabled => button.enabled(false),
+                IconState::Unavailable => button.unavailable("Not yet: choose a message first"),
+                _ => button,
+            };
+            button.show(ui, theme, &Keymap::default());
+        },
+    );
+    let shown = match state {
+        IconState::Hover => Shown::Hover,
+        IconState::Focus => Shown::Focus,
+        IconState::Pressed => Shown::Pressed,
+        _ => Shown::Rest,
+    };
+    bring(&mut harness, "Pin", shown);
+    let rect = harness.get_by_label("Pin").rect();
+    (rect, own(&painted(&harness, "Pin"), rect))
+}
+
+#[test]
+fn an_icon_button_looks_as_its_sheet_says_in_every_state() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for state in ICON_STATES {
+            let (rect, look) = icon_button_in(mode, TextScale::default(), state);
+            let at = format!("{mode:?} {state:?}: {look:#?}");
+            assert!((rect.width() - 32.0).abs() < 0.01 && (rect.height() - 32.0).abs() < 0.01, "{at} {rect:?}");
+            let (fill, edge, glyph) = match state {
+                IconState::Default | IconState::Focus => (None, None, p.muted),
+                IconState::Hover => (Some(p.stage), None, p.ink),
+                IconState::Pressed => (Some(p.stage), Some((1.0, p.muted, false)), p.ink),
+                IconState::Selected => (Some(p.cyan_muted), None, p.cyan_text),
+                IconState::Disabled | IconState::Unavailable => (None, None, p.dim),
+            };
+            assert_eq!(look.fill, fill, "{at}");
+            assert_eq!(look.edge, edge, "{at}");
+            let ring = (state == IconState::Focus).then_some((rect.expand(3.0), 1.0, p.cyan_edge));
+            assert_eq!(look.ring, ring, "{at}");
+            assert_eq!(look.texts.len(), 1, "{at}");
+            let (_, colour, family, size) = &look.texts[0];
+            assert_eq!((*colour, family.clone(), *size), (glyph, icons(), 16.0), "{at}");
+            assert!(!look.overflows, "{at}");
+            assert!(look.radius <= 0.0, "{at}");
+        }
+    }
+}
+
+#[test]
+fn an_icon_button_at_130_percent_is_the_scaled_side() {
+    let theme = Theme::new(Mode::Dark, TextScale::ALL[4]);
+    let side = theme.boxes().button;
+    for state in ICON_STATES {
+        let (rect, _) = icon_button_in(Mode::Dark, TextScale::ALL[4], state);
+        assert!((rect.width() - side).abs() < 0.01 && (rect.height() - side).abs() < 0.01, "{state:?} {rect:?}");
+    }
+}
+
+#[test]
+fn an_icon_button_held_down_by_enter_is_pressed() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        egui::vec2(200.0, 200.0),
+        |ui, theme| {
+            IconButton::new(IconId::Pin, "Pin").show(ui, theme, &Keymap::default());
+        },
+    );
+    bring(&mut harness, "Pin", Shown::Focus);
+    harness.key_down(egui::Key::Enter);
+    harness.run();
+    let rect = harness.get_by_label("Pin").rect();
+    let look = own(&painted(&harness, "Pin"), rect);
+    assert_eq!(look.edge, Some((1.0, theme.palette.muted, false)), "{look:#?}");
+    assert_eq!(look.fill, Some(theme.palette.stage), "{look:#?}");
 }

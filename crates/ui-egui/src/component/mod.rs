@@ -44,7 +44,7 @@ pub mod typed_time;
 
 use std::sync::Arc;
 
-use egui::{CornerRadius, Galley, Margin, Ui};
+use egui::{CornerRadius, Galley, Key, Margin, Response, Ui};
 
 use crate::theme::{Font, Theme};
 
@@ -53,6 +53,43 @@ use crate::theme::{Font, Theme};
 #[must_use]
 pub fn control_side(theme: &Theme) -> f32 {
     theme.boxes().button
+}
+
+/// The state a pressable control is drawn in, as its sheet names it: what the pointer and the keyboard do to it, or
+/// what a board of the gallery asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shown {
+    /// Nothing on it.
+    Rest,
+    /// The pointer over it.
+    Hover,
+    /// The keyboard focus on it.
+    Focus,
+    /// Held down by the pointer, or by Enter or Space while it has the focus.
+    Pressed,
+}
+
+/// What a pressable control shows of the pointer and the keyboard: the hover fill, the pressed look, the focus ring.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Lit {
+    pub hover: bool,
+    pub pressed: bool,
+    pub focus: bool,
+}
+
+/// What `response` shows, `enabled` or not, in `theme`; `forced` draws a state whatever the pointer does (the
+/// gallery's boards). Hover keeps [`crate::motion::toggle`], which lands at once when motion is reduced. Pressed is
+/// the pointer held down on it, or Enter or Space held down while it has the focus.
+pub(crate) fn lit(ui: &Ui, theme: &crate::theme::Theme, response: &Response, enabled: bool, forced: Option<Shown>) -> Lit {
+    if let Some(shown) = forced {
+        return Lit { hover: shown == Shown::Hover, pressed: shown == Shown::Pressed && enabled, focus: shown == Shown::Focus };
+    }
+    let hovered = enabled && response.hovered();
+    let hover = crate::motion::toggle(ui.ctx(), response.id.with("hover"), hovered, theme.motion.hover_fade) > 0.0;
+    let focus = response.has_focus();
+    let keyed = focus && ui.input(|input| input.key_down(Key::Enter) || input.key_down(Key::Space));
+    let pressed = enabled && (response.is_pointer_button_down_on() || keyed);
+    Lit { hover: hover && enabled, pressed, focus }
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for

@@ -501,7 +501,9 @@ fn folded(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, row: &ThreadRow, drawn:
         let preview = format!("   {}", row.preview);
         let text = super::paint::line(ui, &[(&row.sender, f.body, p.ink), (&preview, f.caption, p.muted)], date_left - s.s3 - left);
         ui.painter().galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
-        super::paint::focus_ring(ui, theme, &response);
+        if response.has_focus() {
+            super::paint::focus_ring(ui.painter(), theme, response.rect, super::paint::Ring::Inside);
+        }
     }
     if response.clicked() {
         drawn.asked.push(Asked::Expand(row.id));

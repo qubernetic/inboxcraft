@@ -4,8 +4,8 @@
 //! Every component on one page for `ui_shot` (`"components": true`), in the theme's colours on flat panes:
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
 //! a tooltip, a popup menu, a toast, a board of controls that are coming soon, and the time picker as a float at
-//! [`now`] with `thu 9` typed. The data is
-//! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
+//! [`now`] with `thu 9` typed; under them the boards of the sets drawn as their sheets say, every state labelled in the
+//! sheet's order. The data is invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
@@ -17,6 +17,7 @@ use crate::sample;
 use crate::theme::Theme;
 use crate::tr;
 
+use super::Shown;
 use super::button::{IconButton, TextButton};
 use super::checkbox::checkbox;
 use super::hover::{self, Action};
@@ -31,8 +32,17 @@ use super::{avatar, badge, card, cut, galley, pill, popup, tooltip};
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(1400.0, 660.0)
+    vec2(1400.0, TOP + BOARDS)
 }
+
+/// What draws a column of the page.
+type Draw = fn(&mut Ui, &Theme, &Keymap);
+
+/// The height of the page's upper part, the columns of components, in points.
+const TOP: f32 = 660.0;
+
+/// The height of the boards under the columns, in points.
+const BOARDS: f32 = 560.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -223,6 +233,63 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.data_mut(|data| data.insert_temp(id, state));
 }
 
+/// A board's title: the set's name.
+fn title(ui: &mut Ui, theme: &Theme, text: &str) {
+    ui.add_space(theme.spacing.s2);
+    ui.label(galley(ui, text, theme.fonts.heading, theme.palette.ink));
+    ui.add_space(theme.spacing.s1);
+}
+
+/// One state of a board: its name in `mono_s` and `muted` over the control `add` draws.
+fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = theme.spacing.s1;
+        ui.label(galley(ui, state, theme.fonts.mono_s, theme.palette.muted));
+        add(ui);
+    });
+}
+
+/// A row of a board's cells, apart enough that a focus ring never touches the next control.
+fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = theme.spacing.s4;
+        add(ui);
+    });
+    ui.add_space(theme.spacing.s2);
+}
+
+/// The icon button's board: default, hover, focus, pressed, selected, disabled, unavailable.
+fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Icon button"));
+    let pin = || IconButton::new(IconId::Pin, tr!("Pin"));
+    cells(ui, theme, |ui| {
+        for (state, shown) in
+            [(tr!("default"), Shown::Rest), (tr!("hover"), Shown::Hover), (tr!("focus"), Shown::Focus), (tr!("pressed"), Shown::Pressed)]
+        {
+            cell(ui, theme, state, |ui| {
+                pin().shown(shown).show(ui, theme, keymap);
+            });
+        }
+        cell(ui, theme, tr!("selected"), |ui| {
+            pin().active(true).shown(Shown::Rest).show(ui, theme, keymap);
+        });
+        cell(ui, theme, tr!("disabled"), |ui| {
+            pin().enabled(false).show(ui, theme, keymap);
+        });
+        cell(ui, theme, tr!("unavailable"), |ui| {
+            pin().unavailable(tr!("Not yet: choose a message first")).show(ui, theme, keymap);
+        });
+    });
+}
+
+/// The boards' left column.
+fn boards_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    icon_buttons(ui, theme, keymap);
+}
+
+/// The boards' right column.
+fn boards_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
@@ -230,16 +297,24 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
     let mut layers = Panes::begin(ui.painter());
     let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
-    let mut x = s.s2;
-    for (width, draw) in [(half, left as fn(&mut Ui, &Theme, &Keymap)), (half, right), (PICKER, picker)] {
-        let column = Rect::from_min_size(pos2(x, s.s2), vec2(width, whole.height() - s.s2 * 2.0));
+    let board = (whole.width() - s.s2 * 3.0) / 2.0;
+    let top = TOP - s.s2 * 2.0;
+    let columns: [(f32, f32, f32, Draw); 5] = [
+        (s.s2, s.s2, half, left),
+        (s.s2 * 2.0 + half, s.s2, half, right),
+        (s.s2 * 3.0 + half * 2.0, s.s2, PICKER, picker),
+        (s.s2, TOP, board, boards_left),
+        (s.s2 * 2.0 + board, TOP, board, boards_right),
+    ];
+    for (x, y, width, draw) in columns {
+        let height = if y < TOP { top } else { BOARDS - s.s2 };
+        let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
             layers.card(ui, super::margin(s.s4, s.s3), |ui| {
                 ui.set_min_size(ui.available_size());
                 draw(ui, theme, keymap);
             });
         });
-        x += width + s.s2;
     }
     layers.finish(ui.painter(), theme);
 }

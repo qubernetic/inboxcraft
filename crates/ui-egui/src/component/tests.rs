@@ -431,3 +431,89 @@ pub(crate) fn offer_soon(ctx: &Context, action: &'static str, normal: bool) {
         }),
     );
 }
+
+/// A widget's own look in one state, read from a [`Paint`] for the state tests of the sheets.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Own {
+    /// Its fill: a shape inside it whose fill covers its whole box.
+    pub fill: Option<Color32>,
+    /// Its edge over its whole box, drawn inside: `(width, colour, dashed)`.
+    pub edge: Option<(f32, Color32, bool)>,
+    /// A stroke outside its box (the focus ring): the outer bound of the line, its width and colour.
+    pub ring: Option<(Rect, f32, Color32)>,
+    /// Its texts, glyphs included: `(text, colour, family, size)`.
+    pub texts: Vec<(String, Color32, String, f32)>,
+    /// The largest corner radius it paints.
+    pub radius: f32,
+    /// Whether a text of it reaches past the 4 points around it.
+    pub overflows: bool,
+}
+
+/// [`Own`] of the widget whose own rect is `rect`, from `paint`.
+pub(crate) fn own(paint: &Paint, rect: Rect) -> Own {
+    let near = |a: Rect, b: Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+    let mut found = Own { fill: None, edge: None, ring: None, texts: Vec::new(), radius: 0.0, overflows: false };
+    for shape in &paint.shapes {
+        found.overflows |= shape.overflows;
+        match &shape.look {
+            Look::Rect { fill, stroke, stroke_kind, radius, dashed } => {
+                found.radius = found.radius.max(*radius);
+                if fill.a() > 0 && near(shape.rect, rect) {
+                    found.fill = Some(*fill);
+                }
+                if let Some((width, colour)) = stroke {
+                    let outer = match stroke_kind {
+                        StrokeKind::Inside => shape.rect,
+                        StrokeKind::Middle => shape.rect.expand(width / 2.0),
+                        StrokeKind::Outside => shape.rect.expand(*width),
+                    };
+                    if near(outer, rect) {
+                        found.edge = Some((*width, *colour, *dashed));
+                    } else if !shape.inside && outer.contains_rect(rect) {
+                        found.ring = Some((outer, *width, *colour));
+                    }
+                }
+            }
+            Look::Text { text, colour, family, size, .. } => found.texts.push((text.clone(), *colour, family.clone(), *size)),
+            Look::Shadow { .. } => {}
+        }
+    }
+    found
+}
+
+/// Brings the widget labelled `label` in `harness` into `shown` the way a person would: the pointer over it, the
+/// keyboard focus on it, or the pointer held down on it; then runs the frames.
+pub(crate) fn bring<State>(harness: &mut Harness<'_, State>, label: &str, shown: super::Shown) {
+    let node = harness.get_by_label(label);
+    let centre = node.rect().center();
+    match shown {
+        super::Shown::Rest => {}
+        super::Shown::Hover => node.hover(),
+        super::Shown::Focus => node.focus(),
+        super::Shown::Pressed => {
+            harness.hover_at(centre);
+            harness.drag_at(centre);
+        }
+    }
+    harness.run();
+}
+
+/// A harness that draws `add` on a [`stage`] of `ground` in `theme`, motion reduced, as large as `size`.
+pub(crate) fn staged(
+    theme: Theme,
+    ground: fn(&crate::theme::Palette) -> Color32,
+    size: Vec2,
+    add: impl Fn(&mut egui::Ui, &Theme) + 'static,
+) -> Harness<'static> {
+    let mut harness = builder().with_size(size).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), true);
+        stage(ui, ground(theme.palette), |ui| add(ui, &theme));
+    });
+    harness.run();
+    harness
+}
+
+/// The family name of the icons.
+pub(crate) fn icons() -> String {
+    crate::theme::icon_font(1.0).family.to_string()
+}
