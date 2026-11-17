@@ -770,6 +770,9 @@ impl Theme {
             Mode::Dark => Visuals::dark(),
         };
         let square = CornerRadius::ZERO;
+        // Glyph coverage becomes alpha as it is in both modes, as the design draws text: egui's dark default would
+        // thicken every glyph edge.
+        visuals.text_options.color_transfer_function = egui::epaint::FontColorTransferFunction::Off;
         visuals.override_text_color = Some(p.ink);
         visuals.weak_text_color = Some(p.muted);
         visuals.panel_fill = p.bg;

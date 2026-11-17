@@ -267,6 +267,8 @@ fn the_visuals_follow_the_tokens_flat_and_square() {
         assert_eq!(visuals.selection.bg_fill, p.cyan_muted);
         assert_eq!(visuals.hyperlink_color, p.cyan_text);
         assert_eq!(visuals.override_text_color, Some(p.ink));
+        // Glyph coverage is alpha as it is, in both modes, as the design draws it: no boost in the dark.
+        assert_eq!(visuals.text_options.color_transfer_function, egui::epaint::FontColorTransferFunction::Off, "{:?}", theme.mode);
         assert_eq!(visuals.window_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(visuals.popup_shadow, egui::epaint::Shadow::NONE);
         assert_eq!(visuals.window_corner_radius, egui::CornerRadius::ZERO);
@@ -795,4 +797,37 @@ fn the_theme_carries_the_motion_tokens_and_egui_s_animation_follows_them() {
         assert_eq!(theme.motion, MOTION);
         assert_eq!(theme.style().animation_time, MOTION.tooltip);
     }
+}
+
+/// The font atlas `ctx` builds in `mode` for a few words in the mono and the sans: every texel's alpha.
+fn atlas_in(mode: egui::Theme) -> Vec<u8> {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    Theme::apply(&ctx, &Look::default());
+    ctx.set_theme(mode);
+    let mut atlas = Vec::new();
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let theme = Theme::current(ui.ctx(), &Look::default());
+            ui.label(theme.fonts.mono_s.rich("Archive H 01"));
+            ui.label(theme.fonts.body.rich("Marked as done"));
+        });
+        for (_, patches) in output.textures_delta.set.drain() {
+            for patch in patches {
+                let egui::ImageData::Color(image) = &patch.image;
+                if patch.pos.is_none() {
+                    atlas = image.pixels.iter().map(|texel| texel.a()).collect();
+                }
+            }
+        }
+    }
+    atlas
+}
+
+#[test]
+fn glyphs_have_the_same_linear_coverage_in_dark_and_light() {
+    let (dark, light) = (atlas_in(egui::Theme::Dark), atlas_in(egui::Theme::Light));
+    assert!(dark.iter().any(|alpha| *alpha > 0 && *alpha < 255), "the atlas holds edge texels");
+    let differ = dark.iter().zip(&light).filter(|(d, l)| d != l).count();
+    assert_eq!(differ, 0, "{differ} texels of the dark atlas are not the light one's");
 }
