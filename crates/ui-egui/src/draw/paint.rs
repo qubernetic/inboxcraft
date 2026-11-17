@@ -66,6 +66,34 @@ pub(crate) fn run_centred(painter: &Painter, rect: Rect, galley: Arc<Galley>, co
     run_at(painter, at, galley, colour);
 }
 
+/// How many rows a physical pixel is sampled at by [`sampled_band`], as the design's renderer samples it.
+const BAND_SAMPLES: usize = 4;
+
+/// Paints the band from `top` to `bottom` (points) across `across` in `colour` as the design's renderer covers it: each
+/// physical pixel row it touches in the share of its [`BAND_SAMPLES`] sample rows the band holds. A thin line (an
+/// underline 0.66 high) then has the design's weight wherever its edges fall.
+pub(crate) fn sampled_band(painter: &Painter, across: std::ops::RangeInclusive<f32>, (top, bottom): (f32, f32), colour: Color32) {
+    let ppp = painter.pixels_per_point();
+    if !ppp.is_finite() || ppp <= 0.0 || !top.is_finite() || !bottom.is_finite() || bottom <= top || bottom - top > 64.0 {
+        return;
+    }
+    let (first, last) = ((top * ppp).floor(), (bottom * ppp).ceil());
+    let mut row = first;
+    while row < last {
+        let hits = (0..BAND_SAMPLES).filter(|k| {
+            let at = (row + (*k as f32 + 0.5) / BAND_SAMPLES as f32) / ppp;
+            top <= at && at < bottom
+        });
+        let share = hits.count() as f32 / BAND_SAMPLES as f32;
+        if share > 0.0 {
+            // The colour itself over that share of the row's height: the row takes the share of it.
+            let line = Rect::from_x_y_ranges(across.clone(), row / ppp..=(row + share) / ppp);
+            painter.rect_filled(line, 0.0, colour);
+        }
+        row += 1.0;
+    }
+}
+
 /// The edge of a float: whether it takes the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FloatEdge {
