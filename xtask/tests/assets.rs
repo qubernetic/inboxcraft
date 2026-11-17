@@ -11,6 +11,8 @@ fn assets_fails_on_a_file_without_a_row() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("ATTRIBUTION.md"), "| Asset |\n|---|\n| `docs/listed.png` |\n").unwrap();
     fs::create_dir_all(dir.path().join("docs")).unwrap();
+    fs::create_dir_all(dir.path().join(".config")).unwrap();
+    fs::write(dir.path().join(".config/assets.toml"), "roots = []\n").unwrap();
     fs::write(dir.path().join("docs/listed.png"), "").unwrap();
     fs::write(dir.path().join("docs/unlisted.svg"), "").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_xtask")).args(["assets", "--root"]).arg(dir.path()).output().unwrap();
