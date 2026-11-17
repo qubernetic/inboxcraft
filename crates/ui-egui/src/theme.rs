@@ -206,6 +206,8 @@ pub struct Sizes {
     pub row_link: f32,
     /// The avatar's sides: small, middle, large.
     pub avatar: [f32; 3],
+    /// A badge's height and least width.
+    pub badge: f32,
     /// The mail list's width.
     pub list: f32,
     /// The scroll bar's width.
@@ -230,6 +232,7 @@ pub(crate) const SIZES: Sizes = Sizes {
     link: 24.0,
     row_link: 16.0,
     avatar: [24.0, 32.0, 40.0],
+    badge: 16.0,
     list: 440.0,
     scrollbar: 12.0,
     icon: 16.0,
@@ -777,6 +780,7 @@ impl Theme {
             check: self.size(z.check),
             pill: self.size(z.pill),
             avatar: z.avatar.map(|side| self.size(side)),
+            badge: self.size(z.badge),
             ..z
         }
     }

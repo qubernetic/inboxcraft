@@ -19,6 +19,7 @@ use crate::tr;
 
 use super::Shown;
 use super::avatar::AvatarSize;
+use super::badge::BadgeKind;
 use super::button::{self, IconButton, LinkSize, TextButton, Tone};
 use super::checkbox::{self, checkbox};
 use super::hover::{self, Action};
@@ -745,9 +746,28 @@ fn avatars(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The badge's board: count, overflow, muted, accent.
+fn badges(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Badge"));
+    cells(ui, theme, |ui| {
+        let counts = [
+            (tr!("count"), 7, BadgeKind::Count),
+            (tr!("overflow"), 12_480, BadgeKind::Count),
+            (tr!("muted"), 12, BadgeKind::Muted),
+            (tr!("accent"), 3, BadgeKind::Accent),
+        ];
+        for (state, n, kind) in counts {
+            cell(ui, theme, state, |ui| {
+                badge::badge(ui, theme, n, kind);
+            });
+        }
+    });
+}
+
 /// The marks' left column.
 fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     avatars(ui, theme);
+    badges(ui, theme);
 }
 
 /// The marks' right column.
