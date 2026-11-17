@@ -259,6 +259,27 @@ pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
     cut(low)
 }
 
+/// The most characters of one line of words from outside that are laid out at all: far more than a line shows.
+pub(crate) const MOST: usize = 400;
+
+/// `text` as it fits on one line of `room` points in `font` ([`fit`]), of which at most [`MOST`] characters are laid out
+/// at all: a value as long as a header costs no more than a line. A cut at the cap ends with the ellipsis too.
+pub(crate) fn fit_capped(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    let (kept, capped) = capped(text, MOST);
+    let shown = fit(ui, kept, font, room);
+    if capped && !shown.ends_with('…') {
+        // The line held all it was given: the ellipsis says the rest was left out.
+        return fit(ui, &format!("{}…", kept.trim_end()), font, room);
+    }
+    shown
+}
+
+/// `text` from outside on one line of `room` points in `font` and `colour`: [`plain`], capped and cut between grapheme
+/// clusters with one ellipsis ([`fit_capped`]).
+pub(crate) fn fitted(ui: &Ui, text: &str, font: Font, colour: egui::Color32, room: f32) -> Arc<Galley> {
+    galley(ui, &fit_capped(ui, &plain(text), font, room), font, colour)
+}
+
 /// Whether `c` is an explicit bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069): what could turn
 /// round the words after it.
 fn bidi_override(c: char) -> bool {

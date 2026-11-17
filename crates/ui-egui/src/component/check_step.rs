@@ -10,7 +10,7 @@
 //! The running mark is characters and stands still: the lines print one by one as their steps run (motion M13), which
 //! is the caller's, and nothing of a step repaints by itself.
 
-use egui::{Align, Role, Sense, Ui, WidgetInfo, pos2, vec2};
+use egui::{Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use crate::theme::Theme;
 use crate::tr;
@@ -92,13 +92,13 @@ pub fn check_step(ui: &mut Ui, theme: &Theme, step: &str, detail: &str, note: &s
         return;
     }
     let mark = super::galley(ui, mark, f.mono, mark_ink);
-    let note = super::galley(ui, &super::plain(note), f.mono_s, p.muted);
+    let note = super::galley(ui, super::capped(&super::plain(note), super::MOST).0, f.mono_s, p.muted);
     let note_width = note.size().x.ceil();
     let step_left = rect.left() + mark.size().x.ceil() + GAP;
     let detail_left = step_left + STEP + GAP;
     let detail_width = (rect.right() - note_width - GAP - detail_left).max(1.0);
-    let step = super::wrapped(ui, &super::plain(step), f.mono, step_ink, STEP, 1, Align::LEFT);
-    let detail = super::wrapped(ui, &super::plain(detail), f.mono, detail_ink, detail_width, 1, Align::LEFT);
+    let step = super::fitted(ui, step, f.mono, step_ink, STEP);
+    let detail = super::fitted(ui, detail, f.mono, detail_ink, detail_width);
     let mono_top = (rect.top() + (line - f.mono.line) / 2.0).round();
     let small_top = (rect.top() + (line - f.mono_s.line) / 2.0).round();
     let painter = ui.painter();
@@ -108,7 +108,7 @@ pub fn check_step(ui: &mut Ui, theme: &Theme, step: &str, detail: &str, note: &s
     painter.galley(pos2(rect.right() - note_width, small_top), note, p.muted);
     if let Some(message) = message {
         let room = (rect.right() - detail_left).max(1.0);
-        let message = super::wrapped(ui, &super::plain(message), f.mono_s, p.minus, room, 1, Align::LEFT);
+        let message = super::fitted(ui, message, f.mono_s, p.minus, room);
         ui.painter().galley(pos2(detail_left, rect.top() + line), message, p.minus);
     }
 }

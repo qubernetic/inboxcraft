@@ -131,3 +131,34 @@ fn a_check_step_is_the_scaled_strip_at_130_percent() {
     let rect = harness.get_by_label(&spoken("SMTP", StepState::Waiting)).rect();
     assert_eq!(rect.height(), theme.boxes().strip);
 }
+
+/// Whether `shown`, without its closing ellipsis, is a beginning of `full` that ends between grapheme clusters.
+fn whole_prefix(full: &str, shown: &str) -> bool {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let kept = shown.strip_suffix('…').unwrap_or(shown).trim_end();
+    full.starts_with(kept) && (kept.is_empty() || full.grapheme_indices(true).any(|(at, grapheme)| at + grapheme.len() == kept.len()))
+}
+
+#[test]
+fn a_cut_step_detail_and_message_keep_their_graphemes_whole_and_are_capped() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let marks: &'static str = Box::leak("e\u{301}\u{323}".repeat(300).into_boxed_str());
+    let family: &'static str = Box::leak("\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467} ".repeat(200).into_boxed_str());
+    let long: &'static str = Box::leak("v".repeat(100_000).into_boxed_str());
+    for value in [marks, family, long] {
+        let mut harness = crate::component::tests::builder().allow_missing_glyphs().with_size(vec2(560.0 + 48.0, 120.0)).build_ui(move |ui| {
+            crate::component::tests::stage(ui, theme.palette.term, |ui| {
+                ui.set_width(560.0);
+                check_step(ui, &theme, value, value, "1.2 s", StepState::Failed, Some(value));
+            });
+        });
+        harness.run();
+        let paint = painted(&harness, &spoken(value, StepState::Failed));
+        let drawn: Vec<String> = texts(&paint).into_iter().map(|text| text.1).filter(|text| text.chars().next() == value.chars().next()).collect();
+        assert_eq!(drawn.len(), 3, "step, detail and message");
+        for drawn in drawn {
+            assert!(drawn.chars().count() <= crate::component::MOST + 1, "capped: {} characters", drawn.chars().count());
+            assert!(drawn.ends_with('…') && whole_prefix(value, &drawn), "a whole-grapheme beginning: {drawn:?}");
+        }
+    }
+}

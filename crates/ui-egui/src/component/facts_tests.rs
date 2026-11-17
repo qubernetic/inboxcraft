@@ -168,3 +168,35 @@ fn hostile_facts_stay_on_their_lines() {
         assert!(!words.contains(['\0', '\r', '\n', '\t']), "{words:?}");
     }
 }
+
+/// Whether `shown`, without its closing ellipsis, is a beginning of `full` that ends between grapheme clusters.
+fn whole_prefix(full: &str, shown: &str) -> bool {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let kept = shown.strip_suffix('…').unwrap_or(shown).trim_end();
+    full.starts_with(kept) && (kept.is_empty() || full.grapheme_indices(true).any(|(at, grapheme)| at + grapheme.len() == kept.len()))
+}
+
+#[test]
+fn a_cut_value_keeps_its_graphemes_whole_and_is_capped() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let marks: &'static str = Box::leak("e\u{301}\u{323}".repeat(300).into_boxed_str());
+    let family: &'static str = Box::leak("\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467} ".repeat(200).into_boxed_str());
+    let long: &'static str = Box::leak("v".repeat(100_000).into_boxed_str());
+    for value in [marks, family, long] {
+        let shown = Facts { from: value, to: value, date: value, ..Facts::default() };
+        let mut harness = builder().allow_missing_glyphs().with_size(vec2(560.0 + 48.0, 200.0)).build_ui(move |ui| {
+            crate::component::tests::stage(ui, theme.palette.surface, |ui| {
+                ui.set_width(560.0);
+                facts_of(ui, &theme, &Keymap::default(), &shown, false);
+            });
+        });
+        harness.run();
+        let paint = painted(&harness, &spoken(&shown));
+        let values: Vec<String> = texts(&paint).into_iter().map(|text| text.1).filter(|text| text.chars().next() == value.chars().next()).collect();
+        assert_eq!(values.len(), 3, "the three values");
+        for drawn in values {
+            assert!(drawn.chars().count() <= crate::component::MOST + 1, "capped: {} characters", drawn.chars().count());
+            assert!(drawn.ends_with('…') && whole_prefix(value, &drawn), "a whole-grapheme beginning: {drawn:?}");
+        }
+    }
+}

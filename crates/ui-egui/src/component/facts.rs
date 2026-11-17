@@ -101,7 +101,7 @@ pub fn facts_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: &Facts<'_>, 
         };
         let ink = if *font == f.body { p.ink } else { p.muted };
         let label = super::galley(ui, label, f.label, p.muted);
-        let value = super::cut(ui, &super::plain(value), *font, ink, (row.right() - end - value_left).max(1.0));
+        let value = super::fitted(ui, value, *font, ink, (row.right() - end - value_left).max(1.0));
         let painter = ui.painter();
         painter.galley(pos2(row.left(), (top + small_top).round()), label, p.muted);
         painter.galley(pos2(value_left, top), value, ink);

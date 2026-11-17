@@ -16,6 +16,7 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
+use super::MOST;
 use super::button::{LinkSize, link_sized};
 
 /// What a banner says, and so its label and colours.
@@ -157,20 +158,11 @@ pub(crate) fn banner_in(
     (pressed, rect)
 }
 
-/// The most characters of a banner's words laid out: far more than a line of 640 shows.
-const MOST: usize = 400;
-
 /// The banner's words `text` laid out in `room` points: one line, cut between grapheme clusters with one ellipsis (at
 /// most [`MOST`] characters are laid out at all).
 pub(crate) fn words(ui: &Ui, theme: &Theme, text: &str, room: f32) -> std::sync::Arc<egui::Galley> {
     let f = theme.fonts.caption;
-    let (kept, capped) = super::capped(text, MOST);
-    let mut shown = super::fit(ui, kept, f, room);
-    if capped && !shown.ends_with('…') {
-        // The line held all it was given: the ellipsis says the rest was left out.
-        shown = super::fit(ui, &format!("{}…", kept.trim_end()), f, room);
-    }
-    super::galley(ui, &shown, f, theme.palette.ink)
+    super::galley(ui, &super::fit_capped(ui, text, f, room), f, theme.palette.ink)
 }
 
 /// A link's `name` as it fits in `room` points in the small link's face: whole, or cut between grapheme clusters in its
@@ -180,14 +172,7 @@ pub(crate) fn cut_name(ui: &Ui, theme: &Theme, name: &str, room: f32) -> String 
     if room < 1.0 {
         return String::new();
     }
-    let font = theme.fonts.mono_s;
-    let (kept, capped) = super::capped(name, MOST);
-    let shown = super::fit(ui, kept, font, room);
-    if capped && !shown.ends_with('…') {
-        // The room held all it was given: the ellipsis says the rest was left out.
-        return super::fit(ui, &format!("{}…", kept.trim_end()), font, room);
-    }
-    shown
+    super::fit_capped(ui, name, theme.fonts.mono_s, room)
 }
 
 #[cfg(test)]
