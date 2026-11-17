@@ -27,6 +27,7 @@ use super::field::{self, Field, Secret};
 use super::hover::{self, Action};
 use super::key::{ChipState, key_chip};
 use super::popup::{Item, ItemState};
+use super::recipient::{self, RecipientState};
 use super::scroll::{self, Bar};
 use super::segmented::{self, segmented};
 use super::select::Select;
@@ -928,6 +929,30 @@ fn multiline_fields(ui: &mut Ui, theme: &Theme) {
 fn fields_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     ui.push_id("text-field", |ui| text_fields(ui, theme));
     ui.push_id("multiline-field", |ui| multiline_fields(ui, theme));
+    ui.push_id("recipient-chip", |ui| recipient_chips(ui, theme));
+}
+
+/// The recipient chip's board: valid, invalid, hover, focus, long, disabled; and pressed, which the sheet does not
+/// draw.
+fn recipient_chips(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Recipient chip"));
+    let teodor = "Teodor Vasquez";
+    let one = |ui: &mut Ui, name: &str, state: RecipientState, shown: Option<Shown>| {
+        ui.push_id(ui.next_auto_id(), |ui| recipient::chip_with(ui, theme, name, name, state, shown));
+    };
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("valid"), |ui| one(ui, teodor, RecipientState::Valid, None));
+        cell(ui, theme, tr!("invalid"), |ui| one(ui, "teodor@", RecipientState::Invalid, None));
+        cell(ui, theme, tr!("hover"), |ui| one(ui, teodor, RecipientState::Valid, Some(Shown::Hover)));
+        cell(ui, theme, tr!("focus"), |ui| one(ui, teodor, RecipientState::Valid, Some(Shown::Focus)));
+    });
+    cells(ui, theme, |ui| {
+        cell(ui, theme, tr!("long"), |ui| one(ui, "Bakery on the corner, orders and deliveries", RecipientState::Valid, None));
+        cell(ui, theme, tr!("disabled"), |ui| {
+            ui.add_enabled_ui(false, |ui| one(ui, teodor, RecipientState::Valid, None));
+        });
+        cell(ui, theme, tr!("pressed"), |ui| one(ui, teodor, RecipientState::Valid, Some(Shown::Pressed)));
+    });
 }
 
 /// The password field's board: empty, filled, focus, error, disabled, stored. The dots stand for an invented password.

@@ -22,6 +22,7 @@
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
+//! - [`recipient`]: a recipient's chip and the recipient line of the composer.
 //! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
 //! - [`slider`]: the text size on five ticks, 90 % to 130 %.
 //! - [`account_bar`]: the 3 × 12 px mark in an account's colour.
@@ -43,6 +44,7 @@ pub mod key;
 pub mod label;
 pub mod pill;
 pub mod popup;
+pub mod recipient;
 pub mod scroll;
 pub mod segmented;
 pub mod select;

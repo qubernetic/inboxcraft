@@ -407,6 +407,38 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
     .inner
 }
 
+/// A one-line edit without a box, filling the rect `ui` offers, its text in `body` centred in it: the text being typed
+/// on a recipient line, after the chips. Its caret and its hint are the fields' (the hint 4 after the caret while it
+/// has the focus); drawn in `shown` for a board.
+pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
+    let p = &theme.palette;
+    let rect = ui.max_rect();
+    let seen = seen(ui, id, rect, field, shown);
+    let font = theme.fonts.body;
+    let colour = if seen.enabled { p.ink } else { p.muted };
+    let vertical = ((rect.height() - font.line) / 2.0).max(0.0);
+    let inner = Rect::from_min_max(pos2(rect.left(), rect.top() + vertical), pos2(rect.right(), rect.bottom() - vertical));
+    edit_scope(ui, seen.enabled);
+    let empty = text.is_empty();
+    let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, false);
+    let output = TextEdit::singleline(text)
+        .id(id)
+        .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
+        .desired_width(f32::INFINITY)
+        .min_size(vec2(0.0, rect.height()))
+        .layouter(&mut layouter)
+        .show(ui);
+    if empty && !field.hint.is_empty() {
+        let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
+        let hint = layout(ui, field.hint, font, p.muted, None, false);
+        super::solid(ui).with_clip_rect(rect).galley(inner.min + vec2(shift, 0.0), hint, p.muted);
+    }
+    if seen.focus {
+        paint_caret(ui, theme, id, &output, rect, seen.forced);
+    }
+    output.response.response
+}
+
 /// The margin that puts an edit's text at `inner` inside `outer`.
 fn margin_of(outer: Rect, inner: Rect) -> Margin {
     // A few dozen points at most; the clamp keeps the casts inside i8.
