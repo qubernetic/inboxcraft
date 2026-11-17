@@ -15,7 +15,7 @@ use inboxcraft_time::{FakeClock, Timestamp};
 
 use super::InboxApp;
 use super::tests::drew_icon;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::mailbox::Mailbox;
 use crate::onboard::tests::{FakeWorkers, Kept, PASSWORD, filled, mailbox, proposal};
 use crate::onboard::{MAX_PASSWORD_CHARS, Proposed, Secret, Source, Stage};
@@ -152,6 +152,9 @@ fn detect_add_and_a_passing_check_show_every_step_with_its_server() {
     harness.get_by_label("Found in your provider's settings file.");
     harness.get_by_label("What Detect asked (2)");
     assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
+    // After Detect the form is taller than the sheet: the button is scrolled into view first.
+    harness.get_by_label("Check and add").scroll_to_me();
+    harness.run();
     harness.get_by_label("Check and add").click();
     harness.run();
     harness.run();
@@ -187,8 +190,8 @@ fn a_failed_step_offers_to_check_again_or_change_the_settings() {
     harness.get_by_label("Connection (TCP): failed");
     harness.get_by_label(&ErrorKind::MailPortsBlocked.to_string());
     harness.get_by_label("Encryption (TLS): skipped");
-    for (id, style) in [(IconId::Done, Style::Fill), (IconId::Failed, Style::Fill), (IconId::Skipped, Style::Regular)] {
-        assert!(drew_icon(harness.output(), id, style), "{id:?} {style:?}");
+    for id in [IconId::Done, IconId::Failed, IconId::Skipped] {
+        assert!(drew_icon(harness.output(), id), "{id:?}");
     }
     harness.check_accessibility();
     harness.get_by_label("Check again").click();

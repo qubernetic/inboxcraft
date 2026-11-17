@@ -14,7 +14,7 @@
 use egui::{Align, Align2, Frame, Key, Layout, Margin, Response, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2};
 use inboxcraft_time::{Offset, Timestamp};
 
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
@@ -23,7 +23,7 @@ use crate::tr;
 use super::button::{self, TextButton};
 use super::switch::switch;
 use super::typed_time::{self, long, short};
-use super::{control_side, cut, galley, line_height, margin};
+use super::{control_side, cut, galley, margin};
 
 pub use super::typed_time::MAX_TYPED;
 
@@ -121,7 +121,7 @@ impl TimePicker {
 fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme) + s.s1;
+    let height = control_side(theme) + s.s1;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, tr!("{name}, {time}", name = name, time = time)));
     let lit = response.hovered() || response.has_focus();
@@ -152,9 +152,9 @@ fn reading(ui: &mut Ui, theme: &Theme, chosen: Option<Timestamp>, now: Timestamp
         ui.spacing_mut().item_spacing.x = s.s1;
         match chosen {
             Some(at) => {
-                let side = line_height(ui, theme.fonts.caption);
+                let side = theme.fonts.caption.line;
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                crate::iconset::paint(ui.painter(), rect, IconId::Done, Style::Fill, p.cyan_text);
+                crate::iconset::paint(ui.painter(), rect, IconId::Done, p.cyan_text);
                 ui.label(galley(ui, &long(at, now, offset), theme.fonts.caption, p.cyan_text));
             }
             None => {
@@ -184,7 +184,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         ui.painter().rect_filled(line, 0.0, p.line);
         let caption = ui.label(galley(ui, tr!("Or type a time"), theme.fonts.caption, p.muted));
         let id = ui.make_persistent_id("time-picker-typed");
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(ui, theme) + s.s2), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(theme) + s.s2), Sense::hover());
         let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         ui.painter().rect_filled(rect, 0.0, p.term);
         ui.painter().rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
@@ -215,7 +215,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
             });
         }
         ui.add_space(s.s1);
-        let row = vec2(ui.available_width(), control_side(ui, theme));
+        let row = vec2(ui.available_width(), control_side(theme));
         ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = s.s2;
             let confirm = match chosen {

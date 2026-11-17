@@ -23,16 +23,16 @@ use egui::{
     Align, CentralPanel, Color32, CornerRadius, Layout, Panel, Rect, Response, RichText, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2,
 };
 
-use super::paint::{line, line_height};
+use super::paint::line;
 use super::{around, margin};
 use crate::calendar::{Calendar, Day, EventRow, Picked, View};
 use crate::component::button::{IconButton, TextButton};
 use crate::component::corner;
 use crate::component::segmented::segmented;
 use crate::draw::paint::Panes;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::{Face, Font, Theme, Weight};
+use crate::theme::{Face, Font, Theme};
 use crate::tr;
 
 /// The width of the side panel with the gaps around its card, in points: the card is 240 wide as the design draws it.
@@ -82,9 +82,9 @@ pub(super) enum Asked {
 pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let side = line_height(ui, theme.fonts.body) * 3.6;
+    let side = theme.fonts.body.line * 3.6;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    crate::iconset::paint(ui.painter(), rect, IconId::Calendar, Style::Duotone, p.cyan_text);
+    crate::iconset::paint(ui.painter(), rect, IconId::Calendar, p.cyan_text);
     ui.add_space(s.s3);
     ui.label(RichText::new(tr!("No calendars yet")).font(theme.fonts.title.id()).color(p.ink));
     ui.add_space(s.s1);
@@ -130,7 +130,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
     };
     let font = theme.fonts.button;
     let views = View::ALL.map(|view| (view, view.text(), font));
-    let title = Font { size: theme.fonts.title.size * 1.1, ..theme.fonts.title };
+    let title = theme.fonts.title.sized(theme.fonts.title.size * 1.1);
     let row = vec2(ui.available_width(), TOOLBAR);
     ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_height(TOOLBAR);
@@ -184,12 +184,12 @@ fn tint(theme: &Theme, calendar: &Calendar, id: u64) -> Color32 {
 
 /// `theme`'s caption in the SemiBold weight: an event's summary.
 fn caption_strong(theme: &Theme) -> Font {
-    Font { face: Face::Sans(Weight::SemiBold), ..theme.fonts.caption }
+    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
 }
 
 /// The caption in the Bold weight: today's number.
 fn caption_bold(theme: &Theme) -> Font {
-    Font { face: Face::Sans(Weight::Bold), ..theme.fonts.caption }
+    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
 }
 
 /// How a block is drawn where it shows, as the design draws each place.

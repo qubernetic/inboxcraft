@@ -6,7 +6,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{count, group, group_ink};
 use crate::component::tests::{builder, drew_icon, theme};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::theme::{Mode, TextScale, Theme, contrast};
 
 #[test]
@@ -24,7 +24,7 @@ fn a_count_badge_ends_at_its_right_edge_and_grows_with_its_number() {
 }
 
 #[test]
-fn a_group_badge_is_a_named_picture_with_the_outline_icon() {
+fn a_group_badge_is_a_named_picture_with_its_icon() {
     let theme = theme();
     let mut harness = builder().build_ui(move |ui| {
         group(ui, &theme, IconId::People, "People", 32.0);
@@ -34,8 +34,7 @@ fn a_group_badge_is_a_named_picture_with_the_outline_icon() {
     let people = harness.get_by_label("People");
     assert_eq!(people.accesskit_node().role(), Role::Image);
     assert!((people.rect().width() - 32.0).abs() < 0.5);
-    assert!(drew_icon(harness.output(), IconId::People, Style::Regular));
-    assert!(!drew_icon(harness.output(), IconId::People, Style::Fill));
+    assert!(drew_icon(harness.output(), IconId::People));
 }
 
 #[test]

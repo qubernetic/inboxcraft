@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    FLOAT_SHADOW, Face, Font, Look, Mode, ModePreference, Palette, TextScale, Theme, Weight, contrast, font_definitions, install_fonts, mix, over,
+    FLOAT_SHADOW, Face, Font, Fonts, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast, font_definitions, install_fonts, mix, over,
     preference,
 };
 use crate::motion::MOTION;
@@ -231,6 +231,8 @@ fn sizes_scale_with_text_and_distances_do_not() {
         [32.0, 36.0, 32.0, 56.0, 32.0, 20.0, 440.0, 12.0]
     );
     assert_eq!(z.avatar, [24.0, 32.0, 40.0]);
+    assert_eq!([z.icon, z.mark], [16.0, 14.0]);
+    assert_eq!(theme.icon_side(), 20.0);
     assert_eq!(Theme::new(Mode::Light, TextScale::default()).size(32.0), 32.0);
 }
 
@@ -397,19 +399,55 @@ fn mix_runs_from_one_colour_to_the_other() {
     assert_eq!(mix(a, b, f32::NAN), a);
 }
 
+/// A style as the design file's table gives it: face, size, line, tracking and capitals.
+fn style(face: Face, size: f32, line: f32, tracking: f32, caps: bool) -> Font {
+    Font { face, size, line, tracking, caps }
+}
+
 #[test]
-fn sender_and_subject_are_strong_the_preview_plain_and_unread_heavier() {
-    let f = Theme::new(Mode::Light, TextScale::default()).fonts;
-    assert_eq!(f.preview.face, Face::Sans(Weight::Regular));
-    assert_eq!(f.body.face, Face::Sans(Weight::Regular));
-    for (read, unread) in [(f.sender, f.sender_unread), (f.subject, f.subject_unread)] {
-        let (Face::Sans(read), Face::Sans(unread)) = (read.face, unread.face) else { panic!("sans") };
-        assert!(read < unread, "unread is heavier: {read:?} {unread:?}");
+fn the_twelve_styles_are_the_design_file_s() {
+    let f = Fonts::of(TextScale::default());
+    let expected = [
+        ("display", f.display, style(Face::Mono, 40.0, 48.0, -0.01, false)),
+        ("title", f.title, style(Face::Mono, 22.0, 30.0, 0.0, false)),
+        ("heading", f.heading, style(Face::MonoSemiBold, 15.0, 22.0, 0.0, false)),
+        ("label", f.label, style(Face::Mono, 11.0, 16.0, 0.08, true)),
+        ("mono", f.mono, style(Face::Mono, 13.0, 20.0, 0.0, false)),
+        ("mono_s", f.mono_s, style(Face::Mono, 11.0, 16.0, 0.0, false)),
+        ("key", f.key, style(Face::MonoSemiBold, 11.0, 14.0, 0.0, false)),
+        ("button", f.button, style(Face::Mono, 13.0, 16.0, 0.0, false)),
+        ("body", f.body, style(Face::Sans, 14.0, 22.0, 0.0, false)),
+        ("strong", f.strong, style(Face::SansSemiBold, 14.0, 22.0, 0.0, false)),
+        ("caption", f.caption, style(Face::Sans, 12.0, 18.0, 0.0, false)),
+        ("read", f.read, style(Face::Sans, 16.0, 26.0, 0.0, false)),
+        ("brand", f.brand, style(Face::Brand, 22.0, 30.0, 0.0, false)),
+    ];
+    for (name, got, want) in expected {
+        assert_eq!(got, want, "{name}");
     }
-    let Face::Sans(sender) = f.sender.face else { panic!("sans") };
-    assert!(sender > Weight::Regular, "the sender is stronger than the preview");
-    assert!(f.title.face == Face::Sans(Weight::Bold));
-    assert_eq!(f.mono.face, Face::Mono);
+    assert_eq!(f.all().len(), expected.len(), "every style is listed");
+    // Type is not rounded (boxes are): at 130 % the body is 18.2 on 28.6, its tracking untouched.
+    let large = Fonts::of(TextScale::from_percent(130).unwrap());
+    assert!((large.body.size - 18.2).abs() < 1e-4 && (large.body.line - 28.6).abs() < 1e-4, "{:?}", large.body);
+    assert_eq!(large.label.tracking, 0.08);
+    assert!(large.label.caps);
+}
+
+#[test]
+fn a_style_s_format_carries_its_line_height_and_tracking_in_points() {
+    let f = Fonts::of(TextScale::default());
+    let format = f.label.format(Color32::RED);
+    assert_eq!(format.font_id, f.label.id());
+    assert_eq!(format.line_height, Some(16.0));
+    assert!((format.extra_letter_spacing - 0.88).abs() < 1e-5, "{}", format.extra_letter_spacing);
+    assert_eq!(format.color, Color32::RED);
+    assert_eq!(f.label.text("Mail"), "MAIL");
+    assert_eq!(f.body.text("Mail"), "Mail");
+    let brand = f.brand.sized(44.0);
+    assert_eq!((brand.size, brand.line), (44.0, 60.0));
+    for wrong in [0.0, -3.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(f.brand.sized(wrong), f.brand, "{wrong}");
+    }
 }
 
 #[test]
@@ -437,8 +475,9 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
         assert_eq!(scaled.len(), plain.len());
         assert!(scaled.len() >= 12, "every token is listed");
         for (scaled, plain) in scaled.iter().zip(&plain) {
-            assert_eq!(scaled.face, plain.face);
+            assert_eq!((scaled.face, scaled.tracking, scaled.caps), (plain.face, plain.tracking, plain.caps));
             assert!((scaled.size - plain.size * scale.factor()).abs() < 1e-4, "{scale:?}: {scaled:?} from {plain:?}");
+            assert!((scaled.line - plain.line * scale.factor()).abs() < 1e-4, "{scale:?}: {scaled:?} from {plain:?}");
         }
         let body = theme.style().text_styles.get(&egui::TextStyle::Body).map(|font| font.size);
         assert_eq!(body, Some(theme.fonts.body.size));
@@ -449,54 +488,100 @@ fn the_text_scale_applies_to_every_font_token_and_to_egui_s_text_styles() {
 }
 
 #[test]
-fn every_font_token_names_a_family_figtree_defines() {
+fn every_style_names_a_family_whose_first_font_is_its_face() {
     let definitions = font_definitions();
-    let theme = Theme::new(Mode::Light, TextScale::default());
-    for font in theme.fonts.all() {
+    for font in Fonts::of(TextScale::default()).all() {
         let id = font.id();
         assert_eq!(id.size, font.size);
         let family = definitions.families.get(&id.family).unwrap_or_else(|| panic!("{:?} is defined", id.family));
-        let first = family.first().unwrap();
-        assert!(definitions.font_data.contains_key(first), "{first}");
-        match font.face {
-            Face::Mono => assert_eq!(first, "Hack"),
-            Face::Sans(_) => assert!(first.starts_with("Figtree-"), "{first}"),
+        assert_eq!(family.first().map(String::as_str), Some(font.face.name()), "{font:?}");
+        assert!(family.len() > 1, "{:?} falls back to egui's faces", font.face);
+        assert!(family.iter().all(|name| definitions.font_data.contains_key(name)), "{family:?}");
+    }
+}
+
+#[test]
+fn plex_replaces_the_bundled_faces() {
+    let bundled = egui::FontDefinitions::default();
+    let definitions = font_definitions();
+    for (family, first) in [(egui::FontFamily::Proportional, "IBMPlexSans-Regular"), (egui::FontFamily::Monospace, "IBMPlexMono-Regular")] {
+        let fonts = definitions.families.get(&family).unwrap();
+        assert_eq!(fonts.first().map(String::as_str), Some(first), "{family:?}");
+        assert!(!["Ubuntu-Light", "Hack"].contains(&fonts[0].as_str()));
+        // egui's own faces stay behind: the fallbacks and the icon fonts, Hack behind Plex Sans too.
+        for font in bundled.families.get(&family).unwrap().iter().chain(std::iter::once(&"Hack".to_owned())) {
+            assert!(fonts[1..].contains(font), "{family:?}: {font} in {fonts:?}");
         }
     }
-    assert!(!definitions.font_data.keys().any(|name| name.starts_with("Inter")), "one typeface, no choice");
-    assert!(!definitions.font_data.contains_key("Lucide"), "one icon set, no choice");
-}
-
-#[test]
-fn figtree_replaces_ubuntu_light_everywhere() {
-    let definitions = font_definitions();
-    assert!(!definitions.font_data.contains_key("Ubuntu-Light"));
-    for (family, fonts) in &definitions.families {
-        assert!(!fonts.iter().any(|font| font.contains("Ubuntu")), "{family:?}: {fonts:?}");
-        assert!(fonts.iter().all(|font| definitions.font_data.contains_key(font)), "{family:?}: {fonts:?}");
-    }
-    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
-    assert_eq!(proportional.first().map(String::as_str), Some("Figtree-Regular"));
-    let monospace = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
-    assert!(monospace.contains(&"Figtree-Regular".to_owned()), "Figtree stands in for Hack's missing signs: {monospace:?}");
-    for weight in [Weight::Regular, Weight::Medium, Weight::SemiBold, Weight::Bold] {
-        let family = Font { size: 14.0, face: Face::Sans(weight) }.id().family;
-        let fonts = definitions.families.get(&family).unwrap();
-        assert!(fonts.len() > 1, "{weight:?} falls back to the emoji and icon fonts");
+    for face in Face::ALL {
+        assert!(definitions.font_data.contains_key(face.name()), "{face:?}");
     }
 }
 
 #[test]
-fn install_fonts_puts_figtree_into_the_context() {
+fn install_fonts_puts_plex_into_the_context() {
     let ctx = egui::Context::default();
     install_fonts(&ctx);
     ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
-    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("Figtree-Regular"));
-    let bold = Font { size: 14.0, face: Face::Sans(Weight::Bold) };
-    let regular = Font { size: 14.0, face: Face::Sans(Weight::Regular) };
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.first()).map(String::as_str), Some("IBMPlexSans-Regular"));
+    let f = Fonts::of(TextScale::default());
     let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
-    assert!(width(bold) > width(regular), "the bold weight is its own face");
+    assert!(width(f.strong) > width(f.body), "SemiBold is its own face");
+    assert_eq!(width(f.heading), width(f.title.sized(15.0)), "Plex Mono keeps one advance in both weights");
+}
+
+/// `text` laid out in `font` the way the components do it, in a frame of `ctx`.
+fn laid_out(ctx: &egui::Context, text: &str, font: Font) -> std::sync::Arc<egui::Galley> {
+    let mut galley = None;
+    ctx.run_ui(egui::RawInput::default(), |ui| galley = Some(crate::component::galley(ui, text, font, Color32::BLACK))).textures_delta.clear();
+    galley.unwrap()
+}
+
+fn fonts_ctx() -> egui::Context {
+    let ctx = egui::Context::default();
+    install_fonts(&ctx);
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    ctx
+}
+
+#[test]
+fn text_the_fonts_do_not_hold_falls_back() {
+    let ctx = fonts_ctx();
+    let f = Fonts::of(TextScale::default());
+    let text = "日本語 مرحبا 🙂";
+    for font in [f.body, f.mono] {
+        let galley = laid_out(&ctx, text, font);
+        let chars: String = galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+        assert_eq!(chars, text, "every character is laid out: {font:?}");
+        assert!(galley.size().x > 0.0 && galley.size().y > 0.0);
+        // Signs Plex does not hold come from egui's faces behind it (Hack, Ubuntu Light). No bundled face holds
+        // Japanese, Arabic or emoji: they are boxes (`docs/gaps.md`).
+        for sign in ['●', '▶', '⇧', 'ǅ'] {
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font.id(), sign)), "{font:?} {sign}");
+        }
+    }
+}
+
+#[test]
+fn a_label_is_capitals_with_tracking() {
+    let ctx = fonts_ctx();
+    let label = Fonts::of(TextScale::default()).label;
+    let tracked = laid_out(&ctx, "Mail", label);
+    assert_eq!(tracked.job.text, "MAIL");
+    let plain = laid_out(&ctx, "Mail", Font { tracking: 0.0, ..label });
+    let extra = tracked.size().x - plain.size().x;
+    assert!((extra - 3.0 * 0.08 * 11.0).abs() <= 0.5, "{extra}");
+    assert_eq!(tracked.size().y, 16.0, "the line height is the style's");
+}
+
+#[test]
+fn the_mono_face_has_one_advance() {
+    let ctx = fonts_ctx();
+    let mono = Fonts::of(TextScale::default()).mono;
+    let narrow = laid_out(&ctx, "iiii", mono).size().x;
+    let wide = laid_out(&ctx, "MMMM", mono).size().x;
+    assert!((narrow - wide).abs() < 0.01, "{narrow} {wide}");
 }
 
 /// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a

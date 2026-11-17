@@ -1,20 +1,19 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The icon painter: views ask for an [`IconId`] in a [`Style`]; [`glyph`] maps it to glyphs of Phosphor's fonts and
-//! [`paint`] paints them into a square.
+//! The icon painter: views ask for an [`IconId`]; [`glyph`] maps it to a glyph of Phosphor Regular, the one icon
+//! family and weight ([`crate::theme::ICON`]), and [`paint`] paints it into a square: 16 px in controls, 14 px for a
+//! mark in a row.
 //!
 //! Phosphor maps every id in an exhaustive `match`, so a new id without a glyph fails the build, and keeps its
-//! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The styles carry meaning:
-//! [`Style::Regular`] in toolbars and rows, [`Style::Fill`] for active and selected states, [`Style::Duotone`] for
-//! empty states; Phosphor has a font for each. The app icon is not from Phosphor; it is drawn in code in
-//! [`crate::icons`].
+//! [`Metrics`] (how large the glyph is drawn and how far it is moved to sit in the middle). The app icon is not from
+//! Phosphor; it is drawn in code in [`crate::icons`].
 
 mod phosphor;
 
 use egui::{Color32, Painter, Rect, Vec2, pos2, vec2};
 
-use crate::theme::{IconFont, Theme};
+use crate::theme::{self, Theme};
 
 /// What an icon means. Views name these, never a glyph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -214,30 +213,7 @@ impl IconId {
     }
 }
 
-/// How an icon is drawn, by what it says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Style {
-    /// Lines: toolbars and rows.
-    Regular,
-    /// Solid: active and selected states (a pinned pin, a flagged message).
-    Fill,
-    /// A faint filled back under the lines: empty states.
-    Duotone,
-}
-
-/// The opacity of a duotone icon's back.
-pub const BACK_OPACITY: f32 = 0.2;
-
-/// What is drawn for an id in a style: glyphs of one font, painted one over the other, each at an opacity.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Glyph {
-    /// The font the glyphs are in.
-    pub face: IconFont,
-    /// The glyphs from back to front, each with its opacity (0 to 1).
-    pub layers: Vec<(char, f32)>,
-}
-
-/// How the glyphs sit in the square they are painted into.
+/// How a glyph sits in the square it is painted into.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
     /// The font size as a share of the square's side.
@@ -246,28 +222,23 @@ pub struct Metrics {
     pub drop: f32,
 }
 
-/// The glyphs of `id` in `style`.
+/// The glyph of `id` in Phosphor Regular.
 #[must_use]
-pub fn glyph(id: IconId, style: Style) -> Glyph {
-    phosphor::glyph(id, style)
+pub fn glyph(id: IconId) -> char {
+    phosphor::glyph(id)
 }
 
-/// Paints `id` in `style` and `colour` into the middle of `rect`, as large as its shorter side allows. An empty or
-/// unreal `rect` paints nothing.
-pub fn paint(painter: &Painter, rect: Rect, id: IconId, style: Style, colour: Color32) {
+/// Paints `id` in `colour` into the middle of `rect`, as large as its shorter side allows. An empty or unreal `rect`
+/// paints nothing.
+pub fn paint(painter: &Painter, rect: Rect, id: IconId, colour: Color32) {
     let side = rect.width().min(rect.height());
     if !side.is_finite() || side <= 0.0 || !rect.center().x.is_finite() || !rect.center().y.is_finite() {
         return;
     }
     let metrics = phosphor::METRICS;
-    let glyph = glyph(id, style);
-    let font = glyph.face.id(side * metrics.size);
-    for (layer, opacity) in glyph.layers {
-        let colour = colour.gamma_multiply(opacity);
-        let galley = painter.layout_no_wrap(layer.to_string(), font.clone(), colour);
-        let at = rect.center() + vec2(0.0, side * metrics.drop) - galley.size() / 2.0;
-        painter.galley(at, galley, colour);
-    }
+    let galley = painter.layout_no_wrap(glyph(id).to_string(), theme::icon_font(side * metrics.size), colour);
+    let at = rect.center() + vec2(0.0, side * metrics.drop) - galley.size() / 2.0;
+    painter.galley(at, galley, colour);
 }
 
 /// The side of an icon on the [`sheet`], in points.
@@ -276,30 +247,44 @@ const SHEET_ICON: f32 = 24.0;
 /// The side of a cell of the [`sheet`] and its margin, in points.
 const SHEET_CELL: f32 = 40.0;
 
-/// The rows of the [`sheet`]: a style and the colour token it is shown in.
-const SHEET_ROWS: [Style; 3] = [Style::Regular, Style::Fill, Style::Duotone];
+/// The rows of the [`sheet`]: what an icon is painted in.
+#[derive(Clone, Copy)]
+enum Ink {
+    /// The text colour.
+    Text,
+    /// The accent.
+    Accent,
+    /// The muted colour.
+    Muted,
+}
+
+/// The rows of the [`sheet`]: the side an icon is painted at and its ink (24 px in the text colour, 16 px as in a
+/// control in the accent, 14 px as a mark in a row in the muted colour).
+const SHEET_ROWS: [(f32, Ink); 3] = [(SHEET_ICON, Ink::Text), (16.0, Ink::Accent), (14.0, Ink::Muted)];
 
 /// The size of the [`sheet`] in points.
 #[must_use]
 pub fn sheet_size() -> Vec2 {
     let columns = IconId::ALL.len() as f32;
-    let rows = SHEET_ROWS.len() as f32 + 1.0;
+    let rows = SHEET_ROWS.len() as f32;
     vec2(columns * SHEET_CELL + SHEET_CELL, rows * SHEET_CELL + SHEET_CELL)
 }
 
-/// Every icon on `theme`'s panel colour, for `ui_shot`: a row a style (Regular in the text colour, Fill
-/// and Duotone in the accent) and Regular at the size of a line of body text in the muted colour.
+/// Every icon on `theme`'s panel colour, for `ui_shot`: a row a size and ink.
 pub fn sheet(painter: &Painter, theme: &Theme) {
     let p = &theme.palette;
     let size = sheet_size();
     painter.rect_filled(Rect::from_min_size(pos2(0.0, 0.0), size), 0.0, p.panel);
     let margin = SHEET_CELL / 2.0;
-    let rows = SHEET_ROWS.iter().map(|style| (*style, SHEET_ICON, if *style == Style::Regular { p.ink } else { p.cyan_text }));
-    let small = std::iter::once((Style::Regular, theme.fonts.body.size, p.muted));
-    for (row, (style, side, colour)) in rows.chain(small).enumerate() {
+    for (row, (side, ink)) in SHEET_ROWS.into_iter().enumerate() {
+        let colour = match ink {
+            Ink::Text => p.ink,
+            Ink::Accent => p.cyan_text,
+            Ink::Muted => p.muted,
+        };
         for (column, id) in IconId::ALL.into_iter().enumerate() {
             let centre = pos2(margin + (column as f32 + 0.5) * SHEET_CELL, margin + (row as f32 + 0.5) * SHEET_CELL);
-            paint(painter, Rect::from_center_size(centre, vec2(side, side)), id, style, colour);
+            paint(painter, Rect::from_center_size(centre, vec2(side, side)), id, colour);
         }
     }
 }

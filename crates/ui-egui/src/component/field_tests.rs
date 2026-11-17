@@ -6,7 +6,7 @@ use egui_kittest::kittest::Queryable as _;
 
 use super::{margin, search};
 use crate::component::tests::{builder, drew_icon, theme};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 
 #[test]
 fn the_search_pill_shows_a_magnifier_and_takes_typing() {
@@ -18,7 +18,7 @@ fn the_search_pill_shows_a_magnifier_and_takes_typing() {
         String::new(),
     );
     harness.run();
-    assert!(drew_icon(harness.output(), IconId::Search, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Search));
     harness.get_by_role(Role::TextInput).focus();
     harness.run();
     harness.get_by_role(Role::TextInput).type_text("odile");

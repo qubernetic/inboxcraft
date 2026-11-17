@@ -238,7 +238,7 @@ fn pin_pins_the_open_message_and_the_list_shows_the_pin() {
     settle(&mut harness);
     assert_eq!(toggled(&harness, "Take the pin off"), Some(Toggled::True));
     harness.get_by_label("Odile Brannock, Allotment rota for November, 08:35, pinned");
-    assert!(super::tests::drew_icon(harness.output(), crate::iconset::IconId::Pin, crate::iconset::Style::Fill));
+    assert!(super::tests::drew_icon(harness.output(), crate::iconset::IconId::Pin));
     harness.get_by_role_and_label(Role::Button, "Take the pin off").click();
     settle(&mut harness);
     assert_eq!(harness.state().mailbox().undoable().map(|undo| undo.text.as_str()), Some("Pin taken off"));

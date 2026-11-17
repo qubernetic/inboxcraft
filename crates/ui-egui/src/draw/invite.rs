@@ -19,7 +19,7 @@ use egui::{Frame, Layout, RichText, Sense, Shape, Stroke, StrokeKind, Ui, Widget
 use super::margin;
 use super::reader::{Asked, Drawn};
 use crate::component::button::TextButton;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::invite::{Invite, Method, Rsvp};
 use crate::keymap::Keymap;
 use crate::reader::Reader;
@@ -133,8 +133,8 @@ fn head(ui: &mut Ui, theme: &Theme, invite: &Invite) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = s.s3;
         let month_font = Font { face: f.strong.face, ..f.caption };
-        let month_line = super::paint::line_height(ui, month_font);
-        let day_line = super::paint::line_height(ui, f.title);
+        let month_line = month_font.line;
+        let day_line = f.title.line;
         let height = month_line + day_line + s.s2 * 2.0;
         let (rect, response) = ui.allocate_exact_size(vec2(height * 0.9, height), Sense::hover());
         let spoken = invite.event.when();
@@ -169,9 +169,9 @@ fn chip(ui: &mut Ui, theme: &Theme, id: IconId, text: &str) {
     Frame::new().fill(p.panel).corner_radius(0.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s2;
-            let side = super::paint::line_height(ui, font);
+            let side = font.line;
             let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            crate::iconset::paint(ui.painter(), rect, id, Style::Regular, p.minus);
+            crate::iconset::paint(ui.painter(), rect, id, p.minus);
             ui.add(egui::Label::new(RichText::new(text).font(font.id()).color(p.minus)).wrap());
         });
     });
@@ -179,9 +179,9 @@ fn chip(ui: &mut Ui, theme: &Theme, id: IconId, text: &str) {
 
 /// An icon of the caption's size, muted.
 fn icon(ui: &mut Ui, theme: &Theme, id: IconId) {
-    let side = super::paint::line_height(ui, theme.fonts.caption);
+    let side = theme.fonts.caption.line;
     let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-    crate::iconset::paint(ui.painter(), rect, id, Style::Regular, theme.palette.muted);
+    crate::iconset::paint(ui.painter(), rect, id, theme.palette.muted);
 }
 
 /// A faint strip with the older-version clock: what a version a later one replaced said.

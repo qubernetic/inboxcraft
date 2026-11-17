@@ -7,7 +7,7 @@
 use egui::{Align2, Area, Context, Id, Order, Pos2, Rect, Response, Role, Sense, Shape, Ui, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint::{self, FloatEdge};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
@@ -71,7 +71,7 @@ pub fn option(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, chosen: bool
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: &str, action: Option<&str>, chosen: Option<bool>) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme);
+    let height = control_side(theme);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
     response.widget_info(|| match chosen {
         Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, true, chosen, name),
@@ -87,9 +87,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
         match (icon, chosen) {
-            (Some(icon), Some(false)) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.muted),
-            (Some(icon), Some(true)) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.cyan_text),
-            (Some(icon), None) => crate::iconset::paint(painter, icon_rect, icon, Style::Regular, p.ink),
+            (Some(icon), Some(false)) => crate::iconset::paint(painter, icon_rect, icon, p.muted),
+            (Some(icon), Some(true)) => crate::iconset::paint(painter, icon_rect, icon, p.cyan_text),
+            (Some(icon), None) => crate::iconset::paint(painter, icon_rect, icon, p.ink),
             (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
             (None, _) => {}
         }

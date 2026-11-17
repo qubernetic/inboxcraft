@@ -9,21 +9,16 @@
 use egui::{Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::motion;
-use crate::theme::{Face, Font, Theme, Weight};
+use crate::theme::{Font, Theme};
 use crate::tr;
 
-use super::{cut, galley, line_height, pill};
+use super::{cut, galley, pill};
 
 /// From the track's outside to an option: its edge and the room inside it.
 const TRACK: f32 = 4.0;
 
 /// Between two options.
 const GAP: f32 = 2.0;
-
-/// `font` in the SemiBold weight.
-fn semibold(font: Font) -> Font {
-    Font { face: Face::Sans(Weight::SemiBold), ..font }
-}
 
 /// What the track takes around and between its `count` options.
 fn chrome(count: usize) -> f32 {
@@ -32,7 +27,7 @@ fn chrome(count: usize) -> f32 {
 
 /// An option's width at its full name: the name in SemiBold, so that it does not change when the option is chosen.
 fn natural<T>(ui: &Ui, theme: &Theme, (_, name, font): &(T, &str, Font)) -> f32 {
-    galley(ui, name, semibold(*font), theme.palette.ink).size().x + theme.spacing.s3 * 2.0
+    galley(ui, name, font.semibold(), theme.palette.ink).size().x + theme.spacing.s3 * 2.0
 }
 
 /// The width the options take with their full names, in points.
@@ -58,7 +53,7 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
     // Half a point of leeway: a row sized from this very control must not count as too small.
     let squeezed = full > room + 0.5;
     let shared = ((room - chrome(options.len())) / options.len() as f32).max(1.0);
-    let tallest = options.iter().map(|(_, _, font)| line_height(ui, *font)).fold(0.0, f32::max);
+    let tallest = options.iter().map(|(_, _, font)| font.line).fold(0.0, f32::max);
     let high = tallest + s.s2 + 2.0;
     let size = vec2(if squeezed { room.max(1.0) } else { full }, high + TRACK * 2.0);
     let (track, response) = ui.allocate_exact_size(size, Sense::hover());
@@ -92,7 +87,7 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
             }
             let pad = if squeezed { s.s1 } else { s.s3 };
             // A point more than the name needs, so that rounding never cuts a name that fits.
-            let text = cut(ui, name, if on { semibold(*font) } else { *font }, p.ink, wide - pad * 2.0 + 1.0);
+            let text = cut(ui, name, if on { font.semibold() } else { *font }, p.ink, wide - pad * 2.0 + 1.0);
             ui.painter().galley(rect.center() - text.size() / 2.0, text, p.ink);
             if segment.has_focus() {
                 ui.painter().rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);

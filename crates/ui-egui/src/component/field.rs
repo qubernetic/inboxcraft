@@ -6,7 +6,7 @@
 
 use egui::{Align2, Id, Margin, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, pos2, vec2};
 
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::theme::Theme;
 
 use super::control_side;
@@ -24,7 +24,7 @@ pub fn margin(theme: &Theme) -> Margin {
 pub fn search(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, hint: &str, width: f32) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
-    let height = control_side(ui, theme) + s.s1;
+    let height = control_side(theme) + s.s1;
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let round = 0.0;
     let focused = ui.memory(|memory| memory.has_focus(id));
@@ -35,7 +35,7 @@ pub fn search(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, hint: &str,
     }
     let icon = theme.fonts.body.size * 1.15;
     let at = Rect::from_center_size(pos2(rect.left() + s.s3 + icon / 2.0, rect.center().y), vec2(icon, icon));
-    crate::iconset::paint(ui.painter(), at, IconId::Search, Style::Regular, ink);
+    crate::iconset::paint(ui.painter(), at, IconId::Search, ink);
     let inner = Rect::from_min_max(pos2(at.right() + s.s2, rect.top()), pos2(rect.right() - s.s3, rect.bottom()));
     let edit = TextEdit::singleline(text)
         .id(id)

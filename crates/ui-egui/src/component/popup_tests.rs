@@ -8,7 +8,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::{item, show};
 use crate::component::tests::{builder, drew_icon, theme};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 
@@ -45,8 +45,8 @@ fn a_popup_shows_its_rows_from_its_anchor_with_their_icons() {
     let rect = snooze.rect();
     assert!(rect.left() >= 40.0 && rect.top() >= 30.0 && rect.left() < 60.0, "{rect:?}");
     assert!(rect.width() > 180.0, "a row spans the popup: {rect:?}");
-    assert!(drew_icon(harness.output(), IconId::Snooze, Style::Regular));
-    assert!(drew_icon(harness.output(), IconId::Flag, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Snooze));
+    assert!(drew_icon(harness.output(), IconId::Flag));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn choice_rows_mark_the_chosen_one_and_entries_line_up_with_items() {
     assert_eq!(chosen.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
     assert_eq!(harness.get_by_label("Go back to the list").accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
     assert_eq!(harness.get_by_label("Full width").accesskit_node().role(), Role::MenuItem);
-    assert!(drew_icon(harness.output(), IconId::Done, Style::Regular), "the chosen one is marked");
+    assert!(drew_icon(harness.output(), IconId::Done), "the chosen one is marked");
 }
 
 #[test]

@@ -8,11 +8,11 @@
 
 use egui::{Id, Key, Modifiers, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{cut, line_height, popup};
+use super::{cut, popup};
 
 /// The widest the popup gets, in points; narrower beside a narrower field.
 const POPUP: f32 = 210.0;
@@ -29,8 +29,8 @@ const SIDES: f32 = 10.0;
 /// A field's height: a line of body text and the design's room above and below; the event editor's text fields match
 /// it.
 #[must_use]
-pub fn height(ui: &Ui, theme: &Theme) -> f32 {
-    line_height(ui, theme.fonts.body) + 18.0
+pub fn height(theme: &Theme) -> f32 {
+    theme.fonts.body.line + 18.0
 }
 
 /// What a select shows and offers.
@@ -53,7 +53,7 @@ pub struct Select<'a, T> {
 impl<T: Copy + PartialEq> Select<'_, T> {
     /// Draws the field and, while `open`, the popup; the field's response and the choice just taken.
     pub fn show(self, ui: &mut Ui, theme: &Theme, open: &mut bool) -> (Response, Option<T>) {
-        let high = height(ui, theme);
+        let high = height(theme);
         let width = if self.width.is_finite() { self.width.clamp(high, 2048.0) } else { high };
         let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
         let id = ui.make_persistent_id(("select", self.name));
@@ -100,7 +100,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         let caret = Rect::from_center_size(pos2(rect.right() - SIDES - CARET / 2.0, rect.center().y), vec2(CARET, CARET));
-        crate::iconset::paint(painter, caret, IconId::Caret, Style::Regular, p.muted);
+        crate::iconset::paint(painter, caret, IconId::Caret, p.muted);
         let text = cut(ui, self.shown, theme.fonts.body, p.ink, caret.left() - rect.left() - SIDES * 2.0);
         painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.ink);
     }

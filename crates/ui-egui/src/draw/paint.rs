@@ -7,11 +7,11 @@
 use std::sync::Arc;
 
 use egui::layers::ShapeIdx;
-use egui::text::{LayoutJob, TextFormat, TextWrapping};
+use egui::text::{LayoutJob, TextWrapping};
 use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
 use crate::component::button::DISABLED;
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
 /// One line of `sections` (text, font token and colour), cut with an ellipsis at `width`.
@@ -22,7 +22,7 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
         ..LayoutJob::default()
     };
     for (text, font, colour) in sections {
-        job.append(text, 0.0, TextFormat::simple(font.id(), *colour));
+        job.append(&font.text(text), 0.0, font.format(*colour));
     }
     ui.painter().layout_job(job)
 }
@@ -122,11 +122,6 @@ impl Panes {
     }
 }
 
-/// The height of one line of `font`, from the font's own metrics.
-pub(super) fn line_height(ui: &Ui, font: Font) -> f32 {
-    ui.fonts_mut(|fonts| fonts.row_height(&font.id()))
-}
-
 /// The selection over `rect`: one even tone.
 pub(super) fn selection(painter: &Painter, theme: &Theme, rect: Rect, corner: f32) {
     painter.rect_filled(rect, corner, theme.palette.stage);
@@ -162,7 +157,7 @@ pub(super) struct NavRow<'a> {
 pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response {
     let s = &theme.spacing;
     let p = &theme.palette;
-    let height = line_height(ui, theme.fonts.body) + s.s2 * 1.5;
+    let height = theme.fonts.body.line + s.s2 * 1.5;
     let sense = if row.enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), sense);
     response.widget_info(|| WidgetInfo::selected(Role::Button, row.enabled, row.selected, &row.spoken));
@@ -178,10 +173,10 @@ pub(super) fn nav_row(ui: &mut Ui, theme: &Theme, row: &NavRow<'_>) -> Response 
         let depth = u16::try_from(row.depth.min(8)).unwrap_or(8);
         let mut left = rect.left() + s.s2 + f32::from(depth) * s.s3;
         if let Some(icon) = row.icon {
-            let side = theme.fonts.body.size * 1.15;
+            let side = theme.icon_side();
             let at = Rect::from_center_size(pos2(left + side / 2.0, rect.center().y), vec2(side, side));
-            let (style, ink) = if row.selected { (Style::Fill, p.cyan_text) } else { (Style::Regular, p.muted) };
-            crate::iconset::paint(painter, at, icon, style, ink);
+            let ink = if row.selected { p.cyan_text } else { p.muted };
+            crate::iconset::paint(painter, at, icon, ink);
             left += side + s.s2;
         }
         let right = if row.badge > 0 { badge(ui, theme, row.badge, rect.right() - s.s2, rect.center().y) - s.s2 } else { rect.right() - s.s2 };

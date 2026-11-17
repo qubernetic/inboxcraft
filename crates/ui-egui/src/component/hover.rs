@@ -40,9 +40,9 @@ pub struct Shown {
 }
 
 /// The rectangle of a group of `count` buttons at the right end of `row`.
-fn place(ui: &Ui, theme: &Theme, row: Rect, count: usize) -> Rect {
+fn place(theme: &Theme, row: Rect, count: usize) -> Rect {
     let s = &theme.spacing;
-    let side = control_side(ui, theme);
+    let side = control_side(theme);
     let count = u16::try_from(count.min(16)).unwrap_or(16);
     let width = f32::from(count) * side + f32::from(count.saturating_sub(1)) * s.s1 + s.s1 * 2.0;
     let height = side + s.s1 * 2.0;
@@ -55,7 +55,7 @@ pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, row: Rect, s
     if openness <= 0.0 || actions.is_empty() {
         return Shown { clicked: None, left: row.right(), openness: 0.0 };
     }
-    let group = place(ui, theme, row, actions.len());
+    let group = place(theme, row, actions.len());
     let mut child = ui.new_child(UiBuilder::new().id_salt(id).max_rect(group).layout(Layout::left_to_right(Align::Center)));
     child.multiply_opacity(openness);
     let slot = child.painter().add(Shape::Noop);

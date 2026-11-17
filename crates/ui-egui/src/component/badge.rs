@@ -6,14 +6,14 @@
 
 use egui::{Rect, Response, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::theme::Theme;
 
 use super::galley;
 
 /// The rectangle of a count badge for `count`, its right edge at `right`, centred on `centre_y`.
 fn count_rect(ui: &Ui, theme: &Theme, count: u64, right: f32, centre_y: f32) -> (Rect, std::sync::Arc<egui::Galley>) {
-    let text = galley(ui, &count.to_string(), theme.fonts.caption, theme.palette.cyan_text);
+    let text = galley(ui, &count.to_string(), theme.fonts.mono_s, theme.palette.cyan_text);
     let height = text.size().y + 2.0;
     let width = (text.size().x + theme.spacing.s2 * 1.5).max(height);
     (Rect::from_min_size(pos2(right - width, centre_y - height / 2.0), vec2(width, height)), text)
@@ -47,7 +47,7 @@ pub fn group(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, side: f32) ->
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, name));
     if ui.is_rect_visible(rect) {
-        crate::iconset::paint(ui.painter(), rect.shrink(side * 0.15), icon, Style::Regular, group_ink(theme));
+        crate::iconset::paint(ui.painter(), rect.shrink(side * 0.15), icon, group_ink(theme));
     }
     response
 }

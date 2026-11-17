@@ -8,3 +8,318 @@
 # hexadecimal digits). Paths are relative to the repository root, with `/` and no `.` or `..`.
 
 roots = ["assets/brand", "assets/fonts/plex-mono", "assets/fonts/plex-sans", "assets/fonts/audiowide"]
+
+[[source]]
+id = "ibm-plex"
+url = "https://github.com/IBM/plex"
+version = "@ibm/plex-sans@1.1.0"
+
+[[source]]
+id = "qubernetic-brand"
+version = "v0.3.0"
+
+[[file]]
+path = "assets/fonts/audiowide/Audiowide-Regular.ttf"
+source = "qubernetic-brand"
+from = "fonts/audiowide/Audiowide-Regular.ttf"
+sha256 = "c7c0f2b0f6fad8c623e31772ce79f94a4edb9321ffce9fce978ea892d20ae730"
+
+[[file]]
+path = "assets/fonts/audiowide/OFL.txt"
+source = "qubernetic-brand"
+from = "fonts/audiowide/OFL.txt"
+sha256 = "4fe01b13ffb41faa8f030d84843a95dab32792dfeeca7c072abbfd3f4d6896ad"
+
+[[file]]
+path = "assets/fonts/plex-mono/IBMPlexMono-Regular.ttf"
+source = "qubernetic-brand"
+from = "fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"
+sha256 = "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46"
+
+[[file]]
+path = "assets/fonts/plex-mono/IBMPlexMono-SemiBold.ttf"
+source = "qubernetic-brand"
+from = "fonts/ibm-plex-mono/IBMPlexMono-SemiBold.ttf"
+sha256 = "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46"
+
+[[file]]
+path = "assets/fonts/plex-mono/OFL.txt"
+source = "qubernetic-brand"
+from = "fonts/ibm-plex-mono/OFL.txt"
+sha256 = "37784b44044a4ffd9256702b7c0982c37e5c8887ba90c6dca0479aea93dc898d"
+
+[[file]]
+path = "assets/fonts/plex-sans/IBMPlexSans-Regular.ttf"
+source = "ibm-plex"
+from = "ibm-plex-sans.zip/ibm-plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf"
+sha256 = "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5"
+
+[[file]]
+path = "assets/fonts/plex-sans/IBMPlexSans-SemiBold.ttf"
+source = "ibm-plex"
+from = "ibm-plex-sans.zip/ibm-plex-sans/fonts/complete/ttf/IBMPlexSans-SemiBold.ttf"
+sha256 = "a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1"
+
+[[file]]
+path = "assets/fonts/plex-sans/OFL.txt"
+source = "ibm-plex"
+from = "ibm-plex-sans.zip/ibm-plex-sans/LICENSE.txt"
+sha256 = "37784b44044a4ffd9256702b7c0982c37e5c8887ba90c6dca0479aea93dc898d"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/128x128/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/128x128/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "46408695a321ce5e09adc5935a6fd56f423cbd44cb514cae66ac6089c70a7242"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/16x16/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/16x16/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "d87409597ae54394a0ab599ae953eeac5e76614aec084727b878ffc3a1009373"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/22x22/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/22x22/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "3a140df99c7471e8cff3f3dc36c146927002d50be7b23427ebd9de06de16a71c"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/24x24/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/24x24/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "6b6b81879f9e33601fcbc2e034e290057f02dc162471aa2b038c6bbac3d63015"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/256x256/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/256x256/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "19d9c3bd1a0ff30d2d3b39cc9bb36b878a6267501dabedcd0305d8703be453e6"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/32x32/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/32x32/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "b9634c967f402e5a0146b5d9df485acc8fec4725e5f40ca86b8a2188c9a7ffb4"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/48x48/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/48x48/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "0d090680e6d7528d0e0bd2b5da143945aab02e6c9da89e8a383a94f564cf963e"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/512x512/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/512x512/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "6bbf05a10eac1b7ecafb06c33170a50f03630d63f45acb5ebd3a9fa4bbbd3a4f"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/64x64/apps/io.github.qubernetic.inboxcraft.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/64x64/apps/io.github.qubernetic.inboxcraft.png"
+sha256 = "c527a5066bc083248b9d10ac0cea59ed3e73c06086784ac8b45f9cb0b59eff60"
+
+[[file]]
+path = "assets/brand/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/linux/hicolor/scalable/apps/io.github.qubernetic.inboxcraft.svg"
+sha256 = "793c50d4d11c7d95564ffff492beef877300cad56d337bbc82dc44e479938c46"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-128.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-128.png"
+sha256 = "909e997f9f4feae5db02d061a62dc0e3ed4e6127913899b780c5451571f0b246"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-16.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-16.png"
+sha256 = "a20d9a92e4bd013502d0e8e03b346af15446df1d3f55c27bc0da10d56460660e"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-256.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-256.png"
+sha256 = "6a8201bf38f278c53cadff081304c3ed15e79a195eb1d73df1aa87ce11e61a48"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-32.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-32.png"
+sha256 = "81088421f67663310bfdb3d0aa134431aa28e04a116e497d9c9260b60b1106b7"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-48.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-48.png"
+sha256 = "29bfdec139de2e5f943caffe1a3f5a4ce58dd9e78d576892112b38ab3d9afe7e"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-512.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-512.png"
+sha256 = "4494b7fadcc3c64ac430c313e6ba62b3aa4c83ede758dc9172b599a6adf112b2"
+
+[[file]]
+path = "assets/brand/inboxcraft/png/icon-64.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/png/icon-64.png"
+sha256 = "521c402936d80eb3d4a810a53c6ca045efcce7b3c364b5285e6e36f12e596095"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/lockup-horizontal-dark.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/lockup-horizontal-dark.svg"
+sha256 = "57b643610ae7764aa08768b1f3f2399e49bd8616a1b62ee31c8efe60b40a61a3"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/lockup-horizontal-light.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/lockup-horizontal-light.svg"
+sha256 = "9f79880545ea4b98cba9929bec8b9c41283f25e9e31f27de64b9ea8fc8793a94"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-compact-dark.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-compact-dark.svg"
+sha256 = "0d792212adce88234d9448a912f31ace41de3f1baca0244ef67df2c3078e0f79"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-compact-light.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-compact-light.svg"
+sha256 = "df0807655b34399be16ca687e18fe6d91834d24a47a5c89ccddfa940cdd6aacd"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-dark.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-dark.svg"
+sha256 = "907628b7fab8acd9110b945079de2a8eabb5c14cf920eb06cde7a7137a93ab26"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-light.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-light.svg"
+sha256 = "43f421d4430797e68d6c0116f762c163478ee6e392c0012315111dacd07c34a3"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-micro-dark.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-micro-dark.svg"
+sha256 = "0fea875987c1b558a49725130286f80e1e1ced5945fb275124ed04bf16e729b9"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/mark-micro-light.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/mark-micro-light.svg"
+sha256 = "f46745aa492f5bb8c034122db6d3bc7964b55bfa85f2d84b9a00d26f6d0b585e"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/wordmark-dark.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/wordmark-dark.svg"
+sha256 = "024935aefa9a1de56f58a5412dcac505c3d92e5a2f38e25e0d79ea44a78962ee"
+
+[[file]]
+path = "assets/brand/inboxcraft/svg/wordmark-light.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/svg/wordmark-light.svg"
+sha256 = "cfc0d6bf5816e7c2562677c422b95ff0a7ad01ea8b4d4ab42267be47608256bf"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-16-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-16-dark.png"
+sha256 = "4eb8c4c61f8a6eca75c1b9eab1f5ca23fe390713b0acf328943ee1da47506283"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-16-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-16-light.png"
+sha256 = "80b33adf2eec6fda55f61b660d298ad6f14c5032f80faeb4d3d321c0d0c707ed"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-22-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-22-dark.png"
+sha256 = "cb98f14c2af3419f8b917e06ac3a1576b56b6c9060ca98ded937957e36e494ec"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-22-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-22-light.png"
+sha256 = "6e7e7ed0de3bff0fef1e2f82f68dd38ae6661cc14461f1cde6eb5dd95eb25fe4"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-24-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-24-dark.png"
+sha256 = "f5013917e55e2665e3143a81c9791729130b89f11eb80e48d10ae4101893ffeb"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-24-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-24-light.png"
+sha256 = "464e7d4479c29df3619ea432f554001b06fd08035e491741427c85280cd6bb93"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-symbolic.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-symbolic.svg"
+sha256 = "9708fe82e8f2d2cb1c175e757347ee4b3659e3ca0df4099269e02e3daf3cd643"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-16-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-16-dark.png"
+sha256 = "35edbaa003cc5fcf4b2b6dd6616cd5d1acc8b8a9f7906e8018cbc68fef63ebbc"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-16-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-16-light.png"
+sha256 = "028635b1597e3333e757436a0ff6fda2b4d6137371e3a8ab802a6f5f51bfbf45"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-22-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-22-dark.png"
+sha256 = "4852d9c4341709baf430063c36c88dc36948b387cdd6aa01768bfd2f60ccf174"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-22-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-22-light.png"
+sha256 = "485a6eda768b145ac3374a7fa59a22f9e05a6c6b6266498631802f02e367e4d9"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-24-dark.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-24-dark.png"
+sha256 = "d9ac79d90b2b3bee8c485118bac75f760f8d0d3afa38bce0bd21e27ef15cb34e"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-24-light.png"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-24-light.png"
+sha256 = "facaa5ac736d2433227b3dccc9cb25c4762f545d0b5a55c3828a37eb807cf79d"
+
+[[file]]
+path = "assets/brand/inboxcraft/tray/tray-unread-symbolic.svg"
+source = "qubernetic-brand"
+from = "products/inboxcraft/tray/tray-unread-symbolic.svg"
+sha256 = "206b144c59b12f6cbe14c14a1629570bf053adf99e4f844dd430a25f4a43f07f"
+
+[[file]]
+path = "assets/brand/qubernetic/lockup-horizontal-dark-600.png"
+source = "qubernetic-brand"
+from = "logo/png/lockup-horizontal-dark-600.png"
+sha256 = "1690f15c1d8915fb84ab3729be19a0680ad1ede2a072edc97844828decc276f8"
+
+[[file]]
+path = "assets/brand/qubernetic/lockup-horizontal-light-600.png"
+source = "qubernetic-brand"
+from = "logo/png/lockup-horizontal-light-600.png"
+sha256 = "c68d97d7c3495820635644346e8056509a597324c7139048b75cc83b171efe9f"

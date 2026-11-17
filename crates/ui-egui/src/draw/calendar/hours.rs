@@ -9,7 +9,7 @@ use egui::{Id, Rect, ScrollArea, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
 
 use super::{Asked, Shape, Text, block, caption_strong};
 use crate::calendar::{Calendar, DAY_MINUTES, EventRow, day, layout};
-use crate::draw::paint::{line, line_height, selection};
+use crate::draw::paint::{line, selection};
 use crate::mailbox::weekday_text;
 use crate::theme::Theme;
 
@@ -38,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
     let x = |left: f32, index: i64| left + GUTTER + column * index as f32;
     ui.spacing_mut().item_spacing.y = 0.0;
 
-    let head = line_height(ui, theme.fonts.caption) + s.s3;
+    let head = theme.fonts.caption.line + s.s3;
     let (rect, _) = ui.allocate_exact_size(vec2(width, head), Sense::hover());
     for index in 0..days {
         let day = first.plus(index);
@@ -67,7 +67,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, calendar: &Calendar, days: i64, a
     let bars = layout::bars(&events, first, usize::try_from(days).unwrap_or(1));
     let lanes = layout::lanes(&bars);
     if lanes > 0 {
-        let lane = line_height(ui, caption_strong(theme)) + s.s1 * 2.0 - 2.0;
+        let lane = caption_strong(theme).line + s.s1 * 2.0 - 2.0;
         let (rect, _) = ui.allocate_exact_size(vec2(width, lane * lanes as f32), Sense::hover());
         for bar in &bars {
             let Some(event) = events.get(bar.event) else { continue };

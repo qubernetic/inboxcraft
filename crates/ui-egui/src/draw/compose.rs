@@ -25,14 +25,14 @@ use egui::{
 };
 use inboxcraft_time::Timestamp;
 
-use super::paint::{line, line_height};
+use super::paint::line;
 use crate::component::avatar;
 use crate::component::button::{IconButton, TextButton};
 use crate::component::popup;
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
 use crate::compose::{Chip, Composer, Line};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::Mailbox;
 use crate::theme::Theme;
@@ -170,8 +170,8 @@ fn name(ui: &mut Ui, theme: &Theme, text: &str, width: f32, height: f32) {
 }
 
 /// How tall a chip is.
-fn chip_height(ui: &Ui, theme: &Theme) -> f32 {
-    line_height(ui, theme.fonts.body) * 1.2 + 4.0
+fn chip_height(theme: &Theme) -> f32 {
+    theme.fonts.body.line * 1.2 + 4.0
 }
 
 /// A rule under a line.
@@ -186,7 +186,7 @@ fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
     let p = &theme.palette;
     let s = &theme.spacing;
     let (fill, ink, edge) = if chip.ok { (p.panel, p.ink, p.line) } else { (p.minus, p.bg, p.minus) };
-    let side = line_height(ui, theme.fonts.body) * 1.2;
+    let side = theme.fonts.body.line * 1.2;
     let shown = chip.shown();
     let mut removed = false;
     Frame::new().fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(255).inner_margin(egui::Margin::symmetric(3, 2)).show(ui, |ui| {
@@ -199,7 +199,7 @@ fn chip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, chip: &Chip) -> bool {
             if chip.ok {
                 avatar::paint(ui.painter(), theme, mark, &shown, &chip.address());
             } else {
-                crate::iconset::paint(ui.painter(), mark.shrink(1.0), IconId::Junk, Style::Regular, ink);
+                crate::iconset::paint(ui.painter(), mark.shrink(1.0), IconId::Junk, ink);
             }
             ui.painter().galley(egui::pos2(mark.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, ink);
             let remove = tr!("Remove {recipient}", recipient = shown);
@@ -229,7 +229,7 @@ fn line_keys(ui: &Ui, composer: &Composer, line: Line, asked: &mut Vec<Asked>) {
 fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, line: Line, asked: &mut Vec<Asked>) {
     let body = theme.fonts.body.size;
     ui.horizontal_top(|ui| {
-        name(ui, theme, line.name(), body * NAMES, chip_height(ui, theme));
+        name(ui, theme, line.name(), body * NAMES, chip_height(theme));
         let copies = line == Line::To && !composer.copies();
         let link = copies.then(|| line_width(ui, theme, tr!("Cc  Bcc")));
         let room = ui.available_width() - link.unwrap_or(0.0);
@@ -250,7 +250,7 @@ fn recipients(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Compos
             let hint = if composer.chips(line).is_empty() { tr!("Name or address") } else { "" };
             let Some(typing) = composer.typing_mut(line) else { return };
             let edit = TextEdit::singleline(typing).id(id).frame(Frame::NONE).hint_text(hint).desired_width(width);
-            let response = ui.add(edit.min_size(vec2(0.0, chip_height(ui, theme))).align(Align2::LEFT_CENTER));
+            let response = ui.add(edit.min_size(vec2(0.0, chip_height(theme))).align(Align2::LEFT_CENTER));
             ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(line.name()));
             if response.changed() {
                 asked.push(Asked::Typed(line));
@@ -318,7 +318,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         let sender =
             if account.name.is_empty() { account.address.clone() } else { tr!("{name} <{address}>", name = account.name, address = account.address) };
         let galley = line(ui, &[(&sender, theme.fonts.body, p.ink)], ui.available_width() * 0.7);
-        let caret = line_height(ui, theme.fonts.body) * 0.8;
+        let caret = theme.fonts.body.line * 0.8;
         let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + theme.spacing.s1 + caret, galley.size().y.max(caret)), Sense::click());
         let spoken = tr!("From {sender}", sender = sender);
         response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, &spoken));
@@ -327,7 +327,7 @@ fn from(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, composer: &Composer, aske
         }
         ui.painter().galley(rect.left_top(), galley, p.ink);
         let mark = Rect::from_min_size(egui::pos2(rect.right() - caret, rect.center().y - caret / 2.0), vec2(caret, caret));
-        crate::iconset::paint(ui.painter(), mark, IconId::Caret, Style::Regular, p.muted);
+        crate::iconset::paint(ui.painter(), mark, IconId::Caret, p.muted);
         super::paint::focus_ring(ui, theme, &response);
         Popup::menu(&response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, body * MENU, |ui| {
@@ -449,9 +449,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
             }
             if let Some(problem) = problem {
                 ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
-                let side = line_height(ui, theme.fonts.caption);
+                let side = theme.fonts.caption.line;
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                crate::iconset::paint(ui.painter(), rect, IconId::Junk, Style::Regular, p.minus);
+                crate::iconset::paint(ui.painter(), rect, IconId::Junk, p.minus);
             }
         });
     });
@@ -492,11 +492,11 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             }
         });
         rule(ui, theme);
-        let side = crate::component::control_side(ui, theme);
+        let side = crate::component::control_side(theme);
         // The toolbar, and the line asking for a blank while one is left.
         let foot = side + s.s3 + if composer.blank().is_some() { side + s.s2 * 4.0 } else { 0.0 };
-        let height = (ui.available_height() - foot).max(line_height(ui, theme.fonts.body) * 3.0);
-        let rows = (height / line_height(ui, theme.fonts.body)).floor().max(3.0);
+        let height = (ui.available_height() - foot).max(theme.fonts.body.line * 3.0);
+        let rows = (height / theme.fonts.body.line).floor().max(3.0);
         let marks = composer.blanks().to_vec();
         let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, width: f32| marked(ui, theme, &marks, text.as_str(), width);
         egui::ScrollArea::vertical().max_height(height).auto_shrink([false, true]).show(ui, |ui| {
@@ -532,7 +532,7 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, comp
             ui.horizontal(|ui| {
                 let title = composer.title();
                 let open = tr!("Open the draft {title}", title = title);
-                let side = crate::component::control_side(ui, theme);
+                let side = crate::component::control_side(theme);
                 let room = (ui.available_width() - side - s.s1).max(1.0);
                 let response = ui.allocate_ui_with_layout(vec2(room, side), Layout::top_down(Align::Min), |ui| {
                     popup::item(ui, theme, keymap, IconId::Compose, &title, Some(keymap::COMPOSE))

@@ -11,7 +11,7 @@ use super::card::card;
 use super::hover::{self, Action};
 use super::toast::{self, Toast};
 use super::{button::IconButton, pill, popup};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion::{self, tests::FRAME};
 use crate::theme::{Mode, TextScale, Theme, install_fonts};
@@ -33,8 +33,8 @@ pub(super) fn theme() -> Theme {
     Theme::new(Mode::Light, TextScale::default())
 }
 
-/// Whether the last frame of `output` drew `id` in `style` from the default icon set: its front glyph in its font.
-pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> bool {
+/// Whether the last frame of `output` drew `id`: its glyph in the icon family.
+pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     fn texts<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::TextShape>) {
         match shape {
             egui::Shape::Text(text) => found.push(text),
@@ -42,9 +42,8 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId, style: Style) -> 
             _ => {}
         }
     }
-    let glyph = crate::iconset::glyph(id, style);
-    let Some((front, _)) = glyph.layers.last() else { return false };
-    let family = glyph.face.id(1.0).family;
+    let front = crate::iconset::glyph(id);
+    let family = crate::theme::icon_font(1.0).family;
     let mut found = Vec::new();
     output.shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut found));
     found.iter().any(|text| {

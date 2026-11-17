@@ -345,31 +345,36 @@ time from the code as it is, not measured.
   messages together keep at most 256 MiB: a new picture first forgets the pictures of folded messages, and a
   forgotten remote picture is fetched again when its message shows it. Each inline picture is one `mail.attachment`,
   which reads the whole message again, so a large message with 32 inline pictures opens slowly (#33).
-- Bold text in a message is set in Figtree SemiBold; italic text is slanted by egui, as Figtree's italics are not
-  bundled (#83). Tables are laid out as a grid without borders, four deep at most (#33).
+- Bold text in a message is set in IBM Plex Sans SemiBold; italic text is slanted by egui, as Plex's italics are not
+  bundled (#83, #232). Tables are laid out as a grid without borders, four deep at most (#33).
 - `mail.thread` reads every message of every account to group the thread; fast enough for the sample and small
   mailboxes, an index comes with the store on disk (#33).
 - The next-message rule applies when the open message leaves the list after a refresh; archive and delete, which
   will use it most, come with E2. Bodies that arrive while a message is open show the next time it is opened (#33).
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
-- The window's typeface is Figtree (four weights, #83). Scripts it and egui's fallback fonts lack (CJK, Arabic,
-  Hebrew, Devanagari and others) show as boxes, and right-to-left text is laid out left to right (egui has no
-  bidi). egui's Ubuntu Light is no longer used but is still compiled in with the `epaint_default_fonts` crate,
-  which also brings Hack and the emoji fonts (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml`
-  for that crate only, the project owner's to confirm); leaving it out means replacing that crate's other fonts too.
+- The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
+  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Devanagari and
+  others) and emoji show as boxes (egui's emoji fonts are not built in), and right-to-left text is laid out left to
+  right (egui has no bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
+  with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
+  crate only, the project owner's to confirm). Labels set in capitals reach a screen reader in capitals. Most views
+  take the styles through egui's own labels, which carry the size but not the line height or tracking; the drawn rows
+  and controls carry all three. A message row is 62 points tall at 100 %, not the design's 56, until the rows take
+  their final shape (#232).
 - Text size (#83, #86, #87, #231): the text scale (90 % to 130 %) is set on the appearance settings page or through
-  `ui.text_scale.set`, and kept on disk; the typeface is Figtree, with no choice. The fit test draws the list, the
+  `ui.text_scale.set`, and kept on disk; the type is IBM Plex, with no choice. The fit test draws the list, the
   reader, the add-account page and the settings page at 90 %, 100 % and 130 %, in a window 1200 points wide (and the settings page 820 points wide); a narrower window is not checked.
   Spacing and paddings stay
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
-- Icons (#84, #86, #231): Phosphor, with no choice. The set has the ids the window and the triage actions need so
+- Icons (#84, #86, #231, #232): Phosphor Regular, one family and one weight, with no choice; an active or selected
+  state is the accent colour, not a filled icon. The set has the ids the window and the triage actions need so
   far; a toolbar or a view that needs another meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
-  toolbars, the folder pane and the empty states move onto them with E1.17. The three Phosphor fonts are bundled
-  whole (about 1.5 MB, every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new
-  font file. An icon is one colour token (Duotone's back at 20 % of it). The unread dot and the account dots and
+  toolbars, the folder pane and the empty states move onto them with E1.17. The Phosphor Regular font is bundled
+  whole (every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new font file. An icon
+  is one colour token. The unread dot and the account dots and
   stripes stay shapes, as they are colour markers rather than icons. Loading the owner's own icon pack is an idea
   only (an outside file: safe parsing, size caps, a fuzz target, an SVG rasteriser).
 - Appearance (#86, #87, #231): the four `ui.*.set` commands, the file that keeps their result and the settings sheet that

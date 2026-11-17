@@ -62,7 +62,7 @@ fn the_sheet_opens_over_the_dimmed_window_a_press_beside_it_or_close_or_escape_l
     let mut harness = opened();
     harness.get_by_role_and_label(Role::Dialog, "Settings");
     harness.get_by_label("Appearance");
-    harness.get_by_label("Preview");
+    harness.get_by_label("PREVIEW");
     // The sections not built yet are there, faded.
     assert!(harness.get_by_label("Calendar, settings page").accesskit_node().is_disabled());
     assert!(!harness.get_by_label("Accounts, settings page").accesskit_node().is_disabled());

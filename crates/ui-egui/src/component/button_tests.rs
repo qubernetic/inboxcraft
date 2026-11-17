@@ -8,7 +8,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use super::{IconButton, TextButton};
 use crate::component::control_side;
 use crate::component::tests::{builder, drew_icon, theme};
-use crate::iconset::{IconId, Style};
+use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::theme::TextScale;
 
@@ -58,12 +58,12 @@ fn a_disabled_button_takes_no_press_and_says_so() {
 }
 
 #[test]
-fn an_active_button_is_selected_and_shows_the_fill_icon() {
+fn an_active_button_is_selected_and_shows_its_icon() {
     let harness = harness();
     assert_eq!(harness.get_by_label("Unpin").accesskit_node().toggled(), Some(Toggled::True));
     assert_eq!(harness.get_by_label("Archive").accesskit_node().toggled(), Some(Toggled::False));
-    assert!(drew_icon(harness.output(), IconId::Pin, Style::Fill));
-    assert!(drew_icon(harness.output(), IconId::Archive, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Pin));
+    assert!(drew_icon(harness.output(), IconId::Archive));
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn the_button_grows_with_the_text_scale() {
             let mut harness = builder().build_ui_state(
                 move |ui, side: &mut f32| {
                     crate::theme::install_fonts(ui.ctx());
-                    *side = control_side(ui, &theme);
+                    *side = control_side(&theme);
                     IconButton::new(IconId::Done, "Done").show(ui, &theme, &Keymap::default());
                 },
                 0.0,
@@ -116,8 +116,7 @@ fn a_button_on_a_gradient_draws_its_icon_in_the_ink_it_is_given() {
             IconButton::new(IconId::Settings, "Settings").ink(ink).active(active).show(ui, &theme, &Keymap::default());
         });
         harness.run();
-        let style = if active { Style::Fill } else { Style::Regular };
-        assert!(drew_icon(harness.output(), IconId::Settings, style));
+        assert!(drew_icon(harness.output(), IconId::Settings));
         assert!(text_colours(harness.output()).iter().all(|(_, colour)| *colour == ink), "{active}");
         assert_eq!(harness.get_by_label("Settings").accesskit_node().toggled(), Some(if active { Toggled::True } else { Toggled::False }));
     }
@@ -218,8 +217,8 @@ fn text_buttons_of_every_tone_are_named_buttons_with_their_icons() {
     }
     harness.run();
     assert_eq!(harness.state(), &[1, 1, 0]);
-    assert!(drew_icon(harness.output(), IconId::Reply, Style::Regular));
-    assert!(drew_icon(harness.output(), IconId::Forward, Style::Regular));
+    assert!(drew_icon(harness.output(), IconId::Reply));
+    assert!(drew_icon(harness.output(), IconId::Forward));
 }
 
 #[test]

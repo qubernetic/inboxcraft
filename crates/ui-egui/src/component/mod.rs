@@ -46,26 +46,26 @@ use egui::{CornerRadius, Galley, Margin, Ui};
 
 use crate::theme::{Font, Theme};
 
-/// The height of one line of `font`, from the font's own metrics.
-pub(crate) fn line_height(ui: &Ui, font: Font) -> f32 {
-    ui.fonts_mut(|fonts| fonts.row_height(&font.id()))
-}
-
 /// The side of a control (an icon button, a pill's height): a line of button text and a little room.
 #[must_use]
-pub fn control_side(ui: &Ui, theme: &Theme) -> f32 {
-    line_height(ui, theme.fonts.button) + theme.spacing.s2 * 1.5
+pub fn control_side(theme: &Theme) -> f32 {
+    theme.fonts.button.line + theme.spacing.s2 * 1.5
 }
 
-/// `text` in `font` and `colour`, on one line.
+/// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for
+/// them, in capitals.
 pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> Arc<Galley> {
-    ui.painter().layout_no_wrap(text.to_owned(), font.id(), colour)
+    let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap.max_width = f32::INFINITY;
+    job.break_on_newline = false;
+    ui.painter().layout_job(job)
 }
 
-/// `text` in `font` and `colour` on one line, cut with an ellipsis at `width`.
+/// [`galley`], cut with an ellipsis at `width`.
 pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32) -> Arc<Galley> {
-    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font.id(), colour);
+    let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    job.break_on_newline = false;
     ui.painter().layout_job(job)
 }
 

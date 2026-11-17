@@ -22,7 +22,7 @@ use crate::component::segmented::{self, segmented};
 use crate::component::select::Select;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::{Face, Font, Theme, Weight};
+use crate::theme::{Face, Font, Theme};
 use crate::tr;
 
 /// The editor's width, in points, as the design draws it.
@@ -59,7 +59,7 @@ pub(in crate::draw) fn show(ctx: &egui::Context, theme: &Theme, keymap: &Keymap,
 
 /// A label's font: the caption, SemiBold.
 fn label_font(theme: &Theme) -> Font {
-    Font { face: Face::Sans(Weight::SemiBold), ..theme.fonts.caption }
+    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
 }
 
 fn label(ui: &mut Ui, theme: &Theme, text: &str) -> Response {
@@ -105,7 +105,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     let p = &theme.palette;
     let s = &theme.spacing;
     let width = ui.available_width();
-    let title = Font { size: theme.fonts.title.size * 0.9, ..theme.fonts.title };
+    let title = theme.fonts.title.sized(theme.fonts.title.size * 0.9);
     ui.label(RichText::new(editor.title()).font(title.id()).color(p.ink));
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     {
