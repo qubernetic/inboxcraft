@@ -14,7 +14,7 @@ use crate::keymap::Keymap;
 use crate::theme::{Font, Theme};
 use crate::tr;
 
-use super::button::{LinkSize, link_sized};
+use super::button::{Caret, link_caret, link_caret_width};
 
 /// What the facts show of a message.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -81,8 +81,8 @@ pub fn facts_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: &Facts<'_>, 
     let (_, rect) = ui.allocate_space(vec2(width, high));
     let response = ui.interact(rect, ui.scope_id().with("facts"), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Group, true, spoken(shown)));
-    let link_name = if open { tr!("hide details ▴") } else { tr!("details ▾") };
-    let link_width = super::galley(ui, link_name, f.mono_s, p.cyan_text).size().x.ceil();
+    let (link_words, caret) = if open { (tr!("hide details"), Caret::Up) } else { (tr!("details"), Caret::Down) };
+    let link_width = link_caret_width(ui, theme, link_words);
     let recipients = shown.recipients.filter(|count| *count > 1).map(|count| tr!("{count} in all", count = count));
     let count_galley = recipients.as_deref().map(|count| super::galley(ui, count, f.mono_s, p.muted));
     let value_left = rect.left() + LABEL + GAP;
@@ -114,7 +114,7 @@ pub fn facts_of(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: &Facts<'_>, 
     }
     let link_rect = Rect::from_min_size(pos2(rect.right() - link_width, (rect.top() + small_top).round()), vec2(link_width, theme.boxes().row_link));
     let mut child = ui.new_child(UiBuilder::new().max_rect(link_rect).layout(Layout::left_to_right(Align::Center)));
-    link_sized(&mut child, theme, keymap, link_name, LinkSize::Small)
+    link_caret(&mut child, theme, keymap, link_words, caret)
 }
 
 #[cfg(test)]

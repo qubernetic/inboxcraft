@@ -90,8 +90,8 @@ fn the_facts_look_as_their_sheet_says_in_every_state() {
             let high = rows.len() as f32 * 22.0 + (rows.len() - 1) as f32 * 6.0;
             assert_eq!(rect.size(), vec2(560.0, high), "{at}");
             assert!(
-                paint.rects().all(|shape| !matches!(shape.look, Look::Rect { fill, .. } if fill.a() > 0 && shape.rect.height() > 2.0)),
-                "no fill: {at}"
+                paint.rects().all(|shape| !matches!(shape.look, Look::Rect { fill, .. } if fill.a() > 0 && fill != p.cyan_text && shape.rect.height() > 2.0)),
+                "no fill but the link's caret: {at}"
             );
             let got = texts(&paint);
             for (index, (label, value, body)) in rows.iter().enumerate() {
@@ -107,6 +107,21 @@ fn the_facts_look_as_their_sheet_says_in_every_state() {
             let link = if open { "hide details ▴" } else { "details ▾" };
             let link_rect = harness.get_by_label(link).rect();
             assert_eq!((link_rect.right(), link_rect.top() - rect.top(), link_rect.height()), (rect.right(), 3.0, 16.0), "{at}");
+            // The sheet's link hugs its words and caret: 59 (92 open) wide, so its words start at 501 (468).
+            assert_eq!(link_rect.width(), if open { 92.0 } else { 59.0 }, "{at}");
+            let words = got.iter().find(|text| text.1.starts_with(if open { "hide details" } else { "details" })).map(|text| text.0.left() - rect.left());
+            assert_eq!(words, Some(if open { 468.0 } else { 501.0 }), "{at}");
+            // The caret: the design's triangle 5.46 wide and high, its top 5.6 and its foot 0.12 over the baseline (15.125).
+            let link_paint = painted(&harness, link);
+            let caret = link_paint.shapes.iter().find(|shape| matches!(shape.look, Look::Rect { fill, .. } if fill == p.cyan_text));
+            let caret = caret.map(|shape| shape.rect.translate(-rect.min.to_vec2())).unwrap_or_else(|| panic!("no caret: {at}"));
+            let left = if open { 468.0 + 13.0 * 6.6 } else { 501.0 + 8.0 * 6.6 } + 0.033;
+            let want = egui::Rect::from_min_max(egui::pos2(left, 15.125 - 5.599), egui::pos2(left + 5.456, 15.125 - 0.121));
+            let near = |a: f32, b: f32| (a - b).abs() < 0.02;
+            assert!(
+                near(caret.left(), want.left()) && near(caret.right(), want.right()) && near(caret.top(), want.top()) && near(caret.bottom(), want.bottom()),
+                "the caret {caret:?}, the design's {want:?}: {at}"
+            );
             if state == "long-text" {
                 let count = got.iter().find(|text| text.1 == "12 in all").map(|text| (text.0, text.2, text.3));
                 let (count_rect, ink, size) = count.unwrap_or_else(|| panic!("{at}"));
