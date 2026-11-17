@@ -27,8 +27,8 @@ inboxcraft-store = { path = "../crates/store" }
 inboxcraft-engine = { path = "../crates/engine" }
 inboxcraft-mcp = { path = "../crates/mcp" }
 inboxcraft-ui-egui = { path = "../crates/ui-egui" }
-# the desktop app's library, for its fontconfig reader (Linux and the BSDs)
-inboxcraft = { path = "../apps/inboxcraft" }
+# the desktop app's fontconfig reader (`fontconfig_scan` includes its bytes-level file), as the app has it
+roxmltree = { version = "0.20", default-features = false, features = ["std"] }
 serde_json = "1"
 
 [workspace]

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{MAX_CONFIG, MAX_CONFIGS, MAX_INCLUDE_DEPTH, MAX_LISTED, MAX_NESTING, Named, Places, nesting_within, parse, plain, read};
+use super::{MAX_CONFIG, MAX_CONFIGS, MAX_INCLUDE_DEPTH, MAX_LISTED, MAX_NESTING, MAX_NODES, Named, Places, depth_of, parse, plain, read};
 
 /// A fontconfig file holding `body`.
 fn conf(body: &str) -> String {
@@ -177,14 +177,15 @@ fn nothing_there_gives_nothing() {
 
 /// Whether `text` gets past the count, measured the way `parse` does it: on the plain text.
 fn within(text: &str, max: usize) -> bool {
-    plain(text).is_some_and(|plain| nesting_within(&plain, max))
+    plain(text).and_then(|plain| depth_of(&plain)).is_some_and(|depth| depth <= max)
 }
 
 #[test]
 fn the_nesting_is_counted_before_the_parser_sees_it() {
     assert!(within(&conf("<dir>/a</dir><alias><family>x</family></alias>"), 3));
     assert!(!within(&conf("<a><b><c><d/></c></b></a>"), 3));
-    assert!(within(&conf("<a><b/><b/><b/></a>"), 2), "a self-closed element does not nest");
+    assert!(within(&conf("<a><b/><b/><b/></a>"), 3), "self-closed siblings are one level");
+    assert!(!within(&conf("<a><b/></a>"), 2), "a self-closed element is a level");
     assert!(!within("<a x=\"/>\"><b y='>'><c>", 2), "quotes are honoured");
     assert!(within("<a><!-- <b><c><d> --><?pi <b> ?></a>", 1), "comments and instructions hold no elements");
     assert!(within("<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\"><a/>", 1));
@@ -197,16 +198,16 @@ fn the_nesting_is_counted_before_the_parser_sees_it() {
 
 #[test]
 fn the_count_and_the_parser_see_the_same_text() {
-    assert_eq!(
-        plain("<?xml version=\"1.0\"?><!DOCTYPE f SYSTEM \"x\"><f><!-- c --><a x=\"<!--\"/></f>").as_deref(),
-        Some("  <f> <a x=\"<!--\"/></f>")
-    );
+    assert_eq!(plain("<?xml version=\"1.0\"?><!DOCTYPE f SYSTEM \"x\"><f><!-- c --><a x=\"<!--\"/></f>").as_deref(), Some("<f><a x=\"<!--\"/></f>"));
     // A terminator counts only after its whole opener: `<!-->` and `<!--->` open a comment, they do not close one.
-    assert_eq!(plain("<a><!--></a>--></a>").as_deref(), Some("<a> </a>"));
-    assert_eq!(plain("<a><!---></a>--></a>").as_deref(), Some("<a> </a>"));
-    assert_eq!(plain("<a><?></a>?></a>").as_deref(), Some("<a> </a>"));
-    assert_eq!(plain("<a><?pi?></a>").as_deref(), Some("<a> </a>"));
+    assert_eq!(plain("<a><!--></a>--></a>").as_deref(), Some("<a></a>"));
+    assert_eq!(plain("<a><!---></a>--></a>").as_deref(), Some("<a></a>"));
+    assert_eq!(plain("<a><?></a>?></a>").as_deref(), Some("<a></a>"));
+    assert_eq!(plain("<a><?pi?></a>").as_deref(), Some("<a></a>"));
     assert_eq!(plain("<!-->"), None, "left open");
+    // A removed span leaves no trace in the text around it.
+    let named = parse(b"<fontconfig><dir>/usr/<!--x-->share/<?pi?>fonts</dir></fontconfig>", None, &Places::default());
+    assert_eq!(named, Some(vec![Named::Folder(PathBuf::from("/usr/share/fonts"))]));
     assert_eq!(plain("<?>"), None, "left open");
     // CDATA is refused whole, however it is cut.
     for cdata in ["<a><![CDATA[]]></a>", "<a><![CDATA[]></a>", "<a><![CDATA[]]]></a>", "<a><![CDATA[</a>]]>", "<![CDATA["] {
@@ -303,21 +304,66 @@ proptest::proptest! {
         let _ = parse(&bytes, Some(Path::new("/etc/fonts")), &Places::default());
     }
 
+    /// The count and the parser agree on every document that parses: the depth counted on the plain text is the
+    /// depth the parser builds from the text as written, comments, instructions and the document type included.
     #[test]
-    fn pieces_of_markup_never_get_deep_text_past_the_count(
-        pieces in proptest::collection::vec(
-            proptest::sample::select(vec!["<a>", "</a>", "<a/>", "<!--", "-->", "<!-->", "<?", "?>", "<![CDATA[", "]]>", "\"", "'", ">", "<", "<dir>/x</dir>"]),
-            0..400,
-        )
-    ) {
-        let text = format!("<fontconfig>{}</fontconfig>", pieces.concat());
-        if let Some(plain) = plain(&text)
-            && nesting_within(&plain, MAX_NESTING)
-            && let Ok(document) = roxmltree::Document::parse(&plain)
-        {
-            let deepest = document.descendants().map(|node| node.ancestors().count()).max().unwrap_or(0);
-            proptest::prop_assert!(deepest <= MAX_NESTING + 2, "{deepest} levels passed the count");
+    fn the_count_is_the_parser_s_depth(steps in proptest::collection::vec(0_u8..16, 0..300), head in 0_u8..4) {
+        let text = document(&steps, head);
+        let options = roxmltree::ParsingOptions { allow_dtd: true, nodes_limit: MAX_NODES };
+        let tree = roxmltree::Document::parse_with_options(&text, options);
+        proptest::prop_assert!(tree.is_ok(), "the generated document parses: {}", text);
+        if let Ok(tree) = tree {
+            let real = tree
+                .descendants()
+                .filter(roxmltree::Node::is_element)
+                .map(|node| node.ancestors().filter(roxmltree::Node::is_element).count())
+                .max()
+                .unwrap_or(0);
+            let counted = plain(&text).and_then(|plain| depth_of(&plain));
+            proptest::prop_assert_eq!(counted, Some(real), "{}", text);
         }
-        let _ = parse(text.as_bytes(), None, &Places::default());
     }
+}
+
+/// A balanced document from `steps`: opens, closes (only while one is open), and pieces that hold no element of
+/// their own, among them comments and instructions that hold what looks like closes and opens (`<!-->` and `<!--->`
+/// forms included); `head` picks what comes before the root (nothing, the XML declaration, a document type, both).
+fn document(steps: &[u8], head: u8) -> String {
+    let heads = [
+        "",
+        "<?xml version=\"1.0\"?>",
+        "<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">",
+        "<?xml version=\"1.0\"?><!DOCTYPE fontconfig SYSTEM \"x\">",
+    ];
+    let mut text = heads[usize::from(head % 4)].to_owned();
+    text.push_str("<fontconfig>");
+    let mut open: Vec<&str> = Vec::new();
+    for step in steps {
+        match step {
+            0..=4 => {
+                let (tag, name) =
+                    [("<a>", "a"), ("<dir x=\"&lt;/a>\">", "dir"), ("<b y='&lt;!--'>", "b"), ("<a >", "a"), ("<c\n>", "c")][usize::from(*step)];
+                text.push_str(tag);
+                open.push(name);
+            }
+            5..=7 => {
+                if let Some(name) = open.pop() {
+                    text.push_str(&format!("</{name}>"));
+                }
+            }
+            8 => text.push_str("<!--></a></a>-->"),
+            9 => text.push_str("<!---> <b><c> -->"),
+            10 => text.push_str("<!-- </a> <a> -->"),
+            11 => text.push_str("<?pi </a><a>?>"),
+            12 => text.push_str("<a/>"),
+            13 => text.push_str("/usr/<!--x-->share"),
+            14 => text.push_str("&lt;a&gt; text"),
+            _ => text.push_str("<e k=\"v\"/>"),
+        }
+    }
+    while let Some(name) = open.pop() {
+        text.push_str(&format!("</{name}>"));
+    }
+    text.push_str("</fontconfig>");
+    text
 }
