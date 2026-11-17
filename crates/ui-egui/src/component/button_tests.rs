@@ -735,9 +735,9 @@ fn fade_of(mode: Mode, index: usize, reduced: bool) -> (Own, Own, Vec<Own>, Vec<
 fn at_full_motion_hover_cross_fades_over_125_ms_both_ways() {
     for mode in [Mode::Dark, Mode::Light] {
         let p = Theme::new(mode, TextScale::default()).palette;
-        // Only the text button fades: the presentation's `.btn` transition; a plain one has nothing opaque at both
-        // ends, so nothing of it fades.
-        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0) && faded()[*index].0 != "Discard") {
+        // Only the text button fades: the presentation's `.btn` transition; danger and plain have a fill at one end
+        // only, which switches at once and takes the label with it.
+        for index in (0..faded().len()).filter(|index| !INSTANT.contains(&faded()[*index].0) && !["Discard", "Delete"].contains(&faded()[*index].0)) {
             let (label, _, ground, colour) = faded().swap_remove(index);
             let p_ref = &p;
             let (rest, hover, on, off) = fade_of(mode, index, false);
@@ -803,5 +803,73 @@ fn a_text_buttons_fill_that_is_not_there_at_rest_switches_at_once_on_any_ground(
                 }
             }
         }
+    }
+}
+
+#[test]
+fn a_text_buttons_label_follows_its_fill_so_danger_and_plain_change_at_once() {
+    use crate::component::tests::{hover_frames, staged_motion};
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let p = theme.palette;
+        for (label, tone) in [("Delete", Tone::Danger), ("Discard", Tone::Plain)] {
+            let still = |shown| {
+                let mut harness = staged(
+                    theme,
+                    |p| p.surface,
+                    egui::vec2(400.0, 120.0),
+                    move |ui, theme| {
+                        TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                    },
+                );
+                bring(&mut harness, label, shown);
+                let rect = harness.get_by_label(label).rect();
+                own(&painted(&harness, label), rect)
+            };
+            let mut harness = staged_motion(
+                theme,
+                false,
+                |p| p.surface,
+                egui::vec2(400.0, 120.0),
+                move |ui, theme| {
+                    TextButton::new(label).tone(tone).show(ui, theme, &Keymap::default());
+                },
+            );
+            let (on, off) = hover_frames(&mut harness, label, 10);
+            assert_eq!(on[0], still(Shown::Hover), "{mode:?} {label}: the first hovered frame");
+            assert_eq!(off[0], still(Shown::Rest), "{mode:?} {label}: the first frame after leaving");
+            for look in on.iter().chain(&off) {
+                let ink = label_of(look, label).map(|l| l.0);
+                assert!(!(look.fill == Some(p.minus) && ink == Some(p.minus)), "{mode:?} {label}: a minus label on a minus fill");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_press_during_a_hover_fade_shows_the_pressed_look_in_that_frame() {
+    use crate::component::tests::staged_motion;
+    for mode in [Mode::Dark, Mode::Light] {
+        let theme = Theme::new(mode, TextScale::default());
+        let (_, held) = text_button_in(mode, TextScale::default(), "Send", Shown::Pressed, toned("Send", Tone::Primary, TextState::Pressed));
+        let mut harness = staged_motion(
+            theme,
+            false,
+            |p| p.surface,
+            egui::vec2(400.0, 120.0),
+            |ui, theme| {
+                TextButton::new("Send").primary().show(ui, theme, &Keymap::default());
+            },
+        );
+        let centre = harness.get_by_label("Send").rect().center();
+        harness.hover_at(centre);
+        for _ in 0..3 {
+            harness.step();
+        }
+        harness.drag_at(centre);
+        harness.step();
+        let rect = harness.get_by_label("Send").rect();
+        let look = own(&painted(&harness, "Send"), rect);
+        assert_eq!((look.fill, look.edge, &look.texts), (held.fill, held.edge, &held.texts), "{mode:?}: pressed at once, mid-fade");
     }
 }

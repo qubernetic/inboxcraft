@@ -127,7 +127,8 @@ pub(crate) struct Face {
 
 /// The colours `t` of the way from `rest` to `hover` (0 to 1), moving `toward_hover` or back: each colour opaque at
 /// both ends is mixed between them, never faded by alpha. A fill or edge that one end does not paint has no colour to
-/// mix with (the ground under a control is not known), so it switches at once to the end it moves toward.
+/// mix with (the ground under a control is not known), so it switches at once to the end it moves toward; the text
+/// goes with its fill.
 pub(crate) fn between(rest: Face, hover: Face, t: f32, toward_hover: bool) -> Face {
     let t = t.clamp(0.0, 1.0);
     if t <= 0.0 {
@@ -141,7 +142,19 @@ pub(crate) fn between(rest: Face, hover: Face, t: f32, toward_hover: bool) -> Fa
         _ if toward_hover => b,
         _ => a,
     };
-    Face { fill: pick(rest.fill, hover.fill), edge: pick(rest.edge, hover.edge), ink: rest.ink.lerp_to_gamma(hover.ink, t) }
+    // The text follows its fill: it fades when the fill fades and switches with it when the fill switches, so it
+    // never stands for a moment in the colour of the fill under it.
+    let ink = match (rest.fill, hover.fill) {
+        (Some(_), None) | (None, Some(_)) => {
+            if toward_hover {
+                hover.ink
+            } else {
+                rest.ink
+            }
+        }
+        _ => rest.ink.lerp_to_gamma(hover.ink, t),
+    };
+    Face { fill: pick(rest.fill, hover.fill), edge: pick(rest.edge, hover.edge), ink }
 }
 
 /// `text` in `font` and `colour`, on one line as high as the style's line height, with its tracking and, if it asks for

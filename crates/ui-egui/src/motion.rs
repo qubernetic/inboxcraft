@@ -14,7 +14,9 @@ use egui::{Context, Id, Style, emath::easing, style::ScrollAnimation};
 /// The durations of the motion tokens, in seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Motion {
-    /// Hover actions fading in over a row.
+    /// Hover actions fading in over a row, and the hover of the controls not yet restyled to the design (checkbox,
+    /// pill, select, segmented control, popup rows, card, time picker); the restyled ones take [`Motion::fast`] or
+    /// change at once, as the presentation has them.
     pub hover_fade: f32,
     /// The `fast` token: a control's colours cross-fading between rest and hover, linear.
     pub fast: f32,
