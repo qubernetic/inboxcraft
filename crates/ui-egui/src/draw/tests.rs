@@ -616,6 +616,66 @@ fn a_hovered_row_takes_the_fill_of_its_ground() {
     assert!(!filled_at(&harness, calendar, p.stage));
 }
 
+/// The physical columns that tall upright lines in `colour` cover within 4 points of `x` in the last frame of
+/// `harness`, tessellated without feathering.
+fn upright_line_columns(harness: &Harness<'static, InboxApp>, colour: egui::Color32, x: f32) -> std::collections::BTreeSet<i32> {
+    let output = harness.output();
+    let ppp = output.pixels_per_point;
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let mut covered = std::collections::BTreeSet::new();
+    for clipped in tessellator.tessellate_shapes(output.shapes.clone()) {
+        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+        for triangle in mesh.indices.chunks(3) {
+            let corners: Vec<_> = triangle.iter().map(|at| mesh.vertices[*at as usize]).collect();
+            if corners.iter().any(|vertex| vertex.color != colour) {
+                continue;
+            }
+            let span = egui::Rect::from_points(&corners.iter().map(|vertex| vertex.pos).collect::<Vec<_>>());
+            if span.width() > 4.0 || span.height() < 200.0 || (span.left() - x).abs() > 4.0 {
+                continue;
+            }
+            covered.extend((span.left() * ppp).round() as i32..(span.right() * ppp).round() as i32);
+        }
+    }
+    covered
+}
+
+/// Where the rail ends: its buttons stand in its middle.
+fn rail_right(harness: &Harness<'static, InboxApp>, theme: &Theme) -> f32 {
+    harness.get_by_role_and_label(Role::Button, "Calendar").rect().center().x + super::pane::rail_width(theme) / 2.0
+}
+
+#[test]
+fn one_line_stands_between_the_rail_and_the_pane_beside_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for ppp in [1.0_f32, 1.5] {
+        let wide = ppp.round().max(1.0) as usize;
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(ppp)
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.run();
+        let seam = rail_right(&harness, &theme);
+        let mail = upright_line_columns(&harness, theme.palette.line, seam);
+        assert_eq!(mail.len(), wide, "{ppp}: one line between the rail and the folder pane: {mail:?}");
+        harness.get_by_role_and_label(Role::Button, "Calendar").click();
+        harness.run();
+        let calendar = upright_line_columns(&harness, theme.palette.line, seam);
+        assert_eq!(calendar.len(), wide, "{ppp}: one line between the rail and the calendar's side: {calendar:?}");
+    }
+}
+
+#[test]
+fn the_rail_keeps_its_line_where_no_pane_stands_beside_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let session = Session::new(Box::new(Memory::new(StoreConfig::default())), clock()).unwrap();
+    let harness = harness_with(InboxApp::new(Mailbox::new(session, clock())), egui::Theme::Dark);
+    let columns = upright_line_columns(&harness, theme.palette.line, rail_right(&harness, &theme));
+    assert_eq!(columns.len(), 1, "the rail's own edge: {columns:?}");
+}
+
 #[test]
 fn the_account_picker_opens_by_enter_and_takes_an_account_by_enter() {
     let mut harness = harness();

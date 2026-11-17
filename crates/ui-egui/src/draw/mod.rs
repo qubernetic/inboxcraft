@@ -1299,13 +1299,15 @@ impl InboxApp {
         let mut layers = Panes::begin(ui.painter());
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
-        let clicked_rail = Panel::left("rail")
+        let rail = Panel::left("rail")
             .resizable(false)
             .exact_size(width)
             .show_separator_line(false)
             .frame(Frame::NONE)
-            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)))
-            .inner;
+            .show(ui, |ui| pane::rail(ui, &theme, &self.keymap, &self.mailbox, self.screen, setting, adding, self.rail_place(corner, s.s2)));
+        // The rail draws its own edge, so the pane beside it draws none: one line between them.
+        layers.edged(rail.response.rect);
+        let clicked_rail = rail.inner;
         self.own_frame_parts(ui, &theme, corner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();

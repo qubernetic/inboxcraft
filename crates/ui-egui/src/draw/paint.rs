@@ -171,18 +171,26 @@ pub(crate) fn rule(ui: &mut Ui, colour: Color32) -> Response {
 
 /// The panes of one frame. [`Panes::begin`] keeps a place under everything drawn after it; each [`Panes::card`]
 /// draws its content and notes its rectangle; [`Panes::finish`] puts every pane's flat `surface` into the kept place,
-/// with a `line` hairline on each edge that does not lie on the window's border, once where two panes meet.
+/// with a `line` hairline on each edge that does not lie on the window's border, once where two panes meet, and none
+/// where a pane meets a strip that draws its own edge ([`Panes::edged`], the rail).
 #[derive(Debug)]
 pub(crate) struct Panes {
     slot: ShapeIdx,
     rects: Vec<Rect>,
+    edged: Vec<Rect>,
 }
 
 impl Panes {
     /// Keeps the place for the panes in `painter`'s list, after what it holds now.
     #[must_use]
     pub(crate) fn begin(painter: &Painter) -> Self {
-        Self { slot: painter.add(Shape::Noop), rects: Vec::new() }
+        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new() }
+    }
+
+    /// Notes `rect`, a strip beside the panes that draws the line on its right edge itself (the rail, whose edge
+    /// stands with or without a pane beside it): a pane that starts there draws no line on its left.
+    pub(crate) fn edged(&mut self, rect: Rect) {
+        self.edged.push(rect);
     }
 
     /// A pane over the whole of `ui`, with `add` drawing its content `inner` from its edges.
@@ -201,7 +209,9 @@ impl Panes {
         for rect in &self.rects {
             let (top, bottom) = (rect.top(), rect.bottom() - 1.0);
             let (left, right) = (rect.left(), rect.right() - 1.0);
-            if !near(rect.left(), window.left()) {
+            // A strip's own edge is the line between it and this pane.
+            let beside_edge = self.edged.iter().any(|strip| near(strip.right(), rect.left()));
+            if !near(rect.left(), window.left()) && !beside_edge {
                 shapes.push(hairline_shape(pos2(left, top), pos2(left, rect.bottom()), colour, ppp));
             }
             // The next pane's left edge is this one's right edge: drawn once, by the next.
