@@ -80,13 +80,26 @@ pub(crate) enum Look {
 }
 
 /// One shape painted for a widget: its rect, whether it lies inside the widget's own rect (`false`: in the 4 points
-/// around it, where a focus ring stands), whether its clip rect cuts it, and its look.
+/// around it, where a focus ring stands), whether its clip rect cuts it, whether it is text that reaches past the
+/// 4 points around the widget (`overflows`; always `false` for other shapes), and its look.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Painted {
     pub rect: Rect,
     pub inside: bool,
     pub clipped: bool,
+    pub overflows: bool,
     pub look: Look,
+}
+
+/// The margin [`stage`] keeps around a widget, in points: more than the 4 points [`painted`] looks around it.
+const STAGE_MARGIN: i8 = 16;
+
+/// Places a widget for [`painted`]: paints `ground` over the room `ui` has and adds the widget with `add` inside a
+/// 16 point margin, so the ground always strictly holds the widget and the 4 points around it, and the harness's
+/// own background is never read as the widget's fill.
+pub(crate) fn stage<R>(ui: &mut egui::Ui, ground: Color32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.painter().rect_filled(ui.available_rect_before_wrap(), 0.0, ground);
+    egui::Frame::NONE.inner_margin(egui::Margin::same(STAGE_MARGIN)).show(ui, add).inner
 }
 
 /// What [`painted`] found for a widget: the fill it stands on (`ground`) and its own shapes in paint order.
@@ -229,16 +242,18 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
 ///   rect or not (a focus ring is not), and `clipped` when its clip rect cuts it; shapes clipped away wholly are left
 ///   out. A shadow is kept when its centre lies in the widget's rect, however far its blur reaches.
 /// - `ground`: the fill of the last shape before the widget's first one whose rect strictly holds the grown rect
-///   (the parent it stands on); such shapes are not in `shapes`.
+///   (the parent it stands on, or the [`stage`]); such shapes are not in `shapes`. Always `Some`: without one
+///   `painted` panics and asks for a [`stage`].
+/// - Text is kept whenever its galley touches the widget's own rect, marked `overflows` when it reaches past the
+///   grown rect; it is never dropped.
 ///
 /// The line segments of an edge [`paint::dashed`](crate::draw::paint::dashed) drew are one shape with
-/// `dashed: true`; nothing else is ever dashed. A harness whose only content is the widget paints its own background
-/// in exactly the widget's rect, which then shows as an inside fill.
+/// `dashed: true`; nothing else is ever dashed.
 ///
 /// # Panics
 ///
-/// When no widget or more than one has `label`, or the harness does not [`record_layers`] (build it with
-/// [`builder`]).
+/// When no widget or more than one has `label`, when the harness does not [`record_layers`] (build it with
+/// [`builder`]), or when no ground holds the widget (place it with [`stage`]).
 pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint {
     let node = harness.get_by_label(label);
     let own = node.rect();
@@ -274,6 +289,13 @@ pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint
                 continue;
             }
             let clipped = !clipped.clip_rect.expand(0.01).contains_rect(rect);
+            if let Look::Text { .. } = look {
+                // Text is never dropped while it touches the widget: text that leaves the grown rect is marked.
+                if rect.intersects(own) {
+                    shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, overflows: !grown.contains_rect(rect), look });
+                }
+                continue;
+            }
             let shadow = matches!(look, Look::Shadow { .. }) && own.contains(rect.center());
             if !shadow && rect.contains_rect(grown) && rect != grown {
                 if let Look::Rect { fill, .. } = look
@@ -285,15 +307,18 @@ pub(crate) fn painted<State>(harness: &Harness<'_, State>, label: &str) -> Paint
                 continue;
             }
             if shadow || grown.contains_rect(rect) {
-                shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, look });
+                shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped, overflows: false, look });
             }
         }
     }
     for (rect, colour) in dashes {
         let look = Look::Rect { fill: Color32::TRANSPARENT, stroke: Some((1.0, colour)), stroke_kind: StrokeKind::Inside, radius: 0.0, dashed: true };
-        shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped: false, look });
+        shapes.push(Painted { rect, inside: own.expand(0.01).contains_rect(rect), clipped: false, overflows: false, look });
     }
-    Paint { ground: grounds.last().copied(), shapes }
+    let Some(ground) = grounds.last().copied() else {
+        panic!("{label}: no ground under the widget; place it with component::tests::stage so its own fill is never confused with the page's")
+    };
+    Paint { ground: Some(ground), shapes }
 }
 
 /// The node focused in the harness's AccessKit tree.

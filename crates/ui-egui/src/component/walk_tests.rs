@@ -7,8 +7,11 @@
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 
+use super::button::IconButton;
 use super::gallery::{keymap, page, size};
-use super::tests::{Look, builder, keyboard_walk, painted, rests};
+use super::tests::{Look, builder, keyboard_walk, painted, rests, stage};
+use crate::iconset::IconId;
+use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
@@ -186,4 +189,50 @@ fn painted_calls_dashed_only_what_paint_dashed_drew() {
     let plain = painted(&harness, "Plain");
     assert_eq!(plain.shapes.len(), 4, "{plain:#?}");
     assert!(plain.shapes.iter().all(|shape| matches!(shape.look, Look::Rect { dashed: false, .. })));
+}
+
+#[test]
+fn a_button_on_a_stage_stands_on_its_ground_with_no_fill_of_its_own() {
+    let ground = egui::Color32::from_rgb(40, 50, 60);
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().with_size(egui::vec2(200.0, 120.0)).build_ui(move |ui| {
+        stage(ui, ground, |ui| IconButton::new(IconId::Done, "Done").show(ui, &theme, &Keymap::default()));
+    });
+    harness.run();
+    let paint = painted(&harness, "Done");
+    assert_eq!(paint.ground, Some(ground));
+    assert!(!paint.rects().any(|shape| shape.inside && matches!(shape.look, Look::Rect { fill, .. } if fill.a() > 0)), "{paint:#?}");
+}
+
+#[test]
+#[should_panic(expected = "Done: no ground under the widget; place it with component::tests::stage")]
+fn a_widget_alone_in_a_harness_is_refused() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().build_ui(move |ui| {
+        IconButton::new(IconId::Done, "Done").show(ui, &theme, &Keymap::default());
+    });
+    harness.run();
+    let _ = painted(&harness, "Done");
+}
+
+/// A button of a fixed width on a stage with `label` in it, left aligned.
+fn fixed(label: &'static str) -> Harness<'static> {
+    let mut harness = builder().with_size(egui::vec2(400.0, 120.0)).build_ui(move |ui| {
+        stage(ui, egui::Color32::GRAY, |ui| {
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(60.0, 24.0), egui::Sense::click());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Fixed"));
+            ui.painter().text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(13.0), egui::Color32::WHITE);
+        });
+    });
+    harness.run();
+    harness
+}
+
+#[test]
+fn text_that_leaves_its_button_is_kept_and_marked() {
+    let texts = |harness: &Harness<'static>| -> Vec<bool> {
+        painted(harness, "Fixed").shapes.iter().filter(|shape| matches!(shape.look, Look::Text { .. })).map(|shape| shape.overflows).collect()
+    };
+    assert_eq!(texts(&fixed("A label much longer than its button")), vec![true]);
+    assert_eq!(texts(&fixed("Ok")), vec![false]);
 }
