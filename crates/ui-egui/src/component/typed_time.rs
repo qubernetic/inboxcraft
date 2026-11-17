@@ -307,6 +307,70 @@ pub fn short(at: Timestamp, now: Timestamp, offset: Offset) -> String {
     }
 }
 
+/// Whether `text` names a time that has passed at `now` in `offset`: it reads as a time from long ago (a date), but
+/// none ahead.
+#[must_use]
+pub fn passed(text: &str, now: Timestamp, offset: Offset) -> bool {
+    parse(text, now, offset).is_none() && parse(text, Timestamp::UNIX_EPOCH, offset).is_some()
+}
+
+/// The typed-time field (`typed-time`), filling the width `ui` offers: a box 36 high on `term` with the text in `mono`
+/// 13 in and its hint ("thu 9, 12 nov 17:00, in 3 days") while it is empty, at most [`MAX_TYPED`] bytes' worth; under
+/// it, once something is typed, what it reads as at `now`: a tick and the time in full in `cyan_text`, or why there is
+/// none in `muted`. It counts as soon as it reads as a time: no Enter. `name` is what a screen reader calls it.
+#[allow(clippy::too_many_arguments)]
+pub fn typed_time_field(ui: &mut egui::Ui, theme: &crate::theme::Theme, id: egui::Id, name: &str, text: &mut String, now: Timestamp, offset: Offset) -> egui::Response {
+    typed_time_with(ui, theme, id, name, text, now, offset, None)
+}
+
+/// [`typed_time_field`] drawn in `shown`: a board of the gallery.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn typed_time_with(
+    ui: &mut egui::Ui,
+    theme: &crate::theme::Theme,
+    id: egui::Id,
+    name: &str,
+    text: &mut String,
+    now: Timestamp,
+    offset: Offset,
+    shown: Option<super::Shown>,
+) -> egui::Response {
+    use egui::{Rect, Sense, pos2, vec2};
+    let p = &theme.palette;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = theme.spacing.s2;
+        let field = super::field::Field::new("", tr!("thu 9, 12 nov 17:00, in 3 days"));
+        let response = super::field::mono_field(ui, theme, id, text, &field, MAX_TYPED, shown);
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+        if text.trim().is_empty() {
+            return response;
+        }
+        let font = theme.fonts.caption;
+        let width = ui.available_width();
+        let (rect, line) = ui.allocate_exact_size(vec2(width, font.line), Sense::hover());
+        let (words, colour, tick) = match parse(text, now, offset) {
+            Some(at) => (long(at, now, offset), p.cyan_text, true),
+            None if passed(text, now, offset) => (tr!("That time has passed: type one still ahead").to_owned(), p.muted, false),
+            None => (tr!("Not a time yet: try thu 9, 12 nov or in 3 days").to_owned(), p.muted, false),
+        };
+        line.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &words));
+        if ui.is_rect_visible(rect) {
+            let painter = super::solid(ui);
+            let mut left = rect.left();
+            if tick {
+                let side = theme.boxes().mark;
+                let at = Rect::from_min_size(pos2(left, rect.center().y - side / 2.0), vec2(side, side));
+                crate::iconset::paint_glyph(&painter, at, super::popup::CHECK, colour);
+                left += side + theme.spacing.s1;
+            }
+            let words = super::cut(ui, &words, font, colour, rect.right() - left);
+            painter.galley(pos2(left, rect.top()), words, colour);
+        }
+        response
+    })
+    .inner
+}
+
 #[cfg(test)]
 #[path = "typed_time_tests.rs"]
 mod tests;

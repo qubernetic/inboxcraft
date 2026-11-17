@@ -129,6 +129,8 @@ fn inset(theme: &Theme) -> f32 {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Line {
     Text,
+    /// A line the app reads, in `mono` (the typed time).
+    Mono,
     Password(Secret),
 }
 
@@ -147,6 +149,12 @@ pub fn text_field_limited(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String,
 /// shows a still caret after the text.
 pub(crate) fn text_field_with(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, shown: Option<Shown>) -> Response {
     one_line(ui, theme, id, text, field, Line::Text, usize::MAX, shown)
+}
+
+/// A one-line field whose text is `mono` (Plex Mono 13/20), its hint too, at most `limit` characters, drawn in
+/// `shown` for a board: a line the app reads, as the typed time.
+pub(crate) fn mono_field(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field<'_>, limit: usize, shown: Option<Shown>) -> Response {
+    one_line(ui, theme, id, text, field, Line::Mono, limit, shown)
 }
 
 /// A password field: [`text_field`] whose text is never shown, a dot (Plex Mono 13/20) for every character, the
@@ -330,12 +338,12 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
             paint_box(&painter, rect, fill, edge, dashed);
         }
         let password = matches!(kind, Line::Password(_));
-        let font = if password { theme.fonts.mono } else { theme.fonts.body };
+        let font = if password || kind == Line::Mono { theme.fonts.mono } else { theme.fonts.body };
         // The mark at the right end: the lock of a read-only or stored field, the password mark.
         let mark = match kind {
             _ if field.read_only || stored => Some(LOCK),
             Line::Password(Secret::Typed) => Some(PASSWORD),
-            Line::Text => None,
+            Line::Text | Line::Mono => None,
             Line::Password(Secret::Stored) => Some(LOCK),
         };
         let pad = inset(theme);

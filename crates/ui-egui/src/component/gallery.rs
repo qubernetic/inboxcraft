@@ -36,6 +36,7 @@ use super::switch::{self, SwitchState, switch};
 use super::tag::{TagKind, tag};
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
+use super::typed_time;
 use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip};
 
 /// The page's size in points.
@@ -1098,8 +1099,28 @@ fn menu_choices(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The typed time's board: empty, focus, valid, invalid; and past, which the time picker's board shows.
+fn typed_times(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Typed time"));
+    let one = |ui: &mut Ui, value: &str, shown: Option<Shown>| {
+        let id = ui.make_persistent_id("field");
+        let mut text = value.to_owned();
+        typed_time::typed_time_with(ui, theme, id, tr!("Or type a time"), &mut text, now(), Offset::UTC, shown);
+    };
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("empty"), 296.0, |ui| one(ui, "", None));
+        field_cell(ui, theme, tr!("focus"), 296.0, |ui| one(ui, "", Some(Shown::Focus)));
+    });
+    cells(ui, theme, |ui| {
+        field_cell(ui, theme, tr!("valid"), 296.0, |ui| one(ui, "thu 9", Some(Shown::Focus)));
+        field_cell(ui, theme, tr!("invalid"), 296.0, |ui| one(ui, "thursdy", Some(Shown::Focus)));
+    });
+}
+
 /// The fields' right column of boards.
-fn fields_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+fn fields_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    ui.push_id("typed-time", |ui| typed_times(ui, theme));
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
