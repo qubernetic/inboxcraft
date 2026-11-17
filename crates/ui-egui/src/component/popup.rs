@@ -12,7 +12,7 @@ use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{cut, galley, margin, tick};
+use super::{cut, galley, margin, soon, tick};
 
 /// Draws a float of `width` points into `ui` with `add` drawing its content.
 pub fn panel<R>(ui: &mut Ui, theme: &Theme, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -72,12 +72,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = theme.boxes().menu_row;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
+    let soon = soon::is_soon(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), soon::sense(ui, Sense::click()));
     response.widget_info(|| match chosen {
-        Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, true, chosen, name),
-        None => WidgetInfo::labeled(Role::MenuItem, true, name),
+        Some(chosen) => WidgetInfo::selected(Role::MenuItemRadio, !soon, chosen, name),
+        None => WidgetInfo::labeled(Role::MenuItem, !soon, name),
     });
-    let lit = response.hovered() || response.has_focus();
+    let lit = !soon && (response.hovered() || response.has_focus());
     let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -86,11 +87,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
         }
         let side = theme.fonts.body.size * 1.2;
         let icon_rect = Rect::from_center_size(pos2(rect.left() + s.s2 + side / 2.0, rect.center().y), vec2(side, side));
+        // Coming soon, a row without a box: `muted` words and a `dim` glyph.
         match (icon, chosen) {
+            (Some(icon), _) if soon => crate::iconset::paint(painter, icon_rect, icon, p.dim),
             (Some(icon), Some(false)) => crate::iconset::paint(painter, icon_rect, icon, p.muted),
             (Some(icon), Some(true)) => crate::iconset::paint(painter, icon_rect, icon, p.cyan_text),
             (Some(icon), None) => crate::iconset::paint(painter, icon_rect, icon, p.ink),
-            (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), p.muted),
+            (None, Some(true)) => tick(painter, icon_rect.shrink(1.0), if soon { p.dim } else { p.muted }),
             (None, _) => {}
         }
         let mut right = rect.right() - s.s2;
@@ -101,8 +104,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, icon: Option<IconId>, name: 
             right -= s.s4;
         }
         let left = icon_rect.right() + s.s2;
-        let text = cut(ui, name, theme.fonts.body, p.ink, right - left);
-        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
+        let ink = soon::ink(ui, theme, p.ink);
+        let text = cut(ui, name, theme.fonts.body, ink, right - left);
+        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, ink);
     }
     response
 }

@@ -7,13 +7,14 @@
 
 use egui::{Align, Id, Layout, Rect, Shape, Stroke, StrokeKind, Ui, UiBuilder, vec2};
 
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
 use super::button::IconButton;
-use super::control_side;
+use super::{control_side, soon};
 
 /// One action of the group.
 #[derive(Debug, Clone, Copy)]
@@ -61,8 +62,15 @@ pub fn actions(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: Id, row: Rect, s
     let slot = child.painter().add(Shape::Noop);
     // Flat in its row: the surface and a hairline, no shadow over the rows beside it.
     let p = theme.palette;
-    let shapes = vec![Shape::rect_filled(group, 0.0, p.surface), Shape::rect_stroke(group, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside)];
+    let soon = soon::is_soon(&child);
+    let mut shapes = vec![Shape::rect_filled(group, 0.0, p.surface)];
+    if !soon {
+        shapes.push(Shape::rect_stroke(group, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside));
+    }
     child.painter().set(slot, Shape::Vec(shapes));
+    if soon {
+        paint::dashed(child.painter(), group, p.muted);
+    }
     child.add_space(theme.spacing.s1);
     child.spacing_mut().item_spacing.x = theme.spacing.s1;
     let mut clicked = None;

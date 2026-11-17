@@ -9,12 +9,13 @@
 
 use egui::{Color32, Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, vec2};
 
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{control_side, tooltip};
+use super::{control_side, soon, tooltip};
 
 /// An icon button.
 #[derive(Debug, Clone, Copy)]
@@ -86,10 +87,12 @@ impl<'a> IconButton<'a> {
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
         let side = self.side.filter(|side| side.is_finite() && *side >= 1.0).unwrap_or_else(|| control_side(theme)).min(512.0);
-        let sense = if self.enabled { Sense::click() } else { Sense::hover() };
+        // Coming soon, it is drawn and explains itself like a disabled one.
+        let enabled = self.enabled && !soon::is_soon(ui);
+        let sense = if enabled { Sense::click() } else { Sense::hover() };
         let (rect, response) = ui.allocate_exact_size(vec2(side, side), sense);
-        response.widget_info(|| WidgetInfo::selected(Role::Button, self.enabled, self.active, self.name));
-        let lit = self.enabled && (response.hovered() || response.has_focus());
+        response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, self.active, self.name));
+        let lit = enabled && (response.hovered() || response.has_focus());
         let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -104,7 +107,7 @@ impl<'a> IconButton<'a> {
                 (None, true) => p.cyan_text,
                 (None, false) => p.ink,
             };
-            let colour = if self.enabled { colour } else { p.dim };
+            let colour = if enabled { colour } else { p.dim };
             let icon = if self.side.is_some() { side * 0.5 } else { theme.icon_side() };
             crate::iconset::paint(painter, egui::Rect::from_center_size(rect.center(), vec2(icon, icon)), self.icon, colour);
             if response.has_focus() {
@@ -191,8 +194,10 @@ impl<'a> TextButton<'a> {
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
         let s = &theme.spacing;
-        let enabled = self.note.is_none();
+        let soon = soon::is_soon(ui);
+        let enabled = self.note.is_none() && !soon;
         let ink = match self.tone {
+            _ if soon => p.muted,
             Tone::Primary => p.on_cyan,
             Tone::Danger => p.bg,
             Tone::Quiet | Tone::Secondary => p.ink,
@@ -208,10 +213,13 @@ impl<'a> TextButton<'a> {
         let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
         if ui.is_rect_visible(rect) {
             let mut faded = ui.painter().clone();
-            faded.multiply_opacity(if enabled { 1.0 } else { DISABLED });
+            // Coming soon is drawn faint by colour, never faded.
+            faded.multiply_opacity(if enabled || soon { 1.0 } else { DISABLED });
             let painter = &faded;
             let round = 0.0;
             match self.tone {
+                // Coming soon: no fill, a dashed edge round every button that has a box.
+                Tone::Primary | Tone::Danger | Tone::Secondary if soon => paint::dashed(painter, rect, p.muted),
                 Tone::Primary => {
                     painter.rect_filled(rect, round, p.cyan);
                 }
@@ -270,17 +278,19 @@ pub const LINK_PAD: f32 = 4.0;
 pub fn link(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str) -> Response {
     let s = &theme.spacing;
     let p = &theme.palette;
-    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), p.cyan_text);
-    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(2.0 * LINK_PAD, 2.0 * s.s1), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
+    let soon = soon::is_soon(ui);
+    let ink = soon::ink(ui, theme, p.cyan_text);
+    let galley = ui.painter().layout_no_wrap(name.to_owned(), theme.fonts.button.id(), ink);
+    let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(2.0 * LINK_PAD, 2.0 * s.s1), soon::sense(ui, Sense::click()));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, !soon, name));
     if ui.is_rect_visible(rect) {
-        if response.hovered() {
+        if response.hovered() && !soon {
             ui.painter().rect_filled(rect, 0.0, p.stage);
         }
         if response.has_focus() {
             ui.painter().rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Outside);
         }
-        ui.painter().galley(rect.min + vec2(LINK_PAD, s.s1), galley, p.cyan_text);
+        ui.painter().galley(rect.min + vec2(LINK_PAD, s.s1), galley, ink);
     }
     tooltip::attach(response, theme, keymap, name, None)
 }

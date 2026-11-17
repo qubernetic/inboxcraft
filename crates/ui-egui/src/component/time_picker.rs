@@ -14,6 +14,7 @@
 use egui::{Align, Align2, Frame, Key, Layout, Margin, Response, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, WidgetInfo, pos2, vec2};
 use inboxcraft_time::{Offset, Timestamp};
 
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::motion;
@@ -23,7 +24,7 @@ use crate::tr;
 use super::button::{self, TextButton};
 use super::switch::switch;
 use super::typed_time::{self, long, short};
-use super::{control_side, cut, galley, margin};
+use super::{control_side, cut, galley, margin, soon};
 
 pub use super::typed_time::MAX_TYPED;
 
@@ -122,9 +123,10 @@ fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
     let height = theme.boxes().field;
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, true, tr!("{name}, {time}", name = name, time = time)));
-    let lit = response.hovered() || response.has_focus();
+    let soon = soon::is_soon(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(height), height), soon::sense(ui, Sense::click()));
+    response.widget_info(|| WidgetInfo::labeled(Role::MenuItem, !soon, tr!("{name}, {time}", name = name, time = time)));
+    let lit = !soon && (response.hovered() || response.has_focus());
     let hover = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -135,8 +137,9 @@ fn preset_row(ui: &mut Ui, theme: &Theme, name: &str, time: &str) -> Response {
         let right = rect.right() - s.s3 - time.size().x;
         painter.galley(pos2(right, rect.center().y - time.size().y / 2.0), time, p.muted);
         let left = rect.left() + s.s3;
-        let text = cut(ui, name, theme.fonts.body, p.ink, right - s.s3 - left);
-        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, p.ink);
+        let ink = soon::ink(ui, theme, p.ink);
+        let text = cut(ui, name, theme.fonts.body, ink, right - s.s3 - left);
+        painter.galley(pos2(left, rect.center().y - text.size().y / 2.0), text, ink);
         if response.has_focus() {
             painter.rect_stroke(rect, 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Inside);
         }
@@ -187,7 +190,12 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), control_side(theme) + s.s2), Sense::hover());
         let edge = if ui.memory(|memory| memory.has_focus(id)) { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
         ui.painter().rect_filled(rect, 0.0, p.term);
-        ui.painter().rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        if soon::is_soon(ui) {
+            // Coming soon, the field is disabled with its `Ui`, and its edge is dashed.
+            paint::dashed(ui.painter(), rect, p.muted);
+        } else {
+            ui.painter().rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        }
         let inner = rect.shrink2(vec2(s.s2, 0.0));
         let edit = TextEdit::singleline(&mut state.typed)
             .id(id)
@@ -200,7 +208,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
         let field = ui.put(inner, edit).labelled_by(caption.id);
         // Read after the edit, so the line and the button see this frame's text.
         let chosen = state.chosen(now, offset);
-        let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+        let entered = !soon::is_soon(ui) && field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
         if !state.typed.trim().is_empty() {
             reading(ui, theme, chosen, now, offset);
         }
@@ -232,7 +240,7 @@ pub fn show(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask: &Ask<'_>, n
             }
         });
     });
-    if ui.input(|input| input.key_pressed(Key::Escape)) {
+    if !soon::is_soon(ui) && ui.input(|input| input.key_pressed(Key::Escape)) {
         picked = Picked::Cancelled;
     }
     match picked {

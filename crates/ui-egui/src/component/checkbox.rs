@@ -7,10 +7,11 @@
 
 use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{cut, tick};
+use super::{cut, soon, tick};
 
 /// The side of the box or the ring, in points.
 const BOX: f32 = 18.0;
@@ -31,23 +32,25 @@ const GAP: f32 = 8.0;
 fn row(ui: &mut Ui, theme: &Theme, role: Role, name: &str, on: bool) -> (Response, egui::Rect) {
     let p = &theme.palette;
     let high = theme.fonts.body.line.max(BOX);
-    let text = cut(ui, name, theme.fonts.body, p.ink, f32::INFINITY);
+    let ink = soon::ink(ui, theme, p.ink);
+    let text = cut(ui, name, theme.fonts.body, ink, f32::INFINITY);
     let wanted = BOX + GAP + text.size().x;
     let wide = wanted.min(ui.available_width().max(BOX));
-    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(role, ui.is_enabled(), on, name));
+    let (rect, response) = ui.allocate_exact_size(vec2(wide, high), soon::sense(ui, Sense::click()));
+    response.widget_info(|| WidgetInfo::selected(role, ui.is_enabled() && !soon::is_soon(ui), on, name));
     let mark = egui::Rect::from_min_size(pos2(rect.left(), rect.center().y - BOX / 2.0), vec2(BOX, BOX));
     if ui.is_rect_visible(rect) {
         let room = rect.right() - mark.right() - GAP;
-        let text = if wide < wanted { cut(ui, name, theme.fonts.body, p.ink, room) } else { text };
-        ui.painter().galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, p.ink);
+        let text = if wide < wanted { cut(ui, name, theme.fonts.body, ink, room) } else { text };
+        ui.painter().galley(pos2(mark.right() + GAP, rect.center().y - text.size().y / 2.0), text, ink);
     }
     (response, mark)
 }
 
-/// Lays the hover fade over `mark` as `round` as it should be.
+/// Lays the hover fade over `mark` as `round` as it should be; none coming soon.
 fn hover(ui: &Ui, theme: &Theme, response: &Response, mark: egui::Rect, round: f32) {
-    let shown = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
+    let lit = response.hovered() && !soon::is_soon(ui);
+    let shown = motion::toggle(ui.ctx(), response.id.with("hover"), lit, theme.motion.hover_fade);
     if shown > 0.0 {
         ui.painter().rect_filled(mark, round, theme.palette.stage);
     }
@@ -59,6 +62,14 @@ pub fn checkbox(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     if ui.is_rect_visible(mark) {
         let p = &theme.palette;
         let painter = ui.painter();
+        if soon::is_soon(ui) {
+            // Coming soon: the box is a dashed edge, the tick in the muted colour.
+            paint::dashed(painter, mark, p.muted);
+            if on {
+                tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.muted);
+            }
+            return response;
+        }
         if on {
             painter.rect_filled(mark, CORNER, p.cyan);
             tick(painter, egui::Rect::from_center_size(mark.center(), vec2(TICK, TICK)), p.on_cyan);
@@ -80,6 +91,14 @@ pub fn radio(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     if ui.is_rect_visible(mark) {
         let p = &theme.palette;
         let painter = ui.painter();
+        if soon::is_soon(ui) {
+            // Coming soon: the ring is a dashed edge, the dot in the muted colour.
+            paint::dashed(painter, mark, p.muted);
+            if on {
+                painter.circle_filled(mark.center(), DOT / 2.0, p.muted);
+            }
+            return response;
+        }
         let round = BOX / 2.0;
         painter.rect_filled(mark, round, p.term);
         let edge = if on { Stroke::new(2.0, p.cyan_text) } else { Stroke::new(1.0, p.line) };

@@ -8,11 +8,12 @@
 
 use egui::{Rect, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::motion;
 use crate::theme::{Font, Theme};
 use crate::tr;
 
-use super::{cut, galley, pill};
+use super::{cut, galley, pill, soon};
 
 /// From the track's outside to an option: its edge and the room inside it.
 const TRACK: f32 = 4.0;
@@ -58,8 +59,14 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
     let size = vec2(if squeezed { room.max(1.0) } else { full }, high + TRACK * 2.0);
     let (track, response) = ui.allocate_exact_size(size, Sense::hover());
     let visible = ui.is_rect_visible(track);
+    let soon = soon::is_soon(ui);
+    let ink = soon::ink(ui, theme, p.ink);
     if visible {
-        ui.painter().rect_stroke(track, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
+        if soon {
+            paint::dashed(ui.painter(), track, p.muted);
+        } else {
+            ui.painter().rect_stroke(track, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
+        }
     }
     let mut chosen = None;
     let mut left = track.left() + TRACK;
@@ -70,25 +77,25 @@ pub fn segmented_for<T: Copy + PartialEq>(ui: &mut Ui, theme: &Theme, options: &
         let rect = Rect::from_min_size(pos2(left, track.top() + TRACK), vec2(wide, high));
         left += wide + GAP;
         let id = response.id.with(("segment", index));
-        let segment = ui.interact(rect, id, Sense::click());
+        let segment = ui.interact(rect, id, soon::sense(ui, Sense::click()));
         let spoken = match about {
             Some(about) => tr!("{option} for {about}", option = name, about = about),
             None => (*name).to_owned(),
         };
-        segment.widget_info(|| WidgetInfo::selected(Role::Button, true, on, &spoken));
-        let lit = segment.hovered() || segment.has_focus();
+        segment.widget_info(|| WidgetInfo::selected(Role::Button, !soon, on, &spoken));
+        let lit = !soon && (segment.hovered() || segment.has_focus());
         let hover = motion::toggle(ui.ctx(), id.with("hover"), lit && !on, theme.motion.hover_fade);
         if visible {
             let round = 0.0;
-            if on {
+            if on && !soon {
                 pill::selected_fill(ui.painter(), theme, rect);
             } else if hover > 0.0 {
                 ui.painter().rect_filled(rect, round, p.stage);
             }
             let pad = if squeezed { s.s1 } else { s.s3 };
             // A point more than the name needs, so that rounding never cuts a name that fits.
-            let text = cut(ui, name, if on { font.semibold() } else { *font }, p.ink, wide - pad * 2.0 + 1.0);
-            ui.painter().galley(rect.center() - text.size() / 2.0, text, p.ink);
+            let text = cut(ui, name, if on { font.semibold() } else { *font }, ink, wide - pad * 2.0 + 1.0);
+            ui.painter().galley(rect.center() - text.size() / 2.0, text, ink);
             if segment.has_focus() {
                 ui.painter().rect_stroke(rect.shrink(1.0), round, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
             }

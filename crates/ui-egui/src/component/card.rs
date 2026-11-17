@@ -7,10 +7,11 @@
 
 use egui::{Id, Pos2, Rect, Response, Role, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::galley;
+use super::{galley, soon};
 
 /// What a card drew.
 #[derive(Debug)]
@@ -32,11 +33,13 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
     let slot = ui.painter().add(Shape::Noop);
     let width = ui.available_width().max(1.0);
     let header_height = theme.boxes().group_head;
-    let (header_rect, header) = ui.allocate_exact_size(vec2(width, header_height), Sense::click());
-    header.widget_info(|| WidgetInfo::selected(Role::Button, true, open, title));
-    let lit = header.hovered() || header.has_focus();
+    let soon = soon::is_soon(ui);
+    let (header_rect, header) = ui.allocate_exact_size(vec2(width, header_height), soon::sense(ui, Sense::click()));
+    header.widget_info(|| WidgetInfo::selected(Role::Button, !soon, open, title));
+    let lit = !soon && (header.hovered() || header.has_focus());
     let hover = motion::toggle(ui.ctx(), id.with("hover"), lit, theme.motion.hover_fade);
-    let text = galley(ui, title, theme.fonts.heading, p.ink);
+    let ink = soon::ink(ui, theme, p.ink);
+    let text = galley(ui, title, theme.fonts.heading, ink);
     let text_at = pos2(header_rect.left() + s.s4, header_rect.center().y - text.size().y / 2.0);
     let openness = motion::toggle(ui.ctx(), id.with("open"), open, theme.motion.card);
     let mut inner = None;
@@ -56,17 +59,24 @@ pub fn card<R>(ui: &mut Ui, theme: &Theme, id: Id, title: &str, open: bool, body
         ui.allocate_exact_size(vec2(width, body_height), Sense::hover());
     }
     let rect = Rect::from_min_max(header_rect.min, Pos2::new(header_rect.right(), header_rect.bottom() + body_height));
-    let mut shapes = vec![Shape::rect_filled(rect, 0.0, p.surface), Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside)];
+    let mut shapes = vec![Shape::rect_filled(rect, 0.0, p.surface)];
+    if !soon {
+        shapes.push(Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside));
+    }
     if hover > 0.0 {
         let round = egui::CornerRadius { nw: super::corner(0.0).nw, ne: super::corner(0.0).ne, sw: 0, se: 0 };
         let round = if openness > 0.0 { round } else { super::corner(0.0) };
         shapes.push(Shape::rect_filled(header_rect, round, p.stage));
     }
-    shapes.push(Shape::galley(text_at, text, p.ink));
+    shapes.push(Shape::galley(text_at, text, ink));
     if header.has_focus() {
         shapes.push(Shape::rect_stroke(header_rect.shrink(1.0), 0.0, Stroke::new(2.0, p.cyan_edge), StrokeKind::Inside));
     }
     ui.painter().set(slot, Shape::Vec(shapes));
+    if soon {
+        // Coming soon: the card's edge is dashed, over its body.
+        paint::dashed(ui.painter(), rect, p.muted);
+    }
     Card { header, inner, openness, rect }
 }
 

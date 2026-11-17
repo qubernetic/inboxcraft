@@ -8,11 +8,12 @@
 
 use egui::{Id, Key, Modifiers, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::motion;
 use crate::theme::Theme;
 
-use super::{cut, popup};
+use super::{cut, popup, soon};
 
 /// The widest the popup gets, in points; narrower beside a narrower field.
 const POPUP: f32 = 210.0;
@@ -57,9 +58,14 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let width = if self.width.is_finite() { self.width.clamp(high, 2048.0) } else { high };
         let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
         let id = ui.make_persistent_id(("select", self.name));
-        let response = ui.interact(rect, id, Sense::click());
+        // Coming soon it never opens.
+        let soon = soon::is_soon(ui);
+        if soon {
+            *open = false;
+        }
+        let response = ui.interact(rect, id, soon::sense(ui, Sense::click()));
         response
-            .widget_info(|| WidgetInfo { current_text_value: Some(self.shown.to_owned()), ..WidgetInfo::labeled(Role::ComboBox, true, self.name) });
+            .widget_info(|| WidgetInfo { current_text_value: Some(self.shown.to_owned()), ..WidgetInfo::labeled(Role::ComboBox, !soon, self.name) });
         if response.clicked() {
             *open = !*open;
             if *open {
@@ -92,17 +98,23 @@ impl<T: Copy + PartialEq> Select<'_, T> {
             return;
         }
         let painter = ui.painter();
+        let soon = soon::is_soon(ui);
         painter.rect_filled(rect, 0.0, p.term);
-        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered(), theme.motion.hover_fade);
+        let hover = motion::toggle(ui.ctx(), response.id.with("hover"), response.hovered() && !soon, theme.motion.hover_fade);
         if hover > 0.0 {
             painter.rect_filled(rect, 0.0, p.stage);
         }
-        let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
-        painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        if soon {
+            paint::dashed(painter, rect, p.muted);
+        } else {
+            let edge = if response.has_focus() { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+            painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
+        }
         let caret = Rect::from_center_size(pos2(rect.right() - SIDES - CARET / 2.0, rect.center().y), vec2(CARET, CARET));
         crate::iconset::paint(painter, caret, IconId::Caret, p.muted);
-        let text = cut(ui, self.shown, theme.fonts.body, p.ink, caret.left() - rect.left() - SIDES * 2.0);
-        painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, p.ink);
+        let ink = soon::ink(ui, theme, p.ink);
+        let text = cut(ui, self.shown, theme.fonts.body, ink, caret.left() - rect.left() - SIDES * 2.0);
+        painter.galley(pos2(rect.left() + SIDES, rect.center().y - text.size().y / 2.0), text, ink);
     }
 
     /// The popup over the field at `rect`; where it is and the choice taken in it. `opened_now` gives the current

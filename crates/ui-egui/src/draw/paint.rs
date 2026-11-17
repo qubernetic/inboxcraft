@@ -202,7 +202,6 @@ const DASH: f32 = 2.0;
 
 /// Paints a dashed edge around `rect`, inside it: a 1 px line in `colour`, dashes 2 on and 2 off, square corners.
 /// The edge is noted for the pass in [`DashedEdges`].
-#[cfg_attr(not(test), expect(dead_code, reason = "the component tasks draw their dashed edges through it"))]
 pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
     let inner = rect.shrink(0.5);
     let corners = [inner.left_top(), inner.right_top(), inner.right_bottom(), inner.left_bottom(), inner.left_top()];

@@ -2,19 +2,29 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The switch: a round track with a knob that slides to the right when it is on, the track then on the selection.
-//! The knob moves over the hover token.
+//! The knob moves over the hover token. Coming soon it is the unavailable switch: a dashed edge and no knob.
 
 use egui::{Response, Role, Sense, Stroke, StrokeKind, Ui, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::motion;
 use crate::theme::Theme;
+
+use super::soon;
 
 /// A switch named `name` for a screen reader, on or off; its response is clicked when it was pressed.
 pub fn switch(ui: &mut Ui, theme: &Theme, name: &str, on: bool) -> Response {
     let p = &theme.palette;
     let height = theme.fonts.body.line;
-    let (rect, response) = ui.allocate_exact_size(vec2(height * 1.8, height), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Switch, ui.is_enabled(), on, name));
+    let soon = soon::is_soon(ui);
+    let (rect, response) = ui.allocate_exact_size(vec2(height * 1.8, height), soon::sense(ui, Sense::click()));
+    response.widget_info(|| WidgetInfo::selected(Role::Switch, ui.is_enabled() && !soon, on, name));
+    if soon {
+        if ui.is_rect_visible(rect) {
+            paint::dashed(ui.painter(), rect, p.muted);
+        }
+        return response;
+    }
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let round = rect.height() / 2.0;

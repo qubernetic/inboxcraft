@@ -3,7 +3,8 @@
 
 //! Every component on one page for `ui_shot` (`"components": true`), in the theme's colours on flat panes:
 //! cards open and closed, icon buttons, pills, badges, the sample's people as avatars, a row with its hover actions,
-//! a tooltip, a popup menu, a toast, and the time picker as a float at [`now`] with `thu 9` typed. The data is
+//! a tooltip, a popup menu, a toast, a board of controls that are coming soon, and the time picker as a float at
+//! [`now`] with `thu 9` typed. The data is
 //! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
 use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
@@ -16,11 +17,13 @@ use crate::sample;
 use crate::theme::Theme;
 use crate::tr;
 
-use super::button::IconButton;
+use super::button::{IconButton, TextButton};
 use super::checkbox::checkbox;
 use super::hover::{self, Action};
 use super::segmented::segmented;
 use super::select::Select;
+use super::soon::{soon, soon_tag};
+use super::switch::switch;
 use super::time_picker::{self, Ask, Preset, TimePicker};
 use super::toast::{self, Toast};
 use super::{avatar, badge, card, cut, galley, pill, popup, tooltip};
@@ -95,6 +98,32 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
     caption(ui, theme, tr!("Toast"));
     toast::panel(ui, theme, keymap, &Toast { text: tr!("Marked as done"), undo: Some("ui.undo") });
+    coming(ui, theme, keymap);
+}
+
+/// The board of what is coming soon: the tag alone on its head, then a button, a switch and a menu row drawn
+/// unavailable.
+fn coming(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    let s = &theme.spacing;
+    let p = &theme.palette;
+    ui.add_space(s.s2);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = s.s2;
+        ui.label(galley(ui, tr!("Coming soon"), theme.fonts.caption, p.muted));
+        soon_tag(ui, theme);
+    });
+    ui.add_space(s.s1);
+    soon(ui, theme, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = s.s3;
+            TextButton::new(tr!("Export")).secondary().show(ui, theme, keymap);
+            ui.label(galley(ui, tr!("Sync contacts"), theme.fonts.body, p.muted));
+            switch(ui, theme, tr!("Sync contacts"), false);
+        });
+        ui.add_space(s.s1);
+        ui.set_width(ui.available_width().min(s.s6 * 10.0));
+        popup::item(ui, theme, keymap, IconId::Calendar, tr!("Scheduled messages"), None);
+    });
 }
 
 /// A row of the list with its hover actions shown over its text.
