@@ -411,3 +411,26 @@ fn every_row_a_view_lays_down_is_finished() {
     assert_eq!(self::unfinished(sample), vec!["line 1: drawn".to_owned()], "the check finds a row left unfinished");
     assert!(self::unfinished(&format!("{sample}\ndrawn.finish(ui, theme);")).is_empty());
 }
+
+#[test]
+fn of_two_touching_rows_only_the_lower_takes_the_pointer_on_their_shared_edge() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = crate::component::tests::builder().with_size(vec2(520.0, 200.0)).build_ui_state(
+        move |ui, hovered: &mut [bool; 2]| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            for (index, hovered) in hovered.iter_mut().enumerate() {
+                let row = row(ui, &theme, Id::unique("edge-row").with(index), 56.0, RowGround::Surface, false, false);
+                let name = format!("Row {index}");
+                row.response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+                *hovered = row.hovered;
+                row.finish(ui, &theme);
+            }
+        },
+        [false; 2],
+    );
+    harness.run();
+    let upper = harness.get_by_label("Row 0").rect();
+    harness.hover_at(egui::pos2(upper.center().x, upper.bottom()));
+    harness.run();
+    assert_eq!(*harness.state(), [false, true], "a row's bottom edge is the next row's");
+}

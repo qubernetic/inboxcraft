@@ -343,7 +343,7 @@ fn paint_row(
     let selected = mailbox.selected() == Some(message.id);
     if selected {
         selection(ui.painter(), theme, rect, 0.0);
-    } else if ui.rect_contains_pointer(rect) {
+    } else if pointer_on(ui, rect) {
         ui.painter().rect_filled(rect, 0.0, p.stage);
     }
     let (first_height, second_height) = row_lines(theme);
@@ -370,32 +370,43 @@ fn paint_row(
     let sender_font = if message.seen { f.body } else { f.strong };
     // The hover actions, as the mail row's sheet places them: on the first line, their right edge 16 in from the row's.
     // The row keeps its middle: the group has the line right of the middle (4 clear of it), and what does not fit there
-    // gives way from the end, so a press on the row's middle opens it at every width of the list.
-    let reach = !leaving && (ui.rect_contains_pointer(response.rect) || (selected && mailbox.keyed()));
+    // gives way from the end, so a press on the row's middle opens it at every width of the list. A hovered row gives
+    // its time way to the group (`.row:hover .time` is hidden); the keyed row keeps its time, as the sheet's focus
+    // state, and its group stands left of it. A flag or pin stays, 8 left of the group (or of the time), 8 apart, and
+    // the sender is cut 4 short of them.
+    let hovered = !leaving && pointer_on(ui, response.rect);
+    let keyed = !leaving && selected && mailbox.keyed();
+    let reach = hovered || keyed;
     let actions = actions(message);
-    let actions_line = Rect::from_min_max(pos2(rect.center().x + s.s1, first), pos2(rect.right() - s.s4, first + first_height));
-    let group = hover::place(ui, theme, keymap, actions_line, &actions);
     let flag_size = theme.mark_side();
-    let end = if reach && group.width() > 0.0 {
-        // While the actions show, the time and the marks give them the line (`.row:hover .time` is hidden) and the
-        // sender is cut short of them.
-        group.left() - s.s2
-    } else {
+    let mut cursor = right;
+    if !hovered {
         // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
         let date = line(ui, &[(&mailbox.row_date(message), f.mono_s, p.muted)], f32::INFINITY);
         let date_left = right - date.size().x;
         ui.painter().galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
-        // The flag next to the date, the pin left of it, on the sender's line.
-        let mut end = date_left - s.s2;
-        for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
-            if shown {
-                let at = Rect::from_min_size(pos2(end - flag_size, first + (first_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-                crate::iconset::paint(ui.painter(), at, icon, colour);
-                end -= flag_size + s.s2;
-            }
+        cursor = date_left - s.s2;
+    }
+    // Laid out only for the row whose group shows: the other rows of a long list lay out no chip.
+    let actions_line = reach.then(|| {
+        let line_right = if hovered { rect.right() - s.s4 } else { cursor };
+        Rect::from_min_max(pos2(rect.center().x + s.s1, first), pos2(line_right.max(rect.center().x + s.s1), first + first_height))
+    });
+    if let Some(at) = actions_line {
+        let group = hover::place(ui, theme, keymap, at, &actions);
+        if group.width() > 0.0 {
+            cursor = group.left() - s.s2;
         }
-        end
-    };
+    }
+    // The flag nearest the time or the group, the pin left of it, on the sender's line.
+    for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
+        if shown {
+            let at = Rect::from_min_size(pos2(cursor - flag_size, first + (first_height - flag_size) / 2.0), vec2(flag_size, flag_size));
+            crate::iconset::paint(ui.painter(), at, icon, colour);
+            cursor -= flag_size + s.s2;
+        }
+    }
+    let end = cursor;
     let mark = if message.bounced.is_some() {
         Some((tr!("Not delivered"), p.minus))
     } else if message.new_sender {
@@ -418,8 +429,14 @@ fn paint_row(
     let text = line(ui, &[(subject, f.caption, p.ink), (&preview, f.caption, p.muted)], right - left);
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line, reach, &actions);
+    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line.unwrap_or(rect), reach, &actions);
     shown.clicked.and_then(|index| act(message, index))
+}
+
+/// Whether the pointer is on `rect`, a row of the list: rows touch, so a row owns its top edge and not its bottom one,
+/// and the pointer on their shared edge is the lower row's alone.
+fn pointer_on(ui: &Ui, rect: Rect) -> bool {
+    ui.rect_contains_pointer(rect) && ui.ctx().pointer_latest_pos().is_some_and(|at| at.y < rect.bottom())
 }
 
 /// What follows a row's subject: a dot and the preview, or nothing without one.

@@ -67,7 +67,9 @@ pub(crate) fn row_with(ui: &mut Ui, theme: &Theme, id: Id, height: f32, ground: 
     let high = Theme::size(theme, points);
     let (_, rect) = ui.allocate_space(vec2(ui.available_width().max(0.0), high));
     let response = ui.interact(rect, id, Sense::click());
-    let hovered = shown.map_or_else(|| response.contains_pointer(), |shown| shown == Shown::Hover);
+    // Rows touch: a row owns its top edge and not its bottom one, so the pointer on a shared edge is the lower row's.
+    let below_top = || ui.ctx().pointer_latest_pos().is_some_and(|at| at.y < rect.bottom());
+    let hovered = shown.map_or_else(|| response.contains_pointer() && below_top(), |shown| shown == Shown::Hover);
     let focused = shown.map_or_else(|| response.has_focus(), |shown| shown == Shown::Focus);
     // The fade is kept for a row in sight only: one out of sight neither paints nor asks for frames.
     if !ui.is_rect_visible(rect) {

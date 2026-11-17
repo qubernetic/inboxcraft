@@ -62,6 +62,8 @@ struct Laid {
 
 /// The actions of `list` laid out in `ui`: each one's chip and width.
 fn lay(ui: &Ui, theme: &Theme, keymap: &Keymap, list: &[Action<'_>], soon: bool) -> Vec<Laid> {
+    #[cfg(test)]
+    tests::LAID.with(|laid| laid.set(laid.get().saturating_add(1)));
     let icon = theme.mark_side();
     list.iter()
         .take(MOST)
@@ -201,4 +203,4 @@ pub(crate) fn actions_with(
 
 #[cfg(test)]
 #[path = "hover_tests.rs"]
-mod tests;
+pub(crate) mod tests;

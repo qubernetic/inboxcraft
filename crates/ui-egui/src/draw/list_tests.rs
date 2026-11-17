@@ -324,6 +324,7 @@ fn the_hover_actions_stand_clear_of_the_row_text_and_the_time_gives_way() {
     harness.get_by_label(ODILE).hover();
     harness.run();
     let row = harness.get_by_label(ODILE).rect();
+    let time = date_of(&harness, "Allotment rota for November");
     let buttons: Vec<egui::Rect> = ["Done", "Mark as read", "Delete", "Snooze"]
         .iter()
         .flat_map(|name| harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).collect::<Vec<_>>())
@@ -338,7 +339,7 @@ fn the_hover_actions_stand_clear_of_the_row_text_and_the_time_gives_way() {
             continue;
         }
         let words = &text.galley.job.text;
-        assert!(words != "08:35", "the time is hidden while the actions show");
+        assert!(*words != time, "the time is hidden while the actions show");
         if words.starts_with("Odile") || words.starts_with("Allotment") {
             seen += 1;
             for button in &buttons {
@@ -629,4 +630,122 @@ fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_ye
     };
     // Its icon and its dashed one-letter chip, as wide as Done with its own.
     assert_eq!(width(&harness, "Snooze"), width(&harness, "Done"));
+}
+
+/// The date the list writes for the message with `subject`.
+fn date_of(harness: &Harness<'static, InboxApp>, subject: &str) -> String {
+    let mailbox = harness.state().mailbox();
+    let row = mailbox.messages().iter().find(|row| row.subject == subject).cloned();
+    row.map(|row| mailbox.row_date(&row)).unwrap_or_default()
+}
+
+/// The texts the last frame drew whose left middle lies in `rect`: `(rect, words)`.
+fn texts_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> Vec<(egui::Rect, String)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some((text.visual_bounding_rect(), text.galley.job.text.clone())),
+            _ => None,
+        })
+        .filter(|(at, _)| rect.contains(at.left_center()))
+        .collect()
+}
+
+/// The rects of the buttons called `name` in `rect`.
+fn buttons_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect, name: &str) -> Vec<egui::Rect> {
+    harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).filter(|at| rect.contains(at.center())).collect()
+}
+
+#[test]
+fn the_keyed_row_keeps_its_time_and_its_actions_stand_left_of_it() {
+    let mut harness = harness(true);
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    let selected = harness.state().mailbox().selected().unwrap();
+    let row = harness.state().mailbox().messages().iter().find(|row| row.id == selected).unwrap().clone();
+    let time = harness.state().mailbox().row_date(&row);
+    let rect = harness.get_by_label(&harness.state().mailbox().spoken(&row)).rect();
+    let shown: Vec<_> = texts_in(&harness, rect).into_iter().filter(|(_, words)| *words == time).collect();
+    assert_eq!(shown.len(), 1, "the keyed row shows its time {time:?}, as the mail row's focus state");
+    // Done gives way last: whatever else fits left of the time, Done shows.
+    let done = buttons_in(&harness, rect, "Done");
+    assert_eq!(done.len(), 1, "the keyed row shows its actions");
+    for name in ["Done", "Mark as read", "Mark as unread", "Delete", "Snooze"] {
+        for button in buttons_in(&harness, rect, name) {
+            assert!(button.right() < shown[0].0.left(), "{name} stands left of the time: {button:?} {shown:?}");
+        }
+    }
+}
+
+/// The icon glyphs `id` the last frame drew in `rect`.
+fn marks_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect, id: crate::iconset::IconId) -> Vec<egui::Rect> {
+    let glyph = crate::iconset::glyph(id).to_string();
+    texts_in(harness, rect).into_iter().filter(|(_, words)| *words == glyph).map(|(at, _)| at).collect()
+}
+
+#[test]
+fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
+    use crate::iconset::IconId;
+    let mut harness = harness(true);
+    let marked: Vec<_> = harness.state().mailbox().messages().iter().filter(|row| row.flagged || row.pinned).cloned().collect();
+    assert!(!marked.is_empty(), "the sample has a flagged or pinned message");
+    for row in marked {
+        let name = harness.state().mailbox().spoken(&row);
+        let Some(node) = harness.query_by_label(&name) else { continue };
+        let rect = node.rect();
+        harness.hover_at(egui::pos2(rect.left() + 40.0, rect.center().y));
+        harness.run();
+        let done = buttons_in(&harness, rect, "Done");
+        assert_eq!(done.len(), 1, "{name}: hovered, it shows its actions");
+        for (shown, id) in [(row.flagged, IconId::Flag), (row.pinned, IconId::Pin)] {
+            let marks = marks_in(&harness, rect, id);
+            if shown {
+                assert_eq!(marks.len(), 1, "{name}: its {id:?} stays while the actions show");
+                assert!(marks[0].right() <= done[0].left() - 8.0 + 0.5, "{name}: {id:?} {marks:?} left of the group {done:?}");
+            }
+        }
+        let time = harness.state().mailbox().row_date(&row);
+        assert!(texts_in(&harness, rect).iter().all(|(_, words)| *words != time), "{name}: the hovered row gives its time way");
+    }
+}
+
+#[test]
+fn two_touching_rows_never_both_take_the_pointer_on_their_shared_edge() {
+    let mut harness = harness(true);
+    let upper = harness.get_by_label(ODILE).rect();
+    let rows: Vec<egui::Rect> = harness
+        .state()
+        .mailbox()
+        .messages()
+        .iter()
+        .filter_map(|row| harness.query_by_label(&harness.state().mailbox().spoken(row)).map(|node| node.rect()))
+        .collect();
+    let lower = rows.into_iter().find(|rect| (rect.top() - upper.bottom()).abs() < 0.01 && (rect.left() - upper.left()).abs() < 0.01);
+    let lower = lower.expect("a row right under Odile's");
+    harness.hover_at(egui::pos2(upper.left() + 40.0, upper.bottom()));
+    harness.run();
+    let groups = [upper, lower].iter().filter(|rect| !buttons_in(&harness, **rect, "Done").is_empty()).count();
+    assert_eq!(groups, 1, "one row owns the shared edge");
+    // The one that owns it is the lower: a row's top edge is its own, its bottom edge the next row's.
+    assert_eq!(buttons_in(&harness, lower, "Done").len(), 1);
+}
+
+#[test]
+fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
+    let clock = FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap());
+    let store = sample::grown(Timestamp::from_unix(1_793_869_200, 0).unwrap(), 1_200).unwrap();
+    let session = sample::session_over(store, Box::new(clock.clone())).unwrap();
+    let mut mailbox = Mailbox::new(session, Box::new(clock));
+    mailbox.set_inbox_view(InboxView::List);
+    let mut harness = harness_of(InboxApp::new(mailbox));
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.run();
+    crate::component::hover::tests::reset_laid();
+    harness.step();
+    let built = crate::rows_built(&harness.ctx).unwrap_or(0);
+    assert!(built >= 1_000, "{built} rows laid out");
+    assert_eq!(crate::component::hover::tests::laid(), 0, "no row's actions were laid out");
 }

@@ -372,3 +372,18 @@ fn at_130_percent_the_actions_scale_and_stand_on_whole_pixels() {
         }
     }
 }
+
+thread_local! {
+    /// How many groups [`super::lay`] laid out on this thread since [`reset_laid`].
+    pub(crate) static LAID: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Starts the count of laid out groups again.
+pub(crate) fn reset_laid() {
+    LAID.with(|laid| laid.set(0));
+}
+
+/// The groups laid out since [`reset_laid`].
+pub(crate) fn laid() -> usize {
+    LAID.with(std::cell::Cell::get)
+}
