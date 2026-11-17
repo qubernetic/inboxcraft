@@ -9,7 +9,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use super::{text_size, text_size_with};
 use crate::component::Shown;
 use crate::component::press_tests::{Part, keys_press_as_the_pointer};
-use crate::component::tests::{Look, Paint, bring, builder, keyboard_walk, own, painted, staged};
+use crate::component::tests::{Look, Paint, bring, builder, keyboard_walk, own, painted, stage, staged};
 use crate::theme::{Mode, TextScale, Theme};
 
 /// The states of the slider's sheet, in its order.
@@ -284,4 +284,71 @@ fn a_press_takes_the_focus_for_the_arrow_keys() {
     harness.key_press(Key::ArrowRight);
     harness.run();
     assert_eq!(*harness.state(), TextScale::ALL[3]);
+}
+
+/// The slider at `scale` on a `surface` stage: its rect and its paint.
+fn slider_at(scale: TextScale, current: TextScale) -> (Rect, Paint) {
+    let theme = Theme::new(Mode::Light, scale);
+    let mut harness = staged(
+        theme,
+        |p| p.surface,
+        vec2(400.0, 140.0),
+        move |ui, theme| {
+            text_size(ui, theme, current);
+        },
+    );
+    harness.run();
+    let rect = harness.get_by_label("Text size").rect();
+    (rect, painted(&harness, "Text size"))
+}
+
+#[test]
+fn every_name_is_whole_apart_from_its_neighbours_and_inside_at_every_text_size() {
+    for scale in TextScale::ALL {
+        for current in [TextScale::ALL[0], TextScale::ALL[4]] {
+            let (rect, paint) = slider_at(scale, current);
+            let texts = words(&paint);
+            let names = ["90 %", "100 %", "110 %", "120 %", "130 %"];
+            assert_eq!(texts.iter().map(|(text, ..)| text.as_str()).collect::<Vec<_>>(), names, "{scale:?}");
+            let size = Theme::new(Mode::Light, scale).fonts.mono_s.size;
+            for (index, (text, _, shape)) in texts.iter().enumerate() {
+                // Plex Mono's advance is 0.6 em: a whole name is as wide as its characters, a cut one narrower.
+                let whole = text.chars().count() as f32 * 0.6 * size;
+                assert!((shape.width() - whole).abs() < 1.0, "{scale:?} {text}: {} wide, {whole} whole", shape.width());
+                assert!(rect.contains_rect(*shape), "{scale:?} {text} inside {rect:?}: {shape:?}");
+                if let Some((_, _, next)) = texts.get(index + 1) {
+                    assert!(shape.right() < next.left(), "{scale:?} {text} runs into its neighbour");
+                }
+            }
+            let track = blocks(&paint, rect).into_iter().find(|(block, _)| block.width() > 100.0).map(|(block, _)| block);
+            let handle = blocks(&paint, rect).into_iter().find(|(block, _)| block.width() > 2.0 && block.height() > 10.0).map(|(block, _)| block);
+            let (Some(track), Some(handle)) = (track, handle) else { panic!("{scale:?}: no track or handle") };
+            assert!(track.left() <= handle.center().x && handle.center().x <= track.right(), "{scale:?} the handle on the track");
+        }
+    }
+}
+
+#[test]
+fn ticks_track_and_handle_stand_on_whole_pixels_from_any_origin() {
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        let theme = Theme::new(Mode::Light, TextScale::default());
+        let mut harness = builder().with_pixels_per_point(ppp).with_size(vec2(400.0, 160.0)).build_ui(move |ui| {
+            stage(ui, theme.palette.surface, |ui| {
+                // An origin off the pixel grid: x = 10.3 inside the stage, y a fraction too.
+                let place = Rect::from_min_size(ui.cursor().min + vec2(10.3, 0.7), vec2(300.0, 80.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(place), |ui| {
+                    text_size(ui, &theme, TextScale::ALL[2]);
+                });
+            });
+        });
+        harness.run();
+        let rect = harness.get_by_label("Text size").rect();
+        let paint = painted(&harness, "Text size");
+        let found = blocks(&paint, rect);
+        assert_eq!(found.len(), 7, "{ppp}: {found:?}");
+        let whole = |value: f32| ((value * ppp) - (value * ppp).round()).abs() < 0.01;
+        for (block, _) in found {
+            assert!(whole(block.left()) && whole(block.right()) && whole(block.top()) && whole(block.bottom()), "{ppp}: {block:?}");
+        }
+    }
 }

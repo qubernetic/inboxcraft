@@ -15,7 +15,7 @@ use crate::draw::paint::{self, Ring};
 use crate::theme::{TextScale, Theme};
 use crate::tr;
 
-use super::{Hover, Shown, cut, lit, solid, soon};
+use super::{Hover, Shown, galley, lit, solid, soon};
 
 /// The slider's width, in points.
 const WIDTH: f32 = 240.0;
@@ -35,8 +35,9 @@ const TICK: [f32; 2] = [8.0, 9.0];
 /// The handle's width, its top and height at rest, its top and height held, in points.
 const HANDLE: [f32; 5] = [9.0, 4.0, 17.0, 0.0, 25.0];
 
-/// The top of the sizes' names and their width, in points.
-const NAMES: [f32; 2] = [28.0, 40.0];
+/// The top of the sizes' names, in points. The sheet gives each a 40 wide slot at 100 %; the names are never cut, and
+/// at 120 % and 130 % they are wider than that slot.
+const NAMES: f32 = 28.0;
 
 /// The tick of `index` from the left edge of `rect`: its left side.
 fn tick(rect: Rect, index: usize) -> f32 {
@@ -61,7 +62,7 @@ pub fn text_size(ui: &mut Ui, theme: &Theme, current: TextScale) -> Option<TextS
 pub(crate) fn text_size_with(ui: &mut Ui, theme: &Theme, current: TextScale, shown: Option<Shown>, towards: Option<TextScale>) -> Option<TextScale> {
     let enabled = ui.is_enabled() && !soon::is_soon(ui);
     let names = theme.fonts.mono_s;
-    let size = vec2(WIDTH, NAMES[0] + names.line.ceil());
+    let size = vec2(WIDTH, NAMES + names.line.ceil());
     let sense = if enabled { Sense::click_and_drag() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let name = tr!("Text size");
@@ -104,13 +105,21 @@ pub(crate) fn text_size_with(ui: &mut Ui, theme: &Theme, current: TextScale, sho
 fn paint_slider(ui: &Ui, theme: &Theme, rect: Rect, (now, held): (usize, Option<usize>), enabled: bool, lit: super::Lit) {
     let p = &theme.palette;
     let painter = solid(ui);
+    // Whole pixels whatever the slider's origin: every block's corner is rounded to the pixel grid, and its size to
+    // whole pixels, at least one.
+    let ppp = ui.ctx().pixels_per_point().max(0.1);
+    let on_grid = |value: f32| (value * ppp).round() / ppp;
+    let block = |left: f32, top: f32, wide: f32, high: f32| {
+        let size = |points: f32| (points * ppp).round().max(1.0) / ppp;
+        Rect::from_min_size(pos2(on_grid(left), on_grid(top)), vec2(size(wide), size(high)))
+    };
     let ticks = if enabled { p.muted } else { p.dim };
     let last = TextScale::ALL.len().saturating_sub(1);
-    let track = Rect::from_min_size(pos2(tick(rect, 0), rect.top() + TRACK_Y), vec2(tick(rect, last) - tick(rect, 0) + 1.0, 1.0));
-    painter.rect_filled(track, 0.0, p.line);
+    painter.rect_filled(block(tick(rect, 0), rect.top() + TRACK_Y, tick(rect, last) - tick(rect, 0) + 1.0, 1.0), 0.0, p.line);
     for (index, scale) in TextScale::ALL.iter().enumerate() {
         let x = tick(rect, index);
-        painter.rect_filled(Rect::from_min_size(pos2(x, rect.top() + TICK[0]), vec2(1.0, TICK[1])), 0.0, ticks);
+        let mark = block(x, rect.top() + TICK[0], 1.0, TICK[1]);
+        painter.rect_filled(mark, 0.0, ticks);
         let colour = match (enabled, held) {
             (false, _) => p.muted,
             (true, Some(at)) if at == index => p.cyan_text,
@@ -118,9 +127,12 @@ fn paint_slider(ui: &Ui, theme: &Theme, rect: Rect, (now, held): (usize, Option<
             (true, None) if index == now => p.ink,
             (true, None) => p.muted,
         };
-        let text = cut(ui, &tr!("{percent} %", percent = scale.percent()), theme.fonts.mono_s, colour, NAMES[1]);
-        let centre = x + 0.5;
-        painter.galley(pos2(centre - text.size().x / 2.0, rect.top() + NAMES[0]), text, colour);
+        // Never cut: centred on its tick, kept inside the slider at the ends. Ticks are 50 apart and the widest name is
+        // about 43 at 130 %, so two never meet.
+        let text = galley(ui, &tr!("{percent} %", percent = scale.percent()), theme.fonts.mono_s, colour);
+        let wide = text.size().x;
+        let left = (mark.center().x - wide / 2.0).clamp(rect.left(), (rect.right() - wide).max(rect.left()));
+        painter.galley(pos2(on_grid(left), rect.top() + NAMES), text, colour);
     }
     let (at, top, high) = match held {
         Some(at) => (at, HANDLE[3], HANDLE[4]),
@@ -131,7 +143,7 @@ fn paint_slider(ui: &Ui, theme: &Theme, rect: Rect, (now, held): (usize, Option<
         (true, true) => p.cyan_edge,
         (true, false) => p.ink,
     };
-    let handle = Rect::from_min_size(pos2(tick(rect, at) - (HANDLE[0] - 1.0) / 2.0, rect.top() + top), vec2(HANDLE[0], high));
+    let handle = block(tick(rect, at) - (HANDLE[0] - 1.0) / 2.0, rect.top() + top, HANDLE[0], high);
     painter.rect_filled(handle, 0.0, colour);
     if lit.focus {
         paint::focus_ring(&painter, theme, handle, Ring::Outside);
