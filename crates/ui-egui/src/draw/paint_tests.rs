@@ -376,3 +376,86 @@ fn a_centred_run_s_box_is_in_the_middle_on_a_half_pixel_when_the_room_left_is_od
     let left = 8.0 - super::run_box(wide) / 2.0;
     assert!((text.pos.x + lead - left).abs() < 1e-4, "the box's left at {left}: {} + {lead}", text.pos.x);
 }
+
+/// The share of `ink` over `ground` of every pixel of a dashed box `wide` by `high` with corners of 2, painted at
+/// (4, 4) at scale 1 in `mode`: rows of the picture.
+fn dashed_shares(mode: Mode, wide: f32, high: f32) -> Vec<Vec<f32>> {
+    let theme = Theme::new(mode, TextScale::default());
+    let (ground, ink) = (theme.palette.bg, theme.palette.line);
+    let size = vec2(wide + 8.0, high + 8.0);
+    let picture = crate::shot::paint(size, 1.0, mode, |ui| {
+        ui.painter().rect_filled(egui::Rect::from_min_size(pos2(0.0, 0.0), size), 0.0, ground);
+        super::dashed_round(ui.painter(), egui::Rect::from_min_size(pos2(4.0, 4.0), vec2(wide, high)), ink, 2.0);
+    })
+    .unwrap();
+    let channels = |colour: egui::Color32| [f32::from(colour.r()), f32::from(colour.g()), f32::from(colour.b())];
+    let (g, i) = (channels(ground), channels(ink));
+    let length: f32 = (0..3).map(|c| (i[c] - g[c]) * (i[c] - g[c])).sum();
+    (0..picture.height())
+        .map(|y| {
+            (0..picture.width())
+                .map(|x| {
+                    let p = channels(picture.pixel(x, y).unwrap());
+                    (0..3).map(|c| (p[c] - g[c]) * (i[c] - g[c])).sum::<f32>() / length
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A dashed box of the board: its width and height, its sides and its corners.
+type BoardDashes = (f32, f32, [&'static str; 4], [[f32; 4]; 4]);
+
+/// The design board's dashed boxes with corners of 2 (the unknown avatar, 32 by 32; the key chip's none and disabled,
+/// 37 by 20 and 17 by 20): each side's pixels clockwise from the top left, in quarters of the line's colour, and the
+/// 2 by 2 pixels of each corner clockwise from the top left, row by row, as shares.
+const DESIGN_DASHES: [BoardDashes; 3] = [
+    (
+        32.0,
+        32.0,
+        ["4400440044004400440044004400", "1430143014301430143014301430", "0143014301430143014301430143", "2024202420242024202420242024"],
+        [[0.0, 0.46, 0.45, 0.0], [0.89, 0.26, 0.2, 0.07], [0.2, 0.26, 0.64, 0.2], [0.95, 0.07, 0.07, 0.0]],
+    ),
+    (
+        37.0,
+        20.0,
+        ["440044004400440044004400440044004", "4301430143014301", "143014301430143014301430143014301", "2420242024202420"],
+        [[0.26, 0.51, 0.51, 0.2], [0.76, 0.0, 0.0, 0.07], [0.13, 0.9, 0.07, 0.26], [0.0, 0.13, 0.2, 0.9]],
+    ),
+    (
+        17.0,
+        20.0,
+        ["4400440044004", "4301430143014301", "1430143014301", "2420242024202420"],
+        [[0.26, 0.51, 0.51, 0.2], [0.76, 0.0, 0.0, 0.07], [0.13, 0.9, 0.07, 0.26], [0.0, 0.13, 0.2, 0.9]],
+    ),
+];
+
+#[test]
+fn a_dashed_box_with_round_corners_carries_its_dashes_round_them_as_the_design_board_draws_it() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (wide, high, sides, corners) in DESIGN_DASHES {
+            let shares = dashed_shares(mode, wide, high);
+            let at = |x: usize, y: usize| shares.get(y).and_then(|row| row.get(x)).copied().unwrap_or(f32::NAN);
+            let (left, top, right, bottom) = (4_usize, 4_usize, 4 + wide as usize, 4 + high as usize);
+            let r = 2;
+            let walked: [Vec<f32>; 4] = [
+                (left + r..right - r).map(|x| at(x, top)).collect(),
+                (top + r..bottom - r).map(|y| at(right - 1, y)).collect(),
+                (left + r..right - r).rev().map(|x| at(x, bottom - 1)).collect(),
+                (top + r..bottom - r).rev().map(|y| at(left, y)).collect(),
+            ];
+            for (side, (got, want)) in walked.iter().zip(sides).enumerate() {
+                let want: Vec<f32> = want.chars().map(|c| c.to_digit(10).map_or(f32::NAN, |d| d as f32 / 4.0)).collect();
+                assert_eq!(got.len(), want.len(), "{mode:?} {wide}x{high} side {side}");
+                let off = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                assert!(off <= 0.05, "{mode:?} {wide}x{high} side {side}: {got:?} against the board's {want:?}");
+            }
+            let squares = [(left, top), (right - r, top), (right - r, bottom - r), (left, bottom - r)];
+            for (corner, ((x, y), want)) in squares.iter().zip(corners).enumerate() {
+                let got = [at(*x, *y), at(x + 1, *y), at(*x, y + 1), at(x + 1, y + 1)];
+                let off = got.iter().zip(&want).map(|(a, b)| (a - b).abs()).fold(0.0_f32, f32::max);
+                assert!(off <= 0.15, "{mode:?} {wide}x{high} corner {corner}: {got:?} against the board's {want:?}");
+            }
+        }
+    }
+}

@@ -377,6 +377,9 @@ const LARGEST_CORNER: i64 = 32;
 /// How many samples a side of a corner pixel takes to measure how much of it the arc covers.
 const SAMPLES: i64 = 8;
 
+/// How many samples a pixel of a straight side takes along the side to measure how much of it a dash covers.
+const SIDE_SAMPLES: usize = 4;
+
 /// Paints a dashed edge around `rect`, inside it: a line in `colour` as heavy as a solid 1 point edge, dashes 2 points
 /// on and 2 off along one path clockwise from the top left (after the corner's arc), the phase carried round the
 /// corners; square corners.
@@ -406,15 +409,25 @@ impl DashScale {
         let dash = self.dash as f32;
         at.rem_euclid(2.0 * dash) < dash
     }
+
+    /// The share of the pixel of a straight side from path position `at` to `at + 1` that lies in a dash, sampled at
+    /// [`SIDE_SAMPLES`] even places along it, as the design's renderer samples it: a dash that begins or ends inside
+    /// the pixel (after a round corner the phase is a fraction) covers it in part.
+    fn share(self, at: f32) -> f32 {
+        let step = 1.0 / SIDE_SAMPLES as f32;
+        let hits = (0..SIDE_SAMPLES).filter(|k| self.on(at + (*k as f32 + 0.5) * step)).count();
+        hits as f32 / SIDE_SAMPLES as f32
+    }
 }
 
 /// [`dashed`] with corners of `radius` points.
 ///
 /// The edge is laid out in physical pixels on the pixel grid: the box is rounded to it, the line lies inside the box,
 /// as thick as a solid 1 point edge rounded to whole pixels, and the dashes and gaps are 2 points rounded to whole
-/// pixels ([`DashScale`]). A pixel of a straight side is on when its centre falls in a dash of the path. A corner's
-/// pixels are covered by the arc's ring, sampled, and drawn in that share of `colour`. Every pixel is painted once: at
-/// a square corner, where two sides cross, a pixel is on when either side has it on.
+/// pixels ([`DashScale`]). The dashes run along one path, their phase carried round each corner by the arc's length,
+/// so after a round corner a dash may begin or end inside a pixel: a pixel of a straight side is drawn in the share of
+/// it its dashes cover ([`DashScale::share`]), a corner's pixels in the share the arc's ring covers, both sampled.
+/// Every pixel is painted once: at a square corner, where two sides cross, a pixel takes the larger share.
 pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radius: f32) {
     // The rect first: `clamp` panics on a negative or NaN bound, so only a finite, positive box reaches the radius.
     if !rect.is_finite() || !rect.is_positive() {
@@ -480,9 +493,11 @@ fn dashed_mesh(ppp: f32, scale: DashScale, [left, top, right, bottom]: [i64; 4],
     let mut start = 0.0_f32;
     for (long, (x, y), (dx, dy), (ix, iy), centre, from, square) in pieces {
         for d in 0..long.clamp(0, LONGEST_SIDE) {
-            if scale.on(start + d as f32 + 0.5) {
+            let share = scale.share(start + d as f32);
+            if share > 0.0 {
                 for k in 0..thick {
-                    on.insert((x + dx * d + ix * k, y + dy * d + iy * k), 1.0);
+                    let pixel = on.entry((x + dx * d + ix * k, y + dy * d + iy * k)).or_insert(0.0);
+                    *pixel = pixel.max(share);
                 }
             }
         }
