@@ -92,6 +92,46 @@ pub(crate) fn run_centred(painter: &Painter, rect: Rect, galley: Arc<Galley>, co
     run_at(painter, at, galley, colour);
 }
 
+/// Paints the rows of the wrapped `galley` in a text box `width` wide at `at` as the design places them: each row at the
+/// box's left, or in its middle (the galley's `halign`), a fraction of a pixel included, as [`run_at`] puts a run.
+///
+/// egui places a wrapped row's glyphs at the sub-pixel phase they had in the unwrapped line and puts a centred row on a
+/// whole pixel, so a second row starts up to a pixel right of the first. Each row is laid out again alone here (the
+/// row's words from the galley's own text, in the written order, at the breaks egui chose) and put where the design
+/// puts it. A galley of more than one section is painted as it is.
+pub(crate) fn rows_at(painter: &Painter, at: Pos2, width: f32, galley: Arc<Galley>, colour: Color32) {
+    let align = galley.job.halign;
+    let (Some(section), 1) = (galley.job.sections.first(), galley.job.sections.len()) else {
+        painter.galley(at, galley, colour);
+        return;
+    };
+    let text = galley.job.text.as_str();
+    let mut start = 0_usize;
+    let count = galley.rows.len();
+    for (index, row) in galley.rows.iter().enumerate() {
+        // The row's characters, the newline it ends with included, follow the rows before it in the text.
+        let end = if index + 1 == count {
+            text.len()
+        } else {
+            let chars: usize = row.char_count_including_newline().into();
+            text.get(start..).and_then(|rest| rest.char_indices().nth(chars)).map_or(text.len(), |(at, _)| start + at)
+        };
+        let words = text.get(start..end).unwrap_or_default().trim_end();
+        start = end;
+        let mut job = LayoutJob::single_section(words.to_owned(), section.format.clone());
+        job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, ..galley.job.wrap.clone() };
+        job.break_on_newline = false;
+        let one = painter.layout_job(job);
+        let wide = one.size().x;
+        let x = match align {
+            egui::Align::Center => at.x + (width - wide) / 2.0,
+            egui::Align::Max => at.x + width - wide,
+            egui::Align::Min => at.x,
+        };
+        run_at(painter, pos2(x, at.y + row.pos.y), one, colour);
+    }
+}
+
 /// How many rows a physical pixel is sampled at by [`sampled_band`], as the design's renderer samples it.
 const BAND_SAMPLES: usize = 4;
 

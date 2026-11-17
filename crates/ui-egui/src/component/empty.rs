@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use egui::{Align, Galley, Rect, Response, Role, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
+use crate::draw::paint;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
@@ -71,11 +72,11 @@ fn block(ui: &mut Ui, theme: &Theme, label: &str, title: &str, help: &str, actio
     let response = ui.interact(rect, ui.scope_id().with("empty-state").with(title), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, title));
     let mut top = rect.top() + PAD_Y;
-    let x = if centred { rect.center().x } else { rect.left() + PAD_X };
     if ui.is_rect_visible(rect) {
         for line in lines {
             let high = line.size().y;
-            ui.painter().galley(pos2(x, top), line, p.muted);
+            // Each row at the text box's left, or in its middle, as the design places it.
+            paint::rows_at(ui.painter(), pos2(rect.left() + PAD_X, top), inner, line, p.muted);
             top += high + GAP;
         }
     } else {

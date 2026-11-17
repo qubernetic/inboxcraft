@@ -95,7 +95,7 @@ pub(crate) fn settings_row_with<R>(
         let painter = ui.painter();
         painter.galley(pos2(left, top), title_galley, ink);
         if let Some(help) = help_galley {
-            painter.galley(pos2(left, top + f.strong.line + UNDER), help, p.muted);
+            paint::rows_at(painter, pos2(left, top + f.strong.line + UNDER), words_width, help, p.muted);
         }
     }
     if tagged {

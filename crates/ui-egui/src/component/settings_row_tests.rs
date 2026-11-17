@@ -94,9 +94,14 @@ fn a_settings_row_looks_as_its_sheet_says_by_default_hovered_focused_and_with_he
             assert_eq!(title.min - rect.min, vec2(16.0, title_top), "{at}");
             assert!(words.iter().any(|text| text.1 == TITLE && text.2 == p.ink && text.3 == f.strong.size), "{at}");
             if help {
-                let help = words.iter().find(|text| text.1 == HELP).map_or(Rect::NOTHING, |text| text.0);
+                // The help's rows, each laid out alone and put at the text box's left, the second as the first.
+                let rows: Vec<&(Rect, String, Color32, f32)> = words.iter().filter(|text| text.3 == f.caption.size && text.2 == p.muted).collect();
+                assert_eq!(rows.len(), 2, "two lines of help: {at}");
+                let said = rows.iter().map(|text| text.1.as_str()).collect::<Vec<_>>().join(" ");
+                assert_eq!(said, HELP, "{at}");
+                let help = rows.iter().fold(Rect::NOTHING, |all, text| all.union(text.0));
                 assert_eq!((help.min - rect.min, help.height()), (vec2(16.0, 36.0), 36.0), "two lines of help: {at}");
-                assert!(words.iter().any(|text| text.1 == HELP && text.2 == p.muted && text.3 == f.caption.size), "{at}");
+                assert!(rows.iter().all(|text| text.0.left() == rect.left() + 16.0), "each row at the box's left: {at}");
             }
             let control = harness.get_by_role(Role::RadioGroup).rect();
             let control_top = if help { 26.0 } else { 12.0 };

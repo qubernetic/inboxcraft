@@ -30,6 +30,28 @@ fn texts(paint: &Paint) -> Vec<(Rect, String, Color32, String, f32)> {
         .collect()
 }
 
+/// The blocks painted (label, title, help), each the rows of one size in paint order: `(rect of all its rows, its
+/// words with one space between, colour, family, size, each row's rect)`.
+fn blocks(paint: &Paint) -> Vec<(Rect, String, Color32, String, f32, Vec<Rect>)> {
+    let mut out: Vec<(Rect, String, Color32, String, f32, Vec<Rect>)> = Vec::new();
+    for (rect, text, colour, family, size) in texts(paint) {
+        match out.last_mut() {
+            Some(block) if block.4 == size && block.2 == colour => {
+                block.0 = block.0.union(rect);
+                block.1 = format!("{} {}", block.1, text);
+                block.5.push(rect);
+            }
+            _ => out.push((rect, text, colour, family, size, vec![rect])),
+        }
+    }
+    out
+}
+
+/// `text` with its spaces and line breaks made single spaces.
+fn spaced(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[test]
 fn a_bare_empty_state_looks_as_its_sheet_says_its_lines_centred() {
     for mode in [Mode::Dark, Mode::Light] {
@@ -50,14 +72,18 @@ fn a_bare_empty_state_looks_as_its_sheet_says_its_lines_centred() {
         let at = format!("{mode:?}: {paint:#?}");
         assert_eq!(rect.size(), vec2(440.0, 216.0), "{at}");
         assert!(paint.rects().next().is_none(), "no fill and no edge: {at}");
-        let got = texts(&paint);
+        let got = blocks(&paint);
         let wanted = [("INBOX · NOTHING TO READ", f.label, 40.0, 16.0), (TITLE, f.title, 68.0, 60.0), (HELP, f.caption, 140.0, 36.0)];
         assert_eq!(got.len(), 3, "{at}");
-        for ((text_rect, text, colour, family, size), (words, font, top, high)) in got.iter().zip(wanted) {
-            assert_eq!((text.as_str(), *colour, family.as_str(), *size), (words, p.muted, font.id().family.to_string().as_str(), font.size), "{at}");
+        for ((text_rect, text, colour, family, size, rows), (words, font, top, high)) in got.iter().zip(wanted) {
+            let family_name = font.id().family.to_string();
+            assert_eq!((spaced(text), *colour, family.as_str(), *size), (spaced(words), p.muted, family_name.as_str(), font.size), "{at}");
             assert_eq!(text_rect.top() - rect.top(), top, "{words}: {at}");
             assert_eq!(text_rect.height(), high, "{words}: {at}");
-            assert!((text_rect.center().x - rect.center().x).abs() <= 0.5, "{words} centred: {text_rect:?} {at}");
+            // Every row in the middle of the text box, a fraction of a pixel included, as the design centres it.
+            for row in rows {
+                assert!((row.center().x - rect.center().x).abs() <= 0.01, "{words}: a row centred: {row:?} {at}");
+            }
             assert!(text_rect.left() >= rect.left() + 24.0 - 0.01 && text_rect.right() <= rect.right() - 24.0 + 0.01, "{words}: {at}");
         }
     }
@@ -84,12 +110,15 @@ fn an_empty_state_with_an_action_looks_as_its_sheet_says_its_lines_left() {
         let paint = painted(&harness, ACTION_TITLE);
         let at = format!("{mode:?}: {paint:#?}");
         assert_eq!(rect.size(), vec2(440.0, 250.0), "{at}");
-        let got = texts(&paint);
+        let got = blocks(&paint);
         let wanted = [("NO ACCOUNTS YET", f.label, 40.0, 16.0), (ACTION_TITLE, f.title, 68.0, 60.0), (ACTION_HELP, f.caption, 140.0, 18.0)];
-        for ((text_rect, text, colour, family, size), (words, font, top, high)) in got.iter().take(3).zip(wanted) {
-            assert_eq!((text.as_str(), *colour, family.as_str(), *size), (words, p.muted, font.id().family.to_string().as_str(), font.size), "{at}");
+        for ((text_rect, text, colour, family, size, rows), (words, font, top, high)) in got.iter().take(3).zip(wanted) {
+            let family_name = font.id().family.to_string();
+            assert_eq!((spaced(text), *colour, family.as_str(), *size), (spaced(words), p.muted, family_name.as_str(), font.size), "{at}");
             assert_eq!(text_rect.min - rect.min, vec2(24.0, top), "{words}: {at}");
             assert_eq!(text_rect.height(), high, "{words}: {at}");
+            // Every row starts at the text box's left, the second as the first.
+            assert!(rows.iter().all(|row| row.left() == rect.left() + 24.0), "{words}: {rows:?} {at}");
         }
         let button = harness.get_by_label("Add account").rect();
         assert_eq!(button.min - rect.min, vec2(24.0, 178.0), "the action 8 under the help's gap: {at}");

@@ -599,3 +599,66 @@ fn a_focus_ring_round_a_hostile_rect_never_panics_and_stays_one_shape() {
         }
     }
 }
+
+/// The ink centres of the rows of `text` in the caption wrapped at `width` and painted by [`super::rows_at`] at `at`
+/// in `align`, and of each row's words laid out alone and put where the design puts that row: at the box's left, or
+/// in the middle of `width`, with [`super::run_at`]. `(rows, alone)`, one centre each per row.
+fn rows_and_alone(text: &'static str, at: egui::Pos2, width: f32, align: egui::Align) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let (ground, ink) = (theme.palette.surface, theme.palette.ink);
+    let font = theme.fonts.caption;
+    let line = font.line;
+    let centres = |picture: &crate::shot::Picture, rows: usize| -> Vec<(f32, f32)> {
+        (0..rows)
+            .filter_map(|row| {
+                let top = (at.y + row as f32 * line) as usize;
+                crate::component::tests::ink_centre(picture, 0..picture.width(), top..top + line as usize, ground, ink)
+            })
+            .collect()
+    };
+    let size = vec2(width + 2.0 * at.x, at.y * 2.0 + 4.0 * line);
+    let mut rows = 0;
+    let wrapped = crate::shot::paint(size, 1.0, Mode::Dark, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect().expand(100.0), 0.0, ground);
+        let galley = crate::component::wrapped(ui, text, font, ink, width, 4, align);
+        rows = galley.rows.len();
+        super::rows_at(ui.painter(), at, width, galley, ink);
+    });
+    let wrapped = wrapped.unwrap_or_else(|error| panic!("{error:?}"));
+    let mut pieces: Vec<String> = Vec::new();
+    let alone = crate::shot::paint(size, 1.0, Mode::Dark, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect().expand(100.0), 0.0, ground);
+        let galley = crate::component::wrapped(ui, text, font, ink, width, 4, egui::Align::LEFT);
+        pieces = galley.rows.iter().map(|row| row.glyphs.iter().map(|glyph| glyph.chr).collect::<String>().trim_end().to_owned()).collect();
+        for (index, piece) in pieces.iter().enumerate() {
+            let one = crate::component::galley(ui, piece, font, ink);
+            let x = if align == egui::Align::Center { at.x + (width - one.size().x) / 2.0 } else { at.x };
+            super::run_at(ui.painter(), pos2(x, at.y + index as f32 * line), one, ink);
+        }
+    });
+    let alone = alone.unwrap_or_else(|error| panic!("{error:?}"));
+    assert!(rows >= 2, "{text:?} wraps: {rows} rows");
+    (centres(&wrapped, rows), centres(&alone, rows))
+}
+
+#[test]
+fn every_row_of_a_wrapped_run_stands_where_the_design_puts_it() {
+    // The settings row's help: its second row started 0.8 px right of the box's left; the empty state's centred rows
+    // half a pixel right of the middle.
+    let help = "Reduced keeps what explains a change and drops the text effects. Off: everything at once.";
+    let centred = "This folder holds no unread messages. “Show done” brings back what you finished.";
+    for (text, at, width, align) in [
+        (help, pos2(24.0, 8.0), 397.0, egui::Align::LEFT),
+        (help, pos2(24.5, 8.0), 397.0, egui::Align::LEFT),
+        (centred, pos2(24.0, 8.0), 392.0, egui::Align::Center),
+        (centred, pos2(23.0, 8.0), 391.0, egui::Align::Center),
+    ] {
+        let (rows, alone) = rows_and_alone(text, at, width, align);
+        assert_eq!(rows.len(), alone.len(), "{text:?}");
+        for (index, (row, want)) in rows.iter().zip(&alone).enumerate() {
+            assert!((row.0 - want.0).abs() <= 0.05 && (row.1 - want.1).abs() <= 0.05, "row {index} of {text:?} at {at:?}: {row:?}, the design's {want:?}");
+        }
+    }
+}
