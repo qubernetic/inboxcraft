@@ -1506,7 +1506,7 @@ impl InboxApp {
     }
 
     /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
-    /// sides, its act a small link. Its last row holds the one `line` hairline between it and what stands under it;
+    /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
     /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
     /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
     /// beside the rail, whose lines are its top and left edges, and the frame's outline its right one; where it
@@ -1540,7 +1540,8 @@ impl InboxApp {
             paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
             paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
         }
-        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.line);
+        // Its `minus` edge at the foot is the one line between it and the panes, which draw none there.
+        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.minus);
         (dismiss, Some(r))
     }
 

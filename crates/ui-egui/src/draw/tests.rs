@@ -801,3 +801,24 @@ fn the_account_picker_with_a_stale_account_shows_and_focuses_all_accounts() {
     assert!(first.accesskit_node().is_focused(), "the row the field shows takes the focus");
     assert_eq!(first.accesskit_node().toggled(), Some(Toggled::True), "and is the chosen one");
 }
+
+#[test]
+fn the_line_under_the_error_banner_is_its_minus_edge() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let p = theme.palette;
+    for ppp in [1.0_f32, 1.5] {
+        let wide = ppp.round().max(1.0) as usize;
+        let mut harness = Harness::builder()
+            .with_size(vec2(1100.0, 720.0))
+            .with_pixels_per_point(ppp)
+            .with_theme(egui::Theme::Dark)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), sample_app());
+        harness.state_mut().mailbox_mut().open(Place::Folder(4242));
+        harness.run();
+        harness.run();
+        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let (from, to) = (dismiss.bottom(), dismiss.bottom() + 16.0);
+        assert_eq!(level_line_rows(&harness, &[p.minus], from, to).len(), wide, "{ppp}: the sheet's minus edge all round");
+        assert!(level_line_rows(&harness, &[p.line], from, to).is_empty(), "{ppp}: and no pane line beside it");
+    }
+}
