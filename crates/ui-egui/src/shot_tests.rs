@@ -561,3 +561,31 @@ fn a_shot_shows_the_outbox_the_countdown_send_later_and_a_bounce() {
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "icons": true, "outbox": "waiting"}"#)).unwrap_err().to_string();
     assert!(error.contains("has no window"), "{error}");
 }
+
+#[test]
+fn a_low_floats_shadow_fades_evenly_along_the_diagonals_from_its_corners() {
+    let shadow = crate::theme::FLOAT_SHADOW;
+    let offset = egui::vec2(0.0, f32::from(shadow.offset[1]));
+    let reach = 1.5 * f32::from(shadow.blur);
+    for (x, y) in [(60.0, 60.0), (60.5, 60.0), (60.0, 60.5), (60.3, 60.7)] {
+        for size in [egui::vec2(48.0, 24.0), egui::vec2(63.0, 24.0), egui::vec2(88.0, 28.0), egui::vec2(237.0, 32.0)] {
+            let rect = Rect::from_min_size(pos2(x, y), size);
+            let mesh = crate::draw::paint::shadow_mesh(rect);
+            let picture = fill(&[ClippedPrimitive { clip_rect: Rect::EVERYTHING, primitive: Primitive::Mesh(mesh) }], &white(), 400, 200, 1.0);
+            let alpha = |px: i64, py: i64| {
+                usize::try_from(px).ok().zip(usize::try_from(py).ok()).and_then(|(px, py)| picture.pixel(px, py)).map_or(0, |c| c.a())
+            };
+            let core = rect.translate(offset);
+            for (corner, (dx, dy)) in
+                [(core.left_top(), (-1, -1)), (core.right_top(), (1, -1)), (core.left_bottom(), (-1, 1)), (core.right_bottom(), (1, 1))]
+            {
+                let (cx, cy) = (corner.x.floor() as i64, corner.y.floor() as i64);
+                let line: Vec<u8> = (0..reach as i64).map(|step| alpha(cx + dx * step, cy + dy * step)).collect();
+                assert!(line[2] > 0, "{rect:?} {corner:?}: shaded at the corner: {line:?}");
+                let steps = line.windows(2).all(|pair| pair[1] <= pair[0]);
+                let dark = line.windows(3).any(|three| three[1] > three[0] && three[1] > three[2]);
+                assert!(steps && !dark, "{rect:?} {corner:?}: not even outward: {line:?}");
+            }
+        }
+    }
+}

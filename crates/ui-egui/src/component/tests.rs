@@ -189,7 +189,8 @@ fn text_colour(text: &TextShape) -> Color32 {
     text.override_text_color.or(section).unwrap_or(text.fallback_color)
 }
 
-/// A shape's rect and look, against the widget's own rect `own`; `None` for meshes, callbacks and what shows nothing.
+/// A shape's rect and look, against the widget's own rect `own`; `None` for meshes other than a float's shadow,
+/// callbacks and what shows nothing.
 fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
     let flat = |fill: Color32, stroke: Option<(f32, Color32)>, stroke_kind, radius| {
         (fill.a() > 0 || stroke.is_some()).then_some(Look::Rect { fill, stroke, stroke_kind, radius, dashed: false })
@@ -201,6 +202,17 @@ fn read(shape: &Shape, own: Rect) -> Option<(Rect, Look)> {
             let spread = (shadow.width() - own.width()) / 2.0;
             Some((shadow, Look::Shadow { offset, blur: rect.blur_width, spread, colour: rect.fill }))
         }
+        Shape::Mesh(mesh) => crate::draw::paint::shadow_box(mesh).map(|shadow| {
+            // The float's own shadow mesh: read as the shadow token it draws.
+            let token = crate::theme::FLOAT_SHADOW;
+            let look = Look::Shadow {
+                offset: shadow.center() - own.center(),
+                blur: f32::from(token.blur),
+                spread: (shadow.width() - own.width()) / 2.0,
+                colour: token.color,
+            };
+            (shadow, look)
+        }),
         Shape::Rect(rect) => {
             let corner = rect.corner_radius;
             let largest = f32::from(corner.nw.max(corner.ne).max(corner.sw).max(corner.se));

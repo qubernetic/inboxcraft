@@ -44,10 +44,84 @@ pub(crate) fn float_shapes(theme: &Theme, rect: Rect, edge: FloatEdge) -> Vec<Sh
         FloatEdge::Quiet => p.line,
     };
     vec![
-        Shape::Rect(FLOAT_SHADOW.as_shape(rect, 0.0)),
+        Shape::mesh(shadow_mesh(rect)),
         Shape::rect_filled(rect, 0.0, p.surface),
         Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, colour), StrokeKind::Inside),
     ]
+}
+
+/// The share of a normal distribution below `z` standard deviations (Abramowitz and Stegun 7.1.26, within 1e-7).
+fn below(z: f32) -> f32 {
+    let x = f64::from(z.abs()) / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let poly = t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    let erf = 1.0 - poly * (-x * x).exp();
+    let half = 0.5 * (1.0 + erf);
+    (if z < 0.0 { 1.0 - half } else { half }) as f32
+}
+
+/// The points of one axis a [`shadow_mesh`] is cut at for a box from `low` to `high`: every [`SHADOW_STEP`] across
+/// each blurred edge, both ends of the reach, nothing in between where the shade is even.
+fn shadow_cuts(low: f32, high: f32, reach: f32) -> Vec<f32> {
+    let (first, last) = (low - reach, high + reach);
+    let mut cuts = vec![first, last];
+    for edge in [low, high] {
+        let mut at = edge - reach;
+        while at <= edge + reach {
+            if at > first && at < last {
+                cuts.push(at);
+            }
+            at += SHADOW_STEP;
+        }
+    }
+    cuts.sort_by(f32::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 0.25);
+    cuts
+}
+
+/// The distance between the cuts of a [`shadow_mesh`] across a blurred edge, in points.
+const SHADOW_STEP: f32 = 4.0;
+
+/// The one shadow of a float over `rect`, as its own mesh: [`FLOAT_SHADOW`]'s offset and colour, blurred as CSS
+/// blurs a box shadow (a normal distribution whose standard deviation is half the blur radius), out to three standard
+/// deviations. The blur is never cut to the float's size, and the mesh is a grid of quads, so no two triangles lie
+/// over one another and nothing is blended twice.
+pub(crate) fn shadow_mesh(rect: Rect) -> egui::epaint::Mesh {
+    let shadow = FLOAT_SHADOW;
+    let sigma = f32::from(shadow.blur) / 2.0;
+    let reach = 3.0 * sigma;
+    let core = rect.translate(vec2(f32::from(shadow.offset[0]), f32::from(shadow.offset[1]))).expand(f32::from(shadow.spread));
+    let mut mesh = egui::epaint::Mesh::default();
+    if !core.is_finite() || sigma <= 0.0 {
+        return mesh;
+    }
+    let shade = |at: f32, low: f32, high: f32| (below((at - low) / sigma) - below((at - high) / sigma)).clamp(0.0, 1.0);
+    let (xs, ys) = (shadow_cuts(core.left(), core.right(), reach), shadow_cuts(core.top(), core.bottom(), reach));
+    let strength = f32::from(shadow.color.a());
+    for y in &ys {
+        for x in &xs {
+            let alpha = (strength * shade(*x, core.left(), core.right()) * shade(*y, core.top(), core.bottom())).round() as u8;
+            mesh.colored_vertex(pos2(*x, *y), Color32::from_black_alpha(alpha));
+        }
+    }
+    let columns = xs.len();
+    let at = |column: usize, row: usize| u32::try_from(row * columns + column).unwrap_or(u32::MAX);
+    for row in 0..ys.len().saturating_sub(1) {
+        for column in 0..columns.saturating_sub(1) {
+            mesh.add_triangle(at(column, row), at(column + 1, row), at(column + 1, row + 1));
+            mesh.add_triangle(at(column, row), at(column + 1, row + 1), at(column, row + 1));
+        }
+    }
+    mesh
+}
+
+/// The box a [`shadow_mesh`] shades (the float's box moved by the offset), read back from `mesh`; `None` when the
+/// mesh is not a shadow (one with a vertex that is not black, or none).
+#[cfg(test)]
+pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
+    let black = !mesh.vertices.is_empty() && mesh.vertices.iter().all(|v| v.color.r() == 0 && v.color.g() == 0 && v.color.b() == 0);
+    let reach = 1.5 * f32::from(FLOAT_SHADOW.blur);
+    black.then(|| Rect::from_points(&mesh.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()).shrink(reach))
 }
 
 /// Paints a float over `rect`: the one shadow, the `surface` fill and its 1 px edge.
