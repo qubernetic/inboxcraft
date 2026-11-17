@@ -246,3 +246,56 @@ fn a_hairline_stands_on_whole_pixels() {
         assert!(((bottom - top) - ppp.round().max(1.0)).abs() < 1e-3, "{ppp}: {} physical pixels high", bottom - top);
     }
 }
+
+/// The physical pixels (columns when `across` is false, rows when true) the `line` hairlines of two panes `first` and
+/// `second` cover near their seam at `seam`, at `ppp`: [`super::Panes`] in a window of 400 × 300, tessellated
+/// without feathering.
+fn seam_pixels(ppp: f32, first: egui::Rect, second: egui::Rect, seam: f32, across: bool) -> std::collections::BTreeSet<i32> {
+    let ctx = egui::Context::default();
+    let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+    input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut output = ctx.run_ui(input, |ui| {
+        let mut panes = super::Panes::begin(ui.painter());
+        for rect in [first, second] {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+        }
+        panes.finish(ui.painter(), &theme);
+    });
+    output.textures_delta.clear();
+    let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+    let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+    let mut covered = std::collections::BTreeSet::new();
+    for clipped in tessellator.tessellate_shapes(output.shapes) {
+        let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+        for triangle in mesh.indices.chunks(3) {
+            let corners: Vec<_> = triangle.iter().map(|at| mesh.vertices[*at as usize]).collect();
+            if corners.iter().any(|vertex| vertex.color != theme.palette.line) {
+                continue;
+            }
+            let span = egui::Rect::from_points(&corners.iter().map(|vertex| vertex.pos).collect::<Vec<_>>());
+            let (low, high) = if across { (span.top(), span.bottom()) } else { (span.left(), span.right()) };
+            if high - low > 4.0 || (low - seam).abs() > 4.0 {
+                continue;
+            }
+            let (from, to) = ((low * ppp).round() as i32, (high * ppp).round() as i32);
+            covered.extend(from..to);
+        }
+    }
+    covered
+}
+
+#[test]
+fn panes_that_meet_share_one_line_side_by_side_and_stacked() {
+    for ppp in [1.0_f32, 1.5] {
+        let wide = (ppp.round().max(1.0)) as usize;
+        let left = egui::Rect::from_min_max(pos2(20.0, 20.0), pos2(200.0, 280.0));
+        let right = egui::Rect::from_min_max(pos2(200.0, 20.0), pos2(380.0, 280.0));
+        let beside = seam_pixels(ppp, left, right, 200.0, false);
+        assert_eq!(beside.len(), wide, "{ppp}: one line between panes side by side: {beside:?}");
+        let upper = egui::Rect::from_min_max(pos2(20.0, 20.0), pos2(380.0, 140.0));
+        let lower = egui::Rect::from_min_max(pos2(20.0, 140.0), pos2(380.0, 280.0));
+        let stacked = seam_pixels(ppp, upper, lower, 140.0, true);
+        assert_eq!(stacked.len(), wide, "{ppp}: one line between stacked panes: {stacked:?}");
+    }
+}

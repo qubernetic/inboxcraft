@@ -205,7 +205,9 @@ impl Panes {
             if !near(rect.top(), window.top()) {
                 shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
             }
-            if !near(rect.bottom(), window.bottom()) {
+            // The pane under this one starts at its bottom: that pane's top line is the one line between them.
+            let stacked = self.rects.iter().any(|other| near(other.top(), rect.bottom()));
+            if !near(rect.bottom(), window.bottom()) && !stacked {
                 shapes.push(hairline_shape(pos2(left, bottom), pos2(rect.right(), bottom), colour, ppp));
             }
         }
