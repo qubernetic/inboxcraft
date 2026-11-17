@@ -948,11 +948,46 @@ fn settings_rows(ui: &mut Ui, theme: &Theme) {
     });
 }
 
+/// The facts' board: default, details open and long text, with the design board's words.
+fn facts_board(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::facts::{Facts, facts_of};
+    title(ui, theme, tr!("Facts"));
+    let (from, to, date) = ("Teodor Vasquez  <teodor@example.org>", "studio@example.org", "Mon 16 Nov 2026, 14:02");
+    let open = Facts {
+        from,
+        to,
+        date,
+        cc: "Marit Solheim  <marit@example.org>",
+        reply_to: "teodor@example.org",
+        checked: "example.org · SPF pass · DKIM pass",
+        id: "<20261116.1402.7f3a@example.org>",
+        recipients: None,
+    };
+    let long = Facts {
+        from: "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio.example.org>",
+        to: "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Ada Brannock",
+        date,
+        recipients: Some(12),
+        ..Facts::default()
+    };
+    for (state, shown, opened) in
+        [(tr!("default"), Facts { from, to, date, ..Facts::default() }, false), (tr!("details-open"), open, true), (tr!("long-text"), long, false)]
+    {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(560.0);
+                facts_of(ui, theme, keymap, &shown, opened);
+            });
+        });
+    }
+}
+
 /// The left column of the shared rows and blocks.
 fn blocks_left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     rows(ui, theme);
     banners(ui, theme, keymap);
     settings_rows(ui, theme);
+    facts_board(ui, theme, keymap);
 }
 
 /// The hover actions' board: default, action-hover, focus and unavailable, Done D, Snooze H, Read R and Delete Del.

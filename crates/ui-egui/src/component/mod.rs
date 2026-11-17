@@ -38,6 +38,7 @@ pub mod card;
 pub mod check_step;
 pub mod checkbox;
 pub mod empty;
+pub mod facts;
 pub mod field;
 pub mod gallery;
 pub mod hover;
