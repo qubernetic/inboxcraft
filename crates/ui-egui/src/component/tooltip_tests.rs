@@ -170,3 +170,28 @@ fn a_tooltip_at_130_percent_grows_with_its_text() {
     let (rect, _) = bubble_in(Mode::Light, TextScale::ALL[4], "Archive", Some("mail.archive"), None);
     assert!((rect.height() - (theme.boxes().chip + 8.0)).abs() < 0.01, "{rect:?}");
 }
+
+#[test]
+fn outside_its_box_a_tooltip_paints_the_one_shadow_and_nothing_else() {
+    for mode in [Mode::Dark, Mode::Light] {
+        for (state, name, action, note) in STATES {
+            let theme = Theme::new(mode, TextScale::default());
+            let harness = staged(
+                theme,
+                |p| p.bg,
+                egui::vec2(400.0, 160.0),
+                move |ui, theme| {
+                    let mut keymap = Keymap::default();
+                    keymap.bind("mail.archive", KeyboardShortcut::new(Modifiers::NONE, Key::A));
+                    bubble_noted(ui, theme, &keymap, name, action, note);
+                },
+            );
+            let rect = harness.get_by_role_and_label(Role::Tooltip, name).rect();
+            let paint = painted(&harness, name);
+            let outside: Vec<_> = paint.shapes.iter().filter(|shape| !rect.expand(0.01).contains_rect(shape.rect)).map(|shape| &shape.look).collect();
+            let shadow = crate::theme::FLOAT_SHADOW;
+            let one = Look::Shadow { offset: egui::vec2(0.0, 12.0), blur: f32::from(shadow.blur), spread: 0.0, colour: shadow.color };
+            assert_eq!(outside, vec![&one], "{mode:?} {state}");
+        }
+    }
+}
