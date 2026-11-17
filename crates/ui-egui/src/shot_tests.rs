@@ -689,6 +689,30 @@ fn a_dashed_edge_is_2_px_on_2_off_and_1_px_thick_at_every_scale() {
 }
 
 #[test]
+fn a_dashed_edge_paints_each_pixel_once() {
+    // A translucent colour shows a pixel painted twice: it comes out more opaque than the colour.
+    let colour = Color32::from_rgba_premultiplied(40, 42, 44, 96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for (w, h) in [(40.0, 20.0), (41.0, 19.0), (17.0, 20.0)] {
+            for radius in [0.0, 2.0] {
+                let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(w, h));
+                let picture = dashed_alone(rect, colour, radius, scale);
+                let mut twice = Vec::new();
+                for y in 0..picture.height {
+                    for x in 0..picture.width {
+                        let alpha = picture.pixel(x, y).map_or(0, |c| c.a());
+                        if alpha > colour.a() {
+                            twice.push((x, y, alpha));
+                        }
+                    }
+                }
+                assert!(twice.is_empty(), "{w} × {h} radius {radius} at {scale}: {} pixels painted twice: {twice:?}", twice.len());
+            }
+        }
+    }
+}
+
+#[test]
 fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
     let colour = Color32::from_rgb(0x8b, 0x91, 0x96);
     let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(17.0, 20.0));
