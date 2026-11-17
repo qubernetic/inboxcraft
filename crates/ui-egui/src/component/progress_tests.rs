@@ -41,11 +41,14 @@ fn dots(paint: &Paint, at: egui::Pos2, colour: Color32) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// Where the dot of a finished line stands against `rect`: in the middle of the sheet's 11 points.
-fn dot_left(paint: &Paint, rect: Rect) -> f32 {
-    let dot = texts(paint).into_iter().find(|text| text.1 == "●").map_or(Rect::NOTHING, |text| text.0);
-    assert!((dot.center().x - rect.left() - 5.5).abs() <= 0.5, "the dot in the middle of 11: {dot:?} {rect:?}");
-    dot.left() - rect.left()
+/// The disc of a finished line against `rect`: its centre, radius and colour (the circle painted, if one is).
+fn disc(paint: &Paint, rect: Rect) -> Option<(egui::Vec2, f32, Color32)> {
+    paint.rects().find_map(|shape| match shape.look {
+        Look::Rect { fill, stroke: None, radius, .. } if radius > 0.0 && shape.rect.width() == radius * 2.0 => {
+            Some((shape.rect.center() - rect.min, radius, fill))
+        }
+        _ => None,
+    })
 }
 
 /// One progress line in `state`, drawn still (the sheet's frame) or moving, on the status line's `surface`.
@@ -88,12 +91,14 @@ fn a_progress_line_looks_as_its_sheet_says_in_every_state() {
         assert_eq!(rect.size(), vec2(188.0, 24.0), "{at}");
         let got: Vec<_> = texts(&paint).into_iter().map(|(r, t, c, _)| (r.min - rect.min, t, c)).collect();
         let want = vec![
-            (vec2(dot_left(&paint, rect), 4.0), "●".to_owned(), p.plus),
             (vec2(19.0, 4.0), "synced".to_owned(), p.ink),
             (vec2(67.0, 4.0), "[==========]".to_owned(), p.muted),
             (vec2(155.0, 4.0), "14:02".to_owned(), p.muted),
         ];
         assert_eq!(got, want, "{at}");
+        // The sheet's `●` is a disc 0.75 of the size across, its middle 5 from the line's left and 8⅛ under its text
+        // box's top (its glyph comes from another face there: measured on the design's board).
+        assert_eq!(disc(&paint, rect), Some((vec2(5.0, 12.125), 4.125, p.plus)), "{at}");
         // Failed: everything `minus`, the bar broken where it stopped, the note the link to the log.
         let harness = line(theme, "sync failed", ProgressState::Failed(0.54), "open log", true);
         let rect = harness.get_by_label("sync failed").rect();
@@ -102,14 +107,16 @@ fn a_progress_line_looks_as_its_sheet_says_in_every_state() {
         assert_eq!(rect.size(), vec2(241.0, 24.0), "{at}");
         let got: Vec<_> = texts(&paint).into_iter().map(|(r, t, c, _)| (r.min - rect.min, t, c)).collect();
         let want = vec![
-            (vec2(dot_left(&paint, rect), 4.0), "●".to_owned(), p.minus),
             (vec2(19.0, 4.0), "sync failed".to_owned(), p.minus),
             (vec2(100.0, 4.0), "[=====×    ]".to_owned(), p.minus),
             (vec2(188.0, 4.0), "open log".to_owned(), p.cyan_text),
         ];
         assert_eq!(got, want, "{at}");
         harness.get_by_label("open log");
-        assert!(paint.rects().all(|shape| matches!(shape.look, Look::Rect { radius, .. } if radius <= 0.0)), "{at}");
+        assert_eq!(disc(&paint, rect), Some((vec2(5.0, 12.125), 4.125, p.minus)), "{at}");
+        // Square, but for the disc.
+        let square = paint.rects().filter(|shape| matches!(shape.look, Look::Rect { radius, .. } if radius <= 0.0)).count();
+        assert_eq!(square + 1, paint.rects().count(), "{at}");
     }
 }
 

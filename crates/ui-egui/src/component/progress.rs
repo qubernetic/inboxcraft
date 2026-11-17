@@ -8,7 +8,7 @@
 //!   One dot of the ring is left out, and the gap goes round clockwise a dot every 125 ms: the line asks for a frame
 //!   125 ms on (never at once) and for nothing else. The bar fills as the caller says the work is done (motion M9:
 //!   the same at full and reduced motion, since it is information).
-//! - Done: a `plus` dot, the word `ink`, a full `muted` bar, the note `muted`.
+//! - Done: a `plus` disc (the sheet's `●`, drawn in code), the word `ink`, a full `muted` bar, the note `muted`.
 //! - Failed: a `minus` dot, the word and the bar `minus`, the bar broken with `×` where the work stopped, and the note
 //!   is the small link to the log.
 //!
@@ -44,9 +44,13 @@ const GAP: f32 = 8.0;
 /// The side of the running mark's box, in points: a fixed mark, as large at every text scale.
 const RING: f32 = 10.0;
 
-/// The width of the dot of a finished line, in points: the sheet's `●` is 11 wide (its glyph comes from another face
-/// there); Plex Mono's is narrower and stands in the middle of that room.
+/// The width of the mark of a finished line, in points: the sheet's `●` is a text box 11 wide.
 const DOT_MARK: f32 = 11.0;
+
+/// The sheet's `●` drawn in code, as shares of the text size: Plex Mono holds no such sign, and the design draws it
+/// from another face, a disc 0.75 of the size across (8¼ points at 11), its middle 5/11 of the size right of the
+/// mark's left and 1/88 of the size under the middle of its text box (measured on the design's board).
+const DISC: (f32, f32, f32) = (0.75, 5.0 / 11.0, 1.0 / 88.0);
 
 /// The side of one dot of the running mark, in points.
 const DOT: f32 = 2.0;
@@ -114,14 +118,13 @@ pub(crate) fn progress_with(
         ProgressState::Done => (Some(p.plus), p.ink, p.muted),
         ProgressState::Failed(_) => (Some(p.minus), p.minus, p.minus),
     };
-    let dot = mark.map(|ink| super::galley(ui, "●", font, ink));
     let words = super::galley(ui, &super::plain(word), font, word_ink);
     let bar = super::galley(ui, &bar(state), font, bar_ink);
     let failed = matches!(state, ProgressState::Failed(_));
     let note_galley = (!failed).then(|| super::galley(ui, &super::plain(note), font, p.muted));
     let link_width = if failed { paint::run_box(super::galley(ui, note, font, p.cyan_text).size().x) } else { 0.0 };
     // Each run in a text box hugging it, as the design lays them out ([`paint::run_box`]).
-    let mark_width = dot.as_ref().map_or(RING, |dot| paint::run_box(dot.size().x).max(DOT_MARK));
+    let mark_width = if mark.is_some() { DOT_MARK } else { RING };
     let (words_width, bar_width) = (paint::run_box(words.size().x), paint::run_box(bar.size().x));
     let note_width = note_galley.as_ref().map_or(link_width, |note| paint::run_box(note.size().x));
     let width = mark_width + GAP + words_width + GAP + bar_width + GAP + note_width;
@@ -133,11 +136,11 @@ pub(crate) fn progress_with(
     let mut x = rect.left();
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        match dot {
-            Some(dot) => {
-                // The dot's run centred in the sheet's 11 point box.
-                let at = Rect::from_min_size(pos2(x, text_top), vec2(mark_width, font.line));
-                paint::run_centred(painter, at, dot, p.warn);
+        match mark {
+            Some(ink) => {
+                let (across, right, down) = DISC;
+                let centre = pos2(x + right * font.size, text_top + font.line / 2.0 + down * font.size);
+                painter.circle_filled(centre, across * font.size / 2.0, ink);
             }
             None => {
                 let ring = pos2(x, (rect.center().y - RING / 2.0).round());
