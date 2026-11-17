@@ -379,13 +379,18 @@ fn an_open_select_too_long_for_the_window_shows_the_sheets_scroll_thumb_beside_i
         let harness = overflowing(mode);
         assert!(harness.state().0, "{mode:?}: open");
         let rows: Vec<Rect> = harness.get_all_by_role(Role::MenuItemRadio).map(|row| row.rect()).collect();
-        let (Some(first), Some(focused)) = (rows.first().copied(), harness.query_all_by_role(Role::MenuItemRadio).find(|row| row.is_focused()).map(|row| row.rect())) else {
+        let (Some(first), Some(focused)) =
+            (rows.first().copied(), harness.query_all_by_role(Role::MenuItemRadio).find(|row| row.is_focused()).map(|row| row.rect()))
+        else {
             panic!("{mode:?}: rows and a focused one, {rows:?}");
         };
         let strip = Rect::from_x_y_ranges(first.right()..=first.right() + 12.0, first.top()..=first.top() + 400.0);
         let thumbs: Vec<Rect> = filled(&harness, p.muted).into_iter().filter(|rect| strip.expand(0.01).contains_rect(*rect)).collect();
         let [thumb] = thumbs[..] else { panic!("{mode:?}: one muted thumb beside the rows, {thumbs:?}") };
-        assert!((thumb.left() - (strip.left() + 4.0)).abs() < 0.01 && (thumb.width() - 4.0).abs() < 0.01, "{mode:?}: 4 wide in the middle of the 12, {thumb:?} {strip:?}");
+        assert!(
+            (thumb.left() - (strip.left() + 4.0)).abs() < 0.01 && (thumb.width() - 4.0).abs() < 0.01,
+            "{mode:?}: 4 wide in the middle of the 12, {thumb:?} {strip:?}"
+        );
         assert!((thumb.top() - first.top()).abs() < 0.01 && thumb.height() >= 32.0, "{mode:?}: at the top, at least 32 high, {thumb:?}");
         assert!(rows.iter().all(|row| !thumb.intersects(row.shrink(0.01))), "{mode:?}: the thumb over a row, {thumb:?}");
         // A focused row in the list is lit to its edge: the thumb stands clear of that edge.
