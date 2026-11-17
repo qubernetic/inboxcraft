@@ -19,7 +19,7 @@ use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
-use super::{Hover, Lit, Shown, cut, lit, popup, solid, soon, tooltip};
+use super::{Hover, Lit, Shown, cut, lit, popup, scroll, solid, soon, tooltip};
 
 /// The widest the popup gets, in points; narrower beside a narrower field.
 const POPUP: f32 = 210.0;
@@ -192,7 +192,8 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         let most = (ctx.content_rect().height() * MOST).max(rect.height());
         popup::show(&ctx, theme, id.with("popup"), anchor, POPUP.min(rect.width()), |ui| {
             let mut taken = None;
-            let scrolled = ScrollArea::vertical().id_salt("select-rows").max_height(most).show(ui, |ui| {
+            let area = ScrollArea::vertical().id_salt("select-rows").max_height(most);
+            let scrolled = scroll::show(ui, theme, area, |ui| {
                 for (index, (value, name)) in self.options.iter().enumerate() {
                     let chosen = self.current == Some(*value);
                     let row = popup::option(ui, theme, self.icon, name, chosen);

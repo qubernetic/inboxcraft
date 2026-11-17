@@ -325,3 +325,70 @@ fn a_select_of_any_width_returns_and_is_at_least_as_wide_as_high() {
         assert!((high..=2048.0).contains(&wide), "width {width}: {wide}");
     }
 }
+
+/// A select of 40 choices 240 wide in a window too low for them, open, in `mode`, egui's scroll style the theme's.
+fn overflowing(mode: Mode) -> Harness<'static, (bool, u8)> {
+    const MANY: [(u8, &str); 40] = {
+        let mut rows = [(0_u8, "Every week"); 40];
+        let mut index = 0;
+        while index < 40 {
+            rows[index].0 = index as u8;
+            index += 1;
+        }
+        rows
+    };
+    let theme = Theme::new(mode, TextScale::default());
+    let mut harness = builder().with_size(vec2(500.0, 400.0)).build_ui_state(
+        move |ui, (open, current): &mut (bool, u8)| {
+            motion::set_reduced(ui.ctx(), true);
+            ui.ctx().all_styles_mut(|style| style.spacing.scroll = crate::component::scroll::style(&theme));
+            let select = Select { name: "Repeat", shown: "Every week", options: &MANY, current: Some(*current), icon: IconId::Changed, width: 240.0 };
+            let (_, chosen) = select.show(ui, &theme, open);
+            if let Some(chosen) = chosen {
+                *current = chosen;
+            }
+        },
+        (false, 0),
+    );
+    harness.run();
+    harness.get_by_role_and_label(Role::ComboBox, "Repeat").click();
+    harness.run();
+    harness
+}
+
+/// The filled rects of `fill` painted in the last frame, wherever they stand.
+fn filled(harness: &Harness<'static, (bool, u8)>, fill: Color32) -> Vec<Rect> {
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        let mut stack = vec![&clipped.shape];
+        while let Some(shape) = stack.pop() {
+            match shape {
+                egui::Shape::Vec(shapes) => stack.extend(shapes.iter()),
+                egui::Shape::Rect(rect) if rect.fill == fill => found.push(rect.rect),
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn an_open_select_too_long_for_the_window_shows_the_sheets_scroll_thumb_beside_its_rows() {
+    for mode in [Mode::Dark, Mode::Light] {
+        let p = Theme::new(mode, TextScale::default()).palette;
+        let harness = overflowing(mode);
+        assert!(harness.state().0, "{mode:?}: open");
+        let rows: Vec<Rect> = harness.get_all_by_role(Role::MenuItemRadio).map(|row| row.rect()).collect();
+        let (Some(first), Some(focused)) = (rows.first().copied(), harness.query_all_by_role(Role::MenuItemRadio).find(|row| row.is_focused()).map(|row| row.rect())) else {
+            panic!("{mode:?}: rows and a focused one, {rows:?}");
+        };
+        let strip = Rect::from_x_y_ranges(first.right()..=first.right() + 12.0, first.top()..=first.top() + 400.0);
+        let thumbs: Vec<Rect> = filled(&harness, p.muted).into_iter().filter(|rect| strip.expand(0.01).contains_rect(*rect)).collect();
+        let [thumb] = thumbs[..] else { panic!("{mode:?}: one muted thumb beside the rows, {thumbs:?}") };
+        assert!((thumb.left() - (strip.left() + 4.0)).abs() < 0.01 && (thumb.width() - 4.0).abs() < 0.01, "{mode:?}: 4 wide in the middle of the 12, {thumb:?} {strip:?}");
+        assert!((thumb.top() - first.top()).abs() < 0.01 && thumb.height() >= 32.0, "{mode:?}: at the top, at least 32 high, {thumb:?}");
+        assert!(rows.iter().all(|row| !thumb.intersects(row.shrink(0.01))), "{mode:?}: the thumb over a row, {thumb:?}");
+        // A focused row in the list is lit to its edge: the thumb stands clear of that edge.
+        assert!(thumb.left() >= focused.right() - 0.01, "{mode:?}: the thumb over the focused row's edge, {thumb:?} {focused:?}");
+    }
+}
