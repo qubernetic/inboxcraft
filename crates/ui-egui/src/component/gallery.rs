@@ -994,10 +994,29 @@ fn empty_states(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
 }
 
+/// The progress line's board: running (the sheet's still frame: the page rests), done and failed.
+fn progresses(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::progress::{ProgressState, progress_with};
+    title(ui, theme, tr!("Progress"));
+    cells(ui, theme, |ui| {
+        let states = [
+            (tr!("running"), tr!("syncing"), ProgressState::Running(0.54), "54 %"),
+            (tr!("done"), tr!("synced"), ProgressState::Done, "14:02"),
+            (tr!("failed"), tr!("sync failed"), ProgressState::Failed(0.54), tr!("open log")),
+        ];
+        for (state, word, stands, note) in states {
+            cell(ui, theme, state, |ui| {
+                progress_with(ui, theme, keymap, word, stands, note, true);
+            });
+        }
+    });
+}
+
 /// The right column of the shared rows and blocks.
 fn blocks_right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     hover_actions(ui, theme, keymap);
     empty_states(ui, theme, keymap);
+    progresses(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

@@ -45,6 +45,7 @@ pub mod key;
 pub mod label;
 pub mod pill;
 pub mod popup;
+pub mod progress;
 pub mod row;
 pub mod scroll;
 pub mod segmented;
