@@ -363,3 +363,51 @@ fn drawn_fills(harness: &Harness<'static>) -> Vec<(Rect, egui::Color32)> {
     harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
     found
 }
+
+/// `n` recipients `person<k>@example.org`, all addresses.
+fn persons(n: usize) -> Vec<Recipient> {
+    (0..n)
+        .map(|k| Recipient { shown: format!("person{k}@example.org"), spoken: format!("person{k}@example.org"), state: RecipientState::Valid })
+        .collect()
+}
+
+/// How many shapes the last frame painted, groups opened.
+fn shape_count(harness: &Harness<'static>) -> usize {
+    fn count(shape: &egui::Shape) -> usize {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().map(count).sum(),
+            _ => 1,
+        }
+    }
+    harness.output().shapes.iter().map(|clipped| count(&clipped.shape)).sum()
+}
+
+#[test]
+fn every_chip_of_a_long_line_is_reached_by_tab_and_heard_though_scrolled_out() {
+    let mut harness = line_of(persons(40));
+    // A screen reader hears every chip and every cross, in view or not.
+    assert_eq!(harness.query_all_by_role(Role::ListItem).count(), 40);
+    for k in 0..40 {
+        assert_eq!(harness.query_all_by_label(&format!("Remove person{k}@example.org")).count(), 1, "cross {k}");
+    }
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let field = drawn_fills(&harness).into_iter().find(|(rect, fill)| *fill == theme.palette.term && rect.width() > 500.0).map(|(rect, _)| rect);
+    let Some(field) = field else { panic!("the line's box") };
+    // Tab goes through every cross in order, and each one it reaches is scrolled into the box.
+    for k in 0..40 {
+        harness.key_press(egui::Key::Tab);
+        harness.run();
+        let label = format!("Remove person{k}@example.org");
+        let cross = harness.get_by_label(&label);
+        assert!(cross.accesskit_node().is_focused(), "{label} has the keyboard");
+        let rect = cross.rect();
+        assert!(field.contains_rect(rect), "{label} at {rect:?} is in the box {field:?}");
+    }
+}
+
+#[test]
+fn a_long_line_paints_only_the_rows_in_view() {
+    let few = shape_count(&line_of(persons(40)));
+    let many = shape_count(&line_of(persons(400)));
+    assert_eq!(few, many, "the shapes a frame paints do not grow with the chips out of view");
+}

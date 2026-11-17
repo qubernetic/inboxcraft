@@ -76,6 +76,10 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     let id = ui.make_persistent_id(("recipient-chip", spoken));
     let response = ui.interact(cross.expand(s.s1 / 2.0), id, if enabled { Sense::click() } else { Sense::hover() });
     response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, &remove));
+    // A cross the keyboard reaches out of view (a line that scrolls) is brought into it.
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
     let lit = lit(ui, theme, &response, enabled, shown, Hover::AtOnce);
     let hover = enabled && (lit.hover || (shown.is_none() && chip.hovered()) || shown == Some(Shown::Hover));
     if !ui.is_rect_visible(rect) {
@@ -228,10 +232,8 @@ pub(crate) fn recipient_field_with(
             let at = |(x, row): (f32, usize)| origin + vec2(x, row as f32 * (chip + ROW_GAP));
             for (index, (recipient, place)) in line.chips.iter().zip(places.iter()).enumerate() {
                 let place = Rect::from_min_size(at(*place), vec2(widths.get(index).copied().unwrap_or(0.0), chip));
-                if !ui.is_rect_visible(place.expand(theme.spacing.s1)) {
-                    continue;
-                }
-                // Each chip in an id of its own: two chips may hold one address.
+                // Every chip is built, in view or not, so Tab and a screen reader reach it; one out of view paints
+                // nothing (`chip_with`). Each chip in an id of its own: two chips may hold one address.
                 let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(("chip", index)));
                 if !enabled {
                     child.disable();
