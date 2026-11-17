@@ -350,10 +350,9 @@ fn no_code_paints_a_gradient_or_a_blur() {
             sources(&root.join(dir), &mut files);
         }
     }
-    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter, the picture rasteriser and the icon set's duotone
-    // weight are allowed.
+    // The tokens (`scrim` and `FLOAT_SHADOW`), the float painter and the picture rasteriser are allowed.
     let src = root.join("src");
-    let allowed = [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs"), src.join("iconset").join("mod.rs")];
+    let allowed = [src.join("theme.rs"), src.join("draw").join("paint.rs"), src.join("shot.rs")];
     let mut found = Vec::new();
     for file in files.iter().filter(|file| !allowed.contains(file)) {
         let text = std::fs::read_to_string(file).unwrap();
@@ -583,11 +582,13 @@ fn the_mono_face_has_one_advance() {
     assert!((narrow - wide).abs() < 0.01, "{narrow} {wide}");
 }
 
-/// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style or a
-/// size set by hand.
+/// Whether `line` names a font of its own instead of a font token: a family, a font id, an egui text style, a face,
+/// or a size set by hand (`.size(` or a token `.sized(`).
 fn names_a_font(line: &str) -> bool {
     let size_by_hand = line.split(".size(").skip(1).any(|rest| !rest.starts_with(')'));
-    let styled = [".heading()", ".small()", ".strong()", ".monospace()", ".text_style(", "TextStyle::"].iter().any(|call| line.contains(call));
+    let styled = [".heading()", ".small()", ".strong()", ".monospace()", ".text_style(", "TextStyle::", "Face::", ".sized("]
+        .iter()
+        .any(|call| line.contains(call));
     line.contains("FontFamily") || line.contains("FontId") || size_by_hand || styled
 }
 
@@ -598,6 +599,8 @@ fn the_font_check_finds_families_sizes_and_styles() {
     assert!(names_a_font("RichText::new(text).strong()"));
     assert!(names_a_font("ui.label(RichText::new(x).heading())"));
     assert!(names_a_font("style.text_styles.insert(TextStyle::Body, x)"));
+    assert!(names_a_font("Font { face: Face::SansSemiBold, ..theme.fonts.caption }"));
+    assert!(names_a_font("theme.fonts.title.sized(30.0)"));
     assert!(!names_a_font("let width = galley.size().x;"));
     assert!(!names_a_font("RichText::new(text).font(theme.fonts.caption.id())"));
 }

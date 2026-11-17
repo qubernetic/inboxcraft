@@ -32,7 +32,7 @@ use crate::component::segmented::segmented;
 use crate::draw::paint::Panes;
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
-use crate::theme::{Face, Font, Theme};
+use crate::theme::{Font, Theme};
 use crate::tr;
 
 /// The width of the side panel with the gaps around its card, in points: the card is 240 wide as the design draws it.
@@ -130,7 +130,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
     };
     let font = theme.fonts.button;
     let views = View::ALL.map(|view| (view, view.text(), font));
-    let title = theme.fonts.title.sized(theme.fonts.title.size * 1.1);
+    let title = theme.fonts.period();
     let row = vec2(ui.available_width(), TOOLBAR);
     ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_height(TOOLBAR);
@@ -184,12 +184,12 @@ fn tint(theme: &Theme, calendar: &Calendar, id: u64) -> Color32 {
 
 /// `theme`'s caption in the SemiBold weight: an event's summary.
 fn caption_strong(theme: &Theme) -> Font {
-    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
+    theme.fonts.caption_strong()
 }
 
 /// The caption in the Bold weight: today's number.
 fn caption_bold(theme: &Theme) -> Font {
-    Font { face: Face::SansSemiBold, ..theme.fonts.caption }
+    theme.fonts.caption_strong()
 }
 
 /// How a block is drawn where it shows, as the design draws each place.

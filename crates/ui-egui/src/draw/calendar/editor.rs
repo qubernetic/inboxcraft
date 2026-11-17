@@ -101,7 +101,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, editor: &mut Editor, asked:
     let p = &theme.palette;
     let s = &theme.spacing;
     let width = ui.available_width();
-    let title = theme.fonts.title.sized(theme.fonts.title.size * 0.9);
+    let title = theme.fonts.event_title();
     ui.label(RichText::new(editor.title()).font(title.id()).color(p.ink));
     let hint = if editor.form().all_day { "2026-11-06" } else { "2026-11-06 13:00" };
     {

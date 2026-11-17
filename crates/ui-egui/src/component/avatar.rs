@@ -38,7 +38,7 @@ pub fn paint(painter: &Painter, theme: &Theme, rect: Rect, name: &str, address: 
     let p = theme.palette;
     painter.rect_filled(Rect::from_center_size(rect.center(), vec2(side, side)), CORNER, p.stage);
     let ink = p.muted;
-    let font = theme.fonts.strong.sized(side * 0.4);
+    let font = theme.fonts.initials(side);
     let galley = painter.layout_no_wrap(initials(name, address), font.id(), ink);
     painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
 }

@@ -392,6 +392,30 @@ pub struct Fonts {
 }
 
 impl Fonts {
+    /// The caption in SemiBold: an event's summary and today's number in the calendar.
+    #[must_use]
+    pub fn caption_strong(&self) -> Font {
+        Font { face: Face::SansSemiBold, ..self.caption }
+    }
+
+    /// The title a tenth larger: the calendar's period in its toolbar.
+    #[must_use]
+    pub fn period(&self) -> Font {
+        self.title.sized(self.title.size * 1.1)
+    }
+
+    /// The title a tenth smaller: an event's title in its editor.
+    #[must_use]
+    pub fn event_title(&self) -> Font {
+        self.title.sized(self.title.size * 0.9)
+    }
+
+    /// The initials on an avatar `side` points square, in `strong`.
+    #[must_use]
+    pub fn initials(&self, side: f32) -> Font {
+        self.strong.sized(side * 0.4)
+    }
+
     /// Every style.
     #[must_use]
     pub fn all(&self) -> Vec<Font> {

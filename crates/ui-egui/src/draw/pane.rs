@@ -79,7 +79,8 @@ fn owner(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) {
     response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &spoken));
     let ink = theme.palette.muted;
     ui.painter().rect_filled(rect, avatar::CORNER, theme.palette.stage);
-    let font = theme.fonts.strong.sized(side * 0.36);
+    // The rail's tile shows its initials a tenth smaller than an avatar of its side.
+    let font = theme.fonts.initials(side * 0.9);
     let galley = ui.painter().layout_no_wrap(avatar::initials("", &account.address), font.id(), ink);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
 }

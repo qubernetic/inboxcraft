@@ -369,8 +369,10 @@ time from the code as it is, not measured.
   on the grid at every scale; only text and the heights that hold it grow. Loading the owner's own font file is an
   idea only: it would be an outside file, needing the hostile-input rules (safe parsing, size caps, a fuzz target)
   and handling of missing glyphs.
-- Icons (#84, #86, #231, #232): Phosphor Regular, one family and one weight, with no choice; an active or selected
-  state is the accent colour, not a filled icon. The set has the ids the window and the triage actions need so
+- Icons (#84, #86, #231, #232): Phosphor Regular, one family and one weight, with no choice; a state never swaps
+  in a filled glyph. The design draws an icon `muted`, and `ink` on the current row or a hovered button, never in
+  the accent; the code still draws some in `cyan_text` (an active icon button, the pin on a row, the icons of the
+  settings rows, the add-account steps and the empty list) until those components are restyled. The set has the ids the window and the triage actions need so
   far; a toolbar or a view that needs another meaning adds an id and its glyph. Only the flag, the attachment tile and the add-account steps use icons yet; the
   toolbars, the folder pane and the empty states move onto them with E1.17. The Phosphor Regular font is bundled
   whole (every Phosphor icon) rather than cut down to the glyphs in use, so a new id needs no new font file. An icon

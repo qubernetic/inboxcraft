@@ -5,7 +5,9 @@ source and licence. `cargo xtask assets` (part of `cargo xtask ci`) fails if an 
 
 **Policy (mandatory):** InboxCraft contains **no iconography, images, templates, themes, sounds or fonts from Spark,
 Mailspring, Outlook, Gmail or any other vendor.** Every asset is original, CC0, OSI open source or under a Creative
-Commons licence that allows redistribution.
+Commons licence that allows redistribution. The one exception is InboxCraft's own identity: the InboxCraft mark and
+wordmark and the Qubernetic mark (under `assets/brand/` and in the design files) are trademarks of Qubernetic, all
+rights reserved, and not under MIT or Apache-2.0 (see `NOTICE`).
 
 Art drawn in code is original and has no file to list: the sample mailbox (`crates/ui-egui/src/sample.rs`). A file
 exported from that code has its row below.

@@ -42,6 +42,7 @@ source = "qubernetic-brand"
 from = "fonts/ibm-plex-mono/IBMPlexMono-SemiBold.ttf"
 sha256 = "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46"
 
+# Line endings converted from CRLF to LF, so this hash differs from the upstream file's.
 [[file]]
 path = "assets/fonts/plex-mono/OFL.txt"
 source = "qubernetic-brand"
@@ -60,6 +61,7 @@ source = "ibm-plex"
 from = "ibm-plex-sans.zip/ibm-plex-sans/fonts/complete/ttf/IBMPlexSans-SemiBold.ttf"
 sha256 = "a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1"
 
+# Line endings converted from CRLF to LF, so this hash differs from the upstream file's.
 [[file]]
 path = "assets/fonts/plex-sans/OFL.txt"
 source = "ibm-plex"
