@@ -84,7 +84,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
     /// [`Self::show_with`], the popup drawn only with `list`.
     fn draw(self, ui: &mut Ui, theme: &Theme, open: &mut bool, note: Option<&str>, shown: Option<Shown>, list: bool) -> (Response, Option<T>) {
         let high = height(theme);
-        let width = if self.width.is_finite() { self.width.clamp(high, 2048.0) } else { high };
+        let width = if self.width.is_finite() { self.width.max(high).min(2048.0) } else { high };
         let (rect, _) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
         let id = ui.make_persistent_id(("select", self.name));
         // Disabled, unavailable or coming soon, it never opens.

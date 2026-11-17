@@ -352,3 +352,26 @@ fn ticks_track_and_handle_stand_on_whole_pixels_from_any_origin() {
         }
     }
 }
+
+#[test]
+fn a_slider_painted_on_any_rect_returns() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let (nan, inf) = (f32::NAN, f32::INFINITY);
+    let rects = [
+        Rect::NOTHING,
+        Rect::EVERYTHING,
+        Rect::from_min_max(pos2(300.0, 40.0), pos2(10.0, 10.0)),
+        Rect::from_min_size(pos2(nan, 10.0), vec2(280.0, 40.0)),
+        Rect::from_min_size(pos2(10.0, 10.0), vec2(nan, 40.0)),
+        Rect::from_min_size(pos2(-inf, 10.0), vec2(inf, 40.0)),
+        Rect::from_min_size(pos2(10.0, 10.0), vec2(0.0, 0.0)),
+        Rect::from_min_size(pos2(10.0, 10.0), vec2(1e9, 40.0)),
+    ];
+    let ctx = egui::Context::default();
+    for rect in rects {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            super::paint_slider(ui, &theme, rect, (1, None), true, crate::component::Lit::default());
+        });
+        output.textures_delta.clear();
+    }
+}

@@ -131,7 +131,8 @@ fn paint_slider(ui: &Ui, theme: &Theme, rect: Rect, (now, held): (usize, Option<
         // about 43 at 130 %, so two never meet.
         let text = galley(ui, &tr!("{percent} %", percent = scale.percent()), theme.fonts.mono_s, colour);
         let wide = text.size().x;
-        let left = (mark.center().x - wide / 2.0).clamp(rect.left(), (rect.right() - wide).max(rect.left()));
+        // `max` then `min`, never `clamp`: a NaN or inverted rect would make `clamp` panic.
+        let left = (mark.center().x - wide / 2.0).max(rect.left()).min((rect.right() - wide).max(rect.left()));
         painter.galley(pos2(on_grid(left), rect.top() + NAMES), text, colour);
     }
     let (at, top, high) = match held {

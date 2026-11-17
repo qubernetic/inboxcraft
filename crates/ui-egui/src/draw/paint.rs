@@ -320,10 +320,11 @@ pub(crate) fn dashed(painter: &Painter, rect: Rect, colour: Color32) {
 /// [`dashed`] with corners of `radius`. The path runs along the box's own edge and the line lies 1 px inside it, so
 /// a box on whole pixels has its straight dashes on whole pixels; an arc is filled as a ring and anti-aliased.
 pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radius: f32) {
-    let r = if radius.is_finite() { radius.clamp(0.0, rect.width().min(rect.height()) / 2.0) } else { 0.0 };
+    // The rect first: `clamp` panics on a negative or NaN bound, so only a finite, positive box reaches the radius.
     if !rect.is_finite() || !rect.is_positive() {
         return;
     }
+    let r = if radius.is_finite() { radius.max(0.0).min(rect.width().min(rect.height()) / 2.0) } else { 0.0 };
     let (x0, y0, x1, y1) = (rect.left(), rect.top(), rect.right(), rect.bottom());
     let quarter = std::f32::consts::FRAC_PI_2;
     let runs = [

@@ -307,3 +307,21 @@ fn a_key_held_on_the_closed_field_shows_it_pressed_and_opens_it_once_when_it_com
         assert!(harness.state().0, "{key:?} up: open, and it stays open");
     }
 }
+
+#[test]
+fn a_select_of_any_width_returns_and_is_at_least_as_wide_as_high() {
+    let theme = theme();
+    let high = super::height(&theme);
+    for width in [f32::NAN, f32::INFINITY, -f32::INFINITY, -40.0, 0.0, 1.0, 1e9] {
+        let ctx = egui::Context::default();
+        let mut wide = 0.0;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut open = false;
+            let (response, _) = Select { name: "Repeat", shown: "Every week", options: &WEEKS, current: Some(0), icon: IconId::Changed, width }
+                .show_with(ui, &theme, &mut open, None, None);
+            wide = response.rect.width();
+        });
+        output.textures_delta.clear();
+        assert!((high..=2048.0).contains(&wide), "width {width}: {wide}");
+    }
+}

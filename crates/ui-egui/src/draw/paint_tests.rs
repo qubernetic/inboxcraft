@@ -147,3 +147,68 @@ fn the_shadow_is_the_sheets_0_12_blur_32_black_at_40_percent() {
         assert!((got - want).abs() <= 1.5, "{what}: {got} at {at:?}, want {want}");
     }
 }
+
+/// The shapes `draw` adds to one headless frame at `scale` pixels per point.
+fn frame_shapes(scale: f32, draw: impl FnMut(&mut egui::Ui)) -> Vec<Shape> {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(scale);
+    let mut output = ctx.run_ui(egui::RawInput::default(), draw);
+    output.textures_delta.clear();
+    output.shapes.into_iter().map(|clipped| clipped.shape).collect()
+}
+
+/// The vertices of every mesh in `shapes` and the points of every path, counted.
+fn vertices(shapes: &[Shape]) -> usize {
+    shapes
+        .iter()
+        .map(|shape| match shape {
+            Shape::Mesh(mesh) => mesh.vertices.len(),
+            Shape::Path(path) => path.points.len(),
+            _ => 1,
+        })
+        .sum()
+}
+
+#[test]
+fn a_dashed_edge_on_any_rect_and_radius_returns_and_stays_small() {
+    use egui::Rect;
+    let (nan, inf) = (f32::NAN, f32::INFINITY);
+    let at = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(pos2(x, y), vec2(w, h));
+    let rects = [
+        Rect::NOTHING,
+        Rect::EVERYTHING,
+        Rect::from_min_max(pos2(30.0, 30.0), pos2(10.0, 10.0)),
+        Rect::from_min_max(pos2(10.0, 30.0), pos2(30.0, 10.0)),
+        at(nan, 10.0, 20.0, 20.0),
+        at(10.0, 10.0, nan, 20.0),
+        at(10.0, 10.0, 20.0, nan),
+        at(inf, 10.0, 20.0, 20.0),
+        at(10.0, 10.0, inf, 20.0),
+        at(-inf, -inf, inf, inf),
+        at(10.0, 10.0, 0.0, 0.0),
+        at(10.0, 10.0, 0.0, 20.0),
+        at(10.0, 10.0, 1.0, 1.0),
+        at(10.0, 10.0, 2.0, 2.0),
+        at(10.0, 10.0, 3.0, 3.0),
+        at(10.0, 10.0, 1.0, 20.0),
+        at(10.0, 10.0, 3.0, 20.0),
+        at(10.0, 10.0, 1e9, 20.0),
+        at(-5e8, 10.0, 1e9, 1e9),
+        at(1e30, 1e30, 40.0, 20.0),
+    ];
+    let colour = egui::Color32::from_rgb(0x8b, 0x91, 0x96);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for rect in rects {
+            for radius in [0.0, 2.0, -3.0, nan, inf, -inf, 1e9] {
+                let shapes = frame_shapes(scale, |ui| {
+                    if radius == 0.0 {
+                        super::dashed(ui.painter(), rect, colour);
+                    }
+                    super::dashed_round(ui.painter(), rect, colour, radius);
+                });
+                let count = vertices(&shapes);
+                assert!(count <= 200_000, "{rect:?} radius {radius} at {scale}: {count} vertices");
+            }
+        }
+    }
+}
