@@ -322,7 +322,7 @@ fn a_link_name_is_capped_before_it_is_laid_out() {
     );
     harness.run();
     let shown = harness.state();
-    assert!(shown.chars().count() <= super::MOST + 1, "{} characters", shown.chars().count());
+    assert!(shown.chars().count() <= crate::component::MOST + 1, "{} characters", shown.chars().count());
     assert!(shown.ends_with('…'), "the cap says the rest was left out");
     // In a banner, the link draws a capped beginning and is heard whole.
     let words: &'static str = Box::leak(format!("always for {}@example.org", "b".repeat(100_000)).into_boxed_str());
@@ -334,5 +334,5 @@ fn a_link_name_is_capped_before_it_is_laid_out() {
         Look::Text { text, .. } => Some(text.clone()),
         _ => None,
     });
-    assert!(text.is_some_and(|text| text.chars().count() <= super::MOST + 1), "the drawn link is capped");
+    assert!(text.is_some_and(|text| text.chars().count() <= crate::component::MOST + 1), "the drawn link is capped");
 }

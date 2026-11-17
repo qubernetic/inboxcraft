@@ -16,7 +16,6 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
-use super::MOST;
 use super::button::{LinkSize, link_sized};
 
 /// What a banner says, and so its label and colours.
@@ -159,14 +158,14 @@ pub(crate) fn banner_in(
 }
 
 /// The banner's words `text` laid out in `room` points: one line, cut between grapheme clusters with one ellipsis (at
-/// most [`MOST`] characters are laid out at all).
+/// most [`super::MOST`] characters are laid out at all).
 pub(crate) fn words(ui: &Ui, theme: &Theme, text: &str, room: f32) -> std::sync::Arc<egui::Galley> {
     let f = theme.fonts.caption;
     super::galley(ui, &super::fit_capped(ui, text, f, room), f, theme.palette.ink)
 }
 
 /// A link's `name` as it fits in `room` points in the small link's face: whole, or cut between grapheme clusters in its
-/// written order with one ellipsis; empty when not even the ellipsis fits. At most [`MOST`] characters of it are laid
+/// written order with one ellipsis; empty when not even the ellipsis fits. At most [`super::MOST`] characters of it are laid
 /// out at all, so a name as long as a header costs no more than a line.
 pub(crate) fn cut_name(ui: &Ui, theme: &Theme, name: &str, room: f32) -> String {
     if room < 1.0 {

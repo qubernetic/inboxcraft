@@ -583,7 +583,8 @@ fn a_focus_ring_round_a_hostile_rect_never_panics_and_stays_one_shape() {
                 // Painted all the way to triangles, it stays a bounded mesh.
                 let ctx = egui::Context::default();
                 ctx.set_pixels_per_point(ppp);
-                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
+                let input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
                 let mut output = ctx.run_ui(input, |ui| super::focus_ring(ui.painter(), &theme, rect, place));
                 output.textures_delta.clear();
                 let meshes = ctx.tessellate(output.shapes, ppp);
@@ -600,10 +601,13 @@ fn a_focus_ring_round_a_hostile_rect_never_panics_and_stays_one_shape() {
     }
 }
 
+/// The ink centre of each row of a run.
+type Centres = Vec<(f32, f32)>;
+
 /// The ink centres of the rows of `text` in the caption wrapped at `width` and painted by [`super::rows_at`] at `at`
 /// in `align`, and of each row's words laid out alone and put where the design puts that row: at the box's left, or
 /// in the middle of `width`, with [`super::run_at`]. `(rows, alone)`, one centre each per row.
-fn rows_and_alone(text: &'static str, at: egui::Pos2, width: f32, align: egui::Align) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
+fn rows_and_alone(text: &'static str, at: egui::Pos2, width: f32, align: egui::Align) -> (Centres, Centres) {
     let theme = Theme::new(Mode::Dark, TextScale::default());
     let (ground, ink) = (theme.palette.surface, theme.palette.ink);
     let font = theme.fonts.caption;
@@ -658,7 +662,10 @@ fn every_row_of_a_wrapped_run_stands_where_the_design_puts_it() {
         let (rows, alone) = rows_and_alone(text, at, width, align);
         assert_eq!(rows.len(), alone.len(), "{text:?}");
         for (index, (row, want)) in rows.iter().zip(&alone).enumerate() {
-            assert!((row.0 - want.0).abs() <= 0.05 && (row.1 - want.1).abs() <= 0.05, "row {index} of {text:?} at {at:?}: {row:?}, the design's {want:?}");
+            assert!(
+                (row.0 - want.0).abs() <= 0.05 && (row.1 - want.1).abs() <= 0.05,
+                "row {index} of {text:?} at {at:?}: {row:?}, the design's {want:?}"
+            );
         }
     }
 }
