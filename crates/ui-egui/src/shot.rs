@@ -41,7 +41,7 @@
 //! motion on.
 //! `icons` set to `true` draws every icon
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
-//! the components ([`crate::component::gallery`]), with `page` `fields` its page of fields, pickers and menus
+//! the components ([`crate::component::gallery`]), `fields` set to `true` the page of the fields, pickers and menus
 //! ([`crate::component::gallery_fields`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
 //! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
@@ -213,9 +213,9 @@ pub struct Shot {
     /// The gallery of the components instead of the window.
     #[serde(default)]
     pub components: Option<bool>,
-    /// The gallery's page with `components`: `fields` for the fields, pickers and menus; the first page when left out.
+    /// The page of the fields, pickers and menus instead of the window.
     #[serde(default)]
-    pub page: Option<String>,
+    pub fields: Option<bool>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
@@ -615,7 +615,8 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.picker.is_some()
         || shot.menu.is_some()
         || shot.outbox.is_some()
-        || (shot.icons == Some(true) && shot.components == Some(true));
+        || (shot.icons == Some(true) && shot.components == Some(true))
+        || (shot.fields == Some(true) && (shot.icons == Some(true) || shot.components == Some(true)));
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -627,20 +628,30 @@ fn component_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
     no_window(shot, "the component gallery")?;
     let theme = Theme::new(mode, TextScale::default());
     let keymap = gallery::keymap();
-    type Page = fn(&mut egui::Ui, &Theme, &crate::keymap::Keymap);
-    let (size, draw): (egui::Vec2, Page) = match shot.page.as_deref() {
-        None => (gallery::size(), gallery::page),
-        Some("fields") => (crate::component::gallery_fields::size(), crate::component::gallery_fields::page),
-        Some(other) => return Err(bad(format!("{}: the gallery has no page {other:?}", shot.out))),
-    };
     let mut fonts = true;
-    paint(size, shot.scale.unwrap_or(1.0), mode, |ui| {
+    paint(gallery::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
         if std::mem::take(&mut fonts) {
             theme::install_fonts(ui.ctx());
             // The app's own style, so the boards' text is drawn as the app draws it (coverage, hinting).
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
-        draw(ui, &theme, &keymap);
+        gallery::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the fields, pickers and menus of `shot` in `mode`.
+fn fields_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the fields, pickers and menus")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_fields::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            // The app's own style, so the boards' text is drawn as the app draws it (coverage, hinting).
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_fields::page(ui, &theme, &keymap);
     })
 }
 
@@ -979,8 +990,8 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     if shot.components == Some(true) {
         return component_gallery(shot, mode);
     }
-    if shot.page.is_some() {
-        return Err(bad(format!("{}: a page is a page of the component gallery", shot.out)));
+    if shot.fields == Some(true) {
+        return fields_gallery(shot, mode);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);

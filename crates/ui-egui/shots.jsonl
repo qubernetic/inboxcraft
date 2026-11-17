@@ -45,8 +45,8 @@
 {"out": "docs/images/components-dark.png", "mode": "dark", "components": true}
 # The fields, pickers and menus (#234): text, multiline and password fields, recipients, popup, menu rows, typed time
 # and the time picker, on a page of their own.
-{"out": "docs/images/components-fields-light.png", "mode": "light", "components": true, "page": "fields"}
-{"out": "docs/images/components-fields-dark.png", "mode": "dark", "components": true, "page": "fields"}
+{"out": "docs/images/components-fields-light.png", "mode": "light", "fields": true}
+{"out": "docs/images/components-fields-dark.png", "mode": "dark", "fields": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}

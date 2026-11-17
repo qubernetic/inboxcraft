@@ -833,12 +833,16 @@ fn an_icon_sits_in_its_box_as_the_board_draws_it() {
 }
 
 #[test]
-fn the_fields_page_of_the_gallery_is_its_own_picture() {
-    let picture = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "fields"}"#)).unwrap();
-    let size = crate::component::gallery_fields::size();
-    assert_eq!((picture.width as f32, picture.height as f32), (size.x, size.y));
-    let error = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "other"}"#)).unwrap_err();
-    assert!(error.to_string().contains("no page"), "{error}");
-    let error = shoot(&shot(r#"{"out": "x.png", "mode": "dark", "page": "fields"}"#)).unwrap_err();
-    assert!(error.to_string().contains("component gallery"), "{error}");
+fn the_fields_page_is_its_own_picture_and_no_window_nor_another_page() {
+    for name in ["light", "dark"] {
+        let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "{name}", "fields": true}}"#))).unwrap();
+        let size = crate::component::gallery_fields::size();
+        assert_eq!((picture.width as f32, picture.height as f32), (size.x, size.y), "{name}");
+    }
+    for extra in [r#""components": true"#, r#""icons": true"#, r#""settings": true"#, r#""menu": "more""#] {
+        let error = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "light", "fields": true, {extra}}}"#))).unwrap_err();
+        assert!(error.to_string().contains("no window"), "{extra}: {error}");
+    }
+    let error = parse_script(r#"{"out": "x.png", "mode": "dark", "components": true, "page": "fields"}"#).unwrap_err();
+    assert!(error.to_string().contains("unknown field `page`"), "one key a page: {error}");
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The second page of the gallery, for `ui_shot` (`"components": true, "page": "fields"`): the boards of the
+//! The page of the fields, pickers and menus, for `ui_shot` (`"fields": true`): the boards of the
 //! fields, pickers and menus (text, multiline and password fields, the recipient chip and line, the popup panel, the
 //! menu item and choice, the suggestion row, the typed time and the time picker), every state of each sheet in its
 //! order, labelled, with the design boards' words, on `bg`, in three columns. The data is invented; the keys come
