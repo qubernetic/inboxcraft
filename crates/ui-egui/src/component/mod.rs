@@ -43,6 +43,7 @@ pub mod key;
 pub mod label;
 pub mod pill;
 pub mod popup;
+pub mod row;
 pub mod scroll;
 pub mod segmented;
 pub mod select;

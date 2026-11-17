@@ -220,6 +220,10 @@ pub struct Sizes {
     pub check: f32,
     /// A pill's height.
     pub pill: f32,
+    /// The height of a row's hover action, a progress line and a check step's line.
+    pub strip: f32,
+    /// The least height of a settings row.
+    pub settings_row: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -239,6 +243,8 @@ pub(crate) const SIZES: Sizes = Sizes {
     mark: 14.0,
     check: 16.0,
     pill: 24.0,
+    strip: 24.0,
+    settings_row: 56.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -781,6 +787,8 @@ impl Theme {
             pill: self.size(z.pill),
             avatar: z.avatar.map(|side| self.size(side)),
             badge: self.size(z.badge),
+            strip: self.size(z.strip),
+            settings_row: self.size(z.settings_row),
             ..z
         }
     }

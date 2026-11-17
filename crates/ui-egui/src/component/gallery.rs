@@ -39,7 +39,7 @@ use super::{avatar, badge, card, cut, galley, icon, label, pill, popup, tooltip}
 /// The page's size in points.
 #[must_use]
 pub fn size() -> Vec2 {
-    vec2(1800.0, TOP + BOARDS + CONTROLS + MARKS)
+    vec2(WIDE + BLOCKS, TOP + BOARDS + CONTROLS + MARKS)
 }
 
 /// What draws a column of the page.
@@ -58,6 +58,13 @@ const CONTROLS: f32 = 807.0;
 
 /// The height of the band of marks under the boards (avatar, badge, icon, scroll bar, account bar), in points.
 const MARKS: f32 = 480.0;
+
+/// The width of the page's first part, every band but the shared rows and blocks, in points.
+const WIDE: f32 = 1800.0;
+
+/// The width of the shared rows and blocks (row, hover actions, banner, empty state, progress, settings row, check
+/// step, facts) right of the rest, as high as the page, in points.
+const BLOCKS: f32 = 1800.0;
 
 /// The width of the time picker's column, in points.
 const PICKER: f32 = 380.0;
@@ -165,10 +172,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, f32::INFINITY);
-    let at = pos2(rect.left() + s.s3, rect.center().y - text.size().y / 2.0);
+    // The group stands at the line's right end, the row's text cut short of it.
+    let line = rect.shrink2(vec2(s.s4, 0.0));
+    let room = line.width() - hover::width(ui, theme, keymap, &actions) - s.s2;
+    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, room);
+    let at = pos2(line.left(), rect.center().y - text.size().y / 2.0);
     ui.painter().galley(at, text, p.ink);
-    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
+    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), line, true, &actions);
 }
 
 /// The right column: buttons, pills, badges, a row with hover actions, a tooltip and a popup.
@@ -612,7 +622,7 @@ fn sliders(ui: &mut Ui, theme: &Theme) {
         (tr!("at-130"), at(4), Some(Shown::Rest), None),
     ];
     // Two to a row: three are wider than the column.
-    for pair in states.chunks(2) {
+    for pair in states.chunks(1) {
         cells(ui, theme, |ui| {
             for (state, current, shown, towards) in pair {
                 cell(ui, theme, state, |ui| {
@@ -824,16 +834,60 @@ fn marks_right(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     icons(ui, theme);
 }
 
+/// The row's board: the mail row's read, hover, selected and focus states, a row on the panel under the pointer, and
+/// the last row of a list, without its line.
+fn rows(ui: &mut Ui, theme: &Theme) {
+    use super::row::{RowGround, row_with};
+    title(ui, theme, tr!("Row"));
+    let p = &theme.palette;
+    let states = [
+        (tr!("read"), RowGround::Surface, false, false, Shown::Rest),
+        (tr!("hover"), RowGround::Surface, false, false, Shown::Hover),
+        (tr!("selected"), RowGround::Surface, true, false, Shown::Rest),
+        (tr!("focus"), RowGround::Surface, false, false, Shown::Focus),
+        (tr!("panel-hover"), RowGround::Panel, false, false, Shown::Hover),
+        (tr!("last"), RowGround::Surface, false, true, Shown::Rest),
+    ];
+    for pair in states.chunks(1) {
+        cells(ui, theme, |ui| {
+            for (state, ground, current, last, shown) in pair {
+                cell(ui, theme, state, |ui| {
+                    ui.allocate_ui(vec2(440.0, theme.boxes().mail_row), |ui| {
+                        ui.set_width(440.0);
+                        let fill = if *ground == RowGround::Panel { p.panel } else { p.surface };
+                        ui.painter().rect_filled(Rect::from_min_size(ui.cursor().min, vec2(440.0, theme.boxes().mail_row)), 0.0, fill);
+                        let id = Id::new("gallery-row-board").with(*state);
+                        let drawn = row_with(ui, theme, id, 56.0, *ground, *current, *last, Some(*shown));
+                        let name = format!("{} {state}", tr!("Row"));
+                        drawn.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                        let text = cut(ui, "Teodor Vasquez", theme.fonts.body, p.ink, 300.0);
+                        let at = drawn.rect.left_top() + vec2(34.0, 7.0);
+                        ui.painter().galley(at, text, p.ink);
+                    });
+                });
+            }
+        });
+    }
+}
+
+/// The left column of the shared rows and blocks.
+fn blocks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
+    rows(ui, theme);
+}
+
+/// The right column of the shared rows and blocks.
+fn blocks_right(_: &mut Ui, _: &Theme, _: &Keymap) {}
+
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     let s = theme.spacing;
     let whole = Rect::from_min_size(pos2(0.0, 0.0), size());
     ui.painter().rect_filled(whole, 0.0, theme.palette.bg);
     let mut layers = Panes::begin(ui.painter());
-    let half = (whole.width() - PICKER - s.s2 * 4.0) / 2.0;
-    let board = (whole.width() - s.s2 * 3.0) / 2.0;
+    let half = (WIDE - PICKER - s.s2 * 4.0) / 2.0;
+    let board = (WIDE - s.s2 * 3.0) / 2.0;
     let top = TOP - s.s2 * 2.0;
-    let columns: [(f32, f32, f32, Draw); 9] = [
+    let columns: [(f32, f32, f32, Draw); 11] = [
         (s.s2, s.s2, half, left),
         (s.s2 * 2.0 + half, s.s2, half, right),
         (s.s2 * 3.0 + half * 2.0, s.s2, PICKER, picker),
@@ -843,9 +897,13 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         (s.s2 * 2.0 + board, TOP + BOARDS, board, controls_right),
         (s.s2, TOP + BOARDS + CONTROLS, board, marks_left),
         (s.s2 * 2.0 + board, TOP + BOARDS + CONTROLS, board, marks_right),
+        (WIDE + s.s2, 0.0, board, blocks_left),
+        (WIDE + s.s2 * 2.0 + board, 0.0, board, blocks_right),
     ];
     for (x, y, width, draw) in columns {
-        let height = if y < TOP {
+        let height = if x >= WIDE {
+            whole.height() - s.s2
+        } else if y < TOP {
             top
         } else if y < TOP + BOARDS {
             BOARDS - s.s2
@@ -856,7 +914,7 @@ pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         };
         let column = Rect::from_min_size(pos2(x.round(), y), vec2(width.floor(), height));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            if y < TOP {
+            if y < TOP && x < WIDE {
                 layers.card(ui, super::margin(s.s4, s.s3), |ui| {
                     ui.set_min_size(ui.available_size());
                     draw(ui, theme, keymap);
