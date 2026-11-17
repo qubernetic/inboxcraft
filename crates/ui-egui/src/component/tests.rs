@@ -464,7 +464,7 @@ pub(crate) struct Own {
     pub ring: Option<(Rect, f32, Color32)>,
     /// Its texts, glyphs included: `(text, colour, family, size)`.
     pub texts: Vec<(String, Color32, String, f32)>,
-    /// The colours of the level hairlines inside it (a link's underline).
+    /// The colours of the level hairlines and thin level fills inside it (a link's underline).
     pub lines: Vec<Color32>,
     /// The largest corner radius it paints.
     pub radius: f32,
@@ -486,6 +486,11 @@ pub(crate) fn own(paint: &Paint, rect: Rect) -> Own {
                     && shape.rect.height() == 0.0
                 {
                     found.lines.push(*colour);
+                    continue;
+                }
+                // A thin level fill inside it is a line too (a link's underline, the font's thickness).
+                if fill.a() > 0 && stroke.is_none() && shape.inside && shape.rect.height() < 1.0 && shape.rect.width() > 4.0 {
+                    found.lines.push(*fill);
                     continue;
                 }
                 if fill.a() > 0 && near(shape.rect, rect) {

@@ -432,11 +432,17 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
             painter.rect_filled(rect, 0.0, p.cyan_muted);
         }
         let top = (rect.center().y - galley.size().y / 2.0).round();
-        // The underline: a hairline two points over the foot of the text's line, under the pointer and while pressed.
-        let underline = (lit.pressed || lit.hover).then_some(p.cyan_text);
-        if let Some(colour) = underline {
-            let y = top + font.line - 2.0;
-            paint::hairline(painter, egui::pos2(rect.left() + pad, y), egui::pos2(rect.left() + pad + width - 1.0, y), colour);
+        // The underline, under the pointer and while pressed: the font's own, as the sheet's text decoration draws it,
+        // its thickness and its place under the baseline from the face, so its edges may fall between pixels.
+        if lit.pressed || lit.hover {
+            let baseline = galley.rows.first().and_then(|row| row.glyphs.first().map(|glyph| row.pos.y + glyph.pos.y)).unwrap_or(font.size);
+            let (below, thick) = font.face.underline();
+            let middle = top + baseline + below * font.size;
+            let line = egui::Rect::from_x_y_ranges(
+                rect.left() + pad..=rect.left() + pad + width,
+                middle - thick * font.size / 2.0..=middle + thick * font.size / 2.0,
+            );
+            painter.rect_filled(line, 0.0, p.cyan_text);
         }
         painter.galley(egui::pos2(rect.left() + pad, top), galley, ink);
         if lit.focus {

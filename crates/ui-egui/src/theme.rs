@@ -252,6 +252,19 @@ pub enum Face {
 }
 
 impl Face {
+    /// The face's own underline, from its `post` table, as shares of the size: how far its middle lies under the
+    /// baseline, and how thick it is.
+    #[must_use]
+    pub const fn underline(self) -> (f32, f32) {
+        match self {
+            Self::Mono => (0.140, 0.060),
+            Self::MonoSemiBold => (0.112, 0.088),
+            Self::Sans => (0.095, 0.060),
+            Self::SansSemiBold => (0.075, 0.088),
+            Self::Brand => (154.0 / 2048.0, 102.0 / 2048.0),
+        }
+    }
+
     /// Every face.
     pub const ALL: [Self; 5] = [Self::Mono, Self::MonoSemiBold, Self::Sans, Self::SansSemiBold, Self::Brand];
 

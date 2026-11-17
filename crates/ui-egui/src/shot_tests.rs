@@ -654,3 +654,40 @@ fn a_dashed_edge_with_radius_2_rounds_its_corners_and_keeps_the_phase() {
         assert_ne!(picture.pixel(x, y), Some(colour), "corner {x}, {y}");
     }
 }
+
+/// The coverage (0 to 1) of each row of a hovered link `name` in `size`, drawn at 10, 10 on nothing: the mean alpha of
+/// the row across the link's text, its first and last two columns left out.
+fn underline_rows(name: &'static str, size: crate::component::button::LinkSize) -> Vec<f32> {
+    let keymap = crate::keymap::Keymap::default();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut width = 0;
+    let picture = super::paint(egui::vec2(200.0, 60.0), 1.0, Mode::Light, |ui| {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), egui::vec2(180.0, 40.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            let response = crate::component::button::link_with(ui, &theme, &keymap, name, size, true, Some(crate::component::Shown::Hover));
+            width = response.rect.width() as usize;
+        });
+    })
+    .unwrap();
+    let pad = if size == crate::component::button::LinkSize::Line { 4 } else { 0 };
+    (0..30)
+        .map(|row| {
+            let columns: Vec<f32> =
+                (10 + pad + 2..10 + width - pad - 2).map(|x| picture.pixel(x, 10 + row).map_or(0.0, |c| f32::from(c.a()) / 255.0)).collect();
+            columns.iter().sum::<f32>() / columns.len().max(1) as f32
+        })
+        .collect()
+}
+
+#[test]
+fn a_links_underline_is_the_fonts_in_the_rows_the_sheet_draws_it() {
+    use crate::component::button::LinkSize;
+    // The sheet underlines the text as the font does: 0.06 em thick, 0.14 em under the baseline. In the 24 high link
+    // that is row 18 at about 70 %; in the 16 high small link row 13 at about 65 %.
+    for (name, size, row) in [("Show details", LinkSize::Line, 18), ("show all", LinkSize::Small, 13)] {
+        let rows = underline_rows(name, size);
+        let at = format!("{name}: {:?}", rows.iter().enumerate().skip(10).take(12).map(|(r, c)| (r, (c * 100.0).round())).collect::<Vec<_>>());
+        assert!((0.55..=0.85).contains(&rows[row]), "{at}");
+        assert!(rows[row - 1] <= 0.2 && rows[row + 1] <= 0.2, "{at}");
+    }
+}
