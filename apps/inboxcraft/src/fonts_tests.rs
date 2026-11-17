@@ -268,3 +268,14 @@ fn the_fallbacks_go_in_after_the_app_s_first_pass_and_once() {
     assert!(!ctx.has_requested_repaint(), "then the app rests: they go in once");
     assert_eq!(ctx.fonts(|fonts| fonts.definitions().font_data.len()), installed);
 }
+
+#[test]
+fn the_walk_looks_at_a_limited_number_of_font_files() {
+    let dir = tempfile::tempdir().unwrap();
+    for at in 0..5 {
+        std::fs::write(dir.path().join(format!("{at}.ttf")), b"").unwrap();
+    }
+    let searched = search_folders(&[dir.path().to_owned()], None, &[LATIN], &Limits { files: 2, ..LIMITS });
+    assert_eq!(searched.reads.len(), 2);
+    assert_eq!(LIMITS.files, 20_000);
+}

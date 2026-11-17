@@ -40,10 +40,12 @@ pub(crate) struct Limits {
     pub(crate) total: u64,
     /// The number of faces.
     pub(crate) faces: usize,
+    /// The font files looked at, in all folders together.
+    pub(crate) files: usize,
 }
 
 /// The limits of the search at start.
-pub(crate) const LIMITS: Limits = Limits { file: MAX_FILE, total: 96 * 1024 * 1024, faces: 8 };
+pub(crate) const LIMITS: Limits = Limits { file: MAX_FILE, total: 96 * 1024 * 1024, faces: 8, files: 20_000 };
 
 /// The most faces a collection file may claim: a font collection holds a few dozen at most.
 pub(crate) const MAX_COLLECTION: u32 = 256;
@@ -53,6 +55,10 @@ const MAX_DEPTH: usize = 16;
 
 /// The most folder entries the walk looks at, in all folders together.
 const MAX_ENTRIES: usize = 100_000;
+
+/// The worker's stack: generous, so the XML parser has room to spare at the nesting the configuration files may
+/// have (a defence beside the nesting count, which is what keeps a deep file away from the parser).
+const WORKER_STACK: usize = 16 * 1024 * 1024;
 
 /// The most probes one search takes: one face kept for each at most.
 const MAX_PROBES: usize = 8;
@@ -84,10 +90,11 @@ pub(crate) struct Searched {
 
 /// [`system_fallbacks`] in the font files (`.ttf`, `.otf`, `.ttc`, `.otc`) in and below `folders`, within `limits`,
 /// with `sans` the family the system names sans-serif. The walk follows links, sees each folder and file once (so
-/// link loops end), goes at most [`MAX_DEPTH`] deep and looks at most at [`MAX_ENTRIES`] entries.
+/// link loops end), goes at most [`MAX_DEPTH`] deep, looks at most at [`MAX_ENTRIES`] entries and at most at
+/// `limits.files` font files.
 pub(crate) fn search_folders(folders: &[PathBuf], sans: Option<&str>, missing: &[(&str, char)], limits: &Limits) -> Searched {
     let mut search = Search::new(missing, sans, limits);
-    let mut walk = Walk { seen: HashSet::new(), entries: 0, reads: Vec::new() };
+    let mut walk = Walk { seen: HashSet::new(), entries: 0, files: 0, reads: Vec::new() };
     if search.wants_any() {
         for folder in folders {
             walk.folder(&mut search, folder, 0);
@@ -101,6 +108,7 @@ pub(crate) fn search_folders(folders: &[PathBuf], sans: Option<&str>, missing: &
 struct Walk {
     seen: HashSet<PathBuf>,
     entries: usize,
+    files: usize,
     reads: Vec<PathBuf>,
 }
 
@@ -124,6 +132,10 @@ impl Walk {
             if meta.is_dir() {
                 self.folder(search, &path, depth.saturating_add(1));
             } else if meta.is_file() && is_font_file(&path) && meta.len() <= search.limits.file {
+                self.files = self.files.saturating_add(1);
+                if self.files > search.limits.files {
+                    return;
+                }
                 let Ok(real) = std::fs::canonicalize(&path) else { continue };
                 if self.seen.insert(real.clone()) {
                     self.reads.push(real.clone());
@@ -440,7 +452,7 @@ impl Found {
 pub fn search(wake: impl Fn() + Send + 'static) -> Arc<Found> {
     let found = Arc::new(Found::default());
     let into = Arc::clone(&found);
-    let started = std::thread::Builder::new().name("inboxcraft-fonts".to_owned()).spawn(move || {
+    let started = std::thread::Builder::new().name("inboxcraft-fonts".to_owned()).stack_size(WORKER_STACK).spawn(move || {
         if into.put(system_fallbacks(&theme::missing_probes(&theme::FALLBACK_PROBES))) {
             wake();
         }

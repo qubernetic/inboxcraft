@@ -41,7 +41,7 @@ pub mod control;
 pub mod desk;
 pub mod desktop;
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
-mod fontconfig;
+pub mod fontconfig;
 pub mod fonts;
 pub mod instance;
 pub mod notify;

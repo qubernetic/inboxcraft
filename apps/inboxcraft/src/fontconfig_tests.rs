@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{MAX_CONFIG, MAX_CONFIGS, MAX_INCLUDE_DEPTH, Places, nesting_within, read};
+use super::{MAX_CONFIG, MAX_CONFIGS, MAX_INCLUDE_DEPTH, MAX_LISTED, MAX_NESTING, Named, Places, nesting_within, parse, plain, read};
 
 /// A fontconfig file holding `body`.
 fn conf(body: &str) -> String {
@@ -175,19 +175,115 @@ fn nothing_there_gives_nothing() {
     assert!(read(&[top], &Places::default()).folders.is_empty(), "no home, no XDG folders");
 }
 
+/// Whether `text` gets past the count, measured the way `parse` does it: on the plain text.
+fn within(text: &str, max: usize) -> bool {
+    plain(text).is_some_and(|plain| nesting_within(&plain, max))
+}
+
 #[test]
 fn the_nesting_is_counted_before_the_parser_sees_it() {
-    assert!(nesting_within(&conf("<dir>/a</dir><alias><family>x</family></alias>"), 3));
-    assert!(!nesting_within(&conf("<a><b><c><d/></c></b></a>"), 3));
-    assert!(nesting_within(&conf("<a><b/><b/><b/></a>"), 2), "a self-closed element does not nest");
-    assert!(!nesting_within("<a x=\"/>\"><b y='>'><c>", 2), "quotes are honoured");
-    assert!(nesting_within("<a><!-- <b><c><d> --><![CDATA[<b><c><d>]]><?pi <b> ?></a>", 1), "comments, CDATA and instructions hold no elements");
-    assert!(nesting_within("<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\"><a/>", 1));
-    assert!(!nesting_within("<!DOCTYPE a [ <!ELEMENT a ANY> ]><a/>", 1), "an internal DTD is refused");
-    for cut in ["<a", "<a x=\"", "<!-- open", "<![CDATA[ open", "<? open", "<!DOCTYPE a ["] {
-        assert!(!nesting_within(cut, 64), "{cut}");
+    assert!(within(&conf("<dir>/a</dir><alias><family>x</family></alias>"), 3));
+    assert!(!within(&conf("<a><b><c><d/></c></b></a>"), 3));
+    assert!(within(&conf("<a><b/><b/><b/></a>"), 2), "a self-closed element does not nest");
+    assert!(!within("<a x=\"/>\"><b y='>'><c>", 2), "quotes are honoured");
+    assert!(within("<a><!-- <b><c><d> --><?pi <b> ?></a>", 1), "comments and instructions hold no elements");
+    assert!(within("<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\"><a/>", 1));
+    assert!(!within("<!DOCTYPE a [ <!ELEMENT a ANY> ]><a/>", 1), "an internal DTD is refused");
+    for cut in ["<a", "<a x=\"", "<!-- open", "<![CDATA[ open", "<? open", "<!DOCTYPE a [", "<!ELEMENT a ANY>"] {
+        assert!(!within(cut, 64), "{cut}");
     }
-    assert!(nesting_within("", 0) && nesting_within("no markup", 0));
+    assert!(within("", 0) && within("no markup", 0));
+}
+
+#[test]
+fn the_count_and_the_parser_see_the_same_text() {
+    assert_eq!(
+        plain("<?xml version=\"1.0\"?><!DOCTYPE f SYSTEM \"x\"><f><!-- c --><a x=\"<!--\"/></f>").as_deref(),
+        Some("  <f> <a x=\"<!--\"/></f>")
+    );
+    // A terminator counts only after its whole opener: `<!-->` and `<!--->` open a comment, they do not close one.
+    assert_eq!(plain("<a><!--></a>--></a>").as_deref(), Some("<a> </a>"));
+    assert_eq!(plain("<a><!---></a>--></a>").as_deref(), Some("<a> </a>"));
+    assert_eq!(plain("<a><?></a>?></a>").as_deref(), Some("<a> </a>"));
+    assert_eq!(plain("<a><?pi?></a>").as_deref(), Some("<a> </a>"));
+    assert_eq!(plain("<!-->"), None, "left open");
+    assert_eq!(plain("<?>"), None, "left open");
+    // CDATA is refused whole, however it is cut.
+    for cdata in ["<a><![CDATA[]]></a>", "<a><![CDATA[]></a>", "<a><![CDATA[]]]></a>", "<a><![CDATA[</a>]]>", "<![CDATA["] {
+        assert_eq!(plain(cdata), None, "{cdata}");
+    }
+}
+
+#[test]
+fn a_comment_that_opens_like_a_close_cannot_hide_the_nesting() {
+    // The re-review's input: each `<!-->` opens a comment that swallows 60 closes; a scan that took `<!-->` for a
+    // whole comment would count them and let 10 200 levels through to the parser, which would overflow the stack.
+    let mut text = "<fontconfig>".to_owned();
+    for _ in 0..170 {
+        text.push_str(&"<a>".repeat(60));
+        text.push_str("<!-->");
+        text.push_str(&"</a>".repeat(60));
+        text.push_str("-->");
+    }
+    text.push_str(&"</a>".repeat(10_200));
+    text.push_str("</fontconfig>");
+    assert!(!within(&text, MAX_NESTING));
+    assert_eq!(parse(text.as_bytes(), None, &Places::default()), None);
+    let pi = text.replace("<!-->", "<?>").replace("-->", "?>");
+    assert_eq!(parse(pi.as_bytes(), None, &Places::default()), None, "the same with an instruction");
+    let cdata = text.replace("<!-->", "<![CDATA[]>").replace("-->", "]]>");
+    assert_eq!(parse(cdata.as_bytes(), None, &Places::default()), None, "the same with CDATA");
+}
+
+#[test]
+fn parse_takes_bytes_and_touches_no_file() {
+    let places = places(Path::new("/p"));
+    let named = parse(conf(r#"<dir>/a</dir><include>b.conf</include><alias><family>sans-serif</family><default><family>S</family></default></alias><remap-dir as-path="/x">/c</remap-dir>"#).as_bytes(), Some(Path::new("/etc/fonts")), &places);
+    assert_eq!(
+        named,
+        Some(vec![
+            Named::Folder(PathBuf::from("/a")),
+            Named::Include(PathBuf::from("/etc/fonts/b.conf")),
+            Named::Sans("S".to_owned()),
+            Named::Folder(PathBuf::from("/c"))
+        ])
+    );
+    assert_eq!(parse(b"\xff\xfe", None, &places), None, "not UTF-8");
+    assert_eq!(parse(b"<other><dir>/a</dir></other>", None, &places), Some(Vec::new()), "not fontconfig's");
+    let big = vec![b' '; usize::try_from(MAX_CONFIG).unwrap() + 1];
+    assert_eq!(parse(&big, None, &places), None);
+}
+
+#[test]
+fn a_folder_of_configuration_files_is_listed_for_at_most_4096_entries() {
+    let root = tempfile::tempdir().unwrap();
+    let conf_d = root.path().join("conf.d");
+    std::fs::create_dir(&conf_d).unwrap();
+    for at in 0..5_000 {
+        std::fs::write(conf_d.join(format!("note-{at}")), "").unwrap();
+    }
+    let top = root.path().join("fonts.conf");
+    write(&top, &conf("<dir>/top</dir><include>conf.d</include>"));
+    let found = read(&[top], &places(root.path()));
+    assert_eq!(found.listed, MAX_LISTED);
+    assert_eq!(found.folders, [PathBuf::from("/top")]);
+}
+
+#[test]
+fn a_folder_included_again_is_not_listed_again() {
+    let root = tempfile::tempdir().unwrap();
+    let conf_d = root.path().join("conf.d");
+    std::fs::create_dir(&conf_d).unwrap();
+    for at in 0..10 {
+        std::fs::write(conf_d.join(format!("note-{at}")), "").unwrap();
+    }
+    write(&conf_d.join("10-a.conf"), &conf("<dir>/a</dir><include>.</include><include>../conf.d</include>"));
+    let includes = "<include>conf.d</include>".repeat(1_000) + "<include>./conf.d/</include>";
+    let top = root.path().join("fonts.conf");
+    write(&top, &conf(&includes));
+    let found = read(&[top], &places(root.path()));
+    assert_eq!(found.listed, 11, "listed once");
+    assert_eq!(found.folders, [PathBuf::from("/a")]);
 }
 
 #[test]
@@ -198,4 +294,30 @@ fn an_internal_dtd_is_refused() {
     let found = read(&[top], &places(root.path()));
     assert!(found.folders.is_empty(), "entities could hide markup: {:?}", found.folders);
     assert_eq!(found.skipped.len(), 1);
+}
+
+proptest::proptest! {
+    /// What the fuzz target checks, on stable Rust: any bytes, and any mix of the pieces that tripped the count.
+    #[test]
+    fn parse_never_panics(bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..512)) {
+        let _ = parse(&bytes, Some(Path::new("/etc/fonts")), &Places::default());
+    }
+
+    #[test]
+    fn pieces_of_markup_never_get_deep_text_past_the_count(
+        pieces in proptest::collection::vec(
+            proptest::sample::select(vec!["<a>", "</a>", "<a/>", "<!--", "-->", "<!-->", "<?", "?>", "<![CDATA[", "]]>", "\"", "'", ">", "<", "<dir>/x</dir>"]),
+            0..400,
+        )
+    ) {
+        let text = format!("<fontconfig>{}</fontconfig>", pieces.concat());
+        if let Some(plain) = plain(&text)
+            && nesting_within(&plain, MAX_NESTING)
+            && let Ok(document) = roxmltree::Document::parse(&plain)
+        {
+            let deepest = document.descendants().map(|node| node.ancestors().count()).max().unwrap_or(0);
+            proptest::prop_assert!(deepest <= MAX_NESTING + 2, "{deepest} levels passed the count");
+        }
+        let _ = parse(text.as_bytes(), None, &Places::default());
+    }
 }

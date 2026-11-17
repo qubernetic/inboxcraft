@@ -7,35 +7,40 @@
 //! folder to read; `as-path` is only the name fontconfig's cache gives it), `<include>`, and the `<alias>` that names
 //! the sans-serif family. Everything else is ignored. The files are hostile: only regular files are read (no device,
 //! FIFO, socket or folder in their place), at most [`MAX_CONFIG`] bytes each and [`MAX_CONFIGS`] files in all, an
-//! include goes at most [`MAX_INCLUDE_DEPTH`] deep, each file is read once (so include loops end), the XML parser
-//! keeps at most [`MAX_NODES`] nodes, a file nested more than [`MAX_NESTING`] elements deep is passed over, and only
-//! the top elements and their children are looked at.
+//! include goes at most [`MAX_INCLUDE_DEPTH`] deep, each file and each folder is read once (so include loops end), a
+//! folder is listed for at most [`MAX_LISTED`] entries, and only the top elements and their children are looked at.
+//!
+//! The XML parser recurses once per nesting level, so the nesting is counted before it parses. Both see the same
+//! text: [`plain`] first takes out comments, processing instructions and the document type (refusing an internal
+//! DTD and any CDATA, which fontconfig's files never have), then the count runs on what is left and the parser
+//! parses exactly that, with at most [`MAX_NODES`] nodes. A file nested more than [`MAX_NESTING`] deep is passed
+//! over. The bytes-level part, [`parse`], touches no file and is what the fuzz target drives.
 
 use std::collections::HashSet;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// The largest configuration file read: 1 MiB.
-pub(crate) const MAX_CONFIG: u64 = 1024 * 1024;
+pub const MAX_CONFIG: u64 = 1024 * 1024;
 
 /// The most configuration files read in all.
-pub(crate) const MAX_CONFIGS: usize = 256;
+pub const MAX_CONFIGS: usize = 256;
 
 /// How deep includes go.
-pub(crate) const MAX_INCLUDE_DEPTH: usize = 8;
+pub const MAX_INCLUDE_DEPTH: usize = 8;
 
-/// The most entries of a folder of configuration files looked at.
-const MAX_LISTED: usize = 10_000;
+/// The most entries of one folder of configuration files looked at.
+pub const MAX_LISTED: usize = 4_096;
 
 /// How deep elements may nest in a file; a file nested deeper is passed over.
-pub(crate) const MAX_NESTING: usize = 64;
+pub const MAX_NESTING: usize = 64;
 
 /// The most XML nodes one file may hold.
-pub(crate) const MAX_NODES: u32 = 100_000;
+pub const MAX_NODES: u32 = 100_000;
 
 /// Where relative and prefixed names in the files point.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Places {
+pub struct Places {
     /// `HOME`, for names starting with `~`.
     pub(crate) home: Option<PathBuf>,
     /// `XDG_CONFIG_HOME`, for an include with `prefix="xdg"` (else `~/.config`).
@@ -69,6 +74,50 @@ pub(crate) struct Fontconfig {
     pub(crate) sans: Option<String>,
     /// The files passed over: not regular files, too large, too many, too deep, not XML.
     pub(crate) skipped: Vec<PathBuf>,
+    /// The folder entries looked at, in all folders of configuration files together.
+    pub(crate) listed: usize,
+}
+
+/// One thing a file names, in its order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Named {
+    /// A font folder (`<dir>`, `<remap-dir>`).
+    Folder(PathBuf),
+    /// A file or folder of configuration files to read too (`<include>`).
+    Include(PathBuf),
+    /// The family first named for sans-serif (`<alias>`).
+    Sans(String),
+}
+
+/// What the configuration file `bytes`, in folder `here`, names, in its order; `None` for a file that is not
+/// fontconfig's XML within the limits (not UTF-8, larger than [`MAX_CONFIG`], with CDATA or an internal DTD, nested
+/// more than [`MAX_NESTING`] deep, more than [`MAX_NODES`] nodes, not well-formed). Touches no file.
+#[must_use]
+pub fn parse(bytes: &[u8], here: Option<&Path>, places: &Places) -> Option<Vec<Named>> {
+    if u64::try_from(bytes.len()).ok()? > MAX_CONFIG {
+        return None;
+    }
+    let text = plain(std::str::from_utf8(bytes).ok()?)?;
+    if !nesting_within(&text, MAX_NESTING) {
+        return None;
+    }
+    let options = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: MAX_NODES };
+    let document = roxmltree::Document::parse_with_options(&text, options).ok()?;
+    let root = document.root_element();
+    if root.tag_name().name() != "fontconfig" {
+        return Some(Vec::new());
+    }
+    let mut named = Vec::new();
+    for element in root.children().filter(roxmltree::Node::is_element) {
+        let found = match element.tag_name().name() {
+            "dir" | "remap-dir" => folder(element, here, places).map(Named::Folder),
+            "include" => include(element, here, places).map(Named::Include),
+            "alias" => sans_serif(element).map(Named::Sans),
+            _ => None,
+        };
+        named.extend(found);
+    }
+    Some(named)
 }
 
 /// Reads `files` (each a file or a folder of `*.conf` files) and what they include.
@@ -99,9 +148,15 @@ impl Reading<'_> {
         // The link itself, then what it points at: only folders and regular files go on.
         let (Ok(_), Ok(target)) = (std::fs::symlink_metadata(path), std::fs::metadata(path)) else { return };
         if target.is_dir() {
-            let Ok(entries) = std::fs::read_dir(path) else { return };
+            // A folder included again (or through another name) is not listed again.
+            let Ok(real) = std::fs::canonicalize(path) else { return };
+            if !self.seen.insert(real.clone()) {
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(&real) else { return };
             let mut names: Vec<PathBuf> = entries
                 .take(MAX_LISTED)
+                .inspect(|_| self.found.listed = self.found.listed.saturating_add(1))
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| {
@@ -138,85 +193,95 @@ impl Reading<'_> {
             return;
         }
         self.read = self.read.saturating_add(1);
-        let Some(text) = read_text(&real) else {
-            self.found.skipped.push(real);
-            return;
-        };
-        if !nesting_within(&text, MAX_NESTING) {
-            self.found.skipped.push(real);
-            return;
-        }
-        let options = roxmltree::ParsingOptions { allow_dtd: true, nodes_limit: MAX_NODES };
-        let Ok(document) = roxmltree::Document::parse_with_options(&text, options) else {
-            self.found.skipped.push(real);
-            return;
-        };
-        let root = document.root_element();
-        if root.tag_name().name() != "fontconfig" {
-            return;
-        }
         let here = real.parent().map(Path::to_owned);
-        for element in root.children().filter(roxmltree::Node::is_element) {
-            match element.tag_name().name() {
-                "dir" | "remap-dir" => {
-                    if let Some(folder) = self.folder(element, here.as_deref()) {
-                        self.found.folders.push(folder);
-                    }
-                }
-                "include" => {
-                    if let Some(include) = self.include(element, here.as_deref()) {
-                        self.path(&include, depth.saturating_add(1));
-                    }
-                }
-                "alias" => {
-                    if let Some(sans) = sans_serif(element) {
-                        self.found.sans = Some(sans);
-                    }
-                }
-                _ => {}
+        let Some(named) = read_bytes(&real).and_then(|bytes| parse(&bytes, here.as_deref(), self.places)) else {
+            self.found.skipped.push(real);
+            return;
+        };
+        for item in named {
+            match item {
+                Named::Folder(folder) => self.found.folders.push(folder),
+                Named::Include(include) => self.path(&include, depth.saturating_add(1)),
+                Named::Sans(sans) => self.found.sans = Some(sans),
             }
         }
     }
-
-    /// The folder a `<dir>` or `<remap-dir>` names, in the file in folder `here`.
-    fn folder(&self, element: roxmltree::Node<'_, '_>, here: Option<&Path>) -> Option<PathBuf> {
-        let text = text_of(element)?;
-        if let Some(rest) = text.strip_prefix('~') {
-            return self.in_home(rest);
-        }
-        let base = match element.attribute("prefix") {
-            Some("xdg") => self.places.data_home.clone()?,
-            Some("relative") => here?.to_owned(),
-            _ => self.places.cwd.clone().unwrap_or_default(),
-        };
-        Some(base.join(text))
-    }
-
-    /// The file or folder an `<include>` names, in the file in folder `here`; `ignore_missing` only quiets
-    /// fontconfig's warning, and this reading warns about nothing.
-    fn include(&self, element: roxmltree::Node<'_, '_>, here: Option<&Path>) -> Option<PathBuf> {
-        let text = text_of(element)?;
-        if let Some(rest) = text.strip_prefix('~') {
-            return self.in_home(rest);
-        }
-        let base = match element.attribute("prefix") {
-            Some("xdg") => self.places.config_home.clone()?,
-            _ => here?.to_owned(),
-        };
-        Some(base.join(text))
-    }
-
-    /// `rest` (what follows a `~`) in the home folder.
-    fn in_home(&self, rest: &str) -> Option<PathBuf> {
-        self.places.home.as_ref().map(|home| home.join(rest.trim_start_matches('/')))
-    }
 }
 
-/// Whether the elements of the XML `text` nest at most `max` deep, read before the XML parser sees it (which recurses
-/// once per level and would overflow the stack on a deep file). A lexer of its own, without recursion: comments,
-/// CDATA, processing instructions and declarations are passed over, quotes in a tag are honoured, and a file it cannot
-/// follow to the end counts as too deep, as does one with an internal DTD (`<!DOCTYPE x [ ... ]>`), whose entities
-/// could hide markup from this count.
+/// The folder a `<dir>` or `<remap-dir>` names, in the file in folder `here`.
+fn folder(element: roxmltree::Node<'_, '_>, here: Option<&Path>, places: &Places) -> Option<PathBuf> {
+    let text = text_of(element)?;
+    if let Some(rest) = text.strip_prefix('~') {
+        return in_home(rest, places);
+    }
+    let base = match element.attribute("prefix") {
+        Some("xdg") => places.data_home.clone()?,
+        Some("relative") => here?.to_owned(),
+        _ => places.cwd.clone().unwrap_or_default(),
+    };
+    Some(base.join(text))
+}
+
+/// The file or folder an `<include>` names, in the file in folder `here`; `ignore_missing` only quiets fontconfig's
+/// warning, and this reading warns about nothing.
+fn include(element: roxmltree::Node<'_, '_>, here: Option<&Path>, places: &Places) -> Option<PathBuf> {
+    let text = text_of(element)?;
+    if let Some(rest) = text.strip_prefix('~') {
+        return in_home(rest, places);
+    }
+    let base = match element.attribute("prefix") {
+        Some("xdg") => places.config_home.clone()?,
+        _ => here?.to_owned(),
+    };
+    Some(base.join(text))
+}
+
+/// `rest` (what follows a `~`) in the home folder.
+fn in_home(rest: &str, places: &Places) -> Option<PathBuf> {
+    places.home.as_ref().map(|home| home.join(rest.trim_start_matches('/')))
+}
+
+/// `text` without its comments, processing instructions (the XML declaration among them) and document type, each
+/// replaced by a space: the one text both the nesting count and the parser see. `None` for a text with CDATA, an
+/// internal DTD, another `<!` declaration, or any of them left open. Each terminator is looked for only after its
+/// whole opener, as an XML parser does (`<!-->` opens a comment, it does not close one). Without recursion.
+pub(crate) fn plain(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(next) = bytes.get(at..).and_then(|rest| rest.iter().position(|byte| *byte == b'<')) {
+        let start = at.saturating_add(next);
+        out.push_str(text.get(at..start)?);
+        let rest = bytes.get(start..)?;
+        let end = if rest.starts_with(b"<!--") {
+            find(rest.get(4..)?, b"-->")?.saturating_add(4 + 3)
+        } else if rest.starts_with(b"<?") {
+            find(rest.get(2..)?, b"?>")?.saturating_add(2 + 2)
+        } else if rest.starts_with(b"<!DOCTYPE") {
+            let end = tag_end(rest, true)?;
+            if rest.get(..end)?.contains(&b'[') {
+                return None;
+            }
+            end
+        } else if rest.starts_with(b"<!") {
+            // CDATA and every other declaration.
+            return None;
+        } else {
+            // A tag, copied whole, so nothing inside its quotes is taken for markup.
+            let end = tag_end(rest, false)?;
+            out.push_str(text.get(start..start.saturating_add(end))?);
+            at = start.saturating_add(end);
+            continue;
+        };
+        out.push(' ');
+        at = start.saturating_add(end);
+    }
+    out.push_str(text.get(at..)?);
+    Some(out)
+}
+
+/// Whether the elements of `text` (the output of [`plain`]) nest at most `max` deep, quotes in a tag honoured; a
+/// `<!` or `<?` left in it, or a tag left open, counts as too deep.
 fn nesting_within(text: &str, max: usize) -> bool {
     let bytes = text.as_bytes();
     let mut depth: usize = 0;
@@ -224,34 +289,19 @@ fn nesting_within(text: &str, max: usize) -> bool {
     while let Some(next) = bytes.get(at..).and_then(|rest| rest.iter().position(|byte| *byte == b'<')) {
         at = at.saturating_add(next);
         let rest = bytes.get(at..).unwrap_or_default();
-        let end = if rest.starts_with(b"<!--") {
-            find(rest, b"-->").map(|end| end.saturating_add(3))
-        } else if rest.starts_with(b"<![CDATA[") {
-            find(rest, b"]]>").map(|end| end.saturating_add(3))
-        } else if rest.starts_with(b"<?") {
-            find(rest, b"?>").map(|end| end.saturating_add(2))
-        } else {
-            let end = tag_end(rest);
-            if rest.starts_with(b"<!") {
-                // A declaration: no element. An internal DTD could declare entities that hide markup, and fontconfig's
-                // files never have one.
-                if end.and_then(|end| rest.get(..end)).is_none_or(|declaration| declaration.contains(&b'[')) {
-                    return false;
-                }
-            } else if rest.starts_with(b"</") {
-                depth = depth.saturating_sub(1);
-            } else if let Some(end) = end
-                && bytes.get(at.saturating_add(end).saturating_sub(2)) != Some(&b'/')
-            {
-                depth = depth.saturating_add(1);
-                if depth > max {
-                    return false;
-                }
+        if rest.starts_with(b"<!") || rest.starts_with(b"<?") {
+            return false;
+        }
+        let Some(end) = tag_end(rest, false) else { return false };
+        if rest.starts_with(b"</") {
+            depth = depth.saturating_sub(1);
+        } else if rest.get(end.saturating_sub(2)) != Some(&b'/') {
+            depth = depth.saturating_add(1);
+            if depth > max {
+                return false;
             }
-            end
-        };
-        let Some(end) = end else { return false };
-        at = at.saturating_add(end.max(1));
+        }
+        at = at.saturating_add(end);
     }
     true
 }
@@ -261,8 +311,9 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|window| window == needle)
 }
 
-/// Just past the `>` that ends the tag at the start of `rest`, with quotes and a declaration's `[...]` honoured.
-fn tag_end(rest: &[u8]) -> Option<usize> {
+/// Just past the `>` that ends the tag at the start of `rest`, with quotes honoured, and in a declaration
+/// (`declaration`) its `[...]` too.
+fn tag_end(rest: &[u8], declaration: bool) -> Option<usize> {
     let mut quote: Option<u8> = None;
     let mut brackets: usize = 0;
     for (at, byte) in rest.iter().enumerate().skip(1) {
@@ -270,8 +321,8 @@ fn tag_end(rest: &[u8]) -> Option<usize> {
             (Some(open), byte) if byte == open => quote = None,
             (Some(_), _) => {}
             (None, b'"' | b'\'') => quote = Some(*byte),
-            (None, b'[') => brackets = brackets.saturating_add(1),
-            (None, b']') => brackets = brackets.saturating_sub(1),
+            (None, b'[') if declaration => brackets = brackets.saturating_add(1),
+            (None, b']') if declaration => brackets = brackets.saturating_sub(1),
             (None, b'>') if brackets == 0 => return Some(at.saturating_add(1)),
             _ => {}
         }
@@ -300,9 +351,9 @@ fn sans_serif(alias: roxmltree::Node<'_, '_>) -> Option<String> {
     })
 }
 
-/// The file at `path` as text, if it is a regular file of at most [`MAX_CONFIG`] bytes in UTF-8: the type and size
-/// are checked on the open file, and no more than the cap is read.
-fn read_text(path: &Path) -> Option<String> {
+/// The file at `path`, if it is a regular file of at most [`MAX_CONFIG`] bytes: the type and size are checked on the
+/// open file, and no more than the cap is read.
+fn read_bytes(path: &Path) -> Option<Vec<u8>> {
     let file = std::fs::File::open(path).ok()?;
     let meta = file.metadata().ok()?;
     if !meta.is_file() || meta.len() > MAX_CONFIG {
@@ -310,10 +361,7 @@ fn read_text(path: &Path) -> Option<String> {
     }
     let mut bytes = Vec::new();
     file.take(MAX_CONFIG.saturating_add(1)).read_to_end(&mut bytes).ok()?;
-    if u64::try_from(bytes.len()).ok()? > MAX_CONFIG {
-        return None;
-    }
-    String::from_utf8(bytes).ok()
+    (u64::try_from(bytes.len()).ok()? <= MAX_CONFIG).then_some(bytes)
 }
 
 #[cfg(test)]

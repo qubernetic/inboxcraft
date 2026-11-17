@@ -361,7 +361,8 @@ time from the code as it is, not measured.
   Only one sign per script is looked for, so a found font may still lack rarer signs of its script. The folders
   come from fontconfig's files, read by the app with limits (`<dir>`, `<remap-dir>`, `<include>`; nothing else of
   fontconfig's rules); in the Flatpak the host's folders should arrive through the runtime's `<remap-dir>` entries,
-  which is not checked inside a Flatpak yet, nor on a real desktop (#233). Right-to-left text is laid out left to right (egui has no
+  which is not checked inside a Flatpak yet, nor on a real desktop. A configuration or font file swapped for a FIFO
+  between the type check and the open blocks the search's worker thread (the window is not affected) (#233). Right-to-left text is laid out left to right (egui has no
   bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the
