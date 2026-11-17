@@ -280,3 +280,25 @@ fn the_rail_and_the_keys_that_show_another_place_forget_the_open_state() {
     harness.run();
     assert_closed_clean(&mut harness);
 }
+
+#[test]
+fn a_waiting_key_chip_has_a_1_px_edge_and_the_focus_ring_stands_2_px_clear_of_it() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = on_shortcuts(theme);
+        press_chip(&mut harness, "Show sent mail has no key");
+        let waiting = "Show sent mail: press a key, or Escape to keep the old one";
+        harness.get_by_label(waiting).focus();
+        harness.run();
+        let rect = harness.get_by_label(waiting).rect();
+        let mode = if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light };
+        let cyan = crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge;
+        let mut strokes = super::tests::strokes_round(harness.output(), cyan, rect);
+        strokes.sort_by(|a, b| a.0.width().total_cmp(&b.0.width()));
+        let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.51 && (a.max - b.max).length() < 0.51;
+        assert_eq!(strokes.len(), 2, "{theme:?} the edge and the ring: {strokes:?}");
+        let ((edge, edge_width, _), (ring, ring_width, whole)) = (strokes[0], strokes[1]);
+        assert!(near(edge, rect) && edge_width == 1.0, "{theme:?} the edge is 1 px: {strokes:?} {rect:?}");
+        assert!(near(ring, rect.expand(3.0)) && ring_width == 1.0, "{theme:?} the ring is outside, 2 px clear: {strokes:?} {rect:?}");
+        assert!(whole, "{theme:?} the ring has room: {strokes:?}");
+    }
+}

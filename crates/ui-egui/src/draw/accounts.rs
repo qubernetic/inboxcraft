@@ -95,7 +95,7 @@ fn back(ui: &mut Ui, theme: &Theme) -> bool {
         crate::iconset::paint(ui.painter(), at, IconId::Back, p.cyan_text);
         ui.painter().galley(pos2(at.right() + s.s1, rect.center().y - galley.size().y / 2.0), galley, p.cyan_text);
         if response.has_focus() {
-            focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
         }
     }
     response.clicked()

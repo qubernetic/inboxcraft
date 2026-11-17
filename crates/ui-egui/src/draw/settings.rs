@@ -508,7 +508,7 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool) ->
     asked
 }
 
-/// A key as a chip that can be pressed: `shown` in a rounded frame, ringed in the focus colour while it `waits`.
+/// A key as a chip that can be pressed: `shown` in a frame, its edge in the accent while it `waits`.
 fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool) -> Response {
     let p = &theme.palette;
     let s = &theme.spacing;
@@ -520,11 +520,12 @@ fn key_button(ui: &mut Ui, theme: &Theme, shown: &str, spoken: &str, waits: bool
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, if response.hovered() { p.grid } else { p.panel });
-        let edge = if waits { Stroke::new(2.0, p.cyan_edge) } else { Stroke::new(1.0, p.line) };
+        // Waiting for a key it is the key chip's capture state: a 1 px accent edge.
+        let edge = Stroke::new(1.0, if waits { p.cyan_edge } else { p.line });
         painter.rect_stroke(rect, 0.0, edge, StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() / 2.0, galley, ink);
         if response.has_focus() {
-            focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
+            focus_ring(ui.painter(), theme, response.rect, Ring::Outside);
         }
     }
     response

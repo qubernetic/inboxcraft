@@ -56,6 +56,38 @@ pub(super) fn drew_icon(output: &egui::FullOutput, id: IconId) -> bool {
     })
 }
 
+/// The rect strokes of `colour` the last frame of `output` drew round or inside `near` (grown by 4 points): for each,
+/// the outer bound of its line, its width, and whether its clip rect holds that bound whole.
+pub(super) fn strokes_round(output: &egui::FullOutput, colour: egui::Color32, near: egui::Rect) -> Vec<(egui::Rect, f32, bool)> {
+    fn rects<'a>(shape: &'a egui::Shape, found: &mut Vec<&'a egui::epaint::RectShape>) {
+        match shape {
+            egui::Shape::Rect(rect) => found.push(rect),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| rects(shape, found)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        let mut found = Vec::new();
+        rects(&clipped.shape, &mut found);
+        for rect in found {
+            if rect.stroke.color != colour || rect.stroke.width <= 0.0 {
+                continue;
+            }
+            let width = rect.stroke.width;
+            let outer = match rect.stroke_kind {
+                egui::StrokeKind::Inside => rect.rect,
+                egui::StrokeKind::Middle => rect.rect.expand(width / 2.0),
+                egui::StrokeKind::Outside => rect.rect.expand(width),
+            };
+            if near.expand(4.0).contains_rect(outer) && outer.intersects(near) {
+                out.push((outer, width, clipped.clip_rect.expand(0.01).contains_rect(outer)));
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn a_flagged_row_shows_the_flag_icon() {
     let harness = harness();
