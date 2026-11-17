@@ -223,6 +223,8 @@ const STRIPE_WIDTH: f32 = 3.0;
 
 /// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
+    #[cfg(test)]
+    super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
     // An open envelope opens an unread message; a closed one closes a read one again.
     let (read_icon, read) = if message.seen { (IconId::Mail, tr!("Mark as unread")) } else { (IconId::MarkRead, tr!("Mark as read")) };
     let done = if message.done { tr!("Not done") } else { tr!("Done") };
@@ -377,7 +379,9 @@ fn paint_row(
     let hovered = !leaving && pointer_on(ui, response.rect);
     let keyed = !leaving && selected && mailbox.keyed();
     let reach = hovered || keyed;
-    let actions = actions(message);
+    // Built only for the row whose group shows: the other rows hand the group nothing.
+    let built = reach.then(|| actions(message));
+    let actions: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
     let flag_size = theme.mark_side();
     let mut cursor = right;
     if !hovered {
@@ -393,7 +397,7 @@ fn paint_row(
         Rect::from_min_max(pos2(rect.center().x + s.s1, first), pos2(line_right.max(rect.center().x + s.s1), first + first_height))
     });
     if let Some(at) = actions_line {
-        let group = hover::place(ui, theme, keymap, at, &actions);
+        let group = hover::place(ui, theme, keymap, at, actions);
         if group.width() > 0.0 {
             cursor = group.left() - s.s2;
         }
@@ -429,7 +433,7 @@ fn paint_row(
     let text = line(ui, &[(subject, f.caption, p.ink), (&preview, f.caption, p.muted)], right - left);
     ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
     // Last, so the solid float covers whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line.unwrap_or(rect), reach, &actions);
+    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line.unwrap_or(rect), reach, actions);
     shown.clicked.and_then(|index| act(message, index))
 }
 

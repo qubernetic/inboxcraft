@@ -744,8 +744,15 @@ fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
     harness.hover_at(egui::pos2(1.0, 1.0));
     harness.run();
     crate::component::hover::tests::reset_laid();
+    ACTIONS_BUILT.with(|built| built.set(0));
     harness.step();
     let built = crate::rows_built(&harness.ctx).unwrap_or(0);
     assert!(built >= 1_000, "{built} rows laid out");
     assert_eq!(crate::component::hover::tests::laid(), 0, "no row's actions were laid out");
+    assert_eq!(ACTIONS_BUILT.with(std::cell::Cell::get), 0, "no row's list of actions was built");
+}
+
+thread_local! {
+    /// How many rows' lists of hover actions were built on this thread (`list::actions`).
+    pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
