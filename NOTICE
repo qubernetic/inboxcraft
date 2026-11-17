@@ -43,9 +43,11 @@ Third-party material
 - egui's bundled fonts, compiled into the desktop app through the epaint_default_fonts crate
   (https://github.com/emilk/egui): Ubuntu Light (Copyright 2010-2011 Canonical Ltd., Ubuntu Font Licence 1.0; still
   compiled in with that crate; since IBM Plex replaced it, it only stands in for signs Plex lacks), Hack
-  (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from), Noto
-  Emoji (Copyright 2013 Google LLC, SIL Open Font Licence 1.1) and the emoji icon font with egui's subset of it
-  (Copyright 2014 John Slegers, MIT). The licence texts ship in that crate's `fonts/` directory.
+  (Copyright 2018 Source Foundry Authors, MIT, with the Bitstream Vera licence for the glyphs it derives from) and
+  egui's five-glyph subset of the emoji icon font (Copyright 2014 John Slegers, MIT). egui's Noto Emoji and the whole
+  emoji icon font are not compiled in (the `monochrome_emoji_fonts` feature is off). The licence texts ship in that
+  crate's `fonts/` directory.
+- No font ships for the scripts these do not hold: the desktop app draws them with fonts it finds on the computer.
 - SQLite (https://sqlite.org, public domain) through the rusqlite and libsqlite3-sys crates (MIT), compiled from
   the bundled amalgamation into native builds only; the browser build keeps its in-memory store.
 - Rust dependencies keep their own licences; `cargo deny check licenses` lists them.

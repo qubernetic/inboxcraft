@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Color32;
 
 use super::{
-    FLOAT_SHADOW, Face, Font, Fonts, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast, font_definitions, install_fonts, mix, over,
-    preference,
+    FALLBACK_PROBES, FLOAT_SHADOW, Face, Fallback, Font, Fonts, ICON, Look, Mode, ModePreference, Palette, TextScale, Theme, contrast,
+    font_definitions, font_definitions_with, install_fallbacks, install_fonts, missing_probes, mix, over, preference,
 };
 use crate::motion::MOTION;
 
@@ -527,6 +527,88 @@ fn install_fonts_puts_plex_into_the_context() {
     let width = |font: Font| ctx.fonts_mut(|fonts| fonts.glyph_width(&font.id(), 'm'));
     assert!(width(f.strong) > width(f.body), "SemiBold is its own face");
     assert_eq!(width(f.heading), width(f.title.sized(15.0)), "Plex Mono keeps one advance in both weights");
+}
+
+/// The shipped Plex Sans as a fallback under another name.
+fn plex_as(name: &str) -> Fallback {
+    Fallback { name: name.to_owned(), data: include_bytes!("../../../assets/fonts/plex-sans/IBMPlexSans-Regular.ttf").to_vec(), index: 0 }
+}
+
+#[test]
+fn fallbacks_stand_behind_plex_in_every_text_family() {
+    let definitions = font_definitions_with(&[plex_as("system: Fake")]);
+    let icon = egui::FontFamily::Name(ICON.into());
+    let mut text_families = 0;
+    for (family, fonts) in &definitions.families {
+        if *family == icon {
+            assert!(!fonts.iter().any(|name| name == "system: Fake"), "the icon family holds no fallback");
+        } else {
+            text_families += 1;
+            assert_eq!(fonts.last().map(String::as_str), Some("system: Fake"), "{family:?}: {fonts:?}");
+        }
+    }
+    assert_eq!(text_families, 5, "the five faces' families, Proportional and Monospace among them");
+    let proportional = definitions.families.get(&egui::FontFamily::Proportional).unwrap();
+    assert_eq!(proportional.first().map(String::as_str), Some("IBMPlexSans-Regular"));
+    assert!(definitions.font_data.contains_key("system: Fake"));
+}
+
+#[test]
+fn a_fallback_that_is_not_a_font_is_skipped() {
+    let junk = Fallback { name: "junk".to_owned(), data: b"not a font".to_vec(), index: 0 };
+    let far = Fallback { index: 99, ..plex_as("far") };
+    let empty = Fallback { name: "empty".to_owned(), data: Vec::new(), index: 0 };
+    let fallbacks = [junk, far, empty];
+    let definitions = font_definitions_with(&fallbacks);
+    for name in ["junk", "far", "empty"] {
+        assert!(!definitions.font_data.contains_key(name), "{name}");
+        assert!(definitions.families.values().all(|fonts| !fonts.iter().any(|font| font == name)), "{name}");
+    }
+    let ctx = egui::Context::default();
+    install_fallbacks(&ctx, &fallbacks);
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.label("日本語 🙂");
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn a_fallback_never_replaces_one_of_the_app_s_faces() {
+    let definitions = font_definitions_with(&[plex_as("IBMPlexMono-Regular"), plex_as(ICON)]);
+    let mono = definitions.families.get(&egui::FontFamily::Monospace).unwrap();
+    assert_eq!(mono.iter().filter(|name| *name == "IBMPlexMono-Regular").count(), 1);
+    assert_eq!(definitions.families.get(&egui::FontFamily::Name(ICON.into())).map(Vec::len), Some(1));
+}
+
+#[test]
+fn no_fallbacks_is_today_s_definitions() {
+    let (with, without) = (font_definitions_with(&[]), font_definitions());
+    assert_eq!(with.families, without.families);
+    assert_eq!(with.font_data.keys().collect::<Vec<_>>(), without.font_data.keys().collect::<Vec<_>>());
+    for (name, data) in &with.font_data {
+        let other = &without.font_data[name];
+        assert_eq!((data.bytes(), data.index), (other.bytes(), other.index), "{name}");
+    }
+}
+
+#[test]
+fn install_fallbacks_puts_them_into_the_context_and_asks_for_one_repaint() {
+    let ctx = fonts_ctx();
+    install_fallbacks(&ctx, &[plex_as("system: Fake")]);
+    assert!(ctx.has_requested_repaint(), "the new fonts are drawn without waiting for input");
+    ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    let families = ctx.fonts(|fonts| fonts.definitions().families.clone());
+    assert_eq!(families.get(&egui::FontFamily::Proportional).and_then(|fonts| fonts.last()).map(String::as_str), Some("system: Fake"));
+}
+
+#[test]
+fn the_app_s_own_fonts_lack_every_probe() {
+    // Plex, Audiowide and egui's bundled faces (Ubuntu Light, Hack, the egui icons; egui's emoji faces are not
+    // compiled in) hold none of the probes, so the start searches for all eight.
+    assert_eq!(missing_probes(&FALLBACK_PROBES), FALLBACK_PROBES.to_vec());
+    assert_eq!(missing_probes(&[("latin", 'A'), ("arrows", '⇧'), ("han", '日')]), vec![("han", '日')], "Plex and Hack hold these");
+    assert_eq!(FALLBACK_PROBES.map(|(_, sign)| sign), ['日', 'あ', '한', 'ع', 'א', 'ท', 'अ', '🙂']);
 }
 
 /// `text` laid out in `font` the way the components do it, in a frame of `ctx`.

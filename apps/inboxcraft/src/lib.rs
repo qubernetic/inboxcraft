@@ -40,6 +40,7 @@ pub mod autostart;
 pub mod control;
 pub mod desk;
 pub mod desktop;
+pub mod fonts;
 pub mod instance;
 pub mod notify;
 pub mod store;

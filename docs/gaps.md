@@ -354,9 +354,13 @@ time from the code as it is, not measured.
 - The reader cannot be tested on a real double click in `egui_kittest`, so the list has no double-click shortcut to
   full width; the Full width button is the way (#33).
 - The window's type is IBM Plex Mono and IBM Plex Sans, Regular and SemiBold, in twelve styles, with Audiowide for
-  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Devanagari and
-  others) and emoji show as boxes (egui's emoji fonts are not built in), and right-to-left text is laid out left to
-  right (egui has no bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
+  the product names (#83, #232). Scripts they and egui's fallback faces lack (CJK, Arabic, Hebrew, Thai, Devanagari
+  and others) and emoji are drawn with fonts found on the computer, searched at start on a worker thread and placed
+  behind Plex; where the computer has none for a script, they show as boxes (egui's emoji fonts are not built in).
+  Colour emoji fonts are not used (egui draws outlines only), so emoji need a font with outlines, such as Noto Emoji.
+  Only one sign per script is looked for, so a found font may still lack rarer signs of its script. This is not
+  checked on a real desktop or in the Flatpak yet (#233). Right-to-left text is laid out left to right (egui has no
+  bidi). egui's Ubuntu Light and Hack stand behind Plex only for the signs Plex lacks; they come
   with the `epaint_default_fonts` crate (Ubuntu Font Licence 1.0, not an OSI licence; allowed in `deny.toml` for that
   crate only, the project owner's to confirm). Most views take the styles through egui's own labels, which carry the
   size but not the line height or tracking; the drawn rows and controls carry all three. egui's text fields still

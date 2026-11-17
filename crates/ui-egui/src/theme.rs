@@ -588,6 +588,72 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
 }
 
+/// One face of a font file found on the computer, for the signs the app's own fonts lack.
+#[derive(Clone)]
+pub struct Fallback {
+    /// Its name among the fonts.
+    pub name: String,
+    /// The whole font file.
+    pub data: Vec<u8>,
+    /// The face's index in the file.
+    pub index: u32,
+}
+
+/// One sign of each script the app's fonts may lack: what the start looks for on the computer.
+pub const FALLBACK_PROBES: [(&str, char); 8] =
+    [("han", '日'), ("kana", 'あ'), ("hangul", '한'), ("arabic", 'ع'), ("hebrew", 'א'), ("thai", 'ท'), ("devanagari", 'अ'), ("emoji", '🙂')];
+
+/// [`font_definitions`] with `fallbacks` behind every text family: IBM Plex first, then egui's bundled faces, then
+/// these, in their order. The icon family keeps Phosphor alone. A fallback egui could not read as a font at its index
+/// (egui panics on one) and one whose name is taken are left out.
+#[must_use]
+pub fn font_definitions_with(fallbacks: &[Fallback]) -> egui::FontDefinitions {
+    let mut definitions = font_definitions();
+    let icon = FontFamily::Name(ICON.into());
+    for fallback in fallbacks {
+        if definitions.font_data.contains_key(&fallback.name) || !readable(&fallback.data, fallback.index) {
+            continue;
+        }
+        let data = egui::FontData::from_blob(std::sync::Arc::new(fallback.data.clone()), fallback.index);
+        definitions.font_data.insert(fallback.name.clone(), std::sync::Arc::new(data));
+        for (family, fonts) in &mut definitions.families {
+            if *family != icon {
+                fonts.push(fallback.name.clone());
+            }
+        }
+    }
+    definitions
+}
+
+/// Installs [`font_definitions_with`] `fallbacks` in `ctx` and asks for one frame to draw with them.
+pub fn install_fallbacks(ctx: &egui::Context, fallbacks: &[Fallback]) {
+    ctx.set_fonts(font_definitions_with(fallbacks));
+    ctx.request_repaint();
+}
+
+/// Whether egui can read `data` as a font with a face at `index`: the check egui makes before it panics.
+fn readable(data: &[u8], index: u32) -> bool {
+    skrifa::FontRef::from_index(data, index).is_ok()
+}
+
+/// The `probes` whose sign no font of a text family in [`font_definitions`] maps: what the computer's fonts are
+/// searched for.
+#[must_use]
+pub fn missing_probes(probes: &[(&'static str, char)]) -> Vec<(&'static str, char)> {
+    use skrifa::MetadataProvider as _;
+    let definitions = font_definitions();
+    let icon = FontFamily::Name(ICON.into());
+    let names: std::collections::BTreeSet<&String> =
+        definitions.families.iter().filter(|(family, _)| **family != icon).flat_map(|(_, fonts)| fonts).collect();
+    let charmaps: Vec<skrifa::charmap::Charmap<'_>> = names
+        .into_iter()
+        .filter_map(|name| definitions.font_data.get(name))
+        .filter_map(|data| skrifa::FontRef::from_index(data.bytes(), data.index).ok())
+        .map(|font| font.charmap())
+        .collect();
+    probes.iter().copied().filter(|(_, sign)| !charmaps.iter().any(|charmap| charmap.map(*sign).is_some())).collect()
+}
+
 /// What the tokens take from the owner's choices besides the mode: the text scale.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Look {
