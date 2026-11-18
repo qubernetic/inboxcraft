@@ -4,9 +4,9 @@
 //! The calendar's motion, as the design's presentation moves an event: a timed event whose time changed in place (an
 //! edit saved, an Undo) glides from where it stood to its new cell over `medium` (300 ms) on the one curve,
 //! `cubic-bezier(.2, .7, .2, 1)`, its top alone as the design's `top` transition (its height is the new one at once);
-//! a block's ground fades to `stage` and back over `fast` (125 ms) on CSS's `ease`, as a transition without a curve. Each
-//! asks for repaints only while it runs, and with motion reduced or off the event is at once where it goes. A change
-//! of view or of the days shown moves nothing (M12: no motion for another view or range).
+//! a block's ground fades to `stage` and back over `fast` (125 ms) on CSS's `ease`, as a transition without a curve.
+//! Each asks for repaints only while it runs, and with motion reduced or off the event is at once where it goes. A
+//! change of view or of the days shown moves nothing (M12: no motion for another view or range).
 
 use egui::{Context, Id, Rect, pos2};
 

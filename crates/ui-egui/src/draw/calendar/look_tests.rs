@@ -92,3 +92,19 @@ fn the_day_s_float_counts_its_events_with_the_number_alone() {
     assert!(found.iter().any(|(_, _, text)| *text == held.to_string()), "the count as the design writes it: {held}");
     assert!(!found.iter().any(|(_, _, text)| text.ends_with(" events") && text.starts_with(&held.to_string())));
 }
+
+#[test]
+fn the_side_panel_s_content_stands_16_in_and_the_mini_month_is_220_wide() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    // The panel 252 wide at the right of the card, after its hairline; its scrolling part 15 in, its content 1 further,
+    // as the frame pads it.
+    let found = rects(&harness);
+    let (edge, _) =
+        found.iter().copied().find(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 1000.0).unwrap();
+    let mini = found.into_iter().find(|(rect, fill)| *fill == p.surface && rect.left() > edge.right() && (rect.height() - 240.0).abs() < 41.0);
+    let (mini, _) = mini.unwrap();
+    assert_eq!(mini.left(), edge.right() + 16.0, "{mini:?}");
+    assert_eq!(mini.width(), 220.0, "{mini:?}");
+    assert_eq!(mini.top(), edge.top() + 16.0, "{mini:?}");
+}

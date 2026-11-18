@@ -64,17 +64,10 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     ui.scope_builder(UiBuilder::new().max_rect(inner).id_salt("calendar-side-scroll"), |ui| {
         let area = ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]);
         crate::component::scroll::show(ui, theme, area, |ui| {
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            mini_month(ui, theme, &Mini::of(calendar), asked);
-            ui.add_space(GAP);
-            calendars(ui, theme, calendar, asked);
-            if let Some(event) = calendar.picked() {
-                ui.add_space(GAP);
-                crate::draw::paint::rule(ui, p.panel_line);
-                ui.add_space(GAP);
-                details(ui, theme, keymap, calendar, event, asked);
-            }
-            ui.add_space(GAP);
+            // The scrolling part pads its content 1 point at the top and the sides, as the frame does.
+            egui::Frame::new()
+                .inner_margin(egui::Margin { left: 1, right: 1, top: 1, bottom: 0 })
+                .show(ui, |ui| side_content(ui, theme, keymap, calendar, asked));
         });
     });
     ui.painter().rect_filled(Rect::from_min_max(pos2(inner.left(), foot), pos2(inner.right(), foot + line)), 0.0, p.panel_line);
@@ -87,6 +80,21 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| link_sized(ui, theme, keymap, tr!("sync now"), LinkSize::Small));
         });
     });
+}
+
+/// What the side panel scrolls: the mini month, the calendars and the picked event's details.
+fn side_content(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
+    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+    mini_month(ui, theme, &Mini::of(calendar), asked);
+    ui.add_space(GAP);
+    calendars(ui, theme, calendar, asked);
+    if let Some(event) = calendar.picked() {
+        ui.add_space(GAP);
+        crate::draw::paint::rule(ui, theme.palette.panel_line);
+        ui.add_space(GAP);
+        details(ui, theme, keymap, calendar, event, asked);
+    }
+    ui.add_space(GAP);
 }
 
 /// What the mini month shows: its month, today, the picked day, and a day drawn hovered (the gallery's board).
