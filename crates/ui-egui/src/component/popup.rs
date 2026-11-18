@@ -280,10 +280,10 @@ pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, p.panel);
         let name = galley(ui, label, theme.fonts.label, p.muted);
-        paint::run_at(&painter, pos2(rect.left() + s.s3, rect.center().y - name.size().y / 2.0), name, p.muted);
+        paint::run_at(painter, pos2(rect.left() + s.s3, rect.center().y - name.size().y / 2.0), name, p.muted);
         if let Some(count) = count {
             let count = galley(ui, count, theme.fonts.mono_s, p.muted);
-            paint::run_at(&painter, pos2(rect.right() - s.s3 - count.size().x, rect.center().y - count.size().y / 2.0), count, p.muted);
+            paint::run_at(painter, pos2(rect.right() - s.s3 - count.size().x, rect.center().y - count.size().y / 2.0), count, p.muted);
         }
     }
     hairline(ui, theme);
