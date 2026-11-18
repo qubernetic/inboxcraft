@@ -21,6 +21,7 @@ mod grid;
 mod hours;
 pub(super) mod keys;
 pub(super) use self::side::mini_id;
+pub(crate) use self::side::mini_month_board;
 mod month;
 mod more;
 mod side;
@@ -313,7 +314,8 @@ pub(super) fn block(
     }
     response.widget_info(|| WidgetInfo::selected(egui::accesskit::Role::Button, true, picked, event.spoken()));
     if ui.is_rect_visible(rect) {
-        paint_block(ui, theme, bar_colour(theme, calendar, event.calendar), rect, &response, picked, kind, words);
+        let lit = Lit { hover: response.hovered(), focus: response.has_focus() };
+        paint_block(ui, theme, bar_colour(theme, calendar, event.calendar), rect, lit, picked, kind, words);
     }
     if response.clicked() {
         return Some(Asked::Pick(if picked { None } else { Some(event.key()) }));
@@ -321,14 +323,42 @@ pub(super) fn block(
     (response.gained_focus() && !picked).then_some(Asked::Pick(Some(event.key())))
 }
 
+/// What a block shows of the pointer and the keyboard.
+#[derive(Debug, Clone, Copy, Default)]
+struct Lit {
+    hover: bool,
+    focus: bool,
+}
+
+/// One state of the event-block sheet for the gallery's board, named as the sheet names it (`timed`, `band`, `chip`,
+/// `row`, `picked`, `hover`, `focus`), with the sheet's words, in the second account's colour.
+pub(crate) fn event_board(ui: &mut Ui, theme: &Theme, state: &str) -> Response {
+    let (size, kind, words) = match state {
+        "band" => (vec2(320.0, 24.0), Kind::Band, Words { title: "Open day", detail: "Sat – Sun", time: "" }),
+        "chip" => (vec2(152.0, 20.0), Kind::Chip, Words { title: "Design review", detail: "", time: "15:00" }),
+        "row" => (vec2(440.0, 40.0), Kind::Row, Words { title: "Design review", detail: "Room 3 · 1 h", time: "15:00" }),
+        _ => (vec2(160.0, 60.0), Kind::Timed { narrow: false }, Words { title: "Design review", detail: "15:00 · Room 3", time: "" }),
+    };
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let name = format!("{} {state}", tr!("Event"));
+    response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &name));
+    let lit = Lit { hover: state == "hover" || response.hovered(), focus: state == "focus" || response.has_focus() };
+    paint_block(ui, theme, theme.account_colour(1), rect, lit, state == "picked", kind, &words);
+    if kind == Kind::Row {
+        let line = line_width(ui.pixels_per_point());
+        ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), rect.bottom() - line), rect.max), 0.0, theme.palette.panel_line);
+    }
+    response
+}
+
 /// Paints an event's block: see the event-block sheet. The stroke is painted last, over the bar, as the design does.
 #[expect(clippy::too_many_arguments, reason = "the block's place, its state and its words")]
-fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, response: &Response, picked: bool, kind: Kind, words: &Words<'_>) {
+fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, picked: bool, kind: Kind, words: &Words<'_>) {
     let p = &theme.palette;
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let lit = picked || response.hovered();
+    let lit = picked || shown.hover;
     match kind {
         Kind::Timed { narrow } => {
             painter.rect_filled(rect, 0.0, if lit { p.stage } else { p.surface });
@@ -394,8 +424,8 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, response: &Resp
             row_words(ui, &painter, theme, rect, bar, words);
         }
     }
-    if response.has_focus() && !picked {
-        focus_ring(ui.painter(), theme, rect, Ring::Inside);
+    if shown.focus && !picked {
+        focus_ring(ui.painter(), theme, rect, Ring::Outside);
     }
 }
 

@@ -60,7 +60,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
         let area = ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]);
         crate::component::scroll::show(ui, theme, area, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            mini_month(ui, theme, calendar, asked);
+            mini_month(ui, theme, &Mini::of(calendar), asked);
             ui.add_space(GAP);
             calendars(ui, theme, calendar, asked);
             if let Some(event) = calendar.picked() {
@@ -84,13 +84,39 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     });
 }
 
+/// What the mini month shows: its month, today, the picked day, and a day drawn hovered (the gallery's board).
+struct Mini {
+    month: Day,
+    today: Day,
+    picked: Option<Day>,
+    hover: Option<Day>,
+    /// The board it is drawn on in the gallery, which tells its buttons apart from another board's.
+    board: Option<u8>,
+}
+
+impl Mini {
+    fn of(calendar: &Calendar) -> Self {
+        Self { month: calendar.month(), today: calendar.today(), picked: calendar.picked_day(), hover: None, board: None }
+    }
+}
+
+/// The mini-month sheet's board number `board` for the gallery: the month of `month`, `today`, the `picked` day and a
+/// `hover`ed one, 220 wide.
+pub(crate) fn mini_month_board(ui: &mut Ui, theme: &Theme, board: u8, month: Day, today: Day, (picked, hover): (Option<Day>, Option<Day>)) {
+    ui.allocate_ui(vec2(220.0, 260.0), |ui| {
+        ui.set_width(220.0);
+        let mut asked = Vec::new();
+        mini_month(ui, theme, &Mini { month: month.first_of_month(), today, picked, hover, board: Some(board) }, &mut asked);
+    });
+}
+
 /// The mini month as the mini-month sheet draws it: a box with its name and steps, the weekdays' letters and the weeks
 /// the month touches.
-fn mini_month(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<Asked>) {
+fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
-    let month = calendar.month();
+    let month = mini.month;
     let first = month.monday();
     let last = month.months_later(1).plus(-1);
     let weeks = usize::try_from(last.since(first) / 7 + 1).unwrap_or(6).clamp(4, 6);
@@ -106,12 +132,12 @@ fn mini_month(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<A
     let name = tr!("{month} {year}", month = day::month_name(month.month()), year = month.year());
     let text = crate::component::cut(ui, &name, theme.fonts.label, p.ink, head.width() - 40.0);
     run_at(ui.painter(), pos2(head.left(), snap(head.center().y - theme.fonts.label.line / 2.0, ppp)), text, p.ink);
-    let response = ui.interact(head, ui.scope_id().with("mini-name"), Sense::hover());
+    let response = ui.interact(head, ui.scope_id().with(("mini-name", mini.board)), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &name));
     for (forward, sign, spoken, x) in [(false, "‹", tr!("Month before"), head.right() - 32.0), (true, "›", tr!("Month after"), head.right() - 12.0)]
     {
         let spot = Rect::from_min_size(pos2(x - 4.0, head.top() + 4.0), vec2(16.0, 20.0));
-        let response = ui.interact(spot, ui.scope_id().with(("mini-step", forward)), Sense::click());
+        let response = ui.interact(spot, ui.scope_id().with(("mini-step", forward, mini.board)), Sense::click());
         response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, spoken));
         let colour = if response.hovered() { p.ink } else { p.muted };
         let galley = crate::component::galley(ui, sign, theme.fonts.mono, colour);
@@ -134,18 +160,20 @@ fn mini_month(ui: &mut Ui, theme: &Theme, calendar: &Calendar, asked: &mut Vec<A
         for index in 0..7_usize {
             let day = first.plus(i64::try_from(week * 7 + index).unwrap_or(0));
             let spot = Rect::from_min_size(pos2(left + cell_w * index as f32, top + (cell_h + MINI_GAP) * week as f32), vec2(cell_w, cell_h));
-            mini_day(ui, theme, calendar, day, month.month(), spot, asked);
+            mini_day(ui, theme, mini, day, spot, asked);
         }
     }
 }
 
 /// One day of the mini month over `spot`: a button that puts the view on it.
-fn mini_day(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, month: u8, spot: Rect, asked: &mut Vec<Asked>) {
+fn mini_day(ui: &mut Ui, theme: &Theme, mini: &Mini, day: Day, spot: Rect, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let line = line_width(ui.pixels_per_point());
-    let today = day == calendar.today();
-    let picked = calendar.picked_day() == Some(day);
-    let response = ui.interact(spot, mini_id(day), Sense::click());
+    let today = day == mini.today;
+    let picked = mini.picked == Some(day);
+    let month = mini.month.month();
+    let id = mini.board.map_or_else(|| mini_id(day), |board| mini_id(day).with(board));
+    let response = ui.interact(spot, id, Sense::click());
     super::keys::item(ui.ctx(), &response);
     if super::keys::wanted(ui.ctx(), crate::calendar::Target::Mini(day)) {
         response.request_focus();
@@ -166,7 +194,7 @@ fn mini_day(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, month: u8
     };
     if picked {
         ui.painter().rect_filled(spot, 0.0, p.cyan);
-    } else if response.hovered() {
+    } else if response.hovered() || mini.hover == Some(day) {
         ui.painter().rect_filled(spot, 0.0, p.stage);
     }
     if today && !picked {

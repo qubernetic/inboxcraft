@@ -36,6 +36,7 @@
 
 mod accounts;
 mod calendar;
+pub(crate) use self::calendar::{event_board, mini_month_board};
 mod compose;
 mod frame;
 mod invite;

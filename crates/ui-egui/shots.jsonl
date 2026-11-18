@@ -64,6 +64,9 @@
 # facts, on a page of their own.
 {"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
 {"out": "docs/images/components-blocks-dark.png", "mode": "dark", "blocks": true}
+# The calendar's sets (#238): the event block and the mini month.
+{"out": "docs/images/components-calendar-light.png", "mode": "light", "calendar_sets": true}
+{"out": "docs/images/components-calendar-dark.png", "mode": "dark", "calendar_sets": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
