@@ -187,8 +187,9 @@ pub struct InboxApp {
     composer: Option<Composer>,
     /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
     composer_keys: bool,
-    /// Whether the composer has taken the list's place this frame: too narrow for its heads beside it, the list is not
-    /// drawn, and nothing acts on its rows (no key, no palette command, no Undo).
+    /// Whether the composer has taken the list's place this frame (too narrow for the list's heads beside it, or in
+    /// front of it in one pane): the list is not drawn, and nothing acts on it or its rows (no key, no palette command,
+    /// no Undo).
     list_hidden: bool,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
@@ -572,7 +573,9 @@ impl InboxApp {
             // In front in the reader's place; or the floating panel open with the keys inside it.
             keymap::SEND => self.composer_in_front() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())),
             _ if keymap::CALENDAR_KEYS.contains(&id) => self.screen == Screen::Calendar && !self.calendar.is_empty(),
-            _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && (self.list_row.is_some() || self.list_keys),
+            // The list's keys and its views act on the list: hidden, it is not there to act on.
+            _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && !self.list_hidden && (self.list_row.is_some() || self.list_keys),
+            keymap::VIEW_GROUPED | keymap::VIEW_SMART | keymap::VIEW_LIST => !self.list_hidden,
             _ => keymap::action(id).is_some(),
         }
     }
@@ -882,13 +885,14 @@ impl InboxApp {
 
     /// Whether the list has the keyboard: a row has the focus, or a row was pressed or keyed last and nothing else has
     /// the focus; never while the palette, the settings, the composer in the reader's place or the calendar hold the
-    /// keys, or a popup is open.
+    /// keys, the list is hidden, or a popup is open.
     fn list_has_keyboard(&self, ctx: &egui::Context) -> bool {
         if self.screen != Screen::Mail
             || self.palette.is_open()
             || self.settings.is_open()
             || self.settings.capturing().is_some()
             || self.composer_in_front()
+            || self.list_hidden
         {
             return false;
         }
@@ -1919,6 +1923,9 @@ impl InboxApp {
             (asked, left) = self.folders(ui, &theme, &mut layers, docked);
             let (widest, least) = (list_widest(ui, &theme, docked), self.list_least(ui, &theme, docked, left));
             let place = list_place(list_shown, !single && (self.reader.open_id().is_some() || docked), docked, widest, least);
+            // The list is hidden where the composer stands in its place: beside a composer too narrow for it, and in
+            // one pane with the composer in front. Nothing of it acts then.
+            let hidden = place == ListPlace::Hidden || (place == ListPlace::Away && self.composer_in_front());
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
@@ -1937,7 +1944,8 @@ impl InboxApp {
                 })
             };
             match place {
-                ListPlace::Away => self.list_rect = None,
+                ListPlace::Away if !hidden => self.list_rect = None,
+                ListPlace::Away => {}
                 ListPlace::Hidden => composer_left = left,
                 ListPlace::Beside => {
                     // Where the panel keeps the width a drag gave it (egui's `PanelState`): the tests plant one there.
@@ -1953,7 +1961,7 @@ impl InboxApp {
                     (header, listed) = shown.inner;
                 }
             }
-            self.hide_list(ui.ctx(), place == ListPlace::Hidden);
+            self.hide_list(ui.ctx(), hidden);
         }
         let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets, gained } = listed;
         let mut drawn = reader::Drawn::default();
