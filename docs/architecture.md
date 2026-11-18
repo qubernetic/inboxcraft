@@ -437,8 +437,14 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   the other mail ports of the same address (the network blocks mail, or the port is wrong, or the server is down).
   The certificate's issuer and dates come from our own small DER reader, fed by a verifier that keeps the
   certificate and asks the real one; the dates give the clock check where the platform's verifier gives none.
-- Detect (`net::detect`) only proposes: MX, autoconfig at the domain over HTTPS, the ISPDB when switched on (off by
-  default), SRV, and common host names as a hint. DNS is `hickory-proto` messages over our own blocking UDP and TCP
+- Detect (`net::detect`) only proposes. It asks in stages: MX; autoconfig at the domain over HTTPS, then the ISPDB
+  when switched on (off by default); SRV (RFC 6186); the provider domains of the MX hosts (their autoconfig over
+  HTTPS, then `mail.`, `imap.` and `smtp.` of them); `mail.`, `imap.` and `smtp.` of the address's domain. After each
+  stage it probes the candidates it added, in that order: the list is a pure function of what the lookups returned
+  (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
+  without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in
+  (`net::probe`, which sends no user name or password). It stops once it has an IMAP and a submission server, after
+  24 probes or after 120 seconds. DNS is `hickory-proto` messages over our own blocking UDP and TCP
   exchange with the resolver configuration of the system, HTTPS is `ureq` with `rustls` and the same trust as the
   mail connections, following no redirect and sending nothing but the URL. A candidate is detected settings
   (`CheckTarget::detected`): the check signs in to it only after the owner has seen it and its certificate
