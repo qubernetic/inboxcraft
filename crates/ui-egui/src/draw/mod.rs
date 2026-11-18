@@ -205,7 +205,7 @@ fn around(left: f32, right: f32, gap: f32) -> Frame {
 }
 
 /// Whether the window holds one pane beside the folders ([`ONE_PANE`]).
-fn one_pane(ctx: &egui::Context) -> bool {
+pub(super) fn one_pane(ctx: &egui::Context) -> bool {
     ctx.content_rect().width() < ONE_PANE
 }
 
@@ -476,6 +476,7 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            keymap::BACK => self.screen == Screen::Mail && self.reader.open_id().is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
@@ -549,6 +550,9 @@ impl InboxApp {
             keymap::VIEW_SMART => self.mailbox.set_inbox_view(InboxView::Smart),
             keymap::VIEW_LIST => self.mailbox.set_inbox_view(InboxView::List),
             keymap::OPEN => self.open_from_list(ctx),
+            keymap::BACK => {
+                let _ = self.back_to_list(ctx);
+            }
             keymap::MENU | keymap::MENU_KEY => {
                 if let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) {
                     list::ask_menu(ctx, id);
@@ -2010,6 +2014,10 @@ impl InboxApp {
             }
             return;
         }
+        if asked == reader::Asked::Back {
+            self.run_action(ui.ctx(), keymap::BACK);
+            return;
+        }
         let (reader, mailbox) = (&mut self.reader, &mut self.mailbox);
         match asked {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
@@ -2032,6 +2040,7 @@ impl InboxApp {
             reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
             reader::Asked::Invite(id, invite::Ask::Remove) => reader.remove_invite(mailbox, id),
             reader::Asked::Answer(..) => {}
+            reader::Asked::Back => {}
         }
     }
 }

@@ -75,6 +75,9 @@ pub const DARK: &str = "ui.mode.dark";
 /// Show what the system shows (`ui.theme.set`).
 pub const SYSTEM_MODE: &str = "ui.mode.system";
 
+/// Back to the list: in one pane the list takes the open message's place again, its keyed row focused.
+pub const BACK: &str = "ui.reader.back";
+
 /// Show the inbox grouped: every group open.
 pub const VIEW_GROUPED: &str = "ui.view.grouped";
 
@@ -176,6 +179,7 @@ pub fn actions() -> Vec<Action> {
         action(LAST, tr!("The last message of the list"), IconId::Caret),
         action(UNDO, tr!("Undo"), IconId::Back),
         action(FULL_WIDTH, tr!("Reader full width"), IconId::Mail),
+        action(BACK, tr!("Back to the list"), IconId::Back),
         action(SETTINGS, tr!("Settings"), IconId::Settings),
         action(SHORTCUTS, tr!("Shortcuts"), IconId::Keyboard),
         action(LIGHT, tr!("Light mode"), IconId::Palette),

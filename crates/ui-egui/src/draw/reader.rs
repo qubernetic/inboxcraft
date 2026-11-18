@@ -100,6 +100,8 @@ pub(super) enum Asked {
     Presets,
     /// Something asked on the invitation card of a message.
     Invite(u64, super::invite::Ask),
+    /// Back to the list (one pane).
+    Back,
 }
 
 /// What the reader drew: what was asked for, and the status of the link under the pointer.
@@ -303,6 +305,18 @@ fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
 }
 
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
+/// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
+/// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Whether it was drawn.
+pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {
+    if !super::one_pane(ui.ctx()) {
+        return false;
+    }
+    if IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap).clicked() {
+        drawn.asked.push(Asked::Back);
+    }
+    true
+}
+
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let s = &theme.spacing;
@@ -313,6 +327,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s1)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = s.s1;
+                if back_to_list(ui, theme, keymap, drawn) {
+                    divider(ui, theme);
+                }
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
                     let button = IconButton::new(icon, name);
                     let button = match (act, open) {

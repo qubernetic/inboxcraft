@@ -81,7 +81,7 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
             harness.get_by_label(&format!("Key of {}: {words}", action.name));
         }
         // The inbox's three views, actions without a key of their own.
-        for name in ["Inbox view: Grouped", "Inbox view: Smart", "Inbox view: List"] {
+        for name in ["Inbox view: Grouped", "Inbox view: Smart", "Inbox view: List", "Back to the list"] {
             harness.get_by_label(&format!("{name} has no key"));
         }
         harness.get_by_label("Key of The next message of the list: J");

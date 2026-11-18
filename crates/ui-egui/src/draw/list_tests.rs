@@ -2617,3 +2617,43 @@ fn a_frame_at_rest_keeps_the_lists_order_as_it_was() {
     assert_ne!(*after, *list, "the list by time is drawn in another order than the grouped one");
     assert_eq!(list.first().copied(), Some(1_000_000), "and the new order is the one kept");
 }
+
+/// The sample window `width` wide, motion off.
+fn wide(width: f32) -> Harness<'static, InboxApp> {
+    let mut app = app(false);
+    app.set_reduce_motion(true);
+    let mut harness =
+        Harness::builder().with_size(vec2(width, 900.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    harness
+}
+
+#[test]
+fn in_one_pane_the_reader_starts_with_back_to_the_list() {
+    let mut harness = wide(800.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "the message stands in the list's place");
+    let back = harness.get_by_role_and_label(Role::Button, "Back to the list");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    assert!(reader.contains_rect(back.rect()), "in the reader's tools");
+    // First in the tools: no other button of the reader stands left of it on its line.
+    let tools = harness
+        .query_all_by_role(Role::Button)
+        .filter(|node| reader.contains_rect(node.rect()) && (node.rect().center().y - back.rect().center().y).abs() < 1.0);
+    assert!(tools.into_iter().all(|node| node.rect().left() >= back.rect().left()), "first in the tools");
+    harness.get_by_role_and_label(Role::Button, "Back to the list").click();
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "the list is back");
+    assert_eq!(super::reader_rect(&harness.ctx), None);
+    assert!(selected_focused(&harness), "the keyboard on the row it left");
+    // An action by id, in the palette and on the Shortcuts page: it runs as the button does.
+    assert!(crate::keymap::action(crate::keymap::BACK).is_some());
+    // Beside the list (two panes) it is not drawn.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    assert!(harness.query_by_label("Back to the list").is_none(), "two panes: the list is beside the reader");
+}
