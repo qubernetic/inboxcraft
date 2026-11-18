@@ -36,7 +36,7 @@ use crate::component::soon::{soon, soon_tag};
 use crate::iconset::IconId;
 use crate::keymap::Keymap;
 use crate::mailbox::Mailbox;
-use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Stage, StepRow, StepState};
+use crate::onboard::{Form, Found, Onboarding, Outcome, Secret, Security, Slot, Stage, StepRow, StepState, port_typed};
 use crate::theme::{Font, Theme};
 use crate::tr;
 
@@ -185,16 +185,19 @@ impl Faults {
 }
 
 /// A field or a row of fields that `add` draws, with its `errors` under it, the first `UNDER` below it and each under
-/// the one before, in `caption` and `minus`.
-fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+/// the one before, in `caption` and `minus`, then `note` in `caption` and `muted`.
+fn with_error<R>(ui: &mut Ui, theme: &Theme, errors: &[Option<&str>], note: Option<&str>, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = UNDER;
         let added = add(ui);
-        if errors.iter().any(Option::is_some) {
+        if errors.iter().any(Option::is_some) || note.is_some() {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for error in errors.iter().flatten() {
                     words(ui, error, theme.fonts.caption, theme.palette.minus, width);
+                }
+                if let Some(note) = note {
+                    words(ui, note, theme.fonts.caption, theme.palette.muted, width);
                 }
             });
         }
@@ -244,7 +247,9 @@ fn security(ui: &mut Ui, theme: &Theme, name: &str, chosen: Security) -> Option<
 }
 
 /// One server's row, `width` wide: its host, its port (`usual` as the hint) and its security, with the error of its
-/// host or port under the whole row. What the owner changed in it.
+/// host or port under the whole row, and a line saying so while the row holds the encryption Detect `set` over one the
+/// owner had picked. What the owner changed in it.
+#[allow(clippy::too_many_arguments)]
 fn server_row(
     ui: &mut Ui,
     theme: &Theme,
@@ -252,6 +257,7 @@ fn server_row(
     (caption, placeholder, name, slots): (&str, &str, &str, [Option<Slot>; 2]),
     (host, port_text, chosen): (&mut String, &mut String, &mut Option<Security>),
     usual: fn(Security) -> u16,
+    set: Option<Security>,
     width: f32,
 ) -> Vec<Slot> {
     let mut edited = Vec::new();
@@ -261,7 +267,11 @@ fn server_row(
     let current = chosen.unwrap_or(Security::Tls);
     // The host's and the port's errors both, the one under the other.
     let said = if errors[0] == errors[1] { [errors[0], None] } else { errors };
-    with_error(ui, theme, &said, width, |ui| {
+    let note = set.filter(|set| *chosen == Some(*set)).map(|set| {
+        let port = port_typed(port_text).ok().flatten().unwrap_or_else(|| usual(set));
+        tr!("Detect set the encryption to {security} for port {port}.", security = set.text(), port = port)
+    });
+    with_error(ui, theme, &said, note.as_deref(), width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let response = line_field(ui, theme, (caption, placeholder, name), host, errors[0], room);
@@ -298,7 +308,7 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
         line_field(ui, theme, (tr!("Name on sent mail"), tr!("optional"), ""), &mut form.display_name, None, width - GAP - half);
     });
     let error = faults.of_slot(Slot::Password);
-    with_error(ui, theme, &[error], width, |ui| {
+    with_error(ui, theme, &[error], None, width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             line_field(ui, theme, (tr!("User name"), tr!("the address"), ""), &mut form.username, None, half);
@@ -314,7 +324,7 @@ fn names(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f3
 
 /// The incoming server, and the outgoing server and the CalDAV address, which are optional; waiting, disabled, while
 /// Detect runs. What the owner changed.
-fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: f32, detecting: bool) -> Vec<Slot> {
+fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, (width, detecting): (f32, bool), set: [Option<Security>; 2]) -> Vec<Slot> {
     ui.add_enabled_ui(!detecting, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         let mut edited = server_row(
@@ -324,6 +334,7 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: 
             (tr!("IMAP server"), "imap.example.org", tr!("IMAP security"), [Some(Slot::Host), Some(Slot::Port)]),
             (&mut form.host, &mut form.port, &mut form.security),
             Security::imap_port,
+            set[0],
             width,
         );
         edited.extend(server_row(
@@ -333,10 +344,11 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: 
             (tr!("Outgoing server (SMTP), to send"), "smtp.example.org", tr!("Outgoing security"), [None, Some(Slot::SmtpPort)]),
             (&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security),
             Security::submission_port,
+            set[1],
             width,
         ));
         let error = faults.of_slot(Slot::Caldav);
-        with_error(ui, theme, &[error], width, |ui| {
+        with_error(ui, theme, &[error], None, width, |ui| {
             let words = (tr!("CalDAV address, for calendars"), tr!("optional, https://dav.example.org"), "");
             let response = line_field(ui, theme, words, &mut form.caldav, error, width);
             faults.mark(ui, Slot::Caldav, &response);
@@ -384,7 +396,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
     let button = paint::run_box(component::galley(ui, name, f.button, theme.palette.ink).size().x) + 2.0 * theme.spacing.s3;
     let error = faults.of_slot(Slot::Address);
-    with_error(ui, theme, &[error], width, |ui| {
+    with_error(ui, theme, &[error], None, width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
             let room = (width - button - GAP).max(HOST_MIN);
@@ -496,7 +508,7 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
         let detecting = onboarding.detecting();
         let form = onboarding.form_mut();
         edited.extend(names(ui, theme, &faults, form, width, (tr!("Password"), "")));
-        edited.extend(servers(ui, theme, &faults, form, width, detecting));
+        edited.extend(servers(ui, theme, &faults, form, (width, detecting), found.as_ref().map_or([None, None], |found| found.encryption_set)));
         words(ui, tr!("The password goes into your system's credential store, never into InboxCraft's files."), f.caption, p.muted, width);
         words(
             ui,
@@ -556,7 +568,7 @@ fn edit_form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboa
             field::text_field(ui, theme, id, &mut address, &Field { read_only: true, ..Field::new(tr!("Address"), "") });
         });
         edited.extend(names(ui, theme, &faults, form, width, (tr!("New password"), tr!("empty keeps the stored one"))));
-        edited.extend(servers(ui, theme, &faults, form, width, false));
+        edited.extend(servers(ui, theme, &faults, form, (width, false), [None, None]));
         words(ui, tr!("A new password goes into your system's credential store. The stored one is never shown."), f.caption, p.muted, width);
         if let Some(text) = &note {
             words(ui, text, f.caption, p.ink, width);

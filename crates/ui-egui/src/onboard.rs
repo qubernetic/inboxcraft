@@ -434,7 +434,7 @@ struct Servers {
 }
 
 /// The port typed as `text`: `None` for none (the usual one), else a number from 1 to 65535 or the error.
-fn port_typed(text: &str) -> Result<Option<u16>, String> {
+pub(crate) fn port_typed(text: &str) -> Result<Option<u16>, String> {
     match text.trim() {
         "" => Ok(None),
         text => text.parse::<u16>().ok().filter(|port| *port > 0).map(Some).ok_or_else(|| tr!("The port is a number from 1 to 65535.").to_owned()),
@@ -689,6 +689,8 @@ pub struct Found {
     pub kept_imap: Option<String>,
     /// The outgoing server Detect found and left out, because the owner typed another.
     pub kept_outgoing: Option<String>,
+    /// The encryption Detect set in the IMAP row and in the outgoing row where it replaced one the owner had picked.
+    pub encryption_set: [Option<Security>; 2],
     /// What Detect asked: what left the computer; the first [`MOST_LINES`].
     pub asked: Vec<String>,
     /// The lookups that failed; the first [`MOST_LINES`].
@@ -1291,8 +1293,13 @@ impl Onboarding {
         let detected = &mut self.detected;
         let row = |best: &Suggestion| (shown(&best.host), best.port.to_string(), Some(best.security));
         let best = proposal.imap.first();
+        // An encryption the owner picked: one there that Detect did not put there.
+        let picked = |security: Option<Security>, before: Option<&Row>| security.filter(|_| before.is_none_or(|(_, _, was)| *was != security));
+        let replaced = |picked: Option<Security>, now: Option<Security>| picked.filter(|picked| now != Some(*picked)).and(now);
+        let imap_picked = picked(form.security, detected.imap.as_ref());
         let (imap, now) = fill((&mut form.host, &mut form.port, &mut form.security), detected.imap.as_ref(), best.map(row).as_ref());
         detected.imap = now;
+        let imap_set = replaced(imap_picked, form.security);
         // The user name: Detect's where the owner typed none, taken out with Detect's server when it found none.
         let username_detects = detected.username.as_deref() == Some(form.username.as_str());
         match best.map(|best| shown(&best.username)) {
@@ -1309,16 +1316,19 @@ impl Onboarding {
             }
         }
         let outgoing_best = proposal.submission.first();
+        let outgoing_picked = picked(form.smtp_security, detected.submission.as_ref());
         let (outgoing, now) =
             fill((&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security), detected.submission.as_ref(), outgoing_best.map(row).as_ref());
         detected.submission = now;
+        let encryption_set = [imap_set, replaced(outgoing_picked, form.smtp_security)];
         let source = best.filter(|_| imap == Filled::Detect).map(|best| best.source);
         let kept_imap = best.filter(|_| imap == Filled::Owner).map(|best| shown(&best.host));
         let in_form = outgoing_best.filter(|_| outgoing == Filled::Detect).map(|best| (shown(&best.host), best.source));
         let kept_outgoing = outgoing_best.filter(|_| outgoing == Filled::Owner).map(|best| shown(&best.host));
         let (asked, failed, column, alone) = Found::lines(&proposal.asked, &proposal.failed);
         let asked_count = proposal.asked.len();
-        self.found = Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, asked, failed, asked_count, column, alone }));
+        self.found =
+            Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, encryption_set, asked, failed, asked_count, column, alone }));
     }
 
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check

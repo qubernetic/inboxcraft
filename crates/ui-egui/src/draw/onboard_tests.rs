@@ -1083,3 +1083,24 @@ fn on_a_modal_sheet_esc_and_a_press_beside_close_only_the_open_list() {
     assert!(harness.query_by_label("STARTTLS").is_none(), "a press beside closed the list");
     assert!(harness.state().settings().is_open(), "and only the list");
 }
+
+#[test]
+fn a_line_under_the_select_says_detect_replaced_the_picked_encryption() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = form_open(theme, FakeWorkers::passing());
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.security = Some(Security::StartTls);
+        harness.run();
+        press(&mut harness, "Detect");
+        harness.run();
+        const SAID: &str = "Detect set the encryption to TLS for port 993.";
+        let said = harness.get_by_label(SAID).rect();
+        let select = harness.get_by_label("IMAP security").rect();
+        assert_eq!(said.top(), select.bottom() + 6.0, "{theme:?}: under the row");
+        // Picked again, the line goes.
+        harness.state_mut().onboarding_mut().0.form_mut().security = Some(Security::StartTls);
+        harness.run();
+        assert!(harness.query_by_label(SAID).is_none(), "{theme:?}");
+    }
+}

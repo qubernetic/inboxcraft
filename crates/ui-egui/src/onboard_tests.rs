@@ -1246,3 +1246,13 @@ fn detect_s_lines_are_capped_and_matched_once_when_they_come() {
     assert_eq!(column[0], ("dns MX 0.example.org".to_owned(), Some("timed out".to_owned())), "each question with why it failed");
     assert_eq!(found.alone(), ["https://example.org: refused"], "a lookup that failed for no question, however far down");
 }
+
+#[test]
+fn detect_says_when_it_replaced_an_encryption_the_owner_picked() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().security = Some(Security::StartTls);
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.encryption_set, [Some(Security::Tls), None], "the IMAP pick was replaced; the outgoing one was Detect's already");
+}
