@@ -41,6 +41,20 @@ fn harness(theme: Theme, state: State, views: bool) -> Harness<'static> {
     )
 }
 
+/// The coming-soon tag of a bar whose choice of view works: once at most, 12 before the browser's link and apart from
+/// the `group` of the choice; there for sure where `room` says the words leave it room.
+fn tag_beside_browser(harness: &Harness<'static>, room: bool, group: egui::Rect, browser: egui::Rect, at: &str) -> Option<egui::Rect> {
+    let tags: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
+    assert!(tags.len() <= 1, "{at}");
+    let tag = tags.first().copied();
+    assert!(!room || tag.is_some(), "where the words leave room the tag stands: {at}");
+    if let Some(tag) = tag {
+        assert_eq!(tag.right(), browser.left() - 12.0, "the tag beside the browser's link: {at}");
+        assert!(tag.left() > group.right() + 12.0, "the tag apart from the choice of view: {at}");
+    }
+    tag
+}
+
 #[test]
 fn the_content_bar_looks_as_its_sheet_says_in_every_state() {
     for mode in [Mode::Dark, Mode::Light] {
@@ -87,23 +101,22 @@ fn the_content_bar_looks_as_its_sheet_says_in_every_state() {
             assert!(browser.accesskit_node().is_disabled(), "{at}");
             assert_eq!(browser.rect().right(), rect.right() - 12.0, "{at}");
             assert_eq!(browser.rect().left() - rect.left(), 595.0, "{at}");
-            // The links stand 12 before it; the words 12 before the links (or the browser's link), right-aligned, as
-            // the sheet has them (the words end at 583, or 12 before the links).
-            let mut end = browser.rect().left() - 12.0;
+            // The choice of view works: the coming-soon tag stands once at most, 12 before the browser's link, the one
+            // thing here not built yet, where the words stay whole; never beside the choice.
+            let tag = tag_beside_browser(&harness, name == "html", group, browser.rect(), &at);
+            // The links stand 12 before the tag (or the browser's link); the words 12 before the links, right-aligned,
+            // as the sheet has them (the words end at 583, or 12 before the links), whole.
+            let before = tag.map_or(browser.rect().left(), |tag| tag.left());
+            let mut end = before - 12.0;
             for word in words.iter().rev() {
                 let link = harness.get_by_label(word).rect();
                 assert_eq!(link.right(), end, "{word}: {at}");
                 assert!(!harness.get_by_label(word).accesskit_node().is_disabled(), "{at}");
                 end = link.left() - 10.0;
             }
-            let words_end = if words.is_empty() { browser.rect().left() - 12.0 } else { end + 10.0 - 12.0 };
-            // The coming-soon tag once at most, 12 after the choice of view, only where it leaves the words their place.
-            let tags: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
-            assert!(tags.len() <= 1, "{at}");
-            for tag in tags {
-                assert_eq!(tag.left(), group.right() + 12.0, "{at}");
-                assert!(tag.right() + 12.0 <= words_rect.left() + 0.5, "the tag leaves the words their place: {tag:?} {words_rect:?} {at}");
-            }
+            let words_end = if words.is_empty() { before - 12.0 } else { end + 10.0 - 12.0 };
+            let cut = paint.shapes.iter().any(|shape| matches!(&shape.look, Look::Text { text, .. } if text.ends_with('…')));
+            assert!(!cut, "the words whole: {at}");
             assert!((words_rect.right() - words_end).abs() <= 1.0, "the words end at {words_end}: {at}");
         }
     }
@@ -115,6 +128,9 @@ fn the_choice_of_view_stands_unavailable_until_the_view_is_built() {
     let harness = harness(theme, STATES[1], false);
     assert!(harness.get_by_role(egui::accesskit::Role::RadioGroup).accesskit_node().is_disabled());
     assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the tag once for the bar");
+    // Unavailable, the choice has the tag 12 after it.
+    let group = harness.get_by_role(egui::accesskit::Role::RadioGroup).rect();
+    assert_eq!(harness.get_by_label("coming soon").rect().left(), group.right() + 12.0);
 }
 
 #[test]
