@@ -11,7 +11,7 @@ use egui::{Event, ImeEvent, Key, Modifiers, PointerButton, Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::tests::{Kind, ONE_FRAME, at_the_cap, cap_of, field_of, kind_name, one_frame, press, says_too_long};
+use super::tests::{Kind, ONE_FRAME, at_the_cap, cap_of, field_built, field_of, inside, kind_name, one_frame, press, says_too_long};
 use super::{Cap, Field, LAID_OUT, multiline_field_holding, password_field, text_field_limited};
 use crate::component::tests::{builder, theme};
 
@@ -39,12 +39,6 @@ fn reader(id: egui::Id, action: Action, value: &str) -> Event {
 fn middle(at: Pos2, text: &str) -> Vec<Event> {
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Middle, pressed, modifiers: Modifiers::NONE };
     vec![Event::PointerMoved(at), button(true), Event::MiddleClickPaste { pos: at, text: text.to_owned() }, button(false)]
-}
-
-/// A point inside the part of the field of `kind` that is in the window (a long text's node reaches past it).
-fn inside(harness: &Harness<'static, String>, kind: Kind) -> Pos2 {
-    let rect = harness.get_by_label(kind_name(kind)).rect();
-    pos2(rect.center().x, (rect.top().max(0.0) + rect.bottom().min(500.0)) / 2.0)
 }
 
 /// The field's selection as it is stored.
@@ -369,7 +363,7 @@ fn random_frame(seed: &mut Seeded, id: egui::Id, at: Pos2, most: usize, absent: 
         let marker = absent.get(slot).copied().unwrap_or('x');
         let count = seed.below(most * 2 + 2);
         let text: String = std::iter::repeat_n(marker, count).collect();
-        let pick = seed.below(14);
+        let pick = seed.below(15);
         let carries = match pick {
             0 => Some(Event::Text(text)),
             1 => Some(Event::Paste(text)),
@@ -389,6 +383,10 @@ fn random_frame(seed: &mut Seeded, id: egui::Id, at: Pos2, most: usize, absent: 
             continue;
         }
         keys = true;
+        if pick == 14 {
+            events.push(Event::Cut);
+            continue;
+        }
         let (key, modifiers) = match pick {
             7 => (Key::A, Modifiers::COMMAND),
             8 => (Key::ArrowLeft, if seed.below(2) == 0 { Modifiers::SHIFT } else { Modifiers::NONE }),
@@ -403,9 +401,11 @@ fn random_frame(seed: &mut Seeded, id: egui::Id, at: Pos2, most: usize, absent: 
     (events, carried, keys)
 }
 
-/// 2 000 random frames of one to four events each in a field holding at most `cap`: after each, the text is within
-/// the cap or not longer than before, and in a frame without keys every marker's text is in whole or not at all.
-fn random_frames(cap: Cap, lines: bool) {
+/// 2 000 random frames of one to four events each in a field holding at most `cap` (several `lines` or one), opening
+/// with `start`, kept `focused` or never focused by the test (a middle click or a screen reader may focus it): after
+/// each frame the text is within its limit (the cap, or the size it opened with if that is more), what was laid out
+/// is within twice that, and in a frame without keys every marker's text is in whole or not at all.
+fn random_frames(cap: Cap, lines: bool, start: &str, focused: bool) {
     let theme = theme();
     let id = egui::Id::unique("random");
     let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
@@ -417,17 +417,21 @@ fn random_frames(cap: Cap, lines: bool) {
                 text_field_limited(ui, &theme, id, text, &field, most);
             }
         },
-        String::new(),
+        start.to_owned(),
     );
     harness.run_ok();
-    harness.get_by_label("Random").focus();
-    harness.run_ok();
     let rect = harness.get_by_label("Random").rect();
-    let at = pos2(rect.center().x, (rect.top().max(0.0) + rect.bottom().min(500.0)) / 2.0);
+    let at = pos2(rect.center().x, if rect.top() >= 0.0 { rect.top() + 8.0 } else { rect.bottom() - 16.0 });
     let most = cap.most();
     let measure = |text: &str| cap.measure(text);
+    let limit = most.max(measure(start));
     let mut seed = Seeded(0x1234_5678_9abc_def1);
     for frame in 0..2_000 {
+        if focused {
+            // A one-line field lets go of the focus on Enter: it is given back before every frame.
+            harness.ctx.memory_mut(|memory| memory.request_focus(id));
+            assert!(harness.ctx.memory(|memory| memory.has_focus(id)), "frame {frame}: focused");
+        }
         let was = harness.state().clone();
         let absent: Vec<char> = MARKERS.iter().copied().filter(|marker| !was.contains(*marker)).collect();
         let (events, carried, keys) = random_frame(&mut seed, id, at, most, &absent);
@@ -436,9 +440,9 @@ fn random_frames(cap: Cap, lines: bool) {
         harness.step();
         let now = harness.state();
         let laid = LAID_OUT.with(std::cell::Cell::get);
-        assert!(measure(now) <= most || measure(now) <= measure(&was), "frame {frame}: {} past {most}: {events:?}", measure(now));
-        // Twice the cap: in bytes for a text of several lines, at most four bytes a character for a line.
-        let bound = if lines { 2 * most } else { 2 * 4 * most };
+        assert!(measure(now) <= limit, "frame {frame}: {} past {limit}: {events:?}", measure(now));
+        // Twice the limit: in bytes for a text of several lines, at most four bytes a character for a line.
+        let bound = if lines { 2 * limit } else { 2 * 4 * limit };
         assert!(laid <= bound, "frame {frame}: {laid} bytes laid out: {events:?}");
         if !keys {
             for (marker, count) in carried {
@@ -452,10 +456,128 @@ fn random_frames(cap: Cap, lines: bool) {
 
 #[test]
 fn two_thousand_random_frames_never_pass_the_cap_of_a_line() {
-    random_frames(Cap::Chars(16), false);
+    random_frames(Cap::Chars(16), false, "", true);
+    random_frames(Cap::Chars(16), false, &"y".repeat(20), true);
+    random_frames(Cap::Chars(16), false, "", false);
 }
 
 #[test]
 fn two_thousand_random_frames_never_pass_the_cap_of_a_text_of_several_lines() {
-    random_frames(Cap::Bytes(64), true);
+    random_frames(Cap::Bytes(64), true, "", true);
+    random_frames(Cap::Bytes(64), true, &"y".repeat(80), true);
+    random_frames(Cap::Bytes(64), true, "", false);
+}
+
+#[test]
+fn a_refusal_on_a_field_never_focused_loses_nothing_to_a_later_undo() {
+    for kind in ONE_FRAME {
+        let (most, _) = cap_of(kind);
+        let full = "y".repeat(most);
+        for set_value in [false, true] {
+            let case = if set_value { "a screen reader's value" } else { "a middle click" };
+            let mut harness = field_built(kind, &full, theme());
+            let at = inside(&harness, kind);
+            one_frame(&mut harness, vec![Event::PointerMoved(at)]);
+            let refused_frame = if set_value { vec![reader(id_of(kind), Action::SetValue, &"w".repeat(most + 1))] } else { middle(at, "m") };
+            one_frame(&mut harness, refused_frame);
+            assert_eq!(harness.state(), &full, "{kind:?} {case}: refused whole");
+            assert!(says_too_long(&harness), "{kind:?} {case}: and said");
+            // Focused later: one character deleted, time for egui's history to keep it, then undo and redo, one with a
+            // character typed in its frame.
+            harness.get_by_label(kind_name(kind)).focus();
+            harness.run_ok();
+            one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+            one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
+            harness.run_steps(90);
+            let undo: Vec<Event> = press(Key::Z, Modifiers::COMMAND).into();
+            let mut undo_and_type = undo.clone();
+            undo_and_type.push(Event::Text("a".to_owned()));
+            let redo: Vec<Event> = press(Key::Y, Modifiers::COMMAND).into();
+            for (step, events) in [undo.clone(), undo.clone(), undo_and_type, undo, redo.clone(), redo].into_iter().enumerate() {
+                one_frame(&mut harness, events);
+                let text = harness.state();
+                assert!(text.starts_with(&full[..most - 1]) && size(kind, text) <= most, "{kind:?} {case} step {step}: {} left", text.len());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_text_opened_at_twice_its_cap_can_undo_a_deletion_and_never_grows_past_its_opening_size() {
+    for kind in ONE_FRAME {
+        let (most, _) = cap_of(kind);
+        let opened = "y".repeat(2 * most);
+        let mut harness = field_of(kind, &opened);
+        one_frame(&mut harness, press(Key::A, Modifiers::COMMAND).into());
+        one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
+        assert_eq!(harness.state(), "", "{kind:?}: all of it deleted");
+        one_frame(&mut harness, press(Key::Z, Modifiers::COMMAND).into());
+        if kind == Kind::Password {
+            // A password keeps no history: nothing comes back, and nothing is refused.
+            assert_eq!(harness.state(), "", "{kind:?}");
+            one_frame(&mut harness, vec![Event::Paste(opened.clone())]);
+        }
+        assert_eq!(harness.state(), &opened, "{kind:?}: the deletion is undone");
+        one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+        let was = before(&harness, kind);
+        one_frame(&mut harness, vec![Event::Paste("z".to_owned())]);
+        refused(&harness, kind, &was, "past its opening size");
+        // Changed from outside to a text within the cap: the limit is the cap again.
+        *harness.state_mut() = "y".repeat(most - 1);
+        harness.run_ok();
+        one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+        let was = before(&harness, kind);
+        one_frame(&mut harness, vec![Event::Paste("zz".to_owned())]);
+        refused(&harness, kind, &was, "past the cap after a change from outside");
+        one_frame(&mut harness, vec![Event::Paste("z".to_owned())]);
+        assert_eq!(size(kind, harness.state()), most, "{kind:?}: up to the cap");
+    }
+}
+
+#[test]
+fn a_password_s_buffer_never_moves_nor_grows() {
+    use crate::onboard::Secret;
+    let theme = theme();
+    let id = egui::Id::unique("password");
+    let mut harness = builder().build_ui_state(
+        move |ui, secret: &mut Secret| {
+            password_field(ui, &theme, id, secret.expose_mut(), &Field::new("Password", ""), super::Secret::Typed);
+        },
+        Secret::default(),
+    );
+    harness.run();
+    harness.get_by_label("Password").focus();
+    harness.run();
+    let buffer = |harness: &mut Harness<'static, Secret>| {
+        let text = harness.state_mut().expose_mut();
+        (text.as_ptr(), text.capacity())
+    };
+    let frame = |harness: &mut Harness<'static, Secret>, events: Vec<Event>| {
+        harness.input_mut().events.extend(events);
+        harness.step();
+        harness.run();
+    };
+    let first = buffer(&mut harness);
+    // Typed to the cap, four bytes a character: the buffer is full.
+    for _ in 0..super::MAX_SECRET {
+        frame(&mut harness, vec![Event::Text("𝄞".to_owned())]);
+    }
+    assert_eq!(harness.state().expose().chars().count(), super::MAX_SECRET);
+    assert_eq!(buffer(&mut harness), first, "typing to the cap");
+    frame(&mut harness, vec![Event::Paste("QQQQQ".to_owned())]);
+    assert_eq!(buffer(&mut harness), first, "a refused paste");
+    frame(&mut harness, vec![reader(id, Action::SetValue, &"W".repeat(300))]);
+    assert_eq!(buffer(&mut harness), first, "a refused value");
+    // One character selected and replaced by two: the deletion is rolled back with the refused insert.
+    frame(&mut harness, press(Key::ArrowLeft, Modifiers::SHIFT).into());
+    frame(&mut harness, vec![Event::Paste("ab".to_owned())]);
+    assert_eq!(buffer(&mut harness), first, "a rolled-back replacement");
+    assert_eq!(harness.state().expose(), "𝄞".repeat(super::MAX_SECRET), "the password is as it was");
+    // A deletion and a refused insert in one frame, at the start of the text.
+    let mut events: Vec<Event> = press(Key::Home, Modifiers::NONE).into();
+    events.extend(press(Key::Delete, Modifiers::NONE));
+    events.push(Event::Text("ab".to_owned()));
+    frame(&mut harness, events);
+    assert_eq!(buffer(&mut harness), first, "a rolled-back frame at the start");
+    assert_eq!(harness.state().expose(), "𝄞".repeat(super::MAX_SECRET), "the password is as it was");
 }

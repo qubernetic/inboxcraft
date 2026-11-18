@@ -287,3 +287,7 @@ impl TextBuffer for Capped<'_> {
         TypeId::of::<CappedMarker>()
     }
 }
+
+#[cfg(test)]
+#[path = "field_capped_tests.rs"]
+mod tests;

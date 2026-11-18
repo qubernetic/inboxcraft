@@ -313,7 +313,14 @@ pub(super) fn kind_name(kind: Kind) -> &'static str {
 
 /// A field of `kind` holding the harness's text, focused.
 pub(super) fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
-    let theme = theme();
+    let mut harness = field_built(kind, text, theme());
+    harness.get_by_label(kind_name(kind)).focus();
+    harness.run_ok();
+    harness
+}
+
+/// A field of `kind` holding the harness's text in `theme`, never focused.
+pub(super) fn field_built(kind: Kind, text: &str, theme: Theme) -> Harness<'static, String> {
     let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
         move |ui, text: &mut String| {
             let field = Field::new("Hostile", "hint");
@@ -367,9 +374,21 @@ pub(super) fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
         text.to_owned(),
     );
     harness.run_ok();
-    harness.get_by_label(kind_name(kind)).focus();
-    harness.run_ok();
     harness
+}
+
+/// A point inside the box of the field of `kind` in the window of `field_built` (500 high): a little under its top, or
+/// over its bottom when a long text's node reaches above the window.
+pub(super) fn inside(harness: &Harness<'static, String>, kind: Kind) -> egui::Pos2 {
+    let rect = harness.get_by_label(kind_name(kind)).rect();
+    let y = if rect.top() >= 0.0 {
+        rect.top() + 8.0
+    } else if rect.bottom() <= 500.0 {
+        rect.bottom() - 16.0
+    } else {
+        250.0
+    };
+    pos2(rect.center().x, y)
 }
 
 /// The most a field of `kind` holds, and whether that counts bytes (else characters).
@@ -1191,8 +1210,15 @@ pub(super) const ONE_FRAME: [Kind; 4] = [Kind::Text, Kind::Password, Kind::Many,
 
 /// The field of `kind` filled to its cap with "y", the caret at its end.
 pub(super) fn at_the_cap(kind: Kind) -> (Harness<'static, String>, usize) {
+    at_the_cap_in(kind, theme())
+}
+
+/// [`at_the_cap`] in `theme`.
+pub(super) fn at_the_cap_in(kind: Kind, theme: Theme) -> (Harness<'static, String>, usize) {
     let (most, _) = cap_of(kind);
-    let mut harness = field_of(kind, "");
+    let mut harness = field_built(kind, "", theme);
+    harness.get_by_label(kind_name(kind)).focus();
+    harness.run_ok();
     harness.event(egui::Event::Paste("y".repeat(most)));
     harness.run_ok();
     assert_eq!(harness.state().len(), most, "{kind:?}: filled to the cap");
@@ -1244,19 +1270,20 @@ fn a_selection_moved_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap(
 #[test]
 fn a_pointer_press_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap() {
     use egui::{Event, Modifiers, PointerButton};
-    for kind in ONE_FRAME {
-        let (mut harness, most) = at_the_cap(kind);
+    for (kind, percent) in ONE_FRAME.into_iter().flat_map(|kind| [100, 130].map(|percent| (kind, percent))) {
+        let scaled = || Theme::new(Mode::Light, TextScale::from_percent(percent).unwrap_or_default());
+        let (mut harness, most) = at_the_cap_in(kind, scaled());
         one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
-        // The middle of the part of the field in the window: a long text's node reaches far above and below it, and
-        // its top clamped to the window can be the label over the box, where a press takes the focus away.
-        let rect = harness.get_by_label(kind_name(kind)).rect();
-        let at = pos2(rect.center().x, (rect.top().max(0.0) + rect.bottom().min(500.0)) / 2.0);
+        // A point inside the box: a long text's node reaches far above and below it, and a press on the label over the
+        // box would take the focus away.
+        let at = inside(&harness, kind);
         let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         // A press and its release in the frame of the paste: a click that puts the caret down.
         one_frame(&mut harness, vec![Event::PointerMoved(at), button(true), button(false), Event::Paste("z".repeat(most))]);
         held(&harness, kind, most, most, "pointer click");
+        assert!(harness.get_by_label(kind_name(kind)).is_focused(), "{kind:?} {percent}: the press landed in the field");
         // And a press alone.
-        let (mut harness, most) = at_the_cap(kind);
+        let (mut harness, most) = at_the_cap_in(kind, scaled());
         one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
         one_frame(&mut harness, vec![Event::PointerMoved(at), button(true), Event::Paste("z".repeat(most))]);
         one_frame(&mut harness, vec![button(false)]);
