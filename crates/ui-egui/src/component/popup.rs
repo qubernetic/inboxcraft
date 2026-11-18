@@ -557,10 +557,12 @@ pub(crate) fn suggestion_row_with(ui: &mut Ui, theme: &Theme, name: &str, addres
     }
     let ink = arriving(theme, p.ink, shown);
     let most = NAME.min((right - left).max(1.0));
+    // The name's box: its width rounded up, or all of `most` when the name is cut there; the address 8 after it.
+    let whole = galley(ui, name, theme.fonts.body, ink).size().x;
+    let name_box = if whole > most { most } else { paint::run_box(whole) };
     let text = cut(ui, name, theme.fonts.body, ink, most);
-    let name_width = text.size().x;
     paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
-    let start = (left + name_width).round() + s.s2;
+    let start = left + name_box + s.s2;
     if right - start > 1.0 && !address.is_empty() {
         let muted = arriving(theme, p.muted, shown);
         let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);

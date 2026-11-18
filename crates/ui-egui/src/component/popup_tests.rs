@@ -761,8 +761,11 @@ fn a_suggestion_row_looks_as_its_sheet_says_in_every_state() {
             let shown = one(&harness, name);
             assert_eq!((shown.rect.min, shown.colour, shown.size), (rect.min + egui::vec2(44.0 + shift, 9.0), p.ink, 14.0), "{at}");
             let mail = drawn(&harness).into_iter().find(|text| text.text == address).unwrap_or_else(|| panic!("{at}: no address"));
+            // 8 after the name's box: the name's width rounded up, or all of its 144 when it is cut (the board's
+            // address starts at 196).
+            let name_box = if state == Suggest::Long { 144.0 } else { shown.rect.width().ceil() };
             assert!(
-                (mail.rect.left() - (shown.rect.right().round() + 8.0)).abs() < 0.01 && mail.rect.top() == rect.top() + 12.0,
+                (mail.rect.left() - (shown.rect.left() + name_box + 8.0)).abs() < 0.01 && mail.rect.top() == rect.top() + 12.0,
                 "{at} {mail:?} after {shown:?}"
             );
             assert_eq!((mail.colour, mail.family.as_str(), mail.size), (p.muted, "Monospace", 11.0), "{at}");
