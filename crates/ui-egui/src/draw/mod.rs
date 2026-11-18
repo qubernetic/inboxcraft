@@ -977,10 +977,10 @@ impl InboxApp {
         }
     }
 
-    /// A message opened from the list over the docked composer (one pane) takes the composer's place: the composer
-    /// floats, all it holds kept.
+    /// A message the owner opens from the list (a press on its row, Enter) takes the docked composer's place, in one
+    /// pane or two, also when it was already selected as a preview: the composer floats, all it holds kept.
     fn float_behind(&mut self) {
-        if self.list_over_composer
+        if self.docked()
             && let Some(composer) = &mut self.composer
         {
             composer.set_floating(true);
@@ -1394,9 +1394,12 @@ impl InboxApp {
         (&mut self.reader, &mut self.mailbox)
     }
 
-    /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
-    /// the composer has the reader's place sends the composer to its floating panel, unless the list stands over the
-    /// composer in one pane and the person only walks it.
+    /// Opens the selected message in the reader, or closes it, when the selection changed. A preview never floats a
+    /// docked composer, in one pane or two: a selection the focus or the list's keys made (Tab, the arrows, J and K),
+    /// or the walk-on after an act, only moves the list's selection; the composer keeps the reader's place and the
+    /// message opens behind it as a preview, not read. Only the owner's open floats it: a press on a row, Enter, the
+    /// held-back message opened ([`InboxApp::float_behind`] where the selection stays), or a message selected from
+    /// outside.
     ///
     /// When the owner's own act takes the open message out of the list (done, snoozed, moved), the list walks on to the
     /// row the next-message rule selects; when the server takes it away, the reader shows nothing open and that row is
@@ -1416,7 +1419,9 @@ impl InboxApp {
             // The keyboard stays on the list: on the row walked on to.
             self.land_held = self.mailbox.selected();
         }
-        if walking && !from_list && std::mem::take(&mut self.act_by_key) {
+        // Beside the docked composer the reader is not drawn: nothing asks for its tool, and a focus in the composer
+        // is left alone.
+        if walking && !from_list && !self.docked() && std::mem::take(&mut self.act_by_key) {
             // The keyboard stays in the reader: on the widget it was on, else (a key acted with nothing focused) on the
             // reader's first tool, never on nothing.
             self.focus_walked = true;
@@ -1447,17 +1452,17 @@ impl InboxApp {
         }
         let opening = self.mailbox.selected();
         if open != opening {
-            let walked = self.list_over_composer && !self.reading;
-            // In one pane with the list in front the reader is not shown: a message selected there (the next one after
-            // an act on the keyed row, from the keys, the pointer, a notification or the engine) opens as a preview,
-            // not marked read.
+            let preview = walking || (self.mailbox.keyed() && !self.reading);
+            // In one pane with the list in front, and behind the docked composer, the reader is not shown: a message
+            // selected there (the next one after an act on the keyed row, from the keys, the pointer, a notification
+            // or the engine; a preview beside the composer) opens as a preview, not marked read.
             if let Some(id) = opening
-                && self.list_in_front()
+                && (self.list_in_front() || (preview && self.docked()))
             {
                 self.mailbox.select_by_focus(id);
             }
             if opening.is_some()
-                && !walked
+                && !preview
                 && let Some(composer) = &mut self.composer
             {
                 composer.set_floating(true);

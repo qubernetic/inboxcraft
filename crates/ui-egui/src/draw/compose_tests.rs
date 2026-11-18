@@ -949,10 +949,11 @@ fn every_control_of_the_composer_is_reached_and_it_rests_with_a_blinking_caret()
     type_into(&mut harness, "To", "odile@example.org,");
     harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
     harness.run();
-    // The walk starts in the composer: a list row Tab reaches beside it is shown in the reader's place, which the
-    // composer leaves for its floating panel.
-    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+    // The whole window's walk from its first stop, the 440 list beside the docked composer: the rows Tab passes are
+    // previews, which never float the composer, so its controls are reached where it stands.
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::field_id(Line::To)));
     harness.run();
+    assert!(super::list::view_rect(&harness.ctx).is_some(), "the list stands beside the composer");
     let missed: Vec<String> = crate::component::tests::keyboard_walk(&mut harness)
         .into_iter()
         // The rest of the window has its own walk; the composer's controls are reached.
@@ -963,6 +964,7 @@ fn every_control_of_the_composer_is_reached_and_it_rests_with_a_blinking_caret()
         })
         .collect();
     assert!(missed.is_empty(), "never reached: {missed:?}");
+    assert!(harness.state().composer().is_some_and(|composer| !composer.floating()), "the composer is still docked");
     harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
     harness.run();
     // The caret blinks by a frame asked for at its next change, never continuously.
@@ -971,6 +973,126 @@ fn every_control_of_the_composer_is_reached_and_it_rests_with_a_blinking_caret()
     assert!(delay >= std::time::Duration::from_millis(1) && delay <= std::time::Duration::from_millis(500), "{delay:?}");
     harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::text_id()));
     assert!(crate::component::tests::rests(&mut harness, 6), "without the keys it rests");
+}
+
+/// Whether the composer stands docked in the reader's place, and the draft's text.
+fn docked_with(harness: &Harness<'static, InboxApp>) -> (bool, String) {
+    let composer = harness.state().composer().unwrap();
+    (!composer.floating(), composer.text().to_owned())
+}
+
+#[test]
+fn shift_tab_from_from_walks_the_list_beside_the_docked_composer_and_leaves_it_docked() {
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+    harness.run();
+    let mut rows = 0;
+    for step in 0..400 {
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+        harness.step();
+        harness.step();
+        assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "Shift Tab {step}: the composer stays docked, the draft whole");
+        assert!(super::reader_rect(&harness.ctx).is_none(), "Shift Tab {step}: the reader is not drawn");
+        if super::list::focused_row(&harness.ctx).is_some() {
+            rows += 1;
+        }
+        if harness.ctx.memory(|memory| memory.has_focus(super::compose::text_id())) {
+            break;
+        }
+    }
+    assert!(rows > 0, "Shift Tab walked the list's rows");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::compose::text_id())), "round to the composer again");
+}
+
+#[test]
+fn an_act_on_a_row_beside_the_docked_composer_walks_on_and_leaves_it_docked() {
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    // Shift Tab from From: the list's last row in sight has the keyboard, its message open behind the composer.
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run();
+    let keyed = super::list::focused_row(&harness.ctx).unwrap();
+    assert_eq!(harness.state().reader().open_id(), Some(keyed), "the preview is open behind the composer");
+    // That row's own Done, under the pointer: the owner's act on the open message, from the list.
+    let rect = harness.ctx.read_response(super::list::row_id(keyed)).unwrap().rect;
+    harness.hover_at(rect.center());
+    harness.run();
+    let done = harness.query_all_by_role_and_label(Role::Button, "Done").find(|button| rect.contains(button.rect().center())).unwrap();
+    done.click();
+    harness.run();
+    harness.run();
+    assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == keyed), "done");
+    let next = harness.state().mailbox().selected();
+    assert!(next.is_some_and(|next| next != keyed), "it walked on to the next row");
+    assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "the composer stays docked, the draft whole");
+    assert!(super::reader_rect(&harness.ctx).is_none(), "the reader is not drawn");
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    assert!(focused.is_some_and(|id| harness.ctx.read_response(id).is_some()), "the keyboard is on a drawn widget: {focused:?}");
+    assert_eq!(super::list::focused_row(&harness.ctx), next, "on the row walked on to");
+
+    // A message the owner opened by a press (the composer floated), the composer docked again, then the open row's
+    // Done: the walk-on is no open either.
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    let row = harness.query_all_by_role(Role::ListBoxOption).nth(1).unwrap();
+    let rect = row.rect();
+    row.click();
+    harness.run();
+    let pressed = harness.state().mailbox().selected().unwrap();
+    assert!(!docked_with(&harness).0, "the press floats it");
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place").click();
+    harness.run();
+    assert!(docked_with(&harness).0, "docked again");
+    harness.hover_at(rect.center());
+    harness.run();
+    let done = harness.query_all_by_role_and_label(Role::Button, "Done").find(|button| rect.contains(button.rect().center())).unwrap();
+    done.click();
+    harness.run();
+    harness.run();
+    assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == pressed), "done");
+    assert!(harness.state().mailbox().selected().is_some_and(|next| next != pressed), "it walked on");
+    assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "after an open: the composer stays docked");
+}
+
+#[test]
+fn a_press_or_enter_on_a_row_beside_the_docked_composer_floats_it() {
+    // A press on a row.
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    harness.query_all_by_role(Role::ListBoxOption).nth(1).unwrap().click();
+    harness.run();
+    assert_eq!(docked_with(&harness), (false, "Hello Odile".to_owned()), "a press: the composer floats, the draft whole");
+    assert!(super::reader_rect(&harness.ctx).is_some(), "a press: the message in the reader's place");
+    // Enter on a row the focus walked to: the preview did not float it, the open does.
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run();
+    assert!(super::list::focused_row(&harness.ctx).is_some(), "a row has the keyboard");
+    assert!(docked_with(&harness).0, "the preview leaves it docked");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert_eq!(docked_with(&harness), (false, "Hello Odile".to_owned()), "Enter: the composer floats, the draft whole");
+    assert!(super::reader_rect(&harness.ctx).is_some(), "Enter: the message in the reader's place");
+    // The list's Open from the palette on that previewed row: the selection stays, the open floats it all the same.
+    let mut harness = composing(egui::Theme::Light);
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.run();
+    let keyed = harness.state().mailbox().selected();
+    assert!(docked_with(&harness).0, "the preview leaves it docked");
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::OPEN);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), keyed, "the same message");
+    assert!(!docked_with(&harness).0, "Open: the composer floats");
+    assert!(super::reader_rect(&harness.ctx).is_some(), "Open: the message in the reader's place");
 }
 
 #[test]
