@@ -212,7 +212,7 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     ui.horizontal(|ui| {
         let side = theme.fonts.heading.line * 1.6;
         badge::group(ui, theme, IconId::People, tr!("People"), side);
-        badge::group(ui, theme, IconId::Notify, tr!("Updates"), side);
+        badge::group(ui, theme, IconId::Notify, tr!("Notifications"), side);
         badge::group(ui, theme, IconId::Calendar, tr!("Events"), side);
         let (rect, _) = ui.allocate_exact_size(vec2(s.s6 * 4.0, side), egui::Sense::hover());
         let left = badge::count(ui, theme, 128, rect.right(), rect.center().y);

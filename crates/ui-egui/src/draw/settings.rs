@@ -644,8 +644,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
         });
         if !mailbox.accounts().is_empty() {
             ui.add_space(theme.spacing.s6);
-            let note =
-                tr!("Each account's inbox in People, Updates, Newsletters and Invitations, sorted by InboxCraft or by your choice for a sender.");
+            let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
             texts(ui, theme, tr!("Grouped inbox"), &[note]);
         }
         for account in mailbox.accounts() {

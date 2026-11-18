@@ -28,7 +28,7 @@ fn a_group_badge_is_a_named_picture_with_its_icon() {
     let theme = theme();
     let mut harness = builder().build_ui(move |ui| {
         group(ui, &theme, IconId::People, "People", 32.0);
-        group(ui, &theme, IconId::Notify, "Updates", f32::NAN);
+        group(ui, &theme, IconId::Notify, "Notifications", f32::NAN);
     });
     harness.run();
     let people = harness.get_by_label("People");

@@ -749,10 +749,10 @@ const WAITING: [Person; 2] = [FERRIES, LETTINGS];
 
 /// The showcase's groups: `(icon, name, senders)`.
 const GROUPS: [(IconId, &str, &[Person]); 2] =
-    [(IconId::People, "People", &[ODILE, PETRA, TEODOR, ANSEL]), (IconId::Notify, "Updates", &[LIBRARY, LUMEN, CYCLES])];
+    [(IconId::People, "People", &[ODILE, PETRA, TEODOR, ANSEL]), (IconId::Notify, "Notifications", &[LIBRARY, LUMEN, CYCLES])];
 
 /// The invented screener and groups `ui_shot` shows over `mailbox`'s list ([`Showcase`]): two waiting
-/// senders, the messages of four people as "People" and of three services as "Updates"; any other row stays out of
+/// senders, the messages of four people as "People" and of three services as "Notifications"; any other row stays out of
 /// the groups.
 #[must_use]
 pub fn showcase(mailbox: &crate::mailbox::Mailbox) -> Showcase {

@@ -17,7 +17,7 @@ use crate::sample;
 use crate::theme::install_fonts;
 
 /// The parts of the group cards, which the simple list leaves out.
-const CARDS_ONLY: [&str; 4] = ["done all", "Show all (7)", "People, 2 unread", "Updates, 1 unread"];
+const CARDS_ONLY: [&str; 4] = ["done all", "Show all (7)", "People, 2 unread", "Notifications, 1 unread"];
 
 const ODILE: &str = "Odile Brannock, Allotment rota for November, 08:35, unread";
 const ODILE_READ: &str = "Odile Brannock, Allotment rota for November, 08:35";
@@ -300,7 +300,7 @@ fn the_showcase_shows_the_screener_and_the_group_cards_with_their_rows() {
     harness.get_by_label("2 new senders");
     harness.get_by_role_and_label(Role::Button, "Review");
     harness.get_by_label("People, 2 unread");
-    harness.get_by_label("Updates, 1 unread");
+    harness.get_by_label("Notifications, 1 unread");
     assert_eq!(harness.query_all_by_role_and_label(Role::Button, "done all").count(), 0, "only on a hovered or keyed head");
     let mut harness = harness;
     harness.get_by_label("People, 2 unread").hover();
@@ -824,7 +824,7 @@ thread_local! {
     pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The sample mailbox over a list of 10 000 messages in three groups (People, Updates, Newsletters, in turn), longer than the engine lists, in `view`.
+/// The sample mailbox over a list of 10 000 messages in three groups (People, Notifications, Newsletters, in turn), longer than the engine lists, in `view`.
 fn ten_thousand_mailbox(view: InboxView) -> Mailbox {
     use crate::mailbox::GroupKind;
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
@@ -1763,7 +1763,7 @@ fn an_invitation_is_grouped_by_its_sender() {
     ]);
     let groups: Vec<(String, Vec<u64>)> = mailbox.groups().into_iter().map(|group| (group.name, group.messages)).collect();
     // No Invitations group: a person's invitation stands with People, a system's with the system's mail.
-    assert_eq!(groups, [("People".to_owned(), vec![1, 4]), ("Updates".to_owned(), vec![2, 3, 5])]);
+    assert_eq!(groups, [("People".to_owned(), vec![1, 4]), ("Notifications".to_owned(), vec![2, 3, 5])]);
     // The list draws them so: two heads, every row under its sender's.
     let mut app = InboxApp::new(mailbox);
     app.set_reduce_motion(true);
@@ -1771,10 +1771,10 @@ fn an_invitation_is_grouped_by_its_sender() {
     assert!(harness.query_by_label_contains("Invitations").is_none(), "no Invitations head");
     let head = |name: &str| harness.get_by_label_contains(name).rect().top();
     let row_top = |subject: &str| harness.get_by_label_contains(subject).rect().top();
-    let (people, updates) = (head("People, "), head("Updates, "));
+    let (people, updates) = (head("People, "), head("Notifications, "));
     assert!(people < row_top("Invitation 1") && row_top("Invitation 1") < updates);
     for subject in ["Invitation 2", "Invitation 3"] {
-        assert!(row_top(subject) > updates, "{subject} under Updates");
+        assert!(row_top(subject) > updates, "{subject} under Notifications");
     }
     // The group menu offers the groups a sender can be put in: no Invitations there either.
     assert_eq!(GroupKind::SHOWN, [GroupKind::People, GroupKind::Updates, GroupKind::Newsletters]);

@@ -61,7 +61,7 @@ fn the_inbox_shows_the_screener_card_and_a_card_for_each_group() {
     let harness = harness_of(app());
     harness.get_by_label("2 new senders");
     harness.get_by_label("People, 3 unread");
-    harness.get_by_label("Updates, 1 unread");
+    harness.get_by_label("Notifications, 1 unread");
     harness.get_by_label("Show all (8)");
     assert_eq!(rows(&harness), 6, "three rows of each group until Show all");
 }
@@ -88,7 +88,7 @@ fn a_held_message_opens_as_a_preview_that_asks_whether_to_let_the_sender_in() {
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none(), "the preview has no Reply");
     assert!(harness.query_by_role_and_label(Role::Button, "Snooze").is_none(), "the sender stands in place of the toolbar");
     harness.get_by_role_and_label(Role::Button, "Details");
-    for name in ["People", "Updates", "Newsletters", "Accept", "Accept and open", "Block"] {
+    for name in ["People", "Notifications", "Newsletters", "Accept", "Accept and open", "Block"] {
         harness.get_by_role_and_label(Role::Button, name);
     }
     assert!(harness.query_by_role_and_label(Role::Button, "Invitations").is_none(), "no Invitations group to let a sender into");
@@ -100,12 +100,12 @@ fn a_held_message_opens_as_a_preview_that_asks_whether_to_let_the_sender_in() {
 #[test]
 fn accept_with_a_group_lets_the_sender_in_and_undo_holds_them_again() {
     let mut harness = previewing();
-    harness.get_by_role_and_label(Role::Button, "Updates").click();
+    harness.get_by_role_and_label(Role::Button, "Notifications").click();
     harness.run();
-    assert_eq!(harness.get_by_role_and_label(Role::Button, "Updates").accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(harness.get_by_role_and_label(Role::Button, "Notifications").accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::Button, "Accept").click();
     harness.run();
-    harness.get_by_label("Accepted Harbour Swim Club into Updates");
+    harness.get_by_label("Accepted Harbour Swim Club into Notifications");
     assert_eq!(harness.state().mailbox().waiting().len(), 1);
     assert!(harness.query_by_label(SWIM).is_none());
     harness.get_by_role_and_label(Role::Button, "Undo").click();

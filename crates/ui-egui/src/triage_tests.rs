@@ -43,7 +43,7 @@ fn the_rows_carry_their_group_and_the_inbox_groups_them() {
     assert_eq!(group_of(&mailbox, ROTA), Some(GroupKind::People));
     assert_eq!(group_of(&mailbox, LOAN), Some(GroupKind::Updates));
     let groups: Vec<(String, usize)> = mailbox.groups().into_iter().map(|group| (group.name, group.messages.len())).collect();
-    assert_eq!(groups, [("People".to_owned(), 8), ("Updates".to_owned(), 3)]);
+    assert_eq!(groups, [("People".to_owned(), 8), ("Notifications".to_owned(), 3)]);
     assert!(mailbox.messages().iter().all(|row| !row.new_sender));
 }
 
@@ -60,7 +60,7 @@ fn groups_show_in_the_unified_inbox_only() {
 #[test]
 fn the_groups_have_their_names_and_icons() {
     let names: Vec<(&str, &str)> = GroupKind::ALL.iter().map(|kind| (kind.id(), kind.text())).collect();
-    assert_eq!(names, [("people", "People"), ("updates", "Updates"), ("newsletters", "Newsletters"), ("invitations", "Invitations")]);
+    assert_eq!(names, [("people", "People"), ("updates", "Notifications"), ("newsletters", "Newsletters"), ("invitations", "Invitations")]);
     assert_eq!(GroupKind::named("newsletters"), Some(GroupKind::Newsletters));
     assert_eq!(GroupKind::named("spam"), None);
     assert_ne!(GroupKind::Newsletters.icon(), GroupKind::People.icon());
@@ -105,7 +105,7 @@ fn accept_lets_the_sender_in_with_a_group_and_undo_holds_it_again() {
     let swim = id_of(&mailbox, SWIM);
     mailbox.act(swim, Act::Accept { group: Some(GroupKind::Updates), open: false });
     assert_eq!(mailbox.error(), None);
-    assert_eq!(mailbox.undoable().map(|undo| undo.text.as_str()), Some("Accepted Harbour Swim Club into Updates"));
+    assert_eq!(mailbox.undoable().map(|undo| undo.text.as_str()), Some("Accepted Harbour Swim Club into Notifications"));
     assert_eq!(senders(&mailbox), ["plants@example.org"]);
     assert!(mailbox.messages().iter().all(|row| row.id != swim));
     mailbox.open(Place::View(Role::Inbox));
@@ -178,7 +178,7 @@ fn the_screener_mode_and_the_grouping_of_an_account_change_through_the_engine() 
     assert_eq!(group_of(&mailbox, ROTA), None);
     assert_eq!(group_of(&mailbox, "Draft logo for the bakery"), Some(GroupKind::People), "the Studio stays grouped");
     let groups: Vec<String> = mailbox.groups().into_iter().map(|group| group.name).collect();
-    assert_eq!(groups, ["People", "Updates"]);
+    assert_eq!(groups, ["People", "Notifications"]);
     mailbox.set_grouped(9, false);
     assert!(mailbox.error().is_some());
 }

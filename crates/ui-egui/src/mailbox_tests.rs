@@ -406,7 +406,7 @@ fn the_sample_showcase_groups_people_and_updates_and_leaves_one_row_out() {
     let mailbox = mailbox();
     let showcase = sample::showcase(&mailbox);
     let names: Vec<&str> = showcase.groups.iter().map(|group| group.name.as_str()).collect();
-    assert_eq!(names, ["People", "Updates"]);
+    assert_eq!(names, ["People", "Notifications"]);
     let grouped: Vec<u64> = showcase.groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
     assert_eq!(grouped.len(), mailbox.messages().len() - 1);
     let left: Vec<&str> = mailbox.messages().iter().filter(|row| !grouped.contains(&row.id)).map(|row| row.sender.as_str()).collect();

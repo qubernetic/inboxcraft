@@ -240,7 +240,7 @@ impl GroupKind {
     pub fn text(self) -> &'static str {
         match self {
             Self::People => tr!("People"),
-            Self::Updates => tr!("Updates"),
+            Self::Updates => tr!("Notifications"),
             Self::Newsletters => tr!("Newsletters"),
             Self::Invitations => tr!("Invitations"),
         }

@@ -292,7 +292,7 @@ fn done_all_on_a_group_card_files_the_group() {
     let unread = u64::try_from(app.mailbox().messages().iter().filter(|row| updates.contains(&row.id) && !row.seen).count()).unwrap();
     let mut harness = harness_of(app);
     // "done all" shows on the head the pointer is over.
-    harness.get_by_label(&crate::component::group_head::spoken("Updates", unread)).hover();
+    harness.get_by_label(&crate::component::group_head::spoken("Notifications", unread)).hover();
     harness.run();
     let done_all = harness.query_all_by_role_and_label(Role::Button, "done all").next().unwrap();
     done_all.click();
