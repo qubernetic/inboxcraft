@@ -935,7 +935,8 @@ impl InboxApp {
     /// picked, a toast saying when (`mail.send_later`). A blocked one stays, saying why, and so does one the engine
     /// refuses.
     pub fn send_composer(&mut self) {
-        let Some(composer) = &mut self.composer else { return };
+        // A composer opened or moved in this frame has not been seen yet: Send acts once it has been painted.
+        let Some(composer) = self.composer.as_mut().filter(|composer| composer.painted()) else { return };
         let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
             Ok(Some(at)) => {

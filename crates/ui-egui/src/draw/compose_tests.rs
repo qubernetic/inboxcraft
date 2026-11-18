@@ -699,3 +699,34 @@ fn the_end_of_the_app_in_the_frame_after_a_keystroke_keeps_it() {
     let kept = drafts.iter().find(|held| held.id.get() == draft).unwrap();
     assert!(kept.text.starts_with("Plot 14"), "{:?}", kept.text);
 }
+
+#[test]
+fn send_waits_for_a_composer_that_was_never_painted() {
+    let mut harness = sending();
+    let id = planted(&mut harness, ["", "", ""]);
+    // The draft reopens and Send comes in the same input, before a frame painted it: nothing goes.
+    harness.state_mut().reopen(id);
+    harness.state_mut().send_composer();
+    assert!(harness.state().composer().is_some(), "still open");
+    assert!(!queued(&mut harness, id), "not sent unseen");
+    // Once it was painted, Send sends it.
+    harness.run();
+    harness.state_mut().send_composer();
+    assert!(harness.state().composer().is_none());
+    assert!(queued(&mut harness, id));
+}
+
+#[test]
+fn send_waits_for_a_composer_moved_to_another_place_until_painted_there() {
+    let mut harness = sending();
+    let id = planted(&mut harness, ["", "", ""]);
+    harness.state_mut().reopen(id);
+    harness.run();
+    harness.state_mut().composer_mut().0.unwrap().set_floating(true);
+    harness.state_mut().compose();
+    harness.state_mut().send_composer();
+    assert!(!queued(&mut harness, id), "back in the reader's place, unpainted there");
+    harness.run();
+    harness.state_mut().send_composer();
+    assert!(queued(&mut harness, id));
+}

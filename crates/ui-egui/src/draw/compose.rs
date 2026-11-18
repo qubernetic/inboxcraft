@@ -518,6 +518,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         blank(ui, theme, keymap, composer, &mut asked);
         toolbar(ui, theme, keymap, mailbox, composer, &mut asked);
     });
+    composer.mark_painted();
     asked
 }
 

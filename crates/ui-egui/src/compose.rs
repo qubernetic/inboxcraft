@@ -223,6 +223,8 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
+    /// Whether the whole composer was painted since it was opened or moved to another place: Send waits for it.
+    painted: bool,
     /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
     /// and the text it refused: said while that text stands.
     fill_refused: Option<(String, String)>,
@@ -311,6 +313,7 @@ impl Composer {
             templates: Vec::new(),
             later: None,
             fill_refused: None,
+            painted: false,
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -450,7 +453,22 @@ impl Composer {
 
     /// Makes it the floating panel, or puts it back in the reader's place.
     pub fn set_floating(&mut self, floating: bool) {
+        if self.floating != floating {
+            self.painted = false;
+        }
         self.floating = floating;
+    }
+
+    /// Whether the whole composer was painted since it was opened or moved to another place, so that the person has
+    /// seen what Send would send.
+    #[must_use]
+    pub fn painted(&self) -> bool {
+        self.painted
+    }
+
+    /// The whole composer, its lines and its text, was painted in this frame.
+    pub(crate) fn mark_painted(&mut self) {
+        self.painted = true;
     }
 
     /// What the composer's title says: the subject, or "New message".

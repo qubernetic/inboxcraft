@@ -543,6 +543,8 @@ fn send(app: &mut InboxApp, out: &str, to: &str, subject: &str, later: Option<Ti
     subject.clone_into(composer.subject_mut());
     composer.edited();
     composer.set_later(later);
+    // The scene is set without a frame: what the script wrote counts as seen.
+    composer.mark_painted();
     app.send_composer();
     if app.composer().is_some() {
         return Err(bad(format!("{out}: {subject:?} was not sent: {}", app.mailbox().error().unwrap_or("no reason"))));
