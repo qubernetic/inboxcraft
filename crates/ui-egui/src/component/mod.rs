@@ -54,6 +54,7 @@ pub mod icon;
 pub mod invite_card;
 pub mod key;
 pub mod label;
+pub mod picture_box;
 pub mod pill;
 pub mod popup;
 pub mod progress;
