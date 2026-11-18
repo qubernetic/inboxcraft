@@ -261,19 +261,22 @@ fn a_row_that_leaves_acts_at_once_and_its_gap_closes_as_the_motion_level_says() 
     let ghost = harness.query_by_label(ODILE).map(|node| node.accesskit_node().is_disabled());
     assert_eq!(ghost, Some(true), "the leaving row is named but takes no pointer or focus");
     let mut tops = vec![harness.get_by_label(&next).rect().top()];
+    // The toast where it first shows: it rises from there.
+    let mut rising = harness.query_by_role_and_label(Role::Button, "Undo").map(|node| node.rect());
     for _ in 0..14 {
         harness.step();
         tops.push(harness.get_by_label(&next).rect().top());
+        rising = rising.or_else(|| harness.query_by_role_and_label(Role::Button, "Undo").map(|node| node.rect()));
     }
     assert!(tops.windows(2).all(|pair| pair[1] <= pair[0]), "the row under it only rises: {tops:?}");
     assert!(tops.first().is_some_and(|first| *first > below - 56.0), "it rises over frames: {tops:?}");
     assert_eq!(tops.last().copied(), Some(below - 56.0), "the gap closed: {tops:?}");
     harness.run_steps(2);
     assert!(harness.state().mailbox().left_row().is_none(), "let go once closed");
-    let rising = harness.get_by_role_and_label(Role::Button, "Undo").rect();
+    let rising = rising.unwrap_or(egui::Rect::NOTHING);
     harness.run_steps(20);
     let risen = harness.get_by_role_and_label(Role::Button, "Undo").rect();
-    assert!(rising.top() >= risen.top(), "the toast rose from {rising:?} to {risen:?}");
+    assert!(rising.top() > risen.top(), "the toast rose from {rising:?} to {risen:?}");
     assert_eq!(risen.top(), at_once.top(), "to where it stands at once with motion off");
 }
 
@@ -399,6 +402,13 @@ fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
         harness.run();
         assert_eq!(harness.query_all_by_label(name).count(), before + 1, "{name} has a tooltip");
     }
+    // A head's "done all" shows while the head is hovered; hovered itself, it has its tooltip too.
+    harness.get_by_label("People, 2 unread").hover();
+    harness.run();
+    let before = harness.query_all_by_label("done all").count();
+    harness.get_by_role_and_label(Role::Button, "done all").hover();
+    harness.run();
+    assert_eq!(harness.query_all_by_label("done all").count(), before + 1, "done all has a tooltip");
 }
 
 #[test]
@@ -725,8 +735,15 @@ fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
     let mut harness = beside_the_reader();
     harness.state_mut().set_text_scale(crate::theme::TextScale::ALL[4]);
     harness.run();
+    // A marked row with a sender long enough to reach its marks at 130 %.
+    let mut rows = harness.state().mailbox().messages().to_vec();
+    let long = rows.iter_mut().find(|row| row.flagged || row.pinned).unwrap();
+    long.sender = "Teodor Lisk of the Coastal Walking Society".to_owned();
+    harness.state_mut().mailbox_mut().set_rows(rows);
+    harness.run();
     let marked: Vec<_> = harness.state().mailbox().messages().iter().filter(|row| row.flagged || row.pinned).cloned().collect();
     assert!(!marked.is_empty(), "the sample has a flagged or pinned message");
+    let mut cut = 0;
     let mut checked = 0;
     for row in marked {
         let name = harness.state().mailbox().spoken(&row);
@@ -751,11 +768,13 @@ fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
         assert!(sender.0.right() <= leftmost - 11.0 + 0.5, "{name}: the sender {:?} ends 11 short of the marks at {leftmost}", sender.0);
         // A sender cut short of them ends with one ellipsis after its last letter kept.
         assert!(sender.1 == row.sender || (sender.1.ends_with('…') && sender.1.matches('…').count() == 1), "{name}: {:?}", sender.1);
+        cut += usize::from(sender.1 != row.sender);
         let time = harness.state().mailbox().row_date(&row);
         assert!(texts_in(&harness, rect).iter().all(|(_, words)| *words != time), "{name}: the hovered row gives its time way");
         checked += 1;
     }
     assert!(checked >= 1, "a marked row in sight was hovered");
+    assert!(cut >= 1, "a sender reached its marks and was cut");
 }
 
 #[test]
