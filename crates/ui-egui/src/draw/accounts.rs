@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The Accounts page of the settings sheet: its head with Add account at the title's right end where the window can
-//! add one, then "Your accounts" with a row for each account: the bar of its colour, its name, its address and "open".
+//! add one, then "Your accounts" with a row for each account: the bar of its colour, its name, its address and the
+//! link "open".
 //! With no account the page says so. What is not built yet follows as coming soon: each connection's state, removing
 //! an account and setting up a phone. Adding happens on the same page: "Accounts" at the top leads back to the list,
 //! and the form, Detect and the check follow under it. An account's row opens its settings the same way: the add
@@ -28,12 +29,16 @@ use crate::tr;
 /// The height of an account's row, in points (at 100 %).
 const ROW: f32 = 48.0;
 
-/// Where an account's address starts, from the row's words, in points.
-const ADDRESS_AT: f32 = 180.0;
+/// The width of an account's name, in points; its address follows 12 after it.
+const NAME: f32 = 148.0;
 
-/// One account: the bar of its colour, its name, its address and "open", as one button a screen reader reads, which
-/// opens the account's settings; a hairline under it. Whether it was pressed.
-fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
+/// The room between an account row's parts, in points.
+const ROW_GAP: f32 = 12.0;
+
+/// One account: the bar of its colour (3 × 12, 18 from the top of a 48 row), its name 148 wide, its address in `mono`,
+/// and "open", a small link at the right end; the row is one button a screen reader reads, and it and the link open
+/// the account's settings; a hairline under it. Whether it was pressed.
+fn account(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &AccountRow) -> bool {
     let p = &theme.palette;
     let f = &theme.fonts;
     let height = Theme::size(theme, ROW).max(f.strong.line).ceil();
@@ -41,27 +46,38 @@ fn account(ui: &mut Ui, theme: &Theme, row: &AccountRow) -> bool {
     let response = response.on_hover_cursor(CursorIcon::PointingHand);
     let spoken = tr!("{name}, {address}", name = row.label, address = row.address);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &spoken));
-    let pressed = response.clicked();
+    let mut pressed = response.clicked();
+    if response.hovered() && ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 0.0, p.stage);
+    }
+    let mid = rect.center().y;
+    let right = rect.right() - 16.0;
+    // "open", a link of its own at the right end, standing in the row's middle.
+    let link = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(right, rect.bottom())))
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            |ui| link_sized(ui, theme, keymap, tr!("open"), LinkSize::Small),
+        )
+        .inner;
+    let spoken = tr!("Open the settings of {name}", name = row.label);
+    ui.ctx().accesskit_node_builder(link.id, |node| node.set_label(spoken.as_str()));
+    pressed |= link.clicked();
     if !ui.is_rect_visible(rect) {
         return pressed;
     }
     let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, 0.0, p.stage);
-    }
-    let mid = rect.center().y;
     let left = rect.left() + 16.0;
-    let bar = Rect::from_min_size(pos2(left, (mid - 7.0).round()), vec2(3.0, 14.0));
+    let bar = Rect::from_min_size(pos2(left, rect.top() + ((rect.height() - 12.0) / 2.0).round()), vec2(3.0, 12.0));
     painter.rect_filled(bar, 0.0, theme.account_colour(u64::try_from(row.index).unwrap_or(0)));
-    let open = line(ui, &[(tr!("open"), f.mono_s, p.cyan_text)], f32::INFINITY);
-    let right = rect.right() - 16.0;
-    let words = bar.right() + 12.0;
-    let address_at = (words + ADDRESS_AT - 15.0).min(right - open.size().x - 24.0).max(words + 1.0);
-    let name = crate::component::cut(ui, &row.label, f.strong, p.ink, (address_at - words - 12.0).max(1.0));
-    let address = crate::component::cut(ui, &row.address, f.mono, p.muted, (right - open.size().x - 24.0 - address_at).max(1.0));
+    let words = bar.right() + ROW_GAP;
+    let ends = link.rect.left() - ROW_GAP;
+    let address_at = (words + NAME + ROW_GAP).min(ends - 1.0).max(words + 1.0);
+    let name = crate::component::cut(ui, &row.label, f.strong, p.ink, (address_at - words - ROW_GAP).max(1.0));
+    let address = crate::component::cut(ui, &row.address, f.mono, p.muted, (ends - address_at).max(1.0));
     painter.galley(pos2(words, (mid - name.size().y / 2.0).round()), name, p.ink);
     painter.galley(pos2(address_at, (mid - address.size().y / 2.0).round()), address, p.muted);
-    painter.galley(pos2((right - open.size().x).round(), (mid - open.size().y / 2.0).round()), open, p.cyan_text);
     let y = rect.bottom() - 1.0;
     paint::hairline(painter, pos2(rect.left(), y), pos2(rect.right() - 1.0, y), p.panel_line);
     if response.has_focus() {
@@ -145,7 +161,7 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             let word = tr!("Your accounts · {count}", count = count(u64::try_from(accounts.len()).unwrap_or(u64::MAX)));
             group(ui, theme, "A", &word, None);
             for row in accounts {
-                if account(ui, theme, row) {
+                if account(ui, theme, keymap, row) {
                     asked = Some(Asked::Edit(row.id));
                 }
             }

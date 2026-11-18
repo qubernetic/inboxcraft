@@ -101,8 +101,10 @@ fn the_sections_column_stands_as_the_design_draws_it() {
 fn inbox_view_is_set_on_appearance_and_not_on_triage() {
     let mut harness = opened();
     harness.get_by_label("[ B ] Layout");
-    let view = harness
-        .get_by_role_and_label(Role::Group, "Inbox view. Grouped opens every group, Smart shows the first rows of each, List is one list by time.");
+    let view = harness.get_by_role_and_label(
+        Role::Group,
+        "Inbox view. Grouped opens every group, Smart shows the first three rows of each, List is one list by time.",
+    );
     let size = harness.get_by_role_and_label(Role::Group, "Text size. 90 % to 130 %. Rows and bars follow the type.");
     assert!(view.rect().top() > size.rect().bottom() - 1.0, "Layout follows Look");
     let x = |label: &str| harness.get_by_role_and_label(Role::RadioButton, label).rect().center().x;
@@ -274,4 +276,50 @@ fn hostile_account_names_never_break_a_page() {
         }
         app = harness.into_state();
     }
+}
+
+#[test]
+fn the_accounts_and_shortcuts_pages_take_the_design_s_values() {
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    let mut harness = Harness::builder()
+        .with_size(vec2(1200.0, 900.0))
+        .with_context_setup(crate::component::tests::record_layers)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    // Shortcuts: the field 320 wide with its own label, Reset all keys 2 over its foot at the column's right end, the
+    // list's first hairline 12 under them and the first chip 8 into its 36 row.
+    harness.state_mut().settings_mut().open_at(Section::Shortcuts);
+    harness.run();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let find = harness.get_by_role_and_label(Role::TextInput, "Find a command").rect();
+    assert_eq!(find.width(), 320.0, "{find:?}");
+    let title = harness.get_by_role_and_label(Role::Heading, "Shortcuts").rect();
+    // The head's foot (its intro, a line of 22 under 6), 16, the label 16 and 8, then the box.
+    assert_eq!(find.top(), title.top() - 1.0 + 32.0 + 6.0 + 22.0 + 16.0 + 16.0 + 8.0, "{find:?} under {title:?}");
+    let reset = harness.get_by_role_and_label(Role::Button, "Reset all keys").rect();
+    assert_eq!((reset.bottom(), reset.right()), (find.bottom() - 2.0, sheet.right() - 1.0 - 40.0 - 16.0), "{reset:?}");
+    let chip = harness.get_all_by_role(Role::Button).find(|node| node.accesskit_node().label().unwrap_or_default().starts_with("Key of ")).unwrap();
+    assert_eq!(chip.rect().top(), find.bottom() + 12.0 + 1.0 + 8.0, "{:?}", chip.rect());
+    // Accounts: the bar 3 × 12 at 16 and 18 in its 48 row, the address at 191, "open" a small link 16 from the end.
+    harness.state_mut().settings_mut().open_at(Section::Accounts);
+    harness.run();
+    let account = harness.state().mailbox().accounts()[0].clone();
+    let label = format!("{}, {}", account.label, account.address);
+    let row = harness.get_by_label(&label).rect();
+    assert_eq!(row.height(), 48.0);
+    let paint = crate::component::tests::painted(&harness, &label);
+    let bars: Vec<egui::Rect> = paint.rects().map(|shape| shape.rect).filter(|rect| rect.width() == 3.0).collect();
+    assert_eq!(bars, [egui::Rect::from_min_size(row.min + vec2(16.0, 18.0), vec2(3.0, 12.0))], "the bar");
+    let address = paint
+        .shapes
+        .iter()
+        .find(|shape| matches!(&shape.look, crate::component::tests::Look::Text { text, .. } if *text == account.address))
+        .unwrap()
+        .rect;
+    assert_eq!(address.left(), row.left() + 191.0, "the address");
+    let open = harness.get_by_label(&format!("Open the settings of {}", account.label)).rect();
+    assert!((open.right() - (row.right() - 16.0)).abs() <= 1.0 && (open.center().y - row.center().y).abs() <= 0.5, "{open:?} in {row:?}");
+    // Triage names the design's groups.
+    harness.state_mut().settings_mut().open_at(Section::Triage);
+    harness.run();
+    assert!(harness.query_all_by_label_contains("in People, Notifications and Newsletters,").next().is_some());
 }

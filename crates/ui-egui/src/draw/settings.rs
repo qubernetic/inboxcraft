@@ -82,6 +82,15 @@ const GROUP_UNDER: f32 = 8.0;
 /// The height of a row of the Shortcuts page's list, in points (at 100 %).
 const KEY_ROW: f32 = 36.0;
 
+/// The room above the Shortcuts page's field and Reset all keys, in points.
+const TOOLS_TOP: f32 = 16.0;
+
+/// The room under them, above the list's first hairline, in points.
+const TOOLS_UNDER: f32 = 12.0;
+
+/// The width of the field that narrows the Shortcuts page's list, in points.
+const FIND: f32 = 320.0;
+
 /// What the owner asked for on the sheet this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Asked {
@@ -366,7 +375,7 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
         });
         group(ui, theme, "B", tr!("Layout"), None);
         let views = inbox_views().map(|(view, name)| (view, name, f.button));
-        let view_help = tr!("Grouped opens every group, Smart shows the first rows of each, List is one list by time.");
+        let view_help = tr!("Grouped opens every group, Smart shows the first three rows of each, List is one list by time.");
         settings_row(ui, theme, tr!("Inbox view"), Some(view_help), |ui| {
             if let Some(chosen) = segmented(ui, theme, &views, view) {
                 asked = Some(Asked::InboxView(chosen));
@@ -544,7 +553,8 @@ fn key_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, action: &Action, waits: 
     let height = Theme::size(theme, KEY_ROW).max(theme.fonts.body.line).ceil();
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let inner = Rect::from_min_max(pos2(rect.left() + INSET, rect.top()), pos2((rect.right() - INSET).max(rect.left() + INSET), rect.bottom() - 1.0));
+    // The whole row high, its hairline included, so a chip 20 high stands 8 from its top as the design has it.
+    let inner = Rect::from_min_max(pos2(rect.left() + INSET, rect.top()), pos2((rect.right() - INSET).max(rect.left() + INSET), rect.bottom()));
     let mut right = ui.new_child(UiBuilder::new().max_rect(inner).layout(Layout::right_to_left(Align::Center)));
     right.spacing_mut().item_spacing.x = 0.0;
     let asked = key_control(&mut right, theme, keymap, action, waits);
@@ -568,26 +578,30 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
         &[tr!("Every action can have a key. One key runs one action: giving a key takes it from the action that had it.")],
         |_| {},
     );
-    ui.add_space(GROUP_TOP);
+    ui.add_space(TOOLS_TOP);
     inset(ui, |ui| {
-        crate::component::label(ui, theme.fonts.label, tr!("Find a command"), p.muted);
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() * 0.45).clamp(1.0, 320.0);
-            let find = field::search(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), tr!("a part of its name"), width);
-            ui.ctx().accesskit_node_builder(find.id, |node| node.set_label(tr!("Find a command")));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if TextButton::new(tr!("Reset all keys")).show(ui, theme, keymap).clicked() {
-                    asked = Some(Asked::ResetKeys);
-                }
-            });
+        // The field, its label over it, 320 wide where there is room; Reset all keys at the right end, 2 over its foot.
+        let width = ui.available_width().clamp(1.0, FIND);
+        let field = ui
+            .allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_width(width);
+                let find = field::Field::new(tr!("Find a command"), tr!("a part of its name"));
+                field::text_field(ui, theme, Id::unique("shortcuts-find"), settings.find_mut(), &find);
+            })
+            .response
+            .rect;
+        let reset = Rect::from_min_max(pos2(field.right(), field.top()), pos2(ui.max_rect().right(), field.bottom() - 2.0));
+        ui.scope_builder(UiBuilder::new().max_rect(reset).layout(Layout::right_to_left(Align::Max)), |ui| {
+            if TextButton::new(tr!("Reset all keys")).show(ui, theme, keymap).clicked() {
+                asked = Some(Asked::ResetKeys);
+            }
         });
         if let Some(text) = settings.keys_note() {
             ui.add_space(8.0);
             words(ui, theme.fonts.caption, text, p.muted);
         }
     });
-    ui.add_space(GROUP_UNDER);
+    ui.add_space(TOOLS_UNDER);
     rule(ui, theme);
     let waiting = settings.capturing();
     let list = crate::palette::matching(settings.find());
@@ -615,20 +629,17 @@ const SIGNATURE_GAP: f32 = 24.0;
 fn signature(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings, account: &crate::mailbox::AccountRow) -> Option<Asked> {
     let p = &theme.palette;
     let label = tr!("Signature of {account}", account = account.label);
-    let shown = crate::component::fit(ui, &label, theme.fonts.label, ui.available_width());
-    crate::component::label(ui, theme.fonts.label, &shown, p.muted);
-    ui.add_space(8.0);
     let typed = settings.signature_mut(account.id, &account.signature);
-    // The model keeps a signature's characters: what would pass them is refused whole and said, not cut.
-    let field = field::multiline_field_holding(
+    // The field's own label over it, in capitals, wrapped where it is long; the model keeps a signature's characters:
+    // what would pass them is refused whole and said, not cut.
+    field::multiline_field_holding(
         ui,
         theme,
         Id::unique("signature").with(account.id),
         typed,
-        &field::Field::new("", ""),
+        &field::Field::new(&label, tr!("Anything they should know")),
         field::Cap::Chars(inboxcraft_model::Account::MAX_SIGNATURE_CHARS),
     );
-    ui.ctx().accesskit_node_builder(field.id, |node| node.set_label(label.as_str()));
     let changed = settings.signature(account.id).is_some_and(|typed| typed != account.signature);
     ui.add_space(8.0);
     let mut asked = None;
@@ -740,8 +751,7 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             }
         });
         if !mailbox.accounts().is_empty() {
-            let note =
-                tr!("Each account's inbox in People, Updates, Newsletters and Invitations, sorted by InboxCraft or by your choice for a sender.");
+            let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
             group(ui, theme, "C", tr!("Grouped inbox"), Some(note));
         }
         for account in mailbox.accounts() {
@@ -943,8 +953,9 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         if pressed.is_some() {
             asked = pressed;
         }
-        let room =
-            Rect::from_min_max(pos2(divider + 1.0 + PAGE_X, inner.top() + PAGE_TOP), pos2(inner.right() - PAGE_X, inner.bottom() - PAGE_BOTTOM));
+        // The Shortcuts page's list runs to the sheet's foot.
+        let bottom = if shown == Section::Shortcuts { 0.0 } else { PAGE_BOTTOM };
+        let room = Rect::from_min_max(pos2(divider + 1.0 + PAGE_X, inner.top() + PAGE_TOP), pos2(inner.right() - PAGE_X, inner.bottom() - bottom));
         let width = room.width().clamp(1.0, COLUMN).floor();
         let column = Rect::from_min_size(room.min, vec2(width, room.height().max(1.0)));
         ui.scope_builder(UiBuilder::new().max_rect(column).layout(Layout::top_down(Align::Min)), |ui| {
