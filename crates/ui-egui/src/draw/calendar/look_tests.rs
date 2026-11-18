@@ -160,6 +160,20 @@ fn the_hours_draw_every_day_line_the_last_under_the_scroll_bar() {
 }
 
 #[test]
+fn today_s_head_has_a_1_px_cyan_edge_under_it() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Week);
+    // The frame's head: a `cyan_edge` bottom of 1 px, as wide as the day's column, over the heads' `line`.
+    let under: Vec<Rect> = rects(&harness)
+        .into_iter()
+        .filter(|(rect, fill)| *fill == p.cyan_edge && rect.top() < 150.0 && rect.height() <= 2.0 && (100.0..200.0).contains(&rect.width()))
+        .map(|(rect, _)| rect)
+        .collect();
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under.iter().all(|rect| rect.height() == 1.0), "{under:?}");
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();
