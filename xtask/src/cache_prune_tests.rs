@@ -137,7 +137,7 @@ fn files(dir: &Path) -> Vec<String> {
 }
 
 fn prune_in(root: &Path, metadata: Metadata) -> (u8, String, String) {
-    let ctx = Context { root: PathBuf::from(root), cargo: OsString::from("cargo"), runner: Box::new(metadata), lcov: None };
+    let ctx = Context { root: PathBuf::from(root), cargo: OsString::from("cargo"), runner: Box::new(metadata), lcov: None, shots: None };
     run_in(ctx, &["cache-prune"])
 }
 
@@ -250,8 +250,13 @@ fn a_missing_target_folder_is_an_error() {
 #[test]
 fn a_closed_output_stops_the_prune() {
     let dir = fixture();
-    let mut ctx =
-        Context { root: PathBuf::from(dir.path()), cargo: OsString::from("cargo"), runner: Box::new(Metadata::Json(workspace())), lcov: None };
+    let mut ctx = Context {
+        root: PathBuf::from(dir.path()),
+        cargo: OsString::from("cargo"),
+        runner: Box::new(Metadata::Json(workspace())),
+        lcov: None,
+        shots: None,
+    };
     assert!(matches!(prune(&mut ctx, &mut Broken), Err(Error::Output(_))));
 }
 
