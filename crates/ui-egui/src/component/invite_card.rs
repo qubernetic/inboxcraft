@@ -6,7 +6,7 @@
 //! left a column 92 wide holds the day: the weekday in `label` and `cyan_text`, the day in `display`, the month in
 //! `label` and `muted`. A `line` hairline parts it from the rest, 14 above and below and 16 at the sides, 10 between:
 //! the title in `heading` (struck through and `muted` when cancelled), the facts WHEN, WHERE, WHO and CAL (labels in a
-//! 56 wide column, the values 12 right of it, 22 high, 6 apart), then by state: Going (primary), Maybe and No with to
+//! 56 wide column, the values 12 right of it, 22 high, 6 apart), then by state: Going (primary, but on an older card of a thread), Maybe and No with to
 //! whom the answer goes; what changed or what clashes in a `warn` box; the answer given and Change answer; that it is
 //! cancelled in a `minus` box and Remove from calendar; the guests' answers; or why there is nothing to answer. A
 //! version a later one replaced is one line instead: the older-version clock and what it says, on the `panel` fill in a
@@ -154,11 +154,20 @@ fn edge(theme: &Theme, state: &CardState<'_>) -> Color32 {
 
 /// The card of `event` in `state` across `ui`'s width; what was pressed on it.
 pub fn invite_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &CardEvent<'_>, state: &CardState<'_>) -> Option<CardAsked> {
-    invite_card_with(ui, theme, keymap, event, state, false)
+    invite_card_with(ui, theme, keymap, event, state, false, true)
 }
 
-/// [`invite_card`]; `keep` adds Keep my answer after the answers of a card that asks (the owner changing an answer).
-pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &CardEvent<'_>, state: &CardState<'_>, keep: bool) -> Option<CardAsked> {
+/// [`invite_card`]; `keep` adds Keep my answer after the answers of a card that asks (the owner changing an answer), and
+/// `primary` says whether its Going is the pane's one primary button (on an older card of the thread it is secondary).
+pub fn invite_card_with(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    event: &CardEvent<'_>,
+    state: &CardState<'_>,
+    keep: bool,
+    primary: bool,
+) -> Option<CardAsked> {
     if let CardState::OutOfDate { line } = state {
         replaced(ui, theme, event, line);
         return None;
@@ -187,7 +196,7 @@ pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &Car
     };
     // The buttons, measured once: on the info column's lines, or across the card under the day where the widest is
     // wider than the column (a narrow reader), so none is cut.
-    let buttons = card_buttons(state, keep);
+    let buttons = card_buttons(state, keep, primary);
     let widest = buttons.iter().map(|button| button.width(ui, theme, keymap)).fold(0.0, f32::max);
     let spread = widest > room;
     let lower_room = if spread { width - PAD_X * 2.0 } else { room };
@@ -271,13 +280,14 @@ fn box_high(theme: &Theme) -> f32 {
     (BOX_Y + f.mono_s.line.max(f.label.line) + BOX_Y).ceil()
 }
 
-/// The buttons of a card in `state`, in order: Going (the card's one primary), Maybe, No and, while the owner changes
+/// The buttons of a card in `state`, in order: Going (primary while `primary`), Maybe, No and, while the owner changes
 /// an answer, Keep my answer; Change answer; or Remove from calendar.
-fn card_buttons(state: &CardState<'_>, keep: bool) -> Vec<TextButton<'static>> {
+fn card_buttons(state: &CardState<'_>, keep: bool, primary: bool) -> Vec<TextButton<'static>> {
     match state {
         CardState::Request { .. } | CardState::Changed { .. } | CardState::Clash { .. } => {
-            let mut buttons =
-                vec![TextButton::new(tr!("Going")).primary(), TextButton::new(tr!("Maybe")).secondary(), TextButton::new(tr!("No")).secondary()];
+            let going = TextButton::new(tr!("Going"));
+            let going = if primary { going.primary() } else { going.secondary() };
+            let mut buttons = vec![going, TextButton::new(tr!("Maybe")).secondary(), TextButton::new(tr!("No")).secondary()];
             if keep {
                 buttons.push(TextButton::new(tr!("Keep my answer")).secondary());
             }

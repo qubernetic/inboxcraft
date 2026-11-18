@@ -4,9 +4,10 @@
 //! The invitation card over a message's text (`crate::invite`), drawn by [`invite_card`]: the day, the title, WHEN,
 //! WHERE, WHO and CAL, then by what the invitation does:
 //!
-//! - an invitation: Going (the card's one primary button), Maybe and No, and to whom the answer goes at once, under
-//!   what changed since the version before; once answered, the answer and Change answer, which offers the three again
-//!   with Keep my answer; one that cannot be answered says why;
+//! - an invitation: Going, Maybe and No, and to whom the answer goes at once, under what changed since the version
+//!   before; once answered, the answer and Change answer, which offers the three again with Keep my answer; one that
+//!   cannot be answered says why, and so does one from a sender the screener holds, until the owner lets them in.
+//!   Going is the pane's one primary button on the newest unfolded card that asks; on an older one it is secondary;
 //! - a cancellation: that the event is off, and Remove from calendar while the event is in it, or a line under the
 //!   card that it is not in the calendar;
 //! - a guest's answer: what each guest said, the first 20 and how many more;
@@ -22,6 +23,7 @@ use super::reader::{Asked, Drawn};
 use crate::component::invite_card::{CardAsked, CardEvent, CardState, Said, invite_card, invite_card_with};
 use crate::invite::{Invite, Method, Rsvp};
 use crate::keymap::Keymap;
+use crate::mailbox::Mailbox;
 use crate::reader::Reader;
 use crate::theme::Theme;
 use crate::tr;
@@ -90,13 +92,28 @@ fn said(answer: Option<Rsvp>) -> Said {
     }
 }
 
-/// Whether the card of `invite` asks the owner for an answer: its Going is then the pane's one primary button.
-pub(super) fn asks(reader: &Reader, invite: &Invite) -> bool {
-    !invite.outdated && invite.method == Method::Request && invite.can_answer && (invite.answer.is_none() || reader.changing(invite.message))
+/// Whether the card of `invite` asks the owner for an answer: Going, Maybe and No stand on it. A card of a sender the
+/// screener holds (`held`) asks nothing: an answer is mail to them, and they are not let in yet.
+pub(super) fn asks(reader: &Reader, invite: &Invite, held: bool) -> bool {
+    !held && !invite.outdated && invite.method == Method::Request && invite.can_answer && (invite.answer.is_none() || reader.changing(invite.message))
 }
 
-/// The card of `invite`, with the line about the version before it.
-pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, invite: &Invite, drawn: &mut Drawn) {
+/// The message whose invitation card holds the pane's one primary button, Going: the newest of the unfolded messages
+/// of the thread whose card asks (see [`asks`]). None asks: Reply at the foot, or the let-in card's Accept, is the one.
+pub(super) fn primary_card(mailbox: &Mailbox, reader: &Reader) -> Option<u64> {
+    reader
+        .thread()
+        .iter()
+        .rev()
+        .filter(|row| reader.is_expanded(row.id))
+        .filter_map(|row| row.opened.as_ref())
+        .find(|opened| opened.invite.as_ref().is_some_and(|invite| asks(reader, invite, mailbox.held(opened.id))))
+        .map(|opened| opened.id)
+}
+
+/// The card of `invite`, with the line about the version before it. Its Going is primary only on the card
+/// [`primary_card`] chose (`drawn.primary_card`); a card of a sender the screener holds (`held`) offers no answer.
+pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader, invite: &Invite, held: bool, drawn: &mut Drawn) {
     let words = Words::of(invite);
     let event = words.event();
     if invite.outdated {
@@ -125,7 +142,9 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
     if more > 0 {
         replies.push((Said::Nothing, &more_line));
     }
+    let held_why = tr!("the sender is not let in yet.");
     let state = match invite.method {
+        Method::Request if held => CardState::CannotAnswer { why: held_why },
         Method::Request if !invite.can_answer => CardState::CannotAnswer { why: &why },
         Method::Request if invite.answer.is_some() && !changing => CardState::Answered { answer: &answered },
         Method::Request => match &changed {
@@ -137,7 +156,8 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
         Method::Other => CardState::NoAnswerAsked,
     };
     let ask = |drawn: &mut Drawn, ask: Ask| drawn.asked.push(Asked::Invite(invite.message, ask));
-    match invite_card_with(ui, theme, keymap, &event, &state, changing) {
+    let primary = drawn.primary_card == Some(invite.message);
+    match invite_card_with(ui, theme, keymap, &event, &state, changing, primary) {
         Some(CardAsked::Answer(index)) => {
             if let Some(answer) = Rsvp::ALL.get(index) {
                 ask(drawn, Ask::Answer(*answer));

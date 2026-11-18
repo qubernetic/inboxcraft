@@ -167,8 +167,8 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, opene
 }
 
 /// Reply, the pane's one primary button, with its arrow; then Reply all and Forward: the answers at the reader's foot.
-/// While the message's invitation card asks for an answer, its Going is the pane's one primary button and Reply is
-/// secondary.
+/// While an unfolded invitation card of the thread asks for an answer, its Going is the pane's one primary button and
+/// Reply is secondary.
 fn answer_buttons(asks: bool) -> [(TextButton<'static>, Answer); 3] {
     let reply = TextButton::new(tr!("Reply"));
     [
@@ -251,13 +251,13 @@ pub(super) fn message(
     let held = open && mailbox.held(opened.id);
     let bare = bare(mailbox, reader, opened);
     if let (true, false, true, Some(invite)) = (bare, held, restated(opened), &opened.invite) {
-        crate::draw::invite::card(ui, theme, keymap, reader, invite, drawn);
+        crate::draw::invite::card(ui, theme, keymap, reader, invite, false, drawn);
         return;
     }
     let parts = |ui: &mut Ui, textures: &mut Textures, drawn: &mut Drawn| {
         banner(ui, theme, keymap, reader, opened, drawn);
         if let Some(invite) = &opened.invite {
-            crate::draw::invite::card(ui, theme, keymap, reader, invite, drawn);
+            crate::draw::invite::card(ui, theme, keymap, reader, invite, mailbox.held(opened.id), drawn);
         }
         body(ui, theme, reader, opened, textures, drawn);
         files(ui, theme, keymap, reader, opened.id, &opened.files, drawn);

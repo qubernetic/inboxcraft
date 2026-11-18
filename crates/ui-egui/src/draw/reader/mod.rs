@@ -123,6 +123,9 @@ pub(super) enum Asked {
 pub(super) struct Drawn {
     pub(super) asked: Vec<Asked>,
     pub(super) hover: Option<String>,
+    /// The message whose invitation card holds the pane's one primary button (see `super::invite::primary_card`),
+    /// decided once a frame before anything is drawn.
+    pub(super) primary_card: Option<u64>,
 }
 
 /// The textures of the pictures shown, by picture key.
@@ -253,7 +256,7 @@ pub(super) fn show(
     textures: &mut Textures,
     hover: Option<&str>,
 ) -> Drawn {
-    let mut drawn = Drawn::default();
+    let mut drawn = Drawn { primary_card: super::invite::primary_card(mailbox, reader), ..Drawn::default() };
     let p = &theme.palette;
     let whole = ui.max_rect();
     let unwiped = ui.clip_rect();
@@ -279,8 +282,8 @@ pub(super) fn show(
         (Some(id), None, false) => {
             // The answers stand on one line, or on more where the pane is narrower than they are.
             let inner = room.width() - f32::from(foot_margin.left) - f32::from(foot_margin.right);
-            // An invitation card that asks has the pane's one primary button, Going.
-            let asks = reader.opened(id).and_then(|opened| opened.invite.as_ref()).is_some_and(|invite| super::invite::asks(reader, invite));
+            // An unfolded invitation card that asks has the pane's one primary button, Going.
+            let asks = drawn.primary_card.is_some();
             let placed = thread::answer_lines(ui, theme, keymap, inner, asks);
             let high = (placed.height + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
             Some((id, placed, Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max)))

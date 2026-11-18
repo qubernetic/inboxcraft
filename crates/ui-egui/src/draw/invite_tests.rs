@@ -428,3 +428,143 @@ fn an_invitation_card_keeps_its_buttons_whole_in_a_narrow_reader() {
         }
     }
 }
+
+/// A calendar message `id` (UID `id`) from Odile in Mira's inbox, received `age` seconds before now, with the
+/// Message-ID `<id@example.org>` and answering `answers` (a thread); `calendar` gives its method and event lines, or it
+/// carries no invitation.
+fn threaded(id: u64, subject: &str, calendar: Option<(&str, &str)>, answers: Option<u64>, age: i64) -> Vec<Change> {
+    from_whom(("Odile Brannock", "odile@example.org"), 1, id, subject, calendar, answers, age)
+}
+
+/// [`threaded`] from `from` (a name and an address), in the sample's folder `folder`.
+fn from_whom(from: (&str, &str), folder: u64, id: u64, subject: &str, calendar: Option<(&str, &str)>, answers: Option<u64>, age: i64) -> Vec<Change> {
+    let own = format!("{id}@example.org");
+    let mut builder = MessageBuilder::new()
+        .from(Sender::named(from.0, from.1))
+        .to(Sender::new("mira@example.org"))
+        .subject(subject)
+        .message_id(&own)
+        .text("A word more about it.");
+    if let Some(answers) = answers {
+        builder = builder.in_reply_to(&format!("{answers}@example.org"));
+    }
+    if let Some((method, event)) = calendar {
+        let object = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Example//EN\r\nMETHOD:{method}\r\nBEGIN:VEVENT\r\nUID:{id}@example.org\r\n\
+             DTSTAMP:20261104T080000Z\r\nDTSTART:20261110T180000Z\r\nDTEND:20261110T200000Z\r\nSUMMARY:Party {id}\r\n{event}\
+             END:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        builder = builder.calendar(method, &object);
+    }
+    let raw = builder.build().unwrap();
+    let from = Address::new(Some(from.0), EmailAddress::new(from.1).unwrap());
+    let received = Timestamp::from_unix(NOW - age, 0);
+    let mut envelope = Envelope::new(subject)
+        .with_from(vec![from])
+        .with_date(received)
+        .with_message_id(inboxcraft_model::MessageRef::new(&own))
+        .with_signs(Signs::default().with_calendar(calendar.is_some()));
+    if let Some(answers) = answers {
+        envelope = envelope.with_in_reply_to(inboxcraft_model::MessageRef::new(&format!("{answers}@example.org")).into_iter().collect());
+    }
+    let summary = Summary::new(Uid::new(u32::try_from(id).unwrap()).unwrap(), envelope).with_received(received);
+    let message = Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(folder), summary);
+    vec![Change::PutMessage(message), Change::PutBody(MessageId::new(id), Body::new(raw, "A word more about it.").unwrap())]
+}
+
+/// The cyan-filled buttons the reader shows (right of the list, which ends at `READER`): its primaries.
+fn primaries(harness: &Harness<'static, InboxApp>) -> Vec<egui::Rect> {
+    painted_in(harness, palette(harness).cyan).0.into_iter().filter(|rect| rect.left() >= READER).collect()
+}
+
+/// Where the reader starts in the 1300 wide window, at the latest, in points.
+const READER: f32 = 700.0;
+
+/// The rect of the button `name` on the invitation card of the event `title`.
+fn on_card(harness: &Harness<'static, InboxApp>, title: &str, name: &str) -> Option<egui::Rect> {
+    let card = harness
+        .query_all_by_role(Role::Group)
+        .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with(&format!("Invitation: {title}, "))))?
+        .rect();
+    harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).find(|rect| card.contains_rect(*rect))
+}
+
+/// Unfolds the folded line of the thread that holds `words`.
+fn unfold(harness: &mut Harness<'static, InboxApp>, words: &str) {
+    harness
+        .query_all_by_label_contains(words)
+        .find(|node| node.accesskit_node().label().is_some_and(|label| label.contains("folded")))
+        .unwrap()
+        .click();
+    for _ in 0..4 {
+        harness.run();
+    }
+}
+
+/// The sample's Screener folder.
+const SCREENER: u64 = 16;
+
+/// An invitation from a sender the screener holds: the let-in card's Accept is the pane's one primary, and the card
+/// says what the invitation is but offers no answer, not to the pointer, not to Tab (an answer is mail to them).
+#[test]
+fn a_held_invitation_offers_no_answer_and_has_one_primary() {
+    let organiser = "ORGANIZER;CN=Stranger:mailto:stranger@example.org\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mira@example.org\r\n";
+    let calendar = Some(("REQUEST", organiser));
+    let mut harness = sending(from_whom(("Stranger", "stranger@example.org"), SCREENER, 950, "Invitation: Stranger's party", calendar, None, 600));
+    let id = id_of(&mut harness, "Invitation: Stranger's party");
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::Senders);
+    harness.run();
+    harness.state_mut().mailbox_mut().select(Some(id));
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(harness.state().mailbox().held(id), "the sender is held");
+    assert!(holds(&harness, "Invitation: Party 950"), "the card still shows what the invitation says");
+    assert!(holds(&harness, "the sender is not let in yet"), "the card says why it cannot be answered");
+    for name in ["Going", "Maybe", "No", "Keep my answer", "Change answer"] {
+        assert!(!button(&harness, name), "{name} is offered to a held sender");
+    }
+    let accept = harness.get_by_role_and_label(Role::Button, "Accept").rect();
+    assert_eq!(primaries(&harness), vec![accept], "the let-in card's Accept is the one primary");
+    let missed = crate::component::tests::keyboard_walk(&mut harness);
+    assert!(missed.is_empty(), "Tab never reaches {missed:?}");
+    for name in ["Going", "Maybe", "No"] {
+        assert!(!button(&harness, name), "{name} came back while walking");
+    }
+}
+
+/// In a thread whose older message is unfolded and asks, and whose open message carries no invitation, the older
+/// card's Going is the pane's one primary and Reply is secondary.
+#[test]
+fn an_older_unfolded_card_that_asks_holds_the_one_primary() {
+    let mut changes = threaded(970, "Invitation: Party 970", Some(("REQUEST", ORGANISED_BY_ODILE)), None, 1200);
+    changes.extend(threaded(971, "Re: Invitation: Party 970", None, Some(970), 600));
+    let mut harness = sending(changes);
+    open(&mut harness, "Re: Invitation: Party 970");
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert_eq!(harness.state().reader().thread().len(), 2, "one thread of two");
+    let reply = harness.get_by_role_and_label(Role::Button, "Reply").rect();
+    assert_eq!(primaries(&harness), vec![reply], "Reply is the one primary with no card that asks");
+    unfold(&mut harness, "Odile Brannock");
+    let going = on_card(&harness, "Party 970", "Going").unwrap();
+    assert_eq!(primaries(&harness), vec![going], "the older card's Going is the one primary, Reply secondary");
+}
+
+/// Two unfolded cards that ask: the newest one's Going is the pane's one primary, the older one's is secondary.
+#[test]
+fn of_two_cards_that_ask_the_newest_holds_the_one_primary() {
+    let mut changes = threaded(980, "Invitation: Party 980", Some(("REQUEST", ORGANISED_BY_ODILE)), None, 1200);
+    changes.extend(threaded(981, "Re: Invitation: Party 980", Some(("REQUEST", ORGANISED_BY_ODILE)), Some(980), 600));
+    let mut harness = sending(changes);
+    open(&mut harness, "Re: Invitation: Party 980");
+    for _ in 0..4 {
+        harness.run();
+    }
+    unfold(&mut harness, "Odile Brannock");
+    let older = on_card(&harness, "Party 980", "Going").unwrap();
+    let newer = on_card(&harness, "Party 981", "Going").unwrap();
+    assert_ne!(older, newer);
+    assert_eq!(primaries(&harness), vec![newer], "the newest card's Going is the one primary");
+}
