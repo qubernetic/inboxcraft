@@ -1225,20 +1225,23 @@ fn rows_without_an_error_stand_12_apart() {
         vec![rect("CalDAV address, for calendars", 0)],
     ];
     // A one-line caption stands 24 over its field's box (16 high, then 8): a row's top is that of its highest box less
-    // 24, its foot that of its lowest box, and 12 lie between one row's foot and the next row's top.
-    for pair in rows.windows(2) {
+    // 24 (less 16 more for the outgoing server's row, whose caption takes a second line: below), its foot that of its
+    // lowest box, and 12 lie between one row's foot and the next row's top.
+    let wrapped = [0.0, 0.0, 0.0, 16.0, 0.0];
+    for (at, pair) in rows.windows(2).enumerate() {
         let foot = pair[0].iter().map(|at| at.bottom()).fold(f32::MIN, f32::max);
-        let top = pair[1].iter().map(|at| at.top()).fold(f32::MAX, f32::min) - 24.0;
+        let top = pair[1].iter().map(|at| at.top()).fold(f32::MAX, f32::min) - 24.0 - wrapped[at + 1];
         assert_eq!(top - foot, 12.0, "12 between {:?} and {:?}", pair[0], pair[1]);
     }
     // The one caption that wraps: in the sheet's 720 column the outgoing server's caption takes a second line of 16
-    // (the gaps line "The add-account page lies in the settings sheet's 720 column" in changes/238.md), so its box
-    // stands 16 under the boxes beside it, and its row's foot with it. Its caption's top is the row's, 12 under the
-    // IMAP row's foot, as the loop checks.
+    // (the gaps line "The add-account page lies in the settings sheet's 720 column" in changes/238.md). The row's boxes
+    // stand level all the same, as the frame's: port and security come down with the host's box.
     let imap = rect("IMAP server", 0);
     let smtp = rect("Outgoing server (SMTP), to send", 0);
     assert_eq!(smtp.top() - imap.top(), 72.0 + 16.0, "a 60-high row, 12 between, and the second caption line");
-    assert_eq!(smtp.top() - rect("Outgoing security", 0).top(), 16.0, "only the wrapped caption's box stands lower");
+    for beside in [rect("Port", 1), rect("Outgoing security", 0)] {
+        assert_eq!((beside.top(), beside.bottom()), (smtp.top(), smtp.bottom()), "the SMTP row's boxes level: {beside:?} {smtp:?}");
+    }
 }
 
 #[test]

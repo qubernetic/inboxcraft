@@ -227,10 +227,12 @@ fn password(ui: &mut Ui, theme: &Theme, (caption, hint): (&str, &str), secret: &
 }
 
 /// The security of a server row: its label over a select of TLS and STARTTLS, `SECURITY` wide. There is no
-/// unencrypted choice. The choice the owner took, if one.
-fn security(ui: &mut Ui, theme: &Theme, name: &str, chosen: Security) -> Option<Security> {
+/// unencrypted choice. `drop` lower, to stand level with a host box under a caption of more lines. The choice the
+/// owner took, if one.
+fn security(ui: &mut Ui, theme: &Theme, name: &str, chosen: Security, drop: f32) -> Option<Security> {
     let f = &theme.fonts;
     part(ui, SECURITY, |ui| {
+        ui.add_space(drop);
         ui.spacing_mut().item_spacing.y = theme.spacing.s2;
         let caption = tr!("Security");
         let galley = component::galley(ui, caption, f.label, theme.palette.muted);
@@ -271,6 +273,12 @@ fn server_row(
         let port = port_typed(port_text).ok().flatten().unwrap_or_else(|| usual(set));
         tr!("Detect set the encryption to {security} for port {port}.", security = set.text(), port = port)
     });
+    // A host caption of more lines than one (a narrow row) puts the host's box lower: the port and the security come
+    // down with it, so the row's boxes stand level, as the frame's.
+    let label = theme.fonts.label;
+    let mut job = egui::text::LayoutJob::single_section(label.text(caption), label.format(theme.palette.muted));
+    job.wrap = egui::text::TextWrapping { max_width: room.max(1.0), ..Default::default() };
+    let drop = (ui.painter().layout_job(job).size().y.max(label.line) - label.line).max(0.0);
     with_error(ui, theme, &said, note.as_deref(), width, |ui| {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GAP;
@@ -282,14 +290,17 @@ fn server_row(
                 edited.extend(host_slot);
             }
             let usual = usual(current).to_string();
-            let response = line_field(ui, theme, (tr!("Port"), &usual, name), port_text, errors[1], PORT);
+            let response = part(ui, PORT, |ui| {
+                ui.add_space(drop);
+                line_field(ui, theme, (tr!("Port"), &usual, name), port_text, errors[1], PORT)
+            });
             if let Some(slot) = port_slot {
                 faults.mark(ui, slot, &response);
             }
             if response.changed() {
                 edited.extend(port_slot);
             }
-            if let Some(taken) = security(ui, theme, name, current) {
+            if let Some(taken) = security(ui, theme, name, current, drop) {
                 *chosen = Some(taken);
             }
         });
