@@ -323,3 +323,22 @@ fn the_accounts_and_shortcuts_pages_take_the_design_s_values() {
     harness.run();
     assert!(harness.query_all_by_label_contains("in People, Notifications and Newsletters,").next().is_some());
 }
+
+#[test]
+fn calendar_rows_stand_56_apart_with_read_again_at_their_end_and_about_names_the_icons() {
+    let mut harness = harness();
+    harness.state_mut().settings_mut().open_at(Section::Calendar);
+    harness.run();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let links: Vec<egui::Rect> = harness.query_all_by_label("read again").map(|node| node.rect()).collect();
+    assert_eq!(links.len(), harness.state().mailbox().accounts().len(), "one row per account");
+    for link in &links {
+        assert!((link.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 1.0, "{link:?}");
+    }
+    for pair in links.windows(2) {
+        assert_eq!(pair[1].center().y - pair[0].center().y, 56.0, "{pair:?}");
+    }
+    harness.state_mut().settings_mut().open_at(Section::About);
+    harness.run();
+    assert!(harness.query_all_by_label_contains("· Phosphor. The typefaces under the SIL Open Font Licence, the icons under MIT.").next().is_some());
+}

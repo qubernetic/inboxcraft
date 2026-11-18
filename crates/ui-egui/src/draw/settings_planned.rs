@@ -7,7 +7,7 @@
 //! program, its licences, its makers and contributors), AI (where a model runs, and the consent to send mail to one
 //! elsewhere) and Plugins. Nothing on them can be pressed or focused.
 
-use egui::Ui;
+use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 
 use super::{Asked, body, group, head};
 use crate::component::button::{LinkSize, link_sized};
@@ -16,7 +16,7 @@ use crate::component::settings_row::{settings_row, settings_row_soon, settings_r
 use crate::component::soon::soon;
 use crate::component::switch::{SwitchState, switch_in};
 use crate::keymap::Keymap;
-use crate::mailbox::Mailbox;
+use crate::mailbox::{AccountRow, Mailbox};
 use crate::settings::Section;
 use crate::theme::Theme;
 use crate::tr;
@@ -30,10 +30,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
         let note = tr!("A calendar comes from its account's CalDAV address. Which of them the calendar shows is chosen in its side panel.");
         group(ui, theme, "B", tr!("Calendars"), Some(note));
         for account in mailbox.accounts() {
-            let help = tr!("The calendars found at the CalDAV address of {address}.", address = account.address);
-            settings_row_soon_with(ui, theme, &account.label, &help, |ui| {
-                link_sized(ui, theme, keymap, tr!("read again"), LinkSize::Small);
-            });
+            calendars(ui, theme, keymap, account);
         }
         group(ui, theme, "C", tr!("Week"), None);
         settings_row(ui, theme, tr!("Week starts on"), Some(tr!("Fixed: it cannot be changed yet.")), |ui| {
@@ -41,6 +38,57 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
         });
     });
     None
+}
+
+/// The height of an account's row of calendars, in points (at 100 %).
+const CALENDARS_ROW: f32 = 56.0;
+
+/// The room the coming-soon tag takes, in points (at 100 %).
+const TAG: f32 = 85.0;
+
+/// One account's calendars, coming soon, as the design's row: the account's bar (3 × 12, 16 in), its name in `strong`
+/// with the coming-soon tag, a `mono_s` line of where its calendars come from under it, and "read again", a small link
+/// 16 from the end; a hairline under it.
+fn calendars(ui: &mut Ui, theme: &Theme, keymap: &Keymap, account: &AccountRow) {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let height = theme.size(CALENDARS_ROW).max(f.strong.line + 2.0 + f.mono_s.line + 16.0).ceil();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    soon(ui, theme, |ui| {
+        let link = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(Rect::from_min_max(rect.min, pos2(rect.right() - 16.0, rect.bottom())))
+                    .layout(Layout::right_to_left(Align::Center)),
+                |ui| link_sized(ui, theme, keymap, tr!("read again"), LinkSize::Small),
+            )
+            .inner;
+        let bar = Rect::from_min_size(pos2(rect.left() + 16.0, rect.top() + ((rect.height() - 12.0) / 2.0).round()), vec2(3.0, 12.0));
+        ui.painter().rect_filled(bar, 0.0, theme.account_colour(u64::try_from(account.index).unwrap_or(0)));
+        let words = bar.right() + 12.0;
+        let room = (link.rect.left() - 12.0 - words).max(1.0);
+        let lines = f.strong.line + 2.0 + f.mono_s.line;
+        let top = rect.top() + ((rect.height() - lines) / 2.0).round();
+        let column = Rect::from_min_size(pos2(words, top), vec2(room, lines));
+        ui.scope_builder(UiBuilder::new().max_rect(column).layout(Layout::top_down(Align::Min)), |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 2.0);
+            ui.horizontal(|ui| {
+                ui.set_height(f.strong.line);
+                // The name takes what the tag after it leaves of the column, cut there.
+                let tag = theme.size(TAG) + 8.0;
+                let name = crate::component::cut(ui, &account.label, f.strong, p.muted, (room - tag).max(1.0));
+                let (at, _) = ui.allocate_exact_size(vec2(name.size().x, f.strong.line), Sense::hover());
+                ui.painter().galley(pos2(at.left(), (at.center().y - name.size().y / 2.0).round()), name, p.muted);
+                crate::component::soon::soon_tag(ui, theme);
+            });
+            let line = tr!("Calendars from the CalDAV address of {address}", address = account.address);
+            let line = crate::component::cut(ui, &line, f.mono_s, p.muted, room);
+            let (at, _) = ui.allocate_exact_size(line.size(), Sense::hover());
+            ui.painter().galley(at.min, line, p.muted);
+        });
+    });
+    let y = rect.bottom() - 1.0;
+    super::paint::hairline(ui.painter(), pos2(rect.left(), y), pos2(rect.right() - 1.0, y), p.panel_line);
 }
 
 /// The Privacy page: what a remote picture tells, and the senders whose pictures always load.
@@ -90,7 +138,7 @@ pub(super) fn about(ui: &mut Ui, theme: &Theme) -> Option<Asked> {
                 ui,
                 theme,
                 tr!("Type, icons"),
-                Some(tr!("IBM Plex Mono, IBM Plex Sans and Audiowide under the SIL Open Font Licence.")),
+                Some(tr!("IBM Plex Mono, IBM Plex Sans, Audiowide · Phosphor. The typefaces under the SIL Open Font Licence, the icons under MIT.")),
                 |_| {},
             );
             group(ui, theme, "B", tr!("Qubernetic"), None);
