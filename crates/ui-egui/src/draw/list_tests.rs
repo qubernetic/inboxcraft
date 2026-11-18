@@ -3211,3 +3211,34 @@ fn back_to_the_list_stands_8_before_the_next_tool_with_no_divider_and_runs_only_
     harness.run();
     assert!(!harness.state().can_run(BACK), "one pane, the list in front of the composer");
 }
+
+#[test]
+fn dragging_the_lists_thumb_keeps_the_grab_point_under_the_pointer_past_an_end_and_back() {
+    let thumb = |harness: &Harness<'static, InboxApp>| crate::component::scroll::over_thumb(&harness.ctx).unwrap();
+    let mut harness = ten_thousand(InboxView::List);
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    let start = thumb(&harness);
+    // Held 10 below the thumb's top.
+    let grab = egui::pos2(start.center().x, start.top() + 10.0);
+    harness.hover_at(grab);
+    harness.run();
+    harness.drag_at(grab);
+    harness.step();
+    let under = |harness: &Harness<'static, InboxApp>, y: f32| (thumb(harness).top() + 10.0 - y).abs() < 0.5;
+    // Each move puts the grab point under the pointer in the frame of the move.
+    for y in [grab.y + 60.0, grab.y + 150.0] {
+        harness.hover_at(egui::pos2(grab.x, y));
+        harness.step();
+        assert!(under(&harness, y), "moved to {y}: the thumb {:?} keeps its grab point under the pointer", thumb(&harness));
+    }
+    // Past the end the thumb stops there; back up, it waits for the pointer to reach its grab point.
+    harness.hover_at(egui::pos2(grab.x, view.bottom() + 200.0));
+    harness.step();
+    assert!((thumb(&harness).bottom() - view.bottom()).abs() < 0.5, "at the end: {:?}", thumb(&harness));
+    let y = view.bottom() - start.height() + 10.0 - 100.0;
+    harness.hover_at(egui::pos2(grab.x, y));
+    harness.step();
+    assert!(under(&harness, y), "back 100 above the end's grab point: the thumb {:?} is under the pointer at {y}", thumb(&harness));
+    harness.drop_at(egui::pos2(grab.x, y));
+    harness.run();
+}
