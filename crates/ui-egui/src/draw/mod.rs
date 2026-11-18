@@ -117,15 +117,22 @@ struct Keys {
 const ROW_ACTS: [(&str, Act); 5] =
     [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
 
+/// What the reader keeps when the open message left the list: the row the next-message rule named and the rule then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    pick: u64,
+    after: crate::mailbox::After,
+}
+
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
     mailbox: Mailbox,
     reader: Reader,
     textures: reader::Textures,
     hover: Option<String>,
-    /// The row the next-message rule selected when the open message left the list: the reader stays closed on it until
-    /// the owner opens a message.
-    held_back: Option<u64>,
+    /// The row the next-message rule names when the open message left the list, and the rule: the reader shows nothing
+    /// open and the list selects no row until the owner opens a message; a key starts from it.
+    held_back: Option<Held>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -437,6 +444,21 @@ impl InboxApp {
         &mut self.palette
     }
 
+    /// Opens the row below (`forward`) or above in the list. After the open message left, the step starts from the gap
+    /// it left: down opens the row that followed it, up the row before it, whichever the next-message rule named.
+    fn step_list(&mut self, forward: bool) {
+        let Some(held) = self.held_back.take() else {
+            self.mailbox.step(forward);
+            return;
+        };
+        self.mailbox.select(Some(held.pick));
+        // The rule named the row after the gap (Next) or before it (Previous); a step the other way goes one further.
+        let further = if forward { held.after == crate::mailbox::After::Previous } else { held.after == crate::mailbox::After::Next };
+        if further || self.mailbox.selected().is_none() {
+            self.mailbox.step(forward);
+        }
+    }
+
     /// The act `action` (Done, Archive, read or unread, flag or not, Delete) on the selected row.
     fn row_act(&self, action: &str) -> Option<(u64, Act)> {
         let row = self.mailbox.selected().and_then(|id| self.mailbox.messages().iter().find(|row| row.id == id))?;
@@ -458,6 +480,8 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
+            keymap::NEXT | keymap::PREVIOUS => self.screen == Screen::Mail && !self.docked(),
+            keymap::OPEN => self.screen == Screen::Mail && !self.docked() && self.held_back.is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
@@ -501,6 +525,13 @@ impl InboxApp {
                 self.search.clear();
             }
             keymap::SNOOZE => self.open_picker(""),
+            keymap::NEXT => self.step_list(true),
+            keymap::PREVIOUS => self.step_list(false),
+            keymap::OPEN => {
+                if let Some(held) = self.held_back.take() {
+                    self.mailbox.select(Some(held.pick));
+                }
+            }
             keymap::CALENDAR => self.show_calendar(),
             keymap::COMPOSE => {
                 self.compose();
@@ -817,14 +848,16 @@ impl InboxApp {
     /// When the open message leaves the list (done, snoozed, moved), the reader shows nothing open: the row the
     /// next-message rule selects is not opened by itself, only when the owner picks a message.
     fn sync(&mut self) {
-        let selected = self.mailbox.selected();
         let open = self.reader.open_id();
-        if open.is_some_and(|id| Some(id) != selected && !self.mailbox.messages().iter().any(|row| row.id == id)) {
-            self.held_back = selected;
-        } else if self.held_back.is_some() && self.held_back != selected {
+        let gone = open.is_some_and(|id| !self.mailbox.messages().iter().any(|row| row.id == id));
+        if let (true, Some(pick)) = (gone, self.mailbox.selected()) {
+            // The rule's row is kept, not selected: no act lands on a message that is not shown.
+            self.held_back = Some(Held { pick, after: self.mailbox.after() });
+            self.mailbox.select(None);
+        } else if self.mailbox.selected().is_some() {
             self.held_back = None;
         }
-        let opening = selected.filter(|id| Some(*id) != self.held_back);
+        let opening = self.mailbox.selected();
         if open != opening {
             if opening.is_some()
                 && let Some(composer) = &mut self.composer
@@ -1309,7 +1342,7 @@ impl InboxApp {
         let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
-            self.mailbox.step(down);
+            self.step_list(down);
             stepped = true;
         }
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };

@@ -310,7 +310,7 @@ fn done_in_the_toolbar_marks_the_open_message_done_and_the_toast_offers_undo() {
     }
     assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id), "it left the inbox");
     harness.get_by_label("Marked as done");
-    assert_ne!(harness.state().reader().open_id(), Some(id), "the next-message rule picks what shows");
+    assert_eq!(harness.state().reader().open_id(), None, "no message opens by itself: the reader shows nothing open");
 }
 
 #[test]
@@ -815,21 +815,135 @@ fn after_done_the_reader_shows_nothing_open() {
     harness.get_by_role_and_label(Role::Button, "Done").click();
     settle(&mut harness);
     assert!(row_of(&harness, done).is_none(), "it left the list");
-    let next = harness.state().mailbox().selected();
-    assert!(next.is_some(), "the next row is selected in the list");
-    assert_eq!(harness.state().reader().open_id(), None, "but no message opens by itself");
+    // The list selects no row (the nothing-open frame), and no message opens by itself.
+    assert_eq!(harness.state().mailbox().selected(), None);
+    assert_eq!(harness.state().reader().open_id(), None, "no message opens by itself");
+    let next = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
     assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none());
     // The bare empty state, its lines centred in the reader's pane.
     let label = harness.get_by_label("Pick a message.\nIt opens here.").rect();
+    // The help in the frame's words, with the keys the owner has.
+    fn texts(shape: &egui::Shape, found: &mut String) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, found)),
+            egui::Shape::Text(text) => found.push_str(&text.galley.job.text),
+            _ => {}
+        }
+    }
+    let mut painted = String::new();
+    harness.output().shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut painted));
+    assert!(painted.contains("J and K move in the list, Enter opens"), "{painted}");
+    assert!(painted.contains("Ctrl K runs any"), "{painted}");
     let pane_middle = (pane.0 + pane.1) / 2.0;
     assert!((label.center().x - pane_middle).abs() <= 1.0, "in the middle of the reader's pane: {label:?} {pane:?}");
-    // A row picked opens again.
-    let row = harness.state().mailbox().messages().iter().find(|row| Some(row.id) == next).map(|row| row.id).unwrap();
-    harness.state_mut().mailbox_mut().select(None);
-    harness.run();
-    harness.state_mut().mailbox_mut().select(Some(row));
-    harness.run();
-    assert_eq!(harness.state().reader().open_id(), Some(row));
+    // A row picked by a click opens again.
+    let subject = row_of(&harness, next).unwrap().subject;
+    row_node(&harness, &subject).click();
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(next));
+}
+
+/// The row of the list whose spoken words hold `subject`.
+fn row_node<'h>(harness: &'h Harness<'static, InboxApp>, subject: &str) -> egui_kittest::Node<'h> {
+    harness
+        .query_all_by_role(Role::ListBoxOption)
+        .find(|node| node.accesskit_node().label().is_some_and(|label| label.contains(subject)))
+        .unwrap_or_else(|| panic!("no row of {subject}"))
+}
+
+/// Whether a row of the list is selected.
+fn any_selected(harness: &Harness<'static, InboxApp>) -> bool {
+    harness.query_all_by_role(Role::ListBoxOption).any(|node| node.accesskit_node().is_selected() == Some(true))
+}
+
+/// The subjects of the list, in order.
+fn subjects(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    harness.state().mailbox().messages().iter().map(|row| row.subject.clone()).collect()
+}
+
+/// The subject of the open message, if one is.
+fn open_subject(harness: &Harness<'static, InboxApp>) -> Option<String> {
+    let id = harness.state().reader().open_id()?;
+    row_of(harness, id).map(|row| row.subject)
+}
+
+/// Done on the open message by its button, and the frames after it.
+fn done(harness: &mut Harness<'static, InboxApp>) {
+    // The reader's Done: a row picked by a key shows its own hover actions in the list, left of it.
+    let reader = harness.query_all_by_role_and_label(Role::Button, "Done").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
+    reader.unwrap().click();
+    settle(harness);
+    assert_eq!(harness.state().reader().open_id(), None, "nothing opens by itself");
+}
+
+#[test]
+fn with_nothing_open_no_row_is_selected_and_the_row_keys_act_on_nothing() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    done(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), None, "the list selects no row, as the nothing-open frame draws it");
+    assert!(!any_selected(&harness), "no row is drawn selected");
+    let before = subjects(&harness);
+    let seen: Vec<bool> = harness.state().mailbox().messages().iter().map(|row| row.seen || row.flagged).collect();
+    // Done, Archive, read or unread, flag, Delete: none lands on a message that is not shown.
+    for key in [Key::D, Key::A, Key::R, Key::S, Key::Delete] {
+        harness.key_press(key);
+        settle(&mut harness);
+        assert_eq!(subjects(&harness), before, "{key:?} acted on a row that is not shown");
+        assert_eq!(harness.state().reader().open_id(), None, "{key:?}: still nothing opens by itself");
+    }
+    let after: Vec<bool> = harness.state().mailbox().messages().iter().map(|row| row.seen || row.flagged).collect();
+    assert_eq!(after, seen, "no row was read or flagged");
+    assert!(!any_selected(&harness));
+}
+
+#[test]
+fn after_a_second_done_no_message_opens_by_itself() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    done(&mut harness);
+    // J opens the message the rule names, Done on it, and still nothing opens.
+    harness.key_press(Key::J);
+    settle(&mut harness);
+    assert!(harness.state().reader().open_id().is_some(), "J opens a row");
+    done(&mut harness);
+    assert!(!any_selected(&harness));
+    // The arrows open a row too.
+    harness.key_press(Key::ArrowDown);
+    settle(&mut harness);
+    assert!(harness.state().reader().open_id().is_some(), "the down arrow opens a row");
+    done(&mut harness);
+    harness.key_press(Key::K);
+    settle(&mut harness);
+    assert!(harness.state().reader().open_id().is_some(), "K opens a row");
+    done(&mut harness);
+    harness.key_press(Key::ArrowUp);
+    settle(&mut harness);
+    assert!(harness.state().reader().open_id().is_some(), "the up arrow opens a row");
+}
+
+#[test]
+fn the_next_message_rule_names_what_a_key_opens_after_a_message_left() {
+    for after in [After::Next, After::Previous] {
+        for key in [Key::Enter, Key::J, Key::ArrowDown, Key::K, Key::ArrowUp] {
+            let fetch = Recorder::default();
+            let mut harness = opened(&fetch, None, "Photos from the coast walk");
+            let list = subjects(&harness);
+            let at = list.iter().position(|subject| subject == "Photos from the coast walk").unwrap();
+            // The rows each side of the one that leaves.
+            let (before, behind) = (list[at - 1].clone(), list[at + 1].clone());
+            harness.state_mut().mailbox_mut().set_after(after);
+            done(&mut harness);
+            let wanted = match (key, after) {
+                // Enter opens the message the rule names: the next one, or the one before.
+                (Key::Enter, After::Next) | (Key::J | Key::ArrowDown, _) => &behind,
+                _ => &before,
+            };
+            harness.key_press(key);
+            settle(&mut harness);
+            assert_eq!(open_subject(&harness).as_deref(), Some(wanted.as_str()), "{after:?} {key:?}");
+        }
+    }
 }
 
 #[test]
