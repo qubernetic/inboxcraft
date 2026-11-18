@@ -1478,3 +1478,47 @@ fn a_board_s_focused_scrolling_field_shows_its_end_with_the_caret_on_the_last_li
 fn box_of_ui(harness: &Harness<'static>) -> Rect {
     box_of(harness, NOTES)
 }
+
+#[test]
+fn a_caret_inside_the_text_keeps_egui_s_place_and_only_the_end_follows_the_board() {
+    let theme = theme();
+    let ground = theme.palette.bg;
+    let text = "Odile Brannock";
+    let mut harness = builder().with_size(vec2(400.0, 120.0)).build_ui_state(
+        move |ui, value: &mut String| {
+            crate::component::tests::stage(ui, ground, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(320.0);
+                    text_field(ui, &theme, egui::Id::unique("name"), value, &Field::new("Name", ""));
+                });
+            });
+        },
+        text.to_owned(),
+    );
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Name").focus();
+    harness.run();
+    harness.key_press(egui::Key::End);
+    harness.run();
+    // The text starts 13 in from the box (the edit's node).
+    let start = harness.get_by_label("Name").rect().left() + 13.0;
+    let ctx = harness.ctx.clone();
+    let width = |words: &str| ctx.fonts_mut(|fonts| fonts.layout_no_wrap(words.to_owned(), theme.fonts.body.id(), Color32::WHITE).size().x);
+    let at_end = caret(&painted(&harness, "Name"), theme.palette.cyan_edge).unwrap();
+    assert_eq!(at_end.left(), start + width(text).ceil() + 2.0, "the end: the board's, the text's box rounded up");
+    // Inside the text: where egui puts the caret, rounded to the nearest pixel, 2 after the letter before it.
+    let mut checked = 0;
+    for back in 1..text.chars().count() {
+        harness.key_press(egui::Key::ArrowLeft);
+        harness.run();
+        let before: String = text.chars().take(text.chars().count() - back).collect();
+        let exact = width(&before);
+        if exact.ceil() == exact.round() {
+            continue;
+        }
+        let block = caret(&painted(&harness, "Name"), theme.palette.cyan_edge).unwrap();
+        assert_eq!(block.left(), (start + exact + 2.0).round(), "after {before:?}");
+        checked += 1;
+    }
+    assert!(checked > 0, "a place where rounding up and to the nearest differ");
+}
