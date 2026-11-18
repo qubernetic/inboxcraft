@@ -148,20 +148,60 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, opene
 }
 
 /// Reply, the pane's one primary button, with its arrow; then Reply all and Forward: the answers at the reader's foot.
-pub(super) fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, drawn: &mut Drawn) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = ANSWER_GAP;
-        let answers = [
-            (TextButton::new(tr!("Reply")).primary().arrow(), Answer::Reply),
-            (TextButton::new(tr!("Reply all")).secondary(), Answer::ReplyAll),
-            (TextButton::new(tr!("Forward")).secondary(), Answer::Forward),
-        ];
-        for (button, answer) in answers {
-            if button.show(ui, theme, keymap).clicked() {
-                drawn.asked.push(Asked::Answer(id, answer));
-            }
+fn answer_buttons() -> [(TextButton<'static>, Answer); 3] {
+    [
+        (TextButton::new(tr!("Reply")).primary().arrow(), Answer::Reply),
+        (TextButton::new(tr!("Reply all")).secondary(), Answer::ReplyAll),
+        (TextButton::new(tr!("Forward")).secondary(), Answer::Forward),
+    ]
+}
+
+/// The line each answer stands on in `room` points: all on one line where they fit; else, as the acts do, as many on a
+/// line as fit, in order, so none is cut at the pane's edge.
+fn answer_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, room: f32) -> [usize; 3] {
+    let mut lines = [0_usize; 3];
+    let (mut line, mut used) = (0_usize, 0.0_f32);
+    for (index, (button, _)) in answer_buttons().iter().enumerate() {
+        let wide = button.width(ui, theme, keymap);
+        if used > 0.0 && used + ANSWER_GAP + wide > room {
+            line = line.saturating_add(1);
+            used = 0.0;
         }
-    });
+        used += if used > 0.0 { ANSWER_GAP + wide } else { wide };
+        if let Some(slot) = lines.get_mut(index) {
+            *slot = line;
+        }
+    }
+    lines
+}
+
+/// How high the answers stand in `room` points: one control, or one per line and the gaps between.
+pub(super) fn answers_height(ui: &Ui, theme: &Theme, keymap: &Keymap, room: f32) -> f32 {
+    let count = answer_lines(ui, theme, keymap, room).iter().max().copied().unwrap_or(0) as f32 + 1.0;
+    count * crate::component::control_side(theme) + (count - 1.0) * ANSWER_GAP
+}
+
+/// The answers at the reader's foot, on the lines [`answer_lines`] gives them.
+pub(super) fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, drawn: &mut Drawn) {
+    let room = ui.available_width();
+    let lines = answer_lines(ui, theme, keymap, room);
+    let side = crate::component::control_side(theme);
+    let (_, whole) = ui.allocate_space(egui::vec2(room.max(0.0), answers_height(ui, theme, keymap, room)));
+    let mut line_ui: Option<(usize, Ui)> = None;
+    for ((button, answer), line) in answer_buttons().into_iter().zip(lines) {
+        if line_ui.as_ref().is_none_or(|(at, _)| *at != line) {
+            let top = whole.top() + line as f32 * (side + ANSWER_GAP);
+            let place = egui::Rect::from_min_size(egui::pos2(whole.left(), top), egui::vec2(whole.width(), side));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(place).layout(egui::Layout::left_to_right(egui::Align::Center)));
+            child.spacing_mut().item_spacing.x = ANSWER_GAP;
+            line_ui = Some((line, child));
+        }
+        if let Some((_, child)) = line_ui.as_mut()
+            && button.show(child, theme, keymap).clicked()
+        {
+            drawn.asked.push(Asked::Answer(id, answer));
+        }
+    }
 }
 
 /// The room between two answers, in points.

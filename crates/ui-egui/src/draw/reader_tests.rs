@@ -1400,8 +1400,9 @@ fn a_thread_s_rows_keep_their_words_inside_them_in_a_narrow_reader() {
             let texts = painted_texts(&harness);
             for row in &rows {
                 assert!(row.right() <= width + 0.5, "the row stands in the window: {row:?} {at}");
+                // The texts on the row's line: their middle in its height, their run touching it.
                 let inside: Vec<&(egui::Rect, String)> =
-                    texts.iter().filter(|(rect, _)| rect.intersects(*row) && rect.intersect(*row).area() > 1.0).collect();
+                    texts.iter().filter(|(rect, _)| row.y_range().contains(rect.center().y) && rect.intersect(*row).area() > 1.0).collect();
                 for (rect, text) in &inside {
                     assert!(row.expand(0.5).contains_rect(*rect), "{text:?} at {rect:?} paints past its row {row:?}: {at}");
                 }
@@ -1415,6 +1416,31 @@ fn a_thread_s_rows_keep_their_words_inside_them_in_a_narrow_reader() {
                 let rect = link.rect();
                 assert!(rows.iter().any(|row| row.expand(0.5).contains_rect(rect)), "details at {rect:?} stands in its row: {at}");
             }
+        }
+    }
+}
+
+#[test]
+fn the_answers_stand_whole_in_the_pane_in_a_narrow_reader() {
+    for (width, percent, ppp) in NARROW_SIZES {
+        let fetch = Recorder::default();
+        let harness = opened_in(&fetch, None, "Photos from the coast walk", width, percent, ppp);
+        let at = format!("{width} {percent}% {ppp}x");
+        let subject = harness.get_by_label("Photos from the coast walk").rect();
+        let texts = painted_texts(&harness);
+        let mut boxes = Vec::new();
+        for name in ["Reply", "Reply all", "Forward"] {
+            let rect = harness.get_by_role_and_label(Role::Button, name).rect();
+            // In the pane: between the subject's left edge and the window's right edge, under the message.
+            assert!(rect.left() >= subject.left() - 0.5 && rect.right() <= width - 0.5, "{name} at {rect:?} stands in the pane: {at}");
+            assert!(rect.bottom() <= 800.0 + 0.5, "{name} at {rect:?} stands in the window: {at}");
+            // Its words whole inside its box, never clipped at the pane's edge.
+            let words = texts.iter().find(|(text_rect, text)| text == name && rect.contains_rect(*text_rect));
+            assert!(words.is_some(), "{name} reads whole inside {rect:?}: {at}");
+            for other in &boxes {
+                assert!(!rect.intersects(*other), "{name} at {rect:?} runs over another answer at {other:?}: {at}");
+            }
+            boxes.push(rect);
         }
     }
 }

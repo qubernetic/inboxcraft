@@ -6,7 +6,7 @@
 //! reader hears it whole), the facts of a message alone or who wrote and how many messages for a thread, the why line
 //! and the content bar. The thread follows, oldest first: the open message and the ones the owner unfolded in full
 //! (the remote-content banner, the text, the attachments), the rest folded to their line. Reply, Reply all and Forward
-//! stand at the foot under a hairline. More holds Archive (with its key), flag, read or unread and the rest of the acts
+//! stand at the foot under a hairline, on lines of their own in a pane narrower than they are. More holds Archive (with its key), flag, read or unread and the rest of the acts
 //! on the open message, then what is not a mail action: full width, closing the reader and the next-message rule. Move
 //! to a folder opens a menu of the folders of the message's account. While the pointer is on a link, a float at the
 //! bottom says where it goes. Tab goes from the head through the message to the answers.
@@ -211,7 +211,10 @@ pub(super) fn show(
     let room = ui.available_rect_before_wrap();
     let foot = match (reader.open_id(), held, alone) {
         (Some(id), None, false) => {
-            let high = (crate::component::control_side(theme) + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
+            // The answers stand on one line, or on more where the pane is narrower than they are.
+            let inner = room.width() - f32::from(foot_margin.left) - f32::from(foot_margin.right);
+            let answers = thread::answers_height(ui, theme, keymap, inner);
+            let high = (answers + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
             Some((id, Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max)))
         }
         _ => None,

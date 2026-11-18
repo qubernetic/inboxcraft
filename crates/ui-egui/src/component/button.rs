@@ -166,6 +166,15 @@ const PAD: f32 = 12.0;
 /// The room between a text button's parts (icon, label, arrow, key), in points.
 const GAP: f32 = 8.0;
 
+/// What a text button lays out before it is drawn.
+struct Laid {
+    label: std::sync::Arc<egui::Galley>,
+    arrow: Option<std::sync::Arc<egui::Galley>>,
+    chip: Option<Chip>,
+    label_width: f32,
+    width: f32,
+}
+
 /// A text button: its name, an optional icon before it, a trailing arrow, its key, and its tone.
 #[derive(Debug, Clone, Copy)]
 pub struct TextButton<'a> {
@@ -273,6 +282,40 @@ impl<'a> TextButton<'a> {
         self
     }
 
+    /// How wide it is drawn in `ui`, in points: what a row of buttons measures before it places them.
+    #[must_use]
+    pub fn width(&self, ui: &Ui, theme: &Theme, keymap: &Keymap) -> f32 {
+        let soon = soon::is_soon(ui);
+        let enabled = self.enabled && self.note.is_none() && !soon && ui.is_enabled();
+        self.lay_out(ui, theme, keymap, enabled, soon).width
+    }
+
+    /// Its label, arrow and key chip laid out, and the width of its box.
+    fn lay_out(&self, ui: &Ui, theme: &Theme, keymap: &Keymap, enabled: bool, soon: bool) -> Laid {
+        let action = self.action.filter(|_| !soon);
+        let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
+        let font = theme.fonts.button;
+        // Laid out before the state is known: the colour is the painter's, given when it is painted.
+        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, LABEL_WIDEST);
+        let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
+        // A label cut at its widest takes all of it, as the design's does.
+        let label_width = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+        let chip_state = match (enabled, self.tone) {
+            (false, _) => ChipState::Disabled,
+            (true, Tone::Primary) => ChipState::OnCyan,
+            (true, _) => ChipState::Default,
+        };
+        let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
+        let parts = [
+            self.icon.map(|_| theme.icon_side()),
+            Some(label_width),
+            arrow.as_ref().map(|arrow| arrow.size().x.ceil()),
+            chip.as_ref().map(|chip| chip.size().x),
+        ];
+        let inner = parts.iter().flatten().sum::<f32>() + GAP * (parts.iter().flatten().count().saturating_sub(1) as f32);
+        Laid { label, arrow, chip, label_width, width: inner + PAD * 2.0 }
+    }
+
     /// Draws it into `ui`; its response is clicked when it was pressed.
     pub fn show(self, ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Response {
         let p = &theme.palette;
@@ -283,29 +326,10 @@ impl<'a> TextButton<'a> {
         }
         // Coming soon, its key would do nothing: neither the chip nor the tooltip shows it.
         let action = self.action.filter(|_| !soon);
-        let key = action.filter(|_| self.key).and_then(|action| keymap.chip(ui.ctx(), action));
-        let font = theme.fonts.button;
-        // Laid out before the state is known: the colour is the painter's, given when it is painted.
-        let label = super::cut(ui, self.name, font, Color32::PLACEHOLDER, LABEL_WIDEST);
-        let arrow = self.arrow.then(|| super::galley(ui, "→", font, Color32::PLACEHOLDER));
-        // A label cut at its widest takes all of it, as the design's does.
-        let label_width = if label.elided { LABEL_WIDEST } else { label.size().x.ceil() };
+        let Laid { label, arrow, chip, label_width, width } = self.lay_out(ui, theme, keymap, enabled, soon);
         let icon_side = theme.icon_side();
-        let chip_state = match (enabled, self.tone) {
-            (false, _) => ChipState::Disabled,
-            (true, Tone::Primary) => ChipState::OnCyan,
-            (true, _) => ChipState::Default,
-        };
-        let chip = key.map(|key| Chip::new(ui, theme, &key, chip_state));
-        let parts = [
-            self.icon.map(|_| icon_side),
-            Some(label_width),
-            arrow.as_ref().map(|arrow| arrow.size().x.ceil()),
-            chip.as_ref().map(|chip| chip.size().x),
-        ];
-        let inner = parts.iter().flatten().sum::<f32>() + GAP * (parts.iter().flatten().count().saturating_sub(1) as f32);
         let sense = if enabled { Sense::click() } else { Sense::hover() };
-        let (rect, response) = ui.allocate_exact_size(vec2(inner + PAD * 2.0, control_side(theme)), sense);
+        let (rect, response) = ui.allocate_exact_size(vec2(width, control_side(theme)), sense);
         response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, self.name));
         let lit = lit(ui, theme, &response, enabled, self.shown, Hover::Fades);
         if ui.is_rect_visible(rect) {
