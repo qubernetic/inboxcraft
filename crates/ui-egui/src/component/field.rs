@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use egui::text::{LayoutJob, TextWrapping};
+use egui::text::{CCursor, CCursorRange, LayoutJob, TextWrapping};
 use egui::text_edit::{TextEditOutput, TextEditState};
 use egui::{
     Align2, Color32, Galley, Id, Margin, Painter, Rect, Response, ScrollArea, Sense, Stroke, StrokeKind, TextBuffer, TextEdit, Ui, UiBuilder, Vec2,
@@ -28,6 +28,11 @@ use crate::theme::{Font, Theme};
 use crate::tr;
 
 use super::{Shown, scroll, soon};
+
+#[path = "field_capped.rs"]
+mod capped;
+
+use capped::{Capped, Outcome};
 
 /// The margin inside a form field: the field is as tall as a button with a little more room.
 #[must_use]
@@ -155,14 +160,6 @@ impl Cap {
         }
     }
 
-    /// The size of `text` in this cap's unit, counted no further than one past the cap.
-    fn measure_most(self, text: &str) -> usize {
-        match self {
-            Self::Chars(most) => text.chars().take(most.saturating_add(1)).count(),
-            Self::Bytes(_) => text.len(),
-        }
-    }
-
     fn most(self) -> usize {
         match self {
             Self::Chars(most) | Self::Bytes(most) => most,
@@ -225,183 +222,104 @@ enum Refusal {
     Standing,
 }
 
-/// The text and the edit's state as a frame found them, taken by [`guard`] before the edit on a frame whose events
-/// could change the text, so that [`hold`] can put them back whole. It lives on the stack for the frame and is never
-/// stored; a password's copy is zeroed when it goes.
-struct Snapshot {
-    text: String,
-    state: Option<TextEditState>,
-    /// The characters of the IME composition that stood in the text at the frame's start, as the field last saw it
-    /// (its range the stored selection); `None` when there was none, or when anything else touched the field since.
-    composing: Option<usize>,
-    /// An IME commit reached the field in this frame.
-    commit: bool,
-    /// The composition [`guard`] counts on after the frame, when something else touched the field too: [`hold`] keeps
-    /// it only if the text and the composition's selection are as they were.
-    recheck: Option<usize>,
-    /// The text is a password.
-    secret: bool,
+/// What a field keeps of the text it shows, between frames: the most it lets the text hold, as long as the text is
+/// the one it last saw.
+#[derive(Debug, Clone, Copy)]
+struct Opened {
+    /// The most the text may hold, in the cap's unit: the cap, or the size of a text that was longer when the field
+    /// showed it first.
+    limit: usize,
+    /// The text's length in bytes after the field's last frame: another length means the text changed from outside.
+    len: usize,
+    /// The last pass that drew the field.
+    seen: u64,
 }
 
-impl Drop for Snapshot {
-    fn drop(&mut self) {
-        if self.secret {
-            wipe(&mut self.text);
-        }
-    }
+/// Where a field keeps its [`Opened`] (a number, in egui's temporary memory: never persisted).
+fn opened_id(id: Id) -> Id {
+    id.with("opened-limit")
 }
 
-/// Overwrites every byte `text` holds, its spare room too, with zeros and leaves it empty.
-fn wipe(text: &mut String) {
-    let mut bytes = std::mem::take(text).into_bytes();
-    let room = bytes.capacity();
-    bytes.clear();
-    bytes.resize(room, 0);
-    std::hint::black_box(&bytes);
-}
-
-/// What [`guard`] found before a field's edit, for [`hold`] after it.
+/// What [`guard`] found before a field's edit, for [`hold`] after it. Nothing of the text: a range, sizes and flags.
 struct Guarded {
     /// What the field has refused to say, as far as is known before the edit.
     said: Option<Refusal>,
     cap: Cap,
-    /// Taken only on a frame whose events could change the text; never at rest.
-    snapshot: Option<Snapshot>,
+    /// The most the text may hold this frame (see [`Opened`]).
+    limit: usize,
+    /// The caret and selection egui kept for the field, if it kept a state for it.
+    state: Option<CCursorRange>,
+    /// Whether egui kept a state for the field before this frame.
+    had_state: bool,
+    /// The characters of the IME composition that stood in the text at the frame's start, as the field last saw it (its
+    /// range the stored selection); `None` when there was none, or when anything else touched the field since.
+    composing: Option<usize>,
+    /// The composition counted on after the frame when something else touched the field too: [`hold`] keeps it only
+    /// if the text did not change and the selection is as long.
+    recheck: Option<usize>,
+    /// An IME commit reached the field in this frame.
+    commit: bool,
 }
 
-/// Whether `event` could change the text of the field `id` (`focused`, `hovered` by the pointer, `target` its node):
-/// on such a frame [`guard`] takes a snapshot.
+/// Whether `event` could move the selection or change the text of the field `id` (`focused`, `hovered` by the pointer,
+/// `target` its node), IME events aside.
 fn touches(event: &egui::Event, focused: bool, hovered: bool, target: egui::accesskit::NodeId) -> bool {
     use egui::Event;
     match event {
-        Event::Text(_) | Event::Paste(_) | Event::Cut | Event::Key { .. } | Event::Ime(_) => focused,
-        Event::MiddleClickPaste { .. } => true,
-        Event::PointerButton { pressed: true, .. } => focused || hovered,
+        Event::Text(_) | Event::Paste(_) | Event::Cut | Event::Key { pressed: true, .. } => focused,
+        Event::MiddleClickPaste { .. } | Event::PointerButton { pressed: true, .. } => hovered,
         Event::AccessKitActionRequest(request) => request.target_node == target,
         _ => false,
     }
 }
 
-/// What an event carrying text does to an IME composition.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Ime {
-    None,
-    /// A composition so many characters long.
-    Preedit {
-        chars: usize,
-    },
-    Commit,
-}
-
-/// What `event` carries into the field (`focused`, `hovered` by the pointer, `target` its node, a text of several
-/// `lines`) holding at most `cap`: its size in the cap's unit (counted no further than one past the cap) and what it
-/// does to an IME composition; `None` for an event that carries no text into it.
-fn carries(event: &egui::Event, cap: Cap, lines: bool, focused: bool, hovered: bool, target: egui::accesskit::NodeId) -> Option<(usize, Ime)> {
-    use egui::accesskit::{Action, ActionData};
-    use egui::{Event, ImeEvent, Key, Modifiers};
-    match event {
-        Event::Text(insert) | Event::Paste(insert) if focused => Some((cap.measure_most(insert), Ime::None)),
-        // Enter starts a new line in a text of several lines (with a modifier it is a shortcut).
-        Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if focused && lines && modifiers.matches_logically(Modifiers::NONE) => {
-            Some((1, Ime::None))
-        }
-        Event::Ime(ImeEvent::Preedit { text: insert, .. }) if focused => {
-            Some((cap.measure_most(insert), Ime::Preedit { chars: insert.chars().count() }))
-        }
-        Event::Ime(ImeEvent::Commit(insert)) if focused => Some((cap.measure_most(insert), Ime::Commit)),
-        Event::MiddleClickPaste { text: insert, .. } if hovered => Some((cap.measure_most(insert), Ime::None)),
-        Event::AccessKitActionRequest(request) if request.target_node == target => match (&request.action, &request.data) {
-            (Action::SetValue | Action::ReplaceSelectedText, Some(ActionData::Value(value))) => Some((cap.measure_most(value), Ime::None)),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// The first of the two layers that keep the text of the field `id` within `cap` (a text of several `lines`, a
-/// password when `secret`), run before its edit.
-///
-/// It looks at every event of the frame that carries text into this field: typing, a paste, an IME composition or
-/// commit, a middle-click paste over it, a screen reader's new value or replacement, and Enter in a text of several
-/// lines, each as long as what it carries. When together they carry more than the cap, they are all taken out of the
-/// input and refused whole (a refused IME commit becomes an empty one, which ends the composition); what a frame
-/// carries in is then at most the cap. So in one frame the edit adds at most the cap to the longest text it starts
-/// from (the text, a screen reader's value, a state its undo history holds, all within the cap unless the text was
-/// loaded over it): it never holds or lays out more than twice the cap of a text that was within it. This layer bounds
-/// the work; it does not judge the order egui applies the events in. [`hold`], after the edit, does.
-///
-/// On a frame with an event that could change the text it takes a [`Snapshot`]. It returns what the field has
-/// refused to say, if anything, with the snapshot.
-fn guard(ui: &Ui, id: Id, text: &str, cap: Cap, lines: bool, secret: bool) -> Guarded {
+/// Before the edit of the field `id` holding `text` within `cap`: the limit for this frame (the cap, or the size of a
+/// text that was longer when the field first showed it, kept until the text changes from outside or the field goes a
+/// frame undrawn), the caret and selection egui kept, where an IME composition stands, and what the field has refused
+/// to say. It reads the frame's input and changes nothing in it; the cap itself is kept by [`Capped`].
+fn guard(ui: &Ui, id: Id, text: &str, cap: Cap) -> Guarded {
     use egui::{Event, ImeEvent};
     let ctx = ui.ctx();
     let focused = ui.memory(|memory| memory.has_focus(id));
     let hovered = ctx.read_response(id).is_some_and(|response| response.contains_pointer());
     let target = id.accesskit_id();
     let pass = ctx.cumulative_pass_nr();
-    let most = cap.most();
-    let composing_id = composing_id(id);
-    let stored = ui.data(|data| data.get_temp::<usize>(composing_id));
+    let opened = ui.data(|data| data.get_temp::<Opened>(opened_id(id)));
+    let limit = opened
+        .filter(|opened| opened.len == text.len() && opened.seen.saturating_add(1) >= pass)
+        .map_or_else(|| cap.most().max(cap.measure(text)), |opened| opened.limit);
+    let stored = ui.data(|data| data.get_temp::<usize>(composing_id(id)));
     let was_composing = stored.filter(|_| focused);
     let mut composing = was_composing;
-    let (mut refused, mut touched, mut commit, mut other) = (false, false, false, false);
-    ui.input_mut(|input| {
-        // What the frame's events for this field carry together, in the cap's unit: more than the cap, and all of
-        // them are refused.
-        let carried = input
-            .events
-            .iter()
-            .filter_map(|event| carries(event, cap, lines, focused, hovered, target))
-            .try_fold(0_usize, |carried, (size, _)| carried.checked_add(size).filter(|after| *after <= most));
-        refused = carried.is_none();
-        input.events.retain_mut(|event| {
-            let touching = touches(event, focused, hovered, target);
-            touched |= touching;
-            let Some((_, ime)) = carries(event, cap, lines, focused, hovered, target) else {
-                // Anything else on the field may end or move the composition: [`hold`] looks again after the edit.
-                other |= touching && !matches!(event, Event::Ime(_));
-                return true;
-            };
-            match ime {
-                Ime::Preedit { chars } if !refused => composing = (chars > 0).then_some(chars),
-                Ime::Preedit { .. } => {}
-                Ime::None => composing = None,
-                Ime::Commit => {
+    let (mut commit, mut other) = (false, false);
+    ui.input(|input| {
+        for event in &input.events {
+            match event {
+                Event::Ime(ImeEvent::Preedit { text, .. }) if focused => {
+                    let chars = text.chars().count();
+                    composing = (chars > 0).then_some(chars);
+                }
+                Event::Ime(ImeEvent::Commit(_)) if focused => {
                     composing = None;
                     commit = true;
-                    if refused {
-                        // A refused commit still ends the composition: an empty one takes its text out of the field.
-                        *event = Event::Ime(ImeEvent::Commit(String::new()));
-                        return true;
-                    }
                 }
+                // Typing, a paste, a screen reader's value end the composition (egui puts the text in its place).
+                Event::Text(_) | Event::Paste(_) if focused => composing = None,
+                _ => other |= touches(event, focused, hovered, target),
             }
-            !refused
-        });
+        }
     });
     if composing != stored {
-        set_composing(ui.ctx(), id, composing);
+        set_composing(ctx, id, composing);
     }
-    let snapshot = touched.then(|| Snapshot {
-        text: text.to_owned(),
-        state: TextEditState::load(ctx, id),
-        composing: was_composing,
-        commit,
-        recheck: composing.filter(|_| other),
-        secret,
-    });
+    let state = TextEditState::load(ctx, id);
+    let had_state = state.is_some();
+    let state = state.and_then(|state| state.cursor.char_range());
     let kept = ui.data(|data| data.get_temp::<Refused>(refused_id(id)));
-    let said = if refused {
-        Some(Refused { len: Some(text.len()), since: pass, seen: pass })
-    } else {
-        kept.filter(|kept| kept.seen.saturating_add(1) >= pass && kept.len.is_none_or(|len| len == text.len())).map(|kept| Refused {
-            len: Some(text.len()),
-            seen: pass,
-            ..kept
-        })
-    };
+    let said = kept.filter(|kept| kept.seen.saturating_add(1) >= pass && kept.len.is_none_or(|len| len == text.len()));
     let said = match said {
         Some(said) => {
+            let said = Refused { len: Some(text.len()), seen: pass, ..said };
             ui.data_mut(|data| data.insert_temp(refused_id(id), said));
             Some(if fresh(ctx, said.since) { Refusal::Fresh } else { Refusal::Standing })
         }
@@ -412,7 +330,7 @@ fn guard(ui: &Ui, id: Id, text: &str, cap: Cap, lines: bool, secret: bool) -> Gu
             None
         }
     };
-    Guarded { said, cap, snapshot }
+    Guarded { said, cap, limit, state, had_state, composing: was_composing, recheck: composing.filter(|_| other), commit }
 }
 
 /// Where a field keeps whether an IME composition stands in its text.
@@ -432,82 +350,67 @@ fn set_composing(ctx: &egui::Context, id: Id, composing: Option<usize>) {
     });
 }
 
-/// The second layer, run after the edit `id` (its `response`): when the frame's events, in whatever order egui applied
-/// them, took `text` past its cap and made it longer than the snapshot [`guard`] took, the snapshot is put back whole:
-/// the text, the caret and the selection, and the refused text is taken off the top of the undo history. The field
-/// says it is too long at once (egui draws the frame again), and the response says nothing changed. A text over its
-/// cap that did not grow (a text loaded over it, edited down) is kept. Then what the field says is settled.
-fn hold(ui: &Ui, id: Id, text: &mut String, guarded: Guarded, response: &mut Response) {
-    let Guarded { said, cap, snapshot } = guarded;
-    if let Some(mut snapshot) = snapshot {
-        let size = cap.measure(text);
-        if size > cap.most() && size > cap.measure(&snapshot.text) {
-            restore(ui.ctx(), id, text, &mut snapshot);
-            let pass = ui.ctx().cumulative_pass_nr();
-            ui.data_mut(|data| data.insert_temp(refused_id(id), Refused { len: Some(text.len()), since: pass, seen: pass }));
-            response.flags.set(egui::response::Flags::CHANGED, false);
-            // The edit scrolled to where its caret went in the refused text: a request for a place in view takes
-            // its place, so that the view stays and the sentence can be brought into it.
-            ui.scroll_to_rect(Rect::from_center_size(ui.clip_rect().center(), Vec2::ZERO), None);
-            ui.ctx().request_discard("a field refused what would carry its text past its cap");
-            ui.ctx().request_repaint();
-            return;
-        }
-        if let Some(chars) = snapshot.recheck {
-            let range = TextEditState::load(ui.ctx(), id).and_then(|state| state.cursor.char_range());
-            let still = *text == snapshot.text && range.is_some_and(|range| range.primary.index.0.abs_diff(range.secondary.index.0) == chars);
-            if !still {
-                set_composing(ui.ctx(), id, None);
-            }
-        }
-    }
-    settle(ui, id, response.changed(), said);
+/// The edit's buffer for `text`: `text` within the frame's `limit`, taking no change when not `mutable`.
+fn capped<'a>(text: &'a mut String, guarded: &Guarded, mutable: bool, secret: bool) -> Capped<'a> {
+    Capped::new(text, guarded.cap, guarded.limit, mutable, secret)
 }
 
-/// Puts `snapshot` back as the text and the edit state of the field `id`; the text the edit made goes into the
-/// snapshot (and is zeroed with it for a password).
-fn restore(ctx: &egui::Context, id: Id, text: &mut String, snapshot: &mut Snapshot) {
-    use egui::text::{CCursor, CCursorRange};
-    std::mem::swap(text, &mut snapshot.text);
-    // The history as the edit left it, without the refused text: an undo or a redo does not bring it back. An undo of
-    // the refused state takes it off the top of the history if the edit put it there (else it only stands among the
-    // redos); a state no edit ever has (a caret past any text) is then fed in, which empties the redos. A password's
-    // history is kept empty by its field.
-    let undoer = if snapshot.secret {
-        None
-    } else {
-        TextEditState::load(ctx, id).map(|after| {
-            let mut undoer = after.undoer();
-            if let Some(range) = after.cursor.char_range() {
-                let _taken = undoer.undo(&(range, snapshot.text.clone())).is_some();
-            }
-            let nowhere = CCursorRange::one(CCursor::new(usize::MAX));
-            undoer.feed_state(ctx.input(|input| input.time), &(nowhere, String::new()));
-            undoer
-        })
-    };
-    let before = snapshot.state.as_ref().and_then(|state| state.cursor.char_range());
-    let mut state = match before {
-        // The commit ended the composition the snapshot's text holds: it goes, as egui would have taken it out.
-        // Only a selection as long as the composition the field saw last: anything else is the person's text.
-        Some(range)
-            if snapshot.commit && snapshot.composing.is_some_and(|chars| range.primary.index.0.abs_diff(range.secondary.index.0) == chars) =>
+/// After the edit `id` (its `response`) ran on `text` and [`Capped`] said how the frame went (`outcome`).
+///
+/// A refused frame left the text as it began, in the same buffer; egui's state for the field is made to agree with it:
+/// the caret and selection from before the frame are put back (none stored for a field egui kept nothing for), and a
+/// refused IME commit takes its composition out of the text, as egui does when it ends one. egui's undo history never
+/// saw a refused text: [`Capped`] rolled the frame back before egui fed its history at the end of its events. The
+/// field says it is too long at once (egui draws the frame again), and the response says nothing changed. Then what
+/// the field says is settled, and the limit kept for the next frame.
+fn hold(ui: &Ui, id: Id, text: &mut String, guarded: Guarded, outcome: Outcome, response: &mut Response) {
+    let ctx = ui.ctx();
+    let pass = ctx.cumulative_pass_nr();
+    if outcome.refused {
+        let mut selection = guarded.state;
+        let mut composing = guarded.composing;
+        if let (true, Some(chars), Some(range)) = (guarded.commit, composing, selection)
+            && range.primary.index.0.abs_diff(range.secondary.index.0) == chars
         {
             let at = take_out(text, range.primary.index.0, range.secondary.index.0);
-            let mut state = TextEditState::default();
-            state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(at))));
-            set_composing(ctx, id, None);
-            state
+            selection = Some(CCursorRange::one(CCursor::new(at)));
+            composing = None;
         }
-        _ => {
-            set_composing(ctx, id, snapshot.composing);
-            snapshot.state.clone().unwrap_or_default()
+        // Indices egui keeps are its own for this text; held to its length all the same.
+        let most = text.chars().count();
+        let selection = selection.map(|range| {
+            let mut range = range;
+            range.primary.index.0 = range.primary.index.0.min(most);
+            range.secondary.index.0 = range.secondary.index.0.min(most);
+            range
+        });
+        if guarded.had_state {
+            if let Some(mut state) = TextEditState::load(ctx, id) {
+                state.cursor.set_char_range(selection);
+                state.store(ctx, id);
+            }
+        } else {
+            ctx.data_mut(|data| data.remove::<TextEditState>(id));
         }
-    };
-    if let Some(undoer) = undoer {
-        state.set_undoer(undoer);
+        set_composing(ctx, id, composing);
+        ui.data_mut(|data| data.insert_temp(refused_id(id), Refused { len: Some(text.len()), since: pass, seen: pass }));
+        response.flags.set(egui::response::Flags::CHANGED, false);
+        // The edit scrolled to where its caret went in the frame: a request for a place in view takes its place, so
+        // that the view stays and the sentence can be brought into it.
+        ui.scroll_to_rect(Rect::from_center_size(ui.clip_rect().center(), Vec2::ZERO), None);
+        ctx.request_discard("a field refused what would carry its text past its cap");
+        ctx.request_repaint();
+    } else {
+        if let Some(chars) = guarded.recheck {
+            let range = TextEditState::load(ctx, id).and_then(|state| state.cursor.char_range());
+            let still = !outcome.changed && range.is_some_and(|range| range.primary.index.0.abs_diff(range.secondary.index.0) == chars);
+            if !still {
+                set_composing(ctx, id, None);
+            }
+        }
+        settle(ui, id, outcome.changed, guarded.said);
     }
-    state.store(ctx, id);
+    ui.data_mut(|data| data.insert_temp(opened_id(id), Opened { limit: guarded.limit, len: text.len(), seen: pass }));
 }
 
 /// Takes the characters `from..to` (either way round) out of `text`; where they started.
@@ -773,7 +676,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         let cap = Cap::Chars(limit.min(MAX_LINE));
         let password = matches!(kind, Line::Password(_));
-        let guarded = guard(ui, id, text, cap, false, password);
+        let guarded = guard(ui, id, text, cap);
         let said = guarded.said;
         let refusal = said.map(|_| cap.sentence());
         let bring = said == Some(Refusal::Fresh) && field.error.is_none();
@@ -801,22 +704,16 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
         let colour = if seen.enabled { p.ink } else { p.muted };
         let vertical = ((height - font.line) / 2.0).max(0.0);
         let inner = Rect::from_min_max(pos2(rect.left() + pad, rect.top() + vertical), pos2(rect.right() - right, rect.bottom() - vertical));
-        let mut response = ui
+        let (mut response, outcome) = ui
             .scope_builder(UiBuilder::new().max_rect(rect), |ui| {
                 edit_scope(ui, seen.enabled);
                 // A disabled password field is an empty box.
                 let mut nothing = String::new();
-                let mut fixed: &str = text.as_str();
-                let buffer: &mut dyn TextBuffer = if password && !seen.enabled {
-                    &mut nothing
-                } else if field.read_only {
-                    &mut fixed
-                } else {
-                    &mut *text
-                };
+                let blank = password && !seen.enabled;
+                let mut buffer = capped(if blank { &mut nothing } else { &mut *text }, &guarded, !blank && !field.read_only, password);
                 let empty = buffer.as_str().is_empty();
                 let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, password);
-                let edit = TextEdit::singleline(buffer)
+                let edit = TextEdit::singleline(&mut buffer)
                     .id(id)
                     .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
                     .desired_width(f32::INFINITY)
@@ -824,6 +721,7 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                     .password(password)
                     .layouter(&mut layouter);
                 let output = edit.show(ui);
+                let outcome = buffer.finish();
                 if password && let Some(mut state) = TextEditState::load(ui.ctx(), id) {
                     state.clear_undoer();
                     state.store(ui.ctx(), id);
@@ -838,10 +736,10 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                 if seen.focus && !field.read_only {
                     paint_caret(ui, theme, id, &output, clip.intersect(rect.shrink(1.0)), seen.forced);
                 }
-                output.response.response
+                (output.response.response, outcome)
             })
             .inner;
-        hold(ui, id, text, guarded, &mut response);
+        hold(ui, id, text, guarded, outcome, &mut response);
         let spoken = name(field);
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken));
         if let Some(glyph) = mark {
@@ -868,18 +766,21 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
     let vertical = ((rect.height() - font.line) / 2.0).max(0.0);
     let inner = Rect::from_min_max(pos2(rect.left(), rect.top() + vertical), pos2(rect.right(), rect.bottom() - vertical));
     edit_scope(ui, seen.enabled);
-    let guarded = guard(ui, id, text, Cap::Chars(MAX_LINE), false, false);
+    let guarded = guard(ui, id, text, Cap::Chars(MAX_LINE));
     let empty = text.is_empty();
     let mut layouter = |ui: &Ui, text: &dyn TextBuffer, _: f32| layout(ui, text.as_str(), font, colour, None, false);
-    let output = TextEdit::singleline(text)
+    let mut buffer = capped(text, &guarded, true, false);
+    let output = TextEdit::singleline(&mut buffer)
         .id(id)
         .frame(egui::Frame::NONE.inner_margin(margin_of(rect, inner)))
         .desired_width(f32::INFINITY)
         .min_size(vec2(0.0, rect.height()))
         .layouter(&mut layouter)
         .show(ui);
+    let outcome = buffer.finish();
+    drop(buffer);
     let mut response = output.response.response.clone();
-    hold(ui, id, text, guarded, &mut response);
+    hold(ui, id, text, guarded, outcome, &mut response);
     if empty && !field.hint.is_empty() {
         let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
         let hint = layout(ui, field.hint, font, p.muted, None, false);
@@ -938,7 +839,7 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = s.s2;
         label_row(ui, theme, field.label, width);
-        let guarded = guard(ui, id, text, cap, true, false);
+        let guarded = guard(ui, id, text, cap);
         let said = guarded.said;
         let refusal = said.map(|_| cap.sentence());
         let bring = said == Some(Refusal::Fresh) && field.error.is_none();
@@ -973,16 +874,15 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
         let margin = margin_of(Rect::from_min_max(inside.min, pos2(inside.right() - bar, inside.bottom())), view);
         // A child that leaves the cursor where the box put it.
         let mut child = ui.new_child(UiBuilder::new().max_rect(inside));
-        let mut response = {
+        let (mut response, outcome) = {
             let ui = &mut child;
             {
                 edit_scope(ui, seen.enabled);
-                let mut fixed: &str = text.as_str();
-                let buffer: &mut dyn TextBuffer = if field.read_only { &mut fixed } else { &mut *text };
+                let mut buffer = capped(&mut *text, &guarded, !field.read_only, false);
                 let empty = buffer.as_str().is_empty();
                 let mut layouter = |ui: &Ui, text: &dyn TextBuffer, wrap: f32| layout(ui, text.as_str(), font, colour, Some(wrap), false);
                 let mut edit = |ui: &mut Ui| {
-                    let output = TextEdit::multiline(buffer)
+                    let output = TextEdit::multiline(&mut buffer)
                         .id(id)
                         .frame(egui::Frame::NONE.inner_margin(margin))
                         .desired_width(f32::INFINITY)
@@ -1005,7 +905,7 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                     }
                     output.response.response
                 };
-                if scrolls {
+                let response = if scrolls {
                     let area = ScrollArea::vertical().id_salt(id.with("scroll")).max_height(inside.height()).auto_shrink([false, false]);
                     scroll::show(ui, theme, area, |ui| {
                         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_x_y_ranges(inside.x_range(), view.y_range())));
@@ -1014,10 +914,11 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                     .inner
                 } else {
                     edit(ui)
-                }
+                };
+                (response, buffer.finish())
             }
         };
-        hold(ui, id, text, guarded, &mut response);
+        hold(ui, id, text, guarded, outcome, &mut response);
         let spoken = name(field);
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(spoken));
         if lock {
@@ -1035,11 +936,14 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
 /// what would pass them is refused whole, and a line under it says so.
 pub fn plain_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, name: &str) -> Response {
     let cap = Cap::Chars(MAX_LINE);
-    let guarded = guard(ui, id, text, cap, false, false);
+    let guarded = guard(ui, id, text, cap);
     let said = guarded.said;
-    let edit = TextEdit::singleline(text).id(id).font(theme.fonts.body.id()).frame(egui::Frame::NONE).desired_width(ui.available_width());
+    let mut buffer = capped(text, &guarded, true, false);
+    let edit = TextEdit::singleline(&mut buffer).id(id).font(theme.fonts.body.id()).frame(egui::Frame::NONE).desired_width(ui.available_width());
     let mut response = ui.add(edit);
-    hold(ui, id, text, guarded, &mut response);
+    let outcome = buffer.finish();
+    drop(buffer);
+    hold(ui, id, text, guarded, outcome, &mut response);
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
     if said == Some(Refusal::Fresh) || (said.is_some() && !response.changed()) {
         let width = ui.available_width();
@@ -1063,15 +967,19 @@ pub fn plain_text(
 ) -> Response {
     let cap = Cap::Bytes(MAX_BODY);
     // Said over the text, where it shows however long the text is.
-    let guarded = guard(ui, id, text, cap, true, false);
+    let guarded = guard(ui, id, text, cap);
     let said = guarded.said;
     if said.is_some() {
         let width = ui.available_width();
         under(ui, theme, Some(&cap.sentence()), None, width, said == Some(Refusal::Fresh));
     }
-    let edit = TextEdit::multiline(text).layouter(layouter).id(id).frame(egui::Frame::NONE).desired_width(ui.available_width()).desired_rows(rows);
+    let mut buffer = capped(text, &guarded, true, false);
+    let edit =
+        TextEdit::multiline(&mut buffer).layouter(layouter).id(id).frame(egui::Frame::NONE).desired_width(ui.available_width()).desired_rows(rows);
     let mut response = ui.add(edit);
-    hold(ui, id, text, guarded, &mut response);
+    let outcome = buffer.finish();
+    drop(buffer);
+    hold(ui, id, text, guarded, outcome, &mut response);
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
     response
 }

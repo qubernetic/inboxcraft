@@ -277,7 +277,7 @@ fn what_an_edit_lays_out_in_one_frame_is_at_most_twice_the_cap() {
 }
 
 #[test]
-fn a_text_loaded_over_its_cap_opens_whole_edits_down_and_cannot_grow() {
+fn a_text_loaded_over_its_cap_opens_whole_edits_down_and_never_grows_past_its_opening_size() {
     for kind in ONE_FRAME {
         let (most, _) = cap_of(kind);
         let over = "y".repeat(most + 2);
@@ -295,9 +295,13 @@ fn a_text_loaded_over_its_cap_opens_whole_edits_down_and_cannot_grow() {
         one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
         assert_eq!(harness.state().len(), most, "{kind:?}: it fits");
         assert!(!says_too_long(&harness), "{kind:?}: the line goes once it fits");
+        // Up to the size it opened with it may grow again (an undo of the deletion would): past it, never.
+        one_frame(&mut harness, vec![Event::Text("q".to_owned())]);
+        one_frame(&mut harness, vec![Event::Text("q".to_owned())]);
+        assert_eq!(harness.state().len(), most + 2, "{kind:?}: back to its opening size");
         let was = before(&harness, kind);
         one_frame(&mut harness, vec![Event::Text("q".to_owned())]);
-        refused(&harness, kind, &was, "at the cap");
+        refused(&harness, kind, &was, "past its opening size");
     }
 }
 
