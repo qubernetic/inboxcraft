@@ -580,6 +580,8 @@ pub struct Mailbox {
     /// The engine's notices since [`Mailbox::take_notices`] was last called.
     notices: Vec<Notice>,
     after: After,
+    /// Where the selected message stood when it last left the list: the rows from there on followed it.
+    gap: Option<usize>,
     error: Option<String>,
     runs: u64,
     /// The id of the last command run through [`Mailbox::run`].
@@ -806,6 +808,7 @@ impl Mailbox {
             late: Vec::new(),
             notices: Vec::new(),
             after: After::Next,
+            gap: None,
             error: None,
             runs: 0,
             last: None,
@@ -825,6 +828,7 @@ impl Mailbox {
             .and_then(|()| self.load_outbox())
             .and_then(|()| self.load_list(self.place));
         if let (Some(at), None) = (was, self.selected) {
+            self.gap = Some(at);
             let last = self.messages.len().checked_sub(1);
             let pick = match self.after {
                 After::Next => last.map(|last| at.min(last)),
@@ -834,6 +838,13 @@ impl Mailbox {
             self.selected = pick.and_then(|at| self.messages.get(at)).map(|row| row.id);
         }
         self.settle(result);
+    }
+
+    /// Where the selected message stood in the list when it last left it: the rows from there on are the ones that
+    /// followed it, the rows before it the ones above. At either end the rule picks the row on the other side.
+    #[must_use]
+    pub fn gap(&self) -> Option<usize> {
+        self.gap
     }
 
     /// The next-message rule.

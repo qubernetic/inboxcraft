@@ -1444,3 +1444,47 @@ fn the_answers_stand_whole_in_the_pane_in_a_narrow_reader() {
         }
     }
 }
+
+/// The app with the message at `end` of the unified inbox open (`true`: the last row) under the rule `after`; Done on
+/// it, then `key`. The subject opened, if any, and the list as it was before Done.
+fn done_at_the_end_then(end_last: bool, after: After, key: Key) -> (Option<String>, Vec<String>) {
+    let fetch = Recorder::default();
+    let app = app_with(&fetch);
+    let rows = app.mailbox().messages();
+    let subject = if end_last { rows.last() } else { rows.first() }.unwrap().subject.clone();
+    drop(app);
+    let mut harness = opened(&fetch, None, &subject);
+    harness.state_mut().mailbox_mut().set_after(after);
+    let list = subjects(&harness);
+    done(&mut harness);
+    harness.key_press(key);
+    settle(&mut harness);
+    if harness.state().reader().open_id().is_none() {
+        assert_eq!(harness.state().mailbox().selected(), None, "{after:?} {key:?}: nothing selected where nothing opens");
+        assert!(!any_selected(&harness), "{after:?} {key:?}: nothing drawn selected");
+    }
+    (open_subject(&harness), list)
+}
+
+#[test]
+fn done_on_the_last_row_then_up_opens_the_row_before_the_gap() {
+    for after in [After::Next, After::Previous] {
+        let (got, list) = done_at_the_end_then(true, after, Key::ArrowUp);
+        let before = &list[list.len() - 2];
+        assert_eq!(got.as_deref(), Some(before.as_str()), "{after:?}: up opens the row before the gap");
+        // No row followed the one that left: the down arrow opens nothing.
+        let (got, _) = done_at_the_end_then(true, after, Key::ArrowDown);
+        assert_eq!(got, None, "{after:?}: down at the end opens nothing");
+    }
+}
+
+#[test]
+fn done_on_the_first_row_then_down_opens_the_row_after_the_gap() {
+    for after in [After::Previous, After::Next] {
+        let (got, list) = done_at_the_end_then(false, after, Key::ArrowDown);
+        assert_eq!(got.as_deref(), Some(list[1].as_str()), "{after:?}: down opens the row after the gap");
+        // No row stood before the one that left: the up arrow opens nothing.
+        let (got, _) = done_at_the_end_then(false, after, Key::ArrowUp);
+        assert_eq!(got, None, "{after:?}: up at the start opens nothing");
+    }
+}

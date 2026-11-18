@@ -117,11 +117,12 @@ struct Keys {
 const ROW_ACTS: [(&str, Act); 5] =
     [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
 
-/// What the reader keeps when the open message left the list: the row the next-message rule named and the rule then.
+/// What the reader keeps when the open message left the list: the row the next-message rule named, and whether it
+/// followed the gap (the rule's row stands on the gap's other side at either end of the list).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Held {
     pick: u64,
-    after: crate::mailbox::After,
+    below: bool,
 }
 
 /// The InboxCraft window's content over a [`Mailbox`].
@@ -446,17 +447,29 @@ impl InboxApp {
     }
 
     /// Opens the row below (`forward`) or above in the list. After the open message left, the step starts from the gap
-    /// it left: down opens the row that followed it, up the row before it, whichever the next-message rule named.
+    /// it left: down opens the row that followed it, up the row before it, whichever side of the gap the next-message
+    /// rule's row stands on; at an end of the list, where no row stands on that side, the key opens nothing.
     fn step_list(&mut self, forward: bool) {
-        let Some(held) = self.held_back.take() else {
+        let Some(held) = self.held_back else {
             self.mailbox.step(forward);
             return;
         };
-        self.mailbox.select(Some(held.pick));
-        // The rule named the row after the gap (Next) or before it (Previous); a step the other way goes one further.
-        let further = if forward { held.after == crate::mailbox::After::Previous } else { held.after == crate::mailbox::After::Next };
-        if further || self.mailbox.selected().is_none() {
+        let rows = self.mailbox.messages();
+        let Some(at) = rows.iter().position(|row| row.id == held.pick) else {
+            // The rule's row left too: the step starts from the top.
+            self.held_back = None;
             self.mailbox.step(forward);
+            return;
+        };
+        // The first row after the gap.
+        let after = if held.below { at } else { at.saturating_add(1) };
+        let to = if forward { Some(after) } else { after.checked_sub(1) };
+        if let Some(to) = to.filter(|to| *to < rows.len()) {
+            self.held_back = None;
+            // Picked by a key, as a step picks: one step down from the row above it (from none for the first row).
+            let above = to.checked_sub(1).and_then(|above| rows.get(above)).map(|row| row.id);
+            self.mailbox.select(above);
+            self.mailbox.step(true);
         }
     }
 
@@ -850,7 +863,12 @@ impl InboxApp {
         let gone = open.is_some_and(|id| !self.mailbox.messages().iter().any(|row| row.id == id));
         if let (true, Some(pick)) = (gone, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.
-            self.held_back = Some(Held { pick, after: self.mailbox.after() });
+            let at = self.mailbox.messages().iter().position(|row| row.id == pick);
+            let below = match (at, self.mailbox.gap()) {
+                (Some(at), Some(gap)) => at >= gap,
+                _ => self.mailbox.after() != crate::mailbox::After::Previous,
+            };
+            self.held_back = Some(Held { pick, below });
             self.mailbox.select(None);
         } else if self.mailbox.selected().is_some() {
             self.held_back = None;
