@@ -2213,3 +2213,111 @@ fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
         keeps_inside(&harness, left, width, &at("notice"));
     }
 }
+
+// The reader beside the lists: one meaning per key, one surface per Esc.
+
+#[test]
+fn the_lists_menu_key_on_a_line_of_the_reader_opens_that_line_s_menu_and_no_row_s() {
+    const OLDER: &str = "Odile Brannock, 08:35, open: ";
+    for (key, modifiers) in [(Key::F10, egui::Modifiers::SHIFT), (Key::Menu, egui::Modifiers::NONE)] {
+        let fetch = Recorder::default();
+        let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+        let open = harness.state().reader().open_id().unwrap();
+        harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+        settle(&mut harness);
+        assert!(tab_to_containing(&mut harness, OLDER), "{key:?}: Tab reaches the older open line");
+        harness.key_press_modifiers(modifiers, key);
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItem, "Show the full header");
+        assert!(!crate::component::popup::is_open(&harness.ctx, super::list::group_menu_id(open)), "{key:?}: the open row's menu stays shut");
+        let menus = harness.query_all_by_role(Role::MenuItem).count() + harness.query_all_by_role(Role::MenuItemRadio).count();
+        assert_eq!(menus, 1, "{key:?}: one menu, the line's");
+    }
+}
+
+#[test]
+fn the_arrows_step_the_list_once_where_it_has_the_keyboard_and_never_from_the_reader() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Allotment rota for November");
+    // A press on the open row: the list has the keyboard.
+    harness.query_all_by_label_contains("Odile Brannock, Allotment rota for November").next().unwrap().click();
+    settle(&mut harness);
+    let order = super::list::order(&harness.ctx);
+    let first = harness.state().mailbox().selected().unwrap();
+    let at = order.iter().position(|id| *id == first).unwrap();
+    let top = |harness: &Harness<'static, InboxApp>| {
+        let open = harness.state().reader().open_id().unwrap();
+        let subject = harness.state().reader().opened(open).unwrap().header.subject.clone();
+        harness.query_all_by_label(&subject).map(|node| node.rect().top()).fold(f32::MAX, f32::min)
+    };
+    let shown_at = top(&harness);
+    harness.key_press(Key::ArrowDown);
+    settle(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), order.get(at + 1).copied(), "one row down, not two");
+    assert_eq!(harness.state().reader().open_id(), order.get(at + 1).copied(), "the reader shows it");
+    assert_eq!(top(&harness), shown_at, "from its top: the reader did not scroll");
+    harness.key_press(Key::ArrowUp);
+    settle(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), Some(first), "one row up");
+    // A press in the reader: the keyboard is the reader's, and the arrows leave the list where it is.
+    let subject = harness.get_by_label("Allotment rota for November").rect().center();
+    harness.hover_at(subject);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: subject, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        harness.run();
+    }
+    settle(&mut harness);
+    let before = top(&harness);
+    for key in [Key::ArrowDown, Key::ArrowUp, Key::ArrowDown] {
+        harness.key_press(key);
+        settle(&mut harness);
+        assert_eq!(harness.state().mailbox().selected(), Some(first), "{key:?} in the reader moves no row");
+        assert_eq!(top(&harness), before, "{key:?} in the reader scrolls nothing");
+    }
+}
+
+#[test]
+fn one_esc_closes_the_reader_s_menu_and_nothing_under_it_after_the_list_s_menu() {
+    const SUBJECT: &str = "Allotment rota for November";
+    let fetch = Recorder::default();
+    let app = app_with(&fetch);
+    // One pane: the message stands in the list's place, so an Esc too many would take it away.
+    let mut harness = Harness::builder()
+        .with_size(vec2(900.0, 800.0))
+        .with_theme(egui::Theme::Light)
+        .with_max_steps(12)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    settle(&mut harness);
+    // The list's menu first: J keys a row, Shift F10 opens its menu, Esc closes it and gives the row the keyboard.
+    harness.key_press(Key::J);
+    settle(&mut harness);
+    let keyed = harness.state().mailbox().selected().unwrap();
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+    settle(&mut harness);
+    assert!(crate::component::popup::is_open(&harness.ctx, super::list::group_menu_id(keyed)), "the row's menu opened");
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    assert!(!crate::component::popup::is_open(&harness.ctx, super::list::group_menu_id(keyed)), "and closed");
+    // Enter opens the keyed message into the one pane; the subject's menu opens over it by the menu key.
+    let subject = harness.state().mailbox().messages().iter().find(|row| row.id == keyed).map(|row| row.subject.clone()).unwrap();
+    assert_eq!(subject, SUBJECT);
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    assert!(super::reader_rect(&harness.ctx).is_some(), "the message in front");
+    assert!(tab_to(&mut harness, SUBJECT), "Tab reaches the subject");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+    harness.run();
+    harness.get_by_label("Copy the subject");
+    // One Esc: the menu closes, and nothing under it moves.
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    assert!(harness.query_by_label("Copy the subject").is_none(), "Esc closed the menu");
+    assert!(super::reader_rect(&harness.ctx).is_some(), "the message stays in front");
+    assert_eq!(harness.state().reader().open_id(), Some(keyed), "the same message open");
+    assert!(harness.query_by_label(SUBJECT).is_some_and(|node| node.accesskit_node().is_focused()), "the keyboard back on the subject");
+    // The next Esc is the reader's: back to the list.
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    assert!(super::reader_rect(&harness.ctx).is_none(), "the second Esc goes back to the list");
+}
