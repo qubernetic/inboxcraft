@@ -1706,6 +1706,32 @@ fn a_row_leaving_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands
 }
 
 #[test]
+fn a_row_snoozed_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands() {
+    let mut harness = moving_pane(300.0, crate::theme::TextScale::default(), 1.0);
+    harness.hover_at(egui::pos2(220.0, 150.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -200.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(40);
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let top = pane_rect(&harness, first).unwrap().top();
+    let above = harness.state().messages().first().map(|row| row.id).unwrap();
+    assert_ne!(above, first, "the first message is above the viewport");
+    // Snoozed until tomorrow: it fades in its place, then its line goes at once.
+    let until = Timestamp::from_unix(1_793_869_200 + 86_400, 0).unwrap();
+    harness.state_mut().start(above, crate::mailbox::Act::Snooze(until));
+    for step in 0..16 {
+        harness.step();
+        assert_eq!(pane_rect(&harness, first).map(|rect| rect.top()), Some(top), "step {step}: the first row in sight stays");
+    }
+    assert!(harness.state().left_row().is_none(), "gone");
+}
+
+#[test]
 fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
     use crate::theme::{Mode, TextScale, Theme};
     for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
