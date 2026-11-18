@@ -10,7 +10,7 @@ use inboxcraft_model::{
 use inboxcraft_store::{Batch, Change, Memory, Storage};
 use serde_json::{Value, json};
 
-use super::{ADDRESS_CAP, MAX_REASONS, NAME_CAP, clean};
+use super::{ADDRESS_CAP, MAX_REASONS, NAME_CAP, clean, reason, settle};
 use crate::test_support::{NOW, address, at, change, folder, mailbox, sample_session, session_with};
 use crate::{AgentClass, Caller, EngineError, Registry, Session};
 
@@ -174,8 +174,30 @@ fn the_folder_alone_is_the_default_and_only_when_nothing_else_is() {
     let mut session = session();
     put(&mut session, FIRST, 3, "anna@example.org", plain());
     assert_eq!(why(&mut session, FIRST), [json!({ "kind": "default", "text_id": "why.default", "args": { "folder": 3, "role": "archive" } })]);
-    state(&mut session, FIRST, MessageState { returned: Some(at(NOW)), ..MessageState::default() });
-    assert_eq!(said(&why(&mut session, FIRST)), [pair("snooze", "why.snooze.returned")]);
+    // A pin is no reason: the folder still says it alone.
+    state(&mut session, FIRST, MessageState { pinned: true, ..MessageState::default() });
+    assert_eq!(said(&why(&mut session, FIRST)), [pair("default", "why.default")]);
+    // Any other reason stands in its place.
+    put(&mut session, FIRST + 1, 2, "anna@example.org", with_id("plans@example.org"));
+    put(&mut session, FIRST + 2, 3, "anna@example.org", answering("plans@example.org"));
+    assert_eq!(said(&why(&mut session, FIRST + 2)), [pair("thread", "why.thread.yours")]);
+}
+
+#[test]
+fn back_from_a_snooze_is_a_reason_only_while_the_message_stands_where_it_came_back_to() {
+    let mut session = session();
+    let snooze = json!({ "id": 1, "until": "2026-11-05T18:00:00Z" });
+    session.run("mail.snooze", &snooze).unwrap();
+    assert_eq!(said(&why(&mut session, 1)), [pair("snooze", "why.snooze.until")]);
+    session.run("mail.unsnooze", &json!({ "id": 1 })).unwrap();
+    let back = why(&mut session, 1);
+    assert_eq!(back[0], json!({ "kind": "snooze", "text_id": "why.snooze.returned", "args": { "at": "2026-11-05T09:00:00Z" } }));
+    // The owner archives it: the return no longer says why it is there.
+    session.run("mail.archive", &json!({ "id": 1 })).unwrap();
+    assert_eq!(why(&mut session, 1), [json!({ "kind": "default", "text_id": "why.default", "args": { "folder": 3, "role": "archive" } })]);
+    // Snoozed again: a fresh snooze.
+    session.run("mail.snooze", &snooze).unwrap();
+    assert_eq!(said(&why(&mut session, 1)), [pair("snooze", "why.snooze.until")]);
 }
 
 #[test]
@@ -193,16 +215,22 @@ fn the_reasons_come_most_specific_first() {
 
 #[test]
 fn at_most_four_reasons_the_least_specific_left_out() {
-    let mut session = session();
-    put(&mut session, FIRST, 2, "anna@example.org", with_id("plans@example.org"));
-    put(&mut session, FIRST + 1, BLOCKED, "frank@example.org", answering("plans@example.org"));
-    sender(&mut session, "frank@example.org", true, Some(Screening::Blocked), Some(Group::Updates));
-    state(&mut session, FIRST + 1, MessageState { returned: Some(at(NOW)), ..MessageState::default() });
-    // Five reasons: snooze, the sender's group, the sender blocked, the blocked folder and the thread.
+    // No message the stores can hold gives five distinct reasons today (four at most: the order test's); the cap
+    // still stands, so it is tested where the answer is settled, on five reasons of five kinds.
+    let five: Vec<Value> = [
+        ("snooze", "why.snooze.returned"),
+        ("rule", "why.rule.group"),
+        ("sender", "why.sender.blocked"),
+        ("screener", "why.screener.new"),
+        ("thread", "why.thread.other"),
+    ]
+    .into_iter()
+    .map(|(kind, text_id)| reason(kind, text_id, json!({})))
+    .collect();
     assert_eq!(MAX_REASONS, 4);
     assert_eq!(
-        said(&why(&mut session, FIRST + 1)),
-        [pair("snooze", "why.snooze.returned"), pair("sender", "why.sender.group"), pair("sender", "why.sender.blocked"), pair("screener", "why.screener.blocked")]
+        said(&settle(five)),
+        [pair("snooze", "why.snooze.returned"), pair("rule", "why.rule.group"), pair("sender", "why.sender.blocked"), pair("screener", "why.screener.new")]
     );
 }
 

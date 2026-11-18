@@ -492,10 +492,12 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     };
     let mut reasons = Vec::new();
 
-    // Snooze: it came back, or it waits in the snoozed folder.
+    // Snooze: it waits in the snoozed folder, or it came back and still stands where it came back to. The store keeps
+    // the time it came back but not the folder, and a snooze brings mail back to the inbox, so it counts there only:
+    // once the owner moves it on, the return no longer says why it is where it is.
     match (role, state.snoozed_until, state.returned) {
         (Some(Role::Snoozed), Some(until), _) => reasons.push(reason("snooze", "why.snooze.until", json!({ "until": json::date(until) }))),
-        (_, _, Some(at)) => reasons.push(reason("snooze", "why.snooze.returned", json!({ "at": json::date(at) }))),
+        (Some(Role::Inbox), _, Some(at)) => reasons.push(reason("snooze", "why.snooze.returned", json!({ "at": json::date(at) }))),
         _ => {}
     }
 
@@ -545,8 +547,13 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
     if reasons.is_empty() {
         reasons.push(reason("default", "why.default", json!({ "folder": message.folder().get(), "role": role.map(|role| name_arg(&view::role_name(role))) })));
     }
+    Ok(Outcome::new(json!({ "reasons": settle(reasons) })))
+}
+
+/// The reasons an answer gives of `reasons`, most specific first: at most [`MAX_REASONS`].
+fn settle(mut reasons: Vec<Value>) -> Vec<Value> {
     reasons.truncate(MAX_REASONS);
-    Ok(Outcome::new(json!({ "reasons": reasons })))
+    reasons
 }
 
 #[cfg(test)]
