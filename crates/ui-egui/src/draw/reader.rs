@@ -1161,8 +1161,13 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s3;
-            // In one pane a pointer needs a way back to the list here too.
-            back_to_list(ui, theme, keymap, drawn);
+            // In one pane a pointer needs a way back to the list here too, centred on the avatar.
+            if super::one_pane(ui.ctx()) {
+                let tool = crate::component::control_side(theme);
+                let (room, _) = ui.allocate_exact_size(vec2(tool, side), Sense::hover());
+                let at = Rect::from_center_size(room.center(), vec2(tool, tool));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| back_to_list(ui, theme, keymap, drawn));
+            }
             crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // A reader that fills the window has no list beside it to go back to.

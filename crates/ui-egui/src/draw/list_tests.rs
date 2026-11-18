@@ -3144,6 +3144,13 @@ fn in_one_pane_a_held_messages_head_starts_with_back_to_the_list_and_the_focus_o
     assert_eq!(rows(&harness), 0, "the held message stands in the list's place");
     let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
     assert_eq!(focused_rect(&harness), Some(back), "a press put the focus on the head's first tool");
+    // It stands on the middle of the head's avatar, the square right of it.
+    let avatar = flat_shapes(&harness)
+        .into_iter()
+        .map(|shape| shape.visual_bounding_rect())
+        .find(|rect| rect.left() > back.right() && rect.left() < back.right() + 20.0 && rect.width() >= 30.0 && rect.top() < back.bottom())
+        .unwrap();
+    assert!((back.center().y - avatar.center().y).abs() < 0.5, "{back:?} on the middle of the avatar {avatar:?}");
     harness.get_by_role_and_label(Role::Button, "Back to the list").click();
     harness.run();
     harness.run();
