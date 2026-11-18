@@ -598,7 +598,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         note_snooze_row(ui.ctx(), message.id, rect, response.id);
     }
     if message.group.is_some() {
-        acted = acted.or(menu(ui, theme, response, message, selected));
+        acted = acted.or(menu(ui, theme, response, message));
     }
     // The focus its menu gives back on closing is not a walk to the row: it selects nothing.
     let gained = response.gained_focus() && !returned_to(ui.ctx(), message.id);
@@ -783,11 +783,6 @@ fn landing(listing: &Listing<'_>, wanted: u64, top: f32, bottom: f32) -> Option<
     if below { (first..end).rev().find_map(|index| whole(&index)) } else { (first..end).find_map(|index| whole(&index)) }
 }
 
-/// Where the menu the keyboard opened is kept: the message whose row asked for it, and the popup.
-fn by_keys_id() -> Id {
-    Id::unique("list-menu-by-keys")
-}
-
 /// Where the open group menu is kept: the message whose row showed it, and the pass that did.
 fn menu_shown_id() -> Id {
     Id::unique("list-menu-shown")
@@ -810,9 +805,8 @@ fn returned_to(ctx: &egui::Context, id: u64) -> bool {
 }
 
 /// Settles the rows' menus after a pass: an ask ([`ask_menu`]) no row took in a whole pass is dropped (its row was not
-/// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu the keyboard
-/// opened that is no longer open has ended, whatever closed it (a menu whose row this pass did not draw closes, as
-/// every float not shown), so it gives the focus back to nothing later.
+/// drawn: its message gone), so it never opens later, away from the moment it was asked for; a menu whose row this
+/// pass did not draw closes, as every float not shown.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_closed_id())).is_some_and(|(_, at)| pass > at.saturating_add(RETURN_PASSES)) {
@@ -830,31 +824,23 @@ pub(super) fn settle_menus(ctx: &egui::Context) {
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(_, at)| at < pass) {
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_asked_id()));
     }
-    if ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(_, popup)| !popup::is_open(ctx, popup)) {
-        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
-    }
 }
 
 /// The group menu of `message`'s row `response`: by a right click at the pointer, or asked for by the keyboard
-/// ([`ask_menu`]) under the row, its first choice focused. A menu the keyboard opened gives the focus back to its row
-/// when it closes, only while that row is still the `keyed` one and in sight: a menu closing never changes the message
-/// the reader shows. The act chosen.
-fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow, keyed: bool) -> Option<Act> {
+/// ([`ask_menu`]) under the row, its first choice focused. A menu the keyboard opened gives its row the keyboard back
+/// however it closes (Esc, a choice, a press outside); one the pointer opened, on Esc. A menu closing never changes
+/// the message the reader shows. The act chosen.
+fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow) -> Option<Act> {
     let ctx = ui.ctx().clone();
     let popup_id = group_menu_id(message.id);
     let first_id = popup_id.with("focus-first");
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(id, _)| id == message.id) {
         ctx.data_mut(|data| {
             data.remove::<(u64, u64)>(menu_asked_id());
-            data.insert_temp(by_keys_id(), (message.id, popup_id));
             data.insert_temp(first_id, true);
         });
         popup::open_under(&ctx, popup_id);
     }
-    if response.secondary_clicked() {
-        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
-    }
-    let by_keys = ctx.data(|data| data.get_temp::<(u64, Id)>(by_keys_id())).is_some_and(|(id, popup)| id == message.id && popup == popup_id);
     let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
     let width = theme.fonts.body.size * MENU_WIDTH;
     let was_open = popup::is_open(&ctx, popup_id);
@@ -868,13 +854,6 @@ fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow,
         ctx.data_mut(|data| data.insert_temp(menu_shown_id(), (message.id, pass)));
     } else if was_open {
         ctx.data_mut(|data| data.insert_temp(menu_closed_id(), (message.id, pass)));
-    }
-    if by_keys && !popup::is_open(&ctx, popup_id) {
-        ctx.data_mut(|data| data.remove::<(u64, Id)>(by_keys_id()));
-        let in_sight = ui.clip_rect().contains_rect(response.rect);
-        if keyed && in_sight {
-            response.request_focus();
-        }
     }
     acted
 }

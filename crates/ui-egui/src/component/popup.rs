@@ -670,11 +670,11 @@ pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, wid
 }
 
 /// Opens the [`context_menu`] `id` from the keyboard (the Menu key, `Shift F10`): it hangs under its row, not where a
-/// pointer last opened it.
+/// pointer last opened it, and, as every menu the keyboard opened, gives its row the keyboard back however it closes.
 pub fn open_under(ctx: &Context, id: Id) {
     ctx.data_mut(|data| {
         data.remove::<Pos2>(id.with("at"));
-        data.insert_temp(by_key_id(id), false);
+        data.insert_temp(by_key_id(id), true);
     });
     set_open(ctx, id, true);
 }
@@ -698,10 +698,13 @@ fn menu_at<R>(
         None => {
             set_open(ctx, id, false);
             // The float gave the opener the keyboard; a press outside a menu the pointer opened takes it away again
-            // (Esc leaves it there).
+            // (Esc leaves it there). A menu the keyboard opened keeps it given back for a few frames: the press that
+            // closed it may land on the ground, which takes the focus from everything.
             let beside = ctx.data(|data| data.get_temp::<()>(id.with("closing-press"))).is_some();
             if beside && !by_key {
                 ctx.memory_mut(|memory| memory.surrender_focus(opener.id));
+            } else if beside {
+                ctx.data_mut(|data| data.insert_temp(id.with("refocus"), REFOCUS_FRAMES));
             }
             None
         }

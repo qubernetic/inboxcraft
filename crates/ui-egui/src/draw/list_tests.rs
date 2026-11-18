@@ -3502,3 +3502,42 @@ fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_li
         assert_eq!(harness.state().reader().open_id(), None, "{way}: nothing opened");
     }
 }
+
+#[test]
+fn a_rows_menu_the_keyboard_opened_gives_the_row_the_keyboard_however_it_closes() {
+    for width in [900.0_f32, 1300.0] {
+        for close in ["Esc", "Enter on a choice", "a press outside"] {
+            let mut harness = wide(width);
+            harness.key_press(Key::J);
+            harness.run();
+            let keyed = harness.state().mailbox().selected();
+            harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+            harness.run();
+            harness.run();
+            assert!(crate::component::popup::any_open(&harness.ctx), "{width} {close}: Shift F10 opens the row's menu");
+            match close {
+                "Esc" => harness.key_press(Key::Escape),
+                "Enter on a choice" => harness.key_press(Key::Enter),
+                _ => {
+                    let at = egui::pos2(width - 10.0, 880.0);
+                    harness.hover_at(at);
+                    harness.run();
+                    for pressed in [true, false] {
+                        harness.event(egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Modifiers::NONE,
+                        });
+                        harness.step();
+                    }
+                }
+            }
+            harness.run();
+            harness.run();
+            assert!(!crate::component::popup::any_open(&harness.ctx), "{width} {close}: the menu closed");
+            assert_eq!(harness.state().mailbox().selected(), keyed, "{width} {close}: the same row keyed");
+            assert_eq!(super::list::focused_row(&harness.ctx), keyed, "{width} {close}: the row has the keyboard again");
+        }
+    }
+}
