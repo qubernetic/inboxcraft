@@ -84,7 +84,8 @@ RUN cargo binstall --no-confirm --locked \
 # dependencies. The wrapper drops CARGO_TARGET_DIR and CARGO_BUILD_TARGET_DIR
 # first: sccache hashes every CARGO_* variable, so with them in the key no two
 # target dirs would ever share an entry (rustc gets its output dir as an
-# argument and does not need them).
+# argument and does not need them). It runs rustc without sccache when
+# CARGO_INCREMENTAL is on, which sccache refuses.
 RUN set -eu; \
     case "$(uname -m)" in \
         x86_64) sha="${SCCACHE_SHA256_X86_64}" ;; \
@@ -98,10 +99,16 @@ RUN set -eu; \
     tar -xzf "/tmp/${name}.tar.gz" -C /usr/local/cargo/bin --strip-components=1 "${name}/sccache"; \
     rm -f "/tmp/${name}.tar.gz"; \
     printf '%s\n' \
-        '#!/bin/sh' \
+        '#!/bin/bash' \
+        '# bash, not sh: dash drops variables whose names are not shell names,' \
+        '# such as CARGO_BIN_EXE_inboxcraft-web, before rustc could read them.' \
         '# sccache hashes every CARGO_* variable; the target dir must not be part of the key.' \
         'unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR' \
-        'exec sccache "$@"' \
+        '# sccache refuses to run with incremental builds forced on (the coverage run).' \
+        'case "${CARGO_INCREMENTAL:-0}" in' \
+        '    0) exec sccache "$@" ;;' \
+        '    *) exec "$@" ;;' \
+        'esac' \
         > /usr/local/cargo/bin/sccache-wrap; \
     chmod 0755 /usr/local/cargo/bin/sccache /usr/local/cargo/bin/sccache-wrap; \
     sccache --version
