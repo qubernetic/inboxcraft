@@ -2883,3 +2883,99 @@ fn in_the_lists_bar_only_the_thumb_takes_a_press() {
     harness.run();
     assert!(row_rect(&harness, order[0]).is_none(), "dragging the thumb scrolled the list");
 }
+
+/// The docked composer of `harness` holding a whole message: to Odile, a subject and "Dear Odile".
+fn write_to_odile(harness: &mut Harness<'static, InboxApp>) {
+    harness.state_mut().compose();
+    harness.run();
+    let (Some(composer), mailbox) = harness.state_mut().composer_mut() else { panic!("New message opens the composer") };
+    if let Some(field) = composer.typing_mut(crate::compose::Line::To) {
+        "Odile Brannock <odile@example.org>,".clone_into(field);
+    }
+    composer.typed(mailbox, crate::compose::Line::To).unwrap();
+    "Tuesday".clone_into(composer.subject_mut());
+    "Dear Odile".clone_into(composer.text_mut());
+    harness.run();
+}
+
+/// What the composer holds and whether it floats.
+fn written(harness: &Harness<'static, InboxApp>) -> Option<(String, bool)> {
+    harness.state().composer().map(|composer| (composer.text().to_owned(), composer.floating()))
+}
+
+#[test]
+fn in_one_pane_the_list_over_the_docked_composer_has_its_keys_and_sends_nothing() {
+    let mut harness = wide(900.0);
+    write_to_odile(&mut harness);
+    assert_eq!(rows(&harness), 0, "the composer stands in the list's place");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "Esc brings the list in front of the composer");
+    // Behind the list the composer sends by no way in: not by its key, not by the palette.
+    assert!(!harness.state().can_run(crate::keymap::SEND), "the palette offers no Send for a composer not shown");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    harness.run();
+    assert_ne!(harness.state().mailbox().last_run(), Some("mail.send"), "Ctrl Enter sends nothing the person cannot see");
+    assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), false)), "the composer keeps all it holds, behind the list");
+    // The list in front has all its keys; walking it reads nothing and leaves the composer where it is.
+    let was = read_states(&harness);
+    harness.key_press(Key::J);
+    harness.run();
+    harness.key_press(Key::J);
+    harness.run();
+    let second = harness.state().mailbox().selected();
+    assert!(second.is_some(), "J keys a row");
+    harness.key_press(Key::K);
+    harness.run();
+    assert_ne!(harness.state().mailbox().selected(), second, "K moves back up");
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), second, "and the arrows move too");
+    assert!(selected_focused(&harness), "the keyed row has the focus");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
+    assert_eq!(read_states(&harness), was, "the walk read nothing");
+    assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), false)), "the composer stays behind the list as it was");
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    assert!(egui::Popup::is_any_open(&harness.ctx), "Shift F10 opens the keyed row's menu");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!egui::Popup::is_any_open(&harness.ctx));
+    // Enter opens the keyed message in front; the composer floats with its text.
+    let keyed = second.unwrap();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "Enter: the message in the list's place");
+    assert_eq!(harness.state().reader().open_id(), Some(keyed));
+    assert!(seen(&harness, keyed), "Enter reads it");
+    assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), true)), "the composer floats, nothing lost");
+}
+
+#[test]
+fn the_list_over_the_composer_ends_where_the_window_holds_two_panes_and_two_panes_send() {
+    let mut harness = wide(900.0);
+    write_to_odile(&mut harness);
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "the list in front of the composer");
+    harness.set_size(vec2(1300.0, 900.0));
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0 && harness.query_all_by_role(Role::MultilineTextInput).count() > 0, "two panes: both show");
+    harness.set_size(vec2(900.0, 900.0));
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "narrowed again, the composer is in front: two panes ended the list's turn");
+    assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), false)));
+    // Two panes: Ctrl Enter sends the composer shown.
+    let mut harness = wide(1300.0);
+    write_to_odile(&mut harness);
+    assert!(harness.state().can_run(crate::keymap::SEND));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().mailbox().last_run(), Some("mail.send"), "beside the list the composer sends");
+}

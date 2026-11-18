@@ -486,7 +486,7 @@ impl InboxApp {
             keymap::BACK => self.screen == Screen::Mail && self.reader.open_id().is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
-            keymap::SEND => self.docked(),
+            keymap::SEND => self.composer_in_front(),
             _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && (self.list_row.is_some() || self.list_keys),
             _ => keymap::action(id).is_some(),
         }
@@ -592,8 +592,9 @@ impl InboxApp {
             self.mailbox.select_keyed(from);
         }
         self.mailbox.step_in(&list::order(ctx), forward, rows);
-        // In one pane a message in front stays in front as the keys read on; behind the list, they only walk it.
-        let hidden = one_pane(ctx) && !self.message_in_front();
+        // In one pane a message in front stays in front as the keys read on; behind the list (the composer's too),
+        // they only walk it.
+        let hidden = one_pane(ctx) && (self.docked() || !self.message_in_front());
         self.reading = !hidden && one_pane(ctx);
         if let Some(to) = self.mailbox.selected() {
             // In one pane with the list in front the reader is not shown: the keyed message is not read yet.
@@ -620,13 +621,14 @@ impl InboxApp {
         self.list_keys = false;
         self.reading = true;
         self.focus_reader = one_pane(ctx);
+        self.float_behind();
         ctx.request_repaint();
     }
 
     /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
     fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
         let single = one_pane(ctx);
-        let composing = self.docked() && !self.list_over_composer;
+        let composing = self.composer_in_front();
         let swapped = single && (composing || (!self.docked() && self.message_in_front() && self.reader.open_id().is_some()));
         if self.screen != Screen::Mail || (self.list_keys && !swapped) || (self.docked() && !swapped) {
             return false;
@@ -651,6 +653,7 @@ impl InboxApp {
             self.list_keys = true;
             self.reading = true;
             self.focus_reader = one_pane(ctx);
+            self.float_behind();
             if let Some(focused) = self.list_row.filter(|focused| Some(*focused) != clicked) {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
@@ -669,7 +672,8 @@ impl InboxApp {
         if self.reader.open_id().is_none() {
             self.reading = false;
         }
-        if !docked {
+        // The list stands over the composer only in one pane: two panes show both, and end its turn.
+        if !docked || !single {
             self.list_over_composer = false;
         }
         let front = (docked && !self.list_over_composer) || (!docked && self.message_in_front() && self.reader.open_id().is_some());
@@ -686,6 +690,16 @@ impl InboxApp {
         }
     }
 
+    /// A message opened from the list over the docked composer (one pane) takes the composer's place: the composer
+    /// floats, all it holds kept.
+    fn float_behind(&mut self) {
+        if self.list_over_composer
+            && let Some(composer) = &mut self.composer
+        {
+            composer.set_floating(true);
+        }
+    }
+
     /// In one pane, whether the open message stands in the list's place: one the person opened (`Enter`, a press) or
     /// one selected from outside (a script); never one the keys or the focus walked to, which stays behind the list.
     fn message_in_front(&self) -> bool {
@@ -696,7 +710,12 @@ impl InboxApp {
     /// the focus; never while the palette, the settings, the composer in the reader's place or the calendar hold the
     /// keys, or a popup is open.
     fn list_has_keyboard(&self, ctx: &egui::Context) -> bool {
-        if self.screen != Screen::Mail || self.palette.is_open() || self.settings.is_open() || self.settings.capturing().is_some() || self.docked() {
+        if self.screen != Screen::Mail
+            || self.palette.is_open()
+            || self.settings.is_open()
+            || self.settings.capturing().is_some()
+            || self.composer_in_front()
+        {
             return false;
         }
         // A menu open over the list (a row's own included) keeps the keys: its arrows are its own.
@@ -817,7 +836,7 @@ impl InboxApp {
         // A row with the focus is the list's keyed row: it quiets no key.
         let focused = ctx.memory(|memory| memory.focused().is_some()) && self.list_row.is_none();
         // The composer in the reader's place hides the selected message: the keys that act on it rest.
-        let quiet = focused || held || self.settings.is_open() || self.docked();
+        let quiet = focused || held || self.settings.is_open() || self.composer_in_front();
         let typing = quiet || self.screen == Screen::Calendar;
         if held {
             return Keys { ran: Vec::new(), escape: false, typing, quiet };
@@ -975,11 +994,14 @@ impl InboxApp {
     }
 
     /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
-    /// the composer has the reader's place sends the composer to its floating panel.
+    /// the composer has the reader's place sends the composer to its floating panel, unless the list stands over the
+    /// composer in one pane and the person only walks it.
     fn sync(&mut self) {
         if self.reader.open_id() != self.mailbox.selected() {
             let selected = self.mailbox.selected();
+            let walked = self.list_over_composer && !self.reading;
             if selected.is_some()
+                && !walked
                 && let Some(composer) = &mut self.composer
             {
                 composer.set_floating(true);
@@ -1023,6 +1045,12 @@ impl InboxApp {
     /// control channel).
     pub fn composer_mut(&mut self) -> (Option<&mut Composer>, &mut Mailbox) {
         (self.composer.as_mut(), &mut self.mailbox)
+    }
+
+    /// Whether the composer has the reader's place and is shown there: not floating, and in one pane not behind the
+    /// list. Only then do its keys (Send) run and the list's rest.
+    fn composer_in_front(&self) -> bool {
+        self.docked() && !self.list_over_composer
     }
 
     /// Whether the composer has the reader's place.
