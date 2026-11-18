@@ -453,6 +453,21 @@ fn threaded(id: u64, subject: &str, calendar: Option<(&str, &str)>, answers: Opt
 
 /// [`threaded`] from `from` (a name and an address), in the sample's folder `folder`.
 fn from_whom(from: (&str, &str), folder: u64, id: u64, subject: &str, calendar: Option<(&str, &str)>, answers: Option<u64>, age: i64) -> Vec<Change> {
+    written(from, folder, id, subject, calendar, answers, age, None)
+}
+
+/// [`from_whom`] with an HTML part `html` beside its text, if any.
+#[expect(clippy::too_many_arguments, reason = "a test message's parts")]
+fn written(
+    from: (&str, &str),
+    folder: u64,
+    id: u64,
+    subject: &str,
+    calendar: Option<(&str, &str)>,
+    answers: Option<u64>,
+    age: i64,
+    html: Option<&str>,
+) -> Vec<Change> {
     let own = format!("{id}@example.org");
     let mut builder = MessageBuilder::new()
         .from(Sender::named(from.0, from.1))
@@ -460,6 +475,9 @@ fn from_whom(from: (&str, &str), folder: u64, id: u64, subject: &str, calendar: 
         .subject(subject)
         .message_id(&own)
         .text("A word more about it.");
+    if let Some(html) = html {
+        builder = builder.html(html);
+    }
     if let Some(answers) = answers {
         builder = builder.in_reply_to(&format!("{answers}@example.org"));
     }
@@ -611,4 +629,92 @@ fn of_two_cards_that_ask_the_newest_holds_the_one_primary() {
     let newer = on_card(&harness, "Party 981", "Going").unwrap();
     assert_ne!(older, newer);
     assert_eq!(primaries(&harness), vec![newer], "the newest card's Going is the one primary");
+}
+
+/// An HTML invitation's body: a heading, a link and enough paragraphs to scroll a short reader.
+fn html_body() -> String {
+    let mut html = "<h2>The menu</h2><p>See <a href=\"https://example.org/menu\">the menu</a> before you answer.</p>".to_owned();
+    html.push_str(&"<p>Words about the evening that carry no link and fill the reader well past its foot.</p>".repeat(40));
+    html
+}
+
+/// An invitation whose body is a fitted HTML message, with the reader's notice over it: the card's Going is the
+/// pane's one primary, and the notice stays where it is while the message scrolls under it.
+#[test]
+fn an_html_invitation_has_one_primary_and_its_notice_stands_still_over_the_fitted_body() {
+    let body = html_body();
+    let mut harness = sending(written(
+        ("Odile Brannock", "odile@example.org"),
+        1,
+        960,
+        "Invitation: Party 960",
+        Some(("REQUEST", ORGANISED_BY_ODILE)),
+        None,
+        600,
+        Some(&body),
+    ));
+    harness.set_size(vec2(1300.0, 700.0));
+    open(&mut harness, "Invitation: Party 960");
+    for _ in 0..4 {
+        harness.run();
+    }
+    harness.get_by_label("The menu");
+    let going = on_card(&harness, "Party 960", "Going").expect("the card offers Going");
+    assert_eq!(primaries(&harness), vec![going], "Going is the one primary over the fitted body");
+    const SAID: &str = "Subject copied";
+    harness.state_mut().reader_mut().0.set_notice(SAID.to_owned());
+    for _ in 0..4 {
+        harness.run();
+    }
+    let label = format!("Note: {SAID}");
+    let before = harness.get_by_label(&label).rect();
+    let heading = harness.get_by_label("The menu").rect();
+    harness.hover_at(egui::pos2(before.center().x, before.bottom() + 120.0));
+    harness.run();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -400.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+    });
+    for _ in 0..4 {
+        harness.run();
+    }
+    let moved = harness.query_by_label("The menu").map(|node| node.rect());
+    assert!(moved.is_none_or(|rect| rect.top() < heading.top()), "the fitted body scrolled: {heading:?} to {moved:?}");
+    assert_eq!(harness.get_by_label(&label).rect(), before, "the notice stays where it was");
+}
+
+/// A held sender's invitation whose body is fitted HTML offers no answer, as a plain one does: an answer is mail to
+/// them.
+#[test]
+fn a_held_sender_s_html_invitation_offers_no_answer() {
+    let organiser = "ORGANIZER;CN=Stranger:mailto:stranger@example.org\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mira@example.org\r\n";
+    let body = html_body();
+    let mut harness = sending(written(
+        ("Stranger", "stranger@example.org"),
+        SCREENER,
+        961,
+        "Invitation: Stranger's dinner",
+        Some(("REQUEST", organiser)),
+        None,
+        600,
+        Some(&body),
+    ));
+    let id = id_of(&mut harness, "Invitation: Stranger's dinner");
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::Senders);
+    harness.run();
+    harness.state_mut().mailbox_mut().select(Some(id));
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(harness.state().mailbox().held(id), "the sender is held");
+    harness.get_by_label("The menu");
+    assert!(holds(&harness, "the sender is not let in yet"), "the card says why it cannot be answered");
+    let missed = crate::component::tests::keyboard_walk(&mut harness);
+    assert!(missed.is_empty(), "Tab never reaches {missed:?}");
+    for name in ["Going", "Maybe", "No", "Keep my answer", "Change answer"] {
+        assert!(!button(&harness, name), "{name} is offered to a held sender");
+    }
 }
