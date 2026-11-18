@@ -289,9 +289,12 @@ fn done_all_on_a_group_card_files_the_group() {
     let mut app = app();
     app.mailbox_mut().set_inbox_view(InboxView::Cards);
     let updates: Vec<u64> = app.mailbox().messages().iter().filter(|row| row.group == Some(GroupKind::Updates)).map(|row| row.id).collect();
+    let unread = u64::try_from(app.mailbox().messages().iter().filter(|row| updates.contains(&row.id) && !row.seen).count()).unwrap();
     let mut harness = harness_of(app);
-    // People's card comes first, Updates' second.
-    let done_all = harness.query_all_by_role_and_label(Role::Button, "Done all").nth(1).unwrap();
+    // "done all" shows on the head the pointer is over.
+    harness.get_by_label(&crate::component::group_head::spoken("Updates", unread)).hover();
+    harness.run();
+    let done_all = harness.query_all_by_role_and_label(Role::Button, "done all").next().unwrap();
     done_all.click();
     settle(&mut harness);
     let app = harness.state();

@@ -16,6 +16,7 @@ use crate::tr;
 use super::Shown;
 use super::gallery::{cell, cells, title};
 use super::hover::Action;
+use super::group_head::{self, GroupHead};
 use super::mail_row::{self, Mark, MailRow};
 use super::margin;
 use super::tag::TagKind;
@@ -216,14 +217,70 @@ fn mail_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// One state of the group head's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HeadState {
+    pub name: &'static str,
+    pub unread: u64,
+    pub shown_rows: Option<&'static str>,
+    pub link: Option<&'static str>,
+    pub shown: Shown,
+}
+
+/// The group head's states, in the sheet's order, with the sheet's words.
+pub(crate) fn head_states() -> [HeadState; 6] {
+    let default = HeadState { name: "default", unread: 6, shown_rows: None, link: None, shown: Shown::Rest };
+    [
+        default,
+        HeadState { name: "hover", shown: Shown::Hover, ..default },
+        HeadState { name: "focus", shown: Shown::Focus, ..default },
+        HeadState { name: "show-all", shown_rows: Some("3 of 6 ·"), link: Some(tr!("show all")), ..default },
+        HeadState { name: "show-fewer", shown_rows: Some("6 of 6 ·"), link: Some(tr!("show fewer")), ..default },
+        HeadState { name: "zero", unread: 0, ..default },
+    ]
+}
+
+/// The name of the group on the head's boards.
+pub(crate) const HEAD_NAME: &str = "Notifications";
+
+/// The group head of `state`, 440 wide, at `ui`'s cursor.
+pub(crate) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &HeadState) {
+    let shown = GroupHead {
+        id: Id::unique("gallery-group-head").with(state.name),
+        index: "[ B ]",
+        name: HEAD_NAME,
+        unread: state.unread,
+        shown: state.shown_rows,
+        link: state.link,
+        hover_link: Some(tr!("done all")),
+    };
+    ui.allocate_ui(vec2(ROW_WIDTH, Theme::size(theme, group_head::HEIGHT)), |ui| {
+        ui.set_width(ROW_WIDTH);
+        let forced = (state.shown != Shown::Rest).then_some(state.shown);
+        group_head::group_head(ui, theme, keymap, &shown, forced);
+    });
+}
+
+/// The group head's board: every state of its sheet, two to a line.
+fn group_heads(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Group head"));
+    for pair in head_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| head(ui, theme, keymap, state));
+            }
+        });
+    }
+}
+
 /// The left column: the mail row.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     mail_rows(ui, theme, keymap);
 }
 
-/// The right column.
+/// The right column: the group head.
 fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
-    let _ = (ui, theme, keymap);
+    group_heads(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

@@ -42,10 +42,11 @@ use super::paint::line;
 use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::Action;
+use crate::component::group_head::{GroupHead, group_head};
 use crate::component::mail_row::{Mark, MailRow, mail_row};
 use crate::component::tag::TagKind;
 use crate::component::pill::pill;
-use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
+use crate::component::{avatar, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
@@ -613,8 +614,10 @@ pub(super) struct HeadState {
     pub count: usize,
     /// It shows all its rows: on a card, after "Show all"; in the grouped list, always.
     pub open: bool,
-    /// It heads a card of the cards view (a larger name, and "Done all"), not a part of the grouped list.
+    /// It heads a card of the cards view, not a part of the grouped list.
     pub card: bool,
+    /// Its place among the groups shown, from 0: its index letter.
+    pub index: usize,
 }
 
 /// `points` rounded to a whole even number of points, as [`Theme::size`] rounds: whole pixels at 1×, 1.5× and 2×.
@@ -782,10 +785,10 @@ fn sorted<'m>(mailbox: &'m Mailbox, groups: &[Group], leaving: Option<(&'m Leavi
 }
 
 /// The head of a group of `lines`: its messages' rows counted, the row that has left not.
-fn head_state(lines: &[Line<'_>], open: bool, card: bool) -> HeadState {
+fn head_state(lines: &[Line<'_>], open: bool, card: bool, index: usize) -> HeadState {
     let messages = || lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(*message) } else { None });
     let unread = u64::try_from(messages().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
-    HeadState { unread, count: messages().count(), open, card }
+    HeadState { unread, count: messages().count(), open, card, index }
 }
 
 /// The whole list as lines, laid out: in the cards `view` the screener card while senders `wait`, a card for each of
@@ -819,8 +822,8 @@ pub(super) fn lines<'a>(
     let (members, rest) = sorted(mailbox, groups, leaving);
     let parts = groups.iter().zip(&members).filter(|(_, lines)| lines.iter().any(|line| matches!(line, Line::Mail(_))));
     if view == InboxView::Cards {
-        for (group, lines) in parts {
-            let state = head_state(lines, open(group), true);
+        for (index, (group, lines)) in parts.enumerate() {
+            let state = head_state(lines, open(group), true, index);
             stack.open();
             stack.push(Line::Head(group, state));
             let shown = if state.open { state.count } else { state.count.min(GROUP_ROWS) };
@@ -849,12 +852,12 @@ pub(super) fn lines<'a>(
     }
     let rest = Some((other, &rest)).filter(|(_, rest)| rest.iter().any(|line| matches!(line, Line::Mail(_))));
     let mut started = false;
-    for (group, lines) in parts.chain(rest) {
+    for (index, (group, lines)) in parts.chain(rest).enumerate() {
         if !started {
             stack.open();
             started = true;
         }
-        stack.push(Line::Head(group, head_state(lines, true, false)));
+        stack.push(Line::Head(group, head_state(lines, true, false, index)));
         for line in lines {
             stack.push(*line);
         }
@@ -871,35 +874,21 @@ fn sends<'a>(theme: &Theme, mailbox: &'a Mailbox) -> Listing<'a> {
     stack.finish()
 }
 
-/// A group's head across `ui`: its badge, name and unread count, and on a card "Done all" at the right; whether "Done
-/// all" was pressed.
+/// A group's head across `ui`, the design's group head: its index, name and unread count, and "done all" while it is
+/// hovered or keyed; whether "done all" was pressed.
 fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState) -> bool {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let font = if state.card { theme.fonts.heading } else { theme.fonts.strong };
-    let side = if state.card { theme.fonts.heading.line * 1.4 } else { theme.fonts.strong.line * 1.2 };
-    badge::group(ui, theme, group.icon, &group.name, side);
-    ui.add_space(s.s1);
-    let name = line(ui, &[(&group.name, font, p.ink)], f32::INFINITY);
-    let count = if state.unread > 0 { badge::count_width(ui, theme, state.unread) + s.s2 } else { 0.0 };
-    let (rect, response) = ui.allocate_exact_size(vec2(name.size().x + count, side), Sense::hover());
-    let spoken = if state.unread > 0 { tr!("{name}, {count} unread", name = group.name, count = state.unread) } else { group.name.clone() };
-    response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
-    ui.painter().galley(pos2(rect.left(), rect.center().y - name.size().y / 2.0), name, p.ink);
-    if state.unread > 0 {
-        badge::count(ui, theme, state.unread, rect.right(), rect.center().y);
-    }
-    let mut done_all = false;
-    if state.card {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let pressed = button::text(ui, theme, keymap, tr!("Done all"), None, false);
-            if pressed.gained_focus() {
-                pressed.scroll_to_me(None);
-            }
-            done_all = pressed.clicked();
-        });
-    }
-    done_all
+    let letter = char::from(b'A'.saturating_add(u8::try_from(state.index % 26).unwrap_or(0)));
+    let index = format!("[ {letter} ]");
+    let shown = GroupHead {
+        id: Id::unique("list-group-head").with(&group.name),
+        index: &index,
+        name: &group.name,
+        unread: state.unread,
+        shown: None,
+        link: None,
+        hover_link: Some(tr!("done all")),
+    };
+    group_head(ui, theme, keymap, &shown, None).hover_link
 }
 
 /// "Show all (n)" or "Show fewer" across `ui`, as far in as the rows' text; whether it was pressed.
@@ -1069,7 +1058,6 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             let (Some(line), Some((top, bottom))) = (listing.lines.get(index), listing.span(index)) else { break };
             let inset = match line {
                 Line::Card(_) => 0.0,
-                Line::Head(..) => listing.inset + theme.spacing.s2,
                 _ => listing.inset,
             };
             let layout = match line {

@@ -17,7 +17,7 @@ use crate::sample;
 use crate::theme::install_fonts;
 
 /// The parts of the group cards, which the simple list leaves out.
-const CARDS_ONLY: [&str; 4] = ["Done all", "Show all (7)", "People", "Updates"];
+const CARDS_ONLY: [&str; 4] = ["done all", "Show all (7)", "People, 2 unread", "Updates, 1 unread"];
 
 const ODILE: &str = "Odile Brannock, Allotment rota for November, 08:35, unread";
 const ODILE_READ: &str = "Odile Brannock, Allotment rota for November, 08:35";
@@ -297,7 +297,11 @@ fn the_showcase_shows_the_screener_and_the_group_cards_with_their_rows() {
     harness.get_by_role_and_label(Role::Button, "Review");
     harness.get_by_label("People, 2 unread");
     harness.get_by_label("Updates, 1 unread");
-    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Done all").count(), 2);
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "done all").count(), 0, "only on a hovered or keyed head");
+    let mut harness = harness;
+    harness.get_by_label("People, 2 unread").hover();
+    harness.run();
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "done all").count(), 1);
     // People holds seven rows and shows three of them; Updates its three; Kasimir's row stays out of the groups.
     harness.get_by_role_and_label(Role::Button, "Show all (7)");
     assert!(harness.query_by_label("Show all (3)").is_none());
@@ -388,7 +392,7 @@ fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
         harness.run();
         assert!(harness.query_all_by_label(chip).count() >= 1, "{name} shows {chip}");
     }
-    for name in ["Done all", "Review", "Show all (7)"] {
+    for name in ["Review", "Show all (7)"] {
         let before = harness.query_all_by_label(name).count();
         harness.query_all_by_role_and_label(Role::Button, name).next().unwrap().hover();
         harness.run();
