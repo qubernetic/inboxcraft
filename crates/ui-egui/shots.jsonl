@@ -253,3 +253,6 @@
 {"out": "docs/images/accounts-open-dark.png", "mode": "dark", "size": [1400, 860], "steps": [{"press": "Accounts"}]}
 {"out": "docs/images/row-snooze-picker-light.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
 {"out": "docs/images/row-snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}
+# An open list on the settings sheet: the add-account form's IMAP security select, its list open over the sheet (#238).
+{"out": "docs/images/settings-select-open-light.png", "mode": "light", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
+{"out": "docs/images/settings-select-open-dark.png", "mode": "dark", "size": [1200, 820], "onboard": "form", "steps": [{"press": "IMAP security"}]}
