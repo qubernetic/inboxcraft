@@ -139,6 +139,24 @@ pub struct Opened {
     pub plain: Vec<Segment>,
     html: Option<String>,
     inline: BTreeSet<String>,
+    generation: u64,
+}
+
+/// The last generation given to a message's content: each read or new layout of a message's content takes the next.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A generation no content had before.
+fn next_generation() -> u64 {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1)
+}
+
+impl Opened {
+    /// Which content this is: it changes whenever the message is read again or its content is laid out again (with
+    /// pictures allowed, say), so what was drawn from the old content is not drawn from the new.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 /// A message of the thread: what the folded row shows, and the message once read.
@@ -423,6 +441,7 @@ impl Reader {
             plain: Vec::new(),
             html: None,
             inline,
+            generation: next_generation(),
         };
         opened.content = match body {
             None if answer.get("fetching").and_then(Value::as_bool) == Some(true) => Content::Loading,
@@ -533,6 +552,7 @@ impl Reader {
             opened.plain = split(&crate::fitted_text::plain(&document));
         }
         opened.content = Content::Html(document);
+        opened.generation = next_generation();
         for content_id in inline {
             let key = inline_key(id, &content_id);
             if self.pictures.contains_key(&key) {

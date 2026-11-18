@@ -178,13 +178,15 @@ struct Context<'a> {
     ppp: f32,
 }
 
-/// Draws `list`, blocks of message `id`'s `document`, tables `depth` deep, across `ui`'s width.
+/// Draws `list`, blocks of message `id`'s `document` (its `generation`, which changes whenever the reader lays the
+/// message's content out again), tables `depth` deep, across `ui`'s width.
 #[expect(clippy::too_many_arguments, reason = "the drawing context of a message's blocks")]
 pub(super) fn blocks(
     ui: &mut Ui,
     theme: &Theme,
     reader: &Reader,
     id: u64,
+    generation: u64,
     document: &Document,
     list: &[Block],
     depth: usize,
@@ -194,15 +196,17 @@ pub(super) fn blocks(
     let width = ui.available_width().max(1.0).floor();
     let quotes = reader.shows_quotes(id);
     let ppp = ui.ctx().pixels_per_point();
+    // What the layout was made for: the width, the quotes, the pictures and the look; whose it is: the message, the
+    // generation of its content and the depth (never where its blocks lie, a place the next list may take).
     let key = {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (list.as_ptr() as usize, list.len(), depth, width.to_bits(), ppp.to_bits(), quotes, reader.pictures_state()).hash(&mut hasher);
+        (list.len(), width.to_bits(), ppp.to_bits(), quotes, reader.pictures_state()).hash(&mut hasher);
         (theme.palette.ink, theme.palette.cyan_text, theme.fonts.read.size.to_bits()).hash(&mut hasher);
         hasher.finish()
     };
     let who = {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (id, list.as_ptr() as usize).hash(&mut hasher);
+        (id, generation, depth).hash(&mut hasher);
         hasher.finish()
     };
     let laid = kept(ui, who, key, || {
@@ -1047,7 +1051,7 @@ pub(crate) fn board(ui: &mut Ui, theme: &Theme, open: bool) {
     }
     let mut textures = Textures::default();
     let mut drawn = Drawn::default();
-    blocks(ui, theme, &reader, id, &document, &document.blocks, 0, &mut textures, &mut drawn);
+    blocks(ui, theme, &reader, id, 0, &document, &document.blocks, 0, &mut textures, &mut drawn);
 }
 
 #[cfg(test)]

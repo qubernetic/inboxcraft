@@ -121,7 +121,8 @@ pub(in crate::draw) fn blocks(
     textures: &mut Textures,
     drawn: &mut Drawn,
 ) {
-    super::fitted::blocks(ui, theme, reader, id, document, list, depth, textures, drawn);
+    let generation = reader.opened(id).map_or(0, crate::reader::Opened::generation);
+    super::fitted::blocks(ui, theme, reader, id, generation, document, list, depth, textures, drawn);
 }
 
 /// A plain-text body in `read`, its quotes folded until the owner opens them ([`quote_fold`]).

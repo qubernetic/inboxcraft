@@ -5,6 +5,7 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable as _;
 use inboxcraft_html::Document;
 
 use crate::save::NoSave;
@@ -32,7 +33,7 @@ fn opening_nine_large_messages_keeps_the_layout_of_the_one_shown_only() {
                     let mut textures = super::Textures::default();
                     let mut drawn = super::Drawn::default();
                     let id = u64::try_from(*which).unwrap_or(0) + 1;
-                    super::blocks(ui, &theme, &reader, id, document, &document.blocks, 0, &mut textures, &mut drawn);
+                    super::blocks(ui, &theme, &reader, id, 0, document, &document.blocks, 0, &mut textures, &mut drawn);
                 });
             },
             0_usize,
@@ -45,4 +46,35 @@ fn opening_nine_large_messages_keeps_the_layout_of_the_one_shown_only() {
         assert_eq!(count, 1, "message {which}: {count} layouts kept");
         assert!(glyphs > 100_000 && glyphs <= KEPT_GLYPHS, "message {which}: {glyphs} letters kept");
     }
+}
+
+#[test]
+fn a_message_laid_out_again_is_drawn_from_its_new_blocks_wherever_they_lie() {
+    // The blocks change in place (the same list at the same address, as a freed list's place is taken again by the
+    // next one), and the reader gives the message a new generation: the new words are drawn.
+    struct Shown {
+        document: Document,
+        generation: u64,
+    }
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    let mut harness = Harness::builder().with_size(vec2(800.0, 600.0)).with_context_setup(crate::theme::install_fonts).build_ui_state(
+        move |ui, shown: &mut Shown| {
+            let mut textures = super::Textures::default();
+            let mut drawn = super::Drawn::default();
+            let list = &shown.document.blocks;
+            super::blocks(ui, &theme, &reader, 1, shown.generation, &shown.document, list, 0, &mut textures, &mut drawn);
+        },
+        Shown { document: display("<p>The first words</p>"), generation: 1 },
+    );
+    harness.run();
+    let _ = harness.get_by_label("The first words");
+    let fresh = display("<p>The second words</p>");
+    let state = harness.state_mut();
+    if let (Some(slot), Some(block)) = (state.document.blocks.first_mut(), fresh.blocks.into_iter().next()) {
+        *slot = block;
+    }
+    state.generation = 2;
+    harness.run();
+    let _ = harness.get_by_label("The second words");
 }
