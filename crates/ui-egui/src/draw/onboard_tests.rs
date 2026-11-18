@@ -1358,6 +1358,35 @@ fn a_line_under_the_select_says_detect_replaced_the_picked_encryption() {
     }
 }
 
+/// Picks `choice` in the select `select` as the owner does: the list opened, the row pressed.
+fn pick(harness: &mut Harness<'static, InboxApp>, select: &str, choice: &str) {
+    harness.get_by_label(select).click();
+    harness.run();
+    harness.get_by_label(choice).click();
+    harness.run();
+    harness.run();
+}
+
+#[test]
+fn the_detect_line_goes_once_the_owner_picks_that_row_s_encryption_and_stays_gone() {
+    let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let form = harness.state_mut().onboarding_mut().0.form_mut();
+    form.address = "carol@example.org".to_owned();
+    form.security = Some(Security::StartTls);
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    const SAID: &str = "Detect set the encryption to TLS for port 993.";
+    harness.get_by_label(SAID);
+    // The owner picks STARTTLS, then Detect's TLS again: the line said what Detect did, and the pick is the owner's now.
+    pick(&mut harness, "IMAP security", "STARTTLS");
+    assert_eq!(harness.state().onboarding().form().security, Some(Security::StartTls));
+    assert!(harness.query_by_label(SAID).is_none(), "the owner's pick takes the line away");
+    pick(&mut harness, "IMAP security", "TLS");
+    assert_eq!(harness.state().onboarding().form().security, Some(Security::Tls));
+    assert!(harness.query_by_label(SAID).is_none(), "TLS picked by the owner is not Detect's: the line stays away");
+}
+
 #[test]
 fn two_steps_of_the_same_id_each_say_where_they_went() {
     let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());

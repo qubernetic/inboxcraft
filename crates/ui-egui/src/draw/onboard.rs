@@ -495,7 +495,9 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     ui.add_space(HEAD_BELOW - HEAD_GAP);
     let faults = Faults::of(onboarding);
     let found = onboarding.found_shared();
+    let said = onboarding.encryption_said();
     let mut edited = Vec::new();
+    let mut picked = Vec::new();
     let mut form_part = |ui: &mut Ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         let (detect, address) = detect_part(ui, theme, keymap, onboarding, &faults, width);
@@ -508,7 +510,10 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
         let detecting = onboarding.detecting();
         let form = onboarding.form_mut();
         edited.extend(names(ui, theme, &faults, form, width, (tr!("Password"), "")));
-        edited.extend(servers(ui, theme, &faults, form, (width, detecting), found.as_ref().map_or([None, None], |found| found.encryption_set)));
+        let before = [form.security, form.smtp_security];
+        edited.extend(servers(ui, theme, &faults, form, (width, detecting), said));
+        // A row whose encryption the owner picked: Detect's line there is said no more.
+        picked.extend([form.security, form.smtp_security].iter().zip(before).enumerate().filter(|(_, (now, was))| **now != *was).map(|(row, _)| row));
         words(ui, tr!("The password goes into your system's credential store, never into InboxCraft's files."), f.caption, p.muted, width);
         words(
             ui,
@@ -542,6 +547,9 @@ fn form(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onboarding
     }
     for slot in edited {
         onboarding.edited(slot);
+    }
+    for row in picked {
+        onboarding.encryption_picked(row);
     }
     asked
 }

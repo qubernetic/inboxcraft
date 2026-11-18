@@ -748,6 +748,9 @@ struct Detected {
     imap: Option<Row>,
     submission: Option<Row>,
     username: Option<String>,
+    /// The rows (IMAP, outgoing) whose encryption the owner picked since Detect last answered: the line that Detect set
+    /// it is not said there, whichever encryption the owner picked.
+    picked: [bool; 2],
 }
 
 /// The add form as the owner left it, kept while onboarding is closed or on an account's form: the form, what Detect
@@ -1329,6 +1332,23 @@ impl Onboarding {
         let asked_count = proposal.asked.len();
         self.found =
             Some(Arc::new(Found { source, outgoing: in_form, kept_imap, kept_outgoing, encryption_set, asked, failed, asked_count, column, alone }));
+        self.detected.picked = [false; 2];
+    }
+
+    /// The encryption Detect set in each server row (IMAP, outgoing) where it replaced one the owner had picked, as long
+    /// as the owner has not picked that row's encryption since: what the line under the row says.
+    #[must_use]
+    pub fn encryption_said(&self) -> [Option<Security>; 2] {
+        let set = self.found.as_ref().map_or([None, None], |found| found.encryption_set);
+        let [imap, outgoing] = self.detected.picked;
+        [set[0].filter(|_| !imap), set[1].filter(|_| !outgoing)]
+    }
+
+    /// The owner picked the encryption of server row `row` (0 IMAP, 1 outgoing): Detect's line there is not said again.
+    pub fn encryption_picked(&mut self, row: usize) {
+        if let Some(picked) = self.detected.picked.get_mut(row) {
+            *picked = true;
+        }
     }
 
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check
