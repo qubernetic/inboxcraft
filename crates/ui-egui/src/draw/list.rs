@@ -1193,7 +1193,10 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
             // can keep a focus given to it) in this frame.
             Some(kept) if kept.height > 0 => {
-                let (offset, view) = (forced.unwrap_or_else(|| points(kept.offset)), points(kept.height));
+                // The viewport this frame: the area fills the room left, which a resized window changes.
+                let room = ui.available_rect_before_wrap().height();
+                let view = if room.is_finite() && room > 0.0 { room } else { points(kept.height) };
+                let offset = forced.unwrap_or_else(|| points(kept.offset));
                 let wanted = if top < offset {
                     top
                 } else if bottom > offset + view {

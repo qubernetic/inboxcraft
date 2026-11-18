@@ -1972,3 +1972,81 @@ fn the_group_menu_opens_from_the_keyboard() {
     harness.run();
     assert!(harness.query_by_label("Let InboxCraft sort it").is_none());
 }
+
+#[test]
+fn a_keyed_step_at_the_edge_scrolls_the_least_and_a_partly_shown_row_comes_whole() {
+    let mut harness = ten_thousand(InboxView::List);
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    harness.key_press(Key::J);
+    harness.run();
+    let order = super::list::order(&harness.ctx);
+    // Down while the next row is wholly in sight: the keyed row is then the last wholly in sight.
+    let mut at = 0;
+    while order.get(at + 1).is_some_and(|next| in_sight(&harness, *next)) {
+        harness.key_press(Key::J);
+        harness.run();
+        at += 1;
+    }
+    let edge = order[at];
+    assert_eq!(harness.state().mailbox().selected(), Some(edge));
+    let before = row_rect(&harness, edge).unwrap();
+    // One step past the edge: the next row comes whole with the least scroll, its bottom on the viewport's.
+    harness.key_press(Key::J);
+    harness.run();
+    let next = order[at + 1];
+    let shown = row_rect(&harness, next).unwrap();
+    assert!(in_sight(&harness, next), "the row past the edge comes into sight");
+    assert!((shown.bottom() - view.bottom()).abs() < 0.01, "the least scroll: {shown:?} in {view:?}");
+    let moved = before.top() - row_rect(&harness, edge).unwrap().top();
+    assert!(moved > 0.0 && moved <= 56.0, "a step scrolls a row at most: {moved}");
+    // A row partly above the viewport, keyed: it comes whole, its top on the viewport's top.
+    harness.key_press(Key::Home);
+    harness.run();
+    for _ in 0..3 {
+        harness.key_press(Key::J);
+        harness.run();
+    }
+    // Past the screener card's 64 and 20 into the first rows.
+    wheel(&mut harness, 84.0);
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let partly = row_rect(&harness, first).unwrap();
+    assert!(partly.top() < view.top(), "partly above: {partly:?}");
+    for _ in 0..4 {
+        if harness.state().mailbox().selected() == Some(first) {
+            break;
+        }
+        harness.key_press(Key::K);
+        harness.run();
+    }
+    assert_eq!(harness.state().mailbox().selected(), Some(first));
+    let whole = row_rect(&harness, first).unwrap();
+    assert!((whole.top() - view.top()).abs() < 0.01, "its top on the viewport's: {whole:?} in {view:?}");
+}
+
+#[test]
+fn a_keyed_row_scrolls_into_sight_by_this_frames_viewport_and_when_first_shown() {
+    // First shown with a row far down keyed: egui scrolls to it once it knows the viewport.
+    let mut mailbox = ten_thousand_mailbox(InboxView::List);
+    mailbox.select_keyed(1_000_600);
+    let mut app = InboxApp::new(mailbox);
+    app.set_reduce_motion(true);
+    let mut harness =
+        Harness::builder().with_size(vec2(1300.0, 900.0)).with_context_setup(install_fonts).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    assert!(in_sight(&harness, 1_000_600), "the keyed row is in sight when the list first shows");
+    // A row low in the window keyed; the window shrinks: a step down brings the next row whole into the smaller
+    // viewport, measured this frame, not into last frame's.
+    harness.key_press(Key::Home);
+    harness.run();
+    while harness.state().mailbox().selected().and_then(|id| row_rect(&harness, id)).is_some_and(|rect| rect.top() < 600.0) {
+        harness.key_press(Key::J);
+        harness.run();
+    }
+    harness.set_size(vec2(1300.0, 500.0));
+    harness.run();
+    harness.key_press(Key::J);
+    harness.run();
+    assert!(selected_in_sight(&harness), "in sight in the smaller window");
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    assert!(view.height() < 500.0, "{view:?}");
+}
