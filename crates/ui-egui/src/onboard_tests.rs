@@ -1256,3 +1256,47 @@ fn detect_says_when_it_replaced_an_encryption_the_owner_picked() {
     let found = onboarding.found().unwrap();
     assert_eq!(found.encryption_set, [Some(Security::Tls), None], "the IMAP pick was replaced; the outgoing one was Detect's already");
 }
+
+#[test]
+fn the_form_says_its_servers_come_from_an_earlier_detect_only_while_they_do() {
+    let first = found_at("imap.first.example.org", Some("smtp.first.example.org"), "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first.clone(), first]);
+    assert!(!onboarding.detect_older(), "nothing detected yet");
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert!(!onboarding.detect_older(), "Detect answered for the address in the form");
+    // The owner changes the address: the servers below are the earlier answer's.
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    assert!(onboarding.detect_older());
+    // Spaces around the same address are no change: Detect asks about the trimmed address.
+    onboarding.form_mut().address = " a@first.example.org ".to_owned();
+    assert!(!onboarding.detect_older());
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    // A server field edited by hand ends it: the IMAP row's port, then the outgoing row's encryption alone.
+    onboarding.form_mut().port = "1993".to_owned();
+    assert!(!onboarding.detect_older(), "the IMAP port typed by hand");
+    onboarding.form_mut().port = String::new();
+    let was = onboarding.form().port.clone();
+    assert_eq!(was, "", "the row as Detect left it but its port");
+    onboarding.form_mut().port = "993".to_owned();
+    assert!(onboarding.detect_older(), "the row as Detect put it again");
+    onboarding.form_mut().smtp_security = Some(Security::StartTls);
+    assert!(!onboarding.detect_older(), "the outgoing encryption picked by hand");
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    assert!(onboarding.detect_older());
+    // Detect runs again: while it runs and after it answered for the address now in the form, nothing is said.
+    onboarding.detect();
+    assert!(!onboarding.detect_older(), "while Detect runs");
+    detect.answer();
+    assert!(onboarding.poll());
+    assert!(!onboarding.detect_older(), "Detect answered for the new address");
+}
+
+#[test]
+fn a_form_filled_by_hand_never_says_its_servers_come_from_detect() {
+    let mut onboarding = onboarding(&Kept::default());
+    filled(onboarding.form_mut());
+    onboarding.form_mut().smtp_host = "smtp.example.org".to_owned();
+    assert!(!onboarding.detect_older());
+    onboarding.form_mut().address = "dave@example.org".to_owned();
+    assert!(!onboarding.detect_older(), "the address changed, but no server came from Detect");
+}

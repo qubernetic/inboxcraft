@@ -1592,3 +1592,67 @@ fn a_failed_sign_in_or_calendar_step_names_only_the_cause_the_check_reported() {
     }
     assert!(words("smtp_login", Some("tls")).contains("mail.example.org"), "the outgoing server named");
 }
+
+const OLDER: &str = "The servers below come from an earlier Detect, for another address.";
+
+/// The add form open, `address` typed and Detect run on it.
+fn detected(address: &str) -> Harness<'static, InboxApp> {
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.form_mut().address = address.to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    assert_eq!(harness.state().onboarding().form().host, "imap.example.org");
+    harness
+}
+
+#[test]
+fn a_line_says_the_servers_come_from_an_earlier_detect_until_detect_or_a_server_field_changes() {
+    let mut harness = detected("carol@example.org");
+    assert!(harness.query_by_label(OLDER).is_none(), "Detect answered for the address in the form");
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    let line = harness.get_by_label(OLDER).rect();
+    // The form's hint style: one caption line, 18 high, in the form's column.
+    assert_eq!(line.height(), 18.0, "{line:?}");
+    // A server field edited by hand: the line goes.
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.dave.example.org".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none(), "the IMAP server typed by hand");
+    // Detect again, for the address now in the form: the line goes too.
+    let mut harness = detected("carol@example.org");
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    harness.get_by_label(OLDER);
+    press(&mut harness, "Detect");
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none(), "Detect ran again");
+}
+
+#[test]
+fn a_form_filled_by_hand_never_says_detect_filled_it() {
+    let mut harness = form_open(egui::Theme::Light, FakeWorkers::passing());
+    {
+        let form = harness.state_mut().onboarding_mut().0.form_mut();
+        form.address = "carol@example.org".to_owned();
+        form.host = "imap.example.org".to_owned();
+        form.smtp_host = "smtp.example.org".to_owned();
+    }
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER).is_none());
+}
+
+#[test]
+fn a_long_address_does_not_widen_the_earlier_detect_line_or_the_form() {
+    let mut harness = detected("carol@example.org");
+    let hint = "The password goes into your system's credential store, never into InboxCraft's files.";
+    let before = harness.get_by_label(hint).rect();
+    harness.state_mut().onboarding_mut().0.form_mut().address = format!("{}@example.org", "d".repeat(10_000));
+    harness.run();
+    let line = harness.get_by_label(OLDER).rect();
+    let after = harness.get_by_label(hint).rect();
+    assert_eq!(after.width(), before.width(), "the form keeps its width");
+    assert!(line.left() >= after.left() && line.right() <= after.left() + 720.0, "{line:?} in the form's column from {after:?}");
+}

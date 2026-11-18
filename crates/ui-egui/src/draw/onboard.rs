@@ -403,6 +403,7 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let f = &theme.fonts;
     let detecting = onboarding.detecting();
     let found = onboarding.found_shared();
+    let older = onboarding.detect_older();
     let form = onboarding.form_mut();
     let (mut detect, mut edited) = (false, false);
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
@@ -430,7 +431,14 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
         progress(ui, theme, keymap, tr!("detecting"), ProgressState::Running(0.0), domain(&form.address));
     }
     match found.as_ref().filter(|_| !detecting) {
-        Some(found) => found_note(ui, theme, keymap, found),
+        Some(found) => {
+            found_note(ui, theme, keymap, found);
+            // The address changed since Detect answered and the rows below still hold its servers: one line in the
+            // form's hint style says so, until Detect runs again or a server field is edited by hand.
+            if older {
+                words(ui, tr!("The servers below come from an earlier Detect, for another address."), f.caption, theme.palette.muted, width);
+            }
+        }
         None => {
             let sends = tr!(
                 "Detect asks your name servers and your domain's web server (once without encryption) about your domain; it sends no address, user name or password."
