@@ -865,3 +865,59 @@ fn reply_is_the_one_primary_button() {
         assert!(reply.top() > more.bottom() + 200.0, "{reply:?}");
     }
 }
+
+/// The scan lines in `cyan` the last frame painted across the reader (right of the list): their heights on the screen.
+fn scan_lines(harness: &Harness<'static, InboxApp>, cyan: egui::Color32) -> Vec<f32> {
+    fn walk(shape: &egui::Shape, cyan: egui::Color32, found: &mut Vec<f32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, cyan, found)),
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == cyan && points[0].y == points[1].y && points[1].x - points[0].x > 200.0 && points[0].x > 600.0 =>
+            {
+                found.push(points[0].y);
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, cyan, &mut found));
+    found
+}
+
+#[test]
+fn a_message_wipes_in_behind_a_scan_line_and_is_there_at_once_with_reduced_motion() {
+    for reduced in [false, true] {
+        let fetch = Recorder::default();
+        let mut app = app_with(&fetch);
+        app.set_reduce_motion(reduced);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Photos from the coast walk").unwrap().id;
+        let mut harness = harness_with(app, egui::Theme::Dark);
+        let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+        harness.state_mut().mailbox_mut().select(Some(id));
+        harness.step();
+        let lines = scan_lines(&harness, look.palette.cyan);
+        if reduced {
+            assert!(lines.is_empty(), "at once with reduced motion: {lines:?}");
+        } else {
+            assert_eq!(lines.len(), 1, "the scan line while it wipes in: {lines:?}");
+        }
+        harness.run();
+        assert!(scan_lines(&harness, look.palette.cyan).is_empty(), "{reduced}: gone once it is in");
+        assert!(crate::component::tests::rests(&mut harness, 4), "{reduced}: no frame asked for at rest");
+        harness.get_by_role_and_label(Role::Button, "Reply");
+    }
+}
+
+#[test]
+fn the_wipe_runs_on_the_design_s_curve() {
+    let ease = super::reader::ease;
+    assert_eq!((ease(0.0), ease(1.0)), (0.0, 1.0));
+    assert!(ease(0.5) > 0.8, "a quick start: {}", ease(0.5));
+    let mut last = 0.0;
+    for step in 1..=100 {
+        let now = ease(step as f32 / 100.0);
+        assert!(now >= last, "it never goes back");
+        last = now;
+    }
+    assert_eq!(ease(f32::NAN), 1.0, "a value that is no number lands at the end");
+}

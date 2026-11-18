@@ -40,7 +40,7 @@ mod thread;
 
 use std::collections::HashMap;
 
-use egui::{Align2, Area, Frame, Margin, Order, Rect, RichText, ScrollArea, Shape, TextureHandle, Ui, vec2};
+use egui::{Align2, Area, Frame, Id, Margin, Order, Rect, RichText, ScrollArea, Shape, TextureHandle, Ui, vec2};
 
 use super::margin;
 use crate::component::button;
@@ -173,6 +173,12 @@ pub(super) fn show(
     let mut drawn = Drawn::default();
     let p = &theme.palette;
     let whole = ui.max_rect();
+    // A message opening wipes in from the top behind a scan line (M7): what is under the line is not shown yet.
+    let wipe = reader.open_id().map_or(1.0, |id| wiped(ui.ctx(), id));
+    if wipe < 1.0 {
+        let edge = whole.top() + (whole.height() * wipe).round();
+        ui.set_clip_rect(Rect::from_min_max(whole.min, egui::pos2(whole.right(), edge)).intersect(ui.clip_rect()));
+    }
     if let Some(notice) = reader.notice() {
         egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s2))).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -230,5 +236,72 @@ pub(super) fn show(
     if let Some(text) = hover {
         status(ui, theme, whole, text);
     }
+    if wipe < SCAN_GONE {
+        // The scan line at the wipe's edge, over everything in the pane; it is gone for the last tenth of the way.
+        let edge = whole.top() + (whole.height() * wipe).round();
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Foreground, Id::unique("reader-scan"))).with_clip_rect(whole);
+        paint::hairline(&painter, egui::pos2(whole.left(), edge), egui::pos2(whole.right() - 1.0, edge), p.cyan);
+    }
     drawn
+}
+
+/// How long a message takes to wipe in when it opens (M7, the `medium` token), in seconds.
+const WIPE: f64 = 0.3;
+
+/// How far along the wipe the scan line goes out, as the presentation fades it over the last tenth.
+const SCAN_GONE: f32 = 0.9;
+
+/// How far the open message `open` has wiped in, 0 to 1, on the design's curve; a repaint is asked for until it has.
+/// With reduced motion it is there at once, and a key or a press during the wipe takes it to its end.
+fn wiped(ctx: &egui::Context, open: u64) -> f32 {
+    let key = Id::unique("reader-wipe");
+    let now = ctx.input(|input| input.time);
+    let acted = ctx.input(|input| {
+        input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. } | egui::Event::PointerButton { pressed: true, .. }))
+    });
+    let start = ctx.data_mut(|data| match data.get_temp::<(u64, f64)>(key) {
+        Some((id, start)) if id == open && !acted => start,
+        Some((id, _)) if id == open => {
+            data.insert_temp(key, (open, now - WIPE));
+            now - WIPE
+        }
+        _ => {
+            data.insert_temp(key, (open, now));
+            now
+        }
+    });
+    if crate::motion::reduced(ctx) {
+        return 1.0;
+    }
+    // A share of a fraction of a second: the cast loses nothing that shows.
+    let shown = ((now - start) / WIPE).clamp(0.0, 1.0) as f32;
+    if shown < 1.0 {
+        ctx.request_repaint();
+    }
+    ease(shown)
+}
+
+/// The design's one curve, `cubic-bezier(.2, .7, .2, 1)`, at `t` of the way (0 to 1): a quick start and a soft landing.
+/// The bezier's x is found by halving, a fixed number of steps.
+pub(super) fn ease(t: f32) -> f32 {
+    if !t.is_finite() || t >= 1.0 {
+        return 1.0;
+    }
+    if t <= 0.0 {
+        return 0.0;
+    }
+    let bezier = |a: f32, b: f32, s: f32| {
+        let r = 1.0 - s;
+        3.0 * r * r * s * a + 3.0 * r * s * s * b + s * s * s
+    };
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..24 {
+        let middle = (low + high) / 2.0;
+        if bezier(0.2, 0.2, middle) < t {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    bezier(0.7, 1.0, (low + high) / 2.0)
 }
