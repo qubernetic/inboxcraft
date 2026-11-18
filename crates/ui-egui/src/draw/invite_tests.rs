@@ -243,3 +243,12 @@ fn a_generated_body_gives_way_to_the_card_and_a_written_one_stays() {
     assert!(shows(&harness, "See the calendar part."), "a body with more to say stays readable");
     assert!(button(&harness, "Reply"));
 }
+
+#[test]
+fn an_invitation_in_the_reader_is_walked_by_the_keyboard_and_rests() {
+    let mut harness = sample_harness();
+    open(&mut harness, "Updated invitation: Lunch with Odile");
+    let missed = crate::component::tests::keyboard_walk(&mut harness);
+    assert!(missed.is_empty(), "Tab never reaches {missed:?}");
+    assert!(crate::component::tests::rests(&mut harness, 8), "it repaints at rest");
+}

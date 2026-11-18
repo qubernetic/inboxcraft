@@ -1223,3 +1223,57 @@ fn the_why_line_is_coming_soon_and_says_no_reason_of_its_own() {
         assert!(said.iter().all(|label| !label.contains(made_up)), "{made_up}: {said:?}");
     }
 }
+
+/// Tab reaches every control of the scene, and the scene rests (asks for no repaint) once it is still.
+fn walks_and_rests(harness: &mut Harness<'static, InboxApp>, scene: &str) {
+    let mut missed = crate::component::tests::keyboard_walk(harness);
+    // The toast's Undo (after Done) is its key's, Ctrl Z, while the toast shows: the toast is no Tab stop anywhere.
+    missed.retain(|label| label != "Undo");
+    assert!(missed.is_empty(), "{scene}: Tab never reaches {missed:?}");
+    assert!(crate::component::tests::rests(harness, 8), "{scene}: it repaints at rest");
+}
+
+#[test]
+fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
+    let fetch = Recorder::default();
+    for (scene, folder, subject) in [
+        ("a plain message", None, "Photos from the coast walk"),
+        ("a thread", Some(3), "Re: Allotment rota for November"),
+        ("attachments", None, "Draft logo for the bakery"),
+    ] {
+        let mut harness = opened(&fetch, folder, subject);
+        walks_and_rests(&mut harness, scene);
+    }
+    // An open quote.
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_label("Show 8 quoted lines").click();
+    harness.run();
+    harness.get_by_label("Odile Brannock wrote:");
+    walks_and_rests(&mut harness, "an open quote");
+    // Nothing open.
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    done(&mut harness);
+    walks_and_rests(&mut harness, "nothing open");
+}
+
+#[test]
+fn the_reader_s_menus_are_walked_by_the_keyboard_and_rest() {
+    for (button, row) in [("More", "Archive"), ("Move to a folder", "Receipts")] {
+        let fetch = Recorder::default();
+        let mut harness = opened(&fetch, None, "Photos from the coast walk");
+        harness.get_by_role_and_label(Role::Button, button).click();
+        harness.run();
+        harness.get_by_role_and_label(Role::MenuItem, row);
+        // Only the menu takes the keyboard while it is open: Tab goes round its rows, each in turn.
+        let rows: Vec<String> = harness.query_all_by_role(Role::MenuItem).filter_map(|node| node.accesskit_node().label()).collect();
+        let order = tab_order(&mut harness);
+        for row in &rows {
+            assert!(order.contains(row), "{button}: Tab never reaches {row}: {order:?}");
+        }
+        for outside in ["Reply", "Snooze", "Pin", "Delete", "Mail"] {
+            assert!(!order.iter().any(|label| label == outside), "{button}: the keyboard stays in the menu: {order:?}");
+        }
+        assert!(harness.query_by_role_and_label(Role::MenuItem, row).is_some(), "{button}: still open");
+        assert!(crate::component::tests::rests(&mut harness, 8), "{button}: it repaints at rest");
+    }
+}
