@@ -221,7 +221,10 @@ fn recipients(ui: &mut Ui, theme: &Theme, composer: &mut Composer, line: Line, a
         })
         .collect();
     // The sheet's invalid state: the first recipient of the line that is not an address, named under it.
-    let wrong = composer.chips(line).iter().find(|chip| !chip.ok).map(|chip| tr!("{address} is not an address", address = chip.address()));
+    // What the line refused of what was typed comes first: it waits in the typed text.
+    let wrong = composer
+        .refusal(line)
+        .or_else(|| composer.chips(line).iter().find(|chip| !chip.ok).map(|chip| tr!("{address} is not an address", address = chip.address())));
     let copies = line == Line::To && !composer.copies();
     let Some(typing) = composer.typing_mut(line) else { return };
     let fields = Recipients { name: line.name(), chips: &chips, hint: tr!("Name or address"), copies, error: wrong.as_deref(), enabled: true };

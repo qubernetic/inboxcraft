@@ -319,7 +319,7 @@ fn discard_removes_the_draft() {
 }
 
 #[test]
-fn a_recipient_that_does_not_fit_is_cut_and_an_edit_is_never_cut() {
+fn an_edit_is_never_cut_and_control_characters_leave_a_recipient() {
     let mut mailbox = mailbox();
     let mut composer = Composer::start(&mut mailbox).unwrap();
     // The subject's field refuses whole what would pass what the engine keeps: an edit is never cut after it.
@@ -328,11 +328,6 @@ fn a_recipient_that_does_not_fit_is_cut_and_an_edit_is_never_cut() {
     composer.edited();
     assert_eq!(composer.subject(), long);
     *composer.subject_mut() = "a".to_owned();
-    let long = format!("{}@example.org", "a".repeat(MAX_RECIPIENT_BYTES * 2));
-    let many: Vec<String> = (0..MAX_RECIPIENTS + 5).map(|n| format!("p{n}@example.org")).collect();
-    type_in(&mut composer, &mut mailbox, Line::To, &format!("{long},{},", many.join(",")));
-    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS);
-    assert!(composer.chips(Line::To).iter().all(|chip| chip.text.len() <= MAX_RECIPIENT_BYTES));
     type_in(&mut composer, &mut mailbox, Line::Cc, "x\u{0}y\r@example.org;");
     assert_eq!(texts(&composer, Line::Cc), ["xy", "@example.org"], "control characters go; a line break ends a recipient");
 }
@@ -511,4 +506,49 @@ fn the_problems_of_a_draft_are_said_in_order() {
     assert_eq!(blocked(json!(["no_recipient", "blank"]), json!(["[[day]]"])).as_deref(), Some("Add a recipient to send"));
     assert_eq!(blocked(json!(["blank"]), json!(["[[day]]", 4])).as_deref(), Some("Fill in \"day\" to send"));
     assert_eq!(blocked(json!(["other"]), json!([])).as_deref(), Some("This draft cannot be sent yet"));
+}
+
+#[test]
+fn addresses_past_a_line_s_500_stay_typed_and_the_line_says_how_many() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    let many: Vec<String> = (0..MAX_RECIPIENTS).map(|n| format!("p{n}@example.org")).collect();
+    type_in(&mut composer, &mut mailbox, Line::To, &format!("{},", many.join(",")));
+    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS);
+    assert_eq!(composer.refusal(Line::To), None);
+    type_in(&mut composer, &mut mailbox, Line::To, "q1@example.org, q2@example.org; q3@example.org,");
+    assert_eq!(composer.chips(Line::To).len(), MAX_RECIPIENTS, "the chips made stay");
+    assert_eq!(composer.typing(Line::To), "q1@example.org, q2@example.org, q3@example.org", "nothing typed is dropped");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("3 addresses not added: a line holds at most 500."));
+    assert!(!composer.sendable(), "no send while typed addresses wait");
+    assert_eq!(composer.problem(), composer.refusal(Line::To));
+    // A chip taken off lets the next one in.
+    composer.remove(&mut mailbox, Line::To, 0).unwrap();
+    composer.take(&mut mailbox, Line::To).unwrap();
+    assert_eq!(texts(&composer, Line::To).last().copied(), Some("q1@example.org"));
+    assert_eq!(composer.typing(Line::To), "q2@example.org, q3@example.org");
+    assert_eq!(composer.refusal(Line::To).as_deref(), Some("2 addresses not added: a line holds at most 500."));
+    // Closing keeps them typed too.
+    composer.close(&mut mailbox).unwrap();
+    assert_eq!(composer.typing(Line::To), "q2@example.org, q3@example.org");
+}
+
+#[test]
+fn an_address_past_998_bytes_stays_typed_whole_and_the_line_says_so() {
+    let mut mailbox = mailbox();
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    type_in(&mut composer, &mut mailbox, Line::To, "mira@example.org,");
+    for long in [format!("{}@example.org", "a".repeat(1_200)), format!("{}@example.org", "ő".repeat(600))] {
+        type_in(&mut composer, &mut mailbox, Line::Cc, &format!("{long}, ok@example.org,"));
+        assert_eq!(texts(&composer, Line::Cc), ["ok@example.org"], "the one that fits is taken");
+        assert_eq!(composer.typing(Line::Cc), long, "the long one stays whole");
+        assert_eq!(composer.refusal(Line::Cc).as_deref(), Some("An address is too long: it holds at most 998 bytes, and it was not added."));
+        composer.close(&mut mailbox).unwrap();
+        assert_eq!(composer.typing(Line::Cc), long, "closing keeps it typed");
+        assert!(!composer.sendable());
+        // Deleted by the person: the line says nothing more.
+        composer.typing_mut(Line::Cc).unwrap().clear();
+        composer.remove(&mut mailbox, Line::Cc, 0).unwrap();
+        assert_eq!(composer.refusal(Line::Cc), None);
+    }
 }

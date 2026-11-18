@@ -427,3 +427,16 @@ fn the_subject_refuses_whole_what_would_pass_998_bytes_and_undo_still_works() {
     harness.run();
     assert_eq!(subject(&harness), start, "and the one before it");
 }
+
+#[test]
+fn a_recipient_line_says_what_it_refused_and_keeps_it_typed() {
+    let mut harness = composing(egui::Theme::Light);
+    let long = format!("{}@example.org", "ő".repeat(600));
+    type_into(&mut harness, "To", &format!("{long},"));
+    harness.run();
+    assert!(chips(&harness, Line::To).is_empty(), "no chip of it");
+    assert_eq!(harness.state().composer().map(|composer| composer.typing(Line::To).to_owned()), Some(long));
+    // Under the line, and as the reason Send waits.
+    let said = "An address is too long: it holds at most 998 bytes, and it was not added.";
+    assert_eq!(harness.query_all_by_label(said).count(), 2);
+}

@@ -191,14 +191,12 @@ impl Suggestion {
     }
 }
 
-/// `text` cut to at most `bytes` bytes, at a character's start.
-pub(crate) fn cut(text: &mut String, bytes: usize) {
-    if text.len() > bytes {
-        let mut end = bytes;
-        while !text.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
-        text.truncate(end);
+/// The typed text a line keeps: what it refused (`kept`), then what was typed after the last separator (`rest`).
+fn join_kept(kept: String, rest: &str) -> String {
+    match (kept.is_empty(), rest.is_empty()) {
+        (true, _) => rest.to_owned(),
+        (false, true) => kept,
+        (false, false) => format!("{kept}, {rest}"),
     }
 }
 
@@ -234,6 +232,17 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
+    /// What each line refused of what was typed in it, the last time it took chips: it stays typed.
+    refused: [Refused; 3],
+}
+
+/// What a line refused of what was typed in it, which stays in its typed text as it was written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Refused {
+    /// Addresses not added because the line held [`MAX_RECIPIENTS`] already.
+    over: usize,
+    /// An address longer than [`MAX_RECIPIENT_BYTES`] was not added.
+    too_long: bool,
 }
 
 impl Composer {
@@ -309,6 +318,7 @@ impl Composer {
             filling: String::new(),
             templates: Vec::new(),
             later: None,
+            refused: [Refused::default(); 3],
         };
         composer.take_answer(answer);
         composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
@@ -446,12 +456,32 @@ impl Composer {
     /// Whether the draft can be sent as it is kept: it has a recipient and every one is an address.
     #[must_use]
     pub fn sendable(&self) -> bool {
-        self.blocks.is_empty()
+        self.blocks.is_empty() && Line::ALL.iter().all(|line| self.refusal(*line).is_none())
+    }
+
+    /// What `line` refused of what was typed in it, as its error line says it: addresses past a line's
+    /// [`MAX_RECIPIENTS`], an address past [`MAX_RECIPIENT_BYTES`]. They stay typed; none once the typed text is gone.
+    #[must_use]
+    pub fn refusal(&self, line: Line) -> Option<String> {
+        let refused = self.refused.get(line.index()).copied().unwrap_or_default();
+        if self.typing(line).trim().is_empty() {
+            return None;
+        }
+        if refused.too_long {
+            Some(tr!("An address is too long: it holds at most {size} bytes, and it was not added.", size = MAX_RECIPIENT_BYTES))
+        } else if refused.over > 0 {
+            Some(tr!("{count} addresses not added: a line holds at most {most}.", count = refused.over, most = MAX_RECIPIENTS))
+        } else {
+            None
+        }
     }
 
     /// Why Send is blocked, as the composer says it; none when it is not.
     #[must_use]
     pub fn problem(&self) -> Option<String> {
+        if let Some(refused) = Line::ALL.iter().find_map(|line| self.refusal(*line)) {
+            return Some(refused);
+        }
         if let Some(bad) = Line::ALL.iter().flat_map(|line| self.chips(*line)).find(|chip| !chip.ok) {
             return Some(tr!("{address} is not an address", address = bad.address()));
         }
@@ -574,9 +604,9 @@ impl Composer {
         if let Some(at) = typed.rfind(SEPARATORS) {
             let (done, rest) = typed.split_at(at);
             let rest = rest.get(1..).unwrap_or_default().trim_start().to_owned();
-            self.add(line, done);
+            let kept = self.add(line, done);
             if let Some(field) = self.typing_mut(line) {
-                *field = rest;
+                *field = join_kept(kept, &rest);
             }
             self.save(mailbox)?;
         }
@@ -593,7 +623,10 @@ impl Composer {
             Some(at) => self.pick(mailbox, at),
             None => {
                 let typed = self.typing.get_mut(line.index()).map(std::mem::take).unwrap_or_default();
-                self.add(line, &typed);
+                let kept = self.add(line, &typed);
+                if let Some(field) = self.typing_mut(line) {
+                    *field = kept;
+                }
                 self.dismiss_suggestions();
                 self.save(mailbox)
             }
@@ -610,7 +643,10 @@ impl Composer {
         if let Some(field) = self.typing_mut(line) {
             field.clear();
         }
-        self.add(line, &suggestion.recipient());
+        let kept = self.add(line, &suggestion.recipient());
+        if let Some(field) = self.typing_mut(line) {
+            *field = kept;
+        }
         self.dismiss_suggestions();
         self.save(mailbox)
     }
@@ -643,23 +679,40 @@ impl Composer {
         }
     }
 
-    /// Adds the recipients in `typed` to `line`, split at the separators: each once across the lines, cut to what the
-    /// engine keeps.
-    fn add(&mut self, line: Line, typed: &str) {
+    /// Adds the recipients in `typed` to `line`, split at the separators: each once across the lines. What the line
+    /// cannot take (past its [`MAX_RECIPIENTS`], or an address past [`MAX_RECIPIENT_BYTES`]) is never cut or dropped:
+    /// it is given back as it was written, one after another with `, `, for the line's typed text, and the line says
+    /// why ([`Composer::refusal`]).
+    fn add(&mut self, line: Line, typed: &str) -> String {
         let mut held: BTreeSet<String> = Line::ALL.iter().flat_map(|line| self.chips(*line)).map(|chip| split(&chip.text).1.to_lowercase()).collect();
-        let Some(chips) = self.lines.get_mut(line.index()) else { return };
+        let mut refused = Refused::default();
+        let mut kept: Vec<&str> = Vec::new();
+        let Some(chips) = self.lines.get_mut(line.index()) else { return typed.to_owned() };
         for part in typed.split(SEPARATORS).map(str::trim).filter(|part| !part.is_empty()) {
+            let text = part.chars().filter(|c| !c.is_control()).collect::<String>();
+            if text.len() > MAX_RECIPIENT_BYTES {
+                refused.too_long = true;
+                kept.push(part);
+                continue;
+            }
+            let address = split(&text).1.to_lowercase();
+            if held.contains(&address) {
+                continue;
+            }
             if chips.len() >= MAX_RECIPIENTS {
-                break;
+                refused.over = refused.over.saturating_add(1);
+                kept.push(part);
+                continue;
             }
-            let mut text = part.chars().filter(|c| !c.is_control()).collect::<String>();
-            cut(&mut text, MAX_RECIPIENT_BYTES);
-            if held.insert(split(&text).1.to_lowercase()) {
-                // Checked by the engine once kept; until then it counts as not an address.
-                chips.push(Chip { text, ok: false });
-                self.changed = true;
-            }
+            held.insert(address);
+            // Checked by the engine once kept; until then it counts as not an address.
+            chips.push(Chip { text, ok: false });
+            self.changed = true;
         }
+        if let Some(slot) = self.refused.get_mut(line.index()) {
+            *slot = refused;
+        }
+        kept.join(", ")
     }
 
     /// Looks up the people whose name or address holds what is typed in `line`.
@@ -739,7 +792,10 @@ impl Composer {
     pub fn close(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
         for line in Line::ALL {
             let typed = self.typing.get_mut(line.index()).map(std::mem::take).unwrap_or_default();
-            self.add(line, &typed);
+            let kept = self.add(line, &typed);
+            if let Some(field) = self.typing_mut(line) {
+                *field = kept;
+            }
         }
         self.dismiss_suggestions();
         self.save(mailbox)
