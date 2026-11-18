@@ -158,6 +158,20 @@ fn a_restored_appearance_is_what_the_commands_start_from() {
 }
 
 #[test]
+fn a_restored_appearance_whose_motion_fields_disagree_comes_in_as_one_level() {
+    let mut session = session();
+    let disagreeing = Appearance { motion: Motion::Full, motion_reduced: true, theme: ThemeMode::Dark, ..Appearance::default() };
+    session.set_appearance(disagreeing);
+    let restored = *session.appearance();
+    assert_eq!(restored, Appearance { theme: ThemeMode::Dark, ..Appearance::default() }.with_motion(MotionLevel::Reduced, true));
+    assert_eq!((restored.motion, restored.motion_reduced), (Motion::Reduce, true), "the old field agrees with the level");
+    assert_eq!(restored, Appearance::from_value(&disagreeing.to_value()), "what a kept file of it gives");
+    // The old field alone, flag at its default, keeps the meaning it always had.
+    session.set_appearance(Appearance { motion: Motion::Reduce, ..Appearance::default() });
+    assert_eq!((session.appearance().motion_level(), session.appearance().motion_chosen()), (MotionLevel::Off, true));
+}
+
+#[test]
 fn the_removed_appearance_commands_are_unknown() {
     let mut session = session();
     for (id, params) in [

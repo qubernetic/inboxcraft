@@ -531,9 +531,10 @@ impl Session {
         &self.state.appearance
     }
 
-    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`].
+    /// Takes the appearance choices kept from an earlier run, read with [`Appearance::from_value`]; motion fields that
+    /// disagree become one level ([`Appearance::normalised`]).
     pub fn set_appearance(&mut self, appearance: Appearance) {
-        self.state.appearance = appearance;
+        self.state.appearance = appearance.normalised();
     }
 
     /// The screener's mode, as `screener.mode` left it.
@@ -682,7 +683,7 @@ impl Session {
             }
         }
         if let Some(appearance) = appearance {
-            self.state.appearance = appearance;
+            self.state.appearance = appearance.normalised();
         }
         Ok(value)
     }

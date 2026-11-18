@@ -181,8 +181,24 @@ fn the_old_motion_field_answers_as_before_for_each_level() {
     // A front end that still sets the old field alone gets the level the kept file maps it to.
     let reduce = Appearance { motion: Motion::Reduce, ..Appearance::default() };
     assert_eq!((reduce.motion_level(), reduce.motion_chosen()), (MotionLevel::Off, true));
-    let full = Appearance { motion: Motion::Full, motion_reduced: true, ..Appearance::default() };
-    assert_eq!(full.motion_level(), MotionLevel::Full, "the reduced flag counts only beside Reduce");
+}
+
+#[test]
+fn a_pair_that_disagrees_is_the_level_the_new_field_says_once_normalised() {
+    // The old field decides only while the new one is at its default; a set flag is what `with_motion` wrote for a
+    // chosen Reduced, and wins.
+    let reduced = Appearance::default().with_motion(MotionLevel::Reduced, true);
+    for motion in Motion::ALL {
+        let literal = Appearance { motion, motion_reduced: true, ..Appearance::default() };
+        assert_eq!((literal.motion_level(), literal.motion_chosen()), (MotionLevel::Reduced, true), "{motion:?}");
+        assert_eq!(literal.normalised(), reduced, "{motion:?}");
+        assert_eq!(Appearance::from_value(&literal.to_value()), reduced, "{motion:?}: the kept file says the same");
+        assert_eq!(literal.to_value()["motion"], json!("reduce"), "{motion:?}: an old client reads the same level");
+    }
+    for motion in Motion::ALL {
+        let literal = Appearance { motion, ..Appearance::default() };
+        assert_eq!(literal.normalised(), literal, "{motion:?}: a pair with the flag at its default is already one");
+    }
 }
 
 #[test]

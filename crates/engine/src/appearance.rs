@@ -6,7 +6,9 @@
 //! Motion has three levels ([`MotionLevel`]: full, reduced, off) and a flag saying whether the owner chose one; while
 //! the owner has not, the computer's wish for less motion turns it off ([`effective`]). The front end still reads the
 //! older two-way field [`Appearance::motion`] until its Appearance page moves to the levels (Task 5.2 of stage I-2);
-//! that field and [`Appearance::motion_reduced`] together hold the level, so the two never disagree.
+//! that field and [`Appearance::motion_reduced`] together hold the level. [`Appearance::with_motion`] is their only
+//! writer; a pair built otherwise is made one level by [`Appearance::normalised`], which the session applies to every
+//! appearance it takes in.
 //!
 //! The `ui.*.set` commands change one choice each; the session holds the result ([`crate::Session::appearance`]) and
 //! the front end draws with it and keeps it on disk, handing it back with [`crate::Session::set_appearance`] at the
@@ -126,10 +128,13 @@ pub struct Appearance {
     pub text_scale: u16,
     /// The older two-way motion setting, which the front end still reads: [`Motion::System`] while the owner has not
     /// chosen a level, [`Motion::Full`] for [`MotionLevel::Full`], [`Motion::Reduce`] for the other two. Set the level
-    /// with [`Appearance::with_motion`], read it with [`Appearance::motion_level`].
+    /// with [`Appearance::with_motion`], read it with [`Appearance::motion_level`]. Only `with_motion` writes this
+    /// field and [`Appearance::motion_reduced`]: a struct update of one of them alone may disagree with the other, and
+    /// [`Appearance::normalised`] then decides.
     pub motion: Motion,
-    /// Beside [`Motion::Reduce`]: the owner chose [`MotionLevel::Reduced`] (`true`) rather than [`MotionLevel::Off`]
-    /// (`false`). Ignored beside the other two.
+    /// The owner chose [`MotionLevel::Reduced`]; `with_motion` sets it beside [`Motion::Reduce`] only. Only
+    /// `with_motion` writes this field and [`Appearance::motion`]. While it is `false` (its default) `motion` alone
+    /// says the level; when it is `true` the level is Reduced, chosen, whatever `motion` says.
     pub motion_reduced: bool,
     /// Who draws the window's frame.
     pub frame: WindowFrame,
@@ -152,7 +157,7 @@ impl Appearance {
         json!({
             "theme": self.theme.id(),
             "text_scale": self.text_scale,
-            "motion": self.motion.id(),
+            "motion": self.normalised().motion.id(),
             "motion_level": self.motion_level().id(),
             "motion_chosen": self.motion_chosen(),
             "frame": self.frame.id(),
@@ -216,17 +221,24 @@ impl Appearance {
     #[must_use]
     pub const fn motion_level(&self) -> MotionLevel {
         match self.motion {
+            _ if self.motion_reduced => MotionLevel::Reduced,
             Motion::System => MotionLevel::Reduced,
             Motion::Full => MotionLevel::Full,
-            Motion::Reduce if self.motion_reduced => MotionLevel::Reduced,
             Motion::Reduce => MotionLevel::Off,
         }
+    }
+
+    /// These choices with [`Appearance::motion`] and [`Appearance::motion_reduced`] as `with_motion` writes them for
+    /// the level they say: a pair built by a struct update that disagrees becomes one level.
+    #[must_use]
+    pub const fn normalised(self) -> Self {
+        self.with_motion(self.motion_level(), self.motion_chosen())
     }
 
     /// Whether the owner chose the motion level; while not, the computer's wish decides ([`effective`]).
     #[must_use]
     pub const fn motion_chosen(&self) -> bool {
-        !matches!(self.motion, Motion::System)
+        self.motion_reduced || !matches!(self.motion, Motion::System)
     }
 
     /// The own frame to keep beside `frame`: `frame` itself when it is one of the app's own, else `kept` when that is
