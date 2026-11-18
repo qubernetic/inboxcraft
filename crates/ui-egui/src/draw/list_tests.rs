@@ -3478,3 +3478,27 @@ fn in_one_pane_esc_from_a_rows_pointer_menu_gives_it_the_keyboard_and_opens_noth
     assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
     assert!(!seen(&harness, next), "and the row's message is not read");
 }
+
+#[test]
+fn in_one_pane_another_account_or_search_while_reading_keys_no_row_of_the_new_list() {
+    // The message in front leaves the list because the person picked another account or searched: the list comes back
+    // in front, and no row of the new list is keyed for them (as beside the reader).
+    for way in ["account", "search"] {
+        let mut harness = wide(900.0);
+        harness.get_by_label(ODILE).click();
+        harness.run();
+        harness.run();
+        assert_eq!(rows(&harness), 0, "{way}: the message in front");
+        match way {
+            "account" => harness.state_mut().mailbox_mut().narrow(Some(2)),
+            _ => harness.state_mut().search("Teodor"),
+        }
+        for _ in 0..5 {
+            harness.run();
+        }
+        assert!(rows(&harness) > 0, "{way}: the new list in front");
+        assert_eq!(harness.state().mailbox().selected(), None, "{way}: nothing keyed");
+        assert_eq!(super::list::focused_row(&harness.ctx), None, "{way}: the focus on no row");
+        assert_eq!(harness.state().reader().open_id(), None, "{way}: nothing opened");
+    }
+}

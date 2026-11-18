@@ -120,6 +120,9 @@ struct Keys {
 const ROW_ACTS: [(&str, Act); 5] =
     [(keymap::DONE, Act::Done), (keymap::ARCHIVE, Act::Archive), (keymap::READ, Act::Read), (keymap::FLAG, Act::Flag), (keymap::DELETE, Act::Delete)];
 
+/// Which list is shown: its place, the account it is narrowed to (none: all), its search.
+type ListOf = (Place, Option<u64>, String);
+
 /// The InboxCraft window's content over a [`Mailbox`].
 pub struct InboxApp {
     mailbox: Mailbox,
@@ -143,8 +146,9 @@ pub struct InboxApp {
     single: Option<bool>,
     /// Whether the list was shown in the last frame drawn.
     list_was_shown: bool,
-    /// The message the reader showed last, so the keyboard can land near its row once it has gone.
-    left: Option<u64>,
+    /// The message the reader showed last, so the keyboard can land near its row once it has gone, and the list it
+    /// was opened from (place, account, search): a list changed since has no row near it.
+    left: Option<(u64, ListOf)>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -717,8 +721,10 @@ impl InboxApp {
     fn keep_keyboard(&mut self, ctx: &egui::Context, crossed: bool, single: bool, list_shown: bool, message: bool) {
         let came = single && list_shown && !self.list_was_shown;
         self.list_was_shown = list_shown;
-        if let Some(open) = self.reader.open_id() {
-            self.left = Some(open);
+        if let Some(open) = self.reader.open_id()
+            && self.left.as_ref().is_none_or(|(left, _)| *left != open)
+        {
+            self.left = Some((open, self.list_of()));
         }
         if self.screen != Screen::Mail {
             return;
@@ -738,14 +744,25 @@ impl InboxApp {
         }
     }
 
+    /// Which list is shown: its place, the account it is narrowed to, its search.
+    fn list_of(&self) -> ListOf {
+        (self.mailbox.place(), self.mailbox.narrowed(), self.mailbox.query().to_owned())
+    }
+
     /// The row the keyboard goes back to: the selected message's, or once it has gone (the reader showed it last),
-    /// the row next to where it stood in the list as last drawn, below it first.
+    /// the row next to where it stood in the list as last drawn, below it first. None when the list itself changed
+    /// since (another place, account or search): its rows are not near the message, and the person keys one.
     fn row_left(&self, ctx: &egui::Context) -> Option<u64> {
         let listed = |id: &u64| self.mailbox.messages().iter().any(|row| row.id == *id);
         if let Some(id) = self.mailbox.selected().filter(listed) {
             return Some(id);
         }
-        let gone = self.left?;
+        let (gone, from) = self.left.as_ref()?;
+        let (place, narrowed, query) = from;
+        if *place != self.mailbox.place() || *narrowed != self.mailbox.narrowed() || query != self.mailbox.query() {
+            return None;
+        }
+        let gone = *gone;
         let order = list::order(ctx);
         let at = order.iter().position(|id| *id == gone)?;
         let below = order.get(at.saturating_add(1)..).unwrap_or_default();
