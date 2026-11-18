@@ -83,6 +83,11 @@ fn unfolding_id() -> Id {
     Id::unique("popup-unfolding")
 }
 
+/// Where the layer of the float whose rows are being drawn is kept, for a float opened from inside it.
+fn showing_id() -> Id {
+    Id::unique("popup-showing-float")
+}
+
 /// What a float keeps from one frame to the next: when it opened, the pass it was last drawn in, and its rect.
 #[derive(Clone, Copy)]
 struct Kept {
@@ -188,11 +193,19 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let opened = kept.map_or(now, |kept| kept.opened);
     let size = kept.map_or(vec2(width, 0.0), |kept| kept.rect.size());
     let at = placed(float.anchor.left_bottom() + vec2(0.0, DROP), size, ctx.content_rect(), ctx.pixels_per_point());
+    // A float opened from inside another stands directly over it, however the two were ordered before (a list of a
+    // select in the event editor, opened a second time).
+    let parent = ctx.data(|data| data.get_temp::<LayerId>(showing_id()));
+    if let Some(parent) = parent.filter(|parent| *parent != mine) {
+        ctx.memory_mut(|memory| memory.areas_mut().set_sublayer(parent, mine));
+    }
     // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
     ctx.memory_mut(|memory| memory.set_modal_layer(mine));
     // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
     ctx.move_to_top(mine);
     let shown = Area::new(float.id).order(Order::Foreground).pivot(Align2::LEFT_TOP).fixed_pos(at).fade_in(false).show(ctx, |ui| {
+        // The float whose rows are drawn now: one opened from them stands over it.
+        ctx.data_mut(|data| data.insert_temp(showing_id(), mine));
         unfolding(ui, theme, width, opened, |ui| {
             // Its rows scroll once it would be taller than the window: it was as tall as the room last frame.
             if size.y >= room.y - 0.5 {
@@ -203,6 +216,13 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
                 add(ui)
             }
         })
+    });
+    ctx.data_mut(|data| {
+        if let Some(parent) = parent {
+            data.insert_temp(showing_id(), parent);
+        } else {
+            data.remove::<LayerId>(showing_id());
+        }
     });
     ctx.data_mut(|data| data.insert_temp(key, Kept { opened, pass, rect: shown.response.rect }));
     let (inner, rows) = shown.inner;
