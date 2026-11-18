@@ -157,9 +157,13 @@ pub(super) fn strip(ui: &mut Ui, theme: &Theme, keymap: &Keymap, title: &str, co
     // As much room above the controls as below them, and as much again between Close and the window's edge.
     let right = rect.right() - (rect.height() - CONTROL[1]) / 2.0;
     let at = Rect::from_min_max(pos2(right - CONTROLS, rect.center().y - CONTROL[1] / 2.0), pos2(right, rect.center().y + CONTROL[1] / 2.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
+    // On a layer of their own above everything, a sheet over the window (the settings) too, which keeps clear of them.
+    let ctx = ui.ctx().clone();
+    let shown = Area::new(Id::unique("window-strip-controls")).order(Order::Foreground).fixed_pos(at.min).show(&ctx, |ui| {
         controls(ui, theme, keymap);
     });
+    ctx.move_to_top(shown.response.layer_id);
+    ctx.data_mut(|data| data.insert_temp(strip_place_id(), Some(at)));
 }
 
 /// How high the band at the top of the window is that moves it in the top row: the panes' first rows.
@@ -173,6 +177,11 @@ fn place_id() -> Id {
     Id::unique("window-controls-place")
 }
 
+/// Where the strip's controls stand this frame, kept by [`strip`].
+fn strip_place_id() -> Id {
+    Id::unique("window-strip-controls-place")
+}
+
 /// Whether the top row is on, for the panes' first rows; set each frame before the panes are drawn.
 fn on_id() -> Id {
     Id::unique("window-top-row")
@@ -184,6 +193,7 @@ pub(super) fn top_row_begins(ui: &mut Ui, on: bool) {
     ui.ctx().data_mut(|data| {
         data.insert_temp(on_id(), on);
         data.insert_temp(place_id(), None::<Rect>);
+        data.insert_temp(strip_place_id(), None::<Rect>);
     });
     if !on {
         return;
@@ -213,12 +223,12 @@ pub(super) fn beside<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) ->
     inner.inner
 }
 
-/// Where the window controls of the top row stand this frame, once the panes are drawn; `None` without the top row.
-/// A sheet over the window keeps clear of them.
+/// Where the window controls stand this frame, on the strip or in the top row once the panes are drawn; `None` without
+/// the app's own frame. A sheet over the window keeps clear of them, and a press on them is theirs, not the sheet's.
 pub(super) fn controls_place(ctx: &Context, theme: &Theme) -> Option<Rect> {
     let on = ctx.data(|data| data.get_temp::<bool>(on_id())).unwrap_or(false);
     if !on {
-        return None;
+        return ctx.data(|data| data.get_temp::<Option<Rect>>(strip_place_id())).flatten();
     }
     let high = CONTROL[1] + 2.0 * (f32::from(FLOAT_MARGIN) + 1.0);
     let place = ctx.data(|data| data.get_temp::<Option<Rect>>(place_id())).flatten();

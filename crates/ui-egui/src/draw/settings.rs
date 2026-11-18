@@ -841,7 +841,8 @@ pub(super) fn rest(ctx: &egui::Context) {
 pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> Option<Asked> {
     let p = &theme.palette;
     let screen = ctx.content_rect();
-    let rect = place(theme, screen, super::frame::controls_place(ctx, theme));
+    let controls = super::frame::controls_place(ctx, theme);
+    let rect = place(theme, screen, controls);
     let pass = ctx.cumulative_pass_nr();
     // The first frame it shows, the keyboard leaves the control the sheet opened from, to come back to it after.
     let kept = ctx.data(|data| data.get_temp::<Opened>(opened_id())).filter(|opened| opened.pass.saturating_add(1) >= pass);
@@ -860,12 +861,16 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
     let layer = LayerId::new(Order::Foreground, sheet_id());
     ctx.memory_mut(|memory| memory.set_modal_layer(layer));
     // The dim covers the window, so a press there reaches nothing under it; a press beside the sheet (on the press, not
-    // the release: what lies under the press is no longer covered when the button comes up) leaves it.
+    // the release: what lies under the press is no longer covered when the button comes up) leaves it. A press on the
+    // window's own controls, which stand above the dim, is theirs.
     Area::new(Id::unique("settings-dim")).order(Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click());
         ui.painter().rect_filled(rect, 0.0, p.scrim);
     });
-    let beside = ctx.input(|input| input.pointer.primary_pressed() && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at)));
+    let beside = ctx.input(|input| {
+        input.pointer.primary_pressed()
+            && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at) && !controls.is_some_and(|controls| controls.contains(at)))
+    });
     let mut asked = beside.then_some(Asked::Close);
     Area::new(sheet_id()).order(Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());

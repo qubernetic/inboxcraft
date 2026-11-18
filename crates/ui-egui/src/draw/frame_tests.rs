@@ -306,3 +306,24 @@ fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
         assert!(seen.contains(&ViewportCommand::StartDrag), "{ppp}: {seen:?}");
     }
 }
+
+#[test]
+fn over_the_settings_sheet_the_window_controls_stand_clear_and_do_what_they_do() {
+    for frame in [WindowFrame::Strip, WindowFrame::TopRow] {
+        let mut harness = harness_with(frame, InboxApp::open_settings);
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        for name in ["Minimise", "Maximise", "Close the window"] {
+            let control = harness.get_by_label(name).rect();
+            assert!(!control.intersects(sheet), "{frame:?}: {name} {control:?} lies over the sheet {sheet:?}");
+        }
+        // A press on Minimise minimises the window and leaves the sheet open.
+        let at = harness.get_by_label("Minimise").rect().center();
+        let mut seen = press_at(&mut harness, at);
+        harness.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        harness.step();
+        seen.extend(commands(&harness));
+        harness.run();
+        assert!(seen.contains(&ViewportCommand::Minimized(true)), "{frame:?}: {seen:?}");
+        assert!(harness.state().settings().is_open(), "{frame:?}: the press on a window control closed the sheet");
+    }
+}
