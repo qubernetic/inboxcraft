@@ -52,7 +52,7 @@ const TAG: f32 = 85.0;
 fn calendars(ui: &mut Ui, theme: &Theme, keymap: &Keymap, account: &AccountRow) {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let height = theme.size(CALENDARS_ROW).max(f.strong.line + 2.0 + f.mono_s.line + 16.0).ceil();
+    let height = Theme::size(theme, CALENDARS_ROW).max(f.strong.line + 2.0 + f.mono_s.line + 16.0).ceil();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     soon(ui, theme, |ui| {
         let link = ui
@@ -75,7 +75,7 @@ fn calendars(ui: &mut Ui, theme: &Theme, keymap: &Keymap, account: &AccountRow) 
             ui.horizontal(|ui| {
                 ui.set_height(f.strong.line);
                 // The name takes what the tag after it leaves of the column, cut there.
-                let tag = theme.size(TAG) + 8.0;
+                let tag = Theme::size(theme, TAG) + 8.0;
                 let name = crate::component::cut(ui, &account.label, f.strong, p.muted, (room - tag).max(1.0));
                 let (at, _) = ui.allocate_exact_size(vec2(name.size().x, f.strong.line), Sense::hover());
                 ui.painter().galley(pos2(at.left(), (at.center().y - name.size().y / 2.0).round()), name, p.muted);

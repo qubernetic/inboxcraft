@@ -429,7 +429,7 @@ const SECTION_RIGHT: f32 = 14.0;
 fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Response {
     let p = &theme.palette;
     let name = section.name();
-    let height = theme.size(SECTION_ROW).max(theme.fonts.body.line + 8.0).ceil();
+    let height = Theme::size(theme, SECTION_ROW).max(theme.fonts.body.line + 8.0).ceil();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, shown, tr!("{section}, settings page", section = name)));
     if ui.is_rect_visible(rect) {
