@@ -66,16 +66,16 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
     let spoken = row.spoken;
     drawn.response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, spoken));
     let rect = drawn.rect;
-    let mut done = Drawn { row: drawn, open: false, discard: false };
+    let (mut open, mut discard) = (false, false);
     if !ui.is_rect_visible(rect) {
-        return done;
+        return Drawn { row: drawn, open, discard };
     }
     // Without the line under it, the row's middle: where its one line stands.
     let middle = rect.top() + (rect.height() - 1.0) / 2.0;
     let at = |high: f32| (middle - high / 2.0).round();
     let side = theme.boxes().icon;
-    let lit = done.row.hovered || keyed;
-    let mark = if done.row.hovered { p.ink } else { p.muted };
+    let lit = drawn.hovered || keyed;
+    let mark = if drawn.hovered { p.ink } else { p.muted };
     crate::iconset::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + PAD, at(side)), vec2(side, side)), IconId::Compose, mark);
     let mut right = rect.right() - PAD;
     if lit {
@@ -88,9 +88,9 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
             let place = Rect::from_min_size(pos2(x, at(high)), vec2(*wide, high));
             let clicked = ui.scope_builder(UiBuilder::new().max_rect(place).id_salt(index), |ui| link_with(ui, theme, keymap, words, LinkSize::Small, true, None).clicked()).inner;
             if index == 0 {
-                done.open = clicked;
+                open = clicked;
             } else {
-                done.discard = clicked;
+                discard = clicked;
             }
             x += wide + LINK_GAP;
         }
@@ -110,8 +110,8 @@ pub fn draft_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &DraftRow<'_>
     };
     let subject = super::fitted(ui, words, f.body, ink, (right - GAP - left).max(0.0));
     paint::run_at(ui.painter(), pos2(left, at(f.body.line)), subject, ink);
-    done.row.finish(ui, theme);
-    done
+    drawn.finish(ui, theme);
+    Drawn { row: drawn, open, discard }
 }
 
 #[cfg(test)]
