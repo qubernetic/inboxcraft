@@ -349,3 +349,36 @@ fn a_snoozed_row_of_later_brings_its_message_back_from_its_link() {
     assert_eq!(app.mailbox().undoable().map(|undo| undo.text.as_str()), Some("Back in the inbox"));
     assert!(app.mailbox().messages().is_empty(), "the snoozed pile is empty again");
 }
+
+/// The colour the first text drawn with `wanted` as its words is painted in, if any.
+fn drawn_in(harness: &Harness<'static, InboxApp>, wanted: &str) -> Option<egui::Color32> {
+    fn find(shape: &egui::Shape, wanted: &str) -> Option<egui::Color32> {
+        match shape {
+            egui::Shape::Vec(inner) => inner.iter().find_map(|shape| find(shape, wanted)),
+            egui::Shape::Text(text) if text.galley.text() == wanted => {
+                Some(text.galley.job.sections.first().map_or(text.fallback_color, |section| section.format.color))
+            }
+            _ => None,
+        }
+    }
+    harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
+}
+
+#[test]
+fn a_snoozed_message_listed_as_a_mail_row_shows_the_clock_and_when_it_comes_back() {
+    let mut app = app();
+    let rota = id_of(&app, ROTA);
+    let account = app.mailbox().messages().iter().find(|row| row.id == rota).map(|row| row.account).unwrap();
+    app.mailbox_mut().act(rota, Act::Snooze(Timestamp::from_unix(NOW + 2 * 86_400, 0).unwrap()));
+    // The snoozed folder itself lists its mail as mail rows.
+    let snoozed = app.mailbox().folders_of(account).iter().find(|folder| folder.role == Some(FolderRole::Snoozed)).map(|folder| folder.id).unwrap();
+    app.mailbox_mut().open(Place::Folder(snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    harness.run();
+    let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert!(harness.query_all_by_label_contains(ROTA).count() >= 1, "the row is listed");
+    assert_eq!(drawn_in(&harness, "back Sat 09:00"), Some(theme.palette.warn), "the sheet's snoozed time, in warn");
+    let clock = crate::iconset::glyph(crate::iconset::IconId::Snooze).to_string();
+    assert_eq!(drawn_in(&harness, &clock), Some(theme.palette.warn), "the snoozed mark, in warn");
+}

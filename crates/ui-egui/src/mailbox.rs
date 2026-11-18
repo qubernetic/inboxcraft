@@ -1823,6 +1823,14 @@ impl Mailbox {
         }
     }
 
+    /// When the snoozed `row` comes back, as a row says it ("Sat 09:00"); `None` for a message not snoozed or whose
+    /// time has passed.
+    #[must_use]
+    pub fn back_at(&self, row: &MessageRow) -> Option<String> {
+        let until = row.snoozed_until.filter(|until| *until > self.clock.now())?;
+        Some(crate::component::typed_time::short(until, self.clock.now(), self.offset))
+    }
+
     /// Whether the message `id` is one the owner sent: it is in a folder for sent mail. A follow-up reminder goes on
     /// such a message only.
     #[must_use]

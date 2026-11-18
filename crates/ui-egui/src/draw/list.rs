@@ -264,7 +264,9 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     let spoken = mailbox.spoken(message);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let line = format!("{subject}{}", after_subject(&message.preview));
-    let time = mailbox.row_date(message);
+    // A snoozed message (in a search, or Later searched) is the sheet's snoozed row: the clock and when it comes back.
+    let back = mailbox.back_at(message);
+    let time = back.as_ref().map_or_else(|| mailbox.row_date(message), |when| tr!("back {when}", when = when));
     let tag = if message.bounced.is_some() {
         Some((tr!("Not delivered"), TagKind::Minus))
     } else if message.new_sender {
@@ -275,7 +277,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         None
     };
     // The pin, the flag nearest the time (or the actions), the done row's tick.
-    let marks: Vec<Mark> = [(message.pinned, Mark::Pin), (message.flagged, Mark::Flag), (message.done, Mark::Done)]
+    let marks: Vec<Mark> = [(message.pinned, Mark::Pin), (message.flagged, Mark::Flag), (message.done, Mark::Done), (back.is_some(), Mark::Snoozed)]
         .into_iter()
         .filter_map(|(shown, mark)| shown.then_some(mark))
         .collect();
