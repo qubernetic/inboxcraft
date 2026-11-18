@@ -893,7 +893,8 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
         unread: state.unread,
         shown: None,
         link: None,
-        hover_link: Some(tr!("done all")),
+        // A head over no message left (its last row leaving) offers nothing to mark done.
+        hover_link: (state.count > 0).then_some(tr!("done all")),
     };
     group_head(ui, theme, keymap, &shown, None).hover_link
 }
@@ -1285,7 +1286,10 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         review: Cell::new(false),
         outbox: Cell::new(None),
     };
-    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: Vec::new() };
+    // "Other" stands over the messages no group holds: its "done all" marks those, built or not.
+    let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    let rest = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
+    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: rest };
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // The gap of the row that left closes over `row_collapse`; with motion off it is closed at once.
     let gone =

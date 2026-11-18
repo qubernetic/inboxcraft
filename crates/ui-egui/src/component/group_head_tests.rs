@@ -119,3 +119,18 @@ fn the_keyboard_on_a_head_shows_done_all_and_tab_reaches_it() {
     let link = harness.query_by_label("done all").map(|node| node.accesskit_node().is_focused());
     assert_eq!(link, Some(true), "Tab goes on to it, and it stays");
 }
+
+#[test]
+fn a_head_without_a_link_shows_none_hovered_or_keyed() {
+    use super::{GroupHead, group_head};
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let keymap = keymap();
+    let mut harness = staged(theme, |p| p.surface, vec2(ROW_WIDTH + 48.0, 100.0), move |ui, theme| {
+        let head = GroupHead { id: egui::Id::unique("bare"), index: "[ A ]", name: "Empty", unread: 0, shown: None, link: None, hover_link: None };
+        ui.set_width(ROW_WIDTH);
+        group_head(ui, theme, &keymap, &head, None);
+    });
+    harness.get_by_label(&spoken("Empty", 0)).hover();
+    harness.run();
+    assert!(harness.query_by_label("done all").is_none());
+}

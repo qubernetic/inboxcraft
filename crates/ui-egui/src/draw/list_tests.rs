@@ -1391,3 +1391,43 @@ fn the_last_row_of_a_card_draws_no_line_under_it() {
     assert!(lined(first), "a row with a row under it has its line");
     assert!(!lined(last), "the card's edge follows the last row: no line of its own");
 }
+
+/// The showcase in the grouped list, and the messages its "Other" head stands over: those no group holds.
+fn grouped_other() -> (Harness<'static, InboxApp>, Vec<u64>, String) {
+    let mut app = app(true);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
+    let groups = app.mailbox().groups();
+    let held: std::collections::HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    let other: Vec<u64> = app.mailbox().messages().iter().map(|row| row.id).filter(|id| !held.contains(id)).collect();
+    let unread = app.mailbox().messages().iter().filter(|row| other.contains(&row.id) && !row.seen).count();
+    let head = crate::component::group_head::spoken("Other", u64::try_from(unread).unwrap());
+    (harness_of(app), other, head)
+}
+
+#[test]
+fn done_all_on_the_grouped_lists_other_head_marks_its_messages_done_and_undo_brings_them_back() {
+    for by_key in [false, true] {
+        let (mut harness, other, head) = grouped_other();
+        assert!(!other.is_empty(), "the showcase keeps a message out of the groups");
+        let before = harness.state().mailbox().messages().len();
+        if by_key {
+            harness.get_by_label(&head).focus();
+            harness.run();
+            harness.key_press(Key::Tab);
+            harness.run();
+            harness.key_press(Key::Enter);
+        } else {
+            harness.get_by_label(&head).hover();
+            harness.run();
+            harness.get_by_role_and_label(Role::Button, "done all").click();
+        }
+        harness.run();
+        let mailbox = harness.state().mailbox();
+        assert!(mailbox.messages().iter().all(|row| !other.contains(&row.id)), "by key {by_key}: Other's messages are done");
+        assert_eq!(mailbox.messages().len(), before - other.len(), "by key {by_key}: those and no others");
+        assert!(mailbox.undoable().is_some(), "by key {by_key}: with its toast");
+        undo(&mut harness);
+        let mailbox = harness.state().mailbox();
+        assert!(other.iter().all(|id| mailbox.messages().iter().any(|row| row.id == *id)), "by key {by_key}: Undo brings them back");
+    }
+}
