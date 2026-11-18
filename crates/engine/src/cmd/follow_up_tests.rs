@@ -125,6 +125,8 @@ fn a_preset_names_the_time() {
     let (mut session, _) = session();
     let answer = session.run("mail.follow_up", &json!({ "id": SENT, "preset": "tomorrow_morning" })).unwrap();
     assert_eq!(answer["until"], json!("2026-11-06T08:00:00Z"));
+    let answer = session.run("mail.follow_up", &json!({ "id": SENT, "preset": "next_week" })).unwrap();
+    assert_eq!(answer["until"], json!("2026-11-09T09:00:00Z"));
 }
 
 #[test]

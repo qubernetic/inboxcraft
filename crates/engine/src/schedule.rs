@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use inboxcraft_model::{DraftId, Due, MessageId, MessageState, ScheduleId, Scheduled};
 use inboxcraft_store::{Batch, Change, Storage};
-use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp};
+use inboxcraft_time::{CivilDateTime, Offset, Offsets, Timestamp, WeekRule, Weekday};
 
 use crate::act::{Effects, Mover};
 use crate::arrive::snooze;
@@ -33,6 +33,9 @@ pub const MORNING: u8 = 8;
 
 /// The hour of "this evening".
 pub const EVENING: u8 = 20;
+
+/// The hour of "this weekend" and "next week".
+pub const WEEK_MORNING: u8 = 9;
 
 /// How far ahead "later today" is, before it is rounded.
 const LATER: Duration = Duration::from_secs(3 * 3600);
@@ -51,24 +54,32 @@ pub enum Preset {
     ThisEvening,
     /// Tomorrow at [`MORNING`].
     TomorrowMorning,
+    /// The coming Saturday at [`WEEK_MORNING`]: today on a Saturday before it, else the next Saturday.
+    ThisWeekend,
+    /// The first day of next week at [`WEEK_MORNING`], by the owner's [`WeekRule`].
+    NextWeek,
 }
 
 impl Preset {
     /// Every preset, in the order a picker shows them.
-    pub const ALL: [Self; 3] = [Self::LaterToday, Self::ThisEvening, Self::TomorrowMorning];
+    pub const ALL: [Self; 5] = [Self::LaterToday, Self::ThisEvening, Self::TomorrowMorning, Self::ThisWeekend, Self::NextWeek];
 
-    /// The preset's name in commands: `later_today`, `this_evening`, `tomorrow_morning`.
+    /// The preset's name in commands: `later_today`, `this_evening`, `tomorrow_morning`, `this_weekend`,
+    /// `next_week`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::LaterToday => "later_today",
             Self::ThisEvening => "this_evening",
             Self::TomorrowMorning => "tomorrow_morning",
+            Self::ThisWeekend => "this_weekend",
+            Self::NextWeek => "next_week",
         }
     }
 
-    /// The moment the preset stands for at `now`, when `today` is the wall clock's date and time at `now`.
-    fn at(self, now: Timestamp, today: CivilDateTime, offsets: &dyn Offsets) -> Option<Timestamp> {
+    /// The moment the preset stands for at `now`, when `today` is the wall clock's date and time at `now` and weeks
+    /// are counted by `week`.
+    fn at(self, now: Timestamp, today: CivilDateTime, offsets: &dyn Offsets, week: WeekRule) -> Option<Timestamp> {
         match self {
             Self::LaterToday => {
                 // Rounded on the wall clock at the offset of the moment three hours on, so the result is three real
@@ -87,16 +98,30 @@ impl Preset {
                 let tomorrow = noon.checked_add(DAY)?.to_civil(Offset::UTC)?;
                 offsets.resolve(CivilDateTime::new(tomorrow.year(), tomorrow.month(), tomorrow.day(), MORNING, 0, 0)?)
             }
+            Self::ThisWeekend => {
+                // Never a Saturday gone by: from nine on a Saturday, and on a Sunday, it is the next one.
+                let days = (Weekday::Saturday.days_from_monday() - today.weekday().days_from_monday()).rem_euclid(7);
+                let saturday = week_morning(today.plus_days(days)?, offsets)?;
+                if saturday > now { Some(saturday) } else { week_morning(today.plus_days(days.checked_add(7)?)?, offsets) }
+            }
+            // The first day of the week that holds the same day a week on: also when this week began before year 0.
+            Self::NextWeek => week_morning(week.first_day_of(today.plus_days(7)?)?, offsets),
         }
     }
 }
 
-/// The presets ahead of `now` in the wall-clock time of `offsets`, in [`Preset::ALL`] order; one already behind, or
-/// "later today" when it falls tomorrow, is left out.
+/// [`WEEK_MORNING`] on the date of `day` on the wall clock of `offsets`; a time the clock skips or shows twice as
+/// [`Offsets::resolve`] reads it, as the other presets do.
+fn week_morning(day: CivilDateTime, offsets: &dyn Offsets) -> Option<Timestamp> {
+    offsets.resolve(CivilDateTime::new(day.year(), day.month(), day.day(), WEEK_MORNING, 0, 0)?)
+}
+
+/// The presets ahead of `now` in the wall-clock time of `offsets`, weeks counted by `week`, in [`Preset::ALL`] order;
+/// one already behind, "later today" when it falls tomorrow, or one past the end of time is left out.
 #[must_use]
-pub fn presets(now: Timestamp, offsets: &dyn Offsets) -> Vec<(Preset, Timestamp)> {
+pub fn presets(now: Timestamp, offsets: &dyn Offsets, week: WeekRule) -> Vec<(Preset, Timestamp)> {
     let Some(today) = offsets.civil(now) else { return Vec::new() };
-    Preset::ALL.into_iter().filter_map(|preset| preset.at(now, today, offsets).filter(|at| *at > now).map(|at| (preset, at))).collect()
+    Preset::ALL.into_iter().filter_map(|preset| preset.at(now, today, offsets, week).filter(|at| *at > now).map(|at| (preset, at))).collect()
 }
 
 /// A schedule entry whose time came: the event the front end and the later stages act on.

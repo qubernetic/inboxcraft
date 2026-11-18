@@ -45,12 +45,24 @@ fn presets_answers_the_presets_ahead_in_utc_until_the_offsets_are_given() {
             { "preset": "later_today", "at": "2026-11-05T12:00:00Z" },
             { "preset": "this_evening", "at": "2026-11-05T20:00:00Z" },
             { "preset": "tomorrow_morning", "at": "2026-11-06T08:00:00Z" },
+            { "preset": "this_weekend", "at": "2026-11-07T09:00:00Z" },
+            { "preset": "next_week", "at": "2026-11-09T09:00:00Z" },
         ] })
     );
     session.set_offsets(Box::new(OffsetTable::new(Offset::from_minutes(60).unwrap())));
     let answer = session.run("schedule.presets", &json!({})).unwrap();
     assert_eq!(answer["presets"][1], json!({ "preset": "this_evening", "at": "2026-11-05T19:00:00Z" }));
     assert!(bad(session.run("schedule.presets", &json!({ "at": "now" }))));
+}
+
+#[test]
+fn next_week_follows_the_first_day_of_the_week_the_owner_set() {
+    // NOW is Thursday 5 November 2026: with weeks from Sunday, next week starts on Sunday 8 November.
+    let mut session = session();
+    session.run("week.set", &json!({ "first_day": "sunday" })).unwrap();
+    let answer = session.run("schedule.presets", &json!({})).unwrap();
+    assert_eq!(answer["presets"][4], json!({ "preset": "next_week", "at": "2026-11-08T09:00:00Z" }));
+    assert_eq!(answer["presets"][3], json!({ "preset": "this_weekend", "at": "2026-11-07T09:00:00Z" }));
 }
 
 #[test]

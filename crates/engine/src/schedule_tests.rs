@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use inboxcraft_model::{AccountId, Draft, DraftId, Due, MessageId, MessageState, ScheduleId, Scheduled};
 use inboxcraft_store::{Batch, Change, Memory, Storage};
-use inboxcraft_time::{CivilDateTime, FakeClock, Offset, OffsetTable, Offsets, Timestamp};
+use inboxcraft_time::{CivilDateTime, FakeClock, FirstWeek, Offset, OffsetTable, Offsets, Timestamp, WeekRule, Weekday};
 use serde_json::{Value, json};
 
-use super::{Fired, LATE, Preset, presets};
+use super::{Fired, LATE, Preset};
 use crate::test_support::{NOW, at, mailbox};
 use crate::{AgentClass, CommandSpec, Context, EngineError, Outcome, Registry, Session};
 
@@ -27,12 +27,22 @@ fn europe() -> OffsetTable {
     OffsetTable::new(hours(1)).with_change(utc(2026, 3, 29, 1, 0, 0), hours(2)).with_change(utc(2026, 10, 25, 1, 0, 0), hours(1))
 }
 
+/// The presets at `now` with weeks from Monday (the default).
+fn presets(now: Timestamp, offsets: &dyn Offsets) -> Vec<(Preset, Timestamp)> {
+    super::presets(now, offsets, WeekRule::default())
+}
+
+fn presets_by(now: Timestamp, offsets: &dyn Offsets, first_day: Weekday) -> Vec<(Preset, Timestamp)> {
+    super::presets(now, offsets, WeekRule { first_day, first_week: FirstWeek::FirstFourDayWeek })
+}
+
 fn find(list: &[(Preset, Timestamp)], preset: Preset) -> Option<Timestamp> {
     list.iter().find(|(name, _)| *name == preset).map(|(_, at)| *at)
 }
 
 #[test]
-fn the_presets_in_the_morning_are_later_today_this_evening_and_tomorrow_morning() {
+fn the_presets_in_the_morning_are_later_today_this_evening_tomorrow_morning_this_weekend_and_next_week() {
+    // Thursday 5 November 2026.
     let list = presets(utc(2026, 11, 5, 9, 0, 0), &Offset::UTC);
     assert_eq!(
         list,
@@ -40,9 +50,11 @@ fn the_presets_in_the_morning_are_later_today_this_evening_and_tomorrow_morning(
             (Preset::LaterToday, utc(2026, 11, 5, 12, 0, 0)),
             (Preset::ThisEvening, utc(2026, 11, 5, 20, 0, 0)),
             (Preset::TomorrowMorning, utc(2026, 11, 6, 8, 0, 0)),
+            (Preset::ThisWeekend, utc(2026, 11, 7, 9, 0, 0)),
+            (Preset::NextWeek, utc(2026, 11, 9, 9, 0, 0)),
         ]
     );
-    assert_eq!(Preset::ALL.map(Preset::name), ["later_today", "this_evening", "tomorrow_morning"]);
+    assert_eq!(Preset::ALL.map(Preset::name), ["later_today", "this_evening", "tomorrow_morning", "this_weekend", "next_week"]);
 }
 
 #[test]
@@ -66,7 +78,14 @@ fn a_preset_that_is_not_ahead_is_hidden() {
 #[test]
 fn later_today_that_falls_tomorrow_is_hidden() {
     let late = presets(utc(2026, 11, 5, 21, 0, 0), &Offset::UTC);
-    assert_eq!(late, vec![(Preset::TomorrowMorning, utc(2026, 11, 6, 8, 0, 0))]);
+    assert_eq!(
+        late,
+        vec![
+            (Preset::TomorrowMorning, utc(2026, 11, 6, 8, 0, 0)),
+            (Preset::ThisWeekend, utc(2026, 11, 7, 9, 0, 0)),
+            (Preset::NextWeek, utc(2026, 11, 9, 9, 0, 0)),
+        ]
+    );
     let early = presets(utc(2026, 11, 6, 0, 10, 0), &Offset::UTC);
     assert_eq!(find(&early, Preset::TomorrowMorning), Some(utc(2026, 11, 7, 8, 0, 0)), "after midnight tomorrow is the next day");
     assert_eq!(find(&early, Preset::LaterToday), Some(utc(2026, 11, 6, 3, 0, 0)));
@@ -124,6 +143,96 @@ fn no_preset_past_the_end_of_time() {
     assert!(presets(Timestamp::MAX, &Offset::UTC).is_empty());
     assert!(presets(utc(10_000, 12, 31, 12, 0, 0), &Offset::UTC).iter().all(|(preset, _)| *preset != Preset::TomorrowMorning));
     assert!(presets(Timestamp::MIN, &Offset::from_minutes(-5999).unwrap()).is_empty(), "no wall clock before year 0");
+}
+
+#[test]
+fn this_weekend_is_the_coming_saturday_at_nine_and_never_one_gone_by() {
+    // 7 November 2026 is a Saturday.
+    for (now, expected) in [
+        (utc(2026, 11, 2, 0, 0, 0), utc(2026, 11, 7, 9, 0, 0)),
+        (utc(2026, 11, 6, 23, 59, 59), utc(2026, 11, 7, 9, 0, 0)),
+        (utc(2026, 11, 7, 0, 0, 0), utc(2026, 11, 7, 9, 0, 0)),
+        (utc(2026, 11, 7, 8, 59, 59), utc(2026, 11, 7, 9, 0, 0)),
+        (utc(2026, 11, 7, 9, 0, 0), utc(2026, 11, 14, 9, 0, 0)),
+        (utc(2026, 11, 7, 15, 0, 0), utc(2026, 11, 14, 9, 0, 0)),
+        (utc(2026, 11, 8, 10, 0, 0), utc(2026, 11, 14, 9, 0, 0)),
+        (utc(2026, 11, 8, 23, 59, 59), utc(2026, 11, 14, 9, 0, 0)),
+    ] {
+        assert_eq!(find(&presets(now, &Offset::UTC), Preset::ThisWeekend), Some(expected), "at {now:?}");
+    }
+    // The first day of the week does not move the weekend.
+    assert_eq!(find(&presets_by(utc(2026, 11, 7, 10, 0, 0), &Offset::UTC, Weekday::Saturday), Preset::ThisWeekend), Some(utc(2026, 11, 14, 9, 0, 0)));
+}
+
+#[test]
+fn next_week_is_nine_on_the_first_day_of_the_week_after_this_one_by_the_setting() {
+    let thursday = utc(2026, 11, 5, 9, 0, 0);
+    for (first_day, expected) in [
+        (Weekday::Monday, utc(2026, 11, 9, 9, 0, 0)),
+        (Weekday::Sunday, utc(2026, 11, 8, 9, 0, 0)),
+        (Weekday::Saturday, utc(2026, 11, 7, 9, 0, 0)),
+        (Weekday::Friday, utc(2026, 11, 6, 9, 0, 0)),
+        (Weekday::Thursday, utc(2026, 11, 12, 9, 0, 0)),
+    ] {
+        assert_eq!(find(&presets_by(thursday, &Offset::UTC, first_day), Preset::NextWeek), Some(expected), "{first_day:?}");
+    }
+    // On the first day itself, before nine, next week is still a week on, never today.
+    assert_eq!(find(&presets(utc(2026, 11, 9, 8, 0, 0), &Offset::UTC), Preset::NextWeek), Some(utc(2026, 11, 16, 9, 0, 0)));
+    // A Sunday with weeks from Monday: next week is tomorrow.
+    assert_eq!(find(&presets(utc(2026, 11, 8, 22, 0, 0), &Offset::UTC), Preset::NextWeek), Some(utc(2026, 11, 9, 9, 0, 0)));
+}
+
+#[test]
+fn this_weekend_and_next_week_across_the_autumn_change_are_nine_on_the_wall_clock() {
+    // Thursday 22 October 2026, 10:00 at +02:00; the clock goes back on Sunday 25 October.
+    let now = utc(2026, 10, 22, 8, 0, 0);
+    let list = presets(now, &europe());
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(2026, 10, 24, 7, 0, 0)), "09:00 at +02:00");
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(2026, 10, 26, 8, 0, 0)), "09:00 at +01:00");
+    // Saturday 28 March, 10:00 at +01:00; the clock goes forward on Sunday 29 March.
+    let list = presets(utc(2026, 3, 28, 9, 0, 0), &europe());
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(2026, 4, 4, 7, 0, 0)), "next Saturday, 09:00 at +02:00");
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(2026, 3, 30, 7, 0, 0)), "09:00 at +02:00");
+}
+
+#[test]
+fn a_nine_the_clock_skips_or_shows_twice_follows_the_rule_of_the_other_presets() {
+    // The clock skips 09:00 to 10:00 on Saturday 7 November: 09:00 lands at the change, as Offsets::resolve does.
+    let gap = OffsetTable::new(Offset::UTC).with_change(utc(2026, 11, 7, 9, 0, 0), hours(1));
+    let list = presets(utc(2026, 11, 5, 9, 0, 0), &gap);
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(2026, 11, 7, 9, 0, 0)));
+    assert_eq!(gap.civil(utc(2026, 11, 7, 9, 0, 0)), CivilDateTime::new(2026, 11, 7, 10, 0, 0));
+    // The clock shows 09:00 to 10:00 twice on Monday 9 November: the first of the two.
+    let fold = OffsetTable::new(hours(1)).with_change(utc(2026, 11, 9, 9, 0, 0), Offset::UTC);
+    let list = presets(utc(2026, 11, 5, 9, 0, 0), &fold);
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(2026, 11, 9, 8, 0, 0)));
+}
+
+#[test]
+fn this_weekend_and_next_week_at_the_year_s_end() {
+    // Wednesday 30 December 2026.
+    let list = presets(utc(2026, 12, 30, 12, 0, 0), &Offset::UTC);
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(2027, 1, 2, 9, 0, 0)));
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(2027, 1, 4, 9, 0, 0)));
+    // Saturday 26 December after nine: the Saturday of the next year.
+    let list = presets(utc(2026, 12, 26, 12, 0, 0), &Offset::UTC);
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(2027, 1, 2, 9, 0, 0)));
+    // Sunday 31 December 2028 with weeks from Sunday: next week starts 7 January 2029.
+    let list = presets_by(utc(2028, 12, 31, 12, 0, 0), &Offset::UTC, Weekday::Sunday);
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(2029, 1, 7, 9, 0, 0)));
+}
+
+#[test]
+fn this_weekend_and_next_week_past_the_end_of_time_are_left_out() {
+    // Friday 29 December 10000: Saturday is still held, the Monday after is not.
+    let list = presets(utc(10_000, 12, 29, 12, 0, 0), &Offset::UTC);
+    assert_eq!(find(&list, Preset::ThisWeekend), Some(utc(10_000, 12, 30, 9, 0, 0)));
+    assert_eq!(find(&list, Preset::NextWeek), None);
+    let list = presets(utc(10_000, 12, 30, 12, 0, 0), &Offset::UTC);
+    assert_eq!(find(&list, Preset::ThisWeekend), None);
+    // Year 0 begins on a Saturday: a Monday week of it starts before the year 0, next week still counts.
+    let list = presets(utc(0, 1, 1, 12, 0, 0), &Offset::UTC);
+    assert_eq!(find(&list, Preset::NextWeek), Some(utc(0, 1, 3, 9, 0, 0)));
 }
 
 // The scheduler.
