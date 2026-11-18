@@ -898,12 +898,16 @@ fn escape_in_the_suggestions_closes_them_and_keeps_the_text() {
 #[test]
 fn the_lines_stand_as_the_frame_draws_them() {
     let mut harness = composing(egui::Theme::Dark);
+    // The composer as wide as beside the list's 380 at 1300: the list's 440 takes 60 more.
+    harness.set_size(vec2(1360.0, 820.0));
+    harness.run();
     type_into(&mut harness, "To", "ansel.example.org, odile@example.org,");
     harness.run();
     let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
     let to = rect_of(&harness, Role::TextInput, "To");
     let subject = rect_of(&harness, Role::TextInput, "Subject");
-    let chip = harness.query_all_by_role(Role::ListItem).next().unwrap().rect();
+    // The first chip: the list's rows beside the composer are list items too.
+    let chip = harness.query_all_by_role(Role::ListItem).map(|item| item.rect()).find(|item| item.left() >= from.left() - 0.5).unwrap();
     // The values 76 in from the names (a column of 64 and 12), the lines 37 apart (36 and the hairline).
     assert!((chip.left() - from.left()).abs() < 0.5, "chips start under the sender: {chip:?} {from:?}");
     let left = rect_of(&harness, Role::MultilineTextInput, "Message text").left() - 17.0;
@@ -944,6 +948,10 @@ fn every_control_of_the_composer_is_reached_and_it_rests_with_a_blinking_caret()
     let mut harness = composing(egui::Theme::Dark);
     type_into(&mut harness, "To", "odile@example.org,");
     harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
+    harness.run();
+    // The walk starts in the composer: a list row Tab reaches beside it is shown in the reader's place, which the
+    // composer leaves for its floating panel.
+    harness.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("compose-from")));
     harness.run();
     let missed: Vec<String> = crate::component::tests::keyboard_walk(&mut harness)
         .into_iter()

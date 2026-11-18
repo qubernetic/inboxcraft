@@ -3034,9 +3034,11 @@ fn the_list_over_the_composer_ends_where_the_window_holds_two_panes_and_two_pane
     harness.run();
     assert_eq!(rows(&harness), 0, "narrowed again, the composer is in front: two panes ended the list's turn");
     assert_eq!(written(&harness), Some(("Dear Odile".to_owned(), false)));
-    // Two panes: Ctrl Enter sends the composer shown.
+    // Two panes: Ctrl Enter sends the composer shown, from inside it.
     let mut harness = wide(1300.0);
     write_to_odile(&mut harness);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
+    harness.run();
     assert!(harness.state().can_run(crate::keymap::SEND));
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     harness.run();

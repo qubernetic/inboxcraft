@@ -185,6 +185,9 @@ fn closing_the_composer_brings_the_list_back_with_its_place_and_its_pick() {
     let mut harness = window(720.0, 100);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
+    // One pane: the message opened in the list's place; Esc brings the list back in front, the row picked.
+    harness.key_press(Key::Escape);
+    harness.run();
     let row = |harness: &Harness<'static, InboxApp>| harness.query_all_by_label_contains("Your bike is due").next().map(|node| node.rect());
     let list = search_box(&harness).unwrap().center() + vec2(-100.0, 300.0);
     harness.event(egui::Event::PointerMoved(list));
