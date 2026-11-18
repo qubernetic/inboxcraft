@@ -124,7 +124,7 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
     let account =
         mailbox.messages().iter().find(|row| row.id == id).and_then(|row| mailbox.accounts().iter().find(|account| account.id == row.account));
     let caption = account.map(|account| format!("{} · {}", crate::component::spoken(&account.label), targets.len()));
-    popup::menu(ui.ctx(), theme, &response, move_menu(), MOVE_WIDTH, |ui| {
+    popup::menu_right(ui.ctx(), theme, &response, move_menu(), MOVE_WIDTH, |ui| {
         popup::title(ui, theme, tr!("Move to"), caption.as_deref());
         let mut chosen = false;
         for folder in targets {
@@ -348,7 +348,7 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
         move_to(ui, theme, keymap, mailbox, open, drawn);
         act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn);
         let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-        popup::menu(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
+        popup::menu_right(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
             // Any row chosen closes it: each asks for something.
             let before = drawn.asked.len();
             more(ui, theme, keymap, mailbox, reader, drawn);

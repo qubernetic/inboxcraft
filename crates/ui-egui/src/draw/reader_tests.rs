@@ -1119,3 +1119,19 @@ fn tab_goes_from_the_head_through_the_message_to_the_answers() {
     assert!(head < message && message < reply, "head, then the message, then the answers: {order:?}");
     assert!(at("Reply all") > message && at("Forward") > message, "{order:?}");
 }
+
+#[test]
+fn more_and_move_hang_with_their_right_edge_on_their_button_s_right_edge() {
+    // The frames: More 288 wide from 1111 to 1399 under More (1367 to 1399), Move 256 wide from 1063 to 1319 under Move
+    // (1287 to 1319), 4 under the buttons. A row runs 1 in from the menu's edge.
+    for (button, row, width) in [("More", "Archive", 288.0), ("Move to a folder", "Receipts", 256.0)] {
+        let fetch = Recorder::default();
+        let mut harness = opened(&fetch, None, "Photos from the coast walk");
+        let opener = harness.get_by_role_and_label(Role::Button, button).rect();
+        harness.get_by_role_and_label(Role::Button, button).click();
+        harness.run();
+        let item = harness.get_by_role_and_label(Role::MenuItem, row).rect();
+        assert!((item.right() + 1.0 - opener.right()).abs() <= 0.5, "{button}: the menu's right edge on the button's: {item:?} {opener:?}");
+        assert!((item.left() - 1.0 - (opener.right() - width)).abs() <= 0.5, "{button}: {width} wide: {item:?} {opener:?}");
+    }
+}
