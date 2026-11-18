@@ -1936,6 +1936,12 @@ impl Mailbox {
         self.clock.now()
     }
 
+    /// Moves the wall clock's offset the list shows times in (the tests: a change of time zone).
+    #[cfg(test)]
+    pub(crate) fn set_offset(&mut self, offset: Offset) {
+        self.offset = offset;
+    }
+
     /// The wall clock's offset the list shows times in.
     #[must_use]
     pub fn offset(&self) -> Offset {

@@ -1028,6 +1028,18 @@ fn a_rows_words_are_worked_out_once_for_a_list_of_rows() {
     harness.run();
     assert!(TEXTS_BUILT.with(std::cell::Cell::get) > 0, "worked out again");
     harness.get_by_label(&spoken(&harness));
+    // The time zone changes: the times are said where the owner now is, worked out afresh.
+    let time = |harness: &Harness<'static, InboxApp>| {
+        let mailbox = harness.state().mailbox();
+        mailbox.row_date(mailbox.messages().iter().find(|row| row.id == first).unwrap())
+    };
+    let before = time(&harness);
+    TEXTS_BUILT.with(|built| built.set(0));
+    harness.state_mut().mailbox_mut().set_offset(inboxcraft_time::Offset::from_minutes(150).unwrap());
+    harness.run();
+    assert!(TEXTS_BUILT.with(std::cell::Cell::get) > 0, "worked out again for the new offset");
+    assert_ne!(time(&harness), before, "the row's time moved with the offset");
+    harness.get_by_label(&spoken(&harness));
 }
 
 /// The sample mailbox over a list of 10 000 messages in three groups (People, Notifications, Newsletters, in turn), longer than the engine lists, in `view`.
