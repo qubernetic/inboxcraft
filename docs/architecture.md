@@ -99,7 +99,8 @@ at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sen
 words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
 sender's address (cleaned and cut at 254 characters), a count, a folder id and role. No text of the message goes
 into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
-`other`) for mail in the inbox; a return from a snooze counts while the message is in the inbox, as the store keeps
+`other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
+account; a return from a snooze counts while the message is in the inbox, as the store keeps
 when it came back but not where to; `default` (the folder) comes only when nothing else does.
 
 The appearance commands (`ui.theme.set`, `ui.text_scale.set`, `ui.motion.set`, `ui.frame.set`, all `safe`) change

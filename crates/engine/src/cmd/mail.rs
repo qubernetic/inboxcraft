@@ -501,18 +501,20 @@ fn why(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
         _ => {}
     }
 
-    // The grouped inbox: the classifier's rule, or the owner's choice for the sender.
-    let grouped = group::Grouping::new(store)?.of_by(message)?;
-    if role == Some(Role::Inbox)
-        && let Some((in_group, Some(rule))) = grouped
-    {
-        reasons.push(reason("rule", "why.rule.group", json!({ "group": name_arg(group::name(in_group)), "rule": name_arg(group::rule_name(rule)) })));
+    // The grouped inbox, where grouping applies (the inbox of a grouped account, `of_by` says which account): the
+    // classifier's rule, or else the owner's choice for the sender.
+    let grouped = if role == Some(Role::Inbox) { group::Grouping::new(store)?.of_by(message)? } else { None };
+    match grouped {
+        Some((in_group, Some(rule))) => {
+            reasons.push(reason("rule", "why.rule.group", json!({ "group": name_arg(group::name(in_group)), "rule": name_arg(group::rule_name(rule)) })));
+        }
+        Some((in_group, None)) => {
+            reasons.push(reason("sender", "why.sender.group", json!({ "address": address_arg(from), "group": name_arg(group::name(in_group)) })));
+        }
+        None => {}
     }
 
     // The owner's decisions on the sender.
-    if let Some((in_group, None)) = grouped {
-        reasons.push(reason("sender", "why.sender.group", json!({ "address": address_arg(from), "group": name_arg(group::name(in_group)) })));
-    }
     match record.as_ref().and_then(|record| record.screening) {
         Some(Screening::Accepted) => reasons.push(reason("sender", "why.sender.accepted", json!({ "address": address_arg(screened) }))),
         Some(Screening::Blocked) => reasons.push(reason("sender", "why.sender.blocked", json!({ "address": address_arg(screened) }))),

@@ -139,6 +139,20 @@ fn the_owners_choices_for_the_sender_come_before_the_classifier() {
 }
 
 #[test]
+fn the_senders_group_is_a_reason_only_where_grouping_applies() {
+    let mut session = session();
+    put(&mut session, FIRST, 1, "erin@example.org", plain());
+    put(&mut session, FIRST + 1, SCREENER, "erin@example.org", plain());
+    put(&mut session, FIRST + 2, 3, "erin@example.org", plain());
+    sender(&mut session, "erin@example.org", false, None, Some(Group::Updates));
+    let chosen = json!({ "kind": "sender", "text_id": "why.sender.group", "args": { "address": "erin@example.org", "group": "updates" } });
+    assert_eq!(why(&mut session, FIRST), [chosen]);
+    // Held back by the screener or kept in another folder, the group is not why it is there.
+    assert_eq!(said(&why(&mut session, FIRST + 1)), [pair("screener", "why.screener.held")]);
+    assert_eq!(said(&why(&mut session, FIRST + 2)), [pair("default", "why.default")]);
+}
+
+#[test]
 fn the_screener_says_whether_it_held_blocked_marked_or_knew_the_sender() {
     let mut session = session();
     mode(&mut session, "inside");
