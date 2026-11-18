@@ -656,3 +656,29 @@ fn a_cut_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() {
     assert_eq!(shown[1], "Keep a copy", "a name that fits is not touched");
     assert!(shown[2].chars().count() <= 2, "{:?}", shown[2]);
 }
+
+#[test]
+fn a_cut_line_is_never_wider_than_its_box_however_egui_rounds_its_letters() {
+    let theme = theme();
+    let mut harness = builder().build_ui_state(
+        move |ui, found: &mut Vec<(String, f32)>| {
+            found.clear();
+            for (text, font, width) in [
+                ("Bakery on the corner, orders and deliveries", theme.fonts.body, 144.0_f32),
+                ("orders-and-deliveries@bakery-on-the-corner.example.org", theme.fonts.mono_s, 112.0),
+            ] {
+                let cut = super::cut(ui, text, font, theme.palette.ink, width);
+                let shown: String = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect();
+                let wide: f32 = cut.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum();
+                found.push((shown, wide));
+            }
+        },
+        Vec::new(),
+    );
+    harness.run();
+    let found = harness.state();
+    // The boards: `Bakery on the corner…` (the comma does not fit) and `orders-and-deli…` (16 × 6.6 is past 112).
+    assert_eq!(found[0].0, "Bakery on the corner…", "{found:?}");
+    assert_eq!(found[1].0, "orders-and-deli…", "{found:?}");
+    assert!(found[0].1 <= 144.0 && found[1].1 <= 112.0, "{found:?}");
+}

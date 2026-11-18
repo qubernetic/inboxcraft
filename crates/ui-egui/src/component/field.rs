@@ -671,7 +671,7 @@ fn cut_line(ui: &Ui, text: &str, font: Font, colour: Color32, width: f32) -> Arc
     let mut job = LayoutJob::single_section(text.to_owned(), font.format(colour));
     job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    paint::tight_cut(ui.painter(), ui.fonts_mut(|fonts| fonts.layout_job(job)))
+    paint::cut_within(ui.painter(), job, width.max(1.0))
 }
 
 /// Paints `hint` in `muted` at `at` (the text's place), clipped to `clip`; after the caret's block and the box's gap

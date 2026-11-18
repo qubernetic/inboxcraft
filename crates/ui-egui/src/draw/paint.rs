@@ -68,7 +68,30 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     for (text, font, colour) in sections {
         job.append(&font.text(text), 0.0, font.format(*colour));
     }
-    on_baseline(tight_cut(ui.painter(), ui.painter().layout_job(job)))
+    on_baseline(cut_within(ui.painter(), job, width.max(1.0)))
+}
+
+/// The run's width as its letters' advances add up: egui puts each letter on a rounded place, so the galley's own
+/// width can be a fraction under it.
+fn advances(galley: &Galley) -> f32 {
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.advance_width)).sum()
+}
+
+/// `job` (one line, cut with an ellipsis) laid out and cut as the design cuts it ([`tight_cut`]), its letters' advances
+/// never above `width`: egui fits the letters by their rounded places and can keep one that reaches past the box (a
+/// comma, a sixteenth mono letter); then it is laid out again narrower, at most a few times, a letter fewer each.
+pub(crate) fn cut_within(painter: &Painter, job: LayoutJob, width: f32) -> Arc<Galley> {
+    let mut job = job;
+    let mut galley = tight_cut(painter, painter.layout_job(job.clone()));
+    for _ in 0..8 {
+        let over = advances(&galley) - width;
+        if !(over > 0.001) || !job.wrap.max_width.is_finite() {
+            break;
+        }
+        job.wrap.max_width = (job.wrap.max_width - over - 0.01).max(1.0);
+        galley = tight_cut(painter, painter.layout_job(job.clone()));
+    }
+    galley
 }
 
 /// A one-line `galley` cut with an ellipsis as the design cuts a line: the ellipsis follows the last letter kept, so

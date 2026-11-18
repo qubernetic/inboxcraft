@@ -66,8 +66,9 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     // edge after it.
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let words = cut(ui, name, theme.fonts.body, ink, (WIDEST - lead - tail).max(1.0));
-    let width = (lead + words.size().x + tail).ceil();
+    let most = (WIDEST - lead - tail).max(1.0);
+    let words = cut(ui, name, theme.fonts.body, ink, most);
+    let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     chip.widget_info(|| WidgetInfo::labeled(Role::ListItem, enabled, spoken));
     let cross = Rect::from_min_size(pos2(rect.right() - 1.0 - s.s1 - glyph, rect.center().y - glyph / 2.0), vec2(glyph, glyph));
@@ -341,8 +342,15 @@ fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32) -> f3
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let words = cut(ui, &recipient.shown, theme.fonts.body, ink, (WIDEST - lead - tail).max(1.0));
-    (lead + words.size().x + tail).ceil()
+    let most = (WIDEST - lead - tail).max(1.0);
+    let words = cut(ui, &recipient.shown, theme.fonts.body, ink, most);
+    (lead + words_box(ui, theme, &recipient.shown, ink, &words, most) + tail).ceil()
+}
+
+/// The box a chip gives its `name` laid out as `words` within `most`: the words' width, or all of `most` when the name
+/// is cut there, as the design's long chip keeps its 144.
+fn words_box(ui: &Ui, theme: &Theme, name: &str, ink: Color32, words: &egui::Galley, most: f32) -> f32 {
+    if galley(ui, name, theme.fonts.body, ink).size().x > most { most } else { words.size().x }
 }
 
 #[cfg(test)]

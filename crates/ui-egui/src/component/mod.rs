@@ -191,7 +191,7 @@ pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width:
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    crate::draw::paint::on_baseline(crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job)))
+    crate::draw::paint::on_baseline(crate::draw::paint::cut_within(ui.painter(), job, width.max(1.0)))
 }
 
 /// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one
