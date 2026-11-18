@@ -2513,3 +2513,60 @@ fn the_list_keys_rest_under_a_rows_open_menu() {
         assert_eq!(harness.state().mailbox().selected(), Some(odile), "{key:?} under the open menu");
     }
 }
+
+#[test]
+fn a_step_in_the_pass_the_list_shrinks_scrolls_by_that_passs_viewport() {
+    /// Each pass's viewport, the keyed message and its row's rect as the pass built it.
+    type Seen = Vec<(egui::Rect, Option<u64>, Option<egui::Rect>)>;
+    let mut app = InboxApp::new(ten_thousand_mailbox(InboxView::List));
+    app.set_reduce_motion(true);
+    let mut harness = Harness::builder().with_size(vec2(1300.0, 900.0)).with_context_setup(install_fonts).with_max_steps(240).build_ui_state(
+        |ui, (app, seen, armed): &mut (InboxApp, Seen, u8)| {
+            // Armed (1), the pass after the one that read J shows the error banner, which takes room from the list:
+            // the list scrolls to the keyed row in the pass after the key, and its viewport there is not the last
+            // pass's, as when the window shrinks right after a key.
+            if *armed == 2 {
+                *armed = 0;
+                app.mailbox_mut().fail(crate::UiError::Shot("the banner".to_owned()));
+            }
+            if *armed == 1 && ui.input(|input| input.key_pressed(Key::J)) {
+                *armed = 2;
+            }
+            app.ui(ui);
+            let row = |id: u64| ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(super::list::row_id(id)).map(|widget| widget.rect));
+            let keyed = app.mailbox().selected();
+            if let Some(view) = super::list::view_rect(ui.ctx()) {
+                seen.push((view, keyed, keyed.and_then(row)));
+            }
+        },
+        (app, Vec::new(), 0),
+    );
+    harness.run();
+    harness.key_press(Key::Home);
+    harness.run();
+    let view = harness.state().1.last().unwrap().0;
+    // Keyed: a row whose next one stands whole in the viewport, less than a banner's height above its bottom.
+    let order = super::list::order(&harness.ctx);
+    let mut at = 0;
+    loop {
+        harness.key_press(Key::J);
+        harness.run();
+        at += 1;
+        let keyed = harness.state().1.last().and_then(|(_, _, row)| *row).unwrap();
+        let next_bottom = keyed.bottom() + 56.0;
+        if next_bottom + 56.0 > view.bottom() {
+            assert!(next_bottom <= view.bottom(), "the next row is whole: {next_bottom} in {view:?}");
+            break;
+        }
+    }
+    let next = order[at + 1];
+    harness.state_mut().1.clear();
+    harness.state_mut().2 = 1;
+    harness.key_press(Key::J);
+    harness.step();
+    harness.run();
+    let (shrunk, _, row) = harness.state().1.iter().find(|(view, keyed, _)| *keyed == Some(next) && view.top() > 200.0).copied().unwrap();
+    assert!(shrunk.height() < view.height(), "the list's room shrank in that pass: {shrunk:?} from {view:?}");
+    let row = row.expect("the keyed row is built in the pass it was keyed in");
+    assert!(row.top() >= shrunk.top() - 0.01 && row.bottom() <= shrunk.bottom() + 0.01, "whole in that pass's viewport: {row:?} in {shrunk:?}");
+}
