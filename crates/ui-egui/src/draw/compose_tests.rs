@@ -1060,6 +1060,38 @@ fn an_act_on_a_row_beside_the_docked_composer_walks_on_and_leaves_it_docked() {
 }
 
 #[test]
+fn undo_after_a_walk_on_beside_the_docked_composer_leaves_it_docked() {
+    // A press opens a row (the composer floats), the composer docked again, Done on that row's hover act, then Undo:
+    // the selection Undo restores is no open.
+    let mut harness = composing(egui::Theme::Light);
+    type_into(&mut harness, "Message text", "Hello Odile");
+    let row = harness.query_all_by_role(Role::ListBoxOption).nth(1).unwrap();
+    let rect = row.rect();
+    row.click();
+    harness.run();
+    let pressed = harness.state().mailbox().selected().unwrap();
+    assert!(!docked_with(&harness).0, "the press floats it");
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place").click();
+    harness.run();
+    assert!(docked_with(&harness).0, "docked again");
+    harness.hover_at(rect.center());
+    harness.run();
+    let done = harness.query_all_by_role_and_label(Role::Button, "Done").find(|button| rect.contains(button.rect().center())).unwrap();
+    done.click();
+    harness.run();
+    harness.run();
+    assert!(!harness.state().mailbox().messages().iter().any(|row| row.id == pressed), "done");
+    assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "the walk-on leaves it docked");
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::UNDO);
+    harness.run();
+    harness.run();
+    assert!(harness.state().mailbox().messages().iter().any(|row| row.id == pressed), "undone");
+    assert_eq!(docked_with(&harness), (true, "Hello Odile".to_owned()), "after Undo: the composer stays docked, the draft whole");
+    assert!(super::reader_rect(&harness.ctx).is_none(), "after Undo: the reader is not drawn");
+}
+
+#[test]
 fn a_press_or_enter_on_a_row_beside_the_docked_composer_floats_it() {
     // A press on a row.
     let mut harness = composing(egui::Theme::Light);

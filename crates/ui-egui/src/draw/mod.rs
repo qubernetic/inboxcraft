@@ -166,6 +166,8 @@ pub struct InboxApp {
     focus_walked: bool,
     /// The last act on a row came by a key (or the palette), not by a press: the keyboard is in the window.
     act_by_key: bool,
+    /// An Undo beside the docked composer gave a selection back: it opens as a preview, never as the owner's open.
+    restored: bool,
     /// Whether the window held one pane in the last frame drawn; `None` before the first.
     single: Option<bool>,
     /// Whether the list was shown in the last frame drawn.
@@ -395,6 +397,7 @@ impl InboxApp {
             list_over_composer: false,
             focus_reader: false,
             focus_walked: false,
+            restored: false,
             act_by_key: false,
             single: None,
             list_was_shown: true,
@@ -1458,8 +1461,10 @@ impl InboxApp {
             self.held_back = None;
         }
         let opening = self.mailbox.selected();
+        // Read by the first sync after the Undo, which sees what it gave back.
+        let restored = std::mem::take(&mut self.restored);
         if open != opening {
-            let preview = walking || (self.mailbox.keyed() && !self.reading);
+            let preview = walking || restored || (self.mailbox.keyed() && !self.reading);
             // In one pane with the list in front, and behind the docked composer, the reader is not shown: a message
             // selected there (the next one after an act on the keyed row, from the keys, the pointer, a notification
             // or the engine; a preview beside the composer) opens as a preview, not marked read.
@@ -2502,6 +2507,7 @@ impl InboxApp {
     /// Takes the toast's act back, or the newest act of the history; the calendar is read again when it shows.
     fn undo(&mut self) {
         self.mailbox.undo();
+        self.restored = self.docked();
         if self.screen == Screen::Calendar {
             self.calendar.refresh(&mut self.mailbox);
         }
