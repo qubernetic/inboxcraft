@@ -613,6 +613,11 @@ fn by_keys_id() -> Id {
 /// every popup not shown), so it gives the focus back to nothing later.
 pub(super) fn settle_menus(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
+    // A landing no list took (the list not drawn, or a place without rows: New senders' queue) is dropped, so it
+    // never lands later, in another place.
+    if ctx.data(|data| data.get_temp::<(u64, u64)>(land_id())).is_some_and(|(_, at)| pass > at.saturating_add(2)) {
+        ctx.data_mut(|data| data.remove::<(u64, u64)>(land_id()));
+    }
     if ctx.data(|data| data.get_temp::<(u64, u64)>(menu_asked_id())).is_some_and(|(_, at)| at < pass) {
         ctx.data_mut(|data| data.remove::<(u64, u64)>(menu_asked_id()));
     }

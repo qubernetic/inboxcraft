@@ -3150,3 +3150,27 @@ fn in_one_pane_a_held_messages_head_starts_with_back_to_the_list_and_the_focus_o
     assert_eq!(super::reader_rect(&harness.ctx), None, "a pointer gets back to the list");
     harness.get_by_label("Who gets in?");
 }
+
+#[test]
+fn a_landing_no_list_took_never_lands_later_in_another_place() {
+    let mut harness = wide(900.0);
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.get_by_label("Harbour Swim Club, Winter swim at the harbour steps, 06:00, unread, new sender").click();
+    harness.run();
+    harness.run();
+    // Back to New senders' queue, which has no rows to land on.
+    harness.get_by_role_and_label(Role::Button, "Back to the list").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    // The inbox's rows, drawn later with nothing focused, take no keyboard asked for in New senders.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::MAIL);
+    harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Inbox));
+    for _ in 0..3 {
+        harness.run();
+    }
+    assert_eq!(super::list::focused_row(&harness.ctx), None, "no row took a stale landing");
+    assert_eq!(harness.state().mailbox().selected(), None, "and nothing was keyed by it");
+}
