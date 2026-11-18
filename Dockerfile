@@ -13,6 +13,9 @@ ARG GID=1000
 ARG CARGO_BINSTALL_VERSION=1.25.3
 ARG CARGO_BINSTALL_SHA256_X86_64=1f72931713e9091478538c6c78c3f11f205b4f6f394f35e61835036b23929d2a
 ARG CARGO_BINSTALL_SHA256_AARCH64=19ef7a058397f83d6b2cc83727fb8d38babd8ad657210c921b7771a9e8b3a6fb
+ARG SCCACHE_VERSION=0.19.0
+ARG SCCACHE_SHA256_X86_64=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+ARG SCCACHE_SHA256_AARCH64=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
 ARG JUST_VERSION=1.53.0
 ARG CARGO_DENY_VERSION=0.20.2
 ARG CARGO_LLVM_COV_VERSION=0.9.1
@@ -76,6 +79,33 @@ RUN cargo binstall --no-confirm --locked \
         "cargo-nextest@${CARGO_NEXTEST_VERSION}" \
     && rm -rf /usr/local/cargo/registry/* /usr/local/cargo/git/*
 
+# sccache from its pinned release archive, verified before it is extracted.
+# It lets the target dirs of several worktrees share the compiled third-party
+# dependencies. The wrapper drops CARGO_TARGET_DIR and CARGO_BUILD_TARGET_DIR
+# first: sccache hashes every CARGO_* variable, so with them in the key no two
+# target dirs would ever share an entry (rustc gets its output dir as an
+# argument and does not need them).
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) sha="${SCCACHE_SHA256_X86_64}" ;; \
+        aarch64) sha="${SCCACHE_SHA256_AARCH64}" ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    name="sccache-v${SCCACHE_VERSION}-$(uname -m)-unknown-linux-musl"; \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "/tmp/${name}.tar.gz" \
+        "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${name}.tar.gz"; \
+    echo "${sha}  /tmp/${name}.tar.gz" | sha256sum -c -; \
+    tar -xzf "/tmp/${name}.tar.gz" -C /usr/local/cargo/bin --strip-components=1 "${name}/sccache"; \
+    rm -f "/tmp/${name}.tar.gz"; \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        '# sccache hashes every CARGO_* variable; the target dir must not be part of the key.' \
+        'unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR' \
+        'exec sccache "$@"' \
+        > /usr/local/cargo/bin/sccache-wrap; \
+    chmod 0755 /usr/local/cargo/bin/sccache /usr/local/cargo/bin/sccache-wrap; \
+    sccache --version
+
 # Non-root user matching the host UID/GID so bind-mounted files keep their owner.
 RUN set -eu; \
     if ! getent group "${GID}" >/dev/null; then groupadd -g "${GID}" dev; fi; \
@@ -86,3 +116,11 @@ RUN set -eu; \
 
 USER dev
 WORKDIR /workspace
+
+# Every rustc call in the container goes through sccache (set here, never in
+# .cargo/config.toml: native mode and the GitHub workflow build without it).
+# The cache lies under target/ on the bind mount, so it outlives the container
+# and needs no volume of its own; `just clean` deletes it with target/.
+ENV RUSTC_WRAPPER=/usr/local/cargo/bin/sccache-wrap \
+    SCCACHE_DIR=/workspace/target/sccache \
+    SCCACHE_CACHE_SIZE=40G
