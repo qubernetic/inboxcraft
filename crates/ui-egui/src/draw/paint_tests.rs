@@ -792,6 +792,9 @@ fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
             // an edge, no edge running past the fill or past another edge.
             let whole = |at: f32| (at - at.round()).abs() < 0.01;
             assert!([fill.left(), fill.top(), fill.right(), fill.bottom()].into_iter().all(whole), "{ppp} {card:?}: fill {fill:?}");
+            // And it stands where its card rounds to: each side on the pixel boundary nearest the card's.
+            let rounded = [card.left(), card.top(), card.right(), card.bottom()].map(|at| (at * ppp).round());
+            assert_eq!([fill.left(), fill.top(), fill.right(), fill.bottom()].map(f32::round), rounded, "{ppp} {card:?}: where the pane lands");
             let near = |a: egui::Rect, b: egui::Rect| (a.min - b.min).length() < 0.01 && (a.max - b.max).length() < 0.01;
             assert!(near(outline, fill), "{ppp} {card:?}: edges {outline:?} against the fill {fill:?}");
             let covered = |x: f32, y: f32| bands.iter().any(|band| band.contains(pos2(x + 0.5, y + 0.5)));
@@ -807,6 +810,83 @@ fn a_lone_pane_s_edges_meet_at_every_corner_on_odd_points_too() {
             while y <= bottom {
                 assert!(covered(left, y) && covered(right, y), "{ppp} {card:?}: row {y} of {outline:?}");
                 y += 1.0;
+            }
+        }
+    }
+}
+
+/// Two cards that touch, side by side and stacked, split on whole, half and other points: at every scale each pane
+/// stands where its card rounds to, the two fills meet with no gap, and one line a hairline's pixels thick stands
+/// between them, on the second pane's first pixels.
+#[test]
+fn touching_panes_share_one_line_on_whole_pixels_at_every_scale() {
+    for ppp in [1.0_f32, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5] {
+        for split in [200.0_f32, 201.0, 200.5, 200.3] {
+            for stacked in [false, true] {
+                let (a, b) = if stacked {
+                    (
+                        egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(360.0, split - 60.0)),
+                        egui::Rect::from_min_max(pos2(40.0, split - 60.0), pos2(360.0, 270.0)),
+                    )
+                } else {
+                    (egui::Rect::from_min_max(pos2(40.0, 30.0), pos2(split, 270.0)), egui::Rect::from_min_max(pos2(split, 30.0), pos2(360.0, 270.0)))
+                };
+                let ctx = egui::Context::default();
+                let mut input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))), ..Default::default() };
+                input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+                let theme = Theme::new(Mode::Dark, TextScale::default());
+                let mut output = ctx.run_ui(input, |ui| {
+                    let mut panes = super::Panes::begin(ui.painter());
+                    for card in [a, b] {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(card), |ui| panes.card(ui, egui::Margin::ZERO, |_| ()));
+                    }
+                    panes.finish(ui.painter(), &theme);
+                });
+                output.textures_delta.clear();
+                let options = egui::epaint::TessellationOptions { feathering: false, ..Default::default() };
+                let mut tessellator = egui::epaint::Tessellator::new(ppp, options, [1, 1], Vec::new());
+                let (mut fills, mut bands) = (Vec::new(), Vec::new());
+                for clipped in tessellator.tessellate_shapes(output.shapes) {
+                    let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive else { continue };
+                    let quads = |colour: egui::Color32| -> Vec<egui::Rect> {
+                        let at: Vec<egui::Pos2> = mesh
+                            .vertices
+                            .iter()
+                            .filter(|vertex| vertex.color == colour)
+                            .map(|vertex| pos2(vertex.pos.x * ppp, vertex.pos.y * ppp))
+                            .collect();
+                        at.chunks(4).map(egui::Rect::from_points).collect()
+                    };
+                    fills.extend(quads(theme.palette.surface));
+                    bands.extend(quads(theme.palette.line));
+                }
+                let case = format!("{ppp} split {split} stacked {stacked}");
+                assert_eq!(fills.len(), 2, "{case}");
+                for (fill, card) in fills.iter().zip([a, b]) {
+                    let rounded = [card.left(), card.top(), card.right(), card.bottom()].map(|at| (at * ppp).round());
+                    let got = [fill.left(), fill.top(), fill.right(), fill.bottom()];
+                    assert!(got.iter().zip(rounded).all(|(got, want)| (got - want).abs() < 0.01), "{case}: {got:?} against {rounded:?}");
+                }
+                let shared = if stacked { fills[0].bottom() } else { fills[0].right() };
+                let meets = if stacked { fills[1].top() } else { fills[1].left() };
+                assert!((shared - meets).abs() < 0.01, "{case}: no gap between the fills");
+                // Seven edges: four of each pane less the one they share.
+                assert_eq!(bands.len(), 7, "{case}");
+                let pixels = super::line_pixels(ppp).1;
+                let between: Vec<&egui::Rect> = bands
+                    .iter()
+                    .filter(|band| {
+                        if stacked {
+                            (band.top() - shared).abs() < 0.01 && band.width() > 100.0
+                        } else {
+                            (band.left() - shared).abs() < 0.01 && band.height() > 100.0
+                        }
+                    })
+                    .collect();
+                assert_eq!(between.len(), 1, "{case}: one line between them: {bands:?}");
+                let thick = if stacked { between[0].height() } else { between[0].width() };
+                assert!((thick - pixels).abs() < 0.01, "{case}: the line {thick} px, a hairline's {pixels}");
             }
         }
     }
