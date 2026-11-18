@@ -172,3 +172,15 @@
 {"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
 {"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
 {"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}
+{"out": "docs/images/inbox-smart-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-grouped-light.png", "mode": "light", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-list-light.png", "mode": "light", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
+{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1440, 900], "put_away": true, "later": "pins"}
+{"out": "docs/images/new-senders-queue-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 8}}
+{"out": "docs/images/inbox-smart-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-grouped-dark.png", "mode": "dark", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-list-dark.png", "mode": "dark", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
+{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1440, 900], "put_away": true, "later": "pins"}
+{"out": "docs/images/new-senders-queue-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 8}}
