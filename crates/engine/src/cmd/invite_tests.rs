@@ -585,3 +585,23 @@ fn a_hostile_title_never_reaches_a_header_line_of_the_answer() {
     }
     assert_eq!(sent.recipients, ["odile@example.org"], "the answer goes only to the organiser");
 }
+
+/// An invitation from a sender the screener holds cannot be answered: an answer would be mail to someone the owner
+/// has not let in. The card says why; once the sender is let in, it can be answered.
+#[test]
+fn an_invitation_from_a_held_sender_cannot_be_answered_until_let_in() {
+    let mut session = session();
+    session.run("screener.mode", &json!({ "mode": "inside" })).unwrap();
+    let id = arrive(&mut session, 44, "held@example.org", &object("REQUEST", "held@example.org", 0, REQUEST_AT, ""));
+    let card = show(&mut session, id);
+    assert_eq!(card["can_answer"], json!(false), "{card}");
+    assert_eq!(card["why_not"], json!("the sender is not let in yet"));
+    for said in ["accepted", "tentative", "declined"] {
+        assert!(bad(answer(&mut session, id, said)), "{said} went to a held sender");
+    }
+    assert!(!session.take_jobs().iter().any(|job| matches!(job.kind, JobKind::Send { .. })), "nothing is sent");
+    session.run("screener.accept", &json!({ "address": "odile@example.org" })).unwrap();
+    assert_eq!(show(&mut session, id)["can_answer"], json!(true));
+    answer(&mut session, id, "accepted").unwrap();
+    assert_eq!(out(&mut session).recipients, ["odile@example.org"]);
+}
