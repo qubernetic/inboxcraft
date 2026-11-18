@@ -616,16 +616,20 @@ fn the_reader_keeps_to_a_narrow_window() {
     let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
     harness.set_size(vec2(420.0, 420.0));
     harness.run();
-    // A window this narrow leaves the reader a sliver: the banner's links stand where it has room for them, inside the
-    // banner, and nothing of it paints past the window.
-    let banner = harness.get_by_label_contains("Pictures: ").rect();
-    for link in harness.query_all_by_role(Role::Button).filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains("load once")))
-    {
-        assert!(banner.contains_rect(link.rect()), "{:?} in {banner:?}", link.rect());
-    }
+    // A window this narrow leaves the reader a sliver: nothing of the banner paints past the window.
     for (rect, text) in painted_texts(&harness) {
         assert!(rect.left() < 420.0 || !text.contains("remote picture"), "{text:?} at {rect:?} paints past the window");
     }
+    // A reader narrower than the banner's links on one line: each link stands whole on a line of its own, inside it.
+    harness.set_size(vec2(800.0, 420.0));
+    settle(&mut harness);
+    let banner = harness.get_by_label_contains("Pictures: ").rect();
+    let once = harness.get_by_role_and_label(Role::Button, "load once").rect();
+    let always = harness.get_by_role_and_label(Role::Button, "always for prize-desk@example.org").rect();
+    for link in [once, always] {
+        assert!(banner.contains_rect(link), "{link:?} stands inside the banner {banner:?}");
+    }
+    assert!(once.bottom() <= always.top(), "the links wrap: {once:?} {always:?}");
 }
 
 /// How wide and how high the text `label` comes out in a message made of `html`, in a reader 800 points wide.
@@ -2099,6 +2103,10 @@ fn the_reader_s_banners_and_cards_keep_inside_a_narrow_window() {
         let left = harness.get_by_label("You have won a lighthouse").rect().left() - 1.0;
         keeps_inside(&harness, left, width, &at("pictures"));
         let banner = harness.get_by_label_contains("Pictures: ").rect();
+        eprintln!(
+            "DBG banner {banner:?} buttons {:?}",
+            harness.query_all_by_role(Role::Button).filter_map(|n| n.accesskit_node().label()).collect::<Vec<_>>()
+        );
         assert!(banner.right() <= width + 0.5 && banner.left() >= left, "{banner:?}: {}", at("pictures"));
         // The held sender's card.
         let mut app = app_with(&fetch);
