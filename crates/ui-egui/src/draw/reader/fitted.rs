@@ -98,9 +98,40 @@ const KEPT_GLYPHS: usize = 4 * 1024 * 1024;
 /// A message's blocks laid out: what stands where, relative to the top left of the message.
 pub(super) struct Laid {
     items: Vec<Item>,
-    /// The quotes' rules and fold edges.
+    /// The quotes' rules and fold edges; once laid out, in columns (one for each left edge), each from the top down.
     rules: Vec<Rect>,
+    /// The columns of `rules`: where each begins and ends in it.
+    columns: Vec<std::ops::Range<usize>>,
+    /// For each rule, the lowest foot of the rules of its column down to it, so the first in sight is found by halving.
+    reach: Vec<f32>,
     height: f32,
+}
+
+impl Laid {
+    /// Nothing laid out.
+    fn empty() -> Self {
+        Self { items: Vec::new(), rules: Vec::new(), columns: Vec::new(), reach: Vec::new(), height: 0.0 }
+    }
+
+    /// Puts the rules in their columns, once all are made.
+    fn order_rules(&mut self) {
+        self.rules.sort_by(|a, b| a.left().total_cmp(&b.left()).then(a.top().total_cmp(&b.top())));
+        self.columns.clear();
+        self.reach.clear();
+        let mut start = 0;
+        while let Some(first) = self.rules.get(start) {
+            let left = first.left();
+            let length = self.rules.get(start..).map_or(0, |rest| rest.iter().take_while(|rule| rule.left() == left).count()).max(1);
+            let end = start.saturating_add(length);
+            let mut lowest = f32::NEG_INFINITY;
+            for rule in self.rules.get(start..end).unwrap_or_default() {
+                lowest = lowest.max(rule.bottom());
+                self.reach.push(lowest);
+            }
+            self.columns.push(start..end);
+            start = end;
+        }
+    }
 }
 
 /// One block, placed.
@@ -209,7 +240,8 @@ pub(super) fn blocks(
         (id, generation, depth).hash(&mut hasher);
         hasher.finish()
     };
-    let laid = kept(ui, who, key, || {
+    let probe = ui.painter().layout_job(LayoutJob::single_section("fitted".to_owned(), theme.fonts.read.format(theme.palette.ink)));
+    let laid = kept(ui, probe, who, key, || {
         let context = Context { ui, theme, reader, id, quotes, ppp };
         Arc::new(lay(&context, list, width, Style { text: theme.fonts.read, head: false }, depth))
     });
@@ -217,6 +249,13 @@ pub(super) fn blocks(
     let base = ui.scope_id().with(("fitted", id, depth));
     let mut show = Show { theme, reader, id, document, textures, drawn };
     show.laid(ui, &laid, rect.min, base);
+}
+
+/// The layouts kept, and the galley that shows whether egui built its font atlas afresh since they were made.
+#[derive(Default)]
+struct Store {
+    probe: Option<Arc<Galley>>,
+    keeps: Vec<Keep>,
 }
 
 /// A layout kept: whose it is, what it was laid out for, the pass that last drew it and how many letters it holds.
@@ -229,7 +268,7 @@ struct Keep {
 }
 
 /// The kept layouts, in egui's memory for the window.
-type Kept = Arc<Mutex<Vec<Keep>>>;
+type Kept = Arc<Mutex<Store>>;
 
 /// Where the kept layouts are.
 fn kept_slot() -> Id {
@@ -239,10 +278,20 @@ fn kept_slot() -> Id {
 /// The layout kept for `who` under `key`, or the one `make` lays out, kept in its place. Only what is drawn is kept:
 /// before a layout is made, every layout this pass has not drawn is dropped (a message left, an old width), and the
 /// letters kept together stay under [`KEPT_GLYPHS`], so a folder of huge messages opened one after another holds one.
-fn kept(ui: &Ui, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Arc<Laid> {
+///
+/// A kept layout's letters point into egui's font atlas as it was, and egui builds the atlas afresh when it fills or
+/// the text options change, dropping every galley it keeps. `probe`, a word laid out through egui each frame, is the
+/// same galley until then: when it is not, every kept layout is dropped and laid out again. Nothing else is laid out,
+/// copied or hashed again per frame.
+fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Arc<Laid> {
     let pass = ui.ctx().cumulative_pass_nr();
     let store: Kept = ui.data_mut(|data| data.get_temp_mut_or_default::<Kept>(kept_slot()).clone());
-    let mut kept = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !store.probe.as_ref().is_some_and(|kept| Arc::ptr_eq(kept, &probe)) {
+        store.keeps.clear();
+        store.probe = Some(probe);
+    }
+    let kept = &mut store.keeps;
     if let Some(keep) = kept.iter_mut().find(|keep| keep.who == who && keep.key == key) {
         keep.pass = pass;
         return keep.laid.clone();
@@ -284,7 +333,7 @@ fn glyphs(laid: &Laid) -> usize {
 fn kept_now(ctx: &egui::Context) -> (usize, usize) {
     let store = ctx.data(|data| data.get_temp::<Kept>(kept_slot()));
     let kept = store.as_ref().map(|store| store.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-    kept.map_or((0, 0), |kept| (kept.len(), kept.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add)))
+    kept.map_or((0, 0), |kept| (kept.keeps.len(), kept.keeps.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add)))
 }
 
 /// The quote depth of `block`.
@@ -343,7 +392,7 @@ fn rule_at(level: u8, top: f32, bottom: f32) -> Rect {
 
 /// Lays out `list` `width` wide in `style`, tables `depth` deep.
 fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: usize) -> Laid {
-    let mut laid = Laid { items: Vec::new(), rules: Vec::new(), height: 0.0 };
+    let mut laid = Laid::empty();
     if depth > DEEPEST {
         return laid;
     }
@@ -395,6 +444,7 @@ fn lay(context: &Context<'_>, list: &[Block], width: f32, style: Style, depth: u
         levels.end(&mut laid.rules);
     }
     laid.height = y.ceil();
+    laid.order_rules();
     laid
 }
 
@@ -712,7 +762,7 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> G
             .enumerate()
             .map(|(index, width)| match row.get(index) {
                 Some(cell) => lay(context, &cell.blocks, (width - CELL_PAD.x * 2.0).max(1.0), style, depth.saturating_add(1)),
-                None => Laid { items: Vec::new(), rules: Vec::new(), height: 0.0 },
+                None => Laid::empty(),
             })
             .collect();
         // A row is at least one line high: of a head's labels, or of the cells' words.
@@ -746,10 +796,18 @@ impl Show<'_> {
         // link before it is in sight (the focus brings it in).
         let near = sight.expand2(vec2(0.0, sight.height().max(1.0)));
         let p = &self.theme.palette;
-        for rule in &laid.rules {
-            let rule = rule.translate(origin.to_vec2());
-            if rule.intersects(sight) {
-                ui.painter().rect_filled(rule, 0.0, p.line);
+        // The rules in sight, column by column: the first found by halving, the rest until one starts below sight.
+        for column in &laid.columns {
+            let (Some(rules), Some(reach)) = (laid.rules.get(column.clone()), laid.reach.get(column.clone())) else { continue };
+            let first = reach.partition_point(|foot| origin.y + foot < sight.top());
+            for rule in rules.iter().skip(first) {
+                let rule = rule.translate(origin.to_vec2());
+                if rule.top() > sight.bottom() {
+                    break;
+                }
+                if rule.intersects(sight) {
+                    ui.painter().rect_filled(rule, 0.0, p.line);
+                }
             }
         }
         let focus_slot = base.with("focus");
@@ -763,14 +821,14 @@ impl Show<'_> {
                 break;
             }
             seen_focused |= focused == Some(index);
-            if self.item(ui, item, rect, base.with(index), sight) {
+            if self.item(ui, item, rect, base.with(index), sight, near) {
                 holds = Some(index);
             }
         }
         // The link with the focus keeps it while it is far from sight.
         if let (Some(index), false) = (focused, seen_focused)
             && let Some(item) = laid.items.get(index)
-            && self.item(ui, item, item.rect.translate(origin.to_vec2()), base.with(index), sight)
+            && self.item(ui, item, item.rect.translate(origin.to_vec2()), base.with(index), sight, near)
         {
             holds = Some(index);
         }
@@ -783,8 +841,9 @@ impl Show<'_> {
         holds.is_some()
     }
 
-    /// Draws `item` at `rect`, painting it only where it meets `sight`; whether a link in it has the focus.
-    fn item(&mut self, ui: &mut Ui, item: &Item, rect: Rect, id: Id, sight: Rect) -> bool {
+    /// Draws `item` at `rect`, painting it only where it meets `sight` and giving the keyboard what meets `near`;
+    /// whether a link in it has the focus.
+    fn item(&mut self, ui: &mut Ui, item: &Item, rect: Rect, id: Id, sight: Rect, near: Rect) -> bool {
         let theme = self.theme;
         let p = &theme.palette;
         let shows = rect.intersects(sight);
@@ -797,15 +856,41 @@ impl Show<'_> {
                 let at = pos2(rect.left() + left, rect.top());
                 if shows {
                     if let Some(mark) = mark {
-                        paint::run_at(ui.painter(), pos2(at.x - MARK, at.y), fresh(ui, mark), p.ink);
+                        paint::run_at(ui.painter(), pos2(at.x - MARK, at.y), mark.clone(), p.ink);
                     }
-                    paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), fresh(ui, galley), p.ink);
+                    paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), galley.clone(), p.ink);
                 }
-                let mut holds = false;
-                for (index, piece) in links.iter().enumerate() {
-                    holds |= self.link_piece(ui, piece, at, id.with(("link", index)));
+                // Only the links near sight take the pointer and the keyboard (found by halving: a paragraph may hold
+                // thousands), and the one with the focus.
+                let slot = id.with("focus");
+                let focused = ui.data(|data| data.get_temp::<usize>(slot));
+                let first = links.partition_point(|piece| piece.rects.last().is_some_and(|last| at.y + last.bottom() < near.top()));
+                let in_reach = links
+                    .iter()
+                    .enumerate()
+                    .skip(first)
+                    .take_while(|(_, piece)| piece.rects.first().is_some_and(|top| at.y + top.top() <= near.bottom()))
+                    .map(|(index, _)| index);
+                let mut reached: Vec<usize> = in_reach.collect();
+                if let Some(index) = focused.filter(|index| !reached.contains(index)) {
+                    let place = reached.partition_point(|other| *other < index);
+                    reached.insert(place, index);
                 }
-                holds
+                let mut holds = None;
+                for index in reached {
+                    if let Some(piece) = links.get(index)
+                        && self.link_piece(ui, piece, at, id.with(("link", index)))
+                    {
+                        holds = Some(index);
+                    }
+                }
+                ui.data_mut(|data| match holds {
+                    Some(index) => {
+                        data.insert_temp(slot, index);
+                    }
+                    None => data.remove::<usize>(slot),
+                });
+                holds.is_some()
             }
             Kind::Pre { galley, spoken } => {
                 let response = ui.interact(rect, id.with("words"), Sense::hover());
@@ -817,7 +902,7 @@ impl Show<'_> {
                         painter,
                         rect.min + PRE_PAD + vec2(1.0, 0.0),
                         (rect.width() - PRE_PAD.x * 2.0 - 2.0).max(1.0),
-                        fresh(ui, galley),
+                        galley.clone(),
                         p.ink,
                     );
                 }
@@ -843,7 +928,7 @@ impl Show<'_> {
                 let response = self.picture_response(ui, rect, id, alt, *link);
                 if shows {
                     ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-                    paint::rows_at(ui.painter(), rect.min + vec2(9.0, 9.0), (rect.width() - 18.0).max(1.0), fresh(ui, galley), p.muted);
+                    paint::rows_at(ui.painter(), rect.min + vec2(9.0, 9.0), (rect.width() - 18.0).max(1.0), galley.clone(), p.muted);
                 }
                 self.picture_link(ui, &response, rect, *link)
             }
@@ -872,7 +957,7 @@ impl Show<'_> {
                     let said = ui.interact(at, id.with("left out"), Sense::hover());
                     said.widget_info(|| WidgetInfo::labeled(Role::Label, true, note.text()));
                     if shows {
-                        paint::rows_at(ui.painter(), at.min, rect.width(), fresh(ui, note), p.muted);
+                        paint::rows_at(ui.painter(), at.min, rect.width(), note.clone(), p.muted);
                     }
                 }
                 holds
@@ -1000,13 +1085,6 @@ impl Show<'_> {
         }
         focus
     }
-}
-
-/// `galley` laid out again for this frame's paint. A kept galley's letters point into the font atlas as it was when it
-/// was laid out, and egui builds the atlas afresh when it fills: what is painted is laid out again from the same job
-/// (egui keeps the galleys it laid out, so in sight this costs a lookup), and only the kept galley's places are used.
-fn fresh(ui: &Ui, galley: &Arc<Galley>) -> Arc<Galley> {
-    paint::on_baseline(ui.painter().layout_job((*galley.job).clone()))
 }
 
 /// Asks for the address of a link to `target` to be copied; a link that goes nowhere a front end follows copies

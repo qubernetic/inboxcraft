@@ -78,3 +78,74 @@ fn a_message_laid_out_again_is_drawn_from_its_new_blocks_wherever_they_lie() {
     harness.run();
     let _ = harness.get_by_label("The second words");
 }
+
+thread_local! {
+    /// Whether the next harness lays out a line of other letters before the message.
+    static DECOY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[test]
+fn a_message_keeps_its_letters_when_egui_builds_its_font_atlas_afresh() {
+    // A kept layout's letters point into the font atlas as it was; egui builds it afresh when it fills or when the text
+    // options change. The first frame lays the message out after a line of other letters, which take the atlas's
+    // first places; after the atlas is built afresh without them, the message's letters land elsewhere.
+    let html = "<p>Plain words, <b>bold words</b> and <a href=\"https://example.org/\">a link</a> in one paragraph.</p>";
+    let document = display(html);
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    DECOY.with(|decoy| decoy.set(true));
+    let mut harness = Harness::builder().with_size(vec2(640.0, 400.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+        if DECOY.with(std::cell::Cell::get) {
+            ui.label(egui::RichText::new("ZQXJWVKYPBGM 0123456789 ¶§ÆØÅ").size(64.0));
+        }
+        let mut textures = super::Textures::default();
+        let mut drawn = super::Drawn::default();
+        super::blocks(ui, &theme, &reader, 1, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+    });
+    harness.run();
+    DECOY.with(|decoy| decoy.set(false));
+    // Two changes of the text options: each makes egui build its font atlas afresh.
+    for _ in 0..2 {
+        harness.ctx.all_styles_mut(|style| style.visuals.text_options.font_hinting = !style.visuals.text_options.font_hinting);
+        harness.run();
+    }
+    harness.run();
+    fn walk(shape: &egui::Shape, out: &mut Vec<std::sync::Arc<egui::Galley>>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) => out.push(text.galley.clone()),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+    let painted: Vec<_> = texts.iter().filter(|galley| galley.text().contains("bold")).collect();
+    assert!(!painted.is_empty(), "the paragraph is painted");
+    for galley in painted {
+        let now = harness.ctx.fonts_mut(|fonts| fonts.layout_job((*galley.job).clone()));
+        let places = |galley: &egui::Galley| -> Vec<_> {
+            galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| (glyph.chr, glyph.uv_rect.min, glyph.uv_rect.max))).collect()
+        };
+        assert_eq!(places(galley), places(&now), "painted with the old atlas's places");
+    }
+}
+
+#[test]
+fn a_paragraph_of_ten_thousand_links_registers_only_those_near_sight() {
+    // As many links as the cleaner keeps, in one paragraph: each frame only those within reach take the keyboard.
+    let html = format!("<p>{}</p>", "<a href=\"https://allotments.example.org/rota\">rota</a> ".repeat(inboxcraft_html::MAX_LINKS));
+    let document = display(&html);
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+    let mut harness = Harness::builder().with_size(vec2(800.0, 600.0)).with_context_setup(crate::theme::install_fonts).build_ui(move |ui| {
+        crate::component::scroll::show(ui, &theme, egui::ScrollArea::vertical().auto_shrink([false, false]), |ui| {
+            let mut textures = super::Textures::default();
+            let mut drawn = super::Drawn::default();
+            super::blocks(ui, &theme, &reader, 1, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+        });
+    });
+    harness.run();
+    let links = harness.query_all_by_role(egui::accesskit::Role::Link).count();
+    // Three panes of 26-point rows, about fifteen links a row: about a thousand, not ten.
+    assert!((50..2_000).contains(&links), "{links} links registered");
+}
