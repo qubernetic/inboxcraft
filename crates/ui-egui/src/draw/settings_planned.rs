@@ -103,7 +103,9 @@ pub(super) fn privacy(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Option<Ask
     ];
     head(ui, theme, Section::Privacy, &intro, |_| {});
     body(ui, theme, "privacy", |ui| {
-        let note = tr!("The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again.");
+        let note = tr!(
+            "The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again, in every message."
+        );
         group(ui, theme, "A", tr!("Pictures always load"), Some(note));
         settings_row_soon_with(
             ui,

@@ -543,3 +543,13 @@ fn rows_out_of_sight_take_their_new_height_after_a_change_of_text_size_or_width(
         assert_eq!(last_signature_top(&changed), last_signature_top(&fresh), "{size:?} at {percent} %: the rows above keep stale heights");
     }
 }
+
+#[test]
+fn the_privacy_page_says_its_words_as_the_design_has_them() {
+    let mut harness = opened();
+    harness.get_by_label("Privacy, settings page").click();
+    harness.run();
+    harness.get_by_label(
+        "The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again, in every message.",
+    );
+}
