@@ -1300,16 +1300,9 @@ impl InboxApp {
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
-        let mut done_all = None;
-        let mut clicked = None;
-        let mut acted = None;
         // The row sliding out is out when the list is not drawn.
-        let mut out = true;
+        let mut listed = list::Asked { out: true, ..list::Asked::default() };
         let mut changed = None;
-        let mut review = false;
-        let mut outboxed = None;
-        let mut screener_mode = None;
-        let mut presets = false;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         let mut layers = Panes::begin(ui.painter());
@@ -1354,20 +1347,10 @@ impl InboxApp {
                         }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (
-                        searched,
-                        listed.clicked,
-                        listed.acted,
-                        listed.out,
-                        listed.review,
-                        listed.done_all,
-                        listed.outbox,
-                        listed.screener,
-                        listed.presets,
-                    )
+                    (searched, listed)
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed, screener_mode, presets) = if self.reader.open_id().is_some() || docked {
+            (header, listed) = if self.reader.open_id().is_some() || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1379,6 +1362,7 @@ impl InboxApp {
                 CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| list(ui, &mut layers)).inner
             };
         }
+        let list::Asked { clicked, acted, out, review, done_all, outbox: outboxed, screener: screener_mode, presets } = listed;
         let mut drawn = reader::Drawn::default();
         let mut composed = Vec::new();
         // A texture lives no longer than the picture the reader keeps for it.
