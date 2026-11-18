@@ -1787,6 +1787,12 @@ impl Mailbox {
         if !self.query.is_empty() {
             return tr!("Search").to_owned();
         }
+        self.place_title()
+    }
+
+    /// The name of the place shown, searched in or not: "Inbox", a folder's name, "Later".
+    #[must_use]
+    pub fn place_title(&self) -> String {
         match self.place {
             Place::View(role) => role_text(role).to_owned(),
             Place::Folder(id) => self.folders.iter().find(|folder| folder.id == id).map(|folder| folder.leaf.clone()).unwrap_or_default(),

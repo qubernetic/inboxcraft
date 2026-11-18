@@ -325,11 +325,6 @@ pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdg
     painter.extend(float_shapes(theme, rect, edge));
 }
 
-/// Paints a pane over `rect`: the flat `surface`, no edge (a [`hairline`] divides two panes).
-pub(crate) fn pane(painter: &Painter, theme: &Theme, rect: Rect) {
-    painter.rect_filled(rect, 0.0, theme.palette.surface);
-}
-
 /// The scale `ppp` made safe (a scale that is not a positive number counts as 1), and how many whole physical pixels a
 /// line one point wide takes there: one point rounded, at least one (1, 1, 2, 2 at 1, 1.25, 1.5 and 2). What a
 /// [`hairline`] and a [`focus_ring`] share.

@@ -16,8 +16,8 @@ use crate::mailbox::{InboxView, Mailbox, Place};
 use crate::sample;
 use crate::theme::install_fonts;
 
-/// The parts of the group cards, which the simple list leaves out.
-const CARDS_ONLY: [&str; 4] = ["done all", "Show all (7)", "People, 2 unread", "Notifications, 1 unread"];
+/// The parts of the groups' heads, which the List view leaves out.
+const CARDS_ONLY: [&str; 4] = ["done all", "show all", "People, 2 unread", "Notifications, 1 unread"];
 
 const ODILE: &str = "Odile Brannock, Allotment rota for November, 08:35, unread";
 const ODILE_READ: &str = "Odile Brannock, Allotment rota for November, 08:35";
@@ -97,7 +97,7 @@ fn quick_tooltips(harness: &Harness<'static, InboxApp>) {
 }
 
 #[test]
-fn the_simple_list_draws_no_group_card_but_the_screener_card() {
+fn the_list_view_draws_no_group_head_but_the_screener_card() {
     let harness = harness(false);
     for name in CARDS_ONLY {
         assert!(harness.query_by_label(name).is_none(), "{name} shows in the simple list");
@@ -295,33 +295,43 @@ fn the_toast_goes_after_its_time_and_its_act_can_no_longer_be_undone() {
 }
 
 #[test]
-fn the_showcase_shows_the_screener_and_the_group_cards_with_their_rows() {
-    let harness = harness(true);
+fn smart_shows_three_rows_and_show_all() {
+    let mut harness = harness(true);
+    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Smart, "Smart is the view to begin with");
     harness.get_by_label("2 new senders");
     harness.get_by_role_and_label(Role::Button, "Review");
     harness.get_by_label("People, 2 unread");
     harness.get_by_label("Notifications, 1 unread");
+    // The rows no group holds stand under a head of their own, last.
+    harness.get_by_label("Other, 1 unread");
     assert_eq!(harness.query_all_by_role_and_label(Role::Button, "done all").count(), 0, "only on a hovered or keyed head");
-    let mut harness = harness;
     harness.get_by_label("People, 2 unread").hover();
     harness.run();
     assert_eq!(harness.query_all_by_role_and_label(Role::Button, "done all").count(), 1);
-    // People holds seven rows and shows three of them; Updates its three; Kasimir's row stays out of the groups.
-    harness.get_by_role_and_label(Role::Button, "Show all (7)");
-    assert!(harness.query_by_label("Show all (3)").is_none());
+    // People holds seven rows and shows three of them, its head says so and offers "show all"; Notifications shows its
+    // three and offers nothing; Kasimir's row stays out of the groups.
+    assert!(painted(&harness, "3 of 7 ·").is_some(), "how many of the group's rows show");
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "show all").count(), 1, "one group has more than three rows");
     assert_eq!(harness.query_all_by_role(Role::ListBoxOption).count(), 3 + 3 + 1);
     harness.get_by_label("Kasimir Vell, Studio open day: volunteers?, Yesterday, unread");
-}
-
-#[test]
-fn show_all_lists_every_row_of_a_long_group() {
-    let mut harness = harness(true);
-    harness.get_by_role_and_label(Role::Button, "Show all (7)").click();
+    // "show all" lists every row of the group; "show fewer" folds it again.
+    harness.get_by_role_and_label(Role::Button, "show all").click();
     harness.run();
     assert_eq!(harness.query_all_by_role(Role::ListBoxOption).count(), 7 + 3 + 1);
-    harness.get_by_role_and_label(Role::Button, "Show fewer").click();
+    assert!(painted(&harness, "7 of 7 ·").is_some());
+    harness.get_by_role_and_label(Role::Button, "show fewer").click();
     harness.run();
     assert_eq!(harness.query_all_by_role(Role::ListBoxOption).count(), 3 + 3 + 1);
+    // Grouped: every group open, no "show all".
+    harness.state_mut().mailbox_mut().set_inbox_view(InboxView::Grouped);
+    harness.run();
+    assert_eq!(harness.query_all_by_role(Role::ListBoxOption).count(), 7 + 3 + 1);
+    assert!(harness.query_by_role_and_label(Role::Button, "show all").is_none());
+    assert!(painted(&harness, "3 of 7 ·").is_none());
+    // The heads are the design's group heads, 32 high, across the list's rows.
+    let head = harness.get_by_label("People, 2 unread").rect();
+    let row = harness.get_by_label(ODILE).rect();
+    assert_eq!((head.height(), head.left(), head.width()), (32.0, row.left(), row.width()));
 }
 
 #[test]
@@ -396,7 +406,7 @@ fn every_button_of_the_list_and_the_rail_has_a_tooltip_with_its_key_chip() {
         harness.run();
         assert!(harness.query_all_by_label(chip).count() >= 1, "{name} shows {chip}");
     }
-    for name in ["Review", "Show all (7)"] {
+    for name in ["Review", "show all"] {
         let before = harness.query_all_by_label(name).count();
         harness.query_all_by_role_and_label(Role::Button, name).next().unwrap().hover();
         harness.run();
@@ -489,16 +499,16 @@ fn painted(harness: &Harness<'_, InboxApp>, wanted: &str) -> Option<(egui::Rect,
 }
 
 #[test]
-fn show_all_is_an_accent_link_a_little_left_of_the_rows_text() {
+fn show_all_is_an_accent_link_in_its_groups_head_before_the_count() {
     let harness = harness(true);
-    let (text, colour) = painted(&harness, "Show all (7)").expect("Show all is drawn");
+    let (text, colour) = painted(&harness, "show all").expect("show all is drawn");
     let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
-    assert_eq!(colour, theme.palette.cyan_text, "Show all is in the accent colour");
-    let row = harness.get_by_label(ODILE).rect();
-    let sender = painted(&harness, "Odile Brannock").expect("the sender is drawn").0;
-    assert!(sender.left() > row.left() + 20.0, "the sender stands right of the avatar");
-    let wanted = sender.left() - theme.spacing.s4;
-    assert!((text.left() - wanted).abs() <= 1.5, "Show all starts at {}, a step left of the rows' text at {}", text.left(), sender.left());
+    assert_eq!(colour, theme.palette.cyan_text, "show all is in the accent colour");
+    let head = harness.get_by_label("People, 2 unread").rect();
+    assert!(head.contains(text.center()), "in the head: {text:?} in {head:?}");
+    let (shown, _) = painted(&harness, "3 of 7 ·").expect("how many show");
+    // The count stands at the head's right, 16 in, after a gap of 8.
+    assert!(shown.right() < text.left() && text.right() < head.right() - 16.0 - 8.0, "how many show, show all, the count: {shown:?} {text:?}");
 }
 
 #[test]
@@ -517,26 +527,22 @@ fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order_snooze_not_yet
 }
 
 #[test]
-fn the_view_switch_shows_over_the_wide_inbox_and_changes_the_view() {
+fn the_view_switch_changes_the_view() {
     let mut harness = harness(true);
-    harness.get_by_role_and_label(Role::Button, "List").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::List);
-    harness.get_by_role_and_label(Role::Button, "Grouped").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Grouped);
-    harness.get_by_role_and_label(Role::Button, "Smart").click();
-    harness.run();
-    assert_eq!(harness.state().mailbox().inbox_view(), InboxView::Smart);
+    for (name, view) in [("List", InboxView::List), ("Grouped", InboxView::Grouped), ("Smart", InboxView::Smart)] {
+        harness.get_by_role_and_label(Role::RadioButton, &format!("{name} for the inbox")).click();
+        harness.run();
+        assert_eq!(harness.state().mailbox().inbox_view(), view);
+    }
 }
 
 #[test]
-fn the_view_switch_leaves_the_narrow_list_beside_an_open_message() {
+fn the_view_switch_stays_beside_an_open_message() {
     let mut harness = harness(true);
-    harness.get_by_role_and_label(Role::Button, "Smart");
     harness.get_by_label(ODILE).click();
     harness.run();
-    assert!(harness.query_by_role_and_label(Role::Button, "Smart").is_none());
+    // The list keeps its 440 beside the reader, and the switch its place with "Show done".
+    harness.get_by_role_and_label(Role::RadioButton, "Smart for the inbox");
     harness.get_by_role_and_label(Role::Button, "Show done");
 }
 
@@ -565,7 +571,8 @@ fn the_list_counts_the_rows_it_built_for_the_bench() {
     let harness = harness(false);
     let built = crate::rows_built(&harness.ctx).unwrap();
     let all = harness.state().mailbox().messages().len();
-    assert!(built > 0 && built <= all, "{built} of {all}");
+    // The rows and the screener card over them.
+    assert!(built > 0 && built <= all + 1, "{built} of {all}");
     assert_eq!(crate::rows_built(&harness.ctx), None, "read once");
 }
 
@@ -611,32 +618,84 @@ fn press_odile_in_the_middle(harness: &mut Harness<'static, InboxApp>, width: &s
 }
 
 #[test]
-fn a_pointer_press_on_a_rows_middle_opens_it_at_the_default_and_the_narrowest_list() {
+fn the_list_is_440_wide_beside_the_reader() {
+    use crate::theme::TextScale;
+    for percent in [100, 130] {
+        let mut app = app(false);
+        app.set_text_scale(TextScale::from_percent(percent).unwrap());
+        // Tall enough that every row fits: the scroll bar takes its 12 beside the rows only when they do not.
+        let mut harness = Harness::builder()
+            .with_size(vec2(1300.0, 1400.0))
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
+        harness.run();
+        assert!(harness.state().reader().open_id().is_some(), "Teodor's message is open");
+        let row = harness.get_by_label(ODILE).rect();
+        assert_eq!(row.width(), 440.0, "{percent}: the rows are the design's 440 at every text size");
+        // A pointer press in its middle opens it and acts on nothing.
+        press_odile_in_the_middle(&mut harness, &format!("{percent}"));
+        // No splitter: dragging where the list's edge was leaves it 440.
+        let y = row.center().y;
+        for x in [0.0, 1.0, 2.0, 3.0] {
+            let from = egui::pos2(row.left() + 440.0 + x, y);
+            harness.hover_at(from);
+            harness.drag_at(from);
+            harness.run();
+            let to = egui::pos2(row.left() + 200.0, y);
+            harness.hover_at(to);
+            harness.run();
+            harness.drop_at(to);
+            harness.run();
+        }
+        assert_eq!(harness.get_by_label(ODILE_READ).rect().width(), 440.0, "{percent}: the edge does not move");
+    }
+    // A width a person once dragged the list to, kept in egui's memory, is not read.
     let mut harness = beside_the_reader();
-    let row = harness.get_by_label(ODILE).rect();
-    assert!((row.width() - (380.0 - 36.0)).abs() <= 12.0, "the default list: {row:?}");
-    press_odile_in_the_middle(&mut harness, "380");
-    // The list's edge dragged as far left as it goes.
-    let mut harness = beside_the_reader();
-    let row = harness.get_by_label(ODILE).rect();
-    let y = row.center().y;
-    let mut narrowest = row;
-    for x in 1..40 {
-        let from = egui::pos2(row.right() + x as f32, y);
-        harness.hover_at(from);
-        harness.drag_at(from);
+    let id = egui::Id::unique("list");
+    harness.ctx.data_mut(|data| {
+        data.insert_persisted(
+            id,
+            egui::containers::panel::PanelState { outer_rect: egui::Rect::from_min_size(egui::pos2(300.0, 0.0), vec2(120.0, 800.0)) },
+        )
+    });
+    harness.run();
+    harness.run();
+    assert_eq!(harness.get_by_label(ODILE).rect().width(), 440.0, "a kept splitter width is left alone");
+}
+
+#[test]
+fn a_narrow_window_squeezes_the_reader_and_nothing_overlaps_or_panics() {
+    // Rail, folders and the 441 of the list take about 790: under that the reader has nothing left; under the rail and
+    // the folders' width the list gets what remains.
+    for width in [1100.0, 900.0, 800.0, 600.0, 300.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 1400.0))
+            .with_context_setup(install_fonts)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app(false));
         harness.run();
-        harness.hover_at(egui::pos2(10.0, y));
+        harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
         harness.run();
-        harness.drop_at(egui::pos2(10.0, y));
         harness.run();
-        narrowest = harness.get_by_label(ODILE).rect();
-        if narrowest.width() < row.width() - 100.0 {
-            break;
+        let row = harness.get_by_label(ODILE).rect();
+        if width >= 800.0 {
+            assert_eq!(row.width(), 440.0, "{width}: the rows keep their width");
+        } else {
+            // The rail and the folders come first: the list gets what is left, never more than its 440.
+            assert!(row.width() <= 440.0, "{width}: {row:?}");
+        }
+        // Every row stands in the list's column, one under another.
+        let rows: Vec<egui::Rect> = harness.query_all_by_role(Role::ListBoxOption).map(|node| node.rect()).collect();
+        for pair in rows.windows(2) {
+            assert!(pair[0].bottom() <= pair[1].top() + 0.01, "{width}: rows overlap: {pair:?}");
+            assert_eq!(pair[0].left(), pair[1].left());
+        }
+        for key in [Key::ArrowDown, Key::End, Key::Home, Key::J, Key::K] {
+            harness.key_press(key);
+            harness.run();
         }
     }
-    assert!(narrowest.width() < 120.0, "the list is at its narrowest: {narrowest:?}");
-    press_odile_in_the_middle(&mut harness, "narrowest");
 }
 
 #[test]
@@ -1090,7 +1149,8 @@ fn an_empty_list_a_list_of_one_and_a_list_shorter_than_its_pane_draw() {
         harness.run();
         harness.key_press(Key::End);
         harness.run();
-        harness.get_by_label("Nothing here");
+        // Senders wait in the screener: its card stands over the empty inbox.
+        harness.get_by_label("2 new senders");
     }
     for count in [1_u64, 3] {
         for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
@@ -1150,11 +1210,15 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
                     }
                 }
             }
-            let end = listing.sheets.last().map_or(spans.last().unwrap().1, |sheet| sheet.1);
+            let end = spans.last().unwrap().1;
             assert_eq!(end, listing.height, "{percent} {view:?}: the last line (or its card) ends the content exactly");
             if view == InboxView::List {
                 assert_eq!(spans.last().unwrap().1, listing.height, "the last row's bottom is the content's height");
-                assert_eq!(listing.height, theme.size(56.0) * 10_000.0, "{percent}: no point lost over 10 000 rows");
+                assert_eq!(
+                    listing.height,
+                    theme.size(56.0) * 10_000.0 + theme.size(64.0),
+                    "{percent}: no point lost over 10 000 rows and the screener card"
+                );
             }
         }
     }

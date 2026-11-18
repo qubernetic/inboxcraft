@@ -130,12 +130,12 @@ fn the_park_pill_shows_while_mail_is_parked_and_opens_the_pile() {
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Parked));
     assert_eq!(harness.state().mailbox().title(), "Later");
     assert_eq!(toggled(&harness, "Parked (1)"), Some(Toggled::True));
-    assert_eq!(toggled(&harness, "Pins (0)"), Some(Toggled::False));
+    assert_eq!(toggled(&harness, "Pins"), Some(Toggled::False));
     harness.get_by_label_contains("Allotment rota for November");
-    harness.get_by_role_and_label(Role::Button, "Snoozed (0)").click();
+    harness.get_by_role_and_label(Role::Button, "Snoozed").click();
     settle(&mut harness);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Snoozed));
-    harness.get_by_label("Snoozed mail waits here until its time comes.");
+    harness.get_by_label("Nothing is snoozed.");
 }
 
 #[test]
@@ -144,14 +144,14 @@ fn the_rail_s_later_runs_as_an_action_too() {
     harness.state_mut().run_action(&egui::Context::default(), keymap::LATER);
     settle(&mut harness);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Pins));
-    harness.get_by_label("Pinned mail stays here, wherever it is filed.");
-    harness.get_by_role_and_label(Role::Button, "Parked (0)").click();
+    harness.get_by_label("Nothing is pinned.");
+    harness.get_by_role_and_label(Role::Button, "Parked").click();
     settle(&mut harness);
     harness.state_mut().run_action(&egui::Context::default(), keymap::LATER);
     assert_eq!(harness.state().mailbox().place(), Place::Later(Pile::Parked), "Later again stays on the pile shown");
-    harness.get_by_role_and_label(Role::Button, "Parked (0)").click();
+    harness.get_by_role_and_label(Role::Button, "Parked").click();
     settle(&mut harness);
-    harness.get_by_label("Parked mail waits here, out of the inbox, without a time.");
+    harness.get_by_label("Nothing is parked.");
 }
 
 #[test]

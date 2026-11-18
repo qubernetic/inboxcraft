@@ -78,8 +78,9 @@ use crate::workers::{NoWorkers, Workers};
 use crate::{UiError, tr};
 use paint::Panes;
 
-/// The width of the list beside the reader, in points.
-const LIST_WIDTH: f32 = 380.0;
+/// The width of the list's rows beside the reader, in points: the design's 440, whatever the text size. The list's
+/// pane is a point wider, for the line between it and the pane at its left.
+pub(super) const LIST_WIDTH: f32 = 440.0;
 
 /// The default width of the folder pane, in points.
 pub(super) const FOLDER_PANE: f32 = 240.0;
@@ -1344,27 +1345,26 @@ impl InboxApp {
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {
+                    // The pane's first column is the line at its left: the header and the rows start right of it.
+                    let pad = margin(s.s4);
                     let searched = Panel::top("list-header")
                         .show_separator_line(false)
-                        .frame(Frame::new().inner_margin(margin(s.s4)))
+                        .frame(Frame::new().inner_margin(Margin { left: pad.left.saturating_add(1), ..pad }))
                         .show(ui, |ui| frame::beside(ui, &theme, |ui| list::header(ui, &theme, keymap, mailbox, search)))
                         .inner;
                     let listed = CentralPanel::no_frame()
-                        .frame(Frame::new().inner_margin(Margin {
-                            left: margin(s.s3).left,
-                            right: margin(s.s3).right,
-                            top: 0,
-                            bottom: margin(s.s3).bottom,
-                        }))
+                        .frame(Frame::new().inner_margin(Margin { left: 1, right: 0, top: 0, bottom: 0 }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
                     (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
                 })
             };
             (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
+                // The list keeps its 440 beside the reader: no splitter, and a width a person once dragged to is
+                // not read.
                 Panel::left("list")
-                    .resizable(true)
-                    .default_size(LIST_WIDTH)
+                    .resizable(false)
+                    .exact_size(LIST_WIDTH + 1.0)
                     .show_separator_line(false)
                     .frame(around(left, half, gap))
                     .show(ui, |ui| list(ui, &mut layers))

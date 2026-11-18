@@ -361,11 +361,20 @@ fn a_search_without_results_and_an_empty_folder_say_so() {
     let mut harness = harness();
     harness.state_mut().search("zeppelin");
     harness.run();
-    harness.get_by_label("No messages match");
-    harness.get_by_label("No subject, sender or recipient holds “zeppelin”.");
+    harness.get_by_label("No messages match.");
+    fn holds(shape: &egui::Shape, wanted: &str) -> bool {
+        match shape {
+            egui::Shape::Text(text) => text.galley.text().starts_with(wanted),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| holds(shape, wanted)),
+            _ => false,
+        }
+    }
+    let shown = |harness: &Harness<'static, InboxApp>, wanted: &str| harness.output().shapes.iter().any(|clipped| holds(&clipped.shape, wanted));
+    assert!(shown(&harness, "No subject, sender or recipient in Inbox holds “zeppelin”."));
+    assert!(shown(&harness, "INBOX · SEARCH"));
     harness.state_mut().mailbox_mut().open(Place::Folder(8));
     harness.run();
-    harness.get_by_label("Nothing here");
+    harness.get_by_label("This folder holds no messages.");
     harness.get_by_label("All accounts · 0 messages");
 }
 
@@ -572,6 +581,13 @@ fn the_window_is_flat() {
         harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
         harness.run();
         let shapes = flat(&harness.output().shapes);
+        // A dashed edge (the unavailable Snooze's key chip under the pointer) is drawn as a mesh, pixel by pixel: the
+        // design's dashes, not a gradient.
+        let dashed: Vec<egui::Rect> = harness
+            .ctx
+            .data(|data| data.get_temp::<crate::draw::paint::DashedEdges>(crate::draw::paint::dashed_edges_id()))
+            .map(|edges| edges.1.iter().map(|(_, rect, _, _)| rect.expand(1.0)).collect())
+            .unwrap_or_default();
         let round: Vec<String> = shapes
             .iter()
             .filter_map(|(_, shape)| match shape {
@@ -581,7 +597,8 @@ fn the_window_is_flat() {
                 {
                     Some(format!("{rect:?}"))
                 }
-                egui::Shape::Mesh(_) => Some("a mesh".to_owned()),
+                egui::Shape::Mesh(mesh) if dashed.iter().any(|edge| edge.contains_rect(mesh.calc_bounds())) => None,
+                egui::Shape::Mesh(mesh) => Some(format!("a mesh {:?}", mesh.calc_bounds())),
                 _ => None,
             })
             .collect();

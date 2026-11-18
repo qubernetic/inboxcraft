@@ -57,13 +57,13 @@ fn previewing() -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn the_inbox_shows_the_screener_card_and_a_card_for_each_group() {
+fn the_inbox_shows_the_screener_card_and_a_head_for_each_group() {
     let harness = harness_of(app());
     harness.get_by_label("2 new senders");
     harness.get_by_label("People, 3 unread");
     harness.get_by_label("Notifications, 1 unread");
-    harness.get_by_label("Show all (8)");
-    assert_eq!(rows(&harness), 6, "three rows of each group until Show all");
+    harness.get_by_role_and_label(Role::Button, "show all");
+    assert_eq!(rows(&harness), 6, "three rows of each group until show all");
 }
 
 #[test]
