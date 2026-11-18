@@ -166,6 +166,12 @@ pub struct InboxApp {
     list_hidden: bool,
     /// Where the list was drawn last, to tell whether the keyboard was in it when it goes.
     list_rect: Option<Rect>,
+    /// The list's least width beside the docked composer and what it was measured for: the mailbox's revision, whether
+    /// something is searched, the text size and the scale ([`InboxApp::list_least`]).
+    list_least: Option<((u64, bool, u32, u32), f32)>,
+    /// How often [`list::least_width`] was measured (for the tests).
+    #[cfg(test)]
+    measured: usize,
     /// The frame being drawn; between frames, the next one.
     frame: u64,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
@@ -217,10 +223,10 @@ fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
     if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
 }
 
-/// Where the list stands beside the reader (`reading`) or the composer (`docked`), `left` its pane's left margin: not
-/// drawn while the composer beside it would leave it narrower than its heads need ([`list::least_width`]).
-fn list_place(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, reading: bool, docked: bool, left: f32) -> ListPlace {
-    if docked && list_widest(ui, theme, docked) < list_least(ui, theme, mailbox, search, docked, left) {
+/// Where the list stands beside the reader (`reading`) or the composer (`docked`): not drawn while the composer beside
+/// it would leave it (`widest`, [`list_widest`]) narrower than its heads need (`least`, [`InboxApp::list_least`]).
+fn list_place(reading: bool, docked: bool, widest: f32, least: f32) -> ListPlace {
+    if docked && widest < least {
         ListPlace::Hidden
     } else if reading || docked {
         ListPlace::Beside
@@ -229,16 +235,11 @@ fn list_place(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, reading: 
     }
 }
 
-/// The narrowest the list beside the docked composer gets, `left` its pane's left margin; beside the reader, any.
-fn list_least(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, docked: bool, left: f32) -> f32 {
-    if docked { left + list::least_width(ui, theme, mailbox, search) } else { 0.0 }
-}
-
-/// The list's pane at the left, resizable: beside the docked composer kept between its least width and what leaves
-/// the composer its own ([`list_widest`]).
-fn list_panel(ui: &Ui, theme: &Theme, mailbox: &Mailbox, search: &str, docked: bool, left: f32) -> Panel {
+/// The list's pane at the left, resizable: beside the docked composer kept between its `least` width and what leaves
+/// the composer its own (`widest`).
+fn list_panel(docked: bool, widest: f32, least: f32) -> Panel {
     let panel = Panel::left("list").resizable(true).default_size(LIST_WIDTH).show_separator_line(false);
-    if docked { panel.size_range(list_least(ui, theme, mailbox, search, docked, left)..=list_widest(ui, theme, docked)) } else { panel }
+    if docked { panel.size_range(least..=widest) } else { panel }
 }
 
 /// Where the list stands in a frame.
@@ -298,6 +299,9 @@ impl InboxApp {
             composer_keys: false,
             list_hidden: false,
             list_rect: None,
+            list_least: None,
+            #[cfg(test)]
+            measured: 0,
             frame: 0,
             notice: None,
             picker: None,
@@ -1244,6 +1248,29 @@ impl InboxApp {
         }
     }
 
+    /// The narrowest the list beside the docked composer gets, `left` its pane's left margin; beside the reader, any (0).
+    /// [`list::least_width`] is measured once and kept while the mailbox's [`Mailbox::revision`], whether something is
+    /// searched (Clear), the text size and the scale stay the same.
+    fn list_least(&mut self, ui: &Ui, theme: &Theme, docked: bool, left: f32) -> f32 {
+        if !docked {
+            return 0.0;
+        }
+        let key = (self.mailbox.revision(), self.search.is_empty(), theme.fonts.title.size.to_bits(), ui.pixels_per_point().to_bits());
+        let least = match self.list_least {
+            Some((kept, least)) if kept == key => least,
+            _ => {
+                let least = list::least_width(ui, theme, &self.mailbox, &self.search);
+                self.list_least = Some((key, least));
+                #[cfg(test)]
+                {
+                    self.measured = self.measured.saturating_add(1);
+                }
+                least
+            }
+        };
+        left + least
+    }
+
     /// Notes whether the list is `hidden` this frame. When it goes with the keyboard in it, the keyboard goes to the
     /// composer that took its place: nothing of the hidden list keeps it.
     fn hide_list(&mut self, ctx: &egui::Context, hidden: bool) {
@@ -1538,8 +1565,9 @@ impl InboxApp {
         } else if !full {
             let left;
             (asked, left) = self.folders(ui, &theme, &mut layers, docked);
-            let place = list_place(ui, &theme, &self.mailbox, &self.search, self.reader.open_id().is_some(), docked, left);
-            let panel = list_panel(ui, &theme, &self.mailbox, &self.search, docked, left);
+            let (widest, least) = (list_widest(ui, &theme, docked), self.list_least(ui, &theme, docked, left));
+            let place = list_place(self.reader.open_id().is_some(), docked, widest, least);
+            let panel = list_panel(docked, widest, least);
             let (mailbox, search, keymap) = (&self.mailbox, &mut self.search, &self.keymap);
             let mut list = |ui: &mut Ui, layers: &mut Panes| {
                 layers.card(ui, Margin::ZERO, |ui| {

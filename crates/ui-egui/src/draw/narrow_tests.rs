@@ -259,3 +259,20 @@ fn a_folder_pane_dragged_wide_leaves_the_composer_its_send_whole() {
         }
     }
 }
+
+#[test]
+fn the_list_s_least_width_is_measured_again_only_when_the_mailbox_or_the_scale_changes() {
+    let mut harness = composing(720.0, 100);
+    let once = harness.state().measured;
+    assert!(once >= 1, "measured while docked");
+    for _ in 0..5 {
+        harness.step();
+    }
+    assert_eq!(harness.state().measured, once, "kept from frame to frame, the list hidden");
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::View(inboxcraft_model::Role::Sent));
+    harness.run();
+    assert_eq!(harness.state().measured, once + 1, "another place: measured again");
+    harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(130).unwrap());
+    harness.run();
+    assert_eq!(harness.state().measured, once + 2, "another text size: measured again");
+}
