@@ -231,7 +231,14 @@ fn shown<R>(ctx: &Context, theme: &Theme, float: &Float, mode: Mode, add: impl F
     let cover = covers(ctx);
     if mode == Mode::Closes && kept.is_some_and(|kept| kept.cover != cover) {
         // The settings sheet or the palette came over it ([`covered`]): it closes, choosing nothing, and leaves the
-        // keyboard to that surface.
+        // keyboard to that surface. Where the keyboard was in it, it goes to the control the float opened from in this
+        // same frame, before the surface takes it, so the surface gives it back there when it closes.
+        let mine = LayerId::new(Order::Foreground, float.id);
+        let inside =
+            ctx.memory(|memory| memory.focused()).and_then(|focused| ctx.read_response(focused)).is_some_and(|focused| focused.layer_id == mine);
+        if inside {
+            ctx.memory_mut(|memory| memory.request_focus(float.returns_to));
+        }
         ctx.data_mut(|data| data.remove::<Kept>(key));
         return None;
     }

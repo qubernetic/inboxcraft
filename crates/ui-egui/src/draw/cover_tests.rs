@@ -272,3 +272,23 @@ fn under_the_sheet_a_key_with_ctrl_runs_no_command_of_the_window_under_it() {
     harness.run();
     assert!(harness.query_by_label("Snooze until").is_some(), "Ctrl+H opens Snooze over the reader");
 }
+
+#[test]
+fn the_keyboard_in_a_float_the_sheet_closed_comes_back_to_its_opener_when_the_sheet_closes() {
+    let mut harness = composer_with_its_picker_open();
+    // The keyboard on a row of the picker.
+    harness.key_press(Key::Tab);
+    harness.run();
+    let row = focused(&harness);
+    assert!(row.is_some() && row.as_deref() != Some("Send later"), "the keyboard is in the picker: {row:?}");
+    open_sheet(&mut harness);
+    assert!(!picker_open(&harness), "the picker closed");
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let inside =
+        harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).is_none_or(|node| sheet.contains_rect(node.rect()));
+    assert!(inside, "the sheet keeps the keyboard: {:?}", focused(&harness));
+    esc(&mut harness);
+    assert!(!harness.state().settings().is_open());
+    assert_eq!(focused(&harness).as_deref(), Some("Send later"), "the keyboard is back on the picker's opener");
+    assert!(!picker_open(&harness), "the picker stays closed");
+}
