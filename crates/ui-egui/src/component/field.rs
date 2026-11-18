@@ -223,7 +223,11 @@ enum Refusal {
 }
 
 /// What a field keeps of the text it shows, between frames: the most it lets the text hold, as long as the text is
-/// the one it last saw.
+/// the one it last saw, drawn or not in between (the composer is undrawn on another screen and keeps its limit).
+///
+/// Two numbers per field id, in egui's temporary memory: they stay after the field is gone for good, as egui's own
+/// [`TextEditState`] for the id does, and are bounded the same way, by the fixed ids fields have (the composer's
+/// lines, a signature per account, onboarding's fields), each overwritten in place when it is drawn again.
 #[derive(Debug, Clone, Copy)]
 struct Opened {
     /// The most the text may hold, in the cap's unit: the cap, or the size of a text that was longer when the field
@@ -231,8 +235,6 @@ struct Opened {
     limit: usize,
     /// The text's length in bytes after the field's last frame: another length means the text changed from outside.
     len: usize,
-    /// The last pass that drew the field.
-    seen: u64,
 }
 
 /// Where a field keeps its [`Opened`] (a number, in egui's temporary memory: never persisted).
@@ -274,9 +276,10 @@ fn touches(event: &egui::Event, focused: bool, hovered: bool, target: egui::acce
 }
 
 /// Before the edit of the field `id` holding `text` within `cap`: the limit for this frame (the cap, or the size of a
-/// text that was longer when the field first showed it, kept until the text changes from outside or the field goes a
-/// frame undrawn), the caret and selection egui kept, where an IME composition stands, and what the field has refused
-/// to say. It reads the frame's input and changes nothing in it; the cap itself is kept by [`Capped`].
+/// text that was longer when the field first showed it, kept until the text changes from outside, which also clears
+/// egui's undo history for the field), the caret and selection egui kept, where an IME composition stands, and what the
+/// field has refused to say. It reads the frame's input and changes nothing in it; the cap itself is kept by
+/// [`Capped`].
 fn guard(ui: &Ui, id: Id, text: &str, cap: Cap) -> Guarded {
     use egui::{Event, ImeEvent};
     let ctx = ui.ctx();
@@ -285,9 +288,19 @@ fn guard(ui: &Ui, id: Id, text: &str, cap: Cap) -> Guarded {
     let target = id.accesskit_id();
     let pass = ctx.cumulative_pass_nr();
     let opened = ui.data(|data| data.get_temp::<Opened>(opened_id(id)));
-    let limit = opened
-        .filter(|opened| opened.len == text.len() && opened.seen.saturating_add(1) >= pass)
-        .map_or_else(|| cap.most().max(cap.measure(text)), |opened| opened.limit);
+    let limit = match opened.filter(|opened| opened.len == text.len()) {
+        Some(opened) => opened.limit,
+        None => {
+            // Another text than the field last held (changed from outside, or shown first): egui's history for the
+            // field belongs to the text before, and a state from it could be past the new limit, refused at every
+            // undo. It goes with the old limit.
+            if let Some(mut state) = TextEditState::load(ctx, id) {
+                state.clear_undoer();
+                state.store(ctx, id);
+            }
+            cap.most().max(cap.measure(text))
+        }
+    };
     let stored = ui.data(|data| data.get_temp::<usize>(composing_id(id)));
     let was_composing = stored.filter(|_| focused);
     let mut composing = was_composing;
@@ -410,7 +423,7 @@ fn hold(ui: &Ui, id: Id, text: &mut String, guarded: Guarded, outcome: Outcome, 
         }
         settle(ui, id, outcome.changed, guarded.said);
     }
-    ui.data_mut(|data| data.insert_temp(opened_id(id), Opened { limit: guarded.limit, len: text.len(), seen: pass }));
+    ui.data_mut(|data| data.insert_temp(opened_id(id), Opened { limit: guarded.limit, len: text.len() }));
 }
 
 /// Takes the characters `from..to` (either way round) out of `text`; where they started.

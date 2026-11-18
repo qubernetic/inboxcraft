@@ -11,7 +11,7 @@ use egui::{Event, ImeEvent, Key, Modifiers, PointerButton, Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
-use super::tests::{Kind, ONE_FRAME, at_the_cap, cap_of, field_built, field_of, inside, kind_name, one_frame, press, says_too_long};
+use super::tests::{Kind, ONE_FRAME, UNDRAWN, at_the_cap, cap_of, field_built, field_of, inside, kind_name, one_frame, press, says_too_long};
 use super::{Cap, Field, LAID_OUT, multiline_field_holding, password_field, text_field_limited};
 use crate::component::tests::{builder, theme};
 
@@ -531,6 +531,49 @@ fn a_text_opened_at_twice_its_cap_can_undo_a_deletion_and_never_grows_past_its_o
         refused(&harness, kind, &was, "past the cap after a change from outside");
         one_frame(&mut harness, vec![Event::Paste("z".to_owned())]);
         assert_eq!(size(kind, harness.state()), most, "{kind:?}: up to the cap");
+    }
+}
+
+#[test]
+fn a_text_opened_over_its_cap_undoes_a_deletion_after_the_field_went_undrawn() {
+    // A password keeps no history: the three others are the composer's message text, a field of several lines and a
+    // line, which another screen undraws (Mail, then Calendar, then Mail again).
+    for kind in [Kind::Text, Kind::Many, Kind::PlainText] {
+        let (most, _) = cap_of(kind);
+        let opened = "y".repeat(2 * most);
+        let mut harness = field_of(kind, &opened);
+        one_frame(&mut harness, press(Key::A, Modifiers::COMMAND).into());
+        one_frame(&mut harness, press(Key::Backspace, Modifiers::NONE).into());
+        assert_eq!(harness.state(), "", "{kind:?}: all of it deleted");
+        UNDRAWN.with(|undrawn| undrawn.set(true));
+        harness.run_steps(5);
+        UNDRAWN.with(|undrawn| undrawn.set(false));
+        harness.run_ok();
+        harness.get_by_label(kind_name(kind)).focus();
+        harness.run_ok();
+        harness.run_steps(90);
+        one_frame(&mut harness, press(Key::Z, Modifiers::COMMAND).into());
+        assert!(harness.state() == &opened, "{kind:?}: the deletion is undone ({} of {})", harness.state().len(), opened.len());
+        assert!(!says_too_long(&harness), "{kind:?}: and nothing was refused");
+        one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+        let was = before(&harness, kind);
+        one_frame(&mut harness, vec![Event::Paste("z".to_owned())]);
+        refused(&harness, kind, &was, "past its opening size after the field went undrawn");
+    }
+}
+
+#[test]
+fn a_change_from_outside_clears_the_field_s_history() {
+    // Another text under the same field (a new draft): Ctrl Z never brings back the one before it.
+    for kind in [Kind::Text, Kind::Many, Kind::PlainText] {
+        let mut harness = field_of(kind, "first");
+        one_frame(&mut harness, press(Key::End, Modifiers::CTRL).into());
+        one_frame(&mut harness, vec![Event::Text("!".to_owned())]);
+        harness.run_steps(90);
+        *harness.state_mut() = "another".to_owned();
+        harness.run_ok();
+        one_frame(&mut harness, press(Key::Z, Modifiers::COMMAND).into());
+        assert_eq!(harness.state(), "another", "{kind:?}: the history of the text before is gone");
     }
 }
 

@@ -319,10 +319,18 @@ pub(super) fn field_of(kind: Kind, text: &str) -> Harness<'static, String> {
     harness
 }
 
+thread_local! {
+    /// While set, `field_built` draws nothing: the field goes undrawn, as the composer does on another screen.
+    pub(super) static UNDRAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A field of `kind` holding the harness's text in `theme`, never focused.
 pub(super) fn field_built(kind: Kind, text: &str, theme: Theme) -> Harness<'static, String> {
     let mut harness = builder().with_size(vec2(600.0, 500.0)).build_ui_state(
         move |ui, text: &mut String| {
+            if UNDRAWN.with(std::cell::Cell::get) {
+                return;
+            }
             let field = Field::new("Hostile", "hint");
             match kind {
                 Kind::Text => {
