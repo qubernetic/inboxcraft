@@ -51,7 +51,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     }
     let row = super::fixed(theme, ROW);
     let head = super::fixed(theme, HEAD);
-    crate::component::scroll::show(ui, theme, ScrollArea::vertical().id_salt("calendar-agenda").auto_shrink([false, false]), |ui| {
+    crate::component::scroll::show_over(ui, theme, ScrollArea::vertical().id_salt("calendar-agenda").auto_shrink([false, false]), |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let ppp = ui.pixels_per_point();
         let line = line_width(ppp);

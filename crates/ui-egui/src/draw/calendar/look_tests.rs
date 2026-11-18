@@ -116,6 +116,26 @@ fn one_line_stands_between_the_heads_or_the_all_day_lane_and_the_hours() {
 }
 
 #[test]
+fn the_agenda_s_rows_run_the_view_s_whole_width_under_the_scroll_bar() {
+    let p = Palette::of(Mode::Dark);
+    let harness = window(View::Agenda);
+    let found = rects(&harness);
+    // The `line` under the toolbar runs the view's width; the frame's row hairlines run as far, the thumb over them.
+    let toolbar = found
+        .iter()
+        .filter(|(rect, fill)| *fill == p.line && rect.height() <= 1.0 && rect.width() > 400.0 && (20.0..200.0).contains(&rect.top()))
+        .map(|(rect, _)| *rect)
+        .next()
+        .unwrap();
+    let rows: Vec<Rect> =
+        found.iter().filter(|(rect, fill)| *fill == p.panel_line && rect.height() <= 1.0 && rect.width() > 400.0).map(|(rect, _)| *rect).collect();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert_eq!((row.left(), row.right()), (toolbar.left(), toolbar.right()), "{row:?} under {toolbar:?}");
+    }
+}
+
+#[test]
 fn the_day_s_float_counts_its_events_with_the_number_alone() {
     let mut harness = window(View::Month);
     let thursday = Day::new(2026, 11, 5).unwrap();
