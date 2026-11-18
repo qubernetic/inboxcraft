@@ -53,6 +53,12 @@ const ROW_GAP: f32 = 10.0;
 /// The width of a composer line's name column, in points (the composer's frames).
 pub const LINE_NAMES: f32 = 64.0;
 
+/// The narrowest a composer's recipient line gets with its widest chip whole beside its name and "Cc  Bcc".
+pub fn line_least(ui: &Ui, theme: &Theme) -> f32 {
+    let copies = galley(ui, tr!("Cc  Bcc"), theme.fonts.mono_s, theme.palette.cyan_text);
+    LINE_NAMES + theme.spacing.s3 + WIDEST + theme.spacing.s3 + paint::run_box(copies.size().x)
+}
+
 /// How a recipient line is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Look {
@@ -82,7 +88,9 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
     // edge after it.
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST - lead - tail).max(1.0);
+    // In a line narrower than a chip's 176, the chip is cut to the line's room ([`chip_width`]).
+    let widest = WIDEST.min(ui.available_width()).max(1.0);
+    let most = (widest - lead - tail).max(1.0);
     let words = cut(ui, name, theme.fonts.body, ink, most);
     let width = (lead + words_box(ui, theme, name, ink, &words, most) + tail).ceil();
     let (rect, chip) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
@@ -232,7 +240,8 @@ fn recipients_drawn(
     let room = (width - left - right).max(1.0);
     let row_gap = if boxed { ROW_GAP } else { s.s1 };
     let inks: Vec<Color32> = line.chips.iter().map(|recipient| chip_ink(theme, recipient.state, enabled)).collect();
-    let widths: Vec<f32> = line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink)).collect();
+    let widths: Vec<f32> =
+        line.chips.iter().zip(&inks).map(|(recipient, ink)| chip_width(ui, theme, recipient, *ink, room - theme.sizes.scrollbar - s.s1)).collect();
     let (mut places, mut typing_at, mut rows) = flow(&widths, room, s.s1);
     // Past its most rows the line scrolls: the bar's room comes off the chips' row.
     let scrolls = rows > MOST_ROWS;
@@ -393,14 +402,15 @@ fn chip_ink(theme: &Theme, state: RecipientState, enabled: bool) -> Color32 {
     }
 }
 
-/// The width a recipient's chip takes, in points, its name laid out in `ink` as the chip lays it out.
-fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32) -> f32 {
+/// The width a recipient's chip takes, in points, its name laid out in `ink` as the chip lays it out: at most 176, and
+/// at most `room` (with a scroll bar beside the chips too) in a line narrower than that.
+fn chip_width(ui: &Ui, theme: &Theme, recipient: &Recipient, ink: Color32, room: f32) -> f32 {
     let s = &theme.spacing;
     let glyph = theme.boxes().mark.min(theme.boxes().pill);
     let invalid = recipient.state == RecipientState::Invalid;
     let lead = 1.0 + s.s2 + if invalid { glyph + s.s1 } else { 0.0 };
     let tail = s.s1 + glyph + s.s1 + 1.0;
-    let most = (WIDEST - lead - tail).max(1.0);
+    let most = (WIDEST.min(room).max(1.0) - lead - tail).max(1.0);
     let words = cut(ui, &recipient.shown, theme.fonts.body, ink, most);
     (lead + words_box(ui, theme, &recipient.shown, ink, &words, most) + tail).ceil()
 }

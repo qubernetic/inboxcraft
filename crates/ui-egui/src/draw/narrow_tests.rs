@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The composer in the reader's place in a narrow window: the list beside it while its heads fit, else the composer in
-//! its place; nothing drawn over anything else in the list's head, a group's head or the composer's head and From line.
+//! its place; nothing drawn over anything else in the list's head, a group's head or the composer's head, From and To
+//! lines.
 
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, Rect, vec2};
@@ -120,6 +121,9 @@ fn at_every_width_nothing_in_the_list_s_or_the_composer_s_heads_stands_over_anyt
             assert_eq!(overdrawn(&harness, band(composer.left(), close.top(), close.bottom())), Vec::<String>::new(), "{at}: its head");
             let from = harness.query_all(egui_kittest::kittest::by().role(Role::ComboBox).label_contains("From ")).next().unwrap().rect();
             assert_eq!(overdrawn(&harness, band(composer.left(), from.top(), from.bottom())), Vec::<String>::new(), "{at}: From");
+            // The To line: its chips, the field and "Cc  Bcc", each row of chips.
+            let cc = harness.get_by_label("Cc  Bcc").rect();
+            assert_eq!(overdrawn(&harness, band(composer.left(), cc.top() - 8.0, cc.bottom() + 8.0)), Vec::<String>::new(), "{at}: To");
         }
     }
 }
