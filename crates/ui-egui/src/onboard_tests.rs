@@ -1092,3 +1092,21 @@ fn a_server_the_owner_typed_stays_and_the_note_says_so() {
     assert_eq!((found.source, found.outgoing.as_ref()), (None, None), "Detect put no server into the form");
     assert_eq!((found.kept_imap.as_deref(), found.kept_outgoing.as_deref()), (Some("imap.example.org"), Some("smtp.example.org")));
 }
+
+#[test]
+fn after_change_settings_detect_still_knows_what_it_filled() {
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let detect =
+        Held::new(vec![found_at("imap.example.org", None, "carol@example.org"), found_at("imap.new.example.org", None, "carol@new.example.org")]);
+    let mut onboarding = Onboarding::new(Arc::new(kept), Box::new(detect.clone()));
+    onboarding.open();
+    onboarding.form_mut().password = Secret::new(PASSWORD);
+    detect_now(&mut onboarding, &detect, "carol@example.org");
+    onboarding.add(&mut mailbox);
+    assert!(matches!(onboarding.stage(), Stage::Checking(_)), "{:?}", onboarding.error());
+    onboarding.change(&mut mailbox);
+    assert_eq!(onboarding.stage(), Stage::Form);
+    detect_now(&mut onboarding, &detect, "carol@new.example.org");
+    assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("imap.new.example.org", "carol@new.example.org"));
+}

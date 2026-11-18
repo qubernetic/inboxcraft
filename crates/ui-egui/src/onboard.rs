@@ -1226,9 +1226,9 @@ impl Onboarding {
         }
         self.stored.insert(id);
         self.error = None;
-        // What the form held is an account now: the next add form starts empty.
+        // What the form held is an account now: the next add form starts empty. What Detect put into it is still
+        // known, for Change settings, which brings this form back; the next add form starts without it.
         self.kept = None;
-        self.detected = Detected::default();
         // Checked by the form, so this answers an error only when the store fails; the check goes on without it.
         if let Some(url) = optional(&self.form.caldav)
             && let Err(error) = mailbox.run("calendar.server", &json!({ "account": id, "url": url }))
