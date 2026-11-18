@@ -1760,7 +1760,7 @@ impl InboxApp {
             self.mailbox.left();
         }
         if let Some((id, act)) = acted {
-            self.mailbox.start(id, act);
+            start(&mut self.reader, &mut self.mailbox, id, act);
         }
         if undone {
             self.undo();
@@ -1969,13 +1969,22 @@ impl InboxApp {
                 ui.ctx().copy_text(subject);
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
-            reader::Asked::Act(id, act) => mailbox.start(id, act),
+            reader::Asked::Act(id, act) => start(reader, mailbox, id, act),
             reader::Asked::Presets => mailbox.load_presets(),
             reader::Asked::Invite(id, invite::Ask::Answer(answer)) => reader.answer_invite(mailbox, id, answer),
             reader::Asked::Invite(id, invite::Ask::Change) => reader.change_answer(id),
             reader::Asked::Invite(id, invite::Ask::Remove) => reader.remove_invite(mailbox, id),
             reader::Asked::Answer(..) => {}
         }
+    }
+}
+
+/// Starts `act` on message `id`. Letting a sender in or blocking them reads the reader's invitation cards again:
+/// whether an invitation can be answered hangs on it, and the message may stay open.
+fn start(reader: &mut Reader, mailbox: &mut Mailbox, id: u64, act: Act) {
+    mailbox.start(id, act);
+    if matches!(act, Act::Accept { .. } | Act::Block) {
+        reader.refresh_invites(mailbox);
     }
 }
 

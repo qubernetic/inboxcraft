@@ -548,6 +548,35 @@ fn a_held_invitation_offers_no_answer_and_has_one_primary() {
     }
 }
 
+/// A held sender's invitation, let in from the reader by Accept and reply: back from the composer (closed, the draft
+/// kept), its card offers the answers at once, Going the one primary, without opening the message again.
+#[test]
+fn a_sender_let_in_from_the_reader_can_answer_at_once() {
+    let organiser = "ORGANIZER;CN=Stranger:mailto:stranger@example.org\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mira@example.org\r\n";
+    let calendar = Some(("REQUEST", organiser));
+    let mut harness = sending(from_whom(("Stranger", "stranger@example.org"), SCREENER, 952, "Invitation: Stranger's party", calendar, None, 600));
+    harness.state_mut().mailbox_mut().run("screener.mode", &json!({ "mode": "before" })).unwrap();
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::Folder(SCREENER));
+    harness.run();
+    let id = open(&mut harness, "Invitation: Stranger's party");
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(holds(&harness, "the sender is not let in yet") && !button(&harness, "Going"), "held at first");
+    harness.get_by_role_and_label(Role::Button, "Accept and reply").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    // The composer over the reply closes, the draft kept; the reader is back on the message.
+    harness.get_by_role_and_label(Role::Button, "Close; the draft is kept").click();
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert_eq!(harness.state().reader().open_id(), Some(id), "the message stays open");
+    let going = on_card(&harness, "Party 952", "Going").expect("Going is offered once the sender is let in");
+    assert_eq!(primaries(&harness), vec![going], "Going is the one primary");
+}
+
 /// In a thread whose older message is unfolded and asks, and whose open message carries no invitation, the older
 /// card's Going is the pane's one primary and Reply is secondary.
 #[test]
