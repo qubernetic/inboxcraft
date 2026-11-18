@@ -14,7 +14,7 @@ const HELP: &str = "\
 usage: cargo xtask <command> [--root <dir>]
 
 commands:
-  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, changes, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, stats
+  ci            every gate: fmt, clippy -D warnings, spdx, test-files, assets, changes, layers, flatpak-sources-check, doctests, cov --check (the one test run), wasm, deny, shots, stats
   assets        every asset file has a row in ATTRIBUTION.md; pinned files match .config/assets.toml
   cache-prune   delete from target/ all but third-party deps, build and .fingerprint entries (CI, before the cache save)
   changes [--fold]

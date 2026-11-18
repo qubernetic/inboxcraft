@@ -29,13 +29,19 @@ impl Runner for Recorder {
         }
         Ok(!self.failing.contains(&first))
     }
+
+    fn output(&mut self, program: &OsStr, args: &[&str], dir: &Path) -> Result<Option<Vec<u8>>, Error> {
+        // As `run`, with nothing printed: `ui_shot` drew no scene.
+        Ok(self.run(program, args, dir)?.then(Vec::new))
+    }
 }
 
 fn ci_context(failing: Vec<&'static str>) -> (Context, Rc<RefCell<Vec<String>>>) {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let runner = Recorder { report: tempfile::tempdir().unwrap(), calls: Rc::clone(&calls), failing };
     let lcov = Some(runner.report.path().join("lcov.info"));
-    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov, shots: None }, calls)
+    let shots = Some(runner.report.path().join("shots"));
+    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov, shots }, calls)
 }
 
 fn report_of(ctx: &Context) -> String {
@@ -46,6 +52,10 @@ fn report_of(ctx: &Context) -> String {
 fn ci_runs_every_gate_in_order() {
     let (ctx, calls) = ci_context(vec![]);
     let cov = format!("llvm-cov nextest --workspace --profile ci --lcov --output-path {}", report_of(&ctx));
+    let shots = format!(
+        "run -q -p inboxcraft-ui-egui --example ui_shot -- --out-dir {} crates/ui-egui/shots.jsonl",
+        ctx.shots.as_deref().map(|path| path.display().to_string()).unwrap_or_default()
+    );
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, OK, "{out}");
     let root = crate::default_root();
@@ -54,21 +64,34 @@ fn ci_runs_every_gate_in_order() {
         .concat();
     let wasm = format!("build --target wasm32-unknown-unknown{wasm}");
     let expected: Vec<String> =
-        ["fmt --all -- --check", "clippy --workspace --all-targets -- -D warnings", "test --workspace --doc", &cov, &wasm, "deny check"]
+        ["fmt --all -- --check", "clippy --workspace --all-targets -- -D warnings", "test --workspace --doc", &cov, &wasm, "deny check", &shots]
             .iter()
             .map(|args| format!("cargo {args} @ {}", root.display()))
             .collect();
     assert_eq!(*calls.borrow(), expected);
-    for name in
-        ["fmt", "clippy", "spdx", "test-files", "assets", "changes", "layers", "flatpak-sources-check", "doctests", "cov", "wasm", "deny", "stats"]
-    {
+    for name in [
+        "fmt",
+        "clippy",
+        "spdx",
+        "test-files",
+        "assets",
+        "changes",
+        "layers",
+        "flatpak-sources-check",
+        "doctests",
+        "cov",
+        "wasm",
+        "deny",
+        "shots",
+        "stats",
+    ] {
         assert!(out.contains(&format!("ci: {name}\n")), "{name}: {out}");
     }
     assert!(out.contains("spdx: "), "the in-process gates report: {out}");
     assert!(out.contains("layers: ") && out.contains("assets: ") && out.contains("flatpak-sources-check: ") && out.contains("stats: total"), "{out}");
     assert!(!out.contains("ci: nextest"), "the cov gate is the test run: {out}");
-    assert!(out.ends_with("ci: all 13 gates passed\n"), "{out}");
-    assert_eq!(GATES.len(), 13);
+    assert!(out.ends_with("ci: all 14 gates passed\n"), "{out}");
+    assert_eq!(GATES.len(), 14);
 }
 
 #[test]
@@ -76,8 +99,8 @@ fn ci_runs_on_after_a_failure_and_names_every_failed_gate() {
     let (ctx, calls) = ci_context(vec!["clippy", "deny"]);
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
-    assert_eq!(calls.borrow().len(), 6, "every gate still ran");
-    assert!(out.ends_with("ci: 2 of 13 gates failed: clippy, deny\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 7, "every gate still ran");
+    assert!(out.ends_with("ci: 2 of 14 gates failed: clippy, deny\n"), "{out}");
 }
 
 #[test]
@@ -88,7 +111,7 @@ fn a_failing_test_fails_ci_as_a_test_not_a_floor() {
     assert_eq!(calls.borrow().iter().filter(|call| call.contains("nextest")).count(), 1, "the tests run once");
     assert!(out.contains(&format!("{TESTS_FAILED}\n")), "{out}");
     assert!(!out.contains("below the floor"), "{out}");
-    assert!(out.ends_with("ci: 1 of 13 gates failed: cov\n"), "{out}");
+    assert!(out.ends_with("ci: 1 of 14 gates failed: cov\n"), "{out}");
 }
 
 #[test]
@@ -97,7 +120,7 @@ fn a_tool_that_cannot_start_fails_its_gate() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: fmt: cannot run `cargo`: gone"), "{out}");
-    assert!(out.ends_with("ci: 6 of 13 gates failed: fmt, clippy, doctests, cov, wasm, deny\n"), "{out}");
+    assert!(out.ends_with("ci: 7 of 14 gates failed: fmt, clippy, doctests, cov, wasm, deny, shots\n"), "{out}");
 }
 
 #[test]
@@ -108,8 +131,8 @@ fn an_in_process_gate_that_cannot_run_fails_without_stopping_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: spdx: "), "{out}");
-    assert!(out.ends_with("ci: 7 of 13 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
-    assert_eq!(calls.borrow().len(), 4);
+    assert!(out.ends_with("ci: 7 of 14 gates failed: spdx, assets, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert_eq!(calls.borrow().len(), 5);
 }
 
 #[test]
@@ -121,7 +144,7 @@ fn a_malformed_change_fragment_fails_ci() {
     let (code, out, _) = run_in(ctx, &["ci"]);
     assert_eq!(code, FAILED);
     assert!(out.contains("ci: changes\nchanges: changes/5.md:3: the entry does not name #5\n"), "{out}");
-    assert!(out.ends_with("ci: 8 of 13 gates failed: spdx, assets, changes, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
+    assert!(out.ends_with("ci: 8 of 14 gates failed: spdx, assets, changes, layers, flatpak-sources-check, cov, wasm, stats\n"), "{out}");
 }
 
 #[test]
@@ -179,8 +202,15 @@ fn the_process_runner_captures_standard_output() {
 
 #[test]
 fn a_runner_that_captures_nothing_answers_a_failed_call() {
-    let (mut ctx, _) = ci_context(vec![]);
-    assert_eq!(ctx.runner.output(OsStr::new("cargo"), &["--version"], Path::new(".")).unwrap(), None);
+    /// Starts nothing and keeps the trait's `output`.
+    struct Silent;
+    impl Runner for Silent {
+        fn run(&mut self, _: &OsStr, _: &[&str], _: &Path) -> Result<bool, Error> {
+            Ok(true)
+        }
+    }
+    assert!(Silent.run(OsStr::new("cargo"), &[], Path::new(".")).unwrap());
+    assert_eq!(Silent.output(OsStr::new("cargo"), &["--version"], Path::new(".")).unwrap(), None);
 }
 
 #[test]

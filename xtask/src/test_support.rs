@@ -91,7 +91,7 @@ pub fn empty_report(args: &[&str]) {
     }
 }
 
-/// A runner that starts nothing and passes every tool; `cargo llvm-cov` reports no lines into a directory of its
+/// A runner that starts nothing and passes every tool, printing nothing; `cargo llvm-cov` reports no lines into a directory of its
 /// own, so no test touches the `lcov.info` of the workspace.
 pub struct Passing {
     _report: tempfile::TempDir,
@@ -101,6 +101,11 @@ impl Runner for Passing {
     fn run(&mut self, _: &OsStr, args: &[&str], _: &Path) -> Result<bool, Error> {
         empty_report(args);
         Ok(true)
+    }
+
+    /// Prints nothing: `ui_shot` drew no scene.
+    fn output(&mut self, _: &OsStr, _: &[&str], _: &Path) -> Result<Option<Vec<u8>>, Error> {
+        Ok(Some(Vec::new()))
     }
 }
 
