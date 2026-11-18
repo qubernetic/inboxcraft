@@ -651,13 +651,25 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
         ui.spacing_mut().item_spacing.x = s.s2;
         soon(ui, theme, |ui| {
             if ui.available_width() >= side {
-                IconButton::new(IconId::Attach, tr!("Attach a file")).show(ui, theme, keymap);
+                attach_soon(ui, theme, keymap);
                 if ui.available_width() >= tag_width {
                     soon_tag(ui, theme);
                 }
             }
         });
     });
+}
+
+/// Attaching a file, coming soon: the icon button not pressable, its glyph in `muted` as its frames draw it (a
+/// disabled icon button's is `dim`), its name in its tooltip.
+fn attach_soon(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    let side = control_side(theme);
+    let name = tr!("Attach a file");
+    let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, false, false, name));
+    let icon = theme.icon_side();
+    crate::iconset::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(icon, icon)), IconId::Attach, theme.palette.muted);
+    crate::component::tooltip::attach(response, theme, keymap, name, None);
 }
 
 /// The head in `rect`: the title (in the floating panel a button that folds it), when the draft was kept, the

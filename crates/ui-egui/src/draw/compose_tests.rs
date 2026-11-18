@@ -1524,3 +1524,31 @@ fn in_a_narrow_pane_the_foot_s_coming_soon_gives_way_and_nothing_paints_through_
         }
     }
 }
+
+/// The colours the glyph of `icon` was painted in, in the last frame.
+fn icon_colours(harness: &Harness<'static, InboxApp>, icon: crate::iconset::IconId) -> Vec<egui::Color32> {
+    fn walk(shape: &egui::Shape, glyph: &str, found: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, glyph, found)),
+            egui::Shape::Text(text) if text.galley.job.text == glyph => {
+                found.extend(text.galley.job.sections.iter().map(|section| section.format.color))
+            }
+            _ => {}
+        }
+    }
+    let glyph = crate::iconset::glyph(icon).to_string();
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &glyph, &mut found));
+    found
+}
+
+#[test]
+fn attaching_a_file_coming_soon_is_drawn_in_muted_as_its_frame() {
+    for (theme, mode) in [(egui::Theme::Dark, crate::theme::Mode::Dark), (egui::Theme::Light, crate::theme::Mode::Light)] {
+        let harness = composing(theme);
+        let attach = harness.get_by_label("Attach a file");
+        assert!(attach.accesskit_node().is_disabled(), "coming soon: not pressable");
+        let muted = crate::theme::Palette::of(mode).muted;
+        assert_eq!(icon_colours(&harness, crate::iconset::IconId::Attach), vec![muted]);
+    }
+}
