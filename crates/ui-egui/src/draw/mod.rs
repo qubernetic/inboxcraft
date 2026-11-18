@@ -139,6 +139,8 @@ pub struct InboxApp {
     list_over_composer: bool,
     /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
     focus_reader: bool,
+    /// Whether the window held one pane in the last frame drawn; `None` before the first.
+    single: Option<bool>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -260,6 +262,7 @@ impl InboxApp {
             reading: false,
             list_over_composer: false,
             focus_reader: false,
+            single: None,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -669,6 +672,7 @@ impl InboxApp {
     /// message the person opened, or the docked composer, in its place.
     fn panes(&mut self, ctx: &egui::Context, docked: bool, full: bool) -> (bool, bool, bool) {
         let single = one_pane(ctx);
+        self.single = Some(single);
         if self.reader.open_id().is_none() {
             self.reading = false;
         }
@@ -698,6 +702,12 @@ impl InboxApp {
         {
             composer.set_floating(true);
         }
+    }
+
+    /// Whether the window held one pane in the last frame and the list stood in front there: of the docked composer
+    /// (`Esc` in it), or of a message the keys or the focus walked to.
+    fn list_in_front(&self) -> bool {
+        self.single == Some(true) && if self.docked() { self.list_over_composer } else { !self.message_in_front() }
     }
 
     /// In one pane, whether the open message stands in the list's place: one the person opened (`Enter`, a press) or
@@ -1000,6 +1010,14 @@ impl InboxApp {
         if self.reader.open_id() != self.mailbox.selected() {
             let selected = self.mailbox.selected();
             let walked = self.list_over_composer && !self.reading;
+            // In one pane with the list in front the reader is not shown: a message selected there (the next one after
+            // an act on the keyed row, from the keys, the pointer, a notification or the engine) opens as a preview,
+            // not marked read.
+            if let Some(id) = selected
+                && self.list_in_front()
+            {
+                self.mailbox.select_by_focus(id);
+            }
             if selected.is_some()
                 && !walked
                 && let Some(composer) = &mut self.composer

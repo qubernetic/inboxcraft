@@ -2979,3 +2979,58 @@ fn the_list_over_the_composer_ends_where_the_window_holds_two_panes_and_two_pane
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), Some("mail.send"), "beside the list the composer sends");
 }
+
+/// One pane at 900 with the list in front: J keys a row, the row under it is made unread, the keyed row keeps the
+/// focus. The keyed row and the one under it.
+fn keyed_over_an_unread_row() -> (Harness<'static, InboxApp>, u64, u64) {
+    let mut harness = wide(900.0);
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected().unwrap();
+    let order = super::list::order(&harness.ctx);
+    let at = order.iter().position(|id| *id == keyed).unwrap();
+    let next = order[at + 1];
+    harness.state_mut().mailbox_mut().start(next, crate::mailbox::Act::Unread);
+    harness.run();
+    harness.state_mut().mailbox_mut().select_keyed(keyed);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(keyed)));
+    harness.run();
+    assert!(!seen(&harness, next), "the row under the keyed one is unread");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list in front");
+    (harness, keyed, next)
+}
+
+#[test]
+fn in_one_pane_an_act_on_the_keyed_row_keys_the_next_and_reads_nothing_unseen() {
+    // D, Delete, and an act from outside (a notification's Done, the control channel), each on the keyed row.
+    for way in ["D", "Delete", "outside"] {
+        let (mut harness, keyed, next) = keyed_over_an_unread_row();
+        match way {
+            "D" => harness.key_press(Key::D),
+            "Delete" => harness.key_press(Key::Delete),
+            _ => harness.state_mut().mailbox_mut().act(keyed, crate::mailbox::Act::Done),
+        }
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().mailbox().selected(), Some(next), "{way}: the next row is the keyed row");
+        assert!(harness.state().mailbox().keyed(), "{way}: keyed, as the keys key it");
+        assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "{way}: the list stays in front");
+        assert!(!seen(&harness, next), "{way}: the next message, not shown, is not marked read");
+    }
+    // Two panes as before: the next message is shown, and read.
+    let mut harness = wide(1300.0);
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected().unwrap();
+    let order = super::list::order(&harness.ctx);
+    let next = order[order.iter().position(|id| *id == keyed).unwrap() + 1];
+    harness.state_mut().mailbox_mut().start(next, crate::mailbox::Act::Unread);
+    harness.run();
+    harness.state_mut().mailbox_mut().select_keyed(keyed);
+    harness.run();
+    harness.key_press(Key::D);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().reader().open_id(), Some(next), "two panes: the next message shows");
+    assert!(seen(&harness, next), "and is read");
+}
