@@ -813,3 +813,17 @@ fn a_press_beside_the_sheet_closes_the_open_list_and_only_the_list() {
     }
     assert!(!harness.state().settings().is_open());
 }
+
+#[test]
+fn detect_s_note_says_what_the_form_now_holds() {
+    let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let form = harness.state_mut().onboarding_mut().0.form_mut();
+    form.address = "carol@example.org".to_owned();
+    form.host = "mail.typed.example".to_owned();
+    harness.run();
+    press(&mut harness, "Detect");
+    harness.run();
+    assert_eq!(harness.state().onboarding().form().host, "mail.typed.example");
+    harness.get_by_label("Detect found imap.example.org; the IMAP server you typed stays.");
+    assert!(harness.query_by_label("Found in your provider's settings file.").is_none(), "no server of Detect's is in the form");
+}

@@ -1013,3 +1013,82 @@ fn detect_s_answer_for_an_address_no_longer_in_the_form_is_thrown_away() {
     assert!(onboarding.found().is_none());
     assert!(!onboarding.detecting());
 }
+
+/// Onboarding open on the add form over a Detect that answers `answers` in turn, at once.
+fn detecting(answers: Vec<Proposal>) -> (Onboarding, Held) {
+    let detect = Held::new(answers);
+    let mut onboarding = Onboarding::new(Arc::new(NoKeychain), Box::new(detect.clone()));
+    onboarding.open();
+    (onboarding, detect)
+}
+
+/// Runs Detect for `address` and takes its answer.
+fn detect_now(onboarding: &mut Onboarding, detect: &Held, address: &str) {
+    onboarding.form_mut().address = address.to_owned();
+    onboarding.detect();
+    detect.answer();
+    assert!(onboarding.poll());
+}
+
+#[test]
+fn a_detect_that_finds_nothing_clears_what_an_earlier_detect_filled_and_keeps_what_was_typed() {
+    let first = found_at("imap.first.example.org", Some("smtp.first.example.org"), "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first.clone(), Proposal::default(), first, Proposal::default()]);
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert_eq!(onboarding.form().host, "imap.first.example.org");
+    detect_now(&mut onboarding, &detect, "b@second.example.org");
+    let form = onboarding.form();
+    assert_eq!(
+        (form.host.as_str(), form.port.as_str(), form.security, form.username.as_str()),
+        ("", "", None, ""),
+        "the first domain's IMAP row and user name are gone"
+    );
+    assert_eq!((form.smtp_host.as_str(), form.smtp_port.as_str(), form.smtp_security), ("", "", None), "and its SMTP row");
+    let found = onboarding.found().unwrap();
+    assert_eq!((found.source, found.outgoing.as_ref()), (None, None), "the note says nothing was found, and nothing is in the form");
+    // What the owner typed stays: the user name and the SMTP port here.
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    onboarding.form_mut().username = "a.typed".to_owned();
+    onboarding.form_mut().smtp_port = "587".to_owned();
+    detect_now(&mut onboarding, &detect, "b@second.example.org");
+    let form = onboarding.form();
+    assert_eq!((form.host.as_str(), form.username.as_str()), ("", "a.typed"));
+    assert_eq!((form.smtp_host.as_str(), form.smtp_port.as_str()), ("", "587"));
+}
+
+#[test]
+fn a_security_picked_before_detect_never_keeps_the_host_from_being_filled() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().security = Some(Security::StartTls);
+    onboarding.form_mut().smtp_security = Some(Security::Tls);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let form = onboarding.form();
+    assert_eq!(form.host, "imap.example.org");
+    assert_eq!(form.smtp_host, "smtp.example.org");
+    assert_eq!((form.port.as_str(), form.security), ("993", Some(Security::Tls)), "the encryption goes with Detect's port");
+    let found = onboarding.found().unwrap();
+    assert_eq!(found.source, Some(Source::Autoconfig), "the note's server is the form's");
+}
+
+#[test]
+fn a_host_cleared_by_hand_in_a_row_detect_filled_is_filled_again() {
+    let answer = found_at("imap.example.org", None, "a@example.org");
+    let (mut onboarding, detect) = detecting(vec![answer.clone(), answer]);
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    onboarding.form_mut().host.clear();
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    assert_eq!(onboarding.form().host, "imap.example.org");
+}
+
+#[test]
+fn a_server_the_owner_typed_stays_and_the_note_says_so() {
+    let (mut onboarding, detect) = detecting(vec![found_at("imap.example.org", Some("smtp.example.org"), "a@example.org")]);
+    onboarding.form_mut().host = "mail.typed.example".to_owned();
+    onboarding.form_mut().smtp_host = "out.typed.example".to_owned();
+    detect_now(&mut onboarding, &detect, "a@example.org");
+    let form = onboarding.form();
+    assert_eq!((form.host.as_str(), form.smtp_host.as_str()), ("mail.typed.example", "out.typed.example"));
+    let found = onboarding.found().unwrap();
+    assert_eq!((found.source, found.outgoing.as_ref()), (None, None), "Detect put no server into the form");
+    assert_eq!((found.kept_imap.as_deref(), found.kept_outgoing.as_deref()), (Some("imap.example.org"), Some("smtp.example.org")));
+}

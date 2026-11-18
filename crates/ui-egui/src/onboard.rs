@@ -24,8 +24,10 @@
 //! What the owner typed in the add form is kept on every way out and back but Cancel: Back, Esc, another page or the
 //! window's welcome keep it ([`Onboarding::close`]), and the form opens with it again; only the password is dropped
 //! on the way out. Detect's answer belongs to the add form and the address that asked: one that comes after the page
-//! was left, or for an address no longer in the form, is thrown away. Detect fills a server row or the user name only where the owner typed nothing, or kept what Detect
-//! put there before. A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
+//! was left, or for an address no longer in the form, is thrown away. Detect fills a server row and the user name
+//! where the owner typed nothing, or kept what Detect put there before; a host the owner typed keeps the row theirs,
+//! and the note says Detect's server was left out. A Detect that finds nothing takes out what an earlier one put there.
+//! A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
 //! The password lives in a [`Secret`]: no `Display`, a `Debug` that hides it, and its bytes overwritten when it is
@@ -669,6 +671,10 @@ pub struct Found {
     pub source: Option<Source>,
     /// The outgoing server in the form and where it came from, when Detect found one.
     pub outgoing: Option<(String, Source)>,
+    /// The IMAP server Detect found and left out, because the owner typed another.
+    pub kept_imap: Option<String>,
+    /// The outgoing server Detect found and left out, because the owner typed another.
+    pub kept_outgoing: Option<String>,
     /// What Detect asked: what left the computer.
     pub asked: Vec<String>,
     /// The lookups that failed.
@@ -679,8 +685,8 @@ pub struct Found {
 /// and the user name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Detected {
-    imap: Option<(String, String, Option<Security>)>,
-    submission: Option<(String, String, Option<Security>)>,
+    imap: Option<Row>,
+    submission: Option<Row>,
     username: Option<String>,
 }
 
@@ -693,23 +699,50 @@ struct Kept {
     detected: Detected,
 }
 
-/// Puts Detect's `row` (host, port, encryption) into a server row of the form, unless the owner typed into it: the row
-/// is empty, or holds what Detect put there `before`. Whether it did.
-fn fill(
-    form: (&mut String, &mut String, &mut Option<Security>),
-    before: Option<&(String, String, Option<Security>)>,
-    row: &(String, String, Option<Security>),
-) -> bool {
+/// A server row of the form as Detect fills it: host, port and encryption.
+type Row = (String, String, Option<Security>);
+
+/// What [`fill`] did with a server row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Filled {
+    /// Detect's server is in the row.
+    Detect,
+    /// The owner typed the row's host: the row stays theirs, Detect's server is left out.
+    Owner,
+    /// Detect found none: what it put there before is taken out.
+    Nothing,
+}
+
+/// Puts Detect's `row` into a server row of the form, or, for none, takes out what Detect put there `before`; what the
+/// owner typed stays. A host the owner typed makes the row theirs, and Detect leaves it. Otherwise the host is
+/// Detect's, and its port too unless the owner typed one; the encryption goes with Detect's port. A picked encryption
+/// alone never keeps Detect out: the select always shows one. Returns what it did, and what of the row is Detect's now.
+fn fill(form: (&mut String, &mut String, &mut Option<Security>), before: Option<&Row>, row: Option<&Row>) -> (Filled, Option<Row>) {
     let (host, port, security) = form;
-    let untouched = host.trim().is_empty() && port.trim().is_empty() && security.is_none();
-    let as_left = before.is_some_and(|(was_host, was_port, was_security)| was_host == host && was_port == port && was_security == security);
-    if !untouched && !as_left {
-        return false;
+    let host_detects = before.is_some_and(|(was, _, _)| was == host);
+    let port_detects = before.is_some_and(|(_, was, _)| was == port);
+    let security_detects = before.is_some_and(|(_, _, was)| was == security);
+    let Some((new_host, new_port, new_security)) = row else {
+        if host_detects {
+            host.clear();
+        }
+        if port_detects {
+            port.clear();
+        }
+        if security_detects {
+            *security = None;
+        }
+        return (Filled::Nothing, None);
+    };
+    if !host.trim().is_empty() && !host_detects {
+        return (Filled::Owner, before.cloned());
     }
-    host.clone_from(&row.0);
-    port.clone_from(&row.1);
-    *security = row.2;
-    true
+    host.clone_from(new_host);
+    if port.trim().is_empty() || port_detects {
+        port.clone_from(new_port);
+        *security = *new_security;
+    }
+    (Filled::Detect, Some((host.clone(), port.clone(), *security)))
 }
 
 /// Onboarding's state.
@@ -1120,27 +1153,36 @@ impl Onboarding {
     fn take(&mut self, proposal: Proposal) {
         let form = &mut self.form;
         let detected = &mut self.detected;
-        let source = proposal.imap.first().map(|best| {
-            let row = (shown(&best.host), best.port.to_string(), Some(best.security));
-            if fill((&mut form.host, &mut form.port, &mut form.security), detected.imap.as_ref(), &row) {
-                detected.imap = Some(row);
-            }
-            let username = shown(&best.username);
-            if form.username.trim().is_empty() || detected.username.as_deref() == Some(form.username.as_str()) {
+        let row = |best: &Suggestion| (shown(&best.host), best.port.to_string(), Some(best.security));
+        let best = proposal.imap.first();
+        let (imap, now) = fill((&mut form.host, &mut form.port, &mut form.security), detected.imap.as_ref(), best.map(row).as_ref());
+        detected.imap = now;
+        // The user name: Detect's where the owner typed none, taken out with Detect's server when it found none.
+        let username_detects = detected.username.as_deref() == Some(form.username.as_str());
+        match best.map(|best| shown(&best.username)) {
+            Some(username) if form.username.trim().is_empty() || username_detects => {
                 form.username.clone_from(&username);
                 detected.username = Some(username);
             }
-            best.source
-        });
-        let outgoing = proposal.submission.first().map(|best| {
-            let row = (shown(&best.host), best.port.to_string(), Some(best.security));
-            if fill((&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security), detected.submission.as_ref(), &row) {
-                detected.submission = Some(row);
+            Some(_) => {}
+            None => {
+                if username_detects {
+                    form.username.clear();
+                }
+                detected.username = None;
             }
-            (shown(&best.host), best.source)
-        });
+        }
+        let outgoing_best = proposal.submission.first();
+        let (outgoing, now) =
+            fill((&mut form.smtp_host, &mut form.smtp_port, &mut form.smtp_security), detected.submission.as_ref(), outgoing_best.map(row).as_ref());
+        detected.submission = now;
+        let source = best.filter(|_| imap == Filled::Detect).map(|best| best.source);
+        let kept_imap = best.filter(|_| imap == Filled::Owner).map(|best| shown(&best.host));
+        let in_form = outgoing_best.filter(|_| outgoing == Filled::Detect).map(|best| (shown(&best.host), best.source));
+        let kept_outgoing = outgoing_best.filter(|_| outgoing == Filled::Owner).map(|best| shown(&best.host));
         let clean = |lines: Vec<String>| lines.iter().map(|line| shown(line)).collect();
-        self.found = Some(Found { source, outgoing, asked: clean(proposal.asked), failed: clean(proposal.failed) });
+        self.found =
+            Some(Found { source, outgoing: in_form, kept_imap, kept_outgoing, asked: clean(proposal.asked), failed: clean(proposal.failed) });
     }
 
     /// Adds the account in the form through `mailbox` and keeps its password in the credential store; the check

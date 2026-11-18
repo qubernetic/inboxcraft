@@ -313,17 +313,22 @@ fn servers(ui: &mut Ui, theme: &Theme, faults: &Faults, form: &mut Form, width: 
     .inner
 }
 
-/// What Detect found, over the form's fields: where the settings came from, as a note, or as a careful one when it is a
-/// guess or came through an unencrypted redirect.
+/// What Detect found, over the form's fields, as the form now holds it: where the server in the form came from, as a
+/// note, or as a careful one when it is a guess or came through an unencrypted redirect; a server Detect found and left
+/// out because the owner typed another; or that it found none.
 fn found_note(ui: &mut Ui, theme: &Theme, keymap: &Keymap, found: &Found) {
-    let (kind, text) = match found.source {
-        Some(source) => (if source.doubtful() { BannerKind::Careful } else { BannerKind::Notice }, source.text().to_owned()),
-        None => (BannerKind::Notice, tr!("Detect found no server: type the settings in.").to_owned()),
+    let (kind, text) = match (found.source, found.kept_imap.as_deref()) {
+        (Some(source), _) => (if source.doubtful() { BannerKind::Careful } else { BannerKind::Notice }, source.text().to_owned()),
+        (None, Some(host)) => (BannerKind::Notice, tr!("Detect found {host}; the IMAP server you typed stays.", host = host)),
+        (None, None) => (BannerKind::Notice, tr!("Detect found no server: type the settings in.").to_owned()),
     };
     banner(ui, theme, keymap, kind, &text, &[]);
     let first_doubtful = found.source.is_some_and(|source| source.doubtful());
     if let Some((host, _)) = found.outgoing.as_ref().filter(|(_, source)| source.doubtful() && !first_doubtful) {
         banner(ui, theme, keymap, BannerKind::Careful, &tr!("{host} was a guess from common names: check it.", host = host), &[]);
+    }
+    if let Some(host) = found.kept_outgoing.as_deref() {
+        banner(ui, theme, keymap, BannerKind::Notice, &tr!("Detect found {host}; the outgoing server you typed stays.", host = host), &[]);
     }
 }
 
