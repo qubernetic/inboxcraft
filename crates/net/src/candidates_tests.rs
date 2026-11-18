@@ -56,30 +56,30 @@ fn the_list_is_ordered_and_without_repeats() {
     lookups.add_srv(SrvName::Submission, [srv("mail.privateemail.com", 587)]);
     lookups
         .add_provider_file("privateemail.com", Autoconfig { imap: vec![offer("imap.privateemail.com", 993, Security::Tls)], submission: Vec::new() });
-    lookups.reach(Reached::Own);
+    lookups.reach(Reached::Providers);
     let (imap, submission) = rows(&candidates(&address(), &lookups));
     let want_imap = [
         "imap.example.org:993 (TLS) Autoconfig",
         "imap.srv.example.net:993 (TLS) Srv",
         "imap.srv.example.net:143 (STARTTLS) Srv",
+        "mail.example.org:993 (TLS) Guess",
+        "mail.example.org:143 (STARTTLS) Guess",
+        "imap.example.org:143 (STARTTLS) Guess",
         "imap.privateemail.com:993 (TLS) ProviderAutoconfig",
         "mail.privateemail.com:993 (TLS) Provider",
         "mail.privateemail.com:143 (STARTTLS) Provider",
         "imap.privateemail.com:143 (STARTTLS) Provider",
-        "mail.example.org:993 (TLS) Guess",
-        "mail.example.org:143 (STARTTLS) Guess",
-        "imap.example.org:143 (STARTTLS) Guess",
     ];
     assert_eq!(imap, want_imap);
     let want_submission = [
         "smtp.example.org:587 (STARTTLS) Autoconfig",
         "mail.privateemail.com:587 (STARTTLS) Srv",
-        "mail.privateemail.com:465 (TLS) Provider",
-        "smtp.privateemail.com:465 (TLS) Provider",
-        "smtp.privateemail.com:587 (STARTTLS) Provider",
         "mail.example.org:465 (TLS) Guess",
         "mail.example.org:587 (STARTTLS) Guess",
         "smtp.example.org:465 (TLS) Guess",
+        "mail.privateemail.com:465 (TLS) Provider",
+        "smtp.privateemail.com:465 (TLS) Provider",
+        "smtp.privateemail.com:587 (STARTTLS) Provider",
     ];
     assert_eq!(submission, want_submission);
 }
@@ -92,10 +92,14 @@ fn the_list_holds_only_the_sources_reached() {
     assert!(candidates(&address(), &lookups).imap.is_empty());
     lookups.reach(Reached::Srv);
     assert_eq!(rows(&candidates(&address(), &lookups)).0, ["imap.srv.example.net:993 (TLS) Srv"]);
-    lookups.reach(Reached::Providers);
-    assert_eq!(candidates(&address(), &lookups).imap.len(), 5);
     lookups.reach(Reached::Own);
-    assert_eq!(candidates(&address(), &lookups).imap.len(), 9);
+    let (imap, _) = rows(&candidates(&address(), &lookups));
+    assert_eq!(imap.len(), 5);
+    assert_eq!(imap[1], "mail.example.org:993 (TLS) Guess");
+    lookups.reach(Reached::Providers);
+    let (imap, _) = rows(&candidates(&address(), &lookups));
+    assert_eq!(imap.len(), 9);
+    assert_eq!(imap[5], "mail.privateemail.com:993 (TLS) Provider");
     // Never back.
     lookups.reach(Reached::Files);
     assert_eq!(candidates(&address(), &lookups).imap.len(), 9);
@@ -120,16 +124,20 @@ fn every_list_is_capped_where_it_is_built() {
 }
 
 #[test]
-fn provider_domains_drop_the_first_label_never_above_the_mx_domain() {
+fn each_mx_host_gives_one_provider_domain_never_above_its_mx_domain() {
     let domains = |hosts: &[&str]| provider_domains(&hosts.iter().map(|name| host(name)).collect::<Vec<_>>(), "example.org");
     assert_eq!(domains(&["mx1.privateemail.com", "mx2.privateemail.com"]), ["privateemail.com"]);
-    assert_eq!(domains(&["aspmx.l.example.com"]), ["l.example.com", "example.com"]);
+    assert_eq!(domains(&["aspmx.l.example.com"]), ["example.com"]);
     assert_eq!(domains(&["mx.example.co.uk"]), ["example.co.uk"]);
     assert_eq!(domains(&["Provider.Example.NET"]), ["example.net"]);
     assert_eq!(domains(&["example.net"]), ["example.net"]);
     assert_eq!(domains(&["mx.example.org"]), Vec::<String>::new());
     assert_eq!(domains(&["localhost"]), Vec::<String>::new());
-    assert_eq!(domains(&["a.b.c.one.example.net", "mx.two.example.net", "mx.three.example.net"]).len(), super::MAX_PROVIDERS);
+    // Two MX hosts at two providers give both.
+    assert_eq!(domains(&["mx.filter.example.net", "mx1.privateemail.com"]), ["example.net", "privateemail.com"]);
+    assert_eq!(domains(&["mx.one.example", "mx.two.example", "mx.three.example"]), ["one.example", "two.example"]);
+    // Without a public suffix list a short label under a country stays: `abc.de` is not tried (a gap).
+    assert_eq!(domains(&["mx.abc.de"]), ["mx.abc.de"]);
 }
 
 #[test]

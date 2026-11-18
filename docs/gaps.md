@@ -301,8 +301,8 @@ time from the code as it is, not measured.
 - Detect proposes no CalDAV address: the CalDAV SRV records and `/.well-known/caldav` at the address's domain
   (RFC 6764) are not asked, and no CardDAV (#28, #145).
 - The ISPDB is off by default, so Detect tells Mozilla nothing unless the owner switches it on; with it off, a
-  domain whose provider publishes no autoconfig and no SRV records is found only through its MX hosts' provider and
-  its own common host names, when one of them answers the probe (#28, #260).
+  domain whose provider publishes no autoconfig and no SRV records is found only through its own common host names and
+  its MX hosts' provider, when one of them answers the probe (#28, #260).
 
 - `html` reads no CSS beyond whether an element is hidden: colours, fonts, sizes, alignment and the message's
   `<style>` blocks are ignored, so a message keeps its words and structure but not its look. Text hidden by other

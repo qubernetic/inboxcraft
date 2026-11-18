@@ -16,9 +16,11 @@
 //!    Then Mozilla's ISPDB, for the domain and then for the MX domain: only when it is switched on
 //!    ([`DetectConfig::ispdb`]), because it tells Mozilla the domain, and only when no file named an IMAP server.
 //! 3. SRV records (RFC 6186, RFC 8314): `_imaps._tcp`, `_imap._tcp`, `_submissions._tcp`, `_submission._tcp`.
-//! 4. The provider domains of the MX hosts ([`crate::candidates::provider_domains`]): their autoconfig over HTTPS,
-//!    then `mail.`, `imap.` and `smtp.` of them.
-//! 5. `mail.`, `imap.` and `smtp.` of the address's own domain.
+//! 4. `mail.`, `imap.` and `smtp.` of the address's own domain.
+//! 5. The provider domains of the MX hosts ([`crate::candidates::provider_domains`]), last, as a guess about a third
+//!    party: their autoconfig over HTTPS, then `mail.`, `imap.` and `smtp.` of them.
+//!
+//! A host whose probe timed out or whose name was not found is not probed again in the run, on any port.
 //!
 //! The whole run is capped: at most [`DetectConfig::tries`] probes and [`DetectConfig::within`] of time, checked
 //! before each lookup and each probe (one probe that has started runs to its own timeouts). A lookup or a probe that
@@ -171,8 +173,17 @@ pub struct Proposal {
 #[must_use]
 pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'_>) -> Proposal {
     let start = outside.clock.monotonic();
-    let mut run =
-        Run { address, config, outside, start, lookups: Lookups::default(), proposal: Proposal::default(), tried: Vec::new(), ended: false };
+    let mut run = Run {
+        address,
+        config,
+        outside,
+        start,
+        lookups: Lookups::default(),
+        proposal: Proposal::default(),
+        tried: Vec::new(),
+        unreachable: Vec::new(),
+        ended: false,
+    };
     let Ok(domain) = Host::new(address.domain()) else { return run.proposal };
     if run.time_left() {
         let asked = format!("dns MX {domain}");
@@ -208,6 +219,11 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
     if run.done() {
         return run.proposal;
     }
+    run.lookups.reach(Reached::Own);
+    run.probe_new();
+    if run.done() {
+        return run.proposal;
+    }
     let own = domain.as_str().to_lowercase();
     for provider in provider_domains(run.lookups.mx(), &own) {
         for url in
@@ -227,11 +243,6 @@ pub fn detect(address: &EmailAddress, config: &DetectConfig, outside: &Outside<'
     }
     run.lookups.reach(Reached::Providers);
     run.probe_new();
-    if run.done() {
-        return run.proposal;
-    }
-    run.lookups.reach(Reached::Own);
-    run.probe_new();
     run.proposal
 }
 
@@ -244,6 +255,8 @@ struct Run<'a> {
     proposal: Proposal,
     /// Every server probed, for what.
     tried: Vec<(Service, Server)>,
+    /// Hosts that timed out or have no address: not probed again.
+    unreachable: Vec<Host>,
     /// A cap was reached: nothing more is asked.
     ended: bool,
 }
@@ -294,7 +307,9 @@ impl Run<'_> {
                 continue;
             }
             for candidate in list.of(service) {
-                if self.tried.iter().any(|(held, server)| *held == service && *server == candidate.server) {
+                if self.tried.iter().any(|(held, server)| *held == service && *server == candidate.server)
+                    || self.unreachable.contains(candidate.server.host())
+                {
                     continue;
                 }
                 if !self.may_try() {
@@ -311,7 +326,12 @@ impl Run<'_> {
                         }
                         break;
                     }
-                    Err(error) => self.proposal.failed.push((what, error.kind())),
+                    Err(error) => {
+                        if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::PortTimedOut | ErrorKind::HostNotFound) {
+                            self.unreachable.push(candidate.server.host().clone());
+                        }
+                        self.proposal.failed.push((what, error.kind()));
+                    }
                 }
             }
         }

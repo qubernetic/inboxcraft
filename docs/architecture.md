@@ -438,8 +438,9 @@ asked once per role. Inbox, Sent and Drafts stay fixed once set; Trash, Junk and
   The certificate's issuer and dates come from our own small DER reader, fed by a verifier that keeps the
   certificate and asks the real one; the dates give the clock check where the platform's verifier gives none.
 - Detect (`net::detect`) only proposes. It asks in stages: MX; autoconfig at the domain over HTTPS, then the ISPDB
-  when switched on (off by default); SRV (RFC 6186); the provider domains of the MX hosts (their autoconfig over
-  HTTPS, then `mail.`, `imap.` and `smtp.` of them); `mail.`, `imap.` and `smtp.` of the address's domain. After each
+  when switched on (off by default); SRV (RFC 6186); `mail.`, `imap.` and `smtp.` of the address's domain; and
+  last, as a guess about a third party, the provider domains of the MX hosts (their autoconfig over HTTPS, then
+  `mail.`, `imap.` and `smtp.` of them). After each
   stage it probes the candidates it added, in that order: the list is a pure function of what the lookups returned
   (`net::candidates`: de-duplicated, capped, hosts made up from a domain only on 993 and 143, or 465 and 587, never
   without encryption, never port 25), and a candidate counts only when it greets and, encrypted, offers a sign-in

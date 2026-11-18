@@ -8,9 +8,9 @@
 //!
 //! 1. The autoconfig files at the address's domain, through the redirect and from the ISPDB, as they were read.
 //! 2. SRV records (RFC 6186): `_imaps._tcp`, `_imap._tcp`, `_submissions._tcp`, `_submission._tcp`.
-//! 3. For each provider domain of the MX hosts ([`provider_domains`]): its autoconfig file, then `mail.` and `imap.`
-//!    (IMAP) or `mail.` and `smtp.` (submission) of it.
-//! 4. `mail.` and `imap.`, or `mail.` and `smtp.`, of the address's own domain.
+//! 3. `mail.` and `imap.`, or `mail.` and `smtp.`, of the address's own domain.
+//! 4. For each provider domain of the MX hosts ([`provider_domains`]), last because it is a guess about a third
+//!    party: its autoconfig file, then `mail.` and `imap.` (IMAP) or `mail.` and `smtp.` (submission) of it.
 //!
 //! A host made up from a domain gets the registered pairs only: IMAP 993 with implicit TLS, then 143 with STARTTLS;
 //! submission 465 with implicit TLS, then 587 with STARTTLS. There is no candidate without encryption, none on port
@@ -96,10 +96,10 @@ pub enum Reached {
     Files,
     /// The SRV records.
     Srv,
-    /// The provider domains of the MX hosts.
-    Providers,
     /// The address's own domain.
     Own,
+    /// The provider domains of the MX hosts.
+    Providers,
 }
 
 /// What the lookups returned, each list capped as it is filled.
@@ -243,6 +243,9 @@ pub fn candidates(address: &EmailAddress, lookups: &Lookups) -> Candidates {
         }
     }
     let own = address.domain().to_lowercase();
+    if lookups.reached >= Reached::Own {
+        list.hosts(&own, username, Source::Guess);
+    }
     if lookups.reached >= Reached::Providers {
         for provider in provider_domains(&lookups.mx, &own) {
             for (_, file) in lookups.provider_files.iter().filter(|(of, _)| *of == provider) {
@@ -251,42 +254,23 @@ pub fn candidates(address: &EmailAddress, lookups: &Lookups) -> Candidates {
             list.hosts(&provider, username, Source::Provider);
         }
     }
-    if lookups.reached >= Reached::Own {
-        list.hosts(&own, username, Source::Guess);
-    }
     list
 }
 
-/// The provider domains of the MX hosts, lowercase, at most [`MAX_PROVIDERS`], never `own` (the address's domain).
-/// For each host by preference: its parents, from the nearest, dropping the first label while at least two labels
-/// remain, and never above the MX domain of the rule of thumb in [`crate::detect`]. Without a public suffix list
-/// this is careful: `mx1.mail.example.net` gives `mail.example.net` and `example.net`, `mx.example.co.uk` only
-/// `example.co.uk`.
+/// The provider domains of the MX hosts, lowercase, by preference: one for each MX host, its MX domain by the rule of
+/// thumb in [`crate::detect`] (the last two labels, or three under a two-letter country label), so that two MX hosts
+/// at different providers give two; never `own` (the address's domain), never twice, at most [`MAX_PROVIDERS`].
+/// Without a public suffix list this is careful: `mx1.mail.example.net` gives `example.net`, `mx.example.co.uk`
+/// gives `example.co.uk` and never `co.uk`; but `mx.abc.de` gives `mx.abc.de`, not `abc.de`.
 #[must_use]
 pub fn provider_domains(mx: &[Host], own: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
-    for host in mx {
-        let Some(top) = base_domain(host) else { continue };
-        let name = host.as_str().to_lowercase();
-        if name == top && name != own && !found.contains(&name) && found.len() < MAX_PROVIDERS {
-            found.push(name);
-            continue;
+    for top in mx.iter().filter_map(base_domain) {
+        if found.len() >= MAX_PROVIDERS {
+            break;
         }
-        let mut rest = name.as_str();
-        while let Some((_, parent)) = rest.split_once('.') {
-            if !parent.contains('.') || parent.len() < top.len() {
-                break;
-            }
-            if found.len() >= MAX_PROVIDERS {
-                return found;
-            }
-            if parent != own && !found.iter().any(|held| held == parent) {
-                found.push(parent.to_owned());
-            }
-            if parent == top {
-                break;
-            }
-            rest = parent;
+        if top != own && !found.contains(&top) {
+            found.push(top);
         }
     }
     found

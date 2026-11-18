@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use inboxcraft_model::{EmailAddress, ErrorKind, Host, Security, Server};
-use inboxcraft_time::{FakeClock, Timestamp};
+use inboxcraft_time::{Clock, FakeClock, Timestamp};
 
 use super::{DetectConfig, ISPDB, Lookup, MAX_TRIES, Outside, Proposal, Source, base_domain, detect, https_host, within};
 use crate::NetError;
@@ -93,6 +93,7 @@ impl Lookup for FakeDns {
 /// a clock each probe moves on by `step`.
 struct FakeProbe {
     answering: Option<Vec<&'static str>>,
+    fails_with: ErrorKind,
     tried: Mutex<Vec<String>>,
     clock: FakeClock,
     step: Duration,
@@ -100,7 +101,13 @@ struct FakeProbe {
 
 impl FakeProbe {
     fn all() -> Self {
-        Self { answering: None, tried: Mutex::default(), clock: FakeClock::new(Timestamp::UNIX_EPOCH), step: Duration::ZERO }
+        Self {
+            answering: None,
+            fails_with: ErrorKind::ConnectionRefused,
+            tried: Mutex::default(),
+            clock: FakeClock::new(Timestamp::UNIX_EPOCH),
+            step: Duration::ZERO,
+        }
     }
 
     fn only(answering: &[&'static str]) -> Self {
@@ -117,7 +124,7 @@ impl Probe for FakeProbe {
         self.tried.lock().unwrap().push(format!("{} {server}", service.word()));
         self.clock.advance(self.step);
         match &self.answering {
-            Some(answering) if !answering.contains(&server.to_string().as_str()) => Err(NetError::new(ErrorKind::ConnectionRefused, "fake")),
+            Some(answering) if !answering.contains(&server.to_string().as_str()) => Err(NetError::new(self.fails_with, "fake")),
             _ => Ok(()),
         }
     }
@@ -364,8 +371,39 @@ fn a_domain_hosted_by_a_provider_is_found_through_its_mx() {
     assert_eq!(proposal.imap[0].username, "ada@example.org");
     // The provider's autoconfig was asked, once for both MX hosts; the provider came before the domain's own hosts.
     assert!(web.asked().contains(&"https://autoconfig.privateemail.com/mail/config-v1.1.xml".to_owned()));
-    assert_eq!(probe.tried(), ["imap mail.privateemail.com:993 (TLS)", "submission mail.privateemail.com:465 (TLS)"]);
+    // The domain's own hosts come first: four refused IMAP and four refused submission pairs, then the provider.
+    let tried = probe.tried();
+    assert_eq!(tried.len(), 10);
+    assert_eq!(tried[8], "imap mail.privateemail.com:993 (TLS)");
+    assert_eq!(tried[9], "submission mail.privateemail.com:465 (TLS)");
     assert!(!proposal.failed.iter().any(|(what, _)| what.starts_with("detect")));
+}
+
+/// The owner's case when the domain's hosts drop every packet: each probe takes 20 seconds, the probe's own cap. A
+/// host that timed out is not tried again, so the provider is reached within the run's 120 seconds.
+#[test]
+fn the_owners_case_fits_the_cap_when_the_domain_drops_packets() {
+    let dns = FakeDns { mx: vec!["mx1.privateemail.com"], ..FakeDns::default() };
+    let probe = FakeProbe {
+        fails_with: ErrorKind::TimedOut,
+        step: Duration::from_secs(20),
+        ..FakeProbe::only(&["mail.privateemail.com:993 (TLS)", "mail.privateemail.com:465 (TLS)"])
+    };
+    let proposal = run_probed(&DetectConfig::default(), &dns, &FakeWeb::default(), &probe);
+    assert_eq!(imap(&proposal), ["mail.privateemail.com:993 (TLS) Provider"]);
+    assert_eq!(proposal.submission[0].server.to_string(), "mail.privateemail.com:465 (TLS)");
+    assert_eq!(
+        probe.tried(),
+        [
+            "imap mail.example.org:993 (TLS)",
+            "imap imap.example.org:993 (TLS)",
+            "submission smtp.example.org:465 (TLS)",
+            "imap mail.privateemail.com:993 (TLS)",
+            "submission mail.privateemail.com:465 (TLS)"
+        ]
+    );
+    // Five probes of 20 seconds: 100 seconds in all.
+    assert_eq!(probe.clock.monotonic(), Duration::from_secs(100));
 }
 
 #[test]
@@ -419,13 +457,13 @@ fn the_time_is_capped() {
 
 #[test]
 fn ten_thousand_mx_records_are_capped_where_they_are_kept() {
-    let dns = FakeDns { many_mx: (0..10_000).map(|n| format!("mx{n}.p{n}.example.net")).collect(), ..FakeDns::default() };
+    let dns = FakeDns { many_mx: (0..10_000).map(|n| format!("mx{n}.p{n}.example")).collect(), ..FakeDns::default() };
     let probe = FakeProbe::only(&[]);
     let web = FakeWeb::default();
     let proposal = run_probed(&DetectConfig::default(), &dns, &web, &probe);
     assert_eq!(proposal.mx.len(), MAX_MX);
     // Two provider domains at most, each with its two autoconfig places.
-    let provider_urls = web.asked().iter().filter(|url| url.contains("example.net")).count();
+    let provider_urls = web.asked().iter().filter(|url| url.contains(".example/")).count();
     assert_eq!(provider_urls, 2 * MAX_PROVIDERS);
     assert!(probe.tried().len() <= MAX_TRIES);
 }
