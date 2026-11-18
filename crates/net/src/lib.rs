@@ -64,7 +64,7 @@ pub(crate) mod write;
 
 pub use backoff::Backoff;
 pub use check::{CheckTarget, HTTPS_PORT, MAIL_PORTS, check_account};
-pub use connect::{Connector, Dialer, SystemDialer, Timeouts};
+pub use connect::{Connector, Dialer, Resolve, SystemDialer, Timeouts};
 pub use error::NetError;
 pub use imap::{ImapConnection, Password};
 pub use smtp::SmtpConnection;

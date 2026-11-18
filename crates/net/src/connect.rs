@@ -52,6 +52,20 @@ pub trait Dialer: fmt::Debug + Send + Sync {
     fn dial(&self, address: SocketAddr, timeout: Duration) -> io::Result<TcpStream>;
 }
 
+/// What finds the addresses of a host name in place of the system: a test's stand-in, so that no test looks a real
+/// name up.
+pub trait Resolve: fmt::Debug + Send + Sync {
+    /// The addresses of `host` for `port`.
+    ///
+    /// # Errors
+    ///
+    /// The cause, when the name has none.
+    fn resolve(&self, host: &Host, port: u16) -> io::Result<Vec<SocketAddr>>;
+}
+
+/// The most addresses of one host tried.
+const MAX_ADDRESSES: usize = 16;
+
 /// The operating system's [`Dialer`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemDialer;
@@ -71,13 +85,22 @@ pub struct Connector {
     /// Given addresses for the servers on a port, before `dial`.
     on_port: Vec<(u16, Vec<SocketAddr>)>,
     dialer: Arc<dyn Dialer>,
+    /// Looks host names up in place of the system.
+    resolver: Option<Arc<dyn Resolve>>,
 }
 
 impl Connector {
     /// A connector that looks host names up with the system's resolver.
     #[must_use]
     pub fn new(tls: TlsSettings) -> Self {
-        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, on_port: Vec::new(), dialer: Arc::new(SystemDialer) }
+        Self { tls, timeouts: Timeouts::default(), dial: Dial::Lookup, on_port: Vec::new(), dialer: Arc::new(SystemDialer), resolver: None }
+    }
+
+    /// Looks host names up with `resolver` in place of the system's (the given addresses still come first). For the
+    /// tests, whose fake servers listen on 127.0.0.1 under made-up names.
+    #[must_use]
+    pub fn with_resolver(self, resolver: Arc<dyn Resolve>) -> Self {
+        Self { resolver: Some(resolver), ..self }
     }
 
     /// With another [`Dialer`].
@@ -141,9 +164,19 @@ impl Connector {
         let given = self.on_port.iter().find(|(held, _)| *held == port).map(|(_, addresses)| addresses);
         let addresses: Vec<SocketAddr> = match (given, &self.dial) {
             (Some(addresses), _) | (None, Dial::To(addresses)) => addresses.clone(),
-            (None, Dial::Lookup) => {
-                (server.host().as_str(), port).to_socket_addrs().map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?.collect()
-            }
+            (None, Dial::Lookup) => match &self.resolver {
+                Some(resolver) => resolver
+                    .resolve(server.host(), port)
+                    .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
+                    .into_iter()
+                    .take(MAX_ADDRESSES)
+                    .collect(),
+                None => (server.host().as_str(), port)
+                    .to_socket_addrs()
+                    .map_err(|error| NetError::new(ErrorKind::HostNotFound, error.to_string()))?
+                    .take(MAX_ADDRESSES)
+                    .collect(),
+            },
         };
         if addresses.is_empty() {
             return Err(NetError::new(ErrorKind::HostNotFound, format!("no address for {}", server.host())));
