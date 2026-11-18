@@ -445,12 +445,18 @@ fn act(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &
             // A done message, open under "Show done", is brought back by the same button.
             let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
             let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
-            act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
+            let response = act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
+            // Beside the list, Done is the reader's first tool: where the keyboard goes when it would be on nothing.
+            if !crate::draw::one_pane(ui.ctx()) {
+                super::keep_first_tool(ui.ctx(), response.id);
+            }
         }
         1 => picker(ui, theme, keymap, mailbox, open, drawn),
         2 => pin(ui, theme, keymap, mailbox, open, drawn),
         3 => move_to(ui, theme, keymap, mailbox, open, drawn),
-        4 => act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn),
+        4 => {
+            act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn);
+        }
         _ => {
             let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
             popup::menu_right(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
@@ -472,17 +478,17 @@ fn act_button(
     (icon, name, action): (IconId, &str, &str),
     act: Act,
     drawn: &mut Drawn,
-) {
+) -> egui::Response {
     let button = IconButton::new(icon, name).action(action);
     match open {
         Some(id) => {
-            if button.show(ui, theme, keymap).clicked() {
+            let response = button.show(ui, theme, keymap);
+            if response.clicked() {
                 drawn.asked.push(Asked::Act(id, act));
             }
+            response
         }
-        None => {
-            button.unavailable(not_yet()).show(ui, theme, keymap);
-        }
+        None => button.unavailable(not_yet()).show(ui, theme, keymap),
     }
 }
 

@@ -357,17 +357,20 @@ fn a_disabled_action_says_why_in_its_tooltip() {
 }
 
 #[test]
-fn done_in_the_toolbar_marks_the_open_message_done_and_the_toast_offers_undo() {
+fn done_in_the_toolbar_marks_the_open_message_done_offers_undo_and_walks_on_to_the_next() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     let id = harness.state().reader().open_id().unwrap();
+    let list = subjects(&harness);
+    let behind = list[list.iter().position(|subject| subject == "Photos from the coast walk").unwrap() + 1].clone();
     harness.get_by_role_and_label(Role::Button, "Done").click();
     for _ in 0..4 {
         harness.run();
     }
     assert!(harness.state().mailbox().messages().iter().all(|row| row.id != id), "it left the inbox");
     harness.get_by_label("Marked as done");
-    assert_eq!(harness.state().reader().open_id(), None, "no message opens by itself: the reader shows nothing open");
+    // The owner's own act walks on, as the lists do: the message the next-message rule names opens.
+    assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "the next message opens");
 }
 
 #[test]
@@ -876,15 +879,14 @@ fn a_subject_takes_two_lines_then_an_ellipsis() {
 }
 
 #[test]
-fn after_done_the_reader_shows_nothing_open() {
+fn after_the_open_message_is_taken_away_the_reader_shows_nothing_open() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     let done = harness.state().reader().open_id().unwrap();
     assert_eq!(harness.state().mailbox().after(), After::Next, "the rule that selects the next row");
     // The reader's pane: its parts stand 40 in from its sides.
     let pane = (harness.get_by_label("Photos from the coast walk").rect().left() - 40.0, harness.get_by_label("More").rect().right() + 40.0);
-    harness.get_by_role_and_label(Role::Button, "Done").click();
-    settle(&mut harness);
+    taken_away(&mut harness);
     assert!(row_of(&harness, done).is_none(), "it left the list");
     // The list selects no row (the nothing-open frame), and no message opens by itself.
     assert_eq!(harness.state().mailbox().selected(), None);
@@ -938,12 +940,15 @@ fn open_subject(harness: &Harness<'static, InboxApp>) -> Option<String> {
     row_of(harness, id).map(|row| row.subject)
 }
 
-/// Done on the open message by its button, and the frames after it.
-fn done(harness: &mut Harness<'static, InboxApp>) {
-    // The reader's Done: a row picked by a key shows its own hover actions in the list, left of it.
-    let reader = harness.query_all_by_role_and_label(Role::Button, "Done").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
-    reader.unwrap().click();
+/// The open message taken away by something other than the owner's act in this window (another device, a sync, the
+/// control channel): its row leaves the list, and nothing opens by itself.
+fn taken_away(harness: &mut Harness<'static, InboxApp>) {
+    let id = harness.state().reader().open_id().unwrap();
+    let (_, mailbox) = harness.state_mut().reader_mut();
+    mailbox.run("mail.done", &json!({ "id": id, "done": true })).unwrap();
+    mailbox.refresh();
     settle(harness);
+    assert!(row_of(harness, id).is_none(), "it left the list");
     assert_eq!(harness.state().reader().open_id(), None, "nothing opens by itself");
 }
 
@@ -951,7 +956,7 @@ fn done(harness: &mut Harness<'static, InboxApp>) {
 fn with_nothing_open_no_row_is_selected_and_the_row_keys_act_on_nothing() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    done(&mut harness);
+    taken_away(&mut harness);
     assert_eq!(harness.state().mailbox().selected(), None, "the list selects no row, as the nothing-open frame draws it");
     assert!(!any_selected(&harness), "no row is drawn selected");
     let before = subjects(&harness);
@@ -969,26 +974,26 @@ fn with_nothing_open_no_row_is_selected_and_the_row_keys_act_on_nothing() {
 }
 
 #[test]
-fn after_a_second_done_no_message_opens_by_itself() {
+fn after_a_second_removal_no_message_opens_by_itself() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    done(&mut harness);
+    taken_away(&mut harness);
     // The down arrow opens a row, Done on it, and still nothing opens.
     harness.key_press(Key::ArrowDown);
     settle(&mut harness);
     assert!(harness.state().reader().open_id().is_some(), "the down arrow opens a row");
-    done(&mut harness);
+    taken_away(&mut harness);
     assert!(!any_selected(&harness));
     // The message the rule names opens from the palette's command, and again Done leaves nothing open.
     let ctx = harness.ctx.clone();
     harness.state_mut().run_action(&ctx, crate::keymap::OPEN_HELD);
     settle(&mut harness);
     assert!(harness.state().reader().open_id().is_some(), "the rule's message opens");
-    done(&mut harness);
+    taken_away(&mut harness);
     harness.key_press(Key::ArrowDown);
     settle(&mut harness);
     assert!(harness.state().reader().open_id().is_some(), "the down arrow opens a row again");
-    done(&mut harness);
+    taken_away(&mut harness);
     harness.key_press(Key::ArrowUp);
     settle(&mut harness);
     assert!(harness.state().reader().open_id().is_some(), "the up arrow opens a row");
@@ -1006,7 +1011,7 @@ fn the_next_message_rule_names_what_a_key_opens_after_a_message_left() {
             // The rows each side of the one that leaves.
             let (before, behind) = (list[at - 1].clone(), list[at + 1].clone());
             harness.state_mut().mailbox_mut().set_after(after);
-            done(&mut harness);
+            taken_away(&mut harness);
             let wanted = match (key, after) {
                 // The command opens the message the rule names: the next one, or the one before; the arrows open the
                 // row each side of the gap.
@@ -1401,7 +1406,7 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     walks_and_rests(&mut harness, "an open quote");
     // Nothing open.
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
-    done(&mut harness);
+    taken_away(&mut harness);
     walks_and_rests(&mut harness, "nothing open");
     // Full width.
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
@@ -1649,7 +1654,7 @@ fn done_at_the_end_then(end_last: bool, after: After, key: Key) -> (Option<Strin
     let mut harness = opened(&fetch, None, &subject);
     harness.state_mut().mailbox_mut().set_after(after);
     let list = subjects(&harness);
-    done(&mut harness);
+    taken_away(&mut harness);
     harness.key_press(key);
     settle(&mut harness);
     if harness.state().reader().open_id().is_none() {
@@ -1660,7 +1665,7 @@ fn done_at_the_end_then(end_last: bool, after: After, key: Key) -> (Option<Strin
 }
 
 #[test]
-fn done_on_the_last_row_then_up_opens_the_row_before_the_gap() {
+fn the_last_row_taken_away_then_up_opens_the_row_before_the_gap() {
     for after in [After::Next, After::Previous] {
         let (got, list) = done_at_the_end_then(true, after, Key::ArrowUp);
         let before = &list[list.len() - 2];
@@ -1672,7 +1677,7 @@ fn done_on_the_last_row_then_up_opens_the_row_before_the_gap() {
 }
 
 #[test]
-fn done_on_the_first_row_then_down_opens_the_row_after_the_gap() {
+fn the_first_row_taken_away_then_down_opens_the_row_after_the_gap() {
     for after in [After::Previous, After::Next] {
         let (got, list) = done_at_the_end_then(false, after, Key::ArrowDown);
         assert_eq!(got.as_deref(), Some(list[1].as_str()), "{after:?}: down opens the row after the gap");
@@ -1752,7 +1757,7 @@ fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_af
         harness.key_press(Key::Enter);
         settle(harness);
     };
-    done(&mut harness);
+    taken_away(&mut harness);
     assert!(harness.state().can_run(crate::keymap::OPEN_HELD), "after a message left it can run");
     through_palette(&mut harness);
     assert!(!harness.state().palette().is_open());
@@ -1771,7 +1776,7 @@ fn the_message_the_rule_names_opens_from_the_palette_and_a_bound_key_and_only_af
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, LEAVES);
     harness.state_mut().keymap_mut().bind(crate::keymap::OPEN_HELD, egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::Enter));
-    done(&mut harness);
+    taken_away(&mut harness);
     harness.key_press(Key::Enter);
     settle(&mut harness);
     assert_eq!(open_subject(&harness).as_deref(), Some(behind.as_str()), "its key opens the message the rule names");
@@ -2341,4 +2346,124 @@ fn one_esc_closes_the_reader_s_menu_and_nothing_under_it_after_the_list_s_menu()
     harness.key_press(Key::Escape);
     settle(&mut harness);
     assert!(super::reader_rect(&harness.ctx).is_none(), "the second Esc goes back to the list");
+}
+
+// The owner's own act walks on, as the epic's lists do; the server's removal opens nothing.
+
+/// The coast walk open beside the list, with the rows each side of it.
+fn coast_walk_open(fetch: &Recorder) -> (Harness<'static, InboxApp>, u64, u64) {
+    let harness = opened(fetch, None, "Photos from the coast walk");
+    let id = harness.state().reader().open_id().unwrap();
+    let rows = harness.state().mailbox().messages();
+    let at = rows.iter().position(|row| row.id == id).unwrap();
+    let behind = rows[at + 1].id;
+    (harness, id, behind)
+}
+
+/// A press on the open message's words: the reader has the pointer, the list not the keyboard.
+fn press_in_the_reader(harness: &mut Harness<'static, InboxApp>) {
+    harness.get_by_label_contains("Here are the ones from the cliff path").click();
+    settle(harness);
+}
+
+fn read(harness: &Harness<'static, InboxApp>, id: u64) -> bool {
+    row_of(harness, id).is_some_and(|row| row.seen)
+}
+
+/// The reader's Done (right of the list's own hover acts).
+fn reader_done<'h>(harness: &'h Harness<'static, InboxApp>) -> egui_kittest::Node<'h> {
+    harness.query_all_by_role_and_label(Role::Button, "Done").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap()
+}
+
+#[test]
+fn done_by_the_reader_s_button_walks_on_to_the_next_message_and_reads_it() {
+    let fetch = Recorder::default();
+    let (mut harness, id, behind) = coast_walk_open(&fetch);
+    press_in_the_reader(&mut harness);
+    reader_done(&harness).click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none(), "it left the list");
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "the next message opens");
+    assert!(read(&harness, behind), "and is read, as the lists read it");
+}
+
+#[test]
+fn d_in_the_reader_walks_on_and_the_keyboard_stays_in_the_reader() {
+    let fetch = Recorder::default();
+    let (mut harness, _, behind) = coast_walk_open(&fetch);
+    press_in_the_reader(&mut harness);
+    harness.key_press(Key::D);
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "the next message opens");
+    assert!(read(&harness, behind));
+    assert!(reader_done(&harness).accesskit_node().is_focused(), "the keyboard is on the reader's first tool, not on nothing");
+    assert_eq!(super::list::focused_row(&harness.ctx), None, "and on no row of the list");
+}
+
+#[test]
+fn d_on_the_list_s_row_walks_on_with_the_keyboard_on_the_list() {
+    let fetch = Recorder::default();
+    let (mut harness, _, behind) = coast_walk_open(&fetch);
+    row_node(&harness, "Photos from the coast walk").click();
+    settle(&mut harness);
+    harness.key_press(Key::D);
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "the next message opens");
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(behind), "the keyboard stays on the list, on the next row");
+}
+
+#[test]
+fn done_on_the_list_row_s_own_act_walks_on() {
+    let fetch = Recorder::default();
+    let (mut harness, id, behind) = coast_walk_open(&fetch);
+    row_node(&harness, "Photos from the coast walk").hover();
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Done").min_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().click();
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_none(), "it left the list");
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "the next message opens");
+}
+
+#[test]
+fn a_message_the_server_takes_away_opens_nothing_and_the_keyboard_goes_to_the_row_in_its_place() {
+    let fetch = Recorder::default();
+    let (mut harness, _, behind) = coast_walk_open(&fetch);
+    press_in_the_reader(&mut harness);
+    let unread = !read(&harness, behind);
+    taken_away(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), None, "no row is selected");
+    assert_eq!(read(&harness, behind), !unread, "nothing is read");
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(behind), "the keyboard is on the row that took its place");
+    assert_eq!(harness.state().reader().open_id(), None, "and that row's message is not opened by it");
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    assert_eq!(harness.state().reader().open_id(), Some(behind), "Enter opens the row the keyboard is on");
+}
+
+/// The last row taken away by the server: the keyboard goes to the row that is now last.
+#[test]
+fn the_last_row_the_server_takes_away_leaves_the_keyboard_on_the_new_last_row() {
+    let fetch = Recorder::default();
+    let app = app_with(&fetch);
+    let last = app.mailbox().messages().last().unwrap().subject.clone();
+    drop(app);
+    let mut harness = opened(&fetch, None, &last);
+    taken_away(&mut harness);
+    let now_last = harness.state().mailbox().messages().last().unwrap().id;
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(now_last), "the keyboard is on the last row");
+}
+
+/// A Flag from the list on the open message, then the server takes it away: only an act that takes the row out walks on,
+/// so nothing opens.
+#[test]
+fn a_flag_from_the_list_does_not_turn_a_later_removal_into_a_walk_on() {
+    let fetch = Recorder::default();
+    let (mut harness, id, _) = coast_walk_open(&fetch);
+    row_node(&harness, "Photos from the coast walk").click();
+    settle(&mut harness);
+    harness.key_press(Key::S);
+    settle(&mut harness);
+    assert!(row_of(&harness, id).is_some(), "a flag leaves the row in the list");
+    taken_away(&mut harness);
+    assert_eq!(harness.state().mailbox().selected(), None, "nothing is selected");
 }

@@ -622,6 +622,9 @@ pub struct Mailbox {
     opening: Option<u64>,
     /// The row that just left the list, while its gap closes.
     leaving: Option<Leaving>,
+    /// The message the owner's own act took out of the list last (Done, Archive, Delete, Snooze, Move: never a Read or
+    /// a Flag, never the server), until [`Mailbox::take_taken`] reads it.
+    taken: Option<u64>,
     /// The act the toast shows.
     undo: Option<Undo>,
     acts: u64,
@@ -871,6 +874,7 @@ impl Mailbox {
             inbox_view: InboxView::default(),
             opening: None,
             leaving: None,
+            taken: None,
             undo: None,
             acts: 0,
             history: 0,
@@ -1082,6 +1086,7 @@ impl Mailbox {
         if result.is_ok() || self.history != before {
             self.refresh();
         }
+        self.note_taken(Some(id));
         match result {
             Ok(text) => {
                 self.acts = self.acts.saturating_add(1);
@@ -1097,6 +1102,7 @@ impl Mailbox {
     pub fn done_all(&mut self, ids: &[u64]) {
         let Some(first) = ids.first().copied() else { return };
         let (before, selected) = (self.history, self.selected.is_some_and(|id| ids.contains(&id)));
+        let was = self.selected.filter(|id| ids.contains(id));
         let mut result = Ok(());
         for id in ids {
             if let Err(error) = self.acted(*id, Act::Done) {
@@ -1107,6 +1113,7 @@ impl Mailbox {
         if self.history != before {
             self.refresh();
         }
+        self.note_taken(was);
         match result {
             Ok(()) => {
                 self.acts = self.acts.saturating_add(1);
@@ -1299,6 +1306,19 @@ impl Mailbox {
         if let (Some(row), Some(at), true) = (row, at, gone) {
             self.leaving = Some(Leaving { row, at, group, act });
         }
+    }
+
+    /// Notes that the owner's act took message `id` out of the list, when it did: an act that left its row in place
+    /// (a Read, a Flag, a refusal, a done row "Show done" keeps) notes nothing.
+    fn note_taken(&mut self, id: Option<u64>) {
+        if let Some(id) = id.filter(|id| !self.messages.iter().any(|row| row.id == *id)) {
+            self.taken = Some(id);
+        }
+    }
+
+    /// The message the owner's own act took out of the list last, once: it is forgotten as it is read.
+    pub fn take_taken(&mut self) -> Option<u64> {
+        self.taken.take()
     }
 
     /// The message whose row has just left the list and the act done to it, while its gap closes.

@@ -263,13 +263,20 @@ pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &
     true
 }
 
-/// Where the id of the "Back to the list" drawn in this pass is kept.
+/// Where the id of the reader's first tool drawn in this pass is kept: "Back to the list" in one pane, Done beside the
+/// list.
 fn back_kept_id() -> egui::Id {
     egui::Id::unique("reader-back")
 }
 
-/// Takes the id of the "Back to the list" the reader drew since the last take: where the focus goes when a message is
-/// opened into the one pane.
+/// Keeps `id` as the reader's first tool drawn in this pass ([`take_back_id`]).
+pub(super) fn keep_first_tool(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|data| data.insert_temp(back_kept_id(), id));
+}
+
+/// Takes the id of the reader's first tool drawn since the last take ("Back to the list" in one pane, Done beside the
+/// list): where the focus goes when a message is opened into the one pane, or when an act from the reader walked on
+/// with the keyboard on nothing.
 pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
     let id = ctx.data(|data| data.get_temp::<egui::Id>(back_kept_id()));
     ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
