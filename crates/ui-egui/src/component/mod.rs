@@ -32,6 +32,7 @@
 //! [`gallery`] draws every one of them on one page for `ui_shot`, [`gallery_fields`] the fields, pickers and menus on a
 //! second.
 
+pub mod attachment;
 pub mod avatar;
 pub mod badge;
 pub mod banner;

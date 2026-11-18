@@ -131,6 +131,29 @@ fn quote_folds(ui: &mut Ui, theme: &Theme) {
     }
 }
 
+/// The attachment's board: default, hover, focus, saving, saved and failed, with the design board's words; opening a
+/// file or its folder is not built, so the board carries the coming-soon tag once.
+fn attachments(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::attachment::{FileState, attachment_with};
+    title(ui, theme, tr!("Attachment"));
+    super::soon::soon_tag(ui, theme);
+    let states = [
+        (tr!("default"), FileState::Ready, Shown::Rest),
+        (tr!("hover"), FileState::Ready, Shown::Hover),
+        (tr!("focus"), FileState::Ready, Shown::Focus),
+        (tr!("saving"), FileState::Saving("saving [=====>  ]"), Shown::Rest),
+        (tr!("saved"), FileState::Saved(tr!("saved to Downloads")), Shown::Rest),
+        (tr!("failed"), FileState::Failed(tr!("not saved: the disk is full")), Shown::Rest),
+    ];
+    for (state, file, shown) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                attachment_with(ui, theme, keymap, "bakery-logo-v2.pdf", "1.2 MB", file, Some(shown));
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
@@ -143,7 +166,9 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 }
 
 /// The middle column.
-fn middle(_ui: &mut Ui, _theme: &Theme, _keymap: &Keymap) {}
+fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    attachments(ui, theme, keymap);
+}
 
 /// The right column.
 fn right(_ui: &mut Ui, _theme: &Theme, _keymap: &Keymap) {}
