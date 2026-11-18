@@ -625,8 +625,8 @@ pub struct Onboarding {
     /// The account being edited as it stood: set from [`Onboarding::edit`] until [`Onboarding::close`], through the
     /// check a save starts, so "Change settings" comes back here and removes nothing.
     held: Option<Held>,
-    /// The form a way out of the settings sheet left ([`Onboarding::park`]), as it was typed, until Add account or the
-    /// same account's row brings it back.
+    /// The form a way out of the settings sheet left ([`Onboarding::park`]), as it was typed, until Add account or an
+    /// account's row brings it back.
     parked: Option<Stage>,
 }
 
@@ -662,13 +662,13 @@ impl Onboarding {
         }
     }
 
-    /// Opens an empty form; or the add form a way out of the sheet left, as it was typed.
+    /// Opens an empty form; or, while a way out of the sheet left a form (this one or an account's), that form as it
+    /// was typed: a typed form is never dropped by asking for another one, the owner cancels it to start another.
     pub fn open(&mut self) {
-        if self.parked == Some(Stage::Form) {
+        if self.parked.is_some() {
             self.resume();
             return;
         }
-        self.parked = None;
         self.form = Form::default();
         self.found = None;
         self.error = None;
@@ -678,7 +678,7 @@ impl Onboarding {
     }
 
     /// Leaves the form as it is typed, password included (in memory only), on a way out of the settings sheet: Add
-    /// account, or the same account's row, brings it back ([`Onboarding::open`], [`Onboarding::edit`]). A check that
+    /// account, or any account's row, brings it back ([`Onboarding::open`], [`Onboarding::edit`]). A check that
     /// runs or ran is closed as [`Onboarding::close`] closes it.
     pub fn park(&mut self) {
         match self.stage {
@@ -711,12 +711,13 @@ impl Onboarding {
 
     /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
     /// it: the field starts empty, and an empty field keeps the stored one.
+    /// While a way out of the sheet left a form, that form comes back as it was typed instead, whichever account's
+    /// row was pressed.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
-        if self.parked == Some(Stage::Edit(id)) {
+        if self.parked.is_some() {
             self.resume();
             return;
         }
-        self.parked = None;
         self.error = None;
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
