@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use inboxcraft_engine::Session;
 use inboxcraft_mime::{Mailbox as Sender, MessageBuilder};
 use inboxcraft_model::{
@@ -94,12 +94,22 @@ fn shows(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
     harness.query_by_label(text).is_some()
 }
 
+/// Whether a node's label holds `text`: a line of the card heard within the card's own words.
+fn holds(harness: &Harness<'static, InboxApp>, text: &str) -> bool {
+    harness.query_all_by_label_contains(text).next().is_some()
+}
+
 /// A calendar message from Odile in Mira's inbox, as message `id` with UID `id`: `method` and `event` (the lines of
 /// its event).
 fn message(id: u64, subject: &str, method: &str, event: &str) -> Vec<Change> {
+    titled(id, subject, method, "Board game night", event)
+}
+
+/// [`message`] with the event's title `summary`.
+fn titled(id: u64, subject: &str, method: &str, summary: &str, event: &str) -> Vec<Change> {
     let calendar = format!(
         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Example//Example//EN\r\nMETHOD:{method}\r\nBEGIN:VEVENT\r\nUID:{id}@example.org\r\n\
-         DTSTAMP:20261104T080000Z\r\nDTSTART:20261110T180000Z\r\nDTEND:20261110T200000Z\r\nSUMMARY:Board game night\r\n{event}\
+         DTSTAMP:20261104T080000Z\r\nDTSTART:20261110T180000Z\r\nDTEND:20261110T200000Z\r\nSUMMARY:{summary}\r\n{event}\
          END:VEVENT\r\nEND:VCALENDAR\r\n"
     );
     let raw = MessageBuilder::new()
@@ -125,12 +135,12 @@ fn the_update_says_what_changed_and_what_was_answered_before() {
     let mut harness = sample_harness();
     open(&mut harness, "Updated invitation: Lunch with Odile");
     assert!(shows(&harness, "Changed: time 11:00 → 12:30"));
-    assert!(shows(&harness, "Out of date: the invitation from Monday showed 11:00. You answered Going."));
+    assert!(holds(&harness, "Out of date: the invitation from Monday showed 11:00. You answered Going."));
     assert!(shows(&harness, "Your answer goes to odile@example.org at once."));
     for name in ["Going", "Maybe", "No"] {
         assert!(button(&harness, name), "{name}");
     }
-    assert!(harness.query_all_by_label("Lunch with Odile").count() >= 1);
+    assert!(holds(&harness, "Invitation: Lunch with Odile, 12:30 – 13:30"), "the card names the event and when");
     // The calendar part is the card, not a file to save.
     assert!(!button(&harness, "Save attachment"));
 }
@@ -174,7 +184,7 @@ fn an_answer_goes_at_once_and_shows_with_a_way_to_change_it() {
 fn the_version_a_later_one_replaced_is_a_faint_strip() {
     let mut harness = sample_harness();
     open(&mut harness, "Invitation: Lunch with Odile");
-    assert!(shows(&harness, "Out of date: a later invitation replaces this one. You answered Going."));
+    assert!(holds(&harness, "Out of date: a later invitation replaces this one. You answered Going."));
     assert!(!button(&harness, "Going"));
 }
 
@@ -194,7 +204,7 @@ fn a_cancellation_takes_the_event_out_of_the_calendar_with_undo() {
     changes.push(Change::PutCalendarEvent(event));
     let mut harness = sending(changes);
     open(&mut harness, "Cancelled: Board game night");
-    assert!(shows(&harness, "Odile Brannock cancelled this event."));
+    assert!(shows(&harness, "Cancelled: Odile Brannock cancelled this event."));
     harness.get_by_role_and_label(Role::Button, "Remove from calendar").click();
     harness.run();
     assert!(shows(&harness, "It is not in your calendar."));
@@ -251,4 +261,115 @@ fn an_invitation_in_the_reader_is_walked_by_the_keyboard_and_rests() {
     let missed = crate::component::tests::keyboard_walk(&mut harness);
     assert!(missed.is_empty(), "Tab never reaches {missed:?}");
     assert!(crate::component::tests::rests(&mut harness, 8), "it repaints at rest");
+}
+
+/// The rects the last frame painted filled with or stroked in `colour`: (filled, stroked).
+fn painted_in(harness: &Harness<'static, InboxApp>, colour: egui::Color32) -> (Vec<egui::Rect>, Vec<egui::Rect>) {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, found: &mut (Vec<egui::Rect>, Vec<egui::Rect>)) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, found)),
+            egui::Shape::Rect(rect) => {
+                if rect.fill == colour && rect.rect.height() >= 20.0 {
+                    found.0.push(rect.rect);
+                }
+                if rect.stroke.color == colour && rect.stroke.width > 0.0 {
+                    found.1.push(rect.rect);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = (Vec::new(), Vec::new());
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, colour, &mut found));
+    found
+}
+
+fn palette(harness: &Harness<'static, InboxApp>) -> crate::theme::Palette {
+    *crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance())).palette
+}
+
+#[test]
+fn an_invitation_that_asks_has_one_primary_button_going() {
+    let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
+    open(&mut harness, "Invitation: Board game night");
+    // The text has more to say, so Reply stands at the foot too.
+    let (reply, going) = (harness.get_by_role_and_label(Role::Button, "Reply").rect(), harness.get_by_role_and_label(Role::Button, "Going").rect());
+    let (filled, _) = painted_in(&harness, palette(&harness).cyan);
+    let primary: Vec<egui::Rect> = filled.into_iter().filter(|rect| rect.left() >= going.left() - 200.0).collect();
+    assert_eq!(primary, vec![going], "the pane's one cyan button is Going: {reply:?}");
+}
+
+#[test]
+fn a_focused_button_in_an_asking_card_keeps_its_own_ring() {
+    let mut harness = sending(message(905, "Invitation: Board game night", "REQUEST", ORGANISED_BY_ODILE));
+    open(&mut harness, "Invitation: Board game night");
+    for name in ["Going", "Maybe", "No"] {
+        let mut reached = false;
+        for _ in 0..80 {
+            harness.key_press(egui::Key::Tab);
+            harness.run();
+            if harness.query_by_role_and_label(Role::Button, name).is_some_and(|node| node.accesskit_node().is_focused()) {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Tab reaches {name}");
+        let button = harness.get_by_role_and_label(Role::Button, name).rect();
+        let card = harness
+            .query_all_by_role(Role::Group)
+            .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Board game night, ")))
+            .unwrap()
+            .rect();
+        let (_, edges) = painted_in(&harness, palette(&harness).cyan_edge);
+        // The card's own edge, and a ring of the button's own, 2 clear outside it.
+        assert!(edges.iter().any(|edge| edge.contains_rect(card.shrink(1.0)) && edge.width() <= card.width() + 1.0), "the card's edge: {edges:?}");
+        let ring = edges.iter().find(|edge| edge.contains_rect(button) && edge.width() < button.width() + 8.0);
+        assert!(ring.is_some(), "{name} shows its ring: {button:?} in {edges:?}");
+    }
+}
+
+/// The texts the last frame painted.
+fn painted_words(harness: &Harness<'static, InboxApp>) -> Vec<String> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => found.push(text.galley.job.text.clone()),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    found
+}
+
+/// An invitation's text is the organiser's data: long, right-to-left overrides, control characters, escaped line
+/// breaks and thousands of guests never crash the card, are drawn flat, and the card stays a card's height.
+#[test]
+fn hostile_invitation_text_is_drawn_flat_and_never_crashes() {
+    let long = "Board ".repeat(2000);
+    let summary = format!("Lunch\\nBcc: evil@example.org\\r\u{7}\u{1b}[2J\u{202e}gnp.exe {long}");
+    let place = "LOCATION:Room\\n3\u{202e}\u{7}\r\n";
+    let request = format!("{ORGANISED_BY_ODILE}{place}");
+    let mut guests = String::from("ORGANIZER:mailto:mira@example.org\r\n");
+    for n in 0..2000 {
+        guests.push_str(&format!("ATTENDEE;CN=Guest\u{202e}{n};PARTSTAT=ACCEPTED:mailto:g{n}@example.org\r\n"));
+    }
+    let mut changes = titled(906, "Invitation: hostile", "REQUEST", &summary, &request);
+    changes.extend(titled(907, "Accepted: hostile", "REPLY", &summary, &guests));
+    let mut harness = sending(changes);
+    for subject in ["Invitation: hostile", "Accepted: hostile"] {
+        open(&mut harness, subject);
+        let card = harness
+            .query_all_by_role(Role::Group)
+            .find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Lunch")));
+        let card = card.unwrap_or_else(|| panic!("{subject}: the card stands"));
+        let label = card.accesskit_node().label().unwrap_or_default();
+        assert!(!label.contains(['\n', '\r', '\u{7}', '\u{1b}', '\u{202e}']), "{subject}: the card's name is flat: {label:?}");
+        assert!(card.rect().height() < 800.0, "{subject}: a card's height, whatever the count: {:?}", card.rect());
+        for words in painted_words(&harness) {
+            assert!(!words.contains(['\n', '\r', '\u{7}', '\u{1b}', '\u{202e}']), "{subject}: drawn flat: {words:?}");
+        }
+    }
+    // The guests past the first 20 are counted, not listed.
+    assert!(holds(&harness, "1980 more guests answered."));
 }

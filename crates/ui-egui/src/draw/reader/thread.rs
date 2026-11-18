@@ -167,9 +167,12 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, opene
 }
 
 /// Reply, the pane's one primary button, with its arrow; then Reply all and Forward: the answers at the reader's foot.
-fn answer_buttons() -> [(TextButton<'static>, Answer); 3] {
+/// While the message's invitation card asks for an answer, its Going is the pane's one primary button and Reply is
+/// secondary.
+fn answer_buttons(asks: bool) -> [(TextButton<'static>, Answer); 3] {
+    let reply = TextButton::new(tr!("Reply"));
     [
-        (TextButton::new(tr!("Reply")).primary().arrow(), Answer::Reply),
+        (if asks { reply.secondary() } else { reply.primary().arrow() }, Answer::Reply),
         (TextButton::new(tr!("Reply all")).secondary(), Answer::ReplyAll),
         (TextButton::new(tr!("Forward")).secondary(), Answer::Forward),
     ]
@@ -179,15 +182,17 @@ fn answer_buttons() -> [(TextButton<'static>, Answer); 3] {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AnswerLines {
     lines: [usize; 3],
+    /// Whether an invitation card above asks for an answer: Reply is then secondary.
+    asks: bool,
     pub(super) height: f32,
 }
 
 /// The line each answer stands on in `room` points: all on one line where they fit; else, as the acts do, as many on a
 /// line as fit, in order, so none is cut at the pane's edge. Measured once a frame, for the foot's room and its drawing.
-pub(super) fn answer_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, room: f32) -> AnswerLines {
+pub(super) fn answer_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, room: f32, asks: bool) -> AnswerLines {
     let mut lines = [0_usize; 3];
     let (mut line, mut used) = (0_usize, 0.0_f32);
-    for (index, (button, _)) in answer_buttons().iter().enumerate() {
+    for (index, (button, _)) in answer_buttons(asks).iter().enumerate() {
         let wide = button.width(ui, theme, keymap);
         if used > 0.0 && used + ANSWER_GAP + wide > room {
             line = line.saturating_add(1);
@@ -200,7 +205,7 @@ pub(super) fn answer_lines(ui: &Ui, theme: &Theme, keymap: &Keymap, room: f32) -
     }
     // One control, or one per line and the gaps between.
     let count = line as f32 + 1.0;
-    AnswerLines { lines, height: count * crate::component::control_side(theme) + (count - 1.0) * ANSWER_GAP }
+    AnswerLines { lines, asks, height: count * crate::component::control_side(theme) + (count - 1.0) * ANSWER_GAP }
 }
 
 /// The answers at the reader's foot, on the lines [`answer_lines`] gave them.
@@ -209,7 +214,7 @@ pub(super) fn answers(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, plac
     let side = crate::component::control_side(theme);
     let (_, whole) = ui.allocate_space(egui::vec2(room.max(0.0), placed.height));
     let mut line_ui: Option<(usize, Ui)> = None;
-    for ((button, answer), line) in answer_buttons().into_iter().zip(placed.lines) {
+    for ((button, answer), line) in answer_buttons(placed.asks).into_iter().zip(placed.lines) {
         if line_ui.as_ref().is_none_or(|(at, _)| *at != line) {
             let top = whole.top() + line as f32 * (side + ANSWER_GAP);
             let place = egui::Rect::from_min_size(egui::pos2(whole.left(), top), egui::vec2(whole.width(), side));

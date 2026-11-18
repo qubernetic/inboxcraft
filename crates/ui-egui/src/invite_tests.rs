@@ -156,3 +156,22 @@ fn a_body_that_only_says_what_the_card_says_is_a_restatement() {
     assert!(!invite.restates("Lunch with Odile at The Gull café. Bring the keys to the shed, please."), "their own words stay on screen");
     assert!(!invite.restates(&"Lunch ".repeat(1000)), "too long to be a generated line");
 }
+
+#[test]
+fn the_card_says_when_as_the_design_writes_it() {
+    let mut answer = update();
+    let invite = Invite::read(7, &answer).unwrap();
+    assert_eq!((invite.weekday(), invite.card_when()), ("SAT".to_owned(), "12:30 – 13:30  ·  Sat 7 Nov".to_owned()));
+    answer["invite"]["all_day"] = json!(true);
+    answer["invite"]["local_start"] = json!("2026-11-07T00:00:00+01:00");
+    answer["invite"]["local_end"] = json!("2026-11-08T00:00:00+01:00");
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "all day  ·  Sat 7 Nov");
+    answer["invite"]["local_end"] = json!("2026-11-10T00:00:00+01:00");
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "Sat 7 Nov – Mon 9 Nov");
+    answer["invite"]["all_day"] = json!(false);
+    answer["invite"]["local_end"] = Value::Null;
+    assert_eq!(Invite::read(7, &answer).unwrap().card_when(), "00:00  ·  Sat 7 Nov");
+    answer["invite"]["local_start"] = Value::Null;
+    let invite = Invite::read(7, &answer).unwrap();
+    assert_eq!((invite.weekday(), invite.card_when()), (String::new(), String::new()));
+}

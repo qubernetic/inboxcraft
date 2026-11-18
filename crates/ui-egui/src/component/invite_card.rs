@@ -11,7 +11,8 @@
 //! cancelled in a `minus` box and Remove from calendar; the guests' answers; or why there is nothing to answer. A
 //! version a later one replaced is one line instead: the older-version clock and what it says, on the `panel` fill in a
 //! `panel_line` edge. Every word from the event is data: plain words on one line, cut between grapheme clusters with
-//! one ellipsis; a screen reader hears them whole. A control focused inside the card shows its own ring. Nothing moves.
+//! one ellipsis; a screen reader hears them whole, each line a label of its own. The owner changing an answer also gets
+//! Keep my answer after the three. A control focused inside the card shows its own ring. Nothing moves.
 
 use egui::{Align, Color32, Layout, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -89,6 +90,8 @@ pub enum CardAsked {
     Change,
     /// Remove from calendar.
     Remove,
+    /// Keep my answer: the owner changing an answer keeps the one given.
+    Keep,
 }
 
 /// The width of the day's column, in points.
@@ -150,6 +153,11 @@ fn edge(theme: &Theme, state: &CardState<'_>) -> Color32 {
 
 /// The card of `event` in `state` across `ui`'s width; what was pressed on it.
 pub fn invite_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &CardEvent<'_>, state: &CardState<'_>) -> Option<CardAsked> {
+    invite_card_with(ui, theme, keymap, event, state, false)
+}
+
+/// [`invite_card`]; `keep` adds Keep my answer after the answers of a card that asks (the owner changing an answer).
+pub fn invite_card_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &CardEvent<'_>, state: &CardState<'_>, keep: bool) -> Option<CardAsked> {
     if let CardState::OutOfDate { line } = state {
         replaced(ui, theme, event, line);
         return None;
@@ -236,7 +244,7 @@ pub fn invite_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, event: &CardEven
     }
     let part_top = rect.top() + PAD_Y + f.heading.line + GAP + facts_high + GAP;
     let part_rect = Rect::from_min_max(pos2(info_left, part_top), pos2(rect.right() - PAD_X, rect.bottom() - PAD_Y));
-    let asked = lower(ui, theme, keymap, part_rect, state, why);
+    let asked = lower(ui, theme, keymap, part_rect, state, why, keep);
     // The edge last, over the fills and the hairline.
     if ui.is_rect_visible(rect) {
         ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, edge(theme, state)), StrokeKind::Inside);
@@ -258,6 +266,7 @@ fn lower(
     rect: Rect,
     state: &CardState<'_>,
     why: Option<std::sync::Arc<egui::Galley>>,
+    keep: bool,
 ) -> Option<CardAsked> {
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -265,7 +274,9 @@ fn lower(
     let mut top = rect.top();
     let mut asked = None;
     let goes = |ui: &Ui, top: f32, to: &str| {
-        let words = super::fitted(ui, &tr!("Your answer goes to {address} at once.", address = to), f.caption, p.muted, rect.width());
+        let whole = tr!("Your answer goes to {address} at once.", address = to);
+        let words = super::fitted(ui, &whole, f.caption, p.muted, rect.width());
+        said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(paint::run_box(words.size().x), f.caption.line)), &whole, ("goes", 0));
         paint::run_at(ui.painter(), pos2(rect.left(), top), words, p.muted);
     };
     let row = |ui: &mut Ui, top: f32| {
@@ -289,6 +300,9 @@ fn lower(
                 if button.show(&mut child, theme, keymap).clicked() {
                     asked = Some(CardAsked::Answer(index));
                 }
+            }
+            if keep && TextButton::new(tr!("Keep my answer")).secondary().show(&mut child, theme, keymap).clicked() {
+                asked = Some(CardAsked::Keep);
             }
             goes(ui, top + button + GAP, goes_to);
         }
@@ -317,14 +331,15 @@ fn lower(
         }
         CardState::Replies { replies } => {
             let side = theme.mark_side();
-            for (said, words) in replies.iter() {
-                let (glyph, ink) = match said {
+            for (index, (answer, words)) in replies.iter().enumerate() {
+                let (glyph, ink) = match answer {
                     Said::Going => (CHECK, p.plus),
                     Said::Maybe => (QUESTION, p.warn),
                     Said::No => (CROSS, p.minus),
                     Said::Nothing => (DASH, p.muted),
                 };
                 let line = f.body.line;
+                said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), line)), words, ("reply", index));
                 if ui.is_rect_visible(rect) {
                     let mark = Rect::from_min_size(pos2(rect.left(), (top + (line - side) / 2.0).round()), vec2(side, side));
                     iconset::paint_glyph(ui.painter(), mark, glyph, ink);
@@ -335,11 +350,20 @@ fn lower(
             }
         }
         CardState::NoAnswerAsked => {
-            let words = super::galley(ui, tr!("This calendar message asks for no answer."), f.caption, p.muted);
+            let whole = tr!("This calendar message asks for no answer.");
+            let words = super::galley(ui, whole, f.caption, p.muted);
+            said(
+                ui,
+                Rect::from_min_size(pos2(rect.left(), top), vec2(paint::run_box(words.size().x).min(rect.width()), f.caption.line)),
+                whole,
+                ("none", 0),
+            );
             paint::run_at(ui.painter(), pos2(rect.left(), top), words, p.muted);
         }
-        CardState::CannotAnswer { .. } => {
+        CardState::CannotAnswer { why: words } => {
             if let Some(why) = why {
+                let whole = tr!("This invitation cannot be answered: {why}", why = words);
+                said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), why.size().y)), &whole, ("why", 0));
                 paint::rows_at(ui.painter(), pos2(rect.left(), top), rect.width(), why, p.muted);
             }
         }
@@ -348,12 +372,19 @@ fn lower(
     asked
 }
 
+/// Tells a screen reader that `words` stand in `rect`, whole (the text drawn may be cut): a label of their own.
+fn said(ui: &Ui, rect: Rect, words: &str, salt: (&str, usize)) {
+    let response = ui.interact(rect, ui.next_auto_id().with(("invite-said", salt)), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, super::spoken(words)));
+}
+
 /// A box of `colour` at `top` of `rect`: `label` in `label` and the colour, `words` in `mono_s` and `ink`; its height.
 fn warning(ui: &Ui, theme: &Theme, rect: Rect, top: f32, label: &str, words: &str, colour: Color32) -> f32 {
     let p = &theme.palette;
     let f = &theme.fonts;
     let high = box_high(theme);
     let at = Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), high));
+    said(ui, at, &format!("{label}: {words}"), ("warning", 0));
     if ui.is_rect_visible(at) {
         let painter = ui.painter();
         painter.rect_stroke(at, 0.0, Stroke::new(1.0, colour), StrokeKind::Inside);

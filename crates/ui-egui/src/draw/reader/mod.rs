@@ -204,7 +204,9 @@ pub(super) fn show(
         (Some(id), None, false) => {
             // The answers stand on one line, or on more where the pane is narrower than they are.
             let inner = room.width() - f32::from(foot_margin.left) - f32::from(foot_margin.right);
-            let placed = thread::answer_lines(ui, theme, keymap, inner);
+            // An invitation card that asks has the pane's one primary button, Going.
+            let asks = reader.opened(id).and_then(|opened| opened.invite.as_ref()).is_some_and(|invite| super::invite::asks(reader, invite));
+            let placed = thread::answer_lines(ui, theme, keymap, inner, asks);
             let high = (placed.height + f32::from(foot_margin.top) + f32::from(foot_margin.bottom)).min(room.height());
             Some((id, placed, Rect::from_min_max(egui::pos2(room.left(), room.bottom() - high), room.max)))
         }

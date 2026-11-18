@@ -274,6 +274,40 @@ impl Invite {
         self.event.start.map(|start| month_name(start.day.month()).chars().take(3).collect::<String>().to_uppercase()).unwrap_or_default()
     }
 
+    /// The tile's weekday, short and in capitals: `MON`.
+    #[must_use]
+    pub fn weekday(&self) -> String {
+        self.event
+            .start
+            .map(|start| crate::mailbox::weekday_text(start.day.weekday()).chars().take(3).collect::<String>().to_uppercase())
+            .unwrap_or_default()
+    }
+
+    /// When, as the card's WHEN says it: `14:00 – 15:00  ·  Mon 16 Nov`, `all day  ·  Mon 16 Nov`, or the days of a
+    /// longer one.
+    #[must_use]
+    pub fn card_when(&self) -> String {
+        let Some(start) = self.event.start else { return String::new() };
+        let short = |day: Day| {
+            let weekday: String = crate::mailbox::weekday_text(day.weekday()).chars().take(3).collect();
+            let month: String = month_name(day.month()).chars().take(3).collect();
+            tr!("{weekday} {day} {month}", weekday = weekday, day = day.date(), month = month)
+        };
+        if self.event.all_day {
+            return match self.event.last_day().filter(|last| *last != start.day) {
+                Some(last) => tr!("{first} – {last}", first = short(start.day), last = short(last)),
+                None => tr!("all day  ·  {day}", day = short(start.day)),
+            };
+        }
+        match self.event.end {
+            Some(end) if end.day == start.day => {
+                tr!("{start} – {end}  ·  {day}", start = start.clock(), end = end.clock(), day = short(start.day))
+            }
+            Some(end) => tr!("{day} {start} – {last} {end}", day = short(start.day), start = start.clock(), last = short(end.day), end = end.clock()),
+            None => tr!("{start}  ·  {day}", start = start.clock(), day = short(start.day)),
+        }
+    }
+
     /// The tile's day of the month.
     #[must_use]
     pub fn day(&self) -> String {

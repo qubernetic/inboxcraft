@@ -599,7 +599,7 @@ pub(super) fn screening(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &M
     let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return };
     let chosen_id = egui::Id::unique("screen-into").with(id);
     let mut into = ui.data(|data| data.get_temp::<Option<GroupKind>>(chosen_id)).flatten();
-    crate::draw::invite::edged(ui, theme, crate::draw::invite::Edge::Asks, |ui| {
+    crate::draw::invite::asking(ui, theme, |ui| {
         ui.spacing_mut().item_spacing.y = s.s3;
         let title = tr!("Let {sender} in?", sender = row.sender);
         ui.add(egui::Label::new(RichText::new(title).font(theme.fonts.heading.id()).color(p.ink)).wrap());
