@@ -28,7 +28,9 @@
 //! refused one. A sent message a delivery report says did not get through is marked "Not delivered" in its row.
 
 use std::cell::Cell;
+use std::collections::HashSet;
 
+use egui::accesskit::Role as AccessRole;
 use egui::{
     Align, Color32, Frame, Id, Key, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
     StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
@@ -43,19 +45,13 @@ use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState};
+use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
 
 /// The room between a card's edges and its rows, so a selected or hovered row is a rounded band inside the card.
 pub(super) const ROW_INSET: f32 = 6.0;
-
-/// A vertical scroll area for the list's cards. Its bar takes its own room beside them only while the content
-/// overflows, so cards run the pane's whole width whenever they all fit and never lie under the bar.
-fn scrolled<R>(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
-    crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), add).inner
-}
 
 /// The rows a group shows before "Show all".
 pub(super) const GROUP_ROWS: usize = 3;
@@ -284,11 +280,16 @@ struct Drawn {
 
 /// One message row across `ui`'s width; a click selects it. The row leaving the list slides to the right and fades
 /// over the row slide token, a frame's worth at a time; with reduced motion it is out at once.
-fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool) -> Drawn {
+fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, set: (usize, usize)) -> Drawn {
     let height = row_height(theme);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     let selected = mailbox.selected() == Some(message.id);
     response.widget_info(|| WidgetInfo::selected(WidgetRole::ListBoxOption, true, selected, mailbox.spoken(message)));
+    // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_position_in_set(set.0);
+        node.set_size_of_set(set.1);
+    });
     let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
     if !ui.is_rect_visible(rect) {
         return Drawn { clicked: response.clicked(), acted: None, out: leaving };
@@ -583,65 +584,46 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     asked
 }
 
-/// The outbox on one card: each send in it, newest last; what a button asked for.
-fn outbox(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Option<(u64, Outbox)> {
-    let mut asked = None;
-    scrolled(ui, theme, |ui| {
-        sheet(ui, theme, false, |ui| {
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            for row in mailbox.outbox() {
-                if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row) {
-                    asked = Some((row.draft, pressed));
-                }
-            }
-        });
-    });
-    asked
-}
-
-/// What the rows of a card share.
+/// What the lines of a list share, and what they asked for this frame.
 struct Rows<'a> {
     theme: &'a Theme,
     keymap: &'a Keymap,
     mailbox: &'a Mailbox,
     account_marker: bool,
+    /// The row clicked this frame.
+    clicked: Cell<Option<u64>>,
     /// A hover action pressed this frame.
     acted: Cell<Option<(u64, Act)>>,
     /// Whether the row sliding out was drawn, and whether it is out.
     leaving: Cell<(bool, bool)>,
     /// "Done all" pressed this frame: the group's messages.
     done_all: Cell<Option<Vec<u64>>>,
-    /// How many rows this frame laid out, seen or not: what the frame bench reads ([`rows_built`]).
-    built: Cell<usize>,
+    /// Review pressed on the screener card.
+    review: Cell<bool>,
+    /// A button of a send in the outbox pressed, and its draft.
+    outbox: Cell<Option<(u64, Outbox)>>,
 }
 
 impl Rows<'_> {
-    /// Draws `messages` one under another; the one clicked.
-    fn show<'m>(&self, ui: &mut Ui, messages: impl IntoIterator<Item = &'m MessageRow>) -> Option<u64> {
-        let mut clicked = None;
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        for message in messages {
-            self.built.set(self.built.get().saturating_add(1));
-            let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker);
-            if drawn.clicked {
-                clicked = Some(message.id);
-            }
-            if let Some(act) = drawn.acted {
-                self.acted.set(Some((message.id, act)));
-            }
-            if self.mailbox.leaving().is_some_and(|(id, _)| id == message.id) {
-                self.leaving.set((true, drawn.out));
-            }
+    /// Draws `message`'s row across `ui`, the `rank`th (from 0) of the list's `size` rows.
+    fn mail(&self, ui: &mut Ui, message: &MessageRow, rank: usize, size: usize) {
+        let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size));
+        if drawn.clicked {
+            self.clicked.set(Some(message.id));
         }
-        clicked
+        if let Some(act) = drawn.acted {
+            self.acted.set(Some((message.id, act)));
+        }
+        if self.mailbox.leaving().is_some_and(|(id, _)| id == message.id) {
+            self.leaving.set((true, drawn.out));
+        }
     }
 }
 
 /// The screener card: the waiting senders' avatars, how many wait, and Review; whether Review was pressed.
-fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> bool {
+fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, waiting: &[Waiting]) -> bool {
     let s = &theme.spacing;
     let p = &theme.palette;
-    let waiting = mailbox.waiting();
     let mut review = false;
     sheet(ui, theme, true, |ui| {
         Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
@@ -678,164 +660,472 @@ fn screener(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> b
     review
 }
 
-/// A group's card: its badge, name and unread count, "Done all", its first rows and "Show all (n)". The one clicked.
-fn group_card(ui: &mut Ui, rows: &Rows<'_>, group: &Group, messages: &[&MessageRow]) -> Option<u64> {
-    let theme = rows.theme;
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let id = Id::unique("list-group").with(&group.name);
-    let all = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
-    let mut clicked = None;
-    sheet(ui, theme, false, |ui| {
-        Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let side = theme.fonts.heading.line * 1.4;
-                badge::group(ui, theme, group.icon, &group.name, side);
-                ui.add_space(s.s1);
-                let unread = messages.iter().filter(|message| !message.seen).count();
-                let unread = u64::try_from(unread).unwrap_or(u64::MAX);
-                let name = line(ui, &[(&group.name, theme.fonts.heading, p.ink)], f32::INFINITY);
-                let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s2 } else { 0.0 };
-                let (rect, response) = ui.allocate_exact_size(vec2(name.size().x + count, side), Sense::hover());
-                let spoken = if unread > 0 { tr!("{name}, {count} unread", name = group.name, count = unread) } else { group.name.clone() };
-                response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
-                ui.painter().galley(pos2(rect.left(), rect.center().y - name.size().y / 2.0), name, p.ink);
-                if unread > 0 {
-                    badge::count(ui, theme, unread, rect.right(), rect.center().y);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if button::text(ui, theme, rows.keymap, tr!("Done all"), None, false).clicked() {
-                        rows.done_all.set(Some(messages.iter().map(|message| message.id).collect()));
-                    }
-                });
-            });
-        });
-        let shown = if all { messages.len() } else { messages.len().min(GROUP_ROWS) };
-        clicked = rows.show(ui, messages.iter().take(shown).copied());
-        if messages.len() > GROUP_ROWS {
-            // A link under the rows' text, as far in as the text.
-            ui.horizontal(|ui| {
-                ui.add_space((text_indent(theme) - s.s4 - button::LINK_PAD).max(0.0));
-                let label = if all { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = messages.len()) };
-                if button::link(ui, theme, rows.keymap, &label).clicked() {
-                    ui.data_mut(|data| data.insert_temp(id, !all));
-                }
-            });
+/// One line of a list. A list is its lines one under another, each as high as [`line_height`] says for its kind, so
+/// where every line stands is known without building one, and a frame builds only the lines in sight.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Line<'a> {
+    /// A group's head: its badge, name and unread count, and on a card "Done all".
+    Head(&'a Group, HeadState),
+    /// A message's row.
+    Mail(&'a MessageRow),
+    /// "Show all (n)" or "Show fewer" under a group's first rows on its card.
+    More(&'a Group, HeadState),
+    /// The screener card, while senders wait.
+    Card(&'a [Waiting]),
+    /// A send of the outbox.
+    Send(&'a OutboxRow),
+}
+
+/// How a group's head and its "Show all" stand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HeadState {
+    /// Its unread messages.
+    pub unread: u64,
+    /// Its messages in the list.
+    pub count: usize,
+    /// It shows all its rows: on a card, after "Show all"; in the grouped list, always.
+    pub open: bool,
+    /// It heads a card of the cards view (a larger name, and "Done all"), not a part of the grouped list.
+    pub card: bool,
+}
+
+/// `points` rounded to a whole even number of points, as [`Theme::size`] rounds: whole pixels at 1×, 1.5× and 2×.
+fn even(points: f32) -> f32 {
+    if points.is_finite() { (points.max(0.0) / 2.0).ceil() * 2.0 } else { 0.0 }
+}
+
+/// The height of `line`, fixed for its kind at the text scale: a group's head and "Show all" the group head's size,
+/// a row the mail row's, a send the mail row's (a refused one a line more), the screener card its two lines and its
+/// margins.
+pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
+    let boxes = theme.boxes();
+    let (f, s) = (&theme.fonts, &theme.spacing);
+    match line {
+        Line::Head(..) | Line::More(..) => boxes.group_head,
+        Line::Mail(_) => boxes.mail_row,
+        Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => boxes.mail_row + even(f.caption.line + s.s1),
+        Line::Send(_) => boxes.mail_row,
+        Line::Card(_) => {
+            let faces = f.strong.line + s.s1 + f.caption.line;
+            even(faces.max(boxes.button) + s.s1 * 2.0 + ROW_INSET * 2.0)
         }
-    });
-    clicked
+    }
 }
 
-/// The rows of `group`, in the list's order.
-fn members<'m>(mailbox: &'m Mailbox, group: &Group) -> Vec<&'m MessageRow> {
-    mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).collect()
+/// A list laid out without building it: its lines, the top and bottom of each down the content (from 0), the cards
+/// they stand on, and the whole height. A line's bottom is the next line's top, the same number, so two lines never
+/// overlap or leave a hairline between them, and the last line's bottom (the last card's, on cards) is the height.
+pub(super) struct Listing<'a> {
+    /// The lines, in order.
+    pub lines: Vec<Line<'a>>,
+    tops: Vec<f32>,
+    bottoms: Vec<f32>,
+    /// How many [`Line::Mail`] and [`Line::Send`] lines stand before each line: its place in the list for AccessKit.
+    ranks: Vec<usize>,
+    /// The cards the lines stand on, top and bottom; none for a list on one card that scrolls inside it.
+    pub sheets: Vec<(f32, f32)>,
+    /// How far in from the content's sides a line on a card stands.
+    inset: f32,
+    /// The content's height.
+    pub height: f32,
+    /// How many rows (messages or sends) it lists.
+    pub rows: usize,
 }
 
-/// The rows no group holds, in the list's order.
-fn rest<'m>(mailbox: &'m Mailbox, groups: &[Group]) -> Vec<&'m MessageRow> {
-    mailbox.messages().iter().filter(|message| !groups.iter().any(|group| group.messages.contains(&message.id))).collect()
+impl Listing<'_> {
+    /// The lines that meet the content between `top` and `bottom` (a viewport): the first and one past the last;
+    /// empty where none does.
+    pub(super) fn in_sight(&self, top: f32, bottom: f32) -> (usize, usize) {
+        let first = self.bottoms.partition_point(|at| *at <= top);
+        let end = self.tops.partition_point(|at| *at < bottom);
+        (first.min(end), end)
+    }
+
+    /// The top and bottom of line `index`.
+    pub(super) fn span(&self, index: usize) -> Option<(f32, f32)> {
+        Some((*self.tops.get(index)?, *self.bottoms.get(index)?))
+    }
+
+    /// The line of message `id`.
+    fn find(&self, id: u64) -> Option<usize> {
+        self.lines.iter().position(|line| matches!(line, Line::Mail(message) if message.id == id))
+    }
 }
 
-/// The unified inbox as cards: the screener card while senders `wait`, a card for each group, and the rows no group
-/// holds on a card of their own. The row clicked, and whether Review was pressed.
-fn grouped(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option<u64>, bool) {
-    let s = &rows.theme.spacing;
-    let mailbox = rows.mailbox;
-    let (mut clicked, mut review) = (None, false);
-    scrolled(ui, rows.theme, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
-        if wait {
-            review = screener(ui, rows.theme, rows.keymap, mailbox);
+/// Lays out lines one under another, summing their heights in `f64`, so 10 000 rows lose no pixel.
+struct Stack<'a, 't> {
+    theme: &'t Theme,
+    listing: Listing<'a>,
+    y: f64,
+    /// The top of the card open now.
+    sheet: Option<f64>,
+}
+
+impl<'a, 't> Stack<'a, 't> {
+    fn new(theme: &'t Theme, inset: f32) -> Self {
+        let listing =
+            Listing { lines: Vec::new(), tops: Vec::new(), bottoms: Vec::new(), ranks: Vec::new(), sheets: Vec::new(), inset, height: 0.0, rows: 0 };
+        Self { theme, listing, y: 0.0, sheet: None }
+    }
+
+    /// Puts `line` under the last.
+    fn push(&mut self, line: Line<'a>) {
+        let top = self.y;
+        self.y += f64::from(line_height(self.theme, &line));
+        let listing = &mut self.listing;
+        listing.tops.push(top as f32);
+        listing.bottoms.push(self.y as f32);
+        listing.ranks.push(listing.rows);
+        if matches!(line, Line::Mail(_) | Line::Send(_)) {
+            listing.rows = listing.rows.saturating_add(1);
         }
-        for group in groups {
-            let messages = members(mailbox, group);
-            if !messages.is_empty() {
-                clicked = clicked.or(group_card(ui, rows, group, &messages));
+        listing.lines.push(line);
+    }
+
+    /// The gap between two cards, after anything before.
+    fn gap(&mut self) {
+        if self.y > 0.0 {
+            self.y += f64::from(self.theme.spacing.s2);
+        }
+    }
+
+    /// Starts a card: the gap after the one above, and the card's inset.
+    fn open(&mut self) {
+        self.gap();
+        self.sheet = Some(self.y);
+        self.y += f64::from(ROW_INSET);
+    }
+
+    /// Ends the card open now with its inset.
+    fn close(&mut self) {
+        if let Some(top) = self.sheet.take() {
+            self.y += f64::from(ROW_INSET);
+            self.listing.sheets.push((top as f32, self.y as f32));
+        }
+    }
+
+    fn finish(mut self) -> Listing<'a> {
+        self.close();
+        self.listing.height = self.y as f32;
+        self.listing
+    }
+}
+
+/// The messages of each of `groups` and those no group holds, in the list's order: one pass over the list.
+fn sorted<'m>(mailbox: &'m Mailbox, groups: &[Group]) -> (Vec<Vec<&'m MessageRow>>, Vec<&'m MessageRow>) {
+    let sets: Vec<HashSet<u64>> = groups.iter().map(|group| group.messages.iter().copied().collect()).collect();
+    let mut members = vec![Vec::new(); groups.len()];
+    let mut rest = Vec::new();
+    for message in mailbox.messages() {
+        let mut held = false;
+        for (set, members) in sets.iter().zip(members.iter_mut()) {
+            if set.contains(&message.id) {
+                members.push(message);
+                held = true;
             }
         }
-        let rest = rest(mailbox, groups);
+        if !held {
+            rest.push(message);
+        }
+    }
+    (members, rest)
+}
+
+/// The head of a group of `messages`.
+fn head_state(messages: &[&MessageRow], open: bool, card: bool) -> HeadState {
+    let unread = u64::try_from(messages.iter().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
+    HeadState { unread, count: messages.len(), open, card }
+}
+
+/// The whole list as lines, laid out: in the cards `view` the screener card while senders `wait`, a card for each of
+/// `groups` (its head, its first rows or all of them as `open` says, and "Show all") and one for the rows no group
+/// holds; in the grouped list the screener card and one card with each group's rows under its head and the rest
+/// under `other`'s; in the simple list every row, on the one card around the scroll area.
+pub(super) fn lines<'a>(
+    theme: &Theme,
+    mailbox: &'a Mailbox,
+    view: InboxView,
+    groups: &'a [Group],
+    other: &'a Group,
+    wait: bool,
+    open: &dyn Fn(&Group) -> bool,
+) -> Listing<'a> {
+    if view == InboxView::Simple {
+        let mut stack = Stack::new(theme, 0.0);
+        for message in mailbox.messages() {
+            stack.push(Line::Mail(message));
+        }
+        return stack.finish();
+    }
+    let mut stack = Stack::new(theme, ROW_INSET);
+    if wait {
+        stack.push(Line::Card(mailbox.waiting()));
+    }
+    let (members, rest) = sorted(mailbox, groups);
+    let parts = groups.iter().zip(&members).filter(|(_, messages)| !messages.is_empty());
+    if view == InboxView::Cards {
+        for (group, messages) in parts {
+            let state = head_state(messages, open(group), true);
+            stack.open();
+            stack.push(Line::Head(group, state));
+            let shown = if state.open { messages.len() } else { messages.len().min(GROUP_ROWS) };
+            for message in messages.iter().take(shown) {
+                stack.push(Line::Mail(message));
+            }
+            if messages.len() > GROUP_ROWS {
+                stack.push(Line::More(group, state));
+            }
+            stack.close();
+        }
         if !rest.is_empty() {
-            clicked = clicked.or(sheet(ui, rows.theme, false, |ui| rows.show(ui, rest)));
+            stack.open();
+            for message in rest {
+                stack.push(Line::Mail(message));
+            }
+            stack.close();
         }
-    });
-    (clicked, review)
+        return stack.finish();
+    }
+    let rest = Some((other, &rest)).filter(|(_, rest)| !rest.is_empty());
+    let mut started = false;
+    for (group, messages) in parts.chain(rest) {
+        if !started {
+            stack.open();
+            started = true;
+        }
+        stack.push(Line::Head(group, head_state(messages, true, false)));
+        for message in messages {
+            stack.push(Line::Mail(message));
+        }
+    }
+    stack.finish()
 }
 
-/// A group's heading in the grouped list: its badge, name and unread count.
-fn heading(ui: &mut Ui, theme: &Theme, icon: IconId, name: &str, messages: &[&MessageRow]) {
+/// The sends of the outbox as lines, on the one card around the scroll area.
+fn sends<'a>(theme: &Theme, mailbox: &'a Mailbox) -> Listing<'a> {
+    let mut stack = Stack::new(theme, 0.0);
+    for row in mailbox.outbox() {
+        stack.push(Line::Send(row));
+    }
+    stack.finish()
+}
+
+/// A group's head across `ui`: its badge, name and unread count, and on a card "Done all" at the right; whether "Done
+/// all" was pressed.
+fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadState) -> bool {
     let s = &theme.spacing;
     let p = &theme.palette;
-    Frame::new().inner_margin(margin(s.s2, s.s1)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let side = theme.fonts.strong.line * 1.2;
-            badge::group(ui, theme, icon, name, side);
-            ui.add_space(s.s1);
-            let unread = u64::try_from(messages.iter().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
-            let galley = line(ui, &[(name, theme.fonts.strong, p.ink)], f32::INFINITY);
-            let count = if unread > 0 { badge::count_width(ui, theme, unread) + s.s2 } else { 0.0 };
-            let (rect, response) = ui.allocate_exact_size(vec2(galley.size().x + count, side), Sense::hover());
-            let spoken = if unread > 0 { tr!("{name}, {count} unread", name = name, count = unread) } else { name.to_owned() };
-            response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
-            ui.painter().galley(pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, p.ink);
-            if unread > 0 {
-                badge::count(ui, theme, unread, rect.right(), rect.center().y);
-            }
+    let font = if state.card { theme.fonts.heading } else { theme.fonts.strong };
+    let side = if state.card { theme.fonts.heading.line * 1.4 } else { theme.fonts.strong.line * 1.2 };
+    badge::group(ui, theme, group.icon, &group.name, side);
+    ui.add_space(s.s1);
+    let name = line(ui, &[(&group.name, font, p.ink)], f32::INFINITY);
+    let count = if state.unread > 0 { badge::count_width(ui, theme, state.unread) + s.s2 } else { 0.0 };
+    let (rect, response) = ui.allocate_exact_size(vec2(name.size().x + count, side), Sense::hover());
+    let spoken = if state.unread > 0 { tr!("{name}, {count} unread", name = group.name, count = state.unread) } else { group.name.clone() };
+    response.widget_info(|| WidgetInfo::labeled(WidgetRole::Label, true, &spoken));
+    ui.painter().galley(pos2(rect.left(), rect.center().y - name.size().y / 2.0), name, p.ink);
+    if state.unread > 0 {
+        badge::count(ui, theme, state.unread, rect.right(), rect.center().y);
+    }
+    let mut done_all = false;
+    if state.card {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            done_all = button::text(ui, theme, keymap, tr!("Done all"), None, false).clicked();
         });
-    });
+    }
+    done_all
 }
 
-/// The unified inbox as one grouped list: the screener card while senders `wait`, then one card with each group's
-/// rows under its heading, and the rows no group holds under "Other". The row clicked, and whether Review was pressed.
-fn listed(ui: &mut Ui, rows: &Rows<'_>, groups: &[Group], wait: bool) -> (Option<u64>, bool) {
-    let s = &rows.theme.spacing;
-    let mailbox = rows.mailbox;
-    let (mut clicked, mut review) = (None, false);
-    scrolled(ui, rows.theme, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, s.s2);
-        if wait {
-            review = screener(ui, rows.theme, rows.keymap, mailbox);
+/// "Show all (n)" or "Show fewer" across `ui`, as far in as the rows' text; whether it was pressed.
+fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: HeadState) -> bool {
+    ui.add_space((text_indent(theme) - theme.spacing.s4 - button::LINK_PAD).max(0.0));
+    let label = if state.open { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = state.count) };
+    button::link(ui, theme, keymap, &label).clicked()
+}
+
+/// What a line's ui is told apart by, so a row keeps its id (its focus, its context menu) wherever it is built.
+fn salt(line: &Line<'_>) -> Id {
+    match line {
+        Line::Head(group, _) => Id::unique("list-head").with(&group.name),
+        Line::Mail(message) => Id::unique("list-mail").with(message.id),
+        Line::More(group, _) => Id::unique("list-more").with(&group.name),
+        Line::Card(_) => Id::unique("list-screener"),
+        Line::Send(row) => Id::unique("list-send").with(row.draft),
+    }
+}
+
+/// Draws `line` across `ui`, the line's own room.
+fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: usize) {
+    let (theme, keymap, mailbox) = (rows.theme, rows.keymap, rows.mailbox);
+    match line {
+        Line::Head(group, state) => {
+            if head(ui, theme, keymap, group, *state) {
+                let all = mailbox.messages().iter().filter(|message| group.messages.contains(&message.id)).map(|message| message.id);
+                rows.done_all.set(Some(all.collect()));
+            }
         }
-        clicked = sheet(ui, rows.theme, false, |ui| {
-            let mut clicked = None;
-            for group in groups {
-                let messages = members(mailbox, group);
-                if !messages.is_empty() {
-                    heading(ui, rows.theme, group.icon, &group.name, &messages);
-                    clicked = clicked.or(rows.show(ui, messages));
-                }
+        Line::Mail(message) => rows.mail(ui, message, rank, size),
+        Line::More(group, state) => {
+            if more(ui, theme, keymap, *state) {
+                ui.data_mut(|data| data.insert_temp(group_open_id(&group.name), !state.open));
             }
-            let rest = rest(mailbox, groups);
-            if !rest.is_empty() {
-                heading(ui, rows.theme, IconId::Inbox, tr!("Other"), &rest);
-                clicked = clicked.or(rows.show(ui, rest));
+        }
+        Line::Card(waiting) => {
+            if screener(ui, theme, keymap, waiting) {
+                rows.review.set(true);
             }
-            clicked
-        });
-    });
-    (clicked, review)
+        }
+        Line::Send(row) => {
+            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row) {
+                rows.outbox.set(Some((row.draft, pressed)));
+            }
+        }
+    }
 }
 
-/// The rows of the list on one card that fits them, scrolling inside it.
-fn plain(ui: &mut Ui, rows: &Rows<'_>) -> Option<u64> {
+/// Where the list kept, last frame, the message it holds in place and the keyed row it last brought into sight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Kept {
+    /// What the list showed: a message stays in place only in the same list.
+    place: Place,
+    view: InboxView,
+    query: String,
+    /// The first message in sight, and how far below the viewport's top its row's top stood (above it: negative).
+    anchor: Option<(u64, i64)>,
+    /// The viewport's top then, in hundredths of a point.
+    offset: i64,
+    /// The keyed row last brought into sight, and its line.
+    keyed: Option<(u64, usize)>,
+}
+
+/// Hundredths of a point, which [`Kept`] compares exactly.
+fn hundredths(points: f32) -> i64 {
+    if points.is_finite() { (f64::from(points) * 100.0).round() as i64 } else { 0 }
+}
+
+/// Points from [`hundredths`].
+fn points(hundredths: i64) -> f32 {
+    (hundredths as f64 / 100.0) as f32
+}
+
+/// Draws `listing` in a scroll area of `ui` (told apart by `id_salt`), building only the lines that meet the viewport
+/// and two above and below it; what they asked for goes into `rows`. When the lines above the first message in sight
+/// change (a group opens or folds, a message comes in), that message stays where it was, unless the list stood at its
+/// top; a row moved to by the keyboard is scrolled into sight whether it was built or not.
+fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str) -> Built {
+    let (theme, mailbox) = (rows.theme, rows.mailbox);
+    let kept_id = ui.make_persistent_id(id_salt).with("kept");
+    let kept = ui.data(|data| data.get_temp::<Kept>(kept_id));
+    let same = |kept: &Kept| kept.place == mailbox.place() && kept.view == mailbox.inbox_view() && kept.query == mailbox.query();
+    let kept = kept.filter(same);
+    let mut area = ScrollArea::vertical().id_salt(id_salt).auto_shrink([false, false]);
+    if let Some(kept) = &kept
+        && kept.offset > 50
+        && let Some((id, below)) = kept.anchor
+        && let Some((top, _)) = listing.find(id).and_then(|index| listing.span(index))
+    {
+        let wanted = hundredths(top).saturating_sub(below);
+        if wanted != kept.offset {
+            area = area.vertical_scroll_offset(points(wanted).max(0.0));
+        }
+    }
+    let keyed = mailbox.selected().filter(|_| mailbox.keyed()).and_then(|id| Some((id, listing.find(id)?)));
+    let scroll_to = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed)));
+    // egui springs an offset past last frame's end back to it (rubber-banding); the offset that keeps a message in
+    // place after the lines above it grew lies past that end, so the list's area does not rubber-band.
+    let kinetic = ui.spacing().scroll.kinetic;
+    ui.spacing_mut().scroll.kinetic.rubber_band = false;
+    let output = crate::component::scroll::show_viewport(ui, theme, area, |ui, viewport| {
+        ui.set_min_height(listing.height);
+        let room = ui.max_rect();
+        let at = |top: f32, bottom: f32, inset: f32| {
+            Rect::from_min_max(pos2(room.left() + inset, room.top() + top), pos2(room.right() - inset, room.top() + bottom))
+        };
+        let p = &theme.palette;
+        for &(top, bottom) in &listing.sheets {
+            if bottom >= viewport.top() && top <= viewport.bottom() {
+                let rect = at(top, bottom, 0.0);
+                ui.painter().rect_filled(rect, 0.0, p.surface);
+                ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
+            }
+        }
+        let (first, end) = listing.in_sight(viewport.top(), viewport.bottom());
+        let from = first.saturating_sub(2);
+        let to = end.saturating_add(2).min(listing.lines.len());
+        // The rows are a list box of all the list's rows, of which only those built are in AccessKit's tree.
+        let sends = matches!(listing.lines.first(), Some(Line::Send(_)));
+        let (role, name) = if sends { (AccessRole::List, tr!("Sends")) } else { (AccessRole::ListBox, tr!("Messages")) };
+        let mut listed = ui.new_child(UiBuilder::new().id_salt("lines").max_rect(room).accessibility_role(role));
+        let set = listed.unique_id();
+        listed.ctx().accesskit_node_builder(set, |node| {
+            node.set_label(name);
+            node.set_size_of_set(listing.rows);
+        });
+        for index in from..to {
+            let (Some(line), Some((top, bottom))) = (listing.lines.get(index), listing.span(index)) else { break };
+            let inset = match line {
+                Line::Card(_) => 0.0,
+                Line::Head(..) => listing.inset + theme.spacing.s2,
+                _ => listing.inset,
+            };
+            let layout = match line {
+                Line::Head(..) | Line::More(..) => Layout::left_to_right(Align::Center),
+                _ => Layout::top_down(Align::Min),
+            };
+            let rect = at(top, bottom, inset);
+            let rank = listing.ranks.get(index).copied().unwrap_or(0);
+            listed.scope_builder(UiBuilder::new().id_salt(salt(line)).max_rect(rect).layout(layout), |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, if matches!(line, Line::Card(_)) { theme.spacing.s2 } else { 0.0 });
+                draw_line(ui, rows, line, rank, listing.rows);
+            });
+        }
+        if let Some((_, index)) = scroll_to
+            && let Some((top, bottom)) = listing.span(index)
+        {
+            ui.scroll_to_rect(at(top, bottom, 0.0), None);
+        }
+        let whole = (first..end)
+            .filter(|index| {
+                matches!(listing.lines.get(*index), Some(Line::Mail(_)))
+                    && listing.span(*index).is_some_and(|(top, bottom)| top >= viewport.top() && bottom <= viewport.bottom())
+            })
+            .count();
+        ui.data_mut(|data| data.insert_temp(page_id(), whole));
+        let anchor = (first..end).find_map(|index| match listing.lines.get(index) {
+            Some(Line::Mail(message)) => Some((message.id, hundredths(listing.span(index)?.0 - viewport.top()))),
+            _ => None,
+        });
+        (Built { first: from, count: to.saturating_sub(from) }, anchor, hundredths(viewport.top()))
+    });
+    ui.spacing_mut().scroll.kinetic = kinetic;
+    let (built, anchor, offset) = output.inner;
+    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, keyed };
+    ui.data_mut(|data| {
+        data.insert_temp(kept_id, kept);
+        if let Some((id, _)) = anchor {
+            data.insert_temp(Id::unique("list-first-in-sight"), id);
+        }
+    });
+    built
+}
+
+/// The lines of `listing` on one card that fits them, scrolling inside it (a list without cards of its own).
+fn on_card(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str) -> Built {
     let theme = rows.theme;
     let p = &theme.palette;
-    let count = rows.mailbox.messages().len();
-    let height = row_height(theme);
     let room = ui.available_rect_before_wrap();
-    let content = height * count as f32 + ROW_INSET * 2.0;
+    let content = listing.height + ROW_INSET * 2.0;
     let card = Rect::from_min_size(room.min, vec2(room.width(), content.min(room.height()).max(1.0)));
     super::paint::pane(ui.painter(), theme, card);
     ui.painter().rect_stroke(card, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
     let inside = card.shrink(ROW_INSET);
     // The bar takes its room beside the rows only when they do not all fit, so a short list runs the card's width.
-    let mut clicked = None;
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         ui.shrink_clip_rect(inside);
-        crate::component::scroll::show_rows(ui, theme, ScrollArea::vertical().auto_shrink([false, false]), height, count, |ui, range| {
-            clicked = rows.show(ui, rows.mailbox.messages().get(range).unwrap_or_default());
-        });
-    });
-    clicked
+        show_lines(ui, rows, listing, id_salt)
+    })
+    .inner
 }
 
 /// The empty window's card: the inbox icon, "No accounts yet" and what to do. Where the window can add accounts
@@ -866,14 +1156,14 @@ pub(super) fn welcome(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool
 }
 
 /// "New senders": the list, then under it the screener's mode as pills, the choice the Triage settings page offers.
-fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) {
+fn senders(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>) -> (Built, Option<ScreenerMode>) {
     let theme = rows.theme;
     let s = &theme.spacing;
     let room = ui.available_rect_before_wrap();
     let lines = if room.width() < 360.0 { 2.0 } else { 1.0 };
     let bar = (theme.fonts.button.line + s.s2) * lines + s.s2 * 2.0;
     let list = Rect::from_min_max(room.min, pos2(room.right(), (room.bottom() - bar).max(room.top())));
-    let clicked = ui.scope_builder(UiBuilder::new().max_rect(list), |ui| plain(ui, rows)).inner;
+    let built = ui.scope_builder(UiBuilder::new().max_rect(list), |ui| on_card(ui, rows, listing, "mail-list")).inner;
     ui.add_space(s.s2);
     let mut mode = None;
     ui.horizontal_wrapped(|ui| {
@@ -885,7 +1175,49 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Option<u64>, Option<ScreenerMode>) 
             }
         }
     });
-    (clicked, mode)
+    (built, mode)
+}
+
+/// What the list laid out in a frame: from which line, how many.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Built {
+    /// The first line built.
+    pub first: usize,
+    /// How many lines were built from it.
+    pub count: usize,
+}
+
+/// How many rows Page Down and Page Up move: the rows wholly in sight in the last frame, less one, so the row at
+/// the edge stays in sight; at least one.
+pub(super) fn page(ctx: &egui::Context) -> usize {
+    ctx.data(|data| data.get_temp::<usize>(page_id())).unwrap_or(1).saturating_sub(1).max(1)
+}
+
+/// Where [`page`] is kept.
+fn page_id() -> Id {
+    Id::unique("list-page")
+}
+
+/// What the list built in the last frame that drew one.
+#[cfg(test)]
+pub(super) fn built(ctx: &egui::Context) -> Option<Built> {
+    ctx.data(|data| data.get_temp::<Built>(built_id()))
+}
+
+/// Where [`built`] is kept.
+fn built_id() -> Id {
+    Id::unique("list-built")
+}
+
+/// The message whose row was the first in sight in the last frame that drew the list with one in sight.
+#[cfg(test)]
+pub(super) fn first_in_sight(ctx: &egui::Context) -> Option<u64> {
+    ctx.data(|data| data.get_temp::<u64>(Id::unique("list-first-in-sight")))
+}
+
+/// Where whether `group`'s card shows all its rows is kept.
+pub(super) fn group_open_id(group: &str) -> Id {
+    Id::unique("list-group").with(group)
 }
 
 /// Where the rows a frame built are kept for [`rows_built`].
@@ -893,9 +1225,8 @@ fn rows_built_id() -> Id {
     Id::unique("list-rows-built")
 }
 
-/// How many message rows the list laid out in the last frame that drew rows (each row allocated, whether it was on
-/// screen or not), taken out so the next read sees only a later frame's: `None` when no frame drew rows since. For
-/// the frame bench (`ui_bench`).
+/// How many lines (rows, heads, the screener card) the list laid out in the last frame that drew rows, taken out so
+/// the next read sees only a later frame's: `None` when no frame drew rows since. For the frame bench (`ui_bench`).
 #[must_use]
 pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
     ctx.data_mut(|data| data.remove_temp::<usize>(rows_built_id()))
@@ -903,10 +1234,8 @@ pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
 
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
-    if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
-        return Asked { out: true, outbox: outbox(ui, theme, keymap, mailbox), ..Asked::default() };
-    }
-    if mailbox.messages().is_empty() {
+    let outbox = mailbox.place() == Place::Outbox && mailbox.query().is_empty();
+    if mailbox.messages().is_empty() && !outbox {
         if let (true, Place::Later(pile)) = (mailbox.query().is_empty(), mailbox.place()) {
             let detail = match pile {
                 Pile::Snoozed => tr!("Snoozed mail waits here until its time comes."),
@@ -932,30 +1261,44 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         mailbox,
         // Whose each row is shows in the simple list of more than one account; the grouped cards leave it out.
         account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
+        clicked: Cell::new(None),
         acted: Cell::new(None),
         leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
-        built: Cell::new(0),
+        review: Cell::new(false),
+        outbox: Cell::new(None),
     };
+    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: Vec::new() };
+    let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
+    let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open) };
     let mut screener_mode = None;
-    let (clicked, review) = match view {
-        InboxView::Cards => grouped(ui, &rows, &groups, wait),
-        InboxView::List => listed(ui, &rows, &groups, wait),
-        InboxView::Simple if mailbox.place() == Place::Senders && mailbox.query().is_empty() => {
-            let (clicked, mode) = senders(ui, &rows);
-            screener_mode = mode;
-            (clicked, false)
+    let built = if outbox {
+        on_card(ui, &rows, &listing, "outbox-list")
+    } else if grouping {
+        show_lines(ui, &rows, &listing, "mail-list")
+    } else if mailbox.place() == Place::Senders && mailbox.query().is_empty() {
+        let (built, mode) = senders(ui, &rows, &listing);
+        screener_mode = mode;
+        built
+    } else {
+        if wait {
+            rows.review.set(screener(ui, theme, keymap, mailbox.waiting()));
+            ui.add_space(theme.spacing.s2);
         }
-        InboxView::Simple => {
-            let review = wait && screener(ui, theme, keymap, mailbox);
-            if wait {
-                ui.add_space(theme.spacing.s2);
-            }
-            (plain(ui, &rows), review)
-        }
+        on_card(ui, &rows, &listing, "mail-list")
     };
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(rows_built_id(), built.count);
+        data.insert_temp(built_id(), built);
+    });
     let (drawn, out) = rows.leaving.get();
-    let built = rows.built.get();
-    ui.ctx().data_mut(|data| data.insert_temp(rows_built_id(), built));
-    Asked { clicked, acted: rows.acted.get(), out: !drawn || out, review, done_all: rows.done_all.take(), outbox: None, screener: screener_mode }
+    Asked {
+        clicked: rows.clicked.get(),
+        acted: rows.acted.get(),
+        out: !drawn || out,
+        review: rows.review.get(),
+        done_all: rows.done_all.take(),
+        outbox: rows.outbox.get(),
+        screener: screener_mode,
+    }
 }

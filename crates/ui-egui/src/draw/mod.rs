@@ -107,6 +107,8 @@ struct Keys {
     escape: bool,
     down: bool,
     up: bool,
+    /// Page Down or End (forward), Page Up or Home, and how many rows they move.
+    jump: Option<(bool, usize)>,
     /// Whether the mail's own keys rest.
     typing: bool,
     /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
@@ -634,12 +636,15 @@ impl InboxApp {
         let quiet = focused || held || self.settings.is_open() || self.docked();
         let typing = quiet || self.screen == Screen::Calendar;
         if held {
-            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
+            return Keys { ran: Vec::new(), escape: false, down: false, up: false, jump: None, typing, quiet };
         }
         let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
         let (escape, down, up) =
             ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
-        Keys { ran, escape, down, up, typing, quiet }
+        let page = list::page(ctx);
+        let jumps = [(Key::PageDown, true, page), (Key::PageUp, false, page), (Key::End, true, usize::MAX), (Key::Home, false, usize::MAX)];
+        let jump = jumps.into_iter().find(|(key, ..)| ctx.input(|input| input.key_pressed(*key))).map(|(_, forward, rows)| (forward, rows));
+        Keys { ran, escape, down, up, jump, typing, quiet }
     }
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
@@ -1243,10 +1248,14 @@ impl InboxApp {
         }
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
-        let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
+        let Keys { mut ran, escape, down, up, jump, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
             self.mailbox.step(down);
+            stepped = true;
+        }
+        if !typing && let Some((forward, rows)) = jump {
+            self.mailbox.step_by(forward, rows);
             stepped = true;
         }
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };

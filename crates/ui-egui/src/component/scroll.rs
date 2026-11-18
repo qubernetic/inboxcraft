@@ -116,6 +116,14 @@ pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&m
     output
 }
 
+/// Shows `area` in `ui` with `add` drawing what of the content meets the viewport it is given (the content's part in
+/// sight, from the content's top), and paints its bar: the list that builds only the lines in sight.
+pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
+    let output = area.show_viewport(ui, add);
+    bar(ui, theme, &output);
+    output
+}
+
 /// Shows `area` in `ui` as `rows` rows `height` high, `add` drawing the rows in sight, and paints its bar.
 pub fn show_rows<R>(
     ui: &mut Ui,

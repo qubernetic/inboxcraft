@@ -850,11 +850,19 @@ impl Mailbox {
     /// Selects the row below the selected one (`forward`) or above it; the first row when none is selected. Stays at
     /// either end.
     pub fn step(&mut self, forward: bool) {
+        self.step_by(forward, 1);
+    }
+
+    /// Selects the row `rows` below the selected one (`forward`) or above it, as far as the list goes (Page Down and
+    /// Page Up a page of rows, End and Home `usize::MAX`); with none selected, counts from just above the first row.
+    pub fn step_by(&mut self, forward: bool, rows: usize) {
+        let last = self.messages.len().saturating_sub(1);
         let at = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
         let next = match at {
+            None if forward => rows.saturating_sub(1).min(last),
             None => 0,
-            Some(at) if forward => at.saturating_add(1).min(self.messages.len().saturating_sub(1)),
-            Some(at) => at.saturating_sub(1),
+            Some(at) if forward => at.saturating_add(rows).min(last),
+            Some(at) => at.saturating_sub(rows),
         };
         if let Some(row) = self.messages.get(next) {
             self.selected = Some(row.id);
@@ -1664,6 +1672,12 @@ impl Mailbox {
     #[must_use]
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// Puts `rows` in the list in place of the engine's: a list longer than the engine lists, for a test.
+    #[cfg(test)]
+    pub(crate) fn set_rows(&mut self, rows: Vec<MessageRow>) {
+        self.messages = rows;
     }
 
     /// The rows of the list.

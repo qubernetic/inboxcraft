@@ -41,7 +41,7 @@ fn strip(inner: Rect) -> Rect {
 }
 
 /// The filled rects painted inside `strip` in the last frame: `(rect, fill)`, in paint order.
-fn fills(harness: &Harness<'static, Rect>, strip: Rect) -> Vec<(Rect, Color32)> {
+fn fills<S>(harness: &Harness<'static, S>, strip: Rect) -> Vec<(Rect, Color32)> {
     fn leaves<'a>(shape: &'a Shape, found: &mut Vec<&'a Shape>) {
         match shape {
             Shape::Vec(shapes) => shapes.iter().for_each(|shape| leaves(shape, found)),
@@ -201,4 +201,32 @@ fn no_frame_paints_the_bar_over_the_content_when_it_starts_or_stops_overflowing(
         harness.run();
         assert!(bar_fills(&harness, fits, colours).is_empty(), "{mode:?}: no bar once it fits again");
     }
+}
+
+#[test]
+fn a_viewport_area_hands_over_the_part_in_sight_and_paints_its_bar_beside_it() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness = builder().with_size(vec2(220.0, 160.0)).build_ui_state(
+        move |ui, seen: &mut (Rect, Rect)| {
+            ui.spacing_mut().scroll = style(&theme);
+            stage(ui, theme.palette.surface, |ui| {
+                let area = ScrollArea::vertical().id_salt("scroll-viewport").max_height(AREA).auto_shrink([false, true]);
+                let output = super::show_viewport(ui, &theme, area, |ui, viewport| {
+                    ui.set_min_height(AREA * 3.0);
+                    viewport
+                });
+                *seen = (output.inner_rect, output.inner);
+            });
+        },
+        (Rect::NOTHING, Rect::NOTHING),
+    );
+    harness.run();
+    harness.run();
+    let (inner, viewport) = *harness.state();
+    assert_eq!(viewport.top(), 0.0, "the content's top in sight");
+    assert!((viewport.height() - AREA).abs() < 0.01, "{viewport:?}");
+    let strip = strip(inner);
+    let fills = fills(&harness, strip);
+    assert_eq!(fills.len(), 1, "a thumb at rest: {fills:?}");
+    assert!(strip.left() >= inner.right() - 0.01 && fills.iter().all(|(rect, _)| !rect.intersects(inner.shrink(0.01))), "beside the content");
 }
