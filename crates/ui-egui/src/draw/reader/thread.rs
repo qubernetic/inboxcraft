@@ -22,8 +22,19 @@ use crate::tr;
 use super::body::{banner, body, files};
 use super::{Asked, Drawn, Textures};
 
+/// `people` by name, joined, as far as one line could show them: a list of thousands is not joined whole every frame.
 pub(super) fn names(people: &[Person]) -> String {
-    people.iter().map(Person::shown).collect::<Vec<_>>().join(", ")
+    let mut joined = String::new();
+    for person in people {
+        if joined.chars().count() > crate::component::MOST {
+            break;
+        }
+        if !joined.is_empty() {
+            joined.push_str(", ");
+        }
+        joined.push_str(person.shown());
+    }
+    joined
 }
 
 /// Whether the text of `opened` only says what its invitation card says.

@@ -217,8 +217,9 @@ fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
     harness.get_by_label_contains("Odile Brannock, 08:35, folded");
     harness.get_by_label("details ▾").click();
     harness.run();
-    harness.get_by_label_contains("From Mira Holloway  <mira@example.org>");
-    harness.get_by_label_contains("Thursday 5 Nov 2026, 08:40");
+    // The facts are heard as one line: who wrote, to whom, and the date, exactly.
+    let facts = harness.get_by_label_contains("From Mira Holloway  <mira@example.org>, to ").accesskit_node().label().unwrap_or_default();
+    assert!(facts.starts_with("From Mira Holloway  <mira@example.org>, to ") && facts.ends_with(", Thursday 5 Nov 2026, 08:40"), "{facts}");
     harness.get_by_label("hide details ▴").click();
     harness.run();
 }
@@ -365,7 +366,7 @@ fn a_long_subject_wraps_under_the_toolbar() {
 }
 
 #[test]
-fn the_subject_is_set_large_with_the_message_s_group_as_a_chip_beside_who_wrote() {
+fn the_subject_is_set_large_under_the_message_s_group_tag() {
     let fetch = Recorder::default();
     let mut app = app_with(&fetch);
     let showcase = sample::showcase(app.mailbox());
@@ -534,6 +535,8 @@ fn a_thread_s_header_is_the_name_and_whom_it_went_to_and_details_stays_reachable
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
     assert!(harness.query_by_label_contains("From Mira Holloway").is_none(), "no facts under the resting line");
     harness.get_by_label_contains("Mira Holloway, 08:40, open: mira@example.org  ·  to ");
+    // One line, with its avatar, for each message: Mira wrote one (the avatar is the line's, heard in its name).
+    assert_eq!(harness.query_all_by_label_contains("Mira Holloway, 08:40").count(), 1);
     harness.get_by_role_and_label(Role::Button, "details ▾").click();
     harness.run();
     harness.get_by_label_contains("From Mira Holloway  <mira@example.org>");

@@ -1,27 +1,29 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The reader: a toolbar of mail actions (Done, Archive, Delete, Snooze, Pin, Move and More) over the subject, the
-//! largest text of the window, which wraps rather than being cut, and who wrote in the thread. The thread follows as
-//! cards, oldest first: the open message and the ones the owner unfolded in full (each message's header, the
-//! remote-content banner, the body and the attachment tiles; Reply, Reply all and Forward on the open one), the rest
-//! folded to one line. More holds flag and read or unread for the open message, then what is not a mail action: full
-//! width, closing the reader and the next-message rule. Move to a folder opens a menu of the folders of the message's
-//! account. While the pointer is on a link, a float at the bottom says where it goes.
+//! The reader, as the design puts it from the top: the message's tags and its acts (Done, Snooze, Pin, Move, Delete
+//! and More) on one line, the subject in `title` on two lines at most (the second cut with one ellipsis; a screen
+//! reader hears it whole), the facts of a message alone or who wrote and how many messages for a thread, the why line
+//! and the content bar. The thread follows, oldest first: the open message and the ones the owner unfolded in full
+//! (the remote-content banner, the text, the attachments), the rest folded to their line. Reply, Reply all and Forward
+//! stand at the foot under a hairline. More holds Archive (with its key), flag, read or unread and the rest of the acts
+//! on the open message, then what is not a mail action: full width, closing the reader and the next-message rule. Move
+//! to a folder opens a menu of the folders of the message's account. While the pointer is on a link, a float at the
+//! bottom says where it goes. Tab goes from the head through the message to the answers.
 //!
-//! Done, Archive, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a
-//! real account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in.
-//! More also puts the sender's mail in another group, for a message of a grouped account.
+//! Done, Delete, Move and the acts in More act on the open message as the hover actions of the list do, on a real
+//! account as on the sample; Reply, Reply all and Forward open the composer over a draft the engine filled in. More
+//! also puts the sender's mail in another group, for a message of a grouped account. With no message open (after the
+//! open one left the list) the pane shows the bare empty state and the list selects no row: nothing opens by itself.
 //!
 //! Snooze opens the time picker ("Snooze until"); on a message the owner sent the same button is "Remind me if no
 //! reply" and its picker sets the follow-up reminder. Pin pins the message or takes its pin off. More parks it or
-//! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Under the subject, chips
-//! say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
+//! takes it off the park pile, brings a snoozed message back now and takes a reminder off. Tags on the head's first
+//! line say until when it is snoozed, when its reminder is due, and that it came back from a snooze.
 //!
-//! A message of a longer thread has a header: the avatar, the name, "to ..." under it and the date at the right. The
-//! open message of a thread of one has none: who wrote, their address and the date stand under the subject. Details
-//! fades in beside them when the pointer comes near (it is there for the keyboard and a screen reader all the time,
-//! and in More), and opens the full header with every address.
+//! A message of a longer thread is a thread row: folded, or open with the address and to whom, and `details ▾` that
+//! opens its facts. The open message of a thread of one has no row: its facts (FROM, TO, DATE) stand under the subject,
+//! and `details ▾` (also in More) opens the full header with every address.
 //!
 //! A message with an invitation shows its card over the text (see `super::invite`): the event, what changed, and
 //! Going, Maybe and No, or the answer given with a way to change it. When the text only says what the card says, the

@@ -114,16 +114,17 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
 /// Move to a folder: a menu of the folders of the open message's account but its own; the one chosen moves it there.
 fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open: Option<u64>, drawn: &mut Drawn) {
     let button = IconButton::new(IconId::Move, tr!("Move to a folder"));
-    let (Some(id), false) = (open, open.is_none_or(|id| mailbox.move_targets(id).is_empty())) else {
+    // The folders, read once a frame.
+    let targets = open.map(|id| mailbox.move_targets(id)).unwrap_or_default();
+    let (Some(id), false) = (open, targets.is_empty()) else {
         button.unavailable(tr!("No folder to move it to")).show(ui, theme, keymap);
         return;
     };
     let response = button.show(ui, theme, keymap);
-    let targets = mailbox.move_targets(id);
     // The title's caption: the account and how many folders it offers.
     let account =
         mailbox.messages().iter().find(|row| row.id == id).and_then(|row| mailbox.accounts().iter().find(|account| account.id == row.account));
-    let caption = account.map(|account| format!("{} · {}", crate::component::spoken(&account.label), targets.len()));
+    let caption = account.map(|account| tr!("{account} · {count}", account = crate::component::spoken(&account.label), count = targets.len()));
     popup::menu_right(ui.ctx(), theme, &response, move_menu(), MOVE_WIDTH, |ui| {
         popup::title(ui, theme, tr!("Move to"), caption.as_deref());
         let mut chosen = false;
