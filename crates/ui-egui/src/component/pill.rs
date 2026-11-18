@@ -26,6 +26,12 @@ pub fn pill(ui: &mut Ui, theme: &Theme, text: &str, selected: bool) -> Response 
     pill_with(ui, theme, text, selected, None)
 }
 
+/// How wide a [`pill`] with `text` is, in points: what a line measures before it lays one down.
+pub(crate) fn width(ui: &Ui, theme: &Theme, text: &str) -> f32 {
+    let wide = super::galley(ui, text, theme.fonts.mono_s, Color32::PLACEHOLDER).size().x.ceil().min(WIDEST);
+    wide + PAD * 2.0
+}
+
 /// [`pill`] drawn in `shown` whatever the pointer and the keyboard do: a board of the gallery.
 pub(crate) fn pill_with(ui: &mut Ui, theme: &Theme, text: &str, selected: bool, shown: Option<Shown>) -> Response {
     let p = &theme.palette;

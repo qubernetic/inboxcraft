@@ -137,7 +137,7 @@ fn a_mail_row_and_a_text_button_keep_the_design_s_heights_at_every_text_scale() 
 #[test]
 fn the_unified_inbox_lists_its_rows_by_sender_subject_and_date() {
     let mut app = sample_app();
-    app.mailbox_mut().set_inbox_view(InboxView::Simple);
+    app.mailbox_mut().set_inbox_view(InboxView::List);
     // Tall enough for every row under the header and its pills.
     let mut harness = Harness::builder().with_size(vec2(1100.0, 800.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
@@ -216,16 +216,18 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.body.id());
     assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.caption.id());
     assert_ne!(fonts.body.id(), fonts.strong.id());
-    let preview = flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
-        egui::Shape::Text(text) if text.galley.job.text.starts_with("Teodor Lisk") => None,
-        egui::Shape::Text(text) if text.galley.job.text.starts_with("Photos from the coast walk") => {
-            text.galley.job.sections.get(1).map(|section| section.format.clone())
-        }
-        _ => None,
-    });
-    let preview = preview.unwrap();
-    assert_eq!(preview.font_id, fonts.caption.id());
-    assert_eq!(preview.color, Theme::new(Mode::Light, TextScale::default()).palette.muted);
+    // Line two is one run, the subject and the preview: `muted` on a read row, `ink` on an unread one.
+    let palette = Theme::new(Mode::Light, TextScale::default()).palette;
+    let line_two = |start: &str| {
+        flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
+            egui::Shape::Text(text) if text.galley.job.text.starts_with(start) => {
+                Some((text.galley.job.sections.len(), text.galley.job.sections.first().map(|section| section.format.color)))
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(line_two("Photos from the coast walk"), Some((1, Some(palette.muted))));
+    assert_eq!(line_two("Allotment rota for November"), Some((1, Some(palette.ink))));
 }
 
 #[test]
@@ -359,11 +361,20 @@ fn a_search_without_results_and_an_empty_folder_say_so() {
     let mut harness = harness();
     harness.state_mut().search("zeppelin");
     harness.run();
-    harness.get_by_label("No messages match");
-    harness.get_by_label("No subject, sender or recipient holds “zeppelin”.");
+    harness.get_by_label("No messages match.");
+    fn holds(shape: &egui::Shape, wanted: &str) -> bool {
+        match shape {
+            egui::Shape::Text(text) => text.galley.text().starts_with(wanted),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| holds(shape, wanted)),
+            _ => false,
+        }
+    }
+    let shown = |harness: &Harness<'static, InboxApp>, wanted: &str| harness.output().shapes.iter().any(|clipped| holds(&clipped.shape, wanted));
+    assert!(shown(&harness, "No subject, sender or recipient in Inbox holds “zeppelin”."));
+    assert!(shown(&harness, "INBOX · SEARCH"));
     harness.state_mut().mailbox_mut().open(Place::Folder(8));
     harness.run();
-    harness.get_by_label("Nothing here");
+    harness.get_by_label("This folder holds no messages.");
     harness.get_by_label("All accounts · 0 messages");
 }
 
@@ -570,6 +581,13 @@ fn the_window_is_flat() {
         harness.get_by_label("Teodor Lisk, Photos from the coast walk, 04:00, flagged").click();
         harness.run();
         let shapes = flat(&harness.output().shapes);
+        // A dashed edge (the unavailable Snooze's key chip under the pointer) is drawn as a mesh, pixel by pixel: the
+        // design's dashes, not a gradient.
+        let dashed: Vec<egui::Rect> = harness
+            .ctx
+            .data(|data| data.get_temp::<crate::draw::paint::DashedEdges>(crate::draw::paint::dashed_edges_id()))
+            .map(|edges| edges.1.iter().map(|(_, rect, _, _)| rect.expand(1.0)).collect())
+            .unwrap_or_default();
         let round: Vec<String> = shapes
             .iter()
             .filter_map(|(_, shape)| match shape {
@@ -579,7 +597,8 @@ fn the_window_is_flat() {
                 {
                     Some(format!("{rect:?}"))
                 }
-                egui::Shape::Mesh(_) => Some("a mesh".to_owned()),
+                egui::Shape::Mesh(mesh) if dashed.iter().any(|edge| edge.contains_rect(mesh.calc_bounds())) => None,
+                egui::Shape::Mesh(mesh) => Some(format!("a mesh {:?}", mesh.calc_bounds())),
                 _ => None,
             })
             .collect();

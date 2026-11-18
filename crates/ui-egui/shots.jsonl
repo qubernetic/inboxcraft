@@ -64,6 +64,9 @@
 # facts, on a page of their own.
 {"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
 {"out": "docs/images/components-blocks-dark.png", "mode": "dark", "blocks": true}
+# The mail lists' rows (#236): mail row, group head, outbox row, later row, draft row, on a page of their own.
+{"out": "docs/images/components-lists-light.png", "mode": "light", "lists": true}
+{"out": "docs/images/components-lists-dark.png", "mode": "dark", "lists": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
@@ -132,12 +135,12 @@
 {"out": "docs/images/screener-senders-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 {"out": "docs/images/screener-accepted-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
 {"out": "docs/images/grouped-cards-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
-{"out": "docs/images/grouped-list-light.png", "mode": "light", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/grouped-list-light.png", "mode": "light", "size": [1400, 860], "view": "grouped"}
 {"out": "docs/images/settings-triage-light.png", "mode": "light", "size": [1400, 860], "triage": true}
 {"out": "docs/images/screener-senders-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 {"out": "docs/images/screener-accepted-dark.png", "mode": "dark", "size": [1400, 860], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps", "act": "accept"}
 {"out": "docs/images/grouped-cards-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "newsletters"}
-{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "list"}
+{"out": "docs/images/grouped-list-dark.png", "mode": "dark", "size": [1400, 860], "view": "grouped"}
 {"out": "docs/images/settings-triage-dark.png", "mode": "dark", "size": [1400, 860], "triage": true}
 {"out": "docs/images/settings-notifications-light.png", "mode": "light", "size": [1400, 860], "notifications": true}
 {"out": "docs/images/settings-notifications-dark.png", "mode": "dark", "size": [1400, 860], "notifications": true}
@@ -148,8 +151,8 @@
 {"out": "docs/images/later-snoozed-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "snoozed", "select": "Your ferry booking is confirmed"}
 {"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "later": "pins"}
 {"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "later": "pins"}
-{"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
-{"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "simple"}
+{"out": "docs/images/show-done-light.png", "mode": "light", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
+{"out": "docs/images/show-done-dark.png", "mode": "dark", "size": [1400, 860], "put_away": true, "show_done": true, "view": "list"}
 {"out": "docs/images/snooze-picker-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
 {"out": "docs/images/snooze-picker-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "picker": "sat 9"}
 {"out": "docs/images/follow-up-picker-light.png", "mode": "light", "size": [1400, 860], "open": {"role": "sent"}, "select": "Weekend plans", "picker": "mon 9"}
@@ -173,6 +176,30 @@
 {"out": "docs/images/bounce-dark.png", "mode": "dark", "size": [1400, 860], "outbox": "bounce"}
 {"out": "docs/images/account-settings-light.png", "mode": "light", "size": [1200, 820], "accounts": true, "edit_account": 1}
 {"out": "docs/images/account-settings-dark.png", "mode": "dark", "size": [1200, 820], "accounts": true, "edit_account": 1}
+{"out": "docs/images/inbox-smart-light.png", "mode": "light", "size": [1440, 900], "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-grouped-light.png", "mode": "light", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-list-light.png", "mode": "light", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
+{"out": "docs/images/later-pins-light.png", "mode": "light", "size": [1440, 900], "put_away": true, "later": "pins"}
+{"out": "docs/images/new-senders-queue-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 8}}
+{"out": "docs/images/inbox-smart-dark.png", "mode": "dark", "size": [1440, 900], "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-grouped-dark.png", "mode": "dark", "size": [1440, 900], "view": "grouped", "select": "Allotment rota for November"}
+{"out": "docs/images/inbox-list-dark.png", "mode": "dark", "size": [1440, 900], "view": "list", "select": "Allotment rota for November"}
+{"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1440, 900], "put_away": true, "later": "pins"}
+{"out": "docs/images/new-senders-queue-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}}
+{"out": "docs/images/list-empty-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 8}}
+{"out": "docs/images/list-scrolling-light.png", "mode": "light", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/list-scrolling-dark.png", "mode": "dark", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/one-pane-800-light.png", "mode": "light", "size": [800, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-800-dark.png", "mode": "dark", "size": [800, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-list-light.png", "mode": "light", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-list-dark.png", "mode": "dark", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-reader-light.png", "mode": "light", "size": [900, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "size": [900, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/one-pane-900-held-light.png", "mode": "light", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/one-pane-900-held-dark.png", "mode": "dark", "size": [900, 700], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
 # The menus as floats (#234): the reader's More and Move, the composer's From and Templates, a row's group menu.
 {"out": "docs/images/menu-more-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}
 {"out": "docs/images/menu-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "more"}

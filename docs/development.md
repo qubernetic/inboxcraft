@@ -86,9 +86,9 @@ try:
 - the reader: a reply with its quote, a thread, a newsletter whose remote pictures load only when asked (the sample
   draws them in code), attachments to save into the downloads folder;
 - the hover actions on a row, or on the row selected with the arrow keys: Done (D) marks it read and files it as done
-  in its account's Archive ("Show done" over the list shows it there again, dimmed), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
+  in its account's Archive ("Show done" over the list shows it there again, with a tick), R marks it read or unread, Delete moves it to Trash; A archives it and S flags it. The reader's
   toolbar adds Archive and Move to a folder, its More menu flag and read or unread. A row that leaves the list
-  slides out; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
+  does so at once and its gap closes; a toast says what was done, with Undo (Ctrl+Z) for six seconds, which puts the row back as it was, and
   Ctrl+Z after it walks back through the earlier acts;
 - the appearance settings (the gear on the rail, Ctrl+Comma): mode, window frame, text scale and reduced
   motion, kept in `inboxcraft/appearance.json` in the owner's config folder as in the normal window.
@@ -101,9 +101,9 @@ try:
   the sample has none, and saving one (`template.save`, `owner`) has no place in the window yet.
 - the screener and the grouped inbox: the screener is on (before the inbox) and holds two invented new senders;
   Review on the screener card opens New senders, where a message is a preview with Accept (into a group), Accept and
-  open, and Block. The inbox shows People and Updates as cards; a right click on a row (or the reader's More menu)
-  puts its sender in another group. Settings, Triage changes the screener's mode, the inbox view (cards, grouped
-  list, simple list) and each account's grouping. Each act has a toast with Undo.
+  open, and Block. The inbox shows People and Notifications under their heads (Smart: the first three rows of each); a right click on a
+  row (or the reader's More menu) puts its sender in another group. Settings, Triage changes the screener's mode,
+  the inbox view (Grouped, Smart, List) and each account's grouping. Each act has a toast with Undo.
 - done, park, pin, snooze and reminders: Snooze (H) in the reader opens the time picker; on a message in Sent the
   same button sets a "Remind me if no reply" reminder. Pin pins the open message, More parks it. Later on the rail
   lists the snoozed mail, the pins and the park pile. "Done all" on a group card files the group.

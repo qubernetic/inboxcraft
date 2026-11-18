@@ -58,16 +58,28 @@ impl Triage {
         let named = |key: &str| value.get(key).and_then(Value::as_str);
         Self {
             screener: named("screener").and_then(ScreenerMode::from_name).unwrap_or_default(),
-            view: named("view").and_then(InboxView::named).unwrap_or_default(),
+            // Today's key first; a file of an earlier InboxCraft names the view under `view`, by the ids of then.
+            view: match named("inbox_view") {
+                Some(name) => InboxView::named(name),
+                None => named("view").and_then(InboxView::named_before),
+            }
+            .unwrap_or_default(),
             keep_pins: value.get("keep_pins").and_then(Value::as_bool).unwrap_or(false),
             hold: value.get("hold_seconds").and_then(Value::as_u64).and_then(Hold::new).map(Hold::seconds),
         }
     }
 
-    /// The choices as they are written.
+    /// The choices as they are written: the view under `inbox_view`, and under `view` by the ids of earlier
+    /// InboxCraft, which reads only that key.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        json!({ "screener": self.screener.name(), "view": self.view.id(), "keep_pins": self.keep_pins, "hold_seconds": self.hold })
+        json!({
+            "screener": self.screener.name(),
+            "inbox_view": self.view.id(),
+            "view": self.view.id_before(),
+            "keep_pins": self.keep_pins,
+            "hold_seconds": self.hold,
+        })
     }
 }
 
