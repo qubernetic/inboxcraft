@@ -59,7 +59,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     let line = line_width(ppp);
     let rect = ui.max_rect();
     let foot = snap(rect.bottom() - SYNC - line, ppp);
-    let inner = Rect::from_min_max(pos2(rect.left() + PAD, rect.top() + PAD), pos2(rect.right() - PAD, foot));
+    // On whole pixels: the mini month's box and the foot's hairline never blur.
+    let inner = super::grid::whole(Rect::from_min_max(pos2(rect.left() + PAD, rect.top() + PAD), pos2(rect.right() - PAD, foot)), ppp);
     ui.scope_builder(UiBuilder::new().max_rect(inner).id_salt("calendar-side-scroll"), |ui| {
         let area = ScrollArea::vertical().id_salt("calendar-side").auto_shrink([false, false]);
         crate::component::scroll::show(ui, theme, area, |ui| {
@@ -128,6 +129,8 @@ fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
     let (cell_w, cell_h) = MINI_CELL;
     let height = 8.0 + 28.0 + 4.0 + 20.0 + 4.0 + cell_h * weeks as f32 + MINI_GAP * (weeks - 1) as f32 + 12.0;
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    // On whole pixels, its box and today's never blur (the layout rounds to a 64th of a point).
+    let rect = super::grid::whole(rect, ppp);
     ui.painter().rect_filled(rect, 0.0, p.surface);
     stroke(ui.painter(), rect, line, p.line);
     let left = rect.left() + 12.0;
@@ -173,6 +176,7 @@ fn mini_month(ui: &mut Ui, theme: &Theme, mini: &Mini, asked: &mut Vec<Asked>) {
 fn mini_day(ui: &mut Ui, theme: &Theme, mini: &Mini, day: Day, spot: Rect, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
     let line = line_width(ui.pixels_per_point());
+    let spot = super::grid::whole(spot, ui.pixels_per_point());
     let today = day == mini.today;
     let picked = mini.picked == Some(day);
     let month = mini.month.month();

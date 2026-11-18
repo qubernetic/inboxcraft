@@ -29,6 +29,12 @@ pub(super) fn snap(at: f32, ppp: f32) -> f32 {
     if px.is_finite() { px / ppp } else { 0.0 }
 }
 
+/// `rect` with each edge on the nearest pixel boundary at `ppp`: a box whose 1 px edge must not blur.
+#[must_use]
+pub(super) fn whole(rect: egui::Rect, ppp: f32) -> egui::Rect {
+    egui::Rect::from_min_max(egui::pos2(snap(rect.left(), ppp), snap(rect.top(), ppp)), egui::pos2(snap(rect.right(), ppp), snap(rect.bottom(), ppp)))
+}
+
 /// How wide a grid line is at `ppp`, in points: one point rounded to whole pixels, at least one pixel.
 #[must_use]
 pub(super) fn line(ppp: f32) -> f32 {

@@ -419,7 +419,7 @@ fn paint_block(ui: &Ui, theme: &Theme, bar: Color32, rect: Rect, shown: Lit, pic
         }
         Kind::Chip => {
             if lit {
-                let frame = Rect::from_min_max(rect.min - vec2(3.0, 1.0), rect.max + vec2(4.0, 1.0));
+                let frame = grid::whole(Rect::from_min_max(rect.min - vec2(3.0, 1.0), rect.max + vec2(4.0, 1.0)), ppp);
                 let painter = ui.painter().with_clip_rect(frame.intersect(ui.clip_rect()));
                 painter.rect_filled(frame, 0.0, ground);
                 stroke(&painter, frame, line, if picked { p.cyan_edge } else { p.line });

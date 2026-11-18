@@ -69,6 +69,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             any = true;
             let width = ui.available_width();
             let (rect, response) = ui.allocate_exact_size(vec2(width, head + line), Sense::hover());
+            let rect = super::grid::whole(rect, ppp);
             let today = day == calendar.today();
             let name = crate::component::galley(ui, &day::dated(day), theme.fonts.label, if today { p.cyan_text } else { p.muted });
             let y = snap(rect.top() + head / 2.0 - theme.fonts.label.line / 2.0, ppp);
@@ -88,6 +89,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
             response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &spoken));
             for event in &rows {
                 let (rect, _) = ui.allocate_exact_size(vec2(width, row), Sense::hover());
+                // On whole pixels, so its hairline and the picked row's bar never blur.
+                let rect = super::grid::whole(rect, ppp);
                 let (time, detail) = words(event, day);
                 let salt = 3000_i64.saturating_add(offset);
                 let area = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - line));

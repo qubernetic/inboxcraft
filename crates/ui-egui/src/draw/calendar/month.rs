@@ -10,7 +10,7 @@
 
 use egui::{Rect, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
-use super::grid::{Lines, lane_pitch, line as line_width, snap};
+use super::grid::{Lines, lane_pitch, line as line_width, snap, whole};
 use super::laid::MonthWeek;
 use super::{Asked, Kind, Sizes, Words, block};
 use crate::calendar::layout::{self, Bar};
@@ -174,7 +174,8 @@ fn day_events(
     };
     for (row, event) in timed.iter().take(shown).enumerate() {
         let y = chips_top + CHIP.1 * row as f32;
-        let area = Rect::from_min_size(pos2(cell.left() + CHIP_SIDE, y), vec2((cell.width() - CHIP_SIDE * 2.0).max(1.0), CHIP.0));
+        // On whole pixels, so the lit chip's 1 px frame never blurs.
+        let area = whole(Rect::from_min_size(pos2(cell.left() + CHIP_SIDE, y), vec2((cell.width() - CHIP_SIDE * 2.0).max(1.0), CHIP.0)), ppp);
         let time = event.start.clock();
         let words = Words { title: &event.summary, detail: "", time: if event.start.day == day { &time } else { "" } };
         let salt = 2000_i64.saturating_add(day.since(Day::EPOCH));
@@ -217,7 +218,7 @@ fn day_number(ui: &mut Ui, theme: &Theme, calendar: &Calendar, day: Day, grid: &
     let font = theme.fonts.mono_s;
     let galley = crate::component::galley(ui, &text, font, colour);
     let wide = galley.size().x.ceil();
-    let boxed = Rect::from_min_size(pos2(cell.left() + 4.0, snap(cell.top() + 4.0, ppp)), vec2(wide + 12.0, font.line + 2.0));
+    let boxed = whole(Rect::from_min_size(pos2(cell.left() + 4.0, cell.top() + 4.0), vec2(wide + 12.0, font.line + 2.0)), ppp);
     let response = ui.interact(boxed, number_id(day), Sense::click());
     super::keys::item(ui.ctx(), &response);
     if super::keys::wanted(ui.ctx(), crate::calendar::Target::Day(day)) {

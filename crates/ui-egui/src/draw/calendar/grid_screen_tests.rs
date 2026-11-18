@@ -580,3 +580,40 @@ fn arrows_move_the_picked_day_in_the_mini_month() {
     press(&mut harness, Key::Enter);
     assert_eq!(harness.state().calendar().focus(), Day::new(2026, 10, 29).unwrap(), "Enter puts the view there");
 }
+
+#[test]
+fn month_and_agenda_strokes_stand_on_whole_pixels() {
+    let p = Palette::of(Mode::Dark);
+    for ppp in SCALES {
+        for percent in [100, 130] {
+            for view in [View::Month, View::Agenda] {
+                let mut harness = window(ppp, percent, view);
+                // A picked event: the month's lit chip frame, the agenda's picked row; and today's box.
+                let key = harness.state().calendar().events().find(|event| event.summary == "Call with Petra about the logo").map(EventRow::key);
+                harness.state_mut().calendar_mut().0.pick(key);
+                harness.run();
+                let strokes: Vec<Rect> = rects(&harness)
+                    .into_iter()
+                    .filter(|(rect, fill)| {
+                        // Under the toolbar: the days and the side panel (the toolbar's controls are the components').
+                        rect.top() >= 48.0 * f32::from(percent) / 100.0
+                            && [p.line, p.panel_line, p.cyan_edge].contains(fill)
+                            && (rect.width() * ppp <= 2.5 || rect.height() * ppp <= 2.5)
+                    })
+                    .map(|(rect, _)| rect)
+                    .collect();
+                assert!(strokes.len() > 20, "{view:?} {ppp} {percent}: the strokes are found");
+                let off: Vec<Rect> = strokes
+                    .iter()
+                    .copied()
+                    .filter(|rect| ![rect.left(), rect.right(), rect.top(), rect.bottom()].iter().all(|edge| whole(edge * ppp)))
+                    .collect();
+                assert!(
+                    off.is_empty(),
+                    "{view:?} {ppp} {percent}: strokes between pixels: {:?}",
+                    off.iter().map(|r| [r.left() * ppp, r.top() * ppp, r.right() * ppp, r.bottom() * ppp]).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+}
