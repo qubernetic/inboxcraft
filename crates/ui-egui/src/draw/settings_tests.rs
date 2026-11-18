@@ -114,14 +114,19 @@ fn every_control_runs_its_command() {
     assert_eq!(harness.state().appearance().text_scale, 120);
     assert_eq!(harness.get_by_role_and_label(Role::Slider, "Text size").accesskit_node().numeric_value(), Some(120.0));
 
-    let switch = harness.get_by_role_and_label(Role::Switch, "Reduce motion");
-    assert_eq!(switch.accesskit_node().toggled(), Some(Toggled::False));
+    // Motion, the design's three levels: Full is not built yet; Reduced is today's motion, Off today's reduced one.
+    let level = |harness: &Harness<'static, InboxApp>, name: &str| harness.get_by_role_and_label(Role::RadioButton, name).accesskit_node().toggled();
+    assert!(harness.get_by_role_and_label(Role::RadioButton, "Full for Motion").accesskit_node().is_disabled(), "Full comes later");
+    assert_eq!(level(&harness, "Reduced for Motion"), Some(Toggled::True), "until the owner chooses, the motion that runs");
     // Below the fold at 120 %: pressed the way a screen reader presses it.
-    switch.click_accesskit();
+    harness.get_by_role_and_label(Role::RadioButton, "Off for Motion").click_accesskit();
     harness.run();
     assert_eq!(harness.state().mailbox().last_run(), Some("ui.motion.set"));
     assert_eq!(harness.state().appearance().motion, Motion::Reduce);
-    assert_eq!(harness.get_by_role_and_label(Role::Switch, "Reduce motion").accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(level(&harness, "Off for Motion"), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::RadioButton, "Reduced for Motion").click_accesskit();
+    harness.run();
+    assert_eq!(harness.state().appearance().motion, Motion::Full);
     assert!(harness.query_by_label("Custom").is_none());
 }
 
@@ -131,13 +136,13 @@ fn the_appearance_page_has_no_accent_typeface_or_icon_choice() {
     for gone in ["Accent", "Custom", "Typeface", "Icons"] {
         assert!(harness.query_by_label(gone).is_none(), "{gone}");
     }
-    for kept in ["Mode", "Text size", "Reduce motion", "Window frame"] {
+    for kept in ["Mode", "Text size", "Motion", "Window frame"] {
         assert!(harness.query_all_by_label_contains(kept).count() > 0, "{kept}");
     }
     // The mode reads Auto, Dark, Light, left to right; Auto is the system's.
     let x = |label: &str| harness.get_by_role_and_label(Role::RadioButton, label).rect().center().x;
     assert!(x("Auto") < x("Dark") && x("Dark") < x("Light"));
-    assert!(harness.query_by_label("System").is_none());
+    assert!(harness.query_by_label("Auto / Dark / Light").is_some(), "the mode's Auto is not called System");
 }
 
 #[test]
@@ -209,11 +214,12 @@ fn the_window_frame_row_runs_ui_frame_set() {
     harness.run();
     harness.get_by_label("Appearance settings").click();
     harness.run();
-    assert!(selected(&harness, "Strip"), "the app's own strip by default");
-    assert_eq!(press(&mut harness, "Top row"), "ui.frame.set");
-    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow);
-    assert_eq!(press(&mut harness, "Title bar"), "ui.frame.set");
+    // The design's two frames: InboxCraft's own (the strip by default) and the desktop's.
+    assert!(selected(&harness, "Own"), "the app's own frame by default");
+    assert_eq!(press(&mut harness, "System"), "ui.frame.set");
     assert_eq!(harness.state().appearance().frame, WindowFrame::System);
+    assert_eq!(press(&mut harness, "Own"), "ui.frame.set");
+    assert_eq!(harness.state().appearance().frame, WindowFrame::TopRow);
 }
 
 #[test]

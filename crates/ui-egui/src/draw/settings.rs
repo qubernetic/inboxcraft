@@ -29,7 +29,7 @@ use crate::component::button::{IconButton, LinkSize, TextButton, link_sized};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
 use crate::component::label::section_label;
-use crate::component::segmented::{segmented, segmented_for};
+use crate::component::segmented::{segmented, segmented_but, segmented_for};
 use crate::component::settings_row::{page as on_page, settings_row, settings_row_soon_with};
 use crate::component::slider;
 use crate::component::switch::switch;
@@ -176,13 +176,15 @@ fn mode_name(mode: ThemeMode) -> &'static str {
     }
 }
 
-/// The name of a window frame.
-fn frame_name(frame: WindowFrame) -> &'static str {
-    match frame {
-        WindowFrame::System => tr!("Title bar"),
-        WindowFrame::TopRow => tr!("Top row"),
-        WindowFrame::Strip => tr!("Strip"),
-    }
+/// A level of motion as the design names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MotionLevel {
+    /// The showpiece, with its text effects: not built yet.
+    Full,
+    /// What explains a change, without the text effects: the motion that runs today.
+    Reduced,
+    /// Every change at once: today's reduced motion.
+    Off,
 }
 
 /// The inbox views in the order Appearance offers them, each with the name the design gives it: Grouped opens every
@@ -357,14 +359,21 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
                 asked = Some(Asked::Mode(mode));
             }
         });
+        // The design's three levels. Full, with its text effects, is not built yet; Reduced is the motion that runs
+        // today, Off lands every motion at its end at once (today's reduced motion).
+        let levels =
+            [(MotionLevel::Full, tr!("Full"), f.button), (MotionLevel::Reduced, tr!("Reduced"), f.button), (MotionLevel::Off, tr!("Off"), f.button)];
+        let level = if reduce { MotionLevel::Off } else { MotionLevel::Reduced };
+        let said =
+            if reduce { tr!("Off: every change happens at once.") } else { tr!("Reduced keeps what explains a change and drops the text effects.") };
         let motion_help = if current.motion == Motion::System {
-            tr!("On, every motion lands at its end at once. Until you choose, motion follows the computer where InboxCraft can read it.")
+            tr!("{level} Until you choose, motion follows the computer where InboxCraft can read it.", level = said)
         } else {
-            tr!("On, every motion lands at its end at once.")
+            said.to_owned()
         };
-        settings_row(ui, theme, tr!("Reduce motion"), Some(motion_help), |ui| {
-            if switch(ui, theme, tr!("Reduce motion"), reduce).clicked() {
-                asked = Some(Asked::ReduceMotion(!reduce));
+        settings_row(ui, theme, tr!("Motion"), Some(&motion_help), |ui| {
+            if let Some(chosen) = segmented_but(ui, theme, &levels, level, Some(tr!("Motion")), &[MotionLevel::Full]) {
+                asked = Some(Asked::ReduceMotion(chosen == MotionLevel::Off));
             }
         });
         let now = TextScale::from_percent(current.text_scale).unwrap_or_default();
@@ -388,8 +397,11 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
         settings_row_soon_with(ui, theme, tr!("Write a message"), tr!("Docked in the reader's place, or in a window of its own."), |ui| {
             segmented_for(ui, theme, &places, 0, Some(tr!("Write a message")));
         });
-        let frames = WindowFrame::ALL.map(|frame| (frame, frame_name(frame), f.button));
-        let frame_help = tr!("The desktop's title bar, or InboxCraft's own frame: a top row, or a strip over the window.");
+        // The design's two frames: InboxCraft's own (the top row or the strip, whichever is on; Own from the desktop's
+        // turns on the top row) and the desktop's title bar.
+        let own = if current.frame == WindowFrame::System { WindowFrame::TopRow } else { current.frame };
+        let frames = [(own, tr!("Own"), f.button), (WindowFrame::System, tr!("System"), f.button)];
+        let frame_help = tr!("InboxCraft's own frame, or the desktop's title bar above it.");
         settings_row(ui, theme, tr!("Window frame"), Some(frame_help), |ui| {
             if let Some(frame) = segmented(ui, theme, &frames, current.frame) {
                 asked = Some(Asked::Frame(frame));
