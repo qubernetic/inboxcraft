@@ -262,6 +262,11 @@ fn snooze_row_id() -> Id {
     Id::unique("list-snooze-row")
 }
 
+/// Where the list keeps the row the keyboard is on, as a pass drew it in sight: `(its response, the pass)`.
+fn keyed_row_id() -> Id {
+    Id::unique("list-keyed-row")
+}
+
 /// The time picker open from a row's Snooze: it belongs to a message, not to the row drawn for it.
 #[derive(Debug, Clone, Copy)]
 struct SnoozeOpen {
@@ -322,6 +327,23 @@ fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) -> Optio
     let drawn = ctx.data(|data| data.get_temp::<SnoozeRow>(snooze_row_id())).filter(|row| row.message == open.message && row.pass == pass);
     let Some(drawn) = drawn.filter(|_| open.shown.saturating_add(1) >= pass) else {
         close_snooze(ctx);
+        // The keyboard it held goes back to the list, as Esc gives it back: to the keyed row in sight, else nowhere.
+        let popup = snooze_popup(open.message);
+        let held = ctx
+            .memory(|memory| memory.focused())
+            .and_then(|focused| ctx.read_response(focused))
+            .is_some_and(|response| response.layer_id.id == popup);
+        if held {
+            let keyed = ctx.data(|data| data.get_temp::<(Id, u64)>(keyed_row_id())).filter(|(_, at)| *at == pass).map(|(row, _)| row);
+            ctx.memory_mut(|memory| match keyed {
+                Some(row) => memory.request_focus(row),
+                None => {
+                    if let Some(focused) = memory.focused() {
+                        memory.surrender_focus(focused);
+                    }
+                }
+            });
+        }
         return None;
     };
     ctx.data_mut(|data| data.insert_temp(snooze_open_id(), SnoozeOpen { shown: pass, ..open }));
@@ -424,8 +446,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     if !ui.is_rect_visible(rect) {
         return Drawn { clicked: response.clicked(), acted: None, out: leaving, presets: false };
     }
-    // In sight: the time picker open on this message, if any, stands under this row ([`snooze_picker`]).
+    // In sight: the time picker open on this message, if any, stands under this row ([`snooze_picker`]); the keyed
+    // row is where the keyboard goes when a picker closes unasked.
     note_snooze_row(ui.ctx(), message.id, rect, response.id);
+    if selected && mailbox.keyed() {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.ctx().data_mut(|data| data.insert_temp(keyed_row_id(), (response.id, pass)));
+    }
     let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
     let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
     if leaving {

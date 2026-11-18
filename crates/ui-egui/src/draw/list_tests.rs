@@ -911,3 +911,29 @@ fn the_hover_snooze_s_picker_stays_with_its_message_when_mail_comes_in_above() {
     assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Photos from the coast walk"), "Teodor's message snoozed");
     harness.get_by_label(ODILE);
 }
+
+#[test]
+fn a_picker_pushed_out_of_sight_by_a_smaller_window_closes_and_leaves_no_keyboard_in_it() {
+    let mut harness = still();
+    let row = harness.get_by_label(TEODOR).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    // The keyboard goes into the picker's rows.
+    harness.key_press(Key::Tab);
+    harness.run();
+    let inside = harness.ctx.memory(|memory| memory.focused());
+    assert!(inside.is_some(), "a row of the picker has the keyboard");
+    harness.set_size(vec2(1300.0, row.top() - 20.0));
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Snooze until").is_none(), "closed with its row out of sight");
+    let now = harness.ctx.memory(|memory| memory.focused());
+    assert!(now.is_none() || now != inside, "the keyboard is not left in the closed picker: {now:?}");
+    harness.set_size(vec2(1300.0, 900.0));
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and stays closed");
+}
