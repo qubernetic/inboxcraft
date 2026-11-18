@@ -303,7 +303,7 @@ const SECRET_CAPACITY: usize = MAX_PASSWORD_CHARS * 4;
 
 /// A password in memory: it has no `Display`, its `Debug` hides it, and its bytes are overwritten when it is cleared
 /// or dropped. Its buffer is made once, big enough for [`MAX_PASSWORD_CHARS`] characters, so typing never moves the
-/// text and leaves no copy behind in a freed buffer.
+/// text and leaves no copy of its own behind in a freed buffer (egui's per-frame copies are outside its reach).
 pub struct Secret(String);
 
 impl Default for Secret {
