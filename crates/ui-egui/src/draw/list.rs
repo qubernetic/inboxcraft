@@ -518,7 +518,7 @@ fn standing_look(theme: &Theme, state: &SendState) -> (IconId, Color32) {
 
 /// One send of the outbox across `ui`'s width: the first recipient's avatar, whom it goes to and the subject (with the
 /// server's reply for a refused one), where it stands, and its buttons; the button pressed.
-fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow) -> Option<Outbox> {
+fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, row: &OutboxRow, set: (usize, usize)) -> Option<Outbox> {
     let s = &theme.spacing;
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -533,6 +533,10 @@ fn outbox_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, ro
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::hover());
     let spoken = mailbox.spoken_outbox(row);
     response.widget_info(|| WidgetInfo::labeled(WidgetRole::ListItem, true, &spoken));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_position_in_set(set.0);
+        node.set_size_of_set(set.1);
+    });
     let side = face_side(theme);
     // A send has no unread dot, so its avatar stands further out than a message's.
     let indent = s.s3 + 2.0;
@@ -1001,7 +1005,7 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: u
             }
         }
         Line::Send(row) => {
-            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row) {
+            if let Some(pressed) = outbox_row(ui, theme, keymap, mailbox, row, (rank, size)) {
                 rows.outbox.set(Some((row.draft, pressed)));
             }
         }

@@ -312,3 +312,22 @@ fn a_refused_invitation_answer_offers_no_edit() {
         assert_eq!(state, Some(SendState::Sending));
     }
 }
+
+#[test]
+fn each_send_of_the_outbox_tells_a_screen_reader_its_place_in_the_list() {
+    let clock = clock();
+    let mut harness = sending(&clock, egui::Theme::Light);
+    send(&mut harness, "First of two");
+    send(&mut harness, "Second of two");
+    harness.state_mut().mailbox_mut().open(Place::Outbox);
+    harness.run();
+    let list = harness.get_by_role_and_label(Role::List, "Sends");
+    assert_eq!(list.accesskit_node().size_of_set(), Some(2), "the list's size");
+    let mut places: Vec<(Option<usize>, Option<usize>)> = harness
+        .query_all_by_role(Role::ListItem)
+        .filter(|node| node.accesskit_node().label().is_some_and(|label| label.contains(" of two")))
+        .map(|node| (node.accesskit_node().position_in_set(), node.accesskit_node().size_of_set()))
+        .collect();
+    places.sort();
+    assert_eq!(places, [(Some(0), Some(2)), (Some(1), Some(2))]);
+}
