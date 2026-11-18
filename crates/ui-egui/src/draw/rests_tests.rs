@@ -254,3 +254,100 @@ fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_th
     assert!(harness.query_by_role_and_label(Role::MenuItemRadio, "STARTTLS").is_none() && !popup::any_open(&harness.ctx), "no list");
     assert!(!harness.state().settings().is_open(), "the palette closed the sheet as it came, as before");
 }
+
+/// Drags the thumb of the bar over the content by `down` points, from its middle.
+fn drag_thumb(harness: &mut Harness<'static, InboxApp>, down: f32) {
+    let from = crate::component::scroll::over_thumb(&harness.ctx).unwrap().center();
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.step();
+    for step in 1..=4 {
+        harness.hover_at(from + vec2(0.0, down * step as f32 / 4.0));
+        harness.step();
+    }
+    harness.drop_at(from + vec2(0.0, down));
+    harness.run();
+}
+
+/// A press, down and up, at `at`.
+fn press_at(harness: &mut Harness<'static, InboxApp>, at: egui::Pos2) {
+    harness.event(egui::Event::PointerMoved(at));
+    harness.step();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.step();
+    }
+    harness.run();
+}
+
+/// Where in the bar's strip (from `top` down) a press lands on `content` (a row, an event), off the thumb: the strip's
+/// middle, at the content's middle, which the thumb does not cover.
+fn beside_the_thumb(harness: &Harness<'static, InboxApp>, top: f32, content: &[egui::Rect]) -> Option<(egui::Rect, egui::Pos2)> {
+    let thumb = crate::component::scroll::over_thumb(&harness.ctx)?;
+    let bottom = harness.ctx.content_rect().bottom();
+    content
+        .iter()
+        .copied()
+        .filter(|rect| rect.right() >= thumb.right() - 0.5 && !thumb.y_range().contains(rect.center().y) && rect.height() > 8.0)
+        .find(|rect| rect.center().y > top + 4.0 && rect.center().y < bottom - 4.0)
+        .map(|rect| (rect, egui::pos2(thumb.center().x, rect.center().y)))
+}
+
+#[test]
+fn the_one_bar_over_the_content_drags_by_its_thumb_and_gives_a_press_beside_it_to_the_content() {
+    // A mail list, short enough to scroll.
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_reduce_motion(true);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 420.0))
+        .with_max_steps(40)
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    let rows = |harness: &Harness<'static, InboxApp>| -> Vec<(egui::Rect, String)> {
+        let view = super::list::view_rect(&harness.ctx).unwrap();
+        let rows = harness.query_all_by_role(Role::ListBoxOption).map(|node| (node.rect(), node.accesskit_node().label().unwrap_or_default()));
+        rows.filter(|(rect, _)| view.contains(rect.center())).collect()
+    };
+    let (top, first) = rows(&harness).first().map(|(rect, label)| (rect.top(), label.clone())).unwrap();
+    // The thumb at the top of its strip: where the strip begins.
+    let strip = crate::component::scroll::over_thumb(&harness.ctx).unwrap().top();
+    drag_thumb(&mut harness, 60.0);
+    let moved = harness.query_all_by_role(Role::ListBoxOption).find(|node| node.accesskit_node().label().as_deref() == Some(first.as_str()));
+    assert!(moved.is_some_and(|row| row.rect().top() < top - 40.0), "the list: the thumb's drag scrolls it");
+    let rects: Vec<egui::Rect> = rows(&harness).into_iter().map(|(rect, _)| rect).collect();
+    let (row, at) = beside_the_thumb(&harness, strip, &rects).unwrap();
+    let label = rows(&harness).into_iter().find(|(rect, _)| *rect == row).map(|(_, label)| label);
+    let selected = harness.state().mailbox().selected();
+    press_at(&mut harness, at);
+    assert_ne!(harness.state().mailbox().selected(), selected, "the list: a press in the strip beside the thumb picks {label:?}");
+
+    // The calendar's agenda.
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_reduce_motion(true);
+    app.show_calendar();
+    let (calendar, mailbox) = app.calendar_mut();
+    calendar.set_view(mailbox, crate::calendar::View::Agenda);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 600.0))
+        .with_max_steps(40)
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    let events = |harness: &Harness<'static, InboxApp>| -> Vec<egui::Rect> {
+        let thumb = crate::component::scroll::over_thumb(&harness.ctx).unwrap();
+        let named: Vec<String> = harness.state().calendar().events().map(|event| event.summary.clone()).collect();
+        let event = |label: Option<String>| label.is_some_and(|label| named.iter().any(|name| label.contains(name.as_str())));
+        let rows = harness.query_all_by_role(Role::Button).filter(|node| event(node.accesskit_node().label())).map(|node| node.rect());
+        rows.filter(|rect| rect.right() >= thumb.right() - 0.5 && rect.left() < thumb.left() - 200.0).collect()
+    };
+    let before = events(&harness);
+    let strip = crate::component::scroll::over_thumb(&harness.ctx).unwrap().top();
+    drag_thumb(&mut harness, 60.0);
+    assert_ne!(events(&harness).first().map(|rect| rect.top()), before.first().map(|rect| rect.top()), "the agenda: the thumb's drag scrolls it");
+    let (_, at) = beside_the_thumb(&harness, strip, &events(&harness)).unwrap();
+    assert!(harness.state().calendar().picked().is_none());
+    press_at(&mut harness, at);
+    assert!(harness.state().calendar().picked().is_some(), "the agenda: a press in the strip beside the thumb picks the event");
+}
