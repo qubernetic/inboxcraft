@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{Queryable as _, by};
 use inboxcraft_time::{FakeClock, Timestamp};
 
 use crate::calendar::View;
@@ -149,6 +149,46 @@ fn after_the_warning_of_a_press_new_event_or_edit_the_first_esc_warns_as_esc_doe
         harness.run();
         assert!(summary(&harness).is_none(), "the second Esc after {way} throws it away");
     }
+}
+
+#[test]
+fn a_save_refused_after_the_warning_shows_its_reason() {
+    let mut harness = window();
+    harness.query_all(by().role(Role::Button).label_contains("Studio stand-up")).next().unwrap().click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let id = harness.state().calendar().editor().and_then(crate::calendar::Editor::id).unwrap();
+    type_more(&mut harness, " moved");
+    press_at(&mut harness, 1300.0, 700.0);
+    harness.run();
+    assert!(warns(&harness), "the press outside warns");
+    // The event goes under the editor (another device deleted it), then Save is refused.
+    {
+        let (calendar, mailbox) = harness.state_mut().calendar_mut();
+        mailbox.run("event.delete", &serde_json::json!({ "id": id })).unwrap();
+        calendar.refresh(mailbox);
+    }
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
+    let problem = harness.state().calendar().editor().and_then(|editor| editor.problem().map(str::to_owned));
+    assert!(problem.as_deref().is_some_and(|problem| problem != WARNING), "the refusal's reason, not the warning: {problem:?}");
+    assert!(!warns(&harness), "the warning gives way to the reason");
+    assert!(harness.query_by_label(problem.as_deref().unwrap_or_default()).is_some(), "the reason is shown");
+    // A bad date, refused after Esc's warning: the reason shows too.
+    harness.state_mut().calendar_mut().0.close_editor();
+    harness.run();
+    typed(&mut harness, "Kiln");
+    harness.state_mut().calendar_mut().0.editor_mut().unwrap().form_mut().start = "soon".to_owned();
+    harness.run();
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(warns(&harness));
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
+    assert!(!warns(&harness), "a refused Save clears the warning");
+    assert!(harness.query_by_label("Starts is no date and time like 2026-11-06 13:00").is_some());
 }
 
 #[test]

@@ -248,9 +248,11 @@ impl Editor {
         self.problem = None;
     }
 
-    /// The save was refused for `why`: the editor stays open and says so.
+    /// The save was refused for `why`: the editor stays open and says so; the reason takes the warning's place, and
+    /// the next Esc warns again.
     pub(crate) fn refused(&mut self, why: String) {
         self.problem = Some(why);
+        self.warned = None;
     }
 
     /// The command that saves the form and its parameters, with the times in UTC from the computer's `offset`; `None`
