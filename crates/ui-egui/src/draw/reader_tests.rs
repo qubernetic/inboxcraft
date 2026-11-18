@@ -1178,3 +1178,29 @@ fn the_attachments_coming_soon_tag_never_takes_a_line_of_its_own() {
         }
     }
 }
+
+#[test]
+fn delete_and_more_stay_in_a_narrow_reader_at_130_percent() {
+    const SUBJECT: &str = "Photos from the coast walk";
+    for scale in [crate::theme::TextScale::default(), crate::theme::TextScale::ALL[4]] {
+        for width in [1440.0, 1100.0, 1024.0, 980.0] {
+            let fetch = Recorder::default();
+            let mut harness = opened_at(&fetch, SUBJECT, width, scale);
+            // The subject runs to the pane's inner right edge.
+            let subject = harness.get_by_label(SUBJECT).rect();
+            let at = format!("{scale:?} {width}");
+            for name in ["Done", "Snooze", "Pin", "Move to a folder", "Delete", "More"] {
+                let rect = harness
+                    .query_all_by_role_and_label(Role::Button, name)
+                    .map(|node| node.rect())
+                    .max_by(|a, b| a.left().total_cmp(&b.left()))
+                    .unwrap();
+                assert!(rect.right() <= width - 1.0 && rect.left() >= subject.left() - 0.5, "{name} stands in the pane: {rect:?} {subject:?} {at}");
+                assert!(rect.bottom() <= subject.top(), "{name} stands over the subject: {rect:?} {subject:?} {at}");
+            }
+            harness.query_all_by_role_and_label(Role::Button, "More").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().click();
+            harness.run();
+            assert!(harness.query_by_role_and_label(Role::MenuItem, "Archive").is_some(), "More opens: {at}");
+        }
+    }
+}

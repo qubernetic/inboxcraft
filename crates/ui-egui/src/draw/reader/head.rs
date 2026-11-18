@@ -315,14 +315,48 @@ fn tag_width(ui: &Ui, theme: &Theme, words: &str) -> f32 {
 /// The widest a tag's words get, in points.
 const TAG_WIDEST: f32 = 240.0;
 
-/// The head's first line: the tags at the left, the acts at the right (Done, Snooze, Pin, Move, Delete and More).
+/// The head's first line: the tags at the left, the acts at the right (Done, Snooze, Pin, Move, Delete and More). The
+/// acts keep whole and the tags give way, a tag that does not fit left out whole. A pane narrower than the six acts
+/// (a narrow window at 130 % text before the window takes one pane) stands them on lines of their own, as many on a line
+/// as fit, against the right edge, so Delete and More are always there.
 fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let side = crate::component::control_side(theme);
     let open = reader.open_id();
+    let width = ui.available_width();
+    let line = |count: f32| count * side + (count - 1.0).max(0.0) * TOOL_GAP;
+    if line(ACTS) > width {
+        let mut per = 1.0_f32;
+        while per < ACTS && line(per + 1.0) <= width {
+            per += 1.0;
+        }
+        let mut lines = 1.0_f32;
+        while lines * per < ACTS {
+            lines += 1.0;
+        }
+        let high = lines * side + (lines - 1.0) * TOOL_GAP;
+        let (_, whole) = ui.allocate_space(vec2(width.max(0.0), high));
+        let mut top = whole.top();
+        let mut first = 0_usize;
+        while first < ACT_COUNT {
+            let count = per.min(ACTS - first as f32);
+            let place = Rect::from_min_size(egui::pos2(whole.right() - line(per), top), vec2(line(per), side));
+            let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
+            child.spacing_mut().item_spacing.x = TOOL_GAP;
+            let mut index = first;
+            let mut placed = 0.0_f32;
+            while placed < count && index < ACT_COUNT {
+                act(&mut child, theme, keymap, mailbox, reader, drawn, index);
+                index += 1;
+                placed += 1.0;
+            }
+            first = index;
+            top += side + TOOL_GAP;
+        }
+        return;
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = TOOL_GAP;
-        let acts = 6.0 * side + 5.0 * TOOL_GAP;
-        let room = (ui.available_width() - acts - TOOL_GAP).max(0.0);
+        let room = (ui.available_width() - line(ACTS) - TOOL_GAP).max(0.0);
         let (_, place) = ui.allocate_space(vec2(room, side));
         let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
         child.set_clip_rect(place.intersect(ui.clip_rect()));
@@ -339,22 +373,47 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
             let shown = tag(&mut child, theme, &words, kind);
             shown.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
         }
-        // A done message, open under "Show done", is brought back by the same button.
-        let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
-        let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
-        act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
-        picker(ui, theme, keymap, mailbox, open, drawn);
-        pin(ui, theme, keymap, mailbox, open, drawn);
-        move_to(ui, theme, keymap, mailbox, open, drawn);
-        act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn);
-        let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-        popup::menu_right(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
-            // Any row chosen closes it: each asks for something.
-            let before = drawn.asked.len();
-            more(ui, theme, keymap, mailbox, reader, drawn);
-            ((), drawn.asked.len() > before)
-        });
+        acts(ui, theme, keymap, mailbox, reader, drawn);
     });
+}
+
+/// How many acts the head's first line holds.
+const ACTS: f32 = 6.0;
+
+/// The acts on the open message, in their order: Done, Snooze, Pin, Move, Delete and More.
+fn acts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+    for index in 0..ACT_COUNT {
+        act(ui, theme, keymap, mailbox, reader, drawn, index);
+    }
+}
+
+/// The acts there are.
+const ACT_COUNT: usize = 6;
+
+/// The act `index` of [`acts`].
+fn act(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn, index: usize) {
+    let open = reader.open_id();
+    match index {
+        0 => {
+            // A done message, open under "Show done", is brought back by the same button.
+            let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+            let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
+            act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
+        }
+        1 => picker(ui, theme, keymap, mailbox, open, drawn),
+        2 => pin(ui, theme, keymap, mailbox, open, drawn),
+        3 => move_to(ui, theme, keymap, mailbox, open, drawn),
+        4 => act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn),
+        _ => {
+            let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
+            popup::menu_right(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
+                // Any row chosen closes it: each asks for something.
+                let before = drawn.asked.len();
+                more(ui, theme, keymap, mailbox, reader, drawn);
+                ((), drawn.asked.len() > before)
+            });
+        }
+    }
 }
 
 /// The button of an act on the open message: `icon`, `name` and the key of `action`; unavailable without a message.
