@@ -214,3 +214,61 @@ fn the_palette_over_the_composer_closes_its_picker_and_one_esc_closes_the_palett
     assert!(composer.is_some_and(|composer| composer.later().is_none()), "the closed picker picked no time");
     assert_eq!(subject(&harness).as_deref(), Some("Plot"), "and nothing typed is lost");
 }
+
+/// The label of the control that has the keyboard, if one has it.
+fn focused(harness: &Harness<'static, InboxApp>) -> Option<String> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+}
+
+/// The mail with its first message open in the reader, Snooze on Ctrl+H and New message on Ctrl+M.
+fn reading_with_keys_on_ctrl() -> Harness<'static, InboxApp> {
+    let mut harness = harness(false);
+    let first = harness.state().mailbox().messages().first().map(|row| row.id).unwrap();
+    harness.state_mut().mailbox_mut().select(Some(first));
+    let keymap = harness.state_mut().keymap_mut();
+    keymap.bind(keymap::SNOOZE, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::H));
+    keymap.bind(keymap::COMPOSE, egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::M));
+    harness.run();
+    assert!(harness.state().can_run(keymap::SNOOZE), "Snooze can run on the open message");
+    harness
+}
+
+#[test]
+fn under_the_sheet_a_key_with_ctrl_runs_no_command_of_the_window_under_it() {
+    let mut harness = reading_with_keys_on_ctrl();
+    let screen = format!("{:?}", harness.state().screen());
+    open_sheet(&mut harness);
+    // Snooze's picker and a new message: neither from a key under the sheet. (The keys to a place of the window, the
+    // calendar's Ctrl+2 among them, close the sheet first, as before.)
+    for (modifiers, key) in [(Modifiers::COMMAND, Key::H), (Modifiers::COMMAND, Key::M)] {
+        harness.key_press_modifiers(modifiers, key);
+        harness.run();
+        harness.run();
+        let case = format!("{modifiers:?} {key:?}");
+        assert!(harness.state().settings().is_open(), "{case}: the sheet stays");
+        assert!(harness.query_by_label("Snooze until").is_none() && !popup::any_open(&harness.ctx), "{case}: no float opened");
+        assert!(harness.state().composer().is_none(), "{case}: no message begun");
+        assert_eq!(format!("{:?}", harness.state().screen()), screen, "{case}: the screen under it stays");
+        let modal = harness.ctx.memory(|memory| memory.top_modal_layer());
+        assert_eq!(modal.map(|layer| layer.id), Some(Id::unique("settings-sheet")), "{case}: the sheet holds the modal layer");
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let inside =
+            harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).is_none_or(|node| sheet.contains_rect(node.rect()));
+        assert!(inside, "{case}: the keyboard is nowhere outside the sheet: {:?}", focused(&harness));
+    }
+    // Esc closes the sheet, as before (Ctrl+, over it keeps it open, as before); the palette's key opens the palette.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings().is_open(), "Ctrl+, keeps the sheet");
+    esc(&mut harness);
+    assert!(!harness.state().settings().is_open(), "Esc closes the sheet");
+    open_sheet(&mut harness);
+    open_palette(&mut harness);
+    assert!(!harness.state().settings().is_open(), "the palette closes the sheet, as before");
+    esc(&mut harness);
+    // Without the sheet the same keys run.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::H);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_some(), "Ctrl+H opens Snooze over the reader");
+}

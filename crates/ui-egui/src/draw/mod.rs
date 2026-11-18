@@ -764,8 +764,27 @@ impl InboxApp {
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
     /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
-    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
+    /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's. While the
+    /// settings sheet is open only the keys of the sheet and of the window as a whole run, with a modifier too: Snooze,
+    /// New message, Send and Fold wait for it to close.
     fn pressed(&self, ctx: &egui::Context, quiet: bool) -> Vec<&'static str> {
+        /// The keys of the settings sheet and of the window as a whole: the sheet's own, the palette, the mode and motion,
+        /// and the ways to a place of the window, which close the sheet first. None acts on what lies under the sheet.
+        const SHEET_KEYS: [&str; 13] = [
+            keymap::SETTINGS,
+            keymap::SHORTCUTS,
+            keymap::PALETTE,
+            keymap::LIGHT,
+            keymap::DARK,
+            keymap::SYSTEM_MODE,
+            keymap::MOTION,
+            keymap::MAIL,
+            keymap::SENT,
+            keymap::LATER,
+            keymap::CALENDAR,
+            keymap::FIND,
+            keymap::FULL_WIDTH,
+        ];
         let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
         keymap::actions()
             .into_iter()
@@ -775,6 +794,9 @@ impl InboxApp {
             .filter(|id| !keymap::CALENDAR_KEYS.contains(id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
             .filter(|id| *id != keymap::SEND || self.composer_keys)
+            // Under the sheet only its own keys and the window's run, with a modifier or without: nothing of the mail,
+            // the reader, the composer or the calendar opens, sends or moves behind it.
+            .filter(|id| !self.settings.is_open() || SHEET_KEYS.contains(id))
             .filter(|id| {
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
                     let held = key.modifiers;
