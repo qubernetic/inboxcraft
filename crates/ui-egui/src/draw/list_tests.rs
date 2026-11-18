@@ -1372,7 +1372,7 @@ fn the_longest_sender_and_subject_cut_with_one_ellipsis_at_130() {
 }
 
 #[test]
-fn the_last_row_of_a_card_draws_no_line_under_it() {
+fn the_last_row_of_a_card_keeps_its_line_six_points_above_the_cards_edge() {
     let harness = harness(true);
     let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
     let line = theme.palette.panel_line;
@@ -1390,7 +1390,8 @@ fn the_last_row_of_a_card_draws_no_line_under_it() {
     let last = harness.get_by_label_contains("Kasimir Vell").rect();
     let first = harness.get_by_label(ODILE).rect();
     assert!(lined(first), "a row with a row under it has its line");
-    assert!(!lined(last), "the card's edge follows the last row: no line of its own");
+    // The design lifts the line only where a row ends on its pane's edge; the card's edge stands 6 points lower.
+    assert!(lined(last), "the last row of a card keeps its line");
 }
 
 /// The showcase in the grouped list, and the messages its "Other" head stands over: those no group holds.

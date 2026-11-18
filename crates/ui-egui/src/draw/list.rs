@@ -1121,8 +1121,10 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             };
             let rect = at(top, bottom, inset);
             let rank = listing.ranks.get(index).copied().unwrap_or(0);
-            // The last line of a card or of the list draws no line under it: the card's edge or nothing follows.
-            let last = listing.span(index + 1).is_none_or(|(next, _)| next > bottom);
+            // The design lifts the line under a row only where the row ends on its card's or pane's edge (a line there
+            // would double the edge). Rows stand `ROW_INSET` inside their cards today, so none does; the rule waits for
+            // the list without cards.
+            let last = listing.sheets.iter().any(|(_, foot)| *foot == bottom);
             let slot = Slot { rank, size: listing.rows, last };
             listed.scope_builder(UiBuilder::new().id_salt(salt(line)).max_rect(rect).layout(layout), |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, if matches!(line, Line::Card(_)) { theme.spacing.s2 } else { 0.0 });
