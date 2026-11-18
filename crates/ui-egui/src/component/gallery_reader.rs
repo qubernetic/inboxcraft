@@ -269,6 +269,8 @@ fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     thread_rows(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     quote_folds(ui, theme);
+    ui.add_space(BOARD_GAP);
+    fitted_messages(ui, theme);
 }
 
 /// The middle column.
@@ -278,8 +280,6 @@ fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     tables(ui, theme);
     ui.add_space(BOARD_GAP);
     picture_boxes(ui, theme, keymap);
-    ui.add_space(BOARD_GAP);
-    fitted_messages(ui, theme);
 }
 
 /// The right column.
