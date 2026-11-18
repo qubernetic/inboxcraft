@@ -457,6 +457,7 @@ impl InboxApp {
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
+            keymap::NEXT | keymap::PREVIOUS => self.screen == Screen::Mail,
             _ => keymap::action(id).is_some(),
         }
     }
@@ -503,6 +504,8 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
             }
             keymap::SEND => self.send_composer(),
+            keymap::NEXT => self.mailbox.step(true),
+            keymap::PREVIOUS => self.mailbox.step(false),
             keymap::SETTINGS => {
                 if !self.settings.is_open() {
                     self.open_settings();

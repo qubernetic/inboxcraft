@@ -84,6 +84,12 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// Select the next message of the list.
+pub const NEXT: &str = "ui.message.next";
+
+/// Select the previous message of the list.
+pub const PREVIOUS: &str = "ui.message.previous";
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -111,6 +117,8 @@ pub fn actions() -> Vec<Action> {
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
+        action(NEXT, tr!("Next message"), IconId::Next),
+        action(PREVIOUS, tr!("Previous message"), IconId::Previous),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),
         action(SNOOZE, tr!("Snooze or remind me"), IconId::Snooze),
@@ -224,6 +232,8 @@ impl Default for Keymap {
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
+        keymap.bind(NEXT, KeyboardShortcut::new(Modifiers::NONE, Key::J));
+        keymap.bind(PREVIOUS, KeyboardShortcut::new(Modifiers::NONE, Key::K));
         keymap
     }
 }
