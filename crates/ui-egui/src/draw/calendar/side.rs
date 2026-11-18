@@ -252,15 +252,19 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     let width = ui.available_width();
     let wrapped = |ui: &mut Ui, text: &str, font: crate::theme::Font, colour, rows: usize| {
         let galley = crate::component::wrapped(ui, text, font, colour, width, rows, egui::Align::Min);
-        let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
-        response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, text));
+        let height = galley.rows.len().max(1) as f32 * font.line;
+        let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        // A line broken on purpose is heard as one.
+        let spoken = text.replace('\n', " ");
+        response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &spoken));
         crate::draw::paint::rows_at(ui.painter(), rect.min, width, galley, colour);
     };
     // The head: the title beside its account's bar, Close at the right.
     let close_side = theme.boxes().button;
     let title =
         crate::component::wrapped(ui, &event.summary, theme.fonts.heading, p.ink, (width - close_side - 8.0 - 11.0).max(1.0), 3, egui::Align::Min);
-    let head_height = (title.size().y + 10.0).max(close_side);
+    let rows = title.rows.len().max(1) as f32;
+    let head_height = (rows * theme.fonts.heading.line + 10.0).max(close_side);
     let (head, head_response) = ui.allocate_exact_size(vec2(width, head_height), Sense::hover());
     ui.painter().rect_filled(
         Rect::from_min_size(head.min, vec2(super::grid::pixels(3.0, ppp), head_height)),
@@ -271,16 +275,18 @@ fn details(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, eve
     crate::draw::paint::rows_at(ui.painter(), pos2(head.left() + 11.0, head.top() + 5.0), title_width, title, p.ink);
     head_response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &event.summary));
     let close = Rect::from_min_size(pos2(head.right() - close_side, head.top()), vec2(close_side, close_side));
-    let closed =
-        ui.scope_builder(UiBuilder::new().max_rect(close), |ui| IconButton::new(IconId::Close, tr!("Close the details")).show(ui, theme, keymap));
+    // A child of its own: the head took its room already, so the cursor stays under it.
+    let closed = IconButton::new(IconId::Close, tr!("Close the details")).show(&mut ui.new_child(UiBuilder::new().max_rect(close)), theme, keymap);
     if super::keys::wanted(ui.ctx(), crate::calendar::Target::Details) {
-        closed.inner.request_focus();
+        closed.request_focus();
     }
-    if closed.inner.clicked() {
+    if closed.clicked() {
         asked.push(Asked::Pick(None));
     }
     ui.add_space(8.0);
-    wrapped(ui, &event.when(), theme.fonts.body, p.ink, 3);
+    // One day's times on a line of their own, under the day, as the design breaks them.
+    let when = if !event.all_day && event.first == event.last { event.when().replacen(", ", ",\n", 1) } else { event.when() };
+    wrapped(ui, &when, theme.fonts.body, p.ink, 4);
     if let Some(zone) = event.zone_line() {
         ui.add_space(8.0);
         wrapped(ui, &zone, theme.fonts.caption, p.muted, 3);

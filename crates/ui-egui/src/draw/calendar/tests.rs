@@ -347,3 +347,13 @@ fn texts(harness: &Harness<'static, InboxApp>, text: &str) -> Vec<egui::Color32>
     harness.output().shapes.iter().for_each(|clipped| open(&clipped.shape, text, &mut out));
     out
 }
+
+#[test]
+fn a_long_title_in_the_details_pushes_the_times_down_and_the_day_s_times_stand_under_the_day() {
+    let mut harness = on_calendar(egui::Theme::Dark);
+    pick(&mut harness, "Call with Petra about the logo");
+    let title = harness.get_by_label("Call with Petra about the logo").rect();
+    let when = harness.get_by_label("Thursday 5 November, 09:30 – 10:30").rect();
+    assert!(when.top() >= title.bottom(), "the times under the title: {title:?} {when:?}");
+    assert!(when.height() >= 2.0 * 22.0 - 0.5, "the times on a line of their own: {when:?}");
+}
