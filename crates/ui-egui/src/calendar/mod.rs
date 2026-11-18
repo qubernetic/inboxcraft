@@ -240,7 +240,7 @@ impl EventRow {
     }
 
     fn read(value: &Value) -> Option<Self> {
-        let text = |key: &str| shown(value.get(key).and_then(Value::as_str).unwrap_or_default());
+        let text = |key: &str| line(value.get(key).and_then(Value::as_str).unwrap_or_default());
         let moment = |key: &str| value.get(key).and_then(Value::as_str).and_then(Moment::parse);
         let day = |key: &str| value.get(key).and_then(Value::as_str).and_then(Day::parse);
         let (start, end) = (moment("local_start")?, moment("local_end")?);
@@ -884,6 +884,18 @@ fn paragraphs(text: &str) -> String {
         .filter(|c| !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'))
         .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
         .take(MAX_DESCRIPTION)
+        .collect()
+}
+
+/// An event's title or place from a server fit for one line, and whole: every control character (line breaks, tabs,
+/// NUL) a space, the bidi controls that could reorder it gone, cut only past the engine's own cap
+/// ([`editor::MAX_FIELD`], 1 000 characters). The details wrap it; an Edit opens on it, so it sends nothing it did not
+/// change.
+fn line(text: &str) -> String {
+    text.chars()
+        .filter(|c| !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}'))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(editor::MAX_FIELD)
         .collect()
 }
 
