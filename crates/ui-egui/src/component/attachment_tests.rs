@@ -174,8 +174,14 @@ fn in_a_narrow_pane_nothing_paints_outside_the_box() {
                 let paint = painted(&harness, &label);
                 for shape in &paint.shapes {
                     if let Look::Text { text, .. } = &shape.look {
-                        // What shows of a word stays inside the box: cut whole, or clipped at its edge.
-                        assert!(shape.inside || shape.clipped, "{text:?} at {:?} paints past the box {rect:?}: {at}", shape.rect);
+                        // A word stays inside the box: cut by the one rule, never clipped at its edge. Only a room
+                        // narrower than the box's least (its icon and the room around its parts, 100 at 100 %) clips
+                        // what does not fit at the box's edge.
+                        if room >= 160.0 {
+                            assert!(shape.inside, "{text:?} at {:?} paints past the box {rect:?}: {at}", shape.rect);
+                        } else {
+                            assert!(shape.inside || shape.clipped, "{text:?} at {:?} paints past the box {rect:?}: {at}", shape.rect);
+                        }
                     }
                 }
                 // A link that stands keeps inside the box.
