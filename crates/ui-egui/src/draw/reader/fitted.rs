@@ -377,11 +377,18 @@ fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> 
         keep.pass = pass;
         return Some(keep.laid.clone());
     }
-    let total = keeps.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add);
-    // Refused before: still plain while it would not fit beside what is kept, and not laid out again to see.
+    // Refused before: still plain while it would not fit beside what is kept, and not laid out again to see. What was
+    // not drawn in the last pass (a message folded since) goes first, so its room comes back; every message still
+    // unfolded is drawn every pass, so this never drops one in sight. One kept but not yet drawn in this pass may be
+    // folded: one more pass tells.
     if let Some(refusal) = refused.iter_mut().find(|refusal| refusal.who == who && refusal.key == key) {
         refusal.pass = pass;
+        keeps.retain(|keep| keep.pass.saturating_add(1) >= pass);
+        let total = keeps.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add);
         if refusal.glyphs.saturating_add(total) > cap() {
+            if keeps.iter().any(|keep| keep.pass < pass) {
+                ui.ctx().request_repaint();
+            }
             return None;
         }
     }

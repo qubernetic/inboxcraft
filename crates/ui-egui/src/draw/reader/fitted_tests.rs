@@ -84,6 +84,43 @@ fn a_thread_over_the_cap_keeps_its_letters_under_it_and_lays_nothing_out_again_a
 }
 
 #[test]
+fn a_message_shown_plain_over_the_cap_is_fitted_again_once_a_big_one_is_folded() {
+    // Three messages of about 1.4 million letters each; the first is folded once the third has been shown plain.
+    let documents: Vec<Document> =
+        (0..3).map(|index| display(&format!("<p>{index} {}</p>", "The minutes of the allotment meeting, read again. ".repeat(33_000)))).collect();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness =
+        Harness::builder().with_size(vec2(800.0, 600.0)).with_max_steps(16).with_context_setup(crate::theme::install_fonts).build_ui_state(
+            move |ui, (first, fitted): &mut (usize, Vec<bool>)| {
+                let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+                crate::component::scroll::show(ui, &theme, egui::ScrollArea::vertical(), |ui| {
+                    let mut textures = super::Textures::default();
+                    let mut drawn = super::Drawn::default();
+                    fitted.clear();
+                    for (id, document) in (1_u64..).zip(&documents).skip(*first) {
+                        fitted.push(super::blocks(ui, &theme, &reader, id, 1, document, &document.blocks, 0, &mut textures, &mut drawn));
+                    }
+                });
+            },
+            (0, Vec::new()),
+        );
+    harness.run();
+    assert_eq!(harness.state().1, vec![true, true, false]);
+    harness.state_mut().0 = 1;
+    harness.run();
+    // The folded one's room comes back: the third is fitted, and the first's letters are let go.
+    assert_eq!(harness.state().1, vec![true, true]);
+    let (count, glyphs) = kept_now(&harness.ctx);
+    assert!(count == 2 && glyphs <= KEPT_GLYPHS, "{count} layouts kept, {glyphs} letters");
+    let made = made_now(&harness.ctx);
+    for frame in 0..10 {
+        harness.step();
+        assert_eq!(made_now(&harness.ctx), made, "frame {frame}: laid out again");
+        assert_eq!(harness.state().1, vec![true, true], "frame {frame}");
+    }
+}
+
+#[test]
 fn a_message_laid_out_again_is_drawn_from_its_new_blocks_wherever_they_lie() {
     // The blocks change in place (the same list at the same address, as a freed list's place is taken again by the
     // next one), and the reader gives the message a new generation: the new words are drawn.
