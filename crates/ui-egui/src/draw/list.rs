@@ -276,6 +276,8 @@ struct Drawn {
     acted: Option<Act>,
     /// It is the row sliding out, and it is all the way out.
     out: bool,
+    /// It has the keyboard's focus.
+    focused: bool,
 }
 
 /// One message row across `ui`'s width; a click selects it. The row leaving the list slides to the right and fades
@@ -298,7 +300,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     });
     let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
     if !ui.is_rect_visible(rect) {
-        return Drawn { clicked: response.clicked(), acted: None, out: leaving };
+        return Drawn { clicked: response.clicked(), acted: None, out: leaving, focused: response.has_focus() };
     }
     let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
     let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
@@ -326,7 +328,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
             });
         });
     }
-    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0 }
+    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0, focused: response.has_focus() }
 }
 
 /// The id of message `id`'s row: its focus and its context menu, wherever it is built.
@@ -619,6 +621,9 @@ impl Rows<'_> {
     /// Draws `message`'s row across `ui`, the `rank`th (from 0) of the list's `size` rows.
     fn mail(&self, ui: &mut Ui, message: &MessageRow, rank: usize, size: usize) {
         let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size));
+        if drawn.focused {
+            ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
+        }
         if drawn.clicked {
             self.clicked.set(Some(message.id));
         }
@@ -1014,6 +1019,8 @@ struct Kept {
     anchor: Option<(u64, i64)>,
     /// The viewport's top then, in hundredths of a point.
     offset: i64,
+    /// The viewport's height then, in hundredths of a point.
+    height: i64,
     /// The keyed row's message last frame: a row is brought into sight when the keyed message changes (a key or a
     /// press moved it) or the list is first shown, never because lines above it came or went.
     keyed: Option<u64>,
@@ -1039,7 +1046,9 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     let kept = ui.data(|data| data.get_temp::<Kept>(kept_id));
     let same = |kept: &Kept| kept.place == mailbox.place() && kept.view == mailbox.inbox_view() && kept.query == mailbox.query();
     let kept = kept.filter(same);
-    let mut area = ScrollArea::vertical().id_salt(id_salt).auto_shrink([false, false]);
+    // The offset this frame sets, if any: the first message in sight kept in place when the lines above it changed,
+    // then the keyed row brought into sight when the keyed message changed.
+    let mut forced = None;
     if let Some(kept) = &kept
         && kept.offset > 50
         && let Some((id, below)) = kept.anchor
@@ -1047,16 +1056,42 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
     {
         let wanted = hundredths(top).saturating_sub(below);
         if wanted != kept.offset {
-            area = area.vertical_scroll_offset(points(wanted).max(0.0));
+            forced = Some(points(wanted).max(0.0));
         }
     }
     let keyed = mailbox.selected().filter(|_| mailbox.keyed());
     let moved = keyed.filter(|keyed| kept.as_ref().is_none_or(|kept| kept.keyed != Some(*keyed)));
-    let scroll_to = moved.and_then(|id| listing.find(id));
-    // egui springs an offset past last frame's end back to it (rubber-banding); the offset that keeps a message in
-    // place after the lines above it grew lies past that end, so the list's area does not rubber-band.
+    let mut scroll_to = None;
+    if let Some((top, bottom)) = moved.and_then(|id| listing.find(id)).and_then(|index| listing.span(index)) {
+        match &kept {
+            // The least scroll that shows the row whole, set before the lines are built, so the row is built (and
+            // can keep a focus given to it) in this frame.
+            Some(kept) if kept.height > 0 => {
+                let (offset, view) = (forced.unwrap_or_else(|| points(kept.offset)), points(kept.height));
+                let wanted = if top < offset {
+                    top
+                } else if bottom > offset + view {
+                    bottom - view
+                } else {
+                    offset
+                };
+                if forced.is_some() || hundredths(wanted) != kept.offset {
+                    forced = Some(wanted.max(0.0));
+                }
+            }
+            // The list first shown: egui scrolls to it once it knows the viewport.
+            _ => scroll_to = Some((top, bottom)),
+        }
+    }
+    let mut area = ScrollArea::vertical().id_salt(id_salt).auto_shrink([false, false]);
+    // egui springs an offset past last frame's end back to it (rubber-banding), and the offset that keeps a message
+    // in place after the lines above it grew can lie past that end: the frame that sets an offset does not
+    // rubber-band.
     let kinetic = ui.spacing().scroll.kinetic;
-    ui.spacing_mut().scroll.kinetic.rubber_band = false;
+    if let Some(offset) = forced {
+        area = area.vertical_scroll_offset(offset);
+        ui.spacing_mut().scroll.kinetic.rubber_band = false;
+    }
     let output = crate::component::scroll::show_viewport(ui, theme, area, |ui, viewport| {
         ui.set_min_height(listing.height);
         let room = ui.max_rect();
@@ -1101,9 +1136,7 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
                 draw_line(ui, rows, line, rank, listing.rows);
             });
         }
-        if let Some(index) = scroll_to
-            && let Some((top, bottom)) = listing.span(index)
-        {
+        if let Some((top, bottom)) = scroll_to {
             ui.scroll_to_rect(at(top, bottom, 0.0), None);
         }
         let whole = (first..end)
@@ -1117,11 +1150,11 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             Some(Line::Mail(message)) => Some((message.id, hundredths(listing.span(index)?.0 - viewport.top()))),
             _ => None,
         });
-        (Built { first: from, count: to.saturating_sub(from) }, anchor, hundredths(viewport.top()))
+        (Built { first: from, count: to.saturating_sub(from) }, anchor, hundredths(viewport.top()), hundredths(viewport.height()))
     });
     ui.spacing_mut().scroll.kinetic = kinetic;
-    let (built, anchor, offset) = output.inner;
-    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, keyed };
+    let (built, anchor, offset, height) = output.inner;
+    let kept = Kept { place: mailbox.place(), view: mailbox.inbox_view(), query: mailbox.query().to_owned(), anchor, offset, height, keyed };
     ui.data_mut(|data| {
         data.insert_temp(Id::unique("list-view-rect"), output.inner_rect);
         data.insert_temp(kept_id, kept);
@@ -1218,6 +1251,18 @@ pub(super) fn page(ctx: &egui::Context) -> usize {
 /// Where [`page`] is kept.
 fn page_id() -> Id {
     Id::unique("list-page")
+}
+
+/// The message whose row has the keyboard's focus: the row that had it when the list was last drawn, if it still
+/// has it.
+pub(super) fn focused_row(ctx: &egui::Context) -> Option<u64> {
+    let id = ctx.data(|data| data.get_temp::<u64>(focused_row_id()))?;
+    ctx.memory(|memory| memory.has_focus(row_id(id))).then_some(id)
+}
+
+/// Where [`focused_row`] is kept.
+fn focused_row_id() -> Id {
+    Id::unique("list-focused-row")
 }
 
 /// The list's viewport on the screen in the last frame that drew one.

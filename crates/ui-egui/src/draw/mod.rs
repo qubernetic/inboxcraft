@@ -107,8 +107,6 @@ struct Keys {
     escape: bool,
     down: bool,
     up: bool,
-    /// Page Down or End (forward), Page Up or Home, and how many rows they move.
-    jump: Option<(bool, usize)>,
     /// Whether the mail's own keys rest.
     typing: bool,
     /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
@@ -125,6 +123,8 @@ pub struct InboxApp {
     reader: Reader,
     textures: reader::Textures,
     hover: Option<String>,
+    /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
+    list_row: Option<u64>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -230,6 +230,7 @@ impl InboxApp {
             reader: Reader::new(fetch, save),
             textures: reader::Textures::new(),
             hover: None,
+            list_row: None,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -456,6 +457,7 @@ impl InboxApp {
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
+            _ if keymap::LIST_KEYS.contains(&id) => self.list_row.is_some(),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -521,12 +523,31 @@ impl InboxApp {
                 let reduce = !self.reduce_motion();
                 self.set_reduce_motion(reduce);
             }
+            keymap::PAGE_DOWN | keymap::PAGE_UP | keymap::FIRST | keymap::LAST => self.move_in_list(ctx, id),
             _ => {
                 if let Some((row, act)) = self.row_act(id) {
                     self.mailbox.start(row, act);
                 }
             }
         }
+    }
+
+    /// Moves the list's focused row as the list's key `id` asks (a page down or up, the last or the first row): it is
+    /// selected, as the arrows select, and takes the focus; the list brings it into sight.
+    fn move_in_list(&mut self, ctx: &egui::Context, id: &str) {
+        let Some(from) = self.list_row else { return };
+        let (forward, rows) = match id {
+            keymap::PAGE_DOWN => (true, list::page(ctx)),
+            keymap::PAGE_UP => (false, list::page(ctx)),
+            keymap::LAST => (true, usize::MAX),
+            _ => (false, usize::MAX),
+        };
+        self.mailbox.select(Some(from));
+        self.mailbox.step_by(forward, rows);
+        if let Some(to) = self.mailbox.selected() {
+            ctx.memory_mut(|memory| memory.request_focus(list::row_id(to)));
+        }
+        ctx.request_repaint();
     }
 
     /// Opens the time picker over the open message in the next frame, `typed` in its field: Snooze, or "Remind me if no
@@ -636,15 +657,13 @@ impl InboxApp {
         let quiet = focused || held || self.settings.is_open() || self.docked();
         let typing = quiet || self.screen == Screen::Calendar;
         if held {
-            return Keys { ran: Vec::new(), escape: false, down: false, up: false, jump: None, typing, quiet };
+            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
         }
+        self.list_row = list::focused_row(ctx);
         let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
         let (escape, down, up) =
             ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
-        let page = list::page(ctx);
-        let jumps = [(Key::PageDown, true, page), (Key::PageUp, false, page), (Key::End, true, usize::MAX), (Key::Home, false, usize::MAX)];
-        let jump = jumps.into_iter().find(|(key, ..)| ctx.input(|input| input.key_pressed(*key))).map(|(_, forward, rows)| (forward, rows));
-        Keys { ran, escape, down, up, jump, typing, quiet }
+        Keys { ran, escape, down, up, typing, quiet }
     }
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
@@ -658,6 +677,11 @@ impl InboxApp {
             .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
             .filter(|id| {
+                // The list's keys run while a row of the list has the focus (which quiets the other bare keys), and
+                // never else: a field keeps its Home and End, the reader its open message.
+                if keymap::LIST_KEYS.contains(id) {
+                    return self.list_row.is_some() && self.keymap.pressed(ctx, id);
+                }
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
                     let held = key.modifiers;
                     !(held.command || held.ctrl || held.mac_cmd || held.alt)
@@ -1248,14 +1272,10 @@ impl InboxApp {
         }
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
-        let Keys { mut ran, escape, down, up, jump, typing, quiet } = self.keys(ui.ctx());
+        let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
             self.mailbox.step(down);
-            stepped = true;
-        }
-        if !typing && let Some((forward, rows)) = jump {
-            self.mailbox.step_by(forward, rows);
             stepped = true;
         }
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };

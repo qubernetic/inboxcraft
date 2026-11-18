@@ -904,28 +904,8 @@ fn the_keyed_row_is_scrolled_into_sight_though_it_was_not_built() {
         harness.run();
         assert_eq!(selected_at(&harness), Some(5_001), "{view:?}");
         assert!(selected_in_sight(&harness), "{view:?}: the keyed row is brought into sight");
-        if view != InboxView::Simple {
-            continue;
-        }
         let built = super::list::built(&harness.ctx).unwrap();
         assert!(built.count <= MOST_BUILT, "{built:?}");
-        harness.key_press(Key::PageDown);
-        harness.run();
-        let paged = selected_at(&harness).unwrap();
-        assert!(paged > 5_005 && paged < 5_030, "a page down: {paged}");
-        assert!(selected_in_sight(&harness), "after Page Down");
-        harness.key_press(Key::PageUp);
-        harness.run();
-        assert_eq!(selected_at(&harness), Some(5_001), "a page up again");
-        assert!(selected_in_sight(&harness), "after Page Up");
-        harness.key_press(Key::End);
-        harness.run();
-        assert_eq!(selected_at(&harness), Some(9_999), "End");
-        assert!(selected_in_sight(&harness), "after End");
-        harness.key_press(Key::Home);
-        harness.run();
-        assert_eq!(selected_at(&harness), Some(0), "Home");
-        assert!(selected_in_sight(&harness), "after Home");
     }
 }
 
@@ -1155,4 +1135,83 @@ fn tab_walks_down_the_whole_list_building_rows_as_it_goes() {
     }
     assert_eq!(harness.ctx.memory(egui::Memory::focused), Some(super::list::row_id(1_000_000)), "Shift+Tab walks back up");
     assert!(in_sight(&harness, 1_000_000));
+}
+
+/// The row of the selected message has the keyboard's focus.
+fn focus_selected(harness: &mut Harness<'static, InboxApp>) {
+    let id = harness.state().mailbox().selected().unwrap();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(id)));
+    harness.run();
+}
+
+/// Whether the selected message's row has the keyboard's focus.
+fn selected_focused(harness: &Harness<'static, InboxApp>) -> bool {
+    let id = harness.state().mailbox().selected();
+    id.is_some_and(|id| harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(id))))
+}
+
+#[test]
+fn page_down_page_up_end_and_home_move_the_focused_row_as_keymap_actions() {
+    use crate::keymap::{self, Keymap};
+    let defaults = Keymap::default();
+    for (action, key) in [(keymap::PAGE_DOWN, Key::PageDown), (keymap::PAGE_UP, Key::PageUp), (keymap::FIRST, Key::Home), (keymap::LAST, Key::End)] {
+        assert_eq!(defaults.shortcut(action), Some(egui::KeyboardShortcut::new(Modifiers::NONE, key)), "{action}");
+        assert!(keymap::action(action).is_some(), "{action} is an action, on the Shortcuts page");
+    }
+    let mut harness = ten_thousand(InboxView::Simple);
+    key(&mut harness, 1_005_001);
+    focus_selected(&mut harness);
+    harness.key_press(Key::PageDown);
+    harness.run();
+    let paged = selected_at(&harness).unwrap();
+    assert!(paged > 5_005 && paged < 5_030, "a page down: {paged}");
+    assert!(selected_in_sight(&harness) && selected_focused(&harness), "after Page Down the row is in sight and focused");
+    harness.key_press(Key::PageUp);
+    harness.run();
+    assert_eq!(selected_at(&harness), Some(5_001), "a page up again");
+    assert!(selected_in_sight(&harness) && selected_focused(&harness), "after Page Up");
+    harness.key_press(Key::End);
+    harness.run();
+    assert_eq!(selected_at(&harness), Some(9_999), "End");
+    assert!(selected_in_sight(&harness) && selected_focused(&harness), "after End");
+    harness.key_press(Key::Home);
+    harness.run();
+    assert_eq!(selected_at(&harness), Some(0), "Home");
+    assert!(selected_in_sight(&harness) && selected_focused(&harness), "after Home");
+    // Rebound: N goes to the last row, End no more.
+    harness.state_mut().keymap_mut().bind(keymap::LAST, egui::KeyboardShortcut::new(Modifiers::NONE, Key::N));
+    harness.key_press(Key::End);
+    harness.run();
+    assert_eq!(selected_at(&harness), Some(0), "End has no action now");
+    harness.key_press(Key::N);
+    harness.run();
+    assert_eq!(selected_at(&harness), Some(9_999), "its new key");
+}
+
+#[test]
+fn the_list_keys_rest_while_the_list_does_not_have_the_keyboard() {
+    let mut harness = ten_thousand(InboxView::Simple);
+    // A message open, nothing focused: reading, End and Page Down leave the open message alone.
+    harness.state_mut().mailbox_mut().select(Some(1_000_003));
+    harness.run();
+    assert_eq!(harness.ctx.memory(egui::Memory::focused), None);
+    for pressed in [Key::End, Key::PageDown, Key::Home, Key::PageUp] {
+        harness.key_press(pressed);
+        harness.run();
+        assert_eq!(harness.state().mailbox().selected(), Some(1_000_003), "{pressed:?} with nothing focused");
+    }
+    // The search field keeps its own Home and End.
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.run();
+    harness.event(egui::Event::Text("odile".to_owned()));
+    harness.run();
+    harness.key_press(Key::Home);
+    harness.run();
+    harness.event(egui::Event::Text("x".to_owned()));
+    harness.run();
+    harness.key_press(Key::End);
+    harness.run();
+    harness.event(egui::Event::Text("y".to_owned()));
+    harness.run();
+    assert_eq!(harness.state().search_text(), "xodiley", "Home and End move the field's caret");
 }

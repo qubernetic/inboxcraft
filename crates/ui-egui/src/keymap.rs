@@ -84,6 +84,21 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// Move the list's focused row a page down: by the rows in sight.
+pub const PAGE_DOWN: &str = "ui.list.page_down";
+
+/// Move the list's focused row a page up.
+pub const PAGE_UP: &str = "ui.list.page_up";
+
+/// Move the list's focused row to the first row.
+pub const FIRST: &str = "ui.list.first";
+
+/// Move the list's focused row to the last row.
+pub const LAST: &str = "ui.list.last";
+
+/// The actions that move the focused row of the list: they run only while a row of the list has the keyboard.
+pub const LIST_KEYS: [&str; 4] = [PAGE_DOWN, PAGE_UP, FIRST, LAST];
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -117,6 +132,10 @@ pub fn actions() -> Vec<Action> {
         action(READ, tr!("Mark read or unread"), IconId::MarkRead),
         action(FLAG, tr!("Flag or take the flag off"), IconId::Flag),
         action(DELETE, tr!("Delete"), IconId::Delete),
+        action(PAGE_DOWN, tr!("A page down the list"), IconId::Caret),
+        action(PAGE_UP, tr!("A page up the list"), IconId::Caret),
+        action(FIRST, tr!("The first message of the list"), IconId::Caret),
+        action(LAST, tr!("The last message of the list"), IconId::Caret),
         action(UNDO, tr!("Undo"), IconId::Back),
         action(FULL_WIDTH, tr!("Reader full width"), IconId::Mail),
         action(SETTINGS, tr!("Settings"), IconId::Settings),
@@ -224,6 +243,10 @@ impl Default for Keymap {
         keymap.bind(CALENDAR, KeyboardShortcut::new(Modifiers::COMMAND, Key::Num2));
         keymap.bind(COMPOSE, KeyboardShortcut::new(Modifiers::NONE, Key::C));
         keymap.bind(SEND, KeyboardShortcut::new(Modifiers::COMMAND, Key::Enter));
+        keymap.bind(PAGE_DOWN, KeyboardShortcut::new(Modifiers::NONE, Key::PageDown));
+        keymap.bind(PAGE_UP, KeyboardShortcut::new(Modifiers::NONE, Key::PageUp));
+        keymap.bind(FIRST, KeyboardShortcut::new(Modifiers::NONE, Key::Home));
+        keymap.bind(LAST, KeyboardShortcut::new(Modifiers::NONE, Key::End));
         keymap
     }
 }
