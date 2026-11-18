@@ -142,6 +142,9 @@ pub struct InboxApp {
     /// on: the reader shows nothing open and the list selects no row until the owner opens a message; an arrow opens
     /// the row beside the gap, and "Open the message the rule names" opens the rule's row.
     held_back: Option<Held>,
+    /// The message the list's keys or its rows' acts acted on last: when it leaves while the list has the keyboard,
+    /// the list walks on to the rule's row instead of holding it back.
+    list_acted: Option<u64>,
     /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
     list_row: Option<u64>,
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
@@ -281,6 +284,7 @@ impl InboxApp {
             textures: reader::Textures::new(),
             hover: None,
             held_back: None,
+            list_acted: None,
             list_row: None,
             list_keys: true,
             reading: false,
@@ -1166,8 +1170,13 @@ impl InboxApp {
     fn sync(&mut self) {
         let open = self.reader.open_id();
         let gone = open.is_some_and(|id| !self.mailbox.messages().iter().any(|row| row.id == id));
-        // A person walking the list by its keys keeps walking: the rule's row is keyed in the list, as the lists have it.
-        let walking = self.mailbox.keyed() && self.list_keys;
+        // While the list has the keyboard on the open message's row, or acted on it itself, the list walks on: the
+        // rule's row is keyed in the list, as the lists have it. Anything else that took the message away (the reader's
+        // acts, the server) leaves nothing open.
+        let walking = self.list_keys && open.is_some() && (self.list_acted == open || self.list_row == open);
+        if gone {
+            self.list_acted = None;
+        }
         if let (true, false, Some(pick)) = (gone, walking, self.mailbox.selected()) {
             // The rule's row is kept, not selected: no act lands on a message that is not shown.
             let at = self.mailbox.messages().iter().position(|row| row.id == pick);
@@ -2111,6 +2120,7 @@ impl InboxApp {
             self.mailbox.left();
         }
         if let Some((id, act)) = acted {
+            self.list_acted = Some(id);
             start(&mut self.reader, &mut self.mailbox, id, act);
         }
         if undone {
