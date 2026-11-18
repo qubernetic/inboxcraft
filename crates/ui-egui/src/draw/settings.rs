@@ -879,8 +879,9 @@ fn place(theme: &Theme, screen: Rect, controls: Option<Rect>) -> Rect {
     if let Some(controls) = controls.filter(|controls| controls.intersects(rect)) {
         rect.min.y = (controls.bottom() + theme.spacing.s2).min(rect.max.y - 1.0);
     }
-    // On whole points, so its hairlines and columns stand on whole pixels.
-    Rect::from_min_max(rect.min.round(), rect.max.round())
+    // On whole points, so its hairlines and columns stand on whole pixels; never inverted, however small the window.
+    let min = rect.min.round();
+    Rect::from_min_max(min, rect.max.round().max(min))
 }
 
 /// The id of the sheet's layer.

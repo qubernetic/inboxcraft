@@ -342,3 +342,17 @@ fn calendar_rows_stand_56_apart_with_read_again_at_their_end_and_about_names_the
     harness.run();
     assert!(harness.query_all_by_label_contains("· Phosphor. The typefaces under the SIL Open Font Licence, the icons under MIT.").next().is_some());
 }
+
+#[test]
+fn a_window_too_small_for_the_sheet_draws_it_without_a_fault() {
+    for size in [vec2(10.0, 10.0), vec2(30.0, 400.0), vec2(400.0, 20.0)] {
+        let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+        let mut harness = Harness::builder().with_size(size).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        for section in Section::ALL {
+            harness.state_mut().settings_mut().open_at(section);
+            harness.run();
+            let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+            assert!(sheet.width() >= 0.0 && sheet.height() >= 0.0, "{size:?} {section:?}: {sheet:?}");
+        }
+    }
+}
