@@ -127,10 +127,21 @@ enum Kind {
     Table(Box<Grid>),
 }
 
-/// The words of one link in a text, as it wrapped: a box for each of its rows, relative to the galley.
+/// The words of one link in a text, as it wrapped: a box for each of its rows and the band of its underline there,
+/// relative to the galley.
 struct Piece {
     link: usize,
     rects: Vec<Rect>,
+    bands: Vec<Rect>,
+}
+
+/// A run of one look in a text: its characters `start..end`, its link, and its underline's place under the baseline
+/// and its thickness, in points.
+struct Section {
+    start: usize,
+    end: usize,
+    link: Option<usize>,
+    under: (f32, f32),
 }
 
 /// A table laid out: its columns' lefts and widths, its rows, how wide and high it is, and what was left out.
@@ -448,8 +459,7 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap.max(1.0);
     job.wrap.break_anywhere = pre;
-    // Per section: its characters (start, end) and its link.
-    let mut sections: Vec<(usize, usize, Option<usize>)> = Vec::new();
+    let mut sections: Vec<Section> = Vec::new();
     let mut chars = 0_usize;
     let mut words = String::new();
     for span in spans {
@@ -464,15 +474,17 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         let linked = span.link.is_some();
         let mut format: TextFormat = Font { face, ..font }.format(if linked { p.cyan_text } else { colour });
         format.italics = span.italic;
-        if span.underline || linked {
-            format.underline = Stroke::new(1.0, if linked { p.cyan_text } else { colour });
+        // A link's underline is painted as the design draws it (the face's own place and weight, see `pieces`).
+        if span.underline && !linked {
+            format.underline = Stroke::new(1.0, colour);
         }
         if span.strike {
             format.strikethrough = Stroke::new(1.0, colour);
         }
         let shown = font.text(&crate::component::plain_lines(&span.text));
         let count = shown.chars().count();
-        sections.push((chars, chars.saturating_add(count), span.link));
+        let (below, thick) = face.underline();
+        sections.push(Section { start: chars, end: chars.saturating_add(count), link: span.link, under: (below * font.size, thick * font.size) });
         chars = chars.saturating_add(count);
         words.push_str(crate::quote::cut(&shown, (MOST_SPOKEN * 4).saturating_sub(words.len())));
         job.append(&shown, 0.0, format);
@@ -484,14 +496,14 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         let spoken = crate::component::spoken(crate::component::capped(&words, MOST_SPOKEN).0);
         return Some((Kind::Pre { galley, spoken }, size));
     }
-    let only_links = sections.iter().all(|(start, end, link)| link.is_some() || start == end);
+    let only_links = sections.iter().all(|section| section.link.is_some() || section.start == section.end);
     let spoken = (!only_links).then(|| crate::component::spoken(crate::component::capped(&words, MOST_SPOKEN).0));
     let size = vec2(room, galley.size().y.ceil().max(font.line));
     Some((Kind::Text { galley, left, mark, links, spoken }, size))
 }
 
 /// The boxes of the links of `galley`, whose `sections` say which characters belong to which link.
-fn pieces(galley: &Galley, sections: &[(usize, usize, Option<usize>)]) -> Vec<Piece> {
+fn pieces(galley: &Galley, sections: &[Section]) -> Vec<Piece> {
     let mut found: Vec<Piece> = Vec::new();
     let mut start = 0_usize;
     let mut section = 0_usize;
@@ -501,23 +513,32 @@ fn pieces(galley: &Galley, sections: &[(usize, usize, Option<usize>)]) -> Vec<Pi
         let rect = row.rect();
         for (offset, glyph) in row.glyphs.iter().enumerate() {
             let at = start.saturating_add(offset);
-            while sections.get(section).is_some_and(|(_, end, _)| *end <= at) {
+            while sections.get(section).is_some_and(|run| run.end <= at) {
                 section += 1;
             }
-            let link = sections.get(section).filter(|(begin, ..)| *begin <= at).and_then(|(.., link)| *link);
-            let Some(link) = link else {
+            let Some((link, (below, thick))) =
+                sections.get(section).filter(|run| run.start <= at).and_then(|run| run.link.map(|link| (link, run.under)))
+            else {
                 running = None;
                 continue;
             };
             let left = rect.left() + glyph.pos.x;
             let right = left + glyph.advance_width;
             let boxed = Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
+            let middle = rect.top() + glyph.pos.y + below;
+            let band = Rect::from_min_max(pos2(left, middle - thick / 2.0), pos2(right, middle + thick / 2.0));
             match found.last_mut() {
-                Some(piece) if running == Some(link) && piece.link == link => match piece.rects.last_mut() {
-                    Some(last) if (last.top() - boxed.top()).abs() < 0.5 => *last = last.union(boxed),
-                    _ => piece.rects.push(boxed),
+                Some(piece) if running == Some(link) && piece.link == link => match (piece.rects.last_mut(), piece.bands.last_mut()) {
+                    (Some(last), Some(under)) if (last.top() - boxed.top()).abs() < 0.5 => {
+                        *last = last.union(boxed);
+                        *under = under.union(band);
+                    }
+                    _ => {
+                        piece.rects.push(boxed);
+                        piece.bands.push(band);
+                    }
                 },
-                _ => found.push(Piece { link, rects: vec![boxed] }),
+                _ => found.push(Piece { link, rects: vec![boxed], bands: vec![band] }),
             }
             running = Some(link);
         }
@@ -642,7 +663,9 @@ fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> G
                 None => Laid { items: Vec::new(), rules: Vec::new(), height: 0.0 },
             })
             .collect();
-        let tallest = cells.iter().map(|cell| cell.height).fold(theme.fonts.body.line, f32::max);
+        // A row is at least one line high: of a head's labels, or of the cells' words.
+        let least = if head { theme.fonts.label.line } else { theme.fonts.body.line };
+        let tallest = cells.iter().map(|cell| cell.height).fold(least, f32::max);
         let high = (tallest + CELL_PAD.y * 2.0).ceil();
         laid_rows.push(GridRow { top, high, head, cells });
         top += high + 1.0;
@@ -722,9 +745,9 @@ impl Show<'_> {
                 let at = pos2(rect.left() + left, rect.top());
                 if shows {
                     if let Some(mark) = mark {
-                        paint::run_at(ui.painter(), pos2(at.x - MARK, at.y), mark.clone(), p.ink);
+                        paint::run_at(ui.painter(), pos2(at.x - MARK, at.y), fresh(ui, mark), p.ink);
                     }
-                    paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), galley.clone(), p.ink);
+                    paint::rows_at(ui.painter(), at, (rect.width() - left).max(1.0), fresh(ui, galley), p.ink);
                 }
                 let mut holds = false;
                 for (index, piece) in links.iter().enumerate() {
@@ -742,7 +765,7 @@ impl Show<'_> {
                         painter,
                         rect.min + PRE_PAD + vec2(1.0, 0.0),
                         (rect.width() - PRE_PAD.x * 2.0 - 2.0).max(1.0),
-                        galley.clone(),
+                        fresh(ui, galley),
                         p.ink,
                     );
                 }
@@ -768,7 +791,7 @@ impl Show<'_> {
                 let response = self.picture_response(ui, rect, id, alt, *link);
                 if shows {
                     ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-                    paint::rows_at(ui.painter(), rect.min + vec2(9.0, 9.0), (rect.width() - 18.0).max(1.0), galley.clone(), p.muted);
+                    paint::rows_at(ui.painter(), rect.min + vec2(9.0, 9.0), (rect.width() - 18.0).max(1.0), fresh(ui, galley), p.muted);
                 }
                 self.picture_link(ui, &response, rect, *link)
             }
@@ -797,7 +820,7 @@ impl Show<'_> {
                     let said = ui.interact(at, id.with("left out"), Sense::hover());
                     said.widget_info(|| WidgetInfo::labeled(Role::Label, true, note.text()));
                     if shows {
-                        paint::rows_at(ui.painter(), at.min, rect.width(), note.clone(), p.muted);
+                        paint::rows_at(ui.painter(), at.min, rect.width(), fresh(ui, note), p.muted);
                     }
                 }
                 holds
@@ -912,6 +935,12 @@ impl Show<'_> {
         if response.clicked() || (over_rest && ui.input(|input| input.pointer.primary_clicked())) {
             copy(self.drawn, &link.target);
         }
+        if ui.is_rect_visible(first) || rest.iter().any(|rect| ui.is_rect_visible(*rect)) {
+            for band in &piece.bands {
+                let band = band.translate(at.to_vec2());
+                paint::sampled_band(ui.painter(), band.left()..=band.right(), (band.top(), band.bottom()), self.theme.palette.cyan_text);
+            }
+        }
         if focus {
             for rect in std::iter::once(first).chain(rest) {
                 paint::focus_ring(ui.painter(), self.theme, rect, Ring::Outside);
@@ -919,6 +948,13 @@ impl Show<'_> {
         }
         focus
     }
+}
+
+/// `galley` laid out again for this frame's paint. A kept galley's letters point into the font atlas as it was when it
+/// was laid out, and egui builds the atlas afresh when it fills: what is painted is laid out again from the same job
+/// (egui keeps the galleys it laid out, so in sight this costs a lookup), and only the kept galley's places are used.
+fn fresh(ui: &Ui, galley: &Arc<Galley>) -> Arc<Galley> {
+    paint::on_baseline(ui.painter().layout_job((*galley.job).clone()))
 }
 
 /// Asks for the address of a link to `target` to be copied; a link that goes nowhere a front end follows copies
