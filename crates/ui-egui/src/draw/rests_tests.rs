@@ -188,14 +188,24 @@ fn the_arrow_moves_the_list_one_row_once() {
     harness.key_press(Key::ArrowUp);
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), order.get(at + 2).copied(), "up: one row back");
-    // A row pressed, the keyboard the list's with no row focused: one row on too.
+    // A row pressed, then its focus surrendered: the keyboard the list's with no row focused, so nothing re-anchors the
+    // step on a focused row, and a raw arrow step beside the list's key would show as two rows.
     let mut harness = window(1440.0);
     harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
     harness.run();
     let pressed = harness.state().mailbox().selected().unwrap();
+    if let Some(focused) = harness.ctx.memory(|memory| memory.focused()) {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    assert!(super::list::focused_row(&harness.ctx).is_none(), "no row focused");
+    assert_eq!(harness.state().mailbox().selected(), Some(pressed), "the pressed row stays selected");
     let order = super::list::order(&harness.ctx);
     let at = order.iter().position(|id| *id == pressed).unwrap();
     harness.key_press(Key::ArrowDown);
+    // In the frame of the press itself: a second step there would be put back a frame later by the row the focus went to.
+    harness.step();
+    assert_eq!(harness.state().mailbox().selected(), order.get(at + 1).copied(), "from a pressed row, in the press's frame: one row on");
     harness.run();
     assert_eq!(harness.state().mailbox().selected(), order.get(at + 1).copied(), "from a pressed row: one row on, not two");
 }
@@ -215,7 +225,7 @@ fn float_over_the_sheet() -> Harness<'static, InboxApp> {
 }
 
 #[test]
-fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_the_palette_over_both() {
+fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_the_palette_that_closed_both() {
     // A list float over the sheet: the first Esc closes the list, the second the sheet.
     let mut harness = float_over_the_sheet();
     harness.key_press(Key::Escape);
@@ -243,7 +253,7 @@ fn one_esc_closes_one_surface_a_list_over_the_sheet_the_sheet_over_a_list_and_th
     assert!(!popup::is_open(&harness.ctx, menu) && !popup::any_open(&harness.ctx), "the menu does not come back");
     assert_eq!(harness.state().mailbox().selected(), Some(keyed));
 
-    // The palette over both: it comes over the list and the sheet and closes them; one Esc closes the palette alone.
+    // The palette coming over them closes both, the list and the sheet; one Esc closes the palette alone.
     let mut harness = float_over_the_sheet();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::K);
     harness.run();
