@@ -919,16 +919,24 @@ impl Mailbox {
     /// Selects the row `rows` below the selected one (`forward`) or above it, as far as the list goes (Page Down and
     /// Page Up a page of rows, End and Home `usize::MAX`); with none selected, counts from just above the first row.
     pub fn step_by(&mut self, forward: bool, rows: usize) {
-        let last = self.messages.len().saturating_sub(1);
-        let at = self.selected.and_then(|id| self.messages.iter().position(|row| row.id == id));
+        let order: Vec<u64> = self.messages.iter().map(|row| row.id).collect();
+        self.step_in(&order, forward, rows);
+    }
+
+    /// [`Mailbox::step_by`] through the messages of `order`, the rows as the list shows them (its groups in turn, a
+    /// folded group's hidden rows left out), from the selected one; a selected message `order` does not hold counts as
+    /// none. An id the list does not hold is never selected.
+    pub fn step_in(&mut self, order: &[u64], forward: bool, rows: usize) {
+        let last = order.len().saturating_sub(1);
+        let at = self.selected.and_then(|id| order.iter().position(|shown| *shown == id));
         let next = match at {
             None if forward => rows.saturating_sub(1).min(last),
             None => 0,
             Some(at) if forward => at.saturating_add(rows).min(last),
             Some(at) => at.saturating_sub(rows),
         };
-        if let Some(row) = self.messages.get(next) {
-            self.selected = Some(row.id);
+        if let Some(id) = order.get(next).copied().filter(|id| self.messages.iter().any(|row| row.id == *id)) {
+            self.selected = Some(id);
             self.keyed = true;
         }
     }
@@ -1707,6 +1715,14 @@ impl Mailbox {
             Some(id) if self.messages.iter().any(|row| row.id == id) => self.selected = Some(id),
             Some(_) => {}
             None => self.selected = None,
+        }
+    }
+
+    /// Selects the message `id` as the keyboard does ([`Mailbox::keyed`]): `Tab` onto its row keys it.
+    pub fn select_keyed(&mut self, id: u64) {
+        if self.messages.iter().any(|row| row.id == id) {
+            self.selected = Some(id);
+            self.keyed = true;
         }
     }
 

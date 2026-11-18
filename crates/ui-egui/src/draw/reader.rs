@@ -169,7 +169,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
         }
         paint::rule(ui, p.line);
         if row.group.is_some()
-            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address)
+            && let Some(act) = super::list::group_menu(ui, theme, row.group, &row.address, false)
         {
             drawn.asked.push(Asked::Act(row.id, act));
         }

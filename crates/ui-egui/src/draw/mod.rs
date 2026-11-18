@@ -106,8 +106,6 @@ struct Keys {
     /// The actions whose keys were pressed.
     ran: Vec<&'static str>,
     escape: bool,
-    down: bool,
-    up: bool,
     /// Whether the mail's own keys rest.
     typing: bool,
     /// Whether a text field, the settings sheet, the palette or the composer has the keys: the toast's Undo key rests.
@@ -126,6 +124,9 @@ pub struct InboxApp {
     hover: Option<String>,
     /// The message whose row of the list has the keyboard's focus, as this frame began: the list's keys act on it.
     list_row: Option<u64>,
+    /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
+    /// ([`InboxApp::list_has_keyboard`]).
+    list_keys: bool,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -232,6 +233,7 @@ impl InboxApp {
             textures: reader::Textures::new(),
             hover: None,
             list_row: None,
+            list_keys: true,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -458,7 +460,7 @@ impl InboxApp {
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.docked(),
-            _ if keymap::LIST_KEYS.contains(&id) => self.list_row.is_some(),
+            _ if keymap::LIST_KEYS.contains(&id) => self.screen == Screen::Mail && (self.list_row.is_some() || self.list_keys),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -524,7 +526,14 @@ impl InboxApp {
                 let reduce = !self.reduce_motion();
                 self.set_reduce_motion(reduce);
             }
-            keymap::PAGE_DOWN | keymap::PAGE_UP | keymap::FIRST | keymap::LAST => self.move_in_list(ctx, id),
+            keymap::OPEN => self.open_from_list(ctx),
+            keymap::MENU | keymap::MENU_KEY => {
+                if let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) {
+                    list::ask_menu(ctx, id);
+                    ctx.request_repaint();
+                }
+            }
+            _ if keymap::LIST_KEYS.contains(&id) => self.move_in_list(ctx, id),
             _ => {
                 if let Some((row, act)) = self.row_act(id) {
                     self.mailbox.start(row, act);
@@ -533,22 +542,86 @@ impl InboxApp {
         }
     }
 
-    /// Moves the list's focused row as the list's key `id` asks (a page down or up, the last or the first row): it is
-    /// selected, as the arrows select, and takes the focus; the list brings it into sight.
+    /// Moves the list's keyed row as the list's key `id` asks (one down or up, a page down or up, the last or the
+    /// first row), through the rows as the list shows them (a folded group's hidden rows left out): it is selected and
+    /// takes the focus, so the focus ring and a screen reader follow it, and the list brings it into sight.
     fn move_in_list(&mut self, ctx: &egui::Context, id: &str) {
-        let Some(from) = self.list_row else { return };
         let (forward, rows) = match id {
+            keymap::NEXT | keymap::DOWN => (true, 1),
+            keymap::PREVIOUS | keymap::UP => (false, 1),
             keymap::PAGE_DOWN => (true, list::page(ctx)),
             keymap::PAGE_UP => (false, list::page(ctx)),
             keymap::LAST => (true, usize::MAX),
             _ => (false, usize::MAX),
         };
-        self.mailbox.select(Some(from));
-        self.mailbox.step_by(forward, rows);
-        if let Some(to) = self.mailbox.selected() {
-            ctx.memory_mut(|memory| memory.request_focus(list::row_id(to)));
+        // The focused row is the keyed one; a selection made by the pointer counts from where it is.
+        if let Some(from) = self.list_row.filter(|from| self.mailbox.selected() != Some(*from)) {
+            self.mailbox.select_keyed(from);
         }
+        self.mailbox.step_in(&list::order(ctx), forward, rows);
+        if let Some(to) = self.mailbox.selected() {
+            ctx.memory_mut(|memory| {
+                // egui read the arrow as a move of its focus when the frame began: the list's key moves it instead.
+                memory.move_focus(egui::FocusDirection::None);
+                memory.request_focus(list::row_id(to));
+            });
+        }
+        self.list_keys = true;
         ctx.request_repaint();
+    }
+
+    /// `Enter` in the list: the keyed (or focused) message opens and the keyboard goes to the reader, so the list's keys
+    /// rest until `Esc` there gives it back.
+    fn open_from_list(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) else { return };
+        self.mailbox.select_keyed(id);
+        ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(id)));
+        self.list_keys = false;
+        ctx.request_repaint();
+    }
+
+    /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
+    fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
+        if self.screen != Screen::Mail || self.list_keys || self.docked() {
+            return false;
+        }
+        self.list_keys = true;
+        if let Some(id) = self.mailbox.selected() {
+            self.mailbox.select_keyed(id);
+            ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
+        }
+        true
+    }
+
+    /// The row `clicked` in the list is selected and the list has the keyboard; a row that gained the focus (`Tab` onto
+    /// it) is keyed. Focus and selection move together: a row pressed while another row has the focus takes it away
+    /// from that row.
+    fn follow_list(&mut self, ctx: &egui::Context, clicked: Option<u64>, gained: Option<u64>) {
+        if clicked.is_some() {
+            self.mailbox.select(clicked);
+            self.list_keys = true;
+            if let Some(focused) = self.list_row.filter(|focused| Some(*focused) != clicked) {
+                ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
+            }
+        }
+        if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id)) {
+            self.mailbox.select_keyed(id);
+            self.list_keys = true;
+        }
+    }
+
+    /// Whether the list has the keyboard: a row has the focus, or a row was pressed or keyed last and nothing else has
+    /// the focus; never while the palette, the settings, the composer in the reader's place or the calendar hold the
+    /// keys, or a popup is open.
+    fn list_has_keyboard(&self, ctx: &egui::Context) -> bool {
+        if self.screen != Screen::Mail || self.palette.is_open() || self.settings.is_open() || self.settings.capturing().is_some() || self.docked() {
+            return false;
+        }
+        if self.list_row.is_some() {
+            return true;
+        }
+        let focused = ctx.memory(|memory| memory.focused().is_some());
+        self.list_keys && !focused && !egui::Popup::is_any_open(ctx)
     }
 
     /// Opens the time picker over the open message in the next frame, `typed` in its field: Snooze, or "Remind me if no
@@ -653,24 +726,26 @@ impl InboxApp {
     fn keys(&mut self, ctx: &egui::Context) -> Keys {
         let held = self.settings.capturing().is_some() || self.palette.is_open();
         self.capture_key(ctx);
-        let focused = ctx.memory(|memory| memory.focused().is_some());
+        // Read before anything returns: a row that lost the focus while the palette was open is not the list's row.
+        self.list_row = if held { None } else { list::focused_row(ctx) };
+        // A row with the focus is the list's keyed row: it quiets no key.
+        let focused = ctx.memory(|memory| memory.focused().is_some()) && self.list_row.is_none();
         // The composer in the reader's place hides the selected message: the keys that act on it rest.
         let quiet = focused || held || self.settings.is_open() || self.docked();
         let typing = quiet || self.screen == Screen::Calendar;
         if held {
-            return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
+            return Keys { ran: Vec::new(), escape: false, typing, quiet };
         }
-        self.list_row = list::focused_row(ctx);
-        let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
-        let (escape, down, up) =
-            ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
-        Keys { ran, escape, down, up, typing, quiet }
+        let listing = self.list_has_keyboard(ctx);
+        let ran = self.pressed(ctx, quiet, listing);
+        let escape = ctx.input(|input| input.key_pressed(Key::Escape));
+        Keys { ran, escape, typing, quiet }
     }
 
     /// The actions whose key was pressed in this frame, besides the acts on a row (the list takes those) and Undo while
     /// a toast with Undo shows (the toast takes it). While `quiet` (a field has the focus, or the sheet is open) a key
     /// without Command, Ctrl or Alt runs nothing, so a letter typed is typed, and Undo is the field's.
-    fn pressed(&self, ctx: &egui::Context, quiet: bool) -> Vec<&'static str> {
+    fn pressed(&self, ctx: &egui::Context, quiet: bool, listing: bool) -> Vec<&'static str> {
         let toasted = self.mailbox.undoable().is_some_and(|undo| undo.undoable) || self.counting().is_some();
         keymap::actions()
             .into_iter()
@@ -678,10 +753,10 @@ impl InboxApp {
             .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
             .filter(|id| {
-                // The list's keys run while a row of the list has the focus (which quiets the other bare keys), and
-                // never else: a field keeps its Home and End, the reader its open message.
+                // The list's keys run while the list has the keyboard, and never else: a field keeps its letters, its
+                // Home and End, the reader its open message.
                 if keymap::LIST_KEYS.contains(id) {
-                    return self.list_row.is_some() && self.keymap.pressed(ctx, id);
+                    return listing && self.keymap.pressed(ctx, id);
                 }
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
                     let held = key.modifiers;
@@ -1273,12 +1348,7 @@ impl InboxApp {
         }
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
-        let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
-        let mut stepped = false;
-        if !typing && (down || up) {
-            self.mailbox.step(down);
-            stepped = true;
-        }
+        let Keys { mut ran, escape, typing, quiet } = self.keys(ui.ctx());
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
@@ -1297,6 +1367,7 @@ impl InboxApp {
         if left_full {
             self.reader.set_full_width(false);
         }
+        let back_to_list = escape && !left_settings && !left_full && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.
         let corner = self.window_corner(ui.ctx());
@@ -1315,6 +1386,7 @@ impl InboxApp {
         let mut review = false;
         let mut outboxed = None;
         let mut screener_mode = None;
+        let mut gained = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         let mut layers = Panes::begin(ui.painter());
@@ -1356,10 +1428,20 @@ impl InboxApp {
                         .frame(Frame::new().inner_margin(Margin { left: 1, right: 0, top: 0, bottom: 0 }))
                         .show(ui, |ui| list::rows(ui, &theme, keymap, mailbox))
                         .inner;
-                    (searched, listed.clicked, listed.acted, listed.out, listed.review, listed.done_all, listed.outbox, listed.screener)
+                    (
+                        searched,
+                        listed.clicked,
+                        listed.acted,
+                        listed.out,
+                        listed.review,
+                        listed.done_all,
+                        listed.outbox,
+                        listed.screener,
+                        listed.gained,
+                    )
                 })
             };
-            (header, clicked, acted, out, review, done_all, outboxed, screener_mode) = if self.reader.open_id().is_some() || docked {
+            (header, clicked, acted, out, review, done_all, outboxed, screener_mode, gained) = if self.reader.open_id().is_some() || docked {
                 // The list keeps its 440 beside the reader: no splitter, and a width a person once dragged to is
                 // not read.
                 Panel::left("list")
@@ -1382,14 +1464,17 @@ impl InboxApp {
         } else if self.screen == Screen::Mail && self.reader.open_id().is_some() {
             let hover = self.hover.take();
             let left = if full { gap } else { half };
-            drawn = CentralPanel::no_frame()
-                .frame(around(left, gap, gap))
-                .show(ui, |ui| {
-                    layers.card(ui, Margin::ZERO, |ui| {
-                        reader::show(ui, &theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
-                    })
+            let shown = CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
+                layers.card(ui, Margin::ZERO, |ui| {
+                    reader::show(ui, &theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
                 })
-                .inner;
+            });
+            // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
+            let reader = shown.response.rect;
+            if ui.input(|input| input.pointer.any_pressed() && input.pointer.press_origin().is_some_and(|at| reader.contains(at))) {
+                self.list_keys = false;
+            }
+            drawn = shown.inner;
             if drawn.hover != hover {
                 ui.ctx().request_repaint();
             }
@@ -1420,7 +1505,7 @@ impl InboxApp {
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();
         let busy = dismiss
-            || stepped
+            || back_to_list
             || acted.is_some()
             || undone
             || unsent
@@ -1443,6 +1528,7 @@ impl InboxApp {
             || done_all.is_some()
             || review
             || clicked.is_some()
+            || gained.is_some()
             || add
             || asked.compose
             || !on_calendar.is_empty()
@@ -1464,9 +1550,7 @@ impl InboxApp {
             self.mailbox.dismiss_error();
         }
         self.go(&asked, header, review);
-        if clicked.is_some() {
-            self.mailbox.select(clicked);
-        }
+        self.follow_list(ui.ctx(), clicked, gained);
         self.composed(ui.ctx(), clicked.is_some(), composed);
         ran.extend(asked.compose.then_some(keymap::COMPOSE));
         if add {

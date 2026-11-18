@@ -282,11 +282,15 @@ const MENU_WIDTH: f32 = 18.0;
 
 /// The group menu of a sender's mail: a choice for each group, the one it is in chosen, and "Let InboxCraft sort it";
 /// the act chosen. A line under them says that all the sender's mail moves, the kept and the future.
-pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str) -> Option<Act> {
+pub(super) fn group_menu(ui: &mut Ui, theme: &Theme, current: Option<GroupKind>, address: &str, focus_first: bool) -> Option<Act> {
     let mut chosen = None;
     crate::component::label(ui, theme.fonts.label, tr!("Group"), theme.palette.muted);
-    for kind in GroupKind::SHOWN {
-        if popup::choice(ui, theme, kind.text(), current == Some(kind)).clicked() {
+    for (index, kind) in GroupKind::SHOWN.into_iter().enumerate() {
+        let choice = popup::choice(ui, theme, kind.text(), current == Some(kind));
+        if focus_first && index == 0 {
+            choice.request_focus();
+        }
+        if choice.clicked() {
             chosen = Some(Act::Group(Some(kind)));
         }
     }
@@ -308,6 +312,8 @@ struct Drawn {
     acted: Option<Act>,
     /// It has the keyboard's focus.
     focused: bool,
+    /// It gained the focus this frame.
+    gained: bool,
 }
 
 /// Where a row stands in its list: its place among the list's rows and how many there are (a screen reader says "12 of
@@ -382,19 +388,12 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
     slot.tell(ui, response.id);
+    keep_arrows(ui, response);
     let mut acted = drawn.acted.and_then(|index| act(message, index));
     if message.group.is_some() {
-        let width = theme.fonts.body.size * MENU_WIDTH;
-        Popup::context_menu(response).frame(Frame::NONE).show(|ui| {
-            popup::panel(ui, theme, width, |ui| {
-                if let Some(chosen) = group_menu(ui, theme, message.group, &message.address) {
-                    acted = Some(chosen);
-                    ui.close();
-                }
-            });
-        });
+        acted = acted.or(menu(ui, theme, response, message));
     }
-    Drawn { clicked: response.clicked(), acted, focused: response.has_focus() }
+    Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus() }
 }
 
 /// One message of a pile of Later across `ui`'s width, the design's later row: who, the pile's mark, the subject and
@@ -441,7 +440,68 @@ fn later(
         response.scroll_to_me(None);
     }
     slot.tell(ui, response.id);
-    Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus() }
+    keep_arrows(ui, response);
+    Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus(), gained: response.gained_focus() }
+}
+
+/// Keeps the arrow keys from moving egui's focus off the row `response` while it has the focus: they are the list's
+/// keys ([`keymap::DOWN`], [`keymap::UP`]), which move the keyed row and the focus with it.
+fn keep_arrows(ui: &Ui, response: &egui::Response) {
+    if response.has_focus() {
+        let filter = egui::EventFilter { vertical_arrows: true, ..egui::EventFilter::default() };
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, filter));
+    }
+}
+
+/// Where the message whose group menu the keyboard asked for is kept until its row is drawn.
+fn menu_asked_id() -> Id {
+    Id::unique("list-menu-asked")
+}
+
+/// Asks for the group menu of message `id`'s row (`Shift F10`, the Menu key): its row opens it when drawn.
+pub(super) fn ask_menu(ctx: &egui::Context, id: u64) {
+    ctx.data_mut(|data| data.insert_temp(menu_asked_id(), id));
+}
+
+/// The group menu of `message`'s row `response`: by a right click at the pointer, or asked for by the keyboard
+/// ([`ask_menu`]) under the row, its first choice focused, the focus back on the row once it closes. The act chosen.
+fn menu(ui: &Ui, theme: &Theme, response: &egui::Response, message: &MessageRow) -> Option<Act> {
+    let ctx = ui.ctx().clone();
+    let popup_id = Popup::default_response_id(response);
+    let by_keys_id = popup_id.with("by-keys");
+    let first_id = popup_id.with("focus-first");
+    if ctx.data(|data| data.get_temp::<u64>(menu_asked_id())) == Some(message.id) {
+        ctx.data_mut(|data| {
+            data.remove::<u64>(menu_asked_id());
+            data.insert_temp(by_keys_id, true);
+            data.insert_temp(first_id, true);
+        });
+        Popup::open_id(&ctx, popup_id);
+    }
+    if response.secondary_clicked() {
+        ctx.data_mut(|data| data.remove::<bool>(by_keys_id));
+    }
+    let by_keys = ctx.data(|data| data.get_temp::<bool>(by_keys_id)).unwrap_or(false);
+    let first = ctx.data_mut(|data| data.remove_temp::<bool>(first_id)).unwrap_or(false);
+    let mut popup = Popup::context_menu(response).frame(Frame::NONE);
+    if by_keys {
+        popup = popup.at_position(response.rect.left_bottom());
+    }
+    let width = theme.fonts.body.size * MENU_WIDTH;
+    let mut acted = None;
+    popup.show(|ui| {
+        popup::panel(ui, theme, width, |ui| {
+            if let Some(chosen) = group_menu(ui, theme, message.group, &message.address, first) {
+                acted = Some(chosen);
+                ui.close();
+            }
+        });
+    });
+    if by_keys && !Popup::is_id_open(&ctx, popup_id) {
+        ctx.data_mut(|data| data.remove::<bool>(by_keys_id));
+        response.request_focus();
+    }
+    acted
 }
 
 /// The id of the hover action group of message `id`'s row: its n-th action (Snooze is the fourth, index 3) is
@@ -539,6 +599,8 @@ pub(super) struct Asked {
     pub(super) outbox: Option<(u64, Outbox)>,
     /// A pill of the screener's mode under "New senders".
     pub(super) screener: Option<ScreenerMode>,
+    /// The row that gained the keyboard's focus this frame (`Tab` onto it).
+    pub(super) gained: Option<u64>,
 }
 
 /// What a button of a send in the outbox asks for.
@@ -624,6 +686,8 @@ struct Rows<'a> {
     review: Cell<bool>,
     /// A button of a send in the outbox pressed, and its draft.
     outbox: Cell<Option<(u64, Outbox)>>,
+    /// The row that gained the focus this frame.
+    gained: Cell<Option<u64>>,
 }
 
 impl Rows<'_> {
@@ -637,6 +701,9 @@ impl Rows<'_> {
         };
         if drawn.focused {
             ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
+        }
+        if drawn.gained {
+            self.gained.set(Some(message.id));
         }
         if drawn.clicked {
             self.clicked.set(Some(message.id));
@@ -1273,6 +1340,17 @@ pub(super) fn page(ctx: &egui::Context) -> usize {
     ctx.data(|data| data.get_temp::<usize>(page_id())).unwrap_or(1).saturating_sub(1).max(1)
 }
 
+/// The messages of the list's rows in the order they stand in the last frame that drew the list: the order its keys
+/// move in.
+pub(super) fn order(ctx: &egui::Context) -> std::sync::Arc<[u64]> {
+    ctx.data(|data| data.get_temp::<std::sync::Arc<[u64]>>(order_id())).unwrap_or_else(|| std::sync::Arc::from(Vec::new()))
+}
+
+/// Where [`order`] is kept.
+fn order_id() -> Id {
+    Id::unique("list-order")
+}
+
 /// Where [`page`] is kept.
 fn page_id() -> Id {
     Id::unique("list-page")
@@ -1358,6 +1436,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     // A list with nothing in it, the inbox with senders waiting aside: its empty state.
     let waits = mailbox.place() == Place::View(Role::Inbox) && mailbox.query().is_empty() && !mailbox.waiting().is_empty();
     if none && !waits && mailbox.left_row().is_none() {
+        ui.data_mut(|data| data.insert_temp::<std::sync::Arc<[u64]>>(order_id(), std::sync::Arc::from(Vec::new())));
         empty_list(ui, theme, keymap, mailbox);
         return Asked { out: true, ..Asked::default() };
     }
@@ -1376,6 +1455,7 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         done_all: Cell::new(None),
         review: Cell::new(false),
         outbox: Cell::new(None),
+        gained: Cell::new(None),
     };
     // "Other" stands over the messages no group holds: its "done all" marks those, built or not.
     let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
@@ -1386,6 +1466,9 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));
     let went = gone.is_none_or(|gone| gone.faded >= 1.0);
     let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open, gone.filter(|_| !went)) };
+    let order: std::sync::Arc<[u64]> =
+        listing.lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(message.id) } else { None }).collect();
+    ui.data_mut(|data| data.insert_temp(order_id(), order));
     let mut screener_mode = None;
     let built = if outbox {
         show_lines(ui, &rows, &listing, "outbox-list")
@@ -1408,5 +1491,6 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         done_all: rows.done_all.take(),
         outbox: rows.outbox.get(),
         screener: screener_mode,
+        gained: rows.gained.get(),
     }
 }

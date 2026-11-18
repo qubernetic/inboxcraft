@@ -73,6 +73,15 @@ fn the_shortcuts_page_lists_every_action_with_its_key() {
         harness.get_by_label("Key of Command palette: Ctrl K");
         harness.get_by_label("Key of Search mail: Ctrl F");
         harness.get_by_label("Show sent mail has no key");
+        // The list's keys, each with its own: J and K, the arrows, the page keys, Enter, Shift F10 and the Menu key.
+        let keymap = crate::keymap::Keymap::default();
+        for id in crate::keymap::LIST_KEYS {
+            let action = crate::keymap::action(id).unwrap();
+            let words = crate::component::key::key_words(&keymap.shortcut(id).unwrap());
+            harness.get_by_label(&format!("Key of {}: {words}", action.name));
+        }
+        harness.get_by_label("Key of The next message of the list: J");
+        harness.get_by_label("Key of The message before in the list: K");
         harness.get_by_role_and_label(Role::TextInput, "Find a command");
         harness.get_by_role_and_label(Role::Button, "Reset all keys");
         harness.get_by_role_and_label(Role::Button, "Remove the key of Command palette");

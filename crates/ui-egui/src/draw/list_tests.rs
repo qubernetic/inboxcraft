@@ -1068,13 +1068,17 @@ fn the_keyed_row_is_scrolled_into_sight_though_it_was_not_built() {
         harness.run();
         assert!(row_rect(&harness, 1_005_000).is_none(), "{view:?}: not built");
         if view == InboxView::Smart {
-            // Smart shows a group's first rows: the next row's group (5 001 is in People) shows all of them.
-            harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("People"), true));
+            // Smart shows a group's first rows: 5 000's group (Newsletters) shows all of them.
+            harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Newsletters"), true));
             harness.run();
         }
+        // The next row as the list shows it: by time in List, the next of the same group in Grouped and Smart.
+        let order = super::list::order(&harness.ctx);
+        let next = order.iter().position(|id| *id == 1_005_000).and_then(|at| order.get(at + 1)).copied();
+        assert_eq!(next, Some(if view == InboxView::List { 1_005_001 } else { 1_005_003 }), "{view:?}");
         harness.key_press(Key::ArrowDown);
         harness.run();
-        assert_eq!(selected_at(&harness), Some(5_001), "{view:?}");
+        assert_eq!(harness.state().mailbox().selected(), next, "{view:?}");
         assert!(selected_in_sight(&harness), "{view:?}: the keyed row is brought into sight");
         let built = super::list::built(&harness.ctx).unwrap();
         assert!(built.count <= MOST_BUILT, "{built:?}");
@@ -1224,9 +1228,12 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
     }
 }
 
-/// A row given by its message id is keyed: the selection moved there by the keyboard, from the row before it.
+/// A row given by its message id is keyed: the selection moved there by the keyboard, from the row before it as the
+/// list shows them.
 fn key(harness: &mut Harness<'static, InboxApp>, id: u64) {
-    harness.state_mut().mailbox_mut().select(Some(id - 1));
+    let order = super::list::order(&harness.ctx);
+    let before = order.iter().position(|shown| *shown == id).and_then(|at| at.checked_sub(1)).and_then(|at| order.get(at)).copied();
+    harness.state_mut().mailbox_mut().select(before);
     harness.run();
     harness.key_press(Key::ArrowDown);
     harness.run();
@@ -1262,9 +1269,10 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_mail_arrives_above() {
     assert!(!in_sight(&harness, 1_005_001), "wheeled away from the keyed row");
     arrive(&mut harness, 7, GroupKind::Updates);
     assert_eq!(first_place(&harness), before, "the first message in sight stays where it was");
+    // Down: the next row of the keyed row's group, as the grouped list shows them.
     harness.key_press(Key::ArrowDown);
     harness.run();
-    assert_eq!(harness.state().mailbox().selected(), Some(1_005_002));
+    assert_eq!(harness.state().mailbox().selected(), Some(1_005_004));
     assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
 }
 
@@ -1283,11 +1291,10 @@ fn a_keyed_row_scrolled_away_from_stays_away_when_a_group_opens_or_folds_above()
         harness.run();
         assert_eq!(first_place(&harness), before, "the first message in sight stays where it was, People open: {open}");
     }
-    // Down three times: 5 004 and 5 005 are in folded groups, 5 006 in Newsletters.
-    for _ in 0..3 {
-        harness.key_press(Key::ArrowDown);
-        harness.run();
-    }
+    // Down once: the keys skip the rows a folded group hides (5 004 and 5 005 are in folded groups), to 5 006, the next
+    // of Newsletters.
+    harness.key_press(Key::ArrowDown);
+    harness.run();
     assert_eq!(harness.state().mailbox().selected(), Some(1_005_006));
     assert!(selected_in_sight(&harness), "the newly keyed row comes into sight");
 }
@@ -1297,20 +1304,32 @@ fn tab_walks_down_the_whole_list_building_rows_as_it_goes() {
     let mut harness = ten_thousand(InboxView::List);
     harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(1_000_000)));
     harness.run();
-    for _ in 0..40 {
+    // Tab onto a row keys it, so its hover actions come after it in the walk: each row takes a Tab and one for each
+    // action that runs (Done, mark read, Delete; Snooze is not yet).
+    let mut tabs = 0;
+    while harness.ctx.memory(egui::Memory::focused) != Some(super::list::row_id(1_000_040)) && tabs < 40 * 6 {
         harness.key_press(Key::Tab);
         harness.run();
+        tabs += 1;
+        let built = super::list::built(&harness.ctx).unwrap();
+        assert!(built.count <= MOST_ROWS, "{built:?}");
+        // The row with the focus is the selected one: never two current rows.
+        if let Some(focused) = super::list::focused_row(&harness.ctx) {
+            assert_eq!(harness.state().mailbox().selected(), Some(focused), "Tab onto a row keys it");
+        }
     }
-    let focused = harness.ctx.memory(egui::Memory::focused);
-    assert_eq!(focused, Some(super::list::row_id(1_000_040)), "the 41st row has the focus");
+    // The first row takes its actions a frame after it is keyed, so Tab may pass them once.
+    assert!((40 * 4 - 3..=40 * 4).contains(&tabs), "a row and its three actions a step each: {tabs}");
     assert!(in_sight(&harness, 1_000_040), "and is wholly in sight");
-    let built = super::list::built(&harness.ctx).unwrap();
-    assert!(built.count <= MOST_ROWS, "{built:?}");
-    for _ in 0..40 {
+    // Back up: only the keyed row shows its actions, so Shift+Tab steps from row to row.
+    let mut back = 0;
+    while harness.ctx.memory(egui::Memory::focused) != Some(super::list::row_id(1_000_000)) && back < tabs {
         harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
         harness.run();
+        back += 1;
     }
     assert_eq!(harness.ctx.memory(egui::Memory::focused), Some(super::list::row_id(1_000_000)), "Shift+Tab walks back up");
+    assert!(back <= 40 + 3, "a step a row: {back}");
     assert!(in_sight(&harness, 1_000_000));
 }
 
@@ -1368,15 +1387,36 @@ fn page_down_page_up_end_and_home_move_the_focused_row_as_keymap_actions() {
 #[test]
 fn the_list_keys_rest_while_the_list_does_not_have_the_keyboard() {
     let mut harness = ten_thousand(InboxView::List);
-    // A message open, nothing focused: reading, End and Page Down leave the open message alone.
+    // A message opened with Enter: the keyboard is the reader's, and the list's keys leave the open message alone.
     harness.state_mut().mailbox_mut().select(Some(1_000_003));
     harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
     assert_eq!(harness.ctx.memory(egui::Memory::focused), None);
-    for pressed in [Key::End, Key::PageDown, Key::Home, Key::PageUp] {
+    for pressed in [Key::End, Key::PageDown, Key::Home, Key::PageUp, Key::ArrowDown, Key::J, Key::K, Key::ArrowUp] {
         harness.key_press(pressed);
         harness.run();
-        assert_eq!(harness.state().mailbox().selected(), Some(1_000_003), "{pressed:?} with nothing focused");
+        assert_eq!(harness.state().mailbox().selected(), Some(1_000_003), "{pressed:?} while reading");
     }
+    // Esc in the reader gives the keyboard back: the keyed row takes the focus, and the keys move it again.
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(selected_focused(&harness), "Esc puts the focus on the keyed row");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(1_000_004));
+    assert!(selected_focused(&harness));
+    // A press in the reader takes the keyboard too.
+    let reader = egui::pos2(1200.0, 600.0);
+    harness.hover_at(reader);
+    harness.run();
+    harness.drag_at(reader);
+    harness.run();
+    harness.drop_at(reader);
+    harness.run();
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(1_000_004), "J while reading");
     // The search field keeps its own Home and End.
     harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
     harness.run();
@@ -1846,4 +1886,89 @@ fn an_invitation_is_grouped_by_its_sender() {
     assert_eq!(GroupKind::shown_for(GroupKind::Invitations, "@@@"), GroupKind::People);
     assert_eq!(GroupKind::shown_for(GroupKind::Invitations, &"noreply".repeat(10_000)), GroupKind::Updates);
     assert_eq!(GroupKind::shown_for(GroupKind::Newsletters, "no-reply@example.org"), GroupKind::Newsletters);
+}
+
+#[test]
+fn j_and_k_move_as_the_arrows_and_rest_in_a_text_field() {
+    for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
+        let mut harness = ten_thousand(view);
+        let order = super::list::order(&harness.ctx);
+        let (first, second, third) = (order[0], order[1], order[2]);
+        // Nothing keyed yet: J keys the first row and gives it the focus.
+        harness.key_press(Key::J);
+        harness.run();
+        assert_eq!(harness.state().mailbox().selected(), Some(first), "{view:?}");
+        assert!(selected_focused(&harness), "{view:?}: focus and selection move together");
+        // J, the arrow down, K and the arrow up move alike, the focus with them.
+        for (key, wanted) in [(Key::J, second), (Key::ArrowDown, third), (Key::K, second), (Key::ArrowUp, first), (Key::ArrowDown, second)] {
+            harness.key_press(key);
+            harness.run();
+            assert_eq!(harness.state().mailbox().selected(), Some(wanted), "{view:?} {key:?}");
+            assert!(selected_focused(&harness), "{view:?} {key:?}: the focused row is the keyed one");
+            assert!(selected_in_sight(&harness));
+        }
+    }
+    // In the search field J and K are letters: the list rests.
+    let mut harness = ten_thousand(InboxView::List);
+    harness.key_press(Key::J);
+    harness.run();
+    let keyed = harness.state().mailbox().selected();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.run();
+    for key in [Key::J, Key::K, Key::ArrowDown, Key::ArrowUp] {
+        harness.key_press(key);
+        harness.run();
+        assert_eq!(harness.state().mailbox().selected(), keyed, "{key:?} in a text field");
+    }
+    harness.event(egui::Event::Text("jk".to_owned()));
+    harness.run();
+    assert_eq!(harness.state().search_text(), "jk", "typed, not run");
+    // Rebound: N moves to the next row, J no more.
+    let mut harness = ten_thousand(InboxView::List);
+    harness.state_mut().keymap_mut().bind(crate::keymap::NEXT, egui::KeyboardShortcut::new(Modifiers::NONE, Key::N));
+    harness.key_press(Key::J);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), None, "J has no action now");
+    harness.key_press(Key::N);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(1_000_000), "its new key");
+    // The palette open: its own keys, the list's rest.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, crate::keymap::PALETTE);
+    harness.run();
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().mailbox().selected(), Some(1_000_000), "the palette has the arrows");
+}
+
+#[test]
+fn the_group_menu_opens_from_the_keyboard() {
+    for key in [(Modifiers::SHIFT, Key::F10), (Modifiers::NONE, Key::Menu)] {
+        let mut harness = harness(true);
+        // Odile's row keyed with J: her account is grouped, so her row has the group menu.
+        let odile = harness.state().mailbox().messages().iter().find(|row| row.sender == "Odile Brannock").unwrap().id;
+        harness.state_mut().mailbox_mut().select_keyed(odile);
+        harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(odile)));
+        harness.run();
+        assert!(harness.query_by_label("Let InboxCraft sort it").is_none(), "closed");
+        harness.key_press_modifiers(key.0, key.1);
+        harness.run();
+        harness.get_by_label("Let InboxCraft sort it");
+        // Under the row, its first choice focused, so the arrows and Enter work in it.
+        let row = harness.get_by_label(ODILE_READ).rect();
+        let people = harness.get_by_role_and_label(Role::MenuItemRadio, "People");
+        assert!(people.rect().top() >= row.bottom() - 1.0, "under the row: {:?} {row:?}", people.rect());
+        assert!(people.accesskit_node().is_focused(), "{key:?}: the first choice has the focus");
+        // Esc closes it and the focus goes back to the row.
+        harness.key_press(Key::Escape);
+        harness.run();
+        assert!(harness.query_by_label("Let InboxCraft sort it").is_none(), "Esc closes it");
+        assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::row_id(odile))), "{key:?}: back on the row");
+    }
+    // Rebound, Shift F10 runs nothing; nothing keyed in a text field, neither.
+    let mut harness = harness(true);
+    harness.state_mut().keymap_mut().unbind(crate::keymap::MENU);
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run();
+    assert!(harness.query_by_label("Let InboxCraft sort it").is_none());
 }
