@@ -2079,7 +2079,6 @@ fn the_group_menu_opens_from_the_keyboard() {
 #[test]
 fn a_keyed_step_at_the_edge_scrolls_the_least_and_a_partly_shown_row_comes_whole() {
     let mut harness = ten_thousand(InboxView::List);
-    let view = super::list::view_rect(&harness.ctx).unwrap();
     harness.key_press(Key::J);
     harness.run();
     let order = super::list::order(&harness.ctx);
