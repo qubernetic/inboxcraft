@@ -184,7 +184,7 @@ pub(crate) fn recipient_field_with(
     let name_width = galley(ui, line.name, label, p.muted).size().x.max(NAME_COLUMN);
     let copies_text = tr!("Cc Bcc");
     let copies = line.copies.then(|| galley(ui, copies_text, theme.fonts.mono_s, p.muted));
-    let right = pad + copies.as_ref().map_or(0.0, |copies| copies.size().x + s.s2);
+    let right = pad + copies.as_ref().map_or(0.0, |copies| paint::run_box(copies.size().x) + s.s2);
     let left = pad + name_width + s.s2;
     let room = (width - left - right).max(1.0);
     let inks: Vec<Color32> = line.chips.iter().map(|recipient| chip_ink(theme, recipient.state, enabled)).collect();
@@ -269,7 +269,8 @@ pub(crate) fn recipient_field_with(
         let spoken = line.name;
         ui.ctx().accesskit_node_builder(typed.id, |node| node.set_label(spoken));
         if let Some(copies) = copies {
-            let size = copies.size();
+            // The design's box: the run's width rounded up, at the right pad, the run at its left.
+            let size = vec2(paint::run_box(copies.size().x), copies.size().y);
             let place = Rect::from_min_size(pos2(rect.right() - pad - size.x, first - size.y / 2.0), size);
             let response = ui.interact(place, id.with("copies"), if enabled { Sense::click() } else { Sense::hover() });
             response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, tr!("Cc  Bcc")));

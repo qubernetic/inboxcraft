@@ -129,6 +129,14 @@ pub(crate) fn run_at(painter: &Painter, at: Pos2, galley: Arc<Galley>, colour: C
     painter.galley(pos2(whole, at.y), galley, colour);
 }
 
+/// Paints `galley` ending at `right` as the design right-aligns a run: its text box ([`run_box`], the width rounded
+/// up) with its right edge at `right`, the run at the box's left ([`run_at`]), its top at `top`. The box's left edge.
+pub(crate) fn run_right(painter: &Painter, right: f32, top: f32, galley: Arc<Galley>, colour: Color32) -> f32 {
+    let left = right - run_box(galley.size().x);
+    run_at(painter, pos2(left, top), galley, colour);
+    left
+}
+
 /// Paints `galley` in the middle of `rect` as the design centres a text box: the box ([`run_box`]) in the middle,
 /// on a half pixel when the room left over is odd, and the run at the box's left ([`run_at`]).
 pub(crate) fn run_centred(painter: &Painter, rect: Rect, galley: Arc<Galley>, colour: Color32) {

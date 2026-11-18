@@ -283,7 +283,7 @@ pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
         paint::run_at(painter, pos2(rect.left() + s.s3, rect.center().y - name.size().y / 2.0), name, p.muted);
         if let Some(count) = count {
             let count = galley(ui, count, theme.fonts.mono_s, p.muted);
-            paint::run_at(painter, pos2(rect.right() - s.s3 - count.size().x, rect.center().y - count.size().y / 2.0), count, p.muted);
+            paint::run_right(painter, rect.right() - s.s3, rect.center().y - count.size().y / 2.0, count, p.muted);
         }
     }
     hairline(ui, theme);
@@ -454,10 +454,8 @@ pub(crate) fn menu_item_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: 
     }
     if let Some(caption) = item.caption {
         let caption = galley(ui, caption, theme.fonts.mono_s, p.muted);
-        right -= caption.size().x;
         let colour = arriving(theme, p.muted, shown);
-        paint::run_at(&painter, pos2(right, mid - caption.size().y / 2.0), caption, colour);
-        right -= s.s2;
+        right = paint::run_right(&painter, right, mid - caption.size().y / 2.0, caption, colour) - s.s2;
     }
     let ink = arriving(theme, name_ink, shown);
     let text = cut(ui, item.name, theme.fonts.body, ink, right - left);
@@ -504,9 +502,7 @@ pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool,
     let mut right = row.rect.right() - inset;
     if let Some(reason) = reason.filter(|reason| !reason.is_empty()) {
         let reason = galley(ui, reason, theme.fonts.mono_s, p.muted);
-        right -= reason.size().x;
-        paint::run_at(&painter, pos2(right, mid - reason.size().y / 2.0), reason, arriving(theme, p.muted, shown));
-        right -= s.s2;
+        right = paint::run_right(&painter, right, mid - reason.size().y / 2.0, reason, arriving(theme, p.muted, shown)) - s.s2;
     }
     let ink = arriving(theme, if available && !soon { p.ink } else { p.muted }, shown);
     let text = cut(ui, name, theme.fonts.body, ink, right - left);

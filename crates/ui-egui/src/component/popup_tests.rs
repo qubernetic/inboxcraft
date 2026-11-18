@@ -567,10 +567,13 @@ fn a_menu_item_looks_as_its_sheet_says_in_every_state() {
                 }
                 None => assert_eq!(chip, None, "{at}"),
             }
-            // The caption in `mono_s`, `muted`, its right end at 228, 8 down.
+            // The caption in `mono_s`, `muted`, 8 down, in a box at 228's left as wide as the run rounded up, the run at
+            // the box's left: `Tue 08:00` is 9 × 6.6 = 59.4 wide, so its box 60 and its right end at 227.4.
             if let Some(caption) = caption {
                 let text = one(&harness, caption);
-                assert!((text.rect.right() - (rect.left() + 228.0)).abs() < 0.5 && text.rect.top() == rect.top() + 8.0, "{at} {text:?}");
+                let wide = caption.chars().count() as f32 * 6.6;
+                let end = 228.0 - wide.ceil() + wide;
+                assert!((text.rect.right() - (rect.left() + end)).abs() < 0.05 && text.rect.top() == rect.top() + 8.0, "{at} {text:?}");
                 assert_eq!((text.colour, text.family.as_str(), text.size), (p.muted, "Monospace", 11.0), "{at}");
             }
             let bar = found.iter().find(|(r, fill, _)| *fill == p.cyan_edge && r.width() == 2.0).map(|(r, ..)| *r);
