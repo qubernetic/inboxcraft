@@ -184,3 +184,7 @@
 {"out": "docs/images/later-pins-dark.png", "mode": "dark", "size": [1440, 900], "put_away": true, "later": "pins"}
 {"out": "docs/images/new-senders-queue-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}}
 {"out": "docs/images/list-empty-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 8}}
+{"out": "docs/images/list-scrolling-light.png", "mode": "light", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/list-scrolling-dark.png", "mode": "dark", "size": [1440, 520], "view": "list", "step": 1}
+{"out": "docs/images/one-pane-800-light.png", "mode": "light", "size": [800, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-800-dark.png", "mode": "dark", "size": [800, 700], "select": "Allotment rota for November"}
