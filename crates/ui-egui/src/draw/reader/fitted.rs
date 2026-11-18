@@ -24,7 +24,7 @@
 //! height of it takes the pointer and the keyboard (and the link that has the focus, wherever it is).
 
 use std::hash::{Hash as _, Hasher as _};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
@@ -91,8 +91,9 @@ const LETTER: f32 = 0.55;
 /// The most letters of one block a screen reader hears.
 const MOST_SPOKEN: usize = 4_096;
 
-/// How many messages' layouts are kept.
-const KEPT: usize = 8;
+/// The most letters the kept layouts hold together: about two messages as large as the cleaner lets one be. Only the
+/// layouts drawn in the frame are kept at all (a thread may show more than one message).
+const KEPT_GLYPHS: usize = 4 * 1024 * 1024;
 
 /// A message's blocks laid out: what stands where, relative to the top left of the message.
 pub(super) struct Laid {
@@ -214,25 +215,72 @@ pub(super) fn blocks(
     show.laid(ui, &laid, rect.min, base);
 }
 
-/// The layout kept for `who` under `key`, or the one `make` lays out, kept in its place.
+/// A layout kept: whose it is, what it was laid out for, the pass that last drew it and how many letters it holds.
+struct Keep {
+    who: u64,
+    key: u64,
+    pass: u64,
+    glyphs: usize,
+    laid: Arc<Laid>,
+}
+
+/// The kept layouts, in egui's memory for the window.
+type Kept = Arc<Mutex<Vec<Keep>>>;
+
+/// Where the kept layouts are.
+fn kept_slot() -> Id {
+    Id::unique("fitted-kept")
+}
+
+/// The layout kept for `who` under `key`, or the one `make` lays out, kept in its place. Only what is drawn is kept:
+/// before a layout is made, every layout this pass has not drawn is dropped (a message left, an old width), and the
+/// letters kept together stay under [`KEPT_GLYPHS`], so a folder of huge messages opened one after another holds one.
 fn kept(ui: &Ui, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Arc<Laid> {
-    type Kept = Vec<(u64, u64, Arc<Laid>)>;
-    let slot = Id::unique("fitted-kept");
-    if let Some(laid) = ui
-        .data(|data| data.get_temp::<Arc<Kept>>(slot))
-        .and_then(|kept| kept.iter().find(|(owner, kept_key, _)| *owner == who && *kept_key == key).map(|(_, _, laid)| laid.clone()))
-    {
-        return laid;
+    let pass = ui.ctx().cumulative_pass_nr();
+    let store: Kept = ui.data_mut(|data| data.get_temp_mut_or_default::<Kept>(kept_slot()).clone());
+    let mut kept = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(keep) = kept.iter_mut().find(|keep| keep.who == who && keep.key == key) {
+        keep.pass = pass;
+        return keep.laid.clone();
     }
+    // Not kept: what this pass has not drawn goes before the new layout is made.
+    kept.retain(|keep| keep.pass == pass && keep.who != who);
     let laid = make();
-    ui.data_mut(|data| {
-        let mut kept: Kept =
-            data.get_temp::<Arc<Kept>>(slot).map(|kept| kept.iter().filter(|(owner, ..)| *owner != who).cloned().collect()).unwrap_or_default();
-        kept.insert(0, (who, key, laid.clone()));
-        kept.truncate(KEPT);
-        data.insert_temp(slot, Arc::new(kept));
-    });
+    let count = glyphs(&laid);
+    let mut total = kept.iter().map(|keep| keep.glyphs).fold(count, usize::saturating_add);
+    while total > KEPT_GLYPHS && !kept.is_empty() {
+        let dropped = kept.remove(0);
+        total = total.saturating_sub(dropped.glyphs);
+    }
+    kept.push(Keep { who, key, pass, glyphs: count, laid: laid.clone() });
     laid
+}
+
+/// How many letters `laid` holds laid out: what a kept layout costs, about.
+fn glyphs(laid: &Laid) -> usize {
+    let of = |galley: &Galley| galley.rows.iter().map(|row| row.glyphs.len()).fold(0_usize, usize::saturating_add);
+    laid.items
+        .iter()
+        .map(|item| match &item.kind {
+            Kind::Text { galley, mark, .. } => of(galley).saturating_add(mark.as_ref().map_or(0, |mark| of(mark))),
+            Kind::Pre { galley, .. } | Kind::Missing { galley, .. } => of(galley),
+            Kind::Table(grid) => grid
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter())
+                .map(glyphs)
+                .fold(grid.note.as_ref().map_or(0, |note| of(note)), usize::saturating_add),
+            Kind::Rule | Kind::Picture { .. } | Kind::Fold { .. } => 0,
+        })
+        .fold(0, usize::saturating_add)
+}
+
+/// How many layouts are kept, and how many letters they hold together.
+#[cfg(test)]
+fn kept_now(ctx: &egui::Context) -> (usize, usize) {
+    let store = ctx.data(|data| data.get_temp::<Kept>(kept_slot()));
+    let kept = store.as_ref().map(|store| store.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    kept.map_or((0, 0), |kept| (kept.len(), kept.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add)))
 }
 
 /// The quote depth of `block`.
@@ -1001,3 +1049,7 @@ pub(crate) fn board(ui: &mut Ui, theme: &Theme, open: bool) {
     let mut drawn = Drawn::default();
     blocks(ui, theme, &reader, id, &document, &document.blocks, 0, &mut textures, &mut drawn);
 }
+
+#[cfg(test)]
+#[path = "fitted_tests.rs"]
+mod tests;
