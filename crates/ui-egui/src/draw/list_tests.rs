@@ -777,9 +777,9 @@ thread_local! {
     pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The sample window over a list of 10 000 messages in four groups (People, Updates, Newsletters, Invitations, in
-/// turn), longer than the engine lists, in `view`, reduced motion on.
-fn ten_thousand(view: InboxView) -> Harness<'static, InboxApp> {
+/// The sample mailbox over a list of 10 000 messages in four groups (People, Updates, Newsletters, Invitations, in
+/// turn), longer than the engine lists, in `view`.
+fn ten_thousand_mailbox(view: InboxView) -> Mailbox {
     use crate::mailbox::GroupKind;
     let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
     mailbox.set_inbox_view(view);
@@ -793,7 +793,12 @@ fn ten_thousand(view: InboxView) -> Harness<'static, InboxApp> {
         })
         .collect();
     mailbox.set_rows(rows);
-    let mut app = InboxApp::new(mailbox);
+    mailbox
+}
+
+/// The sample window over [`ten_thousand_mailbox`], reduced motion on.
+fn ten_thousand(view: InboxView) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::new(ten_thousand_mailbox(view));
     app.set_reduce_motion(true);
     let mut harness = Harness::builder()
         .with_size(vec2(1300.0, 900.0))
@@ -802,6 +807,43 @@ fn ten_thousand(view: InboxView) -> Harness<'static, InboxApp> {
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
     harness.run();
     harness
+}
+
+/// The list alone, in a pane 440 × 828 (the brief's), over [`ten_thousand_mailbox`].
+fn pane(view: InboxView) -> Harness<'static, Mailbox> {
+    use crate::theme::{Mode, TextScale, Theme};
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let keymap = crate::keymap::Keymap::default();
+    let mut harness = Harness::builder().with_size(vec2(440.0, 828.0)).with_context_setup(install_fonts).with_max_steps(240).build_ui_state(
+        move |ui, mailbox: &mut Mailbox| {
+            crate::motion::set_reduced(ui.ctx(), true);
+            ui.set_style(theme.style());
+            let _ = super::list::rows(ui, &theme, &keymap, mailbox);
+        },
+        ten_thousand_mailbox(view),
+    );
+    harness.run();
+    harness
+}
+
+/// The rectangle of message `id`'s row in the pane's AccessKit tree, when it was built.
+fn pane_rect(harness: &Harness<'static, Mailbox>, id: u64) -> Option<egui::Rect> {
+    let mailbox = harness.state();
+    let row = mailbox.messages().iter().find(|row| row.id == id)?;
+    harness.query_by_label(&mailbox.spoken(row)).map(|node| node.rect())
+}
+
+/// Turns the wheel over the pane's list by `points` (down when positive) and lets the scrolling settle.
+fn pane_wheel(harness: &mut Harness<'static, Mailbox>, points: f32) {
+    harness.hover_at(egui::pos2(220.0, 400.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -points),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run();
 }
 
 /// Turns the wheel over the list by `points` (down when positive) and lets the scrolling settle.
@@ -826,30 +868,36 @@ const MOST_ROWS: usize = 828_usize.div_ceil(56) + 1 + 4;
 
 #[test]
 fn ten_thousand_messages_build_only_the_rows_in_sight() {
-    let mut harness = ten_thousand(InboxView::List);
+    let mut harness = pane(InboxView::List);
+    let view = super::list::view_rect(&harness.ctx).unwrap();
+    assert!(view.height() > 780.0 && view.height() <= 828.0, "the list's viewport fills the pane: {view:?}");
     let built = super::list::built(&harness.ctx).unwrap();
     assert!(built.count <= MOST_BUILT && built.count >= 8, "{built:?} at the top");
     assert_eq!(built.first, 0, "the top of the list");
-    wheel(&mut harness, 280_000.0);
+    pane_wheel(&mut harness, 280_000.0);
     let built = super::list::built(&harness.ctx).unwrap();
     assert!(built.count <= MOST_BUILT && built.count >= 8, "{built:?} in the middle");
     assert!(built.first > 4_000, "{built:?}: the middle of the list");
     // The first message in sight is built and in AccessKit's tree; the list's first is not.
-    let mailbox = harness.state().mailbox();
     let first = super::list::first_in_sight(&harness.ctx).unwrap();
-    let row = |id: u64| mailbox.messages().iter().find(|row| row.id == id).unwrap();
-    assert!(harness.query_by_label(&mailbox.spoken(row(first))).is_some(), "the first in sight is built");
-    assert!(harness.query_by_label(&mailbox.spoken(row(1_000_000))).is_none(), "the first of the list is not");
+    assert!(pane_rect(&harness, first).is_some(), "the first in sight is built");
+    assert!(pane_rect(&harness, 1_000_000).is_none(), "the first of the list is not");
+    // The simple list, rows only, builds no more than the rows of 56 that meet the pane and four.
+    let mut harness = pane(InboxView::Simple);
+    pane_wheel(&mut harness, 280_000.0);
+    let built = super::list::built(&harness.ctx).unwrap();
+    assert!(built.count <= MOST_ROWS && built.first > 4_000, "{built:?} in the simple list");
 }
 
 #[test]
 fn a_group_opening_or_folding_above_the_viewport_keeps_the_first_message_in_sight() {
-    let mut harness = ten_thousand(InboxView::Cards);
+    let mut harness = pane(InboxView::Cards);
     // The last group opens; the list scrolls into its middle.
     harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("Invitations"), true));
     harness.run();
-    wheel(&mut harness, 70_000.0);
+    pane_wheel(&mut harness, 70_000.0);
     let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let place = pane_rect(&harness, first).unwrap();
     let built = super::list::built(&harness.ctx).unwrap();
     assert!(built.count <= MOST_BUILT, "{built:?}");
     for open in [true, false] {
@@ -857,9 +905,28 @@ fn a_group_opening_or_folding_above_the_viewport_keeps_the_first_message_in_sigh
         harness.ctx.data_mut(|data| data.insert_temp(super::list::group_open_id("People"), open));
         harness.run();
         assert_eq!(super::list::first_in_sight(&harness.ctx), Some(first), "the first message in sight stays, People open: {open}");
+        assert_eq!(pane_rect(&harness, first), Some(place), "on the same place on the screen, People open: {open}");
         let built = super::list::built(&harness.ctx).unwrap();
         assert!(built.count <= MOST_BUILT, "{built:?}");
     }
+}
+
+#[test]
+fn each_row_tells_a_screen_reader_its_place_in_the_whole_list_and_the_list_its_size() {
+    let mut harness = pane(InboxView::Simple);
+    pane_wheel(&mut harness, 280_000.0);
+    let list = harness.get_by_role_and_label(Role::ListBox, "Messages");
+    assert_eq!(list.accesskit_node().size_of_set(), Some(10_000), "the list's size, built or not");
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let index = usize::try_from(first - 1_000_000).unwrap();
+    let mailbox = harness.state();
+    let row = mailbox.messages().iter().find(|row| row.id == first).unwrap();
+    let spoken = mailbox.spoken(row);
+    let node = harness.get_by_label(&spoken);
+    assert_eq!(node.accesskit_node().position_in_set(), Some(index), "its place, from 0");
+    assert_eq!(node.accesskit_node().size_of_set(), Some(10_000));
+    let rows = harness.query_all_by_role(Role::ListBoxOption).count();
+    assert!(rows <= MOST_ROWS, "only the rows built are items: {rows}");
 }
 
 /// The rectangle of message `id`'s row in AccessKit's tree, when it was built.
@@ -1027,8 +1094,8 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
                     assert_eq!(top, bottom, "{percent} {view:?}: rows {index} and {} touch, no gap, no doubled edge", index + 1);
                 }
             }
-            for (top, bottom) in &spans {
-                if let super::list::Line::Mail(_) = listing.lines[0] {
+            for ((top, bottom), line) in spans.iter().zip(&listing.lines) {
+                if let super::list::Line::Mail(_) = line {
                     assert_eq!(bottom - top, theme.size(56.0), "{percent} {view:?}: the mail row's fixed height");
                 }
                 for ppp in [1.0_f32, 1.5] {
