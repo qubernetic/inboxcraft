@@ -12,7 +12,7 @@ use inboxcraft_model::{
     ScheduleId, StepReport, UidValidity,
 };
 use inboxcraft_store::{Batch, Change, Storage};
-use inboxcraft_time::{Clock, Offset, Offsets, Timestamp};
+use inboxcraft_time::{Clock, Offset, Offsets, Timestamp, WeekRule};
 use serde_json::Value;
 
 use crate::ScreenerMode;
@@ -51,6 +51,8 @@ pub struct Outcome {
     pins_outlast_done: Option<bool>,
     /// How long every send is held from now on.
     hold: Option<Hold>,
+    /// How weeks are counted from now on.
+    week: Option<WeekRule>,
     /// Held jobs withdrawn: their removal from the store's queue is in the batch.
     withdrawn: Vec<JobId>,
 }
@@ -86,6 +88,7 @@ impl Outcome {
             notify: None,
             pins_outlast_done: None,
             hold: None,
+            week: None,
             withdrawn: Vec::new(),
         }
     }
@@ -182,6 +185,12 @@ impl Outcome {
     /// The outcome holding every send for `hold` from now on.
     pub(crate) fn with_hold(mut self, hold: Hold) -> Self {
         self.hold = Some(hold);
+        self
+    }
+
+    /// The outcome counting weeks by `rule` from now on.
+    pub(crate) fn with_week(mut self, rule: WeekRule) -> Self {
+        self.week = Some(rule);
         self
     }
 
@@ -282,6 +291,8 @@ pub(crate) struct State {
     pub(crate) pins_outlast_done: bool,
     /// How long every send is held (`send.set`); the front end keeps it on disk and hands it back at the start.
     pub(crate) hold: Hold,
+    /// How weeks are counted (`week.set`); the front end keeps it on disk and hands it back at the start.
+    pub(crate) week: WeekRule,
     /// What to tell the owner, for the front end to take ([`Session::take_notices`]).
     pub(crate) notices: VecDeque<Notice>,
     /// The owner's own moves that come back through a sync, to tell nothing of (see [`crate::notify`]).
@@ -582,6 +593,17 @@ impl Session {
         self.state.hold = hold;
     }
 
+    /// How weeks are counted, as `week.set` left it.
+    #[must_use]
+    pub fn week_rule(&self) -> WeekRule {
+        self.state.week
+    }
+
+    /// Takes the week rule kept from an earlier run, read with [`crate::week::from_value`].
+    pub fn set_week_rule(&mut self, rule: WeekRule) {
+        self.state.week = rule;
+    }
+
     /// What to tell the owner since the last call, in order: more than [`notify::MAX_SINGLE`] new messages of one
     /// account as one count.
     pub fn take_notices(&mut self) -> Vec<Notice> {
@@ -617,7 +639,7 @@ impl Session {
         }
         let context = Context { store: &*self.store, state: &self.state, now: self.clock.now(), offsets: &*self.offsets, caller };
         let outcome = catch_unwind(AssertUnwindSafe(|| (spec.run)(&context, params))).map_err(|_| EngineError::Panicked(spec.id))??;
-        let Outcome { value, batch, jobs, senders, removed, resync, appearance, undo, screener, notify, pins_outlast_done, hold, withdrawn } =
+        let Outcome { value, batch, jobs, senders, removed, resync, appearance, undo, screener, notify, pins_outlast_done, hold, week, withdrawn } =
             outcome;
         self.commit(spec.id, None, &batch, jobs)?;
         for job in withdrawn {
@@ -662,6 +684,9 @@ impl Session {
         }
         if let Some(hold) = hold {
             self.state.hold = hold;
+        }
+        if let Some(rule) = week {
+            self.state.week = rule;
         }
         for account in removed {
             self.state.accounts.remove(&account);

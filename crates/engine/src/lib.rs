@@ -116,6 +116,7 @@ mod sync;
 mod template;
 mod undo;
 mod view;
+pub mod week;
 mod write;
 mod writes;
 
