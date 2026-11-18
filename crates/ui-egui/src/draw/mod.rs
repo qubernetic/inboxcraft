@@ -206,6 +206,12 @@ fn margin(points: f32) -> Margin {
 }
 
 /// A pane's frame: no fill, `left` and `right` of its pane and `gap` above and below it.
+/// The widest the list beside the reader gets in `ui`: with the composer `docked` in the reader's place, what leaves
+/// the composer its least width and the card's 8 beside it, so in a narrow window the list gives way to it.
+fn list_widest(ui: &Ui, theme: &Theme, docked: bool) -> f32 {
+    if docked { (ui.available_width() - compose::least_width(ui, theme) - theme.spacing.s2).max(1.0) } else { f32::INFINITY }
+}
+
 fn around(left: f32, right: f32, gap: f32) -> Frame {
     // Distances are a few points; the clamp keeps the casts inside i8.
     let side = |points: f32| points.clamp(0.0, 100.0) as i8;
@@ -1488,9 +1494,7 @@ impl InboxApp {
                 })
             };
             (header, listed) = if self.reader.open_id().is_some() || docked {
-                // The composer in the reader's place keeps its least width (and the card's 8 beside it): in a narrow
-                // window the list gives way to it.
-                let widest = if docked { (ui.available_width() - compose::least_width(ui, &theme) - s.s2).max(1.0) } else { f32::INFINITY };
+                let widest = list_widest(ui, &theme, docked);
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
