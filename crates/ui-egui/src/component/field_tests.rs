@@ -1379,3 +1379,54 @@ fn in_one_frame_select_all_and_a_shorter_paste_replace_and_deleting_at_the_cap_w
         assert_eq!(harness.state().len(), most - 1, "{kind:?}: deleting at the cap is taken");
     }
 }
+
+/// Where the first glyph of `text` stands in the last frame, in physical pixels: its left edge and its baseline.
+fn first_glyph<State>(harness: &Harness<'_, State>, text: &str, ppp: f32) -> Option<(f32, f32)> {
+    fn walk<'a>(shape: &'a Shape, found: &mut Vec<&'a TextShape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            Shape::Text(text) => found.push(text),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+    let shape = found.into_iter().find(|shape| shape.galley.job.text.trim_start() == text)?;
+    let row = shape.galley.rows.first()?;
+    let glyph = row.glyphs.iter().find(|glyph| !glyph.chr.is_whitespace())?;
+    let at = shape.pos + glyph.pos.to_vec2() + vec2(0.0, row.pos.y);
+    Some((at.x * ppp, at.y * ppp))
+}
+
+#[test]
+fn a_hint_stands_where_the_text_typed_in_its_place_stands() {
+    use egui_kittest::kittest::Queryable as _;
+    for percent in [100, 130] {
+        for ppp in [1.0_f32, 1.25, 1.5] {
+            for many in [false, true] {
+                let scale = TextScale::from_percent(percent).unwrap();
+                let theme = Theme::new(Mode::Light, scale);
+                let mut harness = builder().with_pixels_per_point(ppp).with_size(vec2(400.0, 200.0)).build_ui_state(
+                    move |ui, text: &mut String| {
+                        ui.add_space(13.3);
+                        let field = Field::new("Name", "Hint");
+                        if many {
+                            multiline_field(ui, &theme, egui::Id::unique("hinted"), text, &field);
+                        } else {
+                            text_field(ui, &theme, egui::Id::unique("hinted"), text, &field);
+                        }
+                    },
+                    String::new(),
+                );
+                harness.run();
+                let case = format!("{percent} % at {ppp}, several lines {many}");
+                let hint = first_glyph(&harness, "Hint", ppp).unwrap_or_else(|| panic!("{case}: no hint"));
+                *harness.state_mut() = "Hint".to_owned();
+                harness.run();
+                let typed = first_glyph(&harness, "Hint", ppp).unwrap_or_else(|| panic!("{case}: no text"));
+                assert!((hint.0 - typed.0).abs() < 0.3 && (hint.1 - typed.1).abs() < 0.3, "{case}: hint {hint:?}, typed {typed:?}");
+                let _ = harness.query_by_label("Name");
+            }
+        }
+    }
+}

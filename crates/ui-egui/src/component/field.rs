@@ -668,7 +668,9 @@ fn paint_hint(ui: &Ui, theme: &Theme, hint: &str, font: Font, at: egui::Pos2, cl
     }
     let shift = if focus { caret_size(theme).x + theme.spacing.s2 } else { 0.0 };
     let text = layout(ui, hint, font, theme.palette.muted, None, false);
-    paint::run_at(&super::solid(ui).with_clip_rect(clip), at + vec2(shift, 0.0), text, theme.palette.muted);
+    // Laid out and painted as egui paints the text typed in its place, at the place it gives that text: a person reads
+    // the typed text there, so the hint stands on its baseline at every scale (not through `paint::run_at`).
+    super::solid(ui).with_clip_rect(clip).galley(at + vec2(shift, 0.0), text, theme.palette.muted);
 }
 
 /// The label and screen-reader name of a field.
@@ -743,7 +745,8 @@ fn one_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field: &Field
                 if empty && !disabled_password {
                     // A stored password's hint is words, in `body`, centred as words are.
                     let hint_font = if stored { theme.fonts.body } else { font };
-                    let at = pos2(inner.left(), rect.top() + ((height - hint_font.line) / 2.0).max(0.0));
+                    // A typed hint where egui puts the typed text; a stored one's words in the middle.
+                    let at = if stored { pos2(inner.left(), rect.top() + ((height - hint_font.line) / 2.0).max(0.0)) } else { output.galley_pos };
                     paint_hint(ui, theme, field.hint, hint_font, at, Rect::from_x_y_ranges(inner.x_range(), rect.shrink(1.0).y_range()), seen.focus);
                 }
                 if seen.focus && !field.read_only {
@@ -797,7 +800,8 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
     if empty && !field.hint.is_empty() {
         let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
         let hint = layout(ui, field.hint, font, p.muted, None, false);
-        paint::run_at(&super::solid(ui).with_clip_rect(rect), inner.min + vec2(shift, 0.0), hint, p.muted);
+        // Where egui puts the text typed in its place, painted as egui paints it ([`paint_hint`]).
+        super::solid(ui).with_clip_rect(rect).galley(output.galley_pos + vec2(shift, 0.0), hint, p.muted);
     }
     if seen.focus {
         paint_caret(ui, theme, id, &output, rect, seen.forced);
@@ -904,7 +908,7 @@ fn multiline_inner(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, field:
                         .layouter(&mut layouter)
                         .show(ui);
                     if empty {
-                        paint_hint(ui, theme, field.hint, font, view.min, view, seen.focus);
+                        paint_hint(ui, theme, field.hint, font, output.galley_pos, view, seen.focus);
                     }
                     if seen.focus && !field.read_only {
                         let clip = ui.clip_rect().intersect(view.expand2(vec2(caret_size(theme).x + s.s1, 0.0)));
