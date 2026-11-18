@@ -1914,3 +1914,21 @@ fn a_careful_link_says_so_on_a_bar_over_the_answers() {
     assert!(bar.bottom() <= reply.top() - 12.0 - 10.0 + 0.5 && bar.bottom() >= reply.top() - 12.0 - 10.0 - 1.5, "{bar:?} {reply:?}");
     assert!((bar.left() - reply.left()).abs() <= 0.5, "{bar:?} {reply:?}");
 }
+
+#[test]
+fn more_opens_4_under_its_button_with_archive_and_its_key_first() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let opener = harness.get_by_role_and_label(Role::Button, "More").rect();
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    let rows: Vec<(String, egui::Rect)> =
+        harness.query_all_by_role(Role::MenuItem).map(|node| (node.accesskit_node().label().unwrap_or_default(), node.rect())).collect();
+    let (first, rect) = rows.iter().min_by(|a, b| a.1.top().total_cmp(&b.1.top())).cloned().unwrap();
+    assert!(first.starts_with("Archive"), "Archive is the first row: {rows:?}");
+    // The row runs 1 in from the menu's edge: the menu's top 4 under the button.
+    assert!((rect.top() - 1.0 - opener.bottom() - 4.0).abs() <= 0.5, "4 under its button: {rect:?} {opener:?}");
+    // Its key, A, stands in the row.
+    let keys = painted_texts(&harness);
+    assert!(keys.iter().any(|(at, text)| text == "A" && rect.contains_rect(*at)), "the row shows its key: {keys:?}");
+}
