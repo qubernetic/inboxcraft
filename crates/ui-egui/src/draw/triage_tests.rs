@@ -336,3 +336,81 @@ fn the_held_header_keeps_to_a_narrow_window() {
     harness.get_by_label("Let Harbour Swim Club in?");
     harness.get_by_role_and_label(Role::Button, "Block");
 }
+
+/// The tops of the queue's Let in buttons, top down.
+fn let_in_tops(harness: &Harness<'static, InboxApp>) -> Vec<f32> {
+    let mut tops: Vec<f32> = harness.query_all_by_role_and_label(Role::Button, "Let in").map(|node| node.rect().top()).collect();
+    tops.sort_by(f32::total_cmp);
+    tops
+}
+
+/// The colours of the rectangle edges painted in the last frame.
+fn edges(harness: &Harness<'static, InboxApp>) -> Vec<egui::Color32> {
+    fn leaves(shape: &egui::Shape, found: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| leaves(shape, found)),
+            egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => found.push(rect.stroke.color),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| leaves(&clipped.shape, &mut found));
+    found
+}
+
+#[test]
+fn an_answered_card_takes_its_answers_colour_fades_and_the_next_steps_up() {
+    use crate::theme::{Mode, TextScale, Theme};
+    let minus: Vec<egui::Color32> = [Mode::Light, Mode::Dark].map(|mode| Theme::new(mode, TextScale::default()).palette.minus).to_vec();
+    for motion in [true, false] {
+        let mut app = app();
+        app.set_reduce_motion(!motion);
+        let mut harness = Harness::builder()
+            .with_size(vec2(1300.0, 900.0))
+            .with_context_setup(install_fonts)
+            .with_step_dt(1.0 / 100.0)
+            .with_max_steps(200)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Review").click();
+        harness.run();
+        let tops = let_in_tops(&harness);
+        let (first, second) = (tops[0], tops[1]);
+        harness.query_all_by_role_and_label(Role::Button, "Keep out").next().unwrap().click();
+        harness.step();
+        harness.step();
+        assert!(harness.state().mailbox().can_undo(), "the answer acts at once");
+        if !motion {
+            // Off: the next card is there at once.
+            harness.run();
+            assert_eq!(let_in_tops(&harness), vec![first], "motion off: the next card stands in the answered one's place");
+            continue;
+        }
+        // 0 to 160 ms: the card stays, its edge in the answer's colour (Keep out: `minus`), the next card where it was.
+        harness.run_steps(8);
+        assert!(edges(&harness).iter().any(|colour| minus.contains(colour)), "the edge takes Keep out's colour");
+        assert_eq!(let_in_tops(&harness).last().copied(), Some(second), "the next card waits while the answer shows");
+        // 160 to 285 ms: it fades at an even pace.
+        harness.run_steps(14);
+        let faded_minus = |colour: &egui::Color32| {
+            let alpha = f32::from(colour.a()) / 255.0;
+            colour.a() > 0
+                && colour.a() < 255
+                && minus.iter().any(|m| {
+                    [(colour.r(), m.r()), (colour.g(), m.g()), (colour.b(), m.b())]
+                        .iter()
+                        .all(|(seen, full)| (f32::from(*seen) - f32::from(*full) * alpha).abs() <= 2.0)
+                })
+        };
+        assert!(edges(&harness).iter().any(faded_minus), "half faded: {:?}", edges(&harness));
+        assert_eq!(let_in_tops(&harness).last().copied(), Some(second));
+        // 285 to 465 ms: its place closes on the design's curve and the next card steps up.
+        harness.run_steps(8);
+        let mid = let_in_tops(&harness).last().copied().unwrap();
+        assert!(mid < second && mid > first, "the next card is stepping up: {first} < {mid} < {second}");
+        assert!(!edges(&harness).iter().any(|colour| minus.contains(colour)), "the answered card is no longer drawn");
+        harness.run_steps(20);
+        assert_eq!(let_in_tops(&harness), vec![first], "the next card stands in the answered one's place");
+        assert!(crate::component::tests::rests(&mut harness, 4), "and it rests");
+    }
+}

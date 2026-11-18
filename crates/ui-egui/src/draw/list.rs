@@ -1484,9 +1484,26 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
                 }
             });
             ui.spacing_mut().item_spacing.y = CARD_GAP;
-            for (index, asker) in askers.iter().enumerate() {
-                if let Some(act) = sender_card(ui, theme, keymap, mailbox, asker, index == 0) {
+            // The card just answered, while it leaves (M11): its place in the queue and how far it has gone.
+            let leaving = answered(ui.ctx(), &askers).map(|left| {
+                let gone = answer_gone(ui.ctx(), theme, &left);
+                (left, gone)
+            });
+            let holding = leaving.as_ref().is_some_and(|(_, gone)| gone.closed <= 0.0);
+            for index in 0..=askers.len() {
+                if let Some((left, gone)) = leaving.as_ref().filter(|(left, _)| left.at.min(askers.len()) == index) {
+                    leaving_card(ui, theme, keymap, mailbox, left, *gone);
+                }
+                let Some(asker) = askers.get(index) else { break };
+                // The next card becomes the current one when the answered one has faded.
+                let current = index == 0 && !(holding && leaving.as_ref().is_some_and(|(left, _)| left.at == 0));
+                let (act, high) = sender_card(ui, theme, keymap, mailbox, asker, current, None);
+                if let Some(act) = act {
                     rows.acted.set(Some((asker.newest.id, act)));
+                    if !motion::reduced(ui.ctx()) {
+                        let left = Answered { row: asker.newest.clone(), more: asker.more, at: index, keep_out: act == Act::Block, high };
+                        ui.data_mut(|data| data.insert_temp(answered_id(), left));
+                    }
                 }
             }
             if let Some(id) = ui.data_mut(|data| data.remove_temp::<u64>(Id::unique("new-sender-opened"))) {
@@ -1497,9 +1514,85 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
     (Built { first: 0, count: askers.len() }, mode)
 }
 
-/// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue. The
-/// answer pressed: Let in or Keep out.
-fn sender_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, asker: &Asker<'_>, current: bool) -> Option<Act> {
+/// The card of a sender just answered, while it leaves the queue (M11 at the level the app plays): its edge in the
+/// answer's colour, then it fades, then its place closes and the next card steps up.
+#[derive(Debug, Clone)]
+struct Answered {
+    /// The sender's newest message, as the card showed it.
+    row: MessageRow,
+    more: usize,
+    /// Its place in the queue.
+    at: usize,
+    /// Keep out (the edge in `minus`); Let in otherwise (`plus`).
+    keep_out: bool,
+    /// The card's height, in points.
+    high: f32,
+}
+
+/// Where [`Answered`] is kept.
+fn answered_id() -> Id {
+    Id::unique("queue-answered")
+}
+
+/// How long a card answered shows its answer's colour before it fades, in seconds (the presentation's 160 ms).
+const ANSWER_HOLD: f32 = 0.16;
+
+/// The card answered and still leaving, unless its sender still waits (the answer failed): it is not drawn twice.
+fn answered(ctx: &egui::Context, askers: &[Asker<'_>]) -> Option<Answered> {
+    let left = ctx.data(|data| data.get_temp::<Answered>(answered_id()))?;
+    let address = left.row.address.to_lowercase();
+    if askers.iter().any(|asker| asker.newest.address.to_lowercase() == address) {
+        ctx.data_mut(|data| data.remove::<Answered>(answered_id()));
+        return None;
+    }
+    Some(left)
+}
+
+/// How far the answered card has gone in this frame: it holds its answer's colour for [`ANSWER_HOLD`], fades over
+/// `fast` at an even pace, then its place closes over `row_collapse` on the design's curve. Gone, it is forgotten;
+/// repaints are asked for until then.
+fn answer_gone(ctx: &egui::Context, theme: &Theme, left: &Answered) -> Gone {
+    let (hold, fade, close) = (ANSWER_HOLD, theme.motion.fast, theme.motion.row_collapse);
+    let whole = hold + fade + close;
+    let id = Id::unique("queue-leaving").with(left.row.address.to_lowercase());
+    let at = motion::elapsed(ctx, id, whole) * whole;
+    if at >= whole {
+        ctx.data_mut(|data| data.remove::<Answered>(answered_id()));
+    }
+    let share = |from: f32, span: f32| if span > 0.0 { ((at - from) / span).clamp(0.0, 1.0) } else { 1.0 };
+    Gone { faded: share(hold, fade), closed: motion::ease(share(hold + fade, close)) }
+}
+
+/// Draws the card `left` answered as far as it has `gone`: whole in its answer's colour, fading, then only the room it
+/// leaves, closing. What is pressed on it does nothing: it was answered.
+fn leaving_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, left: &Answered, gone: Gone) {
+    if gone.closed > 0.0 {
+        // The card's place and the gap under it close together; the next card steps up into them.
+        let room = (left.high + CARD_GAP) * (1.0 - gone.closed);
+        if room > 0.0 && room.is_finite() {
+            ui.add_space(room);
+        }
+        return;
+    }
+    let edge = if left.keep_out { theme.palette.minus } else { theme.palette.plus };
+    let asker = Asker { newest: &left.row, more: left.more };
+    ui.scope(|ui| {
+        ui.multiply_opacity(1.0 - gone.faded);
+        let _ = sender_card(ui, theme, keymap, mailbox, &asker, left.at == 0, Some(edge));
+    });
+}
+
+/// The card of the sender `asker` across `ui` (at most [`CARD_WIDE`]): `current` for the first of the queue, its edge
+/// `edge` when given (an answered card's). The answer pressed, Let in or Keep out, and the card's height.
+fn sender_card(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    asker: &Asker<'_>,
+    current: bool,
+    edge: Option<egui::Color32>,
+) -> (Option<Act>, f32) {
     let (p, f, s) = (&theme.palette, &theme.fonts, &theme.spacing);
     let message = asker.newest;
     let wide = ui.available_width().min(CARD_WIDE).floor();
@@ -1582,18 +1675,18 @@ fn sender_card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, a
             });
         });
         let rect = shown.response.rect;
-        let edge = if current { p.cyan_edge } else { p.line };
+        let edge = edge.unwrap_or(if current { p.cyan_edge } else { p.line });
         let card = vec![
             egui::Shape::rect_filled(rect, 0.0, p.surface),
             egui::Shape::rect_stroke(rect, 0.0, egui::Stroke::new(1.0, edge), egui::StrokeKind::Inside),
         ];
         ui.painter().set(slot, egui::Shape::Vec(card));
+        rect.height()
     });
-    let _ = inner;
     if opened {
         ui.data_mut(|data| data.insert_temp(Id::unique("new-sender-opened"), message.id));
     }
-    answer
+    (answer, inner.inner)
 }
 
 /// The line that says why a message waits, as the design's why-line: `WHY HERE` in the accent and `text`, on the panel
