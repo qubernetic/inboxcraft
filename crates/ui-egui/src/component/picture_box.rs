@@ -9,7 +9,8 @@
 //! - not loaded (a remote picture the owner has not asked for): a dashed `muted` edge, the picture icon in `muted`,
 //!   "Remote picture not loaded" in `mono_s` and `muted`, the picture's text in `caption` and `ink`, and its size;
 //! - loading: a `line` edge, the progress line "loading picture" and the picture's text in `muted`;
-//! - not shown (a kind the app does not draw): a `line` edge, the icon, why, and the picture's text;
+//! - not shown (a kind the app does not draw, or one here whose data could not be drawn, in words of its own): a `line`
+//!   edge, the icon, why, and the picture's text;
 //! - failed: a `minus` edge, the broken-picture icon and why in `minus`, the picture's text, and `try again` where it
 //!   fits whole in the box.
 //!
@@ -39,6 +40,8 @@ pub enum PictureLook<'a> {
     Loading,
     /// A kind of picture the app does not draw.
     NotShown,
+    /// Here, but its data could not be made into a picture: the look of [`PictureLook::NotShown`], its own words.
+    Undrawable,
     /// It could not be shown, for `why`.
     Failed(&'a str),
 }
@@ -75,6 +78,7 @@ fn why(look: PictureLook<'_>) -> String {
         PictureLook::NotLoaded => tr!("Remote picture not loaded").to_owned(),
         PictureLook::Loading => tr!("loading picture").to_owned(),
         PictureLook::NotShown => tr!("Picture not shown: InboxCraft does not draw this kind of picture").to_owned(),
+        PictureLook::Undrawable => tr!("Picture not shown: its data could not be drawn").to_owned(),
         PictureLook::Failed(why) => tr!("Picture could not be shown: {why}", why = super::spoken(why)),
     }
 }
@@ -136,7 +140,7 @@ pub(crate) fn picture_box_with(
     let (edge, mark, why_ink) = match look {
         PictureLook::NotLoaded => (p.muted, Some(PICTURE), p.muted),
         PictureLook::Loading => (p.line, None, p.muted),
-        PictureLook::NotShown => (p.line, Some(PICTURE), p.muted),
+        PictureLook::NotShown | PictureLook::Undrawable => (p.line, Some(PICTURE), p.muted),
         PictureLook::Failed(_) => (p.minus, Some(BROKEN), p.minus),
     };
     let why_galley = (look != PictureLook::Loading).then(|| super::fitted(ui, &why(look), f.mono_s, why_ink, inner));

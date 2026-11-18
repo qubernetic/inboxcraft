@@ -174,8 +174,8 @@ fn a_texture_goes_with_its_picture() {
     assert!(harness.state().textures.contains_key(url));
 }
 
-/// A picture that is here but cannot be drawn is a box that says it is not shown, with no `try again`: trying again
-/// would get the same bytes.
+/// A picture that is here but cannot be drawn is a box that says its data could not be drawn, with no `try again`:
+/// trying again would get the same bytes.
 #[test]
 fn a_picture_that_cannot_be_drawn_offers_no_try_again() {
     let fetch = Recorder::default();
@@ -186,7 +186,8 @@ fn a_picture_that_cannot_be_drawn_offers_no_try_again() {
     let broken = crate::picture::Decoded { width: 2, height: 2, rgba: vec![0; 3] };
     harness.state_mut().reader_mut().0.put_picture(url, crate::reader::PictureState::Ready(std::sync::Arc::new(broken)));
     settle(&mut harness);
-    harness.get_by_label_contains("Picture not shown");
+    harness.get_by_label_contains("Picture not shown: its data could not be drawn");
+    assert!(harness.query_by_label_contains("does not draw this kind").is_none(), "its own reason, not another kind's");
     assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
 }
 

@@ -192,7 +192,7 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
         (_, Some(PictureState::Failed(reason))) => PictureLook::Failed(reason),
         (_, Some(PictureState::Waiting) | None) => PictureLook::Loading,
         // Here, but not drawable: trying again would get the same bytes, so it offers no `try again`.
-        (_, Some(PictureState::Ready(_))) => PictureLook::NotShown,
+        (_, Some(PictureState::Ready(_))) => PictureLook::Undrawable,
     };
     let (response, asked) = picture_box(ui, theme, &Keymap::empty(), look, &image.alt, image.size);
     if let (Some(PictureAsked::Retry), Some(key)) = (asked, key) {
