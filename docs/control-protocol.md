@@ -99,8 +99,17 @@ that is:
 - the appearance (`ui.*.set`) and, in the sample mailbox, `sample.mail.set`;
 - snooze, park and pin, as they land.
 
-`sync.status` reads how syncing stands in the app, from what its workers told: `synced`, `syncing`, `offline` or
-`failing`, the folder syncs done of all, the last sync and the number of failing accounts.
+`sync.status` reads how syncing stands in the app, from what its workers told: the state, the folder syncs done of
+all in the rounds under way, the last sync and the number of failing accounts. The state is the first that holds:
+
+- `failing` when an account is stopped until the owner acts: a refused or unanswered sign-in, no password, no login
+  method, a certificate or encryption refused, whether or not any account is connected;
+- `offline` when no account is signed in (connecting counts as not yet), and the failures are of the network or
+  the server: no route, a timeout, a refused or dropped connection;
+- `failing` when a signed-in account's last connection or job failed (not a body fetch) since its last sign-in or
+  its last round that ended with nothing failed;
+- `syncing` while a round has folders left, or a signed-in account has not ended a round yet;
+- `synced` otherwise, and always with no account.
 
 Everything a client sends is hostile. `cargo +nightly fuzz run control_lines` runs the fuzz target on both lines.
 
