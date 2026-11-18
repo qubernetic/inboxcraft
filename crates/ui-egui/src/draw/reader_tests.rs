@@ -1023,6 +1023,46 @@ fn a_message_wipes_in_behind_a_scan_line_and_is_there_at_once_with_reduced_motio
 }
 
 #[test]
+fn the_scan_line_stays_whole_until_nine_tenths_of_the_time_then_fades() {
+    let scan = super::reader::scan;
+    // As the presentation's keyframes: whole until 90 % of the time, then out over the last tenth.
+    for t in [0.0, 0.3, 0.6, 0.89] {
+        assert_eq!(scan(t), 1.0, "whole at {t}");
+    }
+    let fading = [0.92, 0.95, 0.98].map(scan);
+    assert!(fading.iter().all(|alpha| *alpha > 0.0 && *alpha < 1.0) && fading.windows(2).all(|pair| pair[1] < pair[0]), "{fading:?}");
+    assert_eq!((scan(1.0), scan(f32::NAN)), (0.0, 0.0));
+}
+
+#[test]
+fn a_key_or_a_press_during_the_wipe_takes_it_to_its_end() {
+    let key = egui::Event::Key { key: Key::F20, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    let press = egui::Event::PointerButton {
+        pos: egui::pos2(10.0, 10.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for (what, event) in [("nothing", None), ("a key", Some(key)), ("a press", Some(press))] {
+        let ctx = egui::Context::default();
+        let frame = |time: f64, events: Vec<egui::Event>| {
+            let mut got = (0.0, 0.0);
+            let mut output =
+                ctx.run_ui(egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| got = super::reader::wiped(ui.ctx(), 7));
+            output.textures_delta.clear();
+            got
+        };
+        assert_eq!(frame(0.0, Vec::new()), (0.0, 0.0), "{what}: the wipe starts");
+        let (time, shown) = frame(0.05, event.into_iter().collect());
+        if what == "nothing" {
+            assert!(time < 1.0 && shown < 1.0, "it runs on: {time} {shown}");
+        } else {
+            assert_eq!((time, shown), (1.0, 1.0), "{what} took it to its end");
+        }
+    }
+}
+
+#[test]
 fn the_wipe_runs_on_the_design_s_curve() {
     let ease = super::reader::ease;
     assert_eq!((ease(0.0), ease(1.0)), (0.0, 1.0));
