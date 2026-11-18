@@ -380,3 +380,13 @@ fn the_row_waiting_for_a_key_is_a_box_720_by_36_with_a_1_px_cyan_edge() {
         assert_eq!(around, row, "{theme:?}: the edge round the whole row");
     }
 }
+
+#[test]
+fn reset_all_keys_is_a_secondary_button_134_by_32() {
+    let harness = on_shortcuts(egui::Theme::Dark);
+    let reset = harness.get_by_role_and_label(Role::Button, "Reset all keys").rect();
+    // `settings-shortcuts/default`: a secondary text button, its 1 px `line` edge round 134 × 32.
+    assert_eq!((reset.width(), reset.height()), (134.0, 32.0), "{reset:?}");
+    let line = crate::theme::Theme::new(crate::theme::Mode::Dark, crate::theme::TextScale::default()).palette.line;
+    assert!(!super::tests::strokes_round(harness.output(), line, reset).is_empty(), "its edge");
+}

@@ -686,7 +686,7 @@ fn shortcuts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Setting
             .rect;
         let reset = Rect::from_min_max(pos2(field.right(), field.top()), pos2(ui.max_rect().right(), field.bottom() - 2.0));
         ui.scope_builder(UiBuilder::new().max_rect(reset).layout(Layout::right_to_left(Align::Max)), |ui| {
-            if TextButton::new(tr!("Reset all keys")).show(ui, theme, keymap).clicked() {
+            if TextButton::new(tr!("Reset all keys")).secondary().show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::ResetKeys);
             }
         });
