@@ -45,6 +45,7 @@ pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
 pub mod gallery_fields;
+pub mod gallery_reader;
 pub mod hover;
 pub mod icon;
 pub mod key;
@@ -66,6 +67,7 @@ pub mod time_picker;
 pub mod toast;
 pub mod tooltip;
 pub mod typed_time;
+pub mod why_line;
 
 use std::sync::Arc;
 

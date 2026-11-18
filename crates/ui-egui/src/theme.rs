@@ -232,6 +232,9 @@ pub struct Sizes {
     pub strip: f32,
     /// The least height of a settings row.
     pub settings_row: f32,
+    /// The reader's rows: the why line, the content bar, a folded message of a thread, an attachment and a folded
+    /// quote, in that order.
+    pub reader: [f32; 5],
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -257,6 +260,7 @@ pub(crate) const SIZES: Sizes = Sizes {
     suggestion: 40.0,
     strip: 24.0,
     settings_row: 56.0,
+    reader: [32.0, 40.0, 40.0, 44.0, 28.0],
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -815,6 +819,7 @@ impl Theme {
             suggestion: self.size(z.suggestion),
             strip: self.size(z.strip),
             settings_row: self.size(z.settings_row),
+            reader: z.reader.map(|height| self.size(height)),
             ..z
         }
     }
