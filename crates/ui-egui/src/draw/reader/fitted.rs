@@ -1090,22 +1090,35 @@ impl Show<'_> {
             Reach::First | Reach::Last | Reach::Held => 0..0,
         };
         let edges = (grid.stops.first().copied(), grid.stops.last().copied());
-        let mut holds = false;
-        for (row_index, part) in picks(reach, near.clone(), around(&grid.stops, near.start, near.end), edges, None) {
+        // The cell with the focus keeps its row drawn, as a paragraph's link does, wherever it is.
+        let slot = id.with("focus");
+        let focused = ui.data(|data| data.get_temp::<(usize, usize)>(slot));
+        let mut holds = None;
+        for (row_index, part) in picks(reach, near.clone(), around(&grid.stops, near.start, near.end), edges, focused.map(|(row, _)| row)) {
             let Some(row) = grid.rows.get(row_index) else { continue };
             // A row in reach draws every cell; a row reached for its first or last stop draws that cell only.
-            let cells: Vec<(usize, Reach)> = match part {
+            let mut cells: Vec<(usize, Reach)> = match part {
                 Reach::Near(_) => (0..row.cells.len()).map(|column| (column, part)).collect(),
                 Reach::First => row.stops.first().map(|column| (*column, part)).into_iter().collect(),
                 Reach::Last => row.stops.last().map(|column| (*column, part)).into_iter().collect(),
                 Reach::Held => Vec::new(),
             };
+            if let Some((_, column)) = focused.filter(|(row, _)| *row == row_index)
+                && !cells.iter().any(|(picked, _)| *picked == column)
+            {
+                let place = cells.partition_point(|(picked, _)| *picked < column);
+                cells.insert(place, (column, Reach::Held));
+            }
             for (column, part) in cells {
                 let (Some(cell), Some(left)) = (row.cells.get(column), grid.lefts.get(column)) else { continue };
                 let at = pos2(origin.x + left + CELL_PAD.x, origin.y + row.top + CELL_PAD.y);
-                holds |= self.laid(ui, cell, at, id.with(("cell", row_index, column)), part);
+                if self.laid(ui, cell, at, id.with(("cell", row_index, column)), part) {
+                    holds = Some((row_index, column));
+                }
             }
         }
+        remember(ui, slot, holds);
+        let holds = holds.is_some();
         if shows {
             ui.painter().rect_stroke(whole, 0.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
         }

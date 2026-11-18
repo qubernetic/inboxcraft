@@ -382,3 +382,36 @@ fn every_link_is_reached_by_tab_and_shift_tab_however_far_apart() {
     let link = harness.get_by_role_and_label(Role::Link, "link A").rect();
     assert!(link.top() >= 0.0 && link.bottom() <= 600.0, "the focused link is in sight: {link:?}");
 }
+
+#[test]
+fn a_focused_link_in_a_table_keeps_the_focus_far_from_sight() {
+    let html = format!(
+        "<table><tr><td><a href=\"https://example.org/1\">first</a></td><td><a href=\"https://example.org/2\">second</a></td></tr>\
+         {}<tr><td><a href=\"https://example.org/3\">third</a></td><td>x</td></tr></table>",
+        "<tr><td>row</td><td>row</td></tr>".repeat(200)
+    );
+    let mut harness = fitted_then_button(display(&html));
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(focused(&harness).map(|(_, label)| label).as_deref(), Some("first"));
+    // The wheel takes the pane far down the table.
+    harness.hover_at(pos2(300.0, 300.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, -2_500.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run();
+    harness.run();
+    assert_eq!(focused(&harness).map(|(_, label)| label).as_deref(), Some("first"), "the focus stays on the link");
+    let mut next = Vec::new();
+    for _ in 0..3 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        harness.run();
+        next.push(focused(&harness).map(|(_, label)| label));
+    }
+    assert_eq!(next, ["second", "third", "Outside the reader"].map(|label| Some(label.to_owned())));
+}
