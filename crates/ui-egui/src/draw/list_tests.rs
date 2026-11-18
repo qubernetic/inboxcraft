@@ -1311,3 +1311,60 @@ fn the_list_keys_rest_while_the_list_does_not_have_the_keyboard() {
     harness.run();
     assert_eq!(harness.state().search_text(), "xodiley", "Home and End move the field's caret");
 }
+
+#[test]
+fn the_longest_sender_and_subject_cut_with_one_ellipsis_at_130() {
+    use crate::theme::{Mode, TextScale, Theme};
+    let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
+    let keymap = crate::keymap::Keymap::default();
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.set_inbox_view(InboxView::Simple);
+    let model = mailbox.messages().first().unwrap().clone();
+    let sender: String = "Annelise Vandenberghe-Okonkwo-Halvorssen ".repeat(5).chars().take(200).collect();
+    let subject = "Q".repeat(400);
+    let long = crate::mailbox::MessageRow { id: 900_001, sender: sender.clone(), subject: subject.clone(), preview: String::new(), ..model.clone() };
+    let short = crate::mailbox::MessageRow { id: 900_002, sender: "Ines".to_owned(), subject: "Hi".to_owned(), preview: String::new(), ..model };
+    mailbox.set_rows(vec![long.clone(), short.clone()]);
+    let mut harness = Harness::builder().with_size(vec2(440.0, 828.0)).with_context_setup(install_fonts).build_ui_state(
+        move |ui, mailbox: &mut Mailbox| {
+            crate::motion::set_reduced(ui.ctx(), true);
+            ui.set_style(theme.style());
+            let _ = super::list::rows(ui, &theme, &keymap, mailbox);
+        },
+        mailbox,
+    );
+    harness.run();
+    let rect_of = |harness: &Harness<'static, Mailbox>, row: &crate::mailbox::MessageRow| {
+        let name = harness.state().spoken(row);
+        harness.get_by_label(&name).rect()
+    };
+    let (long_rect, short_rect) = (rect_of(&harness, &long), rect_of(&harness, &short));
+    assert_eq!(long_rect.height(), theme.size(56.0), "the row keeps its height");
+    let texts = |rect: egui::Rect| -> Vec<(egui::Rect, String)> {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    rect.contains(at.center()).then(|| (at, text.galley.job.text.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let (long_texts, short_texts) = (texts(long_rect), texts(short_rect));
+    let time = harness.state().row_date(&long);
+    let place = |texts: &[(egui::Rect, String)], origin: egui::Pos2| texts.iter().find(|(_, words)| *words == time).map(|(at, _)| at.translate(-origin.to_vec2()));
+    assert_eq!(place(&long_texts, long_rect.min), place(&short_texts, short_rect.min), "the time column's rect is untouched");
+    assert!(place(&long_texts, long_rect.min).is_some(), "the time is drawn");
+    let line_one = long_texts.iter().find(|(_, words)| sender.starts_with(words.trim_end_matches('…')) && words.len() > 1).map(|(_, words)| words.clone());
+    let line_two = long_texts.iter().find(|(_, words)| words.starts_with('Q')).map(|(_, words)| words.clone());
+    for (line, words) in [("sender", line_one), ("subject", line_two)] {
+        let words = words.unwrap_or_else(|| panic!("the {line} is drawn: {long_texts:?}"));
+        assert!(words.ends_with('…') && words.matches('…').count() == 1, "the {line} ends with exactly one ellipsis: {words:?}");
+        assert!(!words.trim_end_matches('…').ends_with(' '), "no space before it: {words:?}");
+    }
+    assert!(long_texts.iter().all(|(at, _)| at.right() <= long_rect.right() + 0.5), "nothing runs out of the row: {long_texts:?}");
+}
