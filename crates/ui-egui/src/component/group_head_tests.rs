@@ -21,10 +21,24 @@ fn harness(theme: Theme, state: HeadState) -> Harness<'static> {
     staged(theme, |p| p.surface, vec2(ROW_WIDTH + 48.0, 100.0), move |ui, theme| head(ui, theme, &keymap, &state))
 }
 
+/// The head's height, the top of its words and of its link, at the theme's text scale (32, 8 and 8 at 100 %).
+fn places(theme: &Theme) -> (f32, f32, f32, f32) {
+    let high = theme.size(32.0);
+    let words = ((high - theme.fonts.label.line) / 2.0).round();
+    let link = theme.boxes().row_link;
+    (high, words, ((high - link) / 2.0).round(), link)
+}
+
 #[test]
-fn a_group_head_looks_as_its_sheet_says_in_every_state() {
-    for mode in [Mode::Dark, Mode::Light] {
-        let theme = Theme::new(mode, TextScale::default());
+fn places_at_100_are_the_sheets() {
+    assert_eq!(places(&Theme::new(Mode::Light, TextScale::default())), (32.0, 8.0, 8.0, 16.0));
+}
+
+#[test]
+fn a_group_head_looks_as_its_sheet_says_in_every_state_at_100_and_130_percent() {
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
+        let (high, words, link_top, link_high) = places(&theme);
         let (p, f) = (theme.palette, theme.fonts);
         for state in head_states() {
             let mut harness = harness(theme, state);
@@ -35,9 +49,9 @@ fn a_group_head_looks_as_its_sheet_says_in_every_state() {
             }
             let rect = harness.get_by_label(&name).rect();
             let paint = painted(&harness, &name);
-            let at = format!("{mode:?} {}: {paint:#?}", state.name);
+            let at = format!("{mode:?} {:?} {}: {paint:#?}", theme.text_scale, state.name);
             let o = rect.min;
-            assert_eq!(rect.size(), vec2(440.0, 32.0), "{at}");
+            assert_eq!(rect.size(), vec2(440.0, high), "{at}");
             let found = own(&paint, rect);
             let fill = if state.shown == Shown::Hover { p.grid } else { p.panel };
             assert_eq!(found.fill, Some(fill), "{at}");
@@ -53,15 +67,19 @@ fn a_group_head_looks_as_its_sheet_says_in_every_state() {
                 .collect();
             let find = |text: &str| texts.iter().find(|t| t.1 == text).cloned().unwrap_or_else(|| panic!("{text}: {at}"));
             let index = find("[ B ]");
-            assert_eq!((index.0.min - o, index.2, index.3), (vec2(16.0, 8.0), p.cyan_text, f.label.size), "{at}");
+            assert_eq!((index.0.min - o, index.2, index.3), (vec2(16.0, words), p.cyan_text, f.label.size), "{at}");
             let group = find(&HEAD_NAME.to_uppercase());
             let ink = if state.shown == Shown::Hover { p.ink } else { p.muted };
             let name_left = index.0.left() + run_box(index.0.width()) + 8.0;
-            assert_eq!((group.0.left(), group.0.top() - o.y, group.2, group.3), (name_left, 8.0, ink, f.label.size), "{at}");
+            assert_eq!((group.0.left(), group.0.top() - o.y, group.2, group.3), (name_left, words, ink, f.label.size), "{at}");
             // The count at the right, 16 in; "nothing to read" when none is unread.
             let count = if state.unread == 0 { "nothing to read".to_owned() } else { state.unread.to_string() };
             let count = find(&count);
-            assert_eq!((count.2, count.3, count.0.top() - o.y), (p.muted, f.mono_s.size, 8.0), "{at}");
+            assert_eq!(
+                (count.2, count.3, count.0.top() - o.y),
+                (p.muted, f.mono_s.size, words + ((f.label.line - f.mono_s.line) / 2.0).round()),
+                "{at}"
+            );
             assert!((count.0.left() + run_box(count.0.width()) - (o.x + 424.0)).abs() < 0.51, "{at}");
             // The link 8 before the count, and "3 of 6 ·" 8 before the link.
             // "done all" shows hovered and, so that `Tab` reaches it, keyed (the sheet's focus state draws none).
@@ -70,7 +88,7 @@ fn a_group_head_looks_as_its_sheet_says_in_every_state() {
             assert_eq!(harness.query_by_label("done all").is_some(), lit, "{at}");
             if let Some(link) = link {
                 let link = harness.get_by_label(link).rect();
-                assert_eq!((link.right() + 8.0, link.top() - o.y, link.height()), (count.0.left(), 8.0, 16.0), "{at}");
+                assert_eq!((link.right() + 8.0, link.top() - o.y, link.height()), (count.0.left(), link_top, link_high), "{at}");
                 if let Some(rows) = state.shown_rows {
                     let rows = find(rows);
                     assert!((rows.0.left() + run_box(rows.0.width()) + 8.0 - link.left()).abs() < 0.51, "{at}");

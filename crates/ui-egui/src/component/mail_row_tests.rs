@@ -58,6 +58,58 @@ fn family(font: crate::theme::Font) -> String {
     font.id().family.to_string()
 }
 
+/// The rows of the sheet's places, from the row's top, at the theme's text scale: the sheet's at 100 %
+/// (`places_at_100_are_the_sheets`); at 130 % the lines grow and stay centred, the columns stay.
+#[derive(Debug, Clone, Copy)]
+struct Places {
+    high: f32,
+    one: f32,
+    two: f32,
+    time: f32,
+    square: f32,
+    bar: f32,
+    tag: f32,
+    chip: f32,
+    mark: f32,
+    mark_middle: f32,
+    check: f32,
+    check_side: f32,
+}
+
+/// The places in `theme`.
+fn places(theme: &Theme) -> Places {
+    let f = theme.fonts;
+    let high = theme.size(56.0);
+    let (one, two) = super::lines_top(theme, 0.0, high);
+    let line = f.body.line;
+    let middle = |side: f32| one + ((line - side) / 2.0).round();
+    let chip = theme.boxes().chip;
+    let mark = theme.mark_side();
+    let check_side = theme.boxes().check;
+    Places {
+        high,
+        one,
+        two,
+        time: middle(f.mono_s.line),
+        square: ((high - 6.0) / 2.0).round(),
+        bar: middle(12.0),
+        tag: middle(chip),
+        chip,
+        mark,
+        mark_middle: middle(mark) + mark / 2.0,
+        check: ((high - check_side) / 2.0).round(),
+        check_side,
+    }
+}
+
+#[test]
+fn places_at_100_are_the_sheets() {
+    let at = places(&Theme::new(Mode::Light, TextScale::default()));
+    let sheet = [56.0, 7.0, 31.0, 10.0, 25.0, 12.0, 8.0, 20.0, 14.0, 18.0, 20.0, 16.0];
+    let ours = [at.high, at.one, at.two, at.time, at.square, at.bar, at.tag, at.chip, at.mark, at.mark_middle, at.check, at.check_side];
+    assert_eq!(ours, sheet);
+}
+
 /// One state of the sheet drawn and read: its harness, its paint, its rect and what an assertion says.
 struct Seen {
     harness: Harness<'static>,
@@ -76,14 +128,15 @@ fn seen(theme: Theme, mode: Mode, state: MailState) -> Seen {
     }
     let rect = harness.get_by_label(&name).rect();
     let paint = painted(&harness, &name);
-    let at = format!("{mode:?} {}: {paint:#?}", state.name);
+    let at = format!("{mode:?} {:?} {}: {paint:#?}", theme.text_scale, state.name);
     Seen { harness, paint, rect, at }
 }
 
 /// Its size, fill, corners, line, the open row's bar and the unread square.
 fn ground(seen: &Seen, theme: &Theme, state: &MailState) {
     let (p, at, o) = (theme.palette, &seen.at, seen.rect.min);
-    assert_eq!(seen.rect.size(), vec2(440.0, 56.0), "{at}");
+    let at_ = places(theme);
+    assert_eq!(seen.rect.size(), vec2(440.0, at_.high), "{at}");
     let found = own(&seen.paint, seen.rect);
     let staged = state.current || state.checked || state.shown == Shown::Hover;
     // The board's own `surface` under the row is not the row's fill.
@@ -93,9 +146,9 @@ fn ground(seen: &Seen, theme: &Theme, state: &MailState) {
     assert_eq!(found.radius, radius, "square: {at}");
     assert!(found.lines.contains(&p.panel_line), "the line under it: {at}");
     let rects = fills(&seen.paint);
-    let bar = Rect::from_min_size(o, vec2(2.0, 56.0));
+    let bar = Rect::from_min_size(o, vec2(2.0, at_.high));
     assert_eq!(rects.iter().any(|(r, c)| *r == bar && *c == p.cyan_edge), state.current, "the current row's bar: {at}");
-    let square = Rect::from_min_size(o + vec2(16.0, 25.0), vec2(6.0, 6.0));
+    let square = Rect::from_min_size(o + vec2(16.0, at_.square), vec2(6.0, 6.0));
     let unread_square = state.unread && !state.checked;
     assert_eq!(rects.iter().any(|(r, c)| *r == square && *c == p.cyan_edge), unread_square, "the unread square: {at}");
 }
@@ -112,11 +165,12 @@ fn lines(seen: &Seen, theme: &Theme, state: &MailState) -> Rect {
     let sender = find(&words, state.sender).unwrap_or_else(|| panic!("the sender: {at}"));
     let font = if state.unread { f.strong } else { f.body };
     let ink = if state.done { p.muted } else { p.ink };
-    assert_eq!((sender.0.min - o, sender.2, &sender.3, sender.4), (vec2(34.0, 7.0), ink, &family(font), font.size), "{at}");
+    let at_ = places(theme);
+    assert_eq!((sender.0.min - o, sender.2, &sender.3, sender.4), (vec2(34.0, at_.one), ink, &family(font), font.size), "{at}");
     // Line two: subject and preview, `caption`, `ink` when unread.
     let line = find(&words, state.line).unwrap_or_else(|| panic!("line two: {at}"));
     let words_ink = if state.unread { p.ink } else { p.muted };
-    assert_eq!((line.0.min - o, line.2, &line.3, line.4), (vec2(34.0, 31.0), words_ink, &family(f.caption), f.caption.size), "{at}");
+    assert_eq!((line.0.min - o, line.2, &line.3, line.4), (vec2(34.0, at_.two), words_ink, &family(f.caption), f.caption.size), "{at}");
     assert!(line.0.right() <= o.x + 424.0 + 0.01, "line two inside the text: {at}");
     sender.0
 }
@@ -138,7 +192,7 @@ fn right_end(seen: &Seen, theme: &Theme, state: &MailState) {
         } else {
             p.muted
         };
-        assert_eq!((time.0.min.y - o.y, time.2, time.4), (10.0, time_ink, f.mono_s.size), "{at}");
+        assert_eq!((time.0.min.y - o.y, time.2, time.4), (places(theme).time, time_ink, f.mono_s.size), "{at}");
         assert!((time.0.left() + run_box(time.0.width()) - (o.x + 424.0)).abs() < 0.51, "the time ends at the text's right: {at}");
     }
     for (index, mark) in state.marks.iter().enumerate() {
@@ -147,9 +201,10 @@ fn right_end(seen: &Seen, theme: &Theme, state: &MailState) {
         assert!(!glyphs.is_empty(), "the {mark:?} mark in its colour: {at}");
         if index == 0 && state.shown != Shown::Hover {
             let time = words.iter().find(|t| t.1 == state.time && t.3 == family(f.mono_s)).map_or(0.0, |t| t.0.left());
-            let mark_box = Rect::from_center_size(glyphs[0].0.center(), vec2(14.0, 14.0));
+            let at_ = places(theme);
+            let mark_box = Rect::from_center_size(glyphs[0].0.center(), vec2(at_.mark, at_.mark));
             assert!((mark_box.right() + 8.0 - time).abs() < 1.01, "8 before the time: {at}");
-            assert!((mark_box.center().y - (o.y + 18.0)).abs() < 1.01, "on line one's middle: {at}");
+            assert!((mark_box.center().y - (o.y + at_.mark_middle)).abs() < 1.01, "on line one's middle: {at}");
         }
     }
 }
@@ -158,13 +213,14 @@ fn right_end(seen: &Seen, theme: &Theme, state: &MailState) {
 fn after_sender(seen: &Seen, theme: &Theme, state: &MailState, sender: Rect) {
     let (p, at, o) = (theme.palette, &seen.at, seen.rect.min);
     let account = theme.account_colour(state.account);
-    let bar_at = Rect::from_min_size(pos2(sender.left() + run_box(sender.width()) + 8.0, o.y + 12.0), vec2(3.0, 12.0));
+    let at_ = places(theme);
+    let bar_at = Rect::from_min_size(pos2(sender.left() + run_box(sender.width()) + 8.0, o.y + at_.bar), vec2(3.0, 12.0));
     let rects = fills(&seen.paint);
     let barred = rects.iter().any(|(r, c)| (r.min - bar_at.min).length() < 0.51 && r.size() == bar_at.size() && *c == account);
     assert!(barred, "the account bar: {at}");
     if let Some((words, kind)) = state.tag {
         let tag = seen.harness.get_by_label(words).rect();
-        assert_eq!((tag.left(), tag.top() - o.y, tag.height()), (bar_at.right() + 8.0, 8.0, 20.0), "{at}");
+        assert_eq!((tag.left(), tag.top() - o.y, tag.height()), (bar_at.right() + 8.0, at_.tag, at_.chip), "{at}");
         let edge = match kind {
             TagKind::Accent => p.cyan_edge,
             TagKind::Warn => p.warn,
@@ -192,15 +248,17 @@ fn edge_and_check(seen: &Seen, theme: &Theme, state: &MailState) {
     if let Some(check) = check {
         assert!(check.accesskit_node().is_disabled(), "bulk select is coming soon: {at}");
         assert_eq!((check.rect().min - o).x, 11.0, "{at}");
-        let boxed = seen.paint.shapes.iter().any(|shape| shape.rect == Rect::from_min_size(o + vec2(11.0, 20.0), vec2(16.0, 16.0)));
+        let at_ = places(theme);
+        let boxed =
+            seen.paint.shapes.iter().any(|shape| shape.rect == Rect::from_min_size(o + vec2(11.0, at_.check), vec2(at_.check_side, at_.check_side)));
         assert!(boxed, "the 16 px box at 11,20: {at}");
     }
 }
 
 #[test]
-fn a_mail_row_looks_as_its_sheet_says_in_every_state() {
-    for mode in [Mode::Dark, Mode::Light] {
-        let theme = Theme::new(mode, TextScale::default());
+fn a_mail_row_looks_as_its_sheet_says_in_every_state_at_100_and_130_percent() {
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
         for state in mail_states() {
             let seen = seen(theme, mode, state);
             ground(&seen, &theme, &state);

@@ -132,7 +132,7 @@ pub fn later_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &LaterRow<'_>
     let end = if let Some(words) = link {
         let wide = super::galley(ui, words, f.mono_s, p.cyan_text).size().x.ceil();
         let high = theme.boxes().row_link;
-        let at = Rect::from_min_size(pos2(right - wide, two + ((low - high) / 2.0).round()), vec2(wide, high));
+        let at = Rect::from_min_size(pos2(right - wide, (two + (low - high) / 2.0).round()), vec2(wide, high));
         pressed = ui
             .scope_builder(UiBuilder::new().max_rect(at).id_salt("link"), |ui| {
                 let response = link_with(ui, theme, keymap, words, LinkSize::Small, true, None);

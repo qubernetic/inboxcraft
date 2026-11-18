@@ -22,10 +22,38 @@ fn harness(theme: Theme, state: SendState) -> Harness<'static> {
     staged(theme, |p| p.surface, vec2(ROW_WIDTH + 48.0, 140.0), move |ui, theme| send(ui, theme, &keymap, &state))
 }
 
+/// The places of a row, refused or not, at the theme's text scale, from its top: its height, the top of its text,
+/// the middle of its mark, the top of line two, of where it stands, of its buttons and of the reply.
+fn places(theme: &Theme, refused: bool) -> [f32; 7] {
+    let f = theme.fonts;
+    let high = theme.size(if refused { 72.0 } else { 56.0 });
+    let upper = f.body.line + 2.0 + f.caption.line;
+    let block = if refused { upper + 2.0 + f.caption.line } else { upper };
+    let top = ((high - block) / 2.0).round();
+    let icon = theme.boxes().icon;
+    let button = theme.boxes().button;
+    [
+        high,
+        top,
+        top + ((upper - icon) / 2.0).round() + icon / 2.0,
+        top + f.body.line + 2.0,
+        top + ((f.body.line - f.mono_s.line) / 2.0).round(),
+        top + ((upper - button) / 2.0).round(),
+        top + upper + 2.0,
+    ]
+}
+
 #[test]
-fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
-    for mode in [Mode::Dark, Mode::Light] {
-        let theme = Theme::new(mode, TextScale::default());
+fn places_at_100_are_the_sheets() {
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    assert_eq!(places(&theme, false), [56.0, 7.0, 28.0, 31.0, 10.0, 12.0, 51.0]);
+    assert_eq!(places(&theme, true), [72.0, 5.0, 26.0, 29.0, 8.0, 10.0, 49.0]);
+}
+
+#[test]
+fn an_outbox_row_looks_as_its_sheet_says_in_every_state_at_100_and_130_percent() {
+    for (mode, scale) in [Mode::Dark, Mode::Light].into_iter().flat_map(|mode| [(mode, TextScale::default()), (mode, TextScale::ALL[4])]) {
+        let theme = Theme::new(mode, scale);
         let (p, f) = (theme.palette, theme.fonts);
         for state in send_states() {
             let mut harness = harness(theme, state);
@@ -36,10 +64,11 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
             }
             let rect = harness.get_by_label(&name).rect();
             let paint = painted(&harness, &name);
-            let at = format!("{mode:?} {}: {paint:#?}", state.name);
+            let at = format!("{mode:?} {:?} {}: {paint:#?}", theme.text_scale, state.name);
             let o = rect.min;
             let refused = state.standing == Standing::Refused;
-            assert_eq!(rect.size(), vec2(440.0, if refused { 72.0 } else { 56.0 }), "{at}");
+            let [high, top, mark_middle, two, standing, buttons_top, reply_top] = places(&theme, refused);
+            assert_eq!(rect.size(), vec2(440.0, high), "{at}");
             let found = own(&paint, rect);
             let fill = found.fill.filter(|fill| *fill != p.surface);
             assert_eq!(fill, (state.shown == Shown::Hover).then_some(p.stage), "{at}");
@@ -59,33 +88,32 @@ fn an_outbox_row_looks_as_its_sheet_says_in_every_state() {
                 texts.iter().find(|t| t.1 == text || cut(t)).cloned().unwrap_or_else(|| panic!("{text}: {at}"))
             };
             let (_, ink) = state.standing.look(&theme);
-            let top = if refused { 5.0 } else { 7.0 };
             // The mark: 16 px, 16 in, on the upper part's middle, in the standing's colour.
             let mark = texts.iter().find(|t| t.3 == icons()).cloned().unwrap_or_else(|| panic!("the mark: {at}"));
             assert_eq!(mark.2, ink, "{at}");
-            assert!((mark.0.center() - (o + vec2(24.0, top + 21.0))).length() < 1.01, "{:?}: {at}", mark.0);
+            assert!((mark.0.center() - (o + vec2(16.0 + theme.boxes().icon / 2.0, mark_middle))).length() < 1.01, "{:?}: {at}", mark.0);
             let to = find(SEND_TO);
             assert_eq!((to.0.min - o, to.2, to.4), (vec2(44.0, top), p.ink, f.body.size), "{at}");
             let subject = find(SEND_SUBJECT);
-            assert_eq!((subject.0.min - o, subject.2, subject.4), (vec2(44.0, top + 24.0), p.muted, f.caption.size), "{at}");
+            assert_eq!((subject.0.min - o, subject.2, subject.4), (vec2(44.0, two), p.muted, f.caption.size), "{at}");
             let words = find(state.words);
-            assert_eq!((words.0.top() - o.y, words.2, words.4), (top + 3.0, ink, f.mono_s.size), "{at}");
+            assert_eq!((words.0.top() - o.y, words.2, words.4), (standing, ink, f.mono_s.size), "{at}");
             let buttons: Vec<Rect> = state.buttons.iter().map(|button| harness.get_by_role_and_label(Role::Button, button).rect()).collect();
             let text_right = buttons.first().map_or(o.x + 424.0, |first| first.left() - 12.0);
             assert!((words.0.left() + run_box(words.0.width()) - text_right).abs() < 0.51, "where it stands ends at the text's right: {at}");
             if let Some(last) = buttons.last() {
-                assert_eq!((last.right() - o.x, last.top() - o.y, last.height()), (424.0, top + 5.0, 32.0), "{at}");
+                assert_eq!((last.right() - o.x, last.top() - o.y, last.height()), (424.0, buttons_top, theme.boxes().button), "{at}");
             }
             if buttons.len() == 2 {
                 assert_eq!(buttons[1].left() - buttons[0].right(), 8.0, "{at}");
             }
             if refused {
                 let reply = find(SEND_REPLY);
-                assert_eq!((reply.0.min - o, reply.2, reply.4), (vec2(44.0, 49.0), p.minus, f.caption.size), "{at}");
+                assert_eq!((reply.0.min - o, reply.2, reply.4), (vec2(44.0, reply_top), p.minus, f.caption.size), "{at}");
             }
             // A held send draws the share of its hold left along its foot.
             // 2 high, its lower pixel row under the row's line, as the design draws its line over the bar.
-            let bar = Rect::from_min_size(o + vec2(0.0, 54.0), vec2(352.0, 1.0));
+            let bar = Rect::from_min_size(o + vec2(0.0, high - 2.0), vec2(352.0, 1.0));
             let barred =
                 paint.rects().any(|shape| matches!(shape.look, Look::Rect { fill, stroke: None, .. } if fill == p.cyan_edge) && shape.rect == bar);
             assert_eq!(barred, matches!(state.standing, Standing::Countdown { .. }), "{at}");
