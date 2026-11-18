@@ -97,11 +97,9 @@ impl Settings {
     }
 
     /// The signature of `account` as typed on the Sending page, to type in: `kept`, the one it has, until it is
-    /// changed. It is cut to what the engine keeps.
+    /// changed. It is never cut: one longer than the field holds opens whole, under the field's opening-size limit.
     pub fn signature_mut(&mut self, account: u64, kept: &str) -> &mut String {
-        let typed = self.signatures.entry(account).or_insert_with(|| kept.to_owned());
-        crate::compose::cut(typed, MAX_SIGNATURE_BYTES);
-        typed
+        self.signatures.entry(account).or_insert_with(|| kept.to_owned())
     }
 
     /// The signature of `account` as typed, if it was typed since the page opened.
@@ -162,9 +160,6 @@ impl Settings {
         self.keys_note.as_deref()
     }
 }
-
-/// The longest signature, in bytes, as the engine keeps it.
-pub const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
 
 #[cfg(test)]
 #[path = "settings_tests.rs"]

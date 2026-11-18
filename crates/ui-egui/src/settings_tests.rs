@@ -51,8 +51,10 @@ fn a_signature_typed_shows_until_it_is_saved_or_the_sheet_closes() {
     settings.signature_mut(2, "").push_str("Studio");
     settings.close();
     assert_eq!(settings.signature(2), None, "closing forgets what was not saved");
-    let long = "ő".repeat(super::MAX_SIGNATURE_BYTES);
-    assert!(settings.signature_mut(3, &long).len() <= super::MAX_SIGNATURE_BYTES, "cut to what the engine keeps");
+    // A stored signature longer than the field holds opens whole, never cut silently: the field lets it be edited
+    // down and never grow, and a save the engine will not keep is refused with its reason.
+    let long = "ő".repeat(16 * 1024);
+    assert_eq!(settings.signature_mut(3, &long).as_str(), long, "whole");
 }
 
 #[test]
