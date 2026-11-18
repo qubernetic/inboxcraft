@@ -881,6 +881,41 @@ fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
 thread_local! {
     /// How many rows' lists of hover actions were built on this thread (`list::actions`).
     pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many rows' words were worked out on this thread (`list::row_text`).
+    pub(super) static TEXTS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn a_rows_words_are_worked_out_once_for_a_list_of_rows() {
+    let mut harness = ten_thousand(InboxView::List);
+    harness.run();
+    TEXTS_BUILT.with(|built| built.set(0));
+    for _ in 0..30 {
+        harness.ctx.request_repaint();
+        harness.step();
+    }
+    assert_eq!(TEXTS_BUILT.with(std::cell::Cell::get), 0, "the same rows, nothing worked out again");
+    // Scrolled on: only the rows newly built are worked out.
+    wheel(&mut harness, 2_000.0);
+    let built = TEXTS_BUILT.with(std::cell::Cell::get);
+    assert!(built > 0 && built <= 2 * MOST_ROWS, "{built}");
+    // The rows listed again (a message read): their words are worked out afresh, the new state with them.
+    TEXTS_BUILT.with(|built| built.set(0));
+    let first = super::list::first_in_sight(&harness.ctx).unwrap();
+    let mut rows = harness.state().mailbox().messages().to_vec();
+    for row in &mut rows {
+        if row.id == first {
+            row.seen = !row.seen;
+        }
+    }
+    let spoken = |harness: &Harness<'static, InboxApp>| {
+        let mailbox = harness.state().mailbox();
+        mailbox.spoken(mailbox.messages().iter().find(|row| row.id == first).unwrap())
+    };
+    harness.state_mut().mailbox_mut().set_rows(rows);
+    harness.run();
+    assert!(TEXTS_BUILT.with(std::cell::Cell::get) > 0, "worked out again");
+    harness.get_by_label(&spoken(&harness));
 }
 
 /// The sample mailbox over a list of 10 000 messages in three groups (People, Notifications, Newsletters, in turn), longer than the engine lists, in `view`.

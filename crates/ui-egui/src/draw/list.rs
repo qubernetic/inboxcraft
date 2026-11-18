@@ -339,12 +339,9 @@ impl Slot {
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, slot: Slot) -> Drawn {
     let selected = mailbox.selected() == Some(message.id);
     let keyed = selected && mailbox.keyed();
-    let spoken = mailbox.spoken(message);
-    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
-    let line = format!("{subject}{}", after_subject(&message.preview));
-    // A snoozed message (in a search, or Later searched) is the sheet's snoozed row: the clock and when it comes back.
-    let back = mailbox.back_at(message);
-    let time = back.as_ref().map_or_else(|| mailbox.row_date(message), |when| tr!("back {when}", when = when));
+    let text = row_text(ui.ctx(), mailbox, message);
+    let (spoken, line, time) = (&text.spoken, &text.line, &text.time);
+    let back = text.back;
     let tag = if message.bounced.is_some() {
         Some((tr!("Not delivered"), TagKind::Minus))
     } else if message.new_sender {
@@ -355,17 +352,17 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         None
     };
     // The pin, the flag nearest the time (or the actions), the done row's tick.
-    let marks: Vec<Mark> = [(message.pinned, Mark::Pin), (message.flagged, Mark::Flag), (message.done, Mark::Done), (back.is_some(), Mark::Snoozed)]
+    let marks: Vec<Mark> = [(message.pinned, Mark::Pin), (message.flagged, Mark::Flag), (message.done, Mark::Done), (back, Mark::Snoozed)]
         .into_iter()
         .filter_map(|(shown, mark)| shown.then_some(mark))
         .collect();
     let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
     let shown = MailRow {
         id: row_id(message.id),
-        spoken: &spoken,
+        spoken,
         sender: &message.sender,
-        line: &line,
-        time: &time,
+        line,
+        time,
         unread: !message.seen,
         current: selected,
         last: slot.last,
@@ -394,6 +391,67 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         acted = acted.or(menu(ui, theme, response, message));
     }
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus(), gained: response.gained_focus() }
+}
+
+/// What a mail row says, worked out once for a list of rows and kept while it stays ([`row_text`]).
+#[derive(Debug)]
+struct RowText {
+    /// Its name for a screen reader.
+    spoken: String,
+    /// Line two: the subject and the preview.
+    line: String,
+    /// The time at the right, or when a snoozed message comes back.
+    time: String,
+    /// It is snoozed and says when it comes back.
+    back: bool,
+}
+
+/// The rows' words kept between frames: for which list of rows (its serial, place, search and the minute, since a
+/// date is said from now), and each message's.
+#[derive(Debug, Default)]
+struct RowTexts {
+    key: (u64, Option<Place>, String, i64),
+    texts: std::collections::HashMap<u64, (u64, std::sync::Arc<RowText>)>,
+    /// The frame the store was last read in, so a text not used for a while can go.
+    pass: u64,
+}
+
+/// The most rows whose words are kept; past it, those not used in the last frames go.
+const MOST_KEPT_TEXTS: usize = 512;
+
+/// The words of `message`'s row: worked out the first time it is built in a list of rows, then kept until the rows
+/// are listed again, the place or the search change, or the minute turns; at most [`MOST_KEPT_TEXTS`] kept.
+fn row_text(ctx: &egui::Context, mailbox: &Mailbox, message: &MessageRow) -> std::sync::Arc<RowText> {
+    type Store = std::sync::Arc<std::sync::Mutex<RowTexts>>;
+    let store: Store = ctx.data_mut(|data| data.get_temp_mut_or_default::<Store>(Id::unique("list-row-texts")).clone());
+    let mut kept = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let minute = mailbox.now().unix_seconds().div_euclid(60);
+    let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned(), minute);
+    if kept.key != key {
+        kept.key = key;
+        kept.texts.clear();
+    }
+    let pass = ctx.cumulative_pass_nr();
+    kept.pass = pass;
+    if let Some((used, text)) = kept.texts.get_mut(&message.id) {
+        *used = pass;
+        return text.clone();
+    }
+    if kept.texts.len() >= MOST_KEPT_TEXTS {
+        kept.texts.retain(|_, (used, _)| pass.saturating_sub(*used) <= 1);
+    }
+    #[cfg(test)]
+    super::list_tests::TEXTS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
+    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
+    let line = format!("{subject}{}", after_subject(&message.preview));
+    // A snoozed message (in a search, or Later searched) is the sheet's snoozed row: the clock and when it comes back.
+    let back = mailbox.back_at(message);
+    let time = back.as_ref().map_or_else(|| mailbox.row_date(message), |when| tr!("back {when}", when = when));
+    let text = std::sync::Arc::new(RowText { spoken: mailbox.spoken(message), line, time, back: back.is_some() });
+    if kept.texts.len() < MOST_KEPT_TEXTS {
+        kept.texts.insert(message.id, (pass, text.clone()));
+    }
+    text
 }
 
 /// One message of a pile of Later across `ui`'s width, the design's later row: who, the pile's mark, the subject and
@@ -1609,6 +1667,20 @@ fn leaving(ctx: &egui::Context, theme: &Theme, left: &Leaving) -> Gone {
     }
 }
 
+/// The messages of the list no group of `groups` holds, kept for the list of rows, its place, search and `view`.
+fn rest_of(ctx: &egui::Context, mailbox: &Mailbox, view: InboxView, groups: &[Group]) -> std::sync::Arc<[u64]> {
+    type Kept = ((u64, Option<Place>, String, InboxView, usize), std::sync::Arc<[u64]>);
+    let key = (mailbox.rows_serial(), Some(mailbox.place()), mailbox.query().to_owned(), view, groups.len());
+    let id = Id::unique("list-rest");
+    if let Some((_, rest)) = ctx.data(|data| data.get_temp::<Kept>(id)).filter(|(kept, _)| *kept == key) {
+        return rest;
+    }
+    let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
+    let rest: std::sync::Arc<[u64]> = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
+    ctx.data_mut(|data| data.insert_temp::<Kept>(id, (key, rest.clone())));
+    rest
+}
+
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     // The line between the list's head and its rows, in the panel's line colour; the rows start under it.
@@ -1643,10 +1715,9 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         outbox: Cell::new(None),
         gained: Cell::new(None),
     };
-    // "Other" stands over the messages no group holds: its "done all" marks those, built or not.
-    let held: HashSet<u64> = groups.iter().flat_map(|group| group.messages.iter().copied()).collect();
-    let rest = mailbox.messages().iter().map(|message| message.id).filter(|id| !held.contains(id)).collect();
-    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: rest };
+    // "Other" stands over the messages no group holds: its "done all" marks those, built or not. Worked out once for a
+    // list of rows and its view.
+    let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: rest_of(ui.ctx(), mailbox, view, &groups).to_vec() };
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
     // How far the row that left has gone (with motion off, at once); once gone it is let go.
     let gone = mailbox.left_row().map(|left| leaving(ui.ctx(), theme, left));

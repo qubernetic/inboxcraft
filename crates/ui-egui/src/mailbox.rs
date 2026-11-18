@@ -607,6 +607,8 @@ pub struct Mailbox {
     place: Place,
     query: String,
     messages: Vec<MessageRow>,
+    /// Counts each new list of rows, so what is worked out from them can be kept until they change.
+    rows_serial: u64,
     selected: Option<u64>,
     /// Whether the selection came from the keyboard.
     keyed: bool,
@@ -849,6 +851,7 @@ impl Mailbox {
             place: Place::View(Role::Inbox),
             query: String::new(),
             messages: Vec::new(),
+            rows_serial: 0,
             selected: None,
             keyed: false,
             showcase: Showcase::default(),
@@ -1595,6 +1598,7 @@ impl Mailbox {
         let rows = if self.query.is_empty() { self.list(place)? } else { self.found()? };
         self.place = place;
         self.messages = rows;
+        self.rows_serial = self.rows_serial.wrapping_add(1);
         if self.selected.is_some_and(|id| self.messages.iter().all(|row| row.id != id)) {
             self.selected = None;
         }
@@ -1777,6 +1781,14 @@ impl Mailbox {
     #[cfg(test)]
     pub(crate) fn set_rows(&mut self, rows: Vec<MessageRow>) {
         self.messages = rows;
+        self.rows_serial = self.rows_serial.wrapping_add(1);
+    }
+
+    /// Which list of rows this is: it changes whenever the rows are listed again, so what is worked out from the rows
+    /// can be kept while it stays.
+    #[must_use]
+    pub fn rows_serial(&self) -> u64 {
+        self.rows_serial
     }
 
     /// The rows of the list.
