@@ -71,3 +71,20 @@ fn the_boards_of_the_lists_page_stand_on_bg_with_every_set() {
         assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "bulk select's check box, its tag once");
     }
 }
+
+#[test]
+fn the_rows_hover_actions_on_the_page_stand_in_the_lists_order_with_snooze_available() {
+    // The board's group: Done, Snooze, Read, Delete at +0, +47, +94, +141, as the list draws them.
+    let harness = harness(Mode::Dark, true);
+    let snoozes: Vec<_> = harness.query_all_by_role_and_label(Role::Button, "Snooze").collect();
+    assert!(!snoozes.is_empty(), "a row shows its actions");
+    for snooze in snoozes {
+        assert!(!snooze.accesskit_node().is_disabled(), "the list's Snooze opens the picker: available");
+        let at = snooze.rect();
+        let beside = |name: &str| {
+            harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).find(|rect| (rect.center().y - at.center().y).abs() < 1.0)
+        };
+        let lefts = ["Done", "Mark as read", "Delete"].map(|name| beside(name).map(|rect| rect.left() - at.left()));
+        assert_eq!(lefts, [Some(-47.0), Some(47.0), Some(94.0)], "Done, Snooze, Read, Delete");
+    }
+}

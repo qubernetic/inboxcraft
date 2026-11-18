@@ -348,6 +348,34 @@ fn a_hovered_row_shows_its_actions_at_its_right_end() {
 }
 
 #[test]
+fn the_hover_actions_stand_in_the_design_files_order_and_tab_walks_them_so() {
+    // The board's group: Done, Snooze, Read, Delete, 43, 43, 43 and 56 wide at +0, +47, +94 and +141.
+    let mut harness = still();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let boxes: Vec<_> = ["Done", "Snooze", "Mark as read", "Delete"].map(|name| on_row(&harness, row, name)).into();
+    let first = boxes[0].left();
+    let places: Vec<_> = boxes.iter().map(|rect| (rect.left() - first, rect.width())).collect();
+    assert_eq!(places, [(0.0, 43.0), (47.0, 43.0), (94.0, 43.0), (141.0, 56.0)], "{boxes:?}");
+    // The keys' walk follows what is drawn: from the row, Tab reaches them left to right.
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::row_id(id_with(&harness, "Allotment rota for November"))));
+    harness.run();
+    harness.run();
+    let mut walked = Vec::new();
+    for _ in 0..4 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.ctx.memory(egui::Memory::focused).and_then(|id| harness.ctx.read_response(id)).map(|response| response.rect);
+        walked.push(focused);
+    }
+    let row = harness.ctx.read_response(super::list::row_id(id_with(&harness, "Allotment rota for November"))).unwrap().rect;
+    let read = if harness.query_by_label(ODILE).is_some() { "Mark as read" } else { "Mark as unread" };
+    let now: Vec<_> = ["Done", "Snooze", read, "Delete"].map(|name| Some(on_row(&harness, row, name))).into();
+    assert_eq!(walked, now, "Tab walks the actions as they are drawn");
+}
+
+#[test]
 fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
     let mut harness = harness(true);
     harness.key_press(Key::ArrowDown);
@@ -512,13 +540,13 @@ fn show_all_is_an_accent_link_in_its_groups_head_before_the_count() {
 }
 
 #[test]
-fn a_hovered_row_offers_done_read_delete_and_snooze_in_that_order() {
+fn a_hovered_row_offers_done_snooze_read_and_delete_in_that_order() {
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
     let row = harness.get_by_label(ODILE).rect();
     let mut lefts = Vec::new();
-    for name in ["Done", "Mark as read", "Delete", "Snooze"] {
+    for name in ["Done", "Snooze", "Mark as read", "Delete"] {
         let button = harness.query_all_by_role_and_label(Role::Button, name).find(|node| row.contains(node.rect().center())).expect(name);
         assert!(!button.accesskit_node().is_disabled(), "{name}");
         lefts.push(button.rect().left());

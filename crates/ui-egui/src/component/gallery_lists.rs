@@ -47,12 +47,13 @@ pub(crate) const ROW_WIDTH: f32 = 440.0;
 
 /// The hover actions of a row on the boards: those of the list's rows, in the list's order.
 pub(crate) fn row_actions() -> [Action<'static>; 4] {
-    // The page's keymap gives D, R and Del to the actions of the list's rows; Snooze keeps the app's H.
+    // The page's keymap gives D, R and Del to the actions of the list's rows; Snooze keeps the app's H. Snooze is
+    // available, as the list's opens the time picker.
     [
         Action { icon: IconId::Done, name: tr!("Done"), action: Some("mail.done"), unavailable: None },
+        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: None },
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
-        Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: Some(tr!("Open the message to snooze it")) },
     ]
 }
 

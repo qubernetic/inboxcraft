@@ -291,12 +291,12 @@ pub(super) fn row_height(theme: &Theme) -> f32 {
 /// Where each of a row's hover actions ([`actions`]) stands: an action's id is `actions_id(id).with(place)`, and the
 /// place is what [`act`] reads (Snooze's, what its time picker hangs from).
 const DONE_ACTION: usize = 0;
-const READ_ACTION: usize = 1;
-const DELETE_ACTION: usize = 2;
-pub(crate) const SNOOZE_ACTION: usize = 3;
+pub(crate) const SNOOZE_ACTION: usize = 1;
+const READ_ACTION: usize = 2;
+const DELETE_ACTION: usize = 3;
 
-/// The hover actions of `message`, in their places: Done (or "Not done" for a done one), mark read or unread, Delete,
-/// Snooze.
+/// The hover actions of `message`, in their places, the design file's order: Done (or "Not done" for a done one),
+/// Snooze, mark read or unread, Delete.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     #[cfg(test)]
     super::list_tests::ACTIONS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
@@ -305,10 +305,10 @@ fn actions(message: &MessageRow) -> [Action<'static>; 4] {
     let done = if message.done { tr!("Not done") } else { tr!("Done") };
     [
         Action { icon: IconId::Done, name: done, action: Some(keymap::DONE), unavailable: None },
-        Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
-        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
         // It opens the time picker at the row ([`snooze_picker`]); the time chosen snoozes the message.
         Action { icon: IconId::Snooze, name: tr!("Snooze"), action: Some(keymap::SNOOZE), unavailable: None },
+        Action { icon: read_icon, name: read, action: Some(keymap::READ), unavailable: None },
+        Action { icon: IconId::Delete, name: tr!("Delete"), action: Some(keymap::DELETE), unavailable: None },
     ]
 }
 
