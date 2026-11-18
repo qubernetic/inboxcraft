@@ -512,3 +512,27 @@ fn sizes_read_as_people_say_them() {
     assert_eq!(size_text(Some(13_000)), "13 KB");
     assert_eq!(size_text(Some(3_565_158)), "3.4 MB");
 }
+
+#[test]
+fn try_again_asks_a_failed_picture_once_more_and_nothing_else() {
+    const URL: &str = "https://track.example.net/open.png?id=4417";
+    let fetch = Recorder { fail: true, ..Recorder::default() };
+    let kept = Kept::default();
+    let mut mailbox = mailbox();
+    let junk = id_of(&mut mailbox, "You have won a lighthouse");
+    let mut reader = reader(&fetch, &kept);
+    reader.open(&mut mailbox, Some(junk));
+    // Nothing to try before the owner let the pictures load: a blocked picture stays blocked.
+    reader.retry(&mut mailbox, junk, URL);
+    assert!(fetch.asked.lock().unwrap().is_empty(), "nothing asked before consent");
+    reader.allow_once(&mut mailbox, junk);
+    reader.poll();
+    assert!(matches!(reader.picture(URL), Some(PictureState::Failed(_))));
+    reader.retry(&mut mailbox, junk, URL);
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "asked once more");
+    assert!(matches!(reader.picture(URL), Some(PictureState::Waiting)));
+    // A picture that did not fail, or a key the message does not hold, is not asked again.
+    reader.retry(&mut mailbox, junk, URL);
+    reader.retry(&mut mailbox, junk, "https://other.example.org/x.png");
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2);
+}

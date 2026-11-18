@@ -1954,6 +1954,7 @@ impl InboxApp {
             reader::Asked::Details(id) => reader.toggle_details(id),
             reader::Asked::Quotes(id) => reader.toggle_quotes(id),
             reader::Asked::Once(id) => reader.allow_once(mailbox, id),
+            reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),
             reader::Asked::FullWidth(full) => reader.set_full_width(full),

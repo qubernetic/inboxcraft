@@ -91,6 +91,8 @@ pub(super) enum Asked {
     Once(u64),
     /// Load the remote pictures of this sender always.
     Always(u64),
+    /// Try loading a picture of a message again, by its key.
+    Retry(u64, String),
     /// Save an attachment.
     Save(u64, u64),
     /// Fill the window, or not.

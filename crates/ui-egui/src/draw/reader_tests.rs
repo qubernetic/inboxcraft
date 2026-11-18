@@ -1885,3 +1885,15 @@ fn a_cut_text_ends_with_a_note_that_says_so() {
     let words = texts.iter().filter(|(rect, text)| rect.top() > 200.0 && text.contains("coast")).map(|(rect, _)| rect.bottom()).fold(0.0, f32::max);
     assert!(note.top() >= words, "the note comes after the text: {note:?} {words}");
 }
+
+#[test]
+fn a_blocked_remote_picture_is_a_box_of_its_real_size_until_asked_for() {
+    let html = r#"<p>The kiln is in.</p><img src="https://pictures.example.org/kiln.png" alt="The new kiln, lit for the first time" width=600 height=240><p>Open day on Sunday.</p>"#;
+    let harness = html_message(html, false);
+    let label = "Remote picture not loaded: The new kiln, lit for the first time, 600 × 240";
+    assert_eq!(harness.get_by_label(label).rect().size(), vec2(600.0, 240.0), "the box holds the picture's place");
+    // The text after it stands under the box.
+    let after = harness.get_by_label("Open day on Sunday.").rect();
+    assert!(after.top() >= harness.get_by_label(label).rect().bottom());
+    assert!(harness.state().is_empty(), "the box asks for nothing by itself");
+}

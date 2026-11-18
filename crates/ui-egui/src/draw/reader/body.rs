@@ -7,17 +7,17 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Color32, ColorImage, Frame, Galley, Layout, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
+    Align, Color32, ColorImage, Galley, Layout, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
 
 use crate::component::attachment::{FileAsked, FileState, attachment};
 use crate::component::banner::{BannerKind, BannerLink, banner as component_banner};
 use crate::component::button;
+use crate::component::picture_box::{PictureAsked, PictureLook, picture_box};
 use crate::component::progress::ProgressState;
 use crate::component::quote_fold::quote_fold;
 use crate::component::soon::soon_tag;
-use crate::draw::margin;
 use crate::draw::paint;
 use crate::keymap::Keymap;
 use crate::picture::Decoded;
@@ -162,7 +162,6 @@ fn texture<'t>(ui: &Ui, textures: &'t mut Textures, key: &str, picture: &Decoded
 /// A picture of the message: shown when here, else a box that says why not.
 #[expect(clippy::too_many_arguments, reason = "the drawing context of one picture")]
 fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, document: &Document, textures: &mut Textures, drawn: &mut Drawn) {
-    let p = &theme.palette;
     let key = match &image.source {
         ImageSource::Inline(content_id) => Some(inline_key(id, content_id)),
         ImageSource::Remote(url) => Some(url.clone()),
@@ -185,18 +184,24 @@ fn picture(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, image: &Image, 
         }
         return;
     }
-    let why = match (&image.source, state) {
+    // Not shown: a box of the picture's size, by its tag, that says why.
+    let look = match (&image.source, state) {
         (ImageSource::Unsupported, _) if image.alt.is_empty() => return,
-        (ImageSource::Unsupported, _) => tr!("Picture not shown").to_owned(),
-        (ImageSource::Blocked, _) => tr!("Remote picture not loaded").to_owned(),
-        (_, Some(PictureState::Failed(reason))) => tr!("Picture could not be shown: {reason}", reason = reason),
-        (_, Some(PictureState::Waiting) | None) => tr!("Loading picture…").to_owned(),
-        (_, Some(PictureState::Ready(_))) => tr!("Picture could not be shown").to_owned(),
+        (ImageSource::Unsupported, _) => PictureLook::NotShown,
+        (ImageSource::Blocked, _) => PictureLook::NotLoaded,
+        (_, Some(PictureState::Failed(reason))) => PictureLook::Failed(reason),
+        (_, Some(PictureState::Waiting) | None) => PictureLook::Loading,
+        (_, Some(PictureState::Ready(_))) => PictureLook::Failed(tr!("it could not be drawn")),
     };
-    Frame::new().stroke(Stroke::new(1.0, p.muted)).inner_margin(margin(theme.spacing.s2)).corner_radius(0.0).show(ui, |ui| {
-        let text = if image.alt.is_empty() { why } else { format!("{why}: {}", image.alt) };
-        ui.label(RichText::new(text).font(theme.fonts.caption.id()).color(p.muted));
-    });
+    let (response, asked) = picture_box(ui, theme, &Keymap::empty(), look, &image.alt, image.size);
+    if let (Some(PictureAsked::Retry), Some(key)) = (asked, key) {
+        drawn.asked.push(Asked::Retry(id, key));
+    }
+    if let Some(link) = image.link.and_then(|index| document.links.get(index))
+        && response.hovered()
+    {
+        drawn.hover = Some(link_status(link));
+    }
 }
 
 /// Display blocks of an HTML message.

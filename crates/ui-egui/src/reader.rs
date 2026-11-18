@@ -559,6 +559,15 @@ impl Reader {
         }
     }
 
+    /// Asks for picture `key` of message `id` once more, when it failed: the owner's `try again`. A picture that did
+    /// not fail, or one the message does not hold, is left as it is.
+    pub fn retry(&mut self, mailbox: &mut Mailbox, id: u64, key: &str) {
+        if matches!(self.pictures.get(key), Some(PictureState::Failed(_))) && self.owners.get(key) == Some(&id) {
+            self.pictures.remove(key);
+            self.load_pictures(mailbox, id);
+        }
+    }
+
     /// Lets the remote pictures of the sender of message `id` load always (`remote.allow`), and loads them in every
     /// message of the thread from that sender.
     pub fn allow_always(&mut self, mailbox: &mut Mailbox, id: u64) {
