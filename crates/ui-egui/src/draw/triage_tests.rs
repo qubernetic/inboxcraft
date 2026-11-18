@@ -594,3 +594,11 @@ fn the_new_senders_cards_are_the_design_files() {
     });
     assert_eq!(avatar, Some(vec2(21.0, 17.0)), "the avatar");
 }
+
+#[test]
+fn the_new_senders_queue_says_the_design_files_words() {
+    let mut harness = harness_of(app());
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.get_by_label("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked from then on.");
+}

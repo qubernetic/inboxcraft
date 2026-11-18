@@ -1778,8 +1778,7 @@ fn senders(ui: &mut Ui, rows: &Rows<'_>) -> (Built, Option<ScreenerMode>) {
             crate::component::label::section_label(ui, theme, "[ 01 ]", &word, false);
             // On their styles' lines (48, 26), so the cards stand where the design puts them under the title.
             ui.label(f.display.rich(tr!("Who gets in?")).color(p.ink));
-            let about =
-                tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked, never to the inbox.");
+            let about = tr!("Nobody new reaches the inbox before you say so. If you keep a sender out, their mail goes to Blocked from then on.");
             ui.add(egui::Label::new(f.read.rich(about).color(p.muted)).wrap());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = theme.spacing.s3;
