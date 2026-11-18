@@ -85,7 +85,8 @@ pub(crate) fn cut_within(painter: &Painter, job: LayoutJob, width: f32) -> Arc<G
     let mut galley = tight_cut(painter, painter.layout_job(job.clone()));
     for _ in 0..8 {
         let over = advances(&galley) - width;
-        if !(over > 0.001) || !job.wrap.max_width.is_finite() {
+        // `over` is NaN when an advance is: then nothing more is tried.
+        if over.is_nan() || over <= 0.001 || !job.wrap.max_width.is_finite() {
             break;
         }
         job.wrap.max_width = (job.wrap.max_width - over - 0.01).max(1.0);

@@ -7,7 +7,7 @@ use inboxcraft_store::{Batch, Change, Storage as _};
 use inboxcraft_time::{FakeClock, Timestamp};
 use serde_json::{Value, json};
 
-use super::{Answer, Chip, Composer, Line, MAX_RECIPIENT_BYTES, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
+use super::{Answer, Chip, Composer, Line, MAX_RECIPIENTS, MAX_SUBJECT_BYTES, MAX_SUGGESTIONS, Suggestion};
 use crate::mailbox::Mailbox;
 use crate::sample;
 
