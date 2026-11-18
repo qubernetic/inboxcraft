@@ -17,6 +17,7 @@ use super::Shown;
 use super::gallery::{cell, cells, title};
 use super::hover::Action;
 use super::group_head::{self, GroupHead};
+use super::later_row::{self, LaterRow, Pile};
 use super::mail_row::{self, Mark, MailRow};
 use super::outbox_row::{self, OutboxRow, SendButton, Standing};
 use super::margin;
@@ -346,6 +347,93 @@ fn sends(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// One state of the later row's sheet.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LaterState {
+    pub name: &'static str,
+    pub who: &'static str,
+    pub subject: &'static str,
+    pub when: &'static str,
+    pub unread: bool,
+    pub current: bool,
+    pub pile: Pile,
+    pub shown: Shown,
+}
+
+/// The later row's states, in the sheet's order, with the sheet's words.
+pub(crate) fn later_states() -> [LaterState; 7] {
+    let snoozed = LaterState {
+        name: "snoozed",
+        who: "Ines Okafor",
+        subject: "Invoice 2026-114",
+        when: "back today 16:00",
+        unread: false,
+        current: false,
+        pile: Pile::Snoozed,
+        shown: Shown::Rest,
+    };
+    [
+        snoozed,
+        LaterState { name: "pinned", who: "Marit Solheim", subject: "Workshop: what to bring", when: "9 Nov", pile: Pile::Pinned, ..snoozed },
+        LaterState { name: "parked", who: "Hostwell", subject: "Certificate renewed", when: "12 Nov", pile: Pile::Parked, ..snoozed },
+        LaterState {
+            name: "returned",
+            who: "Bankline",
+            subject: "Statement for October",
+            when: "came back 08:00",
+            unread: true,
+            pile: Pile::Returned,
+            ..snoozed
+        },
+        LaterState { name: "hover", shown: Shown::Hover, ..snoozed },
+        LaterState { name: "selected", current: true, ..snoozed },
+        LaterState { name: "focus", shown: Shown::Focus, ..snoozed },
+    ]
+}
+
+/// What a screen reader hears for the later row of `state`.
+pub(crate) fn later_spoken(state: &LaterState) -> String {
+    mail_row::spoken(state.who, state.subject, state.when, state.unread)
+}
+
+/// The later row of `state`, 440 wide, at `ui`'s cursor.
+pub(crate) fn later(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &LaterState) {
+    let spoken = later_spoken(state);
+    let row = LaterRow {
+        id: Id::unique("gallery-later-row").with(state.name),
+        spoken: &spoken,
+        who: state.who,
+        subject: state.subject,
+        when: state.when,
+        unread: state.unread,
+        current: state.current,
+        last: false,
+        account: Some(0),
+        pile: state.pile,
+        link: (state.pile == Pile::Snoozed).then_some(tr!("bring back now")),
+    };
+    let high = Theme::size(theme, mail_row::HEIGHT);
+    ui.allocate_ui(vec2(ROW_WIDTH, high), |ui| {
+        ui.set_width(ROW_WIDTH);
+        let ground = Rect::from_min_size(ui.cursor().min, vec2(ROW_WIDTH, high));
+        ui.painter().rect_filled(ground, 0.0, theme.palette.surface);
+        let forced = (state.shown != Shown::Rest).then_some(state.shown);
+        later_row::later_row(ui, theme, keymap, &row, false, forced);
+    });
+}
+
+/// The later row's board: every state of its sheet, two to a line.
+fn laters(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    title(ui, theme, tr!("Later row"));
+    for pair in later_states().chunks(2) {
+        cells(ui, theme, |ui| {
+            for state in pair {
+                cell(ui, theme, state.name, |ui| later(ui, theme, keymap, state));
+            }
+        });
+    }
+}
+
 /// The left column: the mail row.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     mail_rows(ui, theme, keymap);
@@ -356,6 +444,8 @@ fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     group_heads(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     sends(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    laters(ui, theme, keymap);
 }
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.

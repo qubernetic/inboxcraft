@@ -331,3 +331,21 @@ fn the_snooze_key_opens_the_picker_over_the_open_message_only() {
     settle(&mut harness);
     assert!(harness.query_by_label("Snooze until").is_none(), "Escape closes it");
 }
+
+#[test]
+fn a_snoozed_row_of_later_brings_its_message_back_from_its_link() {
+    let mut app = app();
+    let rota = id_of(&app, ROTA);
+    app.mailbox_mut().act(rota, Act::Snooze(Timestamp::from_unix(NOW + 2 * 86_400, 0).unwrap()));
+    app.mailbox_mut().open(Place::Later(Pile::Snoozed));
+    app.mailbox_mut().forget_undo();
+    let mut harness = harness_of(app);
+    assert!(harness.query_by_label("bring back now").is_none(), "only on a hovered or keyed row");
+    harness.get_by_label_contains("Allotment rota for November, Sat 09:00").hover();
+    harness.run();
+    harness.get_by_label("bring back now").click();
+    settle(&mut harness);
+    let app = harness.state();
+    assert_eq!(app.mailbox().undoable().map(|undo| undo.text.as_str()), Some("Back in the inbox"));
+    assert!(app.mailbox().messages().is_empty(), "the snoozed pile is empty again");
+}

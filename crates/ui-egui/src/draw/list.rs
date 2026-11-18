@@ -39,6 +39,7 @@ use inboxcraft_engine::ScreenerMode;
 
 use crate::component::hover::Action;
 use crate::component::group_head::{GroupHead, group_head};
+use crate::component::later_row::{LaterRow, Pile as LaterPile, later_row};
 use crate::component::mail_row::{Mark, MailRow, mail_row};
 use crate::component::outbox_row::{SendButton, OutboxRow as OutboxRowView, Standing, outbox_row as outbox_view};
 use crate::component::tag::TagKind;
@@ -306,6 +307,56 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     Drawn { clicked: response.clicked(), acted, focused: response.has_focus() }
 }
 
+/// One message of a pile of Later across `ui`'s width, the design's later row: who, the pile's mark, the subject and
+/// when it comes back; a snoozed one offers "bring back now" while hovered or keyed.
+#[expect(clippy::too_many_arguments, reason = "the parts of one row")]
+fn later(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    mailbox: &Mailbox,
+    message: &MessageRow,
+    pile: Pile,
+    account_marker: bool,
+    set: (usize, usize),
+) -> Drawn {
+    let selected = mailbox.selected() == Some(message.id);
+    let keyed = selected && mailbox.keyed();
+    let spoken = mailbox.spoken(message);
+    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
+    let date = mailbox.row_date(message);
+    let (stands, when) = match pile {
+        _ if mailbox.returned(message) => (LaterPile::Returned, date),
+        Pile::Snoozed => (LaterPile::Snoozed, tr!("back {when}", when = date)),
+        Pile::Pins => (LaterPile::Pinned, date),
+        Pile::Parked => (LaterPile::Parked, date),
+    };
+    let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
+    let shown = LaterRow {
+        id: row_id(message.id),
+        spoken: &spoken,
+        who: &message.sender,
+        subject,
+        when: &when,
+        unread: !message.seen,
+        current: selected,
+        last: false,
+        account,
+        pile: stands,
+        link: (stands == LaterPile::Snoozed).then_some(tr!("bring back now")),
+    };
+    let drawn = later_row(ui, theme, keymap, &shown, keyed, None);
+    let response = &drawn.row.response;
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_position_in_set(set.0);
+        node.set_size_of_set(set.1);
+    });
+    Drawn { clicked: response.clicked(), acted: drawn.link.then_some(Act::Unsnooze), focused: response.has_focus() }
+}
+
 /// The id of message `id`'s row: its focus and its context menu, wherever it is built.
 pub(super) fn row_id(id: u64) -> Id {
     Id::unique("list-row").with(id)
@@ -470,7 +521,10 @@ struct Rows<'a> {
 impl Rows<'_> {
     /// Draws `message`'s row across `ui`, the `rank`th (from 0) of the list's `size` rows.
     fn mail(&self, ui: &mut Ui, message: &MessageRow, rank: usize, size: usize) {
-        let drawn = row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size));
+        let drawn = match self.mailbox.place() {
+            Place::Later(pile) if self.mailbox.query().is_empty() => later(ui, self.theme, self.keymap, self.mailbox, message, pile, self.account_marker, (rank, size)),
+            _ => row(ui, self.theme, self.keymap, self.mailbox, message, self.account_marker, (rank, size)),
+        };
         if drawn.focused {
             ui.data_mut(|data| data.insert_temp(focused_row_id(), message.id));
         }
