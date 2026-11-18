@@ -218,8 +218,13 @@ fn a_recipient_field_looks_as_its_sheet_says_in_every_state() {
             let first = if state == Line::Wrapped { 19.0 } else { 18.0 };
             assert!(name.rect.left() == rect.left() + 13.0 && (name.rect.center().y - (rect.top() + first)).abs() < 0.01, "{at} {name:?}");
             assert_eq!((name.colour, name.size), (p.muted, 11.0), "{at}");
-            let copies = one(&harness, "Cc Bcc");
-            assert!((copies.rect.right() - (rect.right() - 13.0)).abs() < 0.5 && copies.colour == p.muted && copies.size == 11.0, "{at} {copies:?}");
+            // "Cc Bcc" at the right end; a disabled line offers none, as its board.
+            if state == Line::Disabled {
+                assert!(drawn(&harness).iter().all(|text| text.text != "Cc Bcc"), "{at}");
+            } else {
+                let copies = one(&harness, "Cc Bcc");
+                assert!((copies.rect.right() - (rect.right() - 13.0)).abs() < 0.5 && copies.colour == p.muted && copies.size == 11.0, "{at} {copies:?}");
+            }
             let block = caret(&paint, p.cyan_edge);
             match state {
                 Line::Empty | Line::Focus => {

@@ -183,7 +183,8 @@ pub(crate) fn recipient_field_with(
     let label = theme.fonts.label;
     let name_width = galley(ui, line.name, label, p.muted).size().x.max(NAME_COLUMN);
     let copies_text = tr!("Cc Bcc");
-    let copies = line.copies.then(|| galley(ui, copies_text, theme.fonts.mono_s, p.muted));
+    // A disabled line offers no Cc Bcc: its board draws none.
+    let copies = (line.copies && enabled).then(|| galley(ui, copies_text, theme.fonts.mono_s, p.muted));
     let right = pad + copies.as_ref().map_or(0.0, |copies| paint::run_box(copies.size().x) + s.s2);
     let left = pad + name_width + s.s2;
     let room = (width - left - right).max(1.0);
