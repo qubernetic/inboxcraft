@@ -479,3 +479,31 @@ fn at_every_text_size_the_section_count_stands_whole_and_close_gives_way() {
         }
     }
 }
+
+#[test]
+fn shift_tab_round_a_page_with_many_accounts_reaches_the_last_account() {
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    for n in 0..40 {
+        let account = serde_json::json!({ "address": format!("many{n}@example.org"), "imap": { "host": "imap.example.org", "security": "tls" } });
+        app.mailbox_mut().run("account.add", &account).unwrap();
+    }
+    app.mailbox_mut().refresh();
+    let last = format!("Signature of {}", app.mailbox().accounts().last().unwrap().label);
+    let mut harness = Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.state_mut().settings_mut().open_at(Section::Sending);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Close").focus();
+    harness.run();
+    // Back from the sheet's first control comes round to its last: the last account's signature, scrolled to.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let (label, rect) = focused(&harness).unwrap_or((String::new(), egui::Rect::NOTHING));
+    assert_eq!(label, last, "Shift+Tab from the first control");
+    assert!(sheet.contains_rect(rect), "{label} {rect:?} in sight on the sheet {sheet:?}");
+    // And on back, the account before it.
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    let before = format!("Signature of {}", harness.state().mailbox().accounts().iter().rev().nth(1).unwrap().label);
+    assert_eq!(focused(&harness).map(|(label, _)| label), Some(before));
+}

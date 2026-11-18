@@ -29,8 +29,10 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
         settings_row_soon(ui, theme, tr!("Calendar alerts"), tr!("An event's alert shows as a desktop notification at its time."));
         let note = tr!("A calendar comes from its account's CalDAV address. Which of them the calendar shows is chosen in its side panel.");
         group(ui, theme, "B", tr!("Calendars"), Some(note));
-        for account in mailbox.accounts() {
-            super::culled(ui, egui::Id::unique("settings-calendars").with(account.id), |ui| calendars(ui, theme, keymap, account));
+        let count = mailbox.accounts().len();
+        for (index, account) in mailbox.accounts().iter().enumerate() {
+            let ends = index == 0 || index.saturating_add(1) == count;
+            super::culled(ui, egui::Id::unique("settings-calendars").with(account.id), ends, |ui| calendars(ui, theme, keymap, account));
         }
         group(ui, theme, "C", tr!("Week"), None);
         settings_row(ui, theme, tr!("Week starts on"), Some(tr!("Fixed: it cannot be changed yet.")), |ui| {

@@ -355,13 +355,15 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
 
 /// Draws `add`, one row of a page that has a row for every account, only where it is near enough to be seen: within a
 /// view's height above or below what the page shows, so `Tab` still reaches the next row, which the page ([`body`])
-/// then scrolls to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of accounts builds the
-/// rows in sight only. The first time a row is drawn it is laid out wherever it is.
-pub(super) fn culled(ui: &mut Ui, id: Id, add: impl FnOnce(&mut Ui)) {
+/// then scrolls to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of
+/// accounts builds the rows in sight only. The first time a row is drawn it is laid out wherever it is. A row at one
+/// of the run's `ends` is always laid out, so `Tab` and `Shift+Tab` coming round the sheet reach the first and the last
+/// account.
+pub(super) fn culled(ui: &mut Ui, id: Id, ends: bool, add: impl FnOnce(&mut Ui)) {
     let width = ui.available_width();
     let top = ui.cursor().top();
     let known = ui.ctx().data(|data| data.get_temp::<f32>(id));
-    if let Some(height) = known {
+    if let Some(height) = known.filter(|_| !ends) {
         let clip = ui.clip_rect();
         let near = clip.expand2(vec2(0.0, clip.height()));
         let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
@@ -757,9 +759,11 @@ fn sending(ui: &mut Ui, theme: &Theme, keymap: &Keymap, settings: &mut Settings,
                 words(ui, theme.fonts.body, tr!("Add an account first: a signature belongs to the account it is sent from."), theme.palette.muted)
             });
         }
-        for pair in mailbox.accounts().chunks(2) {
+        let pairs = mailbox.accounts().len().div_ceil(2);
+        for (index, pair) in mailbox.accounts().chunks(2).enumerate() {
             let first = pair.first().map_or(0, |account| account.id);
-            culled(ui, Id::unique("settings-signatures").with(first), |ui| {
+            let ends = index == 0 || index.saturating_add(1) == pairs;
+            culled(ui, Id::unique("settings-signatures").with(first), ends, |ui| {
                 ui.add_space(INSET);
                 inset(ui, |ui| {
                     let column = ((ui.available_width() - SIGNATURE_GAP) / 2.0).floor().max(1.0);
@@ -829,8 +833,10 @@ fn triage(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox) -> Option<Asked> {
             let note = tr!("Each account's inbox in People, Notifications and Newsletters, sorted by InboxCraft or by your choice for a sender.");
             group(ui, theme, "C", tr!("Grouped inbox"), Some(note));
         }
-        for account in mailbox.accounts() {
-            culled(ui, Id::unique("settings-grouped").with(account.id), |ui| {
+        let count = mailbox.accounts().len();
+        for (index, account) in mailbox.accounts().iter().enumerate() {
+            let ends = index == 0 || index.saturating_add(1) == count;
+            culled(ui, Id::unique("settings-grouped").with(account.id), ends, |ui| {
                 let name = tr!("Group the inbox of {account}", account = account.label);
                 settings_row(ui, theme, &name, Some(&account.address), |ui| {
                     if switch(ui, theme, &name, account.grouped).clicked() {
@@ -864,8 +870,10 @@ fn notifications(ui: &mut Ui, theme: &Theme, mailbox: &Mailbox, settings: &Setti
             });
         }
         let levels = Level::ALL.map(|level| (level, level_name(level), f.button));
-        for account in mailbox.accounts() {
-            culled(ui, Id::unique("settings-level").with(account.id), |ui| {
+        let count = mailbox.accounts().len();
+        for (index, account) in mailbox.accounts().iter().enumerate() {
+            let ends = index == 0 || index.saturating_add(1) == count;
+            culled(ui, Id::unique("settings-level").with(account.id), ends, |ui| {
                 let title = tr!("{account} · {address}", account = account.label, address = account.address);
                 settings_row(ui, theme, &title, None, |ui| {
                     if let Some(level) = segmented_for(ui, theme, &levels, mailbox.notify_level(account.id), Some(&account.label)) {
