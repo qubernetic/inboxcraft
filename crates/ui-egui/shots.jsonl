@@ -219,3 +219,6 @@
 {"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
 {"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
 {"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+# The Accounts page with no account: one box in the middle of the page, Add account in it (settings-accounts/empty).
+{"out": "docs/images/settings-accounts-empty-light.png", "mode": "light", "size": [1200, 820], "first": true, "accounts": true}
+{"out": "docs/images/settings-accounts-empty-dark.png", "mode": "dark", "size": [1200, 820], "first": true, "accounts": true}
