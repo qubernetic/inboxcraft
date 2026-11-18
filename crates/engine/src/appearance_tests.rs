@@ -23,10 +23,27 @@ fn every_choice_has_a_stable_id_it_is_found_by() {
 
 #[test]
 fn an_appearance_comes_back_whole_from_its_json() {
-    let appearance =
-        Appearance { theme: ThemeMode::Dark, text_scale: 130, motion: Motion::Reduce, frame: WindowFrame::TopRow, own_frame: WindowFrame::TopRow };
+    let appearance = Appearance {
+        theme: ThemeMode::Dark,
+        text_scale: 130,
+        motion: Motion::Reduce,
+        motion_reduced: false,
+        frame: WindowFrame::TopRow,
+        own_frame: WindowFrame::TopRow,
+    };
     let value = appearance.to_value();
-    assert_eq!(value, json!({ "theme": "dark", "text_scale": 130, "motion": "reduce", "frame": "top_row", "own_frame": "top_row" }));
+    assert_eq!(
+        value,
+        json!({
+            "theme": "dark",
+            "text_scale": 130,
+            "motion": "reduce",
+            "motion_level": "off",
+            "motion_chosen": true,
+            "frame": "top_row",
+            "own_frame": "top_row",
+        })
+    );
     assert_eq!(Appearance::from_value(&value), appearance);
 }
 
@@ -58,12 +75,19 @@ fn an_appearance_kept_by_the_old_look_loads() {
     let appearance = Appearance::from_value(&kept);
     assert_eq!(
         appearance,
-        Appearance { theme: ThemeMode::Dark, text_scale: 120, motion: Motion::Reduce, frame: WindowFrame::Strip, own_frame: WindowFrame::Strip }
+        Appearance {
+            theme: ThemeMode::Dark,
+            text_scale: 120,
+            motion: Motion::Reduce,
+            motion_reduced: false,
+            frame: WindowFrame::Strip,
+            own_frame: WindowFrame::Strip,
+        }
     );
     let value = appearance.to_value();
     let mut keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["frame", "motion", "own_frame", "text_scale", "theme"]);
+    assert_eq!(keys, ["frame", "motion", "motion_chosen", "motion_level", "own_frame", "text_scale", "theme"]);
 }
 
 #[test]
@@ -76,5 +100,108 @@ fn the_own_frame_last_on_is_kept_and_never_the_desktop_s() {
     assert_eq!(Appearance::from_value(&json!({ "frame": "top_row" })).own_frame, WindowFrame::TopRow);
     for junk in [json!({ "frame": "system", "own_frame": "system" }), json!({ "frame": "system", "own_frame": 3 }), json!({ "frame": "system" })] {
         assert_eq!(Appearance::from_value(&junk).own_frame, WindowFrame::Strip, "{junk}");
+    }
+}
+
+/// The level and whether the owner chose it, as a kept `appearance.json` with `motion` = `motion` gives them.
+fn kept_motion(motion: &serde_json::Value) -> (MotionLevel, bool) {
+    let appearance = Appearance::from_value(&json!({ "theme": "dark", "text_scale": 120, "motion": motion, "frame": "top_row" }));
+    assert_eq!((appearance.theme, appearance.text_scale, appearance.frame), (ThemeMode::Dark, 120, WindowFrame::TopRow), "{motion}");
+    (appearance.motion_level(), appearance.motion_chosen())
+}
+
+#[test]
+fn the_motion_levels_have_stable_ids_and_reduced_is_the_default() {
+    assert_eq!(MotionLevel::ALL.map(MotionLevel::id), ["full", "reduced", "off"]);
+    for level in MotionLevel::ALL {
+        assert_eq!(MotionLevel::named(level.id()), Some(level));
+    }
+    assert_eq!(MotionLevel::default(), MotionLevel::Reduced);
+    let fresh = Appearance::default();
+    assert_eq!((fresh.motion_level(), fresh.motion_chosen()), (MotionLevel::Reduced, false));
+}
+
+#[test]
+fn a_kept_motion_from_before_the_levels_maps_to_a_level() {
+    assert_eq!(kept_motion(&json!("system")), (MotionLevel::Reduced, false), "the system's: the default, not chosen");
+    assert_eq!(kept_motion(&json!("reduce")), (MotionLevel::Off, true));
+    assert_eq!(kept_motion(&json!("full")), (MotionLevel::Full, true));
+}
+
+#[test]
+fn a_kept_motion_named_by_its_level_reads_as_itself() {
+    assert_eq!(kept_motion(&json!("reduced")), (MotionLevel::Reduced, true));
+    assert_eq!(kept_motion(&json!("off")), (MotionLevel::Off, true));
+}
+
+#[test]
+fn a_kept_motion_that_cannot_be_read_is_the_default_and_the_rest_is_kept() {
+    for junk in [json!(3), json!(null), json!("x".repeat(10_000)), json!(["reduce"]), json!({ "level": "off" }), json!("Reduce")] {
+        assert_eq!(kept_motion(&junk), (MotionLevel::Reduced, false), "{junk}");
+    }
+    let missing = Appearance::from_value(&json!({ "theme": "dark", "text_scale": 120, "frame": "top_row" }));
+    assert_eq!((missing.theme, missing.text_scale, missing.frame), (ThemeMode::Dark, 120, WindowFrame::TopRow));
+    assert_eq!((missing.motion_level(), missing.motion_chosen()), (MotionLevel::Reduced, false));
+}
+
+#[test]
+fn every_motion_this_version_keeps_comes_back_the_same() {
+    for (level, chosen) in [(MotionLevel::Full, true), (MotionLevel::Reduced, true), (MotionLevel::Off, true), (MotionLevel::Reduced, false)] {
+        let appearance = Appearance { theme: ThemeMode::Light, text_scale: 110, ..Appearance::default() }.with_motion(level, chosen);
+        assert_eq!((appearance.motion_level(), appearance.motion_chosen()), (level, chosen));
+        let value = appearance.to_value();
+        assert_eq!(value["motion_level"], json!(level.id()), "{value}");
+        assert_eq!(value["motion_chosen"], json!(chosen), "{value}");
+        assert_eq!(Appearance::from_value(&value), appearance, "{value}");
+    }
+}
+
+#[test]
+fn the_kept_level_wins_over_the_old_field_and_a_damaged_one_falls_back_to_it() {
+    let both = json!({ "motion": "reduce", "motion_level": "reduced", "motion_chosen": true });
+    assert_eq!(Appearance::from_value(&both).motion_level(), MotionLevel::Reduced);
+    let damaged = json!({ "motion": "full", "motion_level": 7, "motion_chosen": true });
+    assert_eq!(Appearance::from_value(&damaged).motion_level(), MotionLevel::Full);
+    // A level without its flag, or with a flag that is not one, was chosen; a level not chosen is the default.
+    for chosen in [json!(null), json!("no"), json!(0)] {
+        let kept = Appearance::from_value(&json!({ "motion_level": "off", "motion_chosen": chosen }));
+        assert_eq!((kept.motion_level(), kept.motion_chosen()), (MotionLevel::Off, true), "{chosen}");
+    }
+    let unchosen = Appearance::from_value(&json!({ "motion_level": "full", "motion_chosen": false }));
+    assert_eq!((unchosen.motion_level(), unchosen.motion_chosen()), (MotionLevel::Reduced, false));
+}
+
+#[test]
+fn the_old_motion_field_answers_as_before_for_each_level() {
+    let old = |level, chosen| Appearance::default().with_motion(level, chosen).motion;
+    assert_eq!(old(MotionLevel::Full, true), Motion::Full);
+    assert_eq!(old(MotionLevel::Reduced, true), Motion::Reduce);
+    assert_eq!(old(MotionLevel::Off, true), Motion::Reduce);
+    assert_eq!(old(MotionLevel::Reduced, false), Motion::System);
+    // A front end that still sets the old field alone gets the level the kept file maps it to.
+    let reduce = Appearance { motion: Motion::Reduce, ..Appearance::default() };
+    assert_eq!((reduce.motion_level(), reduce.motion_chosen()), (MotionLevel::Off, true));
+    let full = Appearance { motion: Motion::Full, motion_reduced: true, ..Appearance::default() };
+    assert_eq!(full.motion_level(), MotionLevel::Full, "the reduced flag counts only beside Reduce");
+}
+
+#[test]
+fn the_system_s_wish_decides_only_while_the_owner_has_not_chosen() {
+    use MotionLevel::{Full, Off, Reduced};
+    for (level, chosen, system_reduces, expected) in [
+        (Full, true, false, Full),
+        (Full, true, true, Full),
+        (Reduced, true, false, Reduced),
+        (Reduced, true, true, Reduced),
+        (Off, true, false, Off),
+        (Off, true, true, Off),
+        (Reduced, false, false, Reduced),
+        (Reduced, false, true, Off),
+        (Full, false, false, Full),
+        (Full, false, true, Off),
+        (Off, false, false, Off),
+        (Off, false, true, Off),
+    ] {
+        assert_eq!(effective(level, chosen, system_reduces), expected, "{level:?} chosen {chosen} system reduces {system_reduces}");
     }
 }

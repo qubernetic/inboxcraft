@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
+use crate::appearance::{Appearance, Motion, MotionLevel, ThemeMode, WindowFrame};
 use crate::test_support::session;
 use crate::{AgentClass, Caller, EngineError};
 
@@ -84,17 +84,55 @@ fn text_scale_set_takes_90_to_130_per_cent_in_steps_of_ten() {
     assert_eq!(session.appearance().text_scale, 100);
 }
 
+/// The level and whether it was chosen after `ui.motion.set` with `params`, and the answer's level.
+fn motion_after(session: &mut crate::Session, params: &Value) -> (MotionLevel, bool) {
+    let answer = session.run_as(Caller::Agent, "ui.motion.set", params).unwrap();
+    let appearance = *session.appearance();
+    assert_eq!(answer["appearance"], appearance.to_value(), "{params}");
+    assert_eq!(answer["appearance"]["motion_level"], json!(appearance.motion_level().id()), "{params}");
+    (appearance.motion_level(), appearance.motion_chosen())
+}
+
 #[test]
-fn motion_set_reduces_motion_lets_it_run_or_follows_the_system() {
+fn motion_set_takes_a_level_the_owner_chose() {
     let mut session = session();
-    for (reduce, expected) in [("on", Motion::Reduce), ("off", Motion::Full), ("system", Motion::System)] {
-        let answer = session.run_as(Caller::Agent, "ui.motion.set", &json!({ "reduce": reduce })).unwrap();
-        assert_eq!(session.appearance().motion, expected);
-        assert_eq!(answer["appearance"]["motion"], json!(expected.id()));
+    for (level, expected) in [("off", MotionLevel::Off), ("full", MotionLevel::Full), ("reduced", MotionLevel::Reduced)] {
+        assert_eq!(motion_after(&mut session, &json!({ "level": level })), (expected, true), "{level}");
     }
-    for junk in [json!({ "reduce": true }), json!({ "reduce": "yes" }), json!({})] {
+}
+
+#[test]
+fn motion_set_still_takes_the_old_reduce_for_one_release() {
+    let mut session = session();
+    assert_eq!(motion_after(&mut session, &json!({ "reduce": "on" })), (MotionLevel::Off, true));
+    assert_eq!(motion_after(&mut session, &json!({ "reduce": "off" })), (MotionLevel::Full, true));
+    assert_eq!(motion_after(&mut session, &json!({ "reduce": "system" })), (MotionLevel::Reduced, false), "the choice goes back to the computer");
+    let answer = session.run("ui.motion.set", &json!({ "reduce": "on" })).unwrap();
+    assert_eq!(answer["appearance"]["motion"], json!("reduce"), "an old client reads the old field");
+    assert_eq!(session.appearance().motion, Motion::Reduce);
+}
+
+#[test]
+fn motion_set_with_both_takes_the_level_and_refuses_junk_in_either() {
+    let mut session = session();
+    assert_eq!(motion_after(&mut session, &json!({ "level": "reduced", "reduce": "on" })), (MotionLevel::Reduced, true));
+    assert_eq!(motion_after(&mut session, &json!({ "level": "full", "reduce": "system" })), (MotionLevel::Full, true));
+    let before = *session.appearance();
+    for junk in [
+        json!({}),
+        json!({ "level": null }),
+        json!({ "level": "sideways", "reduce": "on" }),
+        json!({ "level": "off", "reduce": "yes" }),
+        json!({ "level": "Off" }),
+        json!({ "level": 1 }),
+        json!({ "level": "x".repeat(10_000) }),
+        json!({ "reduce": true }),
+        json!({ "reduce": "yes" }),
+        json!({ "level": "off", "speed": 2 }),
+    ] {
         assert!(bad(session.run("ui.motion.set", &junk)), "{junk}");
     }
+    assert_eq!(*session.appearance(), before, "a refused command changes nothing");
 }
 
 #[test]
