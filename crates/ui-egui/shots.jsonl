@@ -196,3 +196,8 @@
 {"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
 {"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
 {"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+# A fitted HTML message (#237): the reader's plain-text view of it, and the fitted view at 130 % in a narrow window.
+{"out": "docs/images/reader-plain-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
+{"out": "docs/images/reader-plain-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "html_view": "plain"}
+{"out": "docs/images/reader-fitted-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}
+{"out": "docs/images/reader-fitted-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "select": "Your bike is due for a service"}

@@ -3,8 +3,8 @@
 
 //! The gallery page of the reader's sets for `ui_shot` (`"reader": true`): the boards of the why line, the content
 //! bar, the thread row, the quote fold, the attachment, the hairline table and the invitation card, every state drawn
-//! as its sheet says, labelled in the sheet's order with the design boards' words, on the boards' `bg`, three columns,
-//! the boards evenly apart. A page of its own: one picture is at most 4 096 px a side.
+//! as its sheet says, labelled in the sheet's order with the design boards' words, and a fitted message with its quote
+//! folded and open, on the boards' `bg`, three columns, the boards evenly apart. A page of its own: one picture is at most 4 096 px a side.
 
 use egui::{Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 
@@ -177,6 +177,19 @@ fn tables(ui: &mut Ui, theme: &Theme) {
     }
 }
 
+/// A fitted HTML message's board, 684 wide as the reader sets a message: its quote folded and open.
+fn fitted_messages(ui: &mut Ui, theme: &Theme) {
+    title(ui, theme, tr!("Fitted message"));
+    for (state, open) in [(tr!("quote folded"), false), (tr!("quote open"), true)] {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(684.0);
+                crate::draw::fitted_board(ui, theme, open);
+            });
+        });
+    }
+}
+
 /// The invitation card's board: its nine states, 640 wide, with the design board's words.
 fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     use super::invite_card::{CardEvent, CardState, Said, invite_card};
@@ -241,6 +254,8 @@ fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     attachments(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     tables(ui, theme);
+    ui.add_space(BOARD_GAP);
+    fitted_messages(ui, theme);
 }
 
 /// The right column.

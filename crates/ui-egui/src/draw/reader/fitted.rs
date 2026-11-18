@@ -977,3 +977,27 @@ fn texture<'t>(ui: &Ui, textures: &'t mut Textures, key: &str, picture: &Decoded
     }
     textures.get(key)
 }
+
+/// The words of the gallery's fitted message: a heading, a paragraph with a link, a list, a table with its head,
+/// preformatted text and a quote two levels deep. Invented, as all sample mail is.
+const BOARD: &str = "<h1>Allotment rota</h1><p>Here is the plan for November. The <b>water butts</b> need emptying before \
+    the frost; <a href=\"https://allotments.example.org/rota\">the full rota</a> is on the site.</p>\
+    <ul><li>Week one: Odile</li><li>Week two: Mira</li></ul>\
+    <table><tr><th>Week</th><th>Who</th><th>Plot</th></tr><tr><td>1</td><td>Odile Brannock</td><td>14</td></tr>\
+    <tr><td>2</td><td>Mira Holloway, with the shed key and the long rake</td><td>9</td></tr></table>\
+    <pre>gate code: 4417</pre>\
+    <blockquote><p>On Mon 16 Nov, Teodor wrote:</p><p>Could you take the second week?</p>\
+    <blockquote><p>The shed key is under the pot.</p></blockquote></blockquote>";
+
+/// A fitted message on the reader's gallery page across `ui`'s width, its quote folded or `open`.
+pub(crate) fn board(ui: &mut Ui, theme: &Theme, open: bool) {
+    let document = inboxcraft_html::display(BOARD, &inboxcraft_html::Options::default());
+    let mut reader = Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(crate::save::NoSave));
+    let id = if open { 2 } else { 1 };
+    if open {
+        reader.toggle_quotes(id);
+    }
+    let mut textures = Textures::default();
+    let mut drawn = Drawn::default();
+    blocks(ui, theme, &reader, id, &document, &document.blocks, 0, &mut textures, &mut drawn);
+}

@@ -45,6 +45,7 @@ pub(crate) mod paint;
 mod palette;
 mod pane;
 mod reader;
+pub(crate) use reader::fitted_board;
 mod settings;
 
 pub use list::rows_built;
