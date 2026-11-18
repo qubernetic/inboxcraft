@@ -313,12 +313,12 @@ impl Composer {
             fill_refused: None,
         };
         composer.take_answer(answer);
-        composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
         Ok(composer)
     }
 
     /// Reads the draft as the engine kept it: the account, the chips checked, the subject, the text and what blocks
-    /// Send. What is being typed in a recipient line stays.
+    /// Send. What is being typed in a recipient line stays. Cc and Bcc show from then on when either holds a chip or
+    /// typed text, so nothing the draft holds is in a line that is not drawn.
     fn take_answer(&mut self, answer: &Value) {
         self.account = answer.get("account").and_then(Value::as_u64).unwrap_or(self.account);
         for line in Line::ALL {
@@ -357,6 +357,7 @@ impl Composer {
             .and_then(Value::as_array)
             .map(|blanks| blanks.iter().filter_map(Value::as_str).map(str::to_owned).collect())
             .unwrap_or_default();
+        self.copies |= [Line::Cc, Line::Bcc].into_iter().any(|line| !self.chips(line).is_empty() || !self.typing(line).trim().is_empty());
     }
 
     /// The draft's id.
@@ -432,6 +433,13 @@ impl Composer {
     /// Shows the Cc and Bcc lines.
     pub fn show_copies(&mut self) {
         self.copies = true;
+    }
+
+    /// The recipient lines the composer draws: To, and Cc and Bcc once they show. The drawing and Send both read it, so
+    /// nothing becomes a recipient from a line that is not drawn.
+    #[must_use]
+    pub fn drawn(&self) -> &'static [Line] {
+        if self.copies { &Line::ALL } else { &[Line::To] }
     }
 
     /// Whether it is the floating panel.
@@ -850,13 +858,14 @@ impl Composer {
         Ok(())
     }
 
-    /// Before the composer closes: what is typed in a recipient line becomes a chip and the draft is kept.
+    /// Before the composer closes: what is typed in a drawn recipient line becomes a chip and the draft is kept. Text in
+    /// a line not drawn stays typed text: it is never made a recipient unseen.
     ///
     /// # Errors
     ///
     /// The command's refusal; then the composer stays open with everything in it.
     pub fn close(&mut self, mailbox: &mut Mailbox) -> Result<(), UiError> {
-        for line in Line::ALL {
+        for &line in self.drawn() {
             let typed = self.typing.get_mut(line.index()).map(std::mem::take).unwrap_or_default();
             let kept = self.add(line, &typed);
             if let Some(field) = self.typing_mut(line) {
@@ -884,8 +893,16 @@ impl Composer {
     ///
     /// # Errors
     ///
-    /// A command's refusal (an account without a submission server, a time picked that has passed).
+    /// A command's refusal (an account without a submission server, a time picked that has passed); text typed in a
+    /// line that is not drawn, which is then shown and not sent ([`UiError::Refused`]).
     pub fn send(&mut self, mailbox: &mut Mailbox) -> Result<Option<Timestamp>, UiError> {
+        // Nothing the owner was not shown becomes a recipient: a line not drawn that holds typed text is shown, and
+        // Send waits for the next press.
+        if let Some(hidden) = Line::ALL.into_iter().find(|line| !self.drawn().contains(line) && !self.typing(*line).trim().is_empty()) {
+            self.show_copies();
+            let said = tr!("{line} holds text that was not shown: look at it, then send.", line = hidden.name());
+            return Err(UiError::Refused(said));
+        }
         self.close(mailbox)?;
         if !self.sendable() {
             return Ok(None);

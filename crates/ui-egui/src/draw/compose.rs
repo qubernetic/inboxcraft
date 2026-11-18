@@ -445,8 +445,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, compo
             }
             // A recipient that is not an address is named under its line (the sheet's place), so not again here; Send's
             // tooltip still says why it cannot go.
-            let shown: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
-            let said_under = shown.iter().flat_map(|line| composer.chips(*line)).any(|chip| !chip.ok);
+            let said_under = composer.drawn().iter().flat_map(|line| composer.chips(*line)).any(|chip| !chip.ok);
             if let Some(problem) = problem.filter(|_| !said_under) {
                 ui.label(RichText::new(problem).font(theme.fonts.caption.id()).color(p.ink));
                 let side = theme.fonts.caption.line;
@@ -477,8 +476,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         ui.add_space(s.s2);
         from(ui, theme, mailbox, composer, &mut asked);
         rule(ui, theme);
-        let lines: &[Line] = if composer.copies() { &Line::ALL } else { &[Line::To] };
-        for line in lines {
+        for line in composer.drawn() {
             recipients(ui, theme, composer, *line, &mut asked);
             rule(ui, theme);
         }
