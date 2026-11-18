@@ -223,8 +223,13 @@ pub struct Composer {
     templates: Vec<String>,
     /// The time picked to send it at; `None` sends it now, after the hold.
     later: Option<Timestamp>,
-    /// Whether the whole composer was painted since it was opened or moved to another place: Send waits for it.
-    painted: bool,
+    /// The first frame that painted the whole composer, its lines in sight, since it was opened, moved to another
+    /// place or changed from outside its fields: Send waits for a frame after it.
+    painted_in: Option<u64>,
+    /// A script set the scene without a frame and counts it as seen.
+    scripted: bool,
+    /// The place it was last drawn in: in the reader's place (`true`) or floating.
+    drawn_docked: Option<bool>,
     /// Whether the floating panel is folded to its head.
     folded: bool,
     /// When the engine last kept the draft.
@@ -317,7 +322,9 @@ impl Composer {
             templates: Vec::new(),
             later: None,
             fill_refused: None,
-            painted: false,
+            painted_in: None,
+            scripted: false,
+            drawn_docked: None,
             folded: false,
             saved: None,
         };
@@ -461,7 +468,7 @@ impl Composer {
     /// Makes it the floating panel, or puts it back in the reader's place.
     pub fn set_floating(&mut self, floating: bool) {
         if self.floating != floating {
-            self.painted = false;
+            self.unsee();
         }
         self.floating = floating;
         if !floating {
@@ -478,7 +485,7 @@ impl Composer {
     /// Folds the floating panel to its head, or opens it again.
     pub fn toggle_fold(&mut self) {
         self.folded = !self.folded;
-        self.painted = false;
+        self.unsee();
     }
 
     /// When the engine last kept the draft, if it said.
@@ -487,16 +494,38 @@ impl Composer {
         self.saved
     }
 
-    /// Whether the whole composer was painted since it was opened or moved to another place, so that the person has
-    /// seen what Send would send.
+    /// Whether the whole composer, its lines in sight, was painted in a frame before `frame` since it was opened,
+    /// moved to another place or changed from outside its fields, so that the person has seen what Send would send.
     #[must_use]
-    pub fn painted(&self) -> bool {
-        self.painted
+    pub fn seen(&self, frame: u64) -> bool {
+        self.scripted || self.painted_in.is_some_and(|painted| painted < frame)
     }
 
-    /// The whole composer, its lines and its text, was painted in this frame.
-    pub(crate) fn mark_painted(&mut self) {
-        self.painted = true;
+    /// The whole composer, its lines in sight, was painted in `frame`.
+    pub(crate) fn mark_painted(&mut self, frame: u64) {
+        if self.painted_in.is_none() {
+            self.painted_in = Some(frame);
+        }
+    }
+
+    /// What a script set up counts as seen: the shots set a scene without a frame.
+    pub(crate) fn mark_seen(&mut self) {
+        self.scripted = true;
+    }
+
+    /// It is drawn in the reader's place (`docked`) or floating: a place other than the last one has not been seen.
+    pub(crate) fn drawn_in(&mut self, docked: bool) {
+        if self.drawn_docked != Some(docked) {
+            self.unsee();
+        }
+        self.drawn_docked = Some(docked);
+    }
+
+    /// What it shows changed in a way the person has not seen yet (it moved, a template or a fill went in, the
+    /// sender changed): Send waits for a frame that paints it.
+    pub(crate) fn unsee(&mut self) {
+        self.painted_in = None;
+        self.scripted = false;
     }
 
     /// What the composer's title says: the subject, or "New message".

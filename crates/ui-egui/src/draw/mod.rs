@@ -163,6 +163,8 @@ pub struct InboxApp {
     composer: Option<Composer>,
     /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
     composer_keys: bool,
+    /// The frame being drawn; between frames, the next one.
+    frame: u64,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
     notice: Option<(String, Option<f64>)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
@@ -268,6 +270,7 @@ impl InboxApp {
             frame_applied: None,
             composer: None,
             composer_keys: false,
+            frame: 0,
             notice: None,
             picker: None,
             sending: None,
@@ -600,7 +603,7 @@ impl InboxApp {
     /// Shows the calendar screen, leaving the settings sheet; its calendars and events are read again.
     pub fn show_calendar(&mut self) {
         self.close_settings();
-        self.screen = Screen::Calendar;
+        self.screen_to(Screen::Calendar);
         self.calendar.refresh(&mut self.mailbox);
     }
 
@@ -646,7 +649,19 @@ impl InboxApp {
     /// Shows the mail, leaving the settings sheet and the calendar.
     fn show_mail(&mut self) {
         self.close_settings();
-        self.screen = Screen::Mail;
+        self.screen_to(Screen::Mail);
+    }
+
+    /// Shows `screen`. A composer in the reader's place moves to the floating panel with the calendar and back with the
+    /// mail: in its new place it has not been seen yet.
+    fn screen_to(&mut self, screen: Screen) {
+        let was = self.docked();
+        self.screen = screen;
+        if was != self.docked()
+            && let Some(composer) = self.composer.as_mut()
+        {
+            composer.unsee();
+        }
     }
 
     /// Gives the action waiting on the Shortcuts page the key pressed in this frame, taking it from the action that had
@@ -944,7 +959,8 @@ impl InboxApp {
     /// refuses.
     pub fn send_composer(&mut self) {
         // A composer opened or moved in this frame has not been seen yet: Send acts once it has been painted.
-        let Some(composer) = self.composer.as_mut().filter(|composer| composer.painted()) else { return };
+        let frame = self.frame;
+        let Some(composer) = self.composer.as_mut().filter(|composer| composer.seen(frame)) else { return };
         let (draft, later) = (composer.draft(), composer.later());
         match composer.send(&mut self.mailbox) {
             Ok(Some(at)) => {
@@ -1082,12 +1098,20 @@ impl InboxApp {
                 composer.show_copies();
                 Ok(())
             }
-            Asked::From(account) => composer.set_account(mailbox, account),
-            Asked::Template(at) => match composer.templates().get(at).cloned() {
-                Some(name) => composer.use_template(mailbox, &name),
-                None => Ok(()),
-            },
+            // What these put in changes the draft after it was painted: Send waits for the next frame to show it.
+            Asked::From(account) => {
+                composer.unsee();
+                composer.set_account(mailbox, account)
+            }
+            Asked::Template(at) => {
+                composer.unsee();
+                match composer.templates().get(at).cloned() {
+                    Some(name) => composer.use_template(mailbox, &name),
+                    None => Ok(()),
+                }
+            }
             Asked::Fill => {
+                composer.unsee();
                 ctx.memory_mut(|memory| memory.request_focus(compose::blank_id()));
                 composer.fill(mailbox)
             }
@@ -1323,6 +1347,7 @@ impl InboxApp {
         }
         self.wake_when_due(ui.ctx());
         self.show_picker(ui.ctx());
+        self.frame = ui.ctx().cumulative_frame_nr();
         let Keys { mut ran, escape, down, up, typing, quiet } = self.keys(ui.ctx());
         let mut stepped = false;
         if !typing && (down || up) {
@@ -1535,6 +1560,8 @@ impl InboxApp {
         self.hear_desk();
         self.own_frame_over(ui.ctx(), &theme, corner);
         self.sync();
+        // What runs after this pass, before the next frame, comes after everything this frame painted.
+        self.frame = ui.ctx().cumulative_frame_nr().saturating_add(1);
     }
 
     /// Shows what was asked for this frame: an account narrowed, a place opened in the pane or by a pill of the

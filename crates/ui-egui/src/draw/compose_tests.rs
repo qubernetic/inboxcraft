@@ -1097,3 +1097,82 @@ fn ctrl_enter_in_the_composer_sends_docked_and_floating() {
     ctrl_enter(&mut harness);
     assert!(queued(&mut harness, id), "floating, from its subject");
 }
+
+/// The sending sample, a frame every 60th of a second as a window runs, with the rota answered to all: the reply's id.
+fn answered_to_all() -> (Harness<'static, InboxApp>, u64) {
+    let mut store = sample::mailbox(Timestamp::from_unix(NOW, 0).unwrap()).unwrap();
+    let account = store.accounts().unwrap().into_iter().find(|account| account.id() == AccountId::new(1)).unwrap();
+    let server = Server::new(Host::new("smtp.example.org").unwrap(), Security::Tls.submission_port(), Security::Tls);
+    let mut batch = Batch::new();
+    batch.push(Change::PutAccount(account.with_submission(Some(server))));
+    store.apply(&batch).unwrap();
+    let mailbox = Mailbox::new(Session::new(Box::new(store), clock()).unwrap(), clock());
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(60)
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
+    harness.run();
+    let rota = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+    // Opened as an act of the window does it, after a frame was drawn: the next frame is the first to paint it.
+    assert!(harness.state_mut().answer(rota, crate::compose::Answer::ReplyAll));
+    let id = harness.state().composer().unwrap().draft();
+    (harness, id)
+}
+
+#[test]
+fn reply_all_and_ctrl_enter_in_one_input_and_the_next_frame_send_nothing_unseen() {
+    let (mut harness, _) = answered_to_all();
+    // Back to the rota in the reader, its Reply all in sight.
+    harness.state_mut().close_composer();
+    let rota = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id);
+    harness.state_mut().mailbox_mut().select(rota);
+    harness.run();
+    // Reply all and Ctrl Enter in one input: the reply opens after that frame was drawn.
+    harness.get_by_role_and_label(Role::Button, "Reply all").click();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.step();
+    let outbox = harness.state_mut().mailbox_mut().run("outbox.list", &json!({})).unwrap();
+    let id = harness.state().composer().map(|composer| composer.draft());
+    assert!(id.is_some(), "sent in the frame that opened it: {outbox}");
+    let id = id.unwrap();
+    // Ctrl Enter in the very next frame, the first to paint it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.step();
+    assert!(!queued(&mut harness, id), "sent in the frame that first painted it");
+    assert!(harness.state().composer().is_some());
+}
+
+#[test]
+fn send_in_the_frames_after_an_answer_waits_until_its_lines_were_seen() {
+    let (mut harness, id) = answered_to_all();
+    let ctx = harness.ctx.clone();
+    harness.step();
+    harness.step();
+    // The wipe still covers the lines: they were painted, not seen.
+    harness.state_mut().run_action(&ctx, keymap::SEND);
+    assert!(!queued(&mut harness, id), "sent from under the wipe");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.step();
+    assert!(!queued(&mut harness, id), "sent by the key that ended the wipe");
+    // Seen whole in a frame before this one: Send goes.
+    harness.step();
+    harness.state_mut().run_action(&ctx, keymap::SEND);
+    assert!(queued(&mut harness, id), "sent once seen");
+}
+
+#[test]
+fn send_waits_for_a_composer_the_calendar_moved_until_painted_in_its_new_place() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+    harness.run();
+    // Back in the reader's place by a switch of screens, not yet painted there.
+    harness.state_mut().run_action(&ctx, keymap::MAIL);
+    harness.state_mut().send_composer();
+    assert!(!queued(&mut harness, id), "sent unpainted in its new place");
+    harness.run();
+    harness.state_mut().send_composer();
+    assert!(queued(&mut harness, id));
+}

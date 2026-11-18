@@ -760,7 +760,6 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
         blank(&mut column, theme, keymap, composer, rect, &mut asked);
     }
     foot(ui, theme, keymap, mailbox, composer, foot_rect, &mut asked);
-    composer.mark_painted();
     asked
 }
 
@@ -834,9 +833,13 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     ui.allocate_rect(whole, Sense::hover());
     mark_drawn(ui, whole);
     let area = Rect::from_min_max(whole.min + vec2(s.s10, s.s6), whole.max - vec2(s.s10, s.s6));
+    composer.drawn_in(true);
     let shown = wiped(ui.ctx(), Id::unique("compose-wipe").with(composer.draft()));
     if shown >= 1.0 {
-        return body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
+        let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
+        // Painted with nothing over it: from the next frame on, what Send would send has been seen.
+        composer.mark_painted(ui.ctx().cumulative_frame_nr());
+        return asked;
     }
     let edge = whole.top() + whole.height() * ease(shown);
     // Drawn and working whole; what the wipe has not reached yet is covered by the ground it stands on.
@@ -874,7 +877,13 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mail
             // 12 above the head, 20 beside and under the rest.
             let pad = s.s4 + s.s1;
             let area = Rect::from_min_max(rect.min + vec2(pad, s.s3), rect.max - vec2(pad, if composer.folded() { s.s3 } else { pad }));
-            body(ui, theme, keymap, mailbox, composer, area, Place::Floating)
+            composer.drawn_in(false);
+            let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Floating);
+            // Folded, its lines are not drawn: nothing of it has been seen.
+            if !composer.folded() {
+                composer.mark_painted(ui.ctx().cumulative_frame_nr());
+            }
+            asked
         })
         .inner
 }
