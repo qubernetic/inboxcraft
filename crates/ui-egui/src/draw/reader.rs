@@ -1159,6 +1159,8 @@ fn sender_header(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox,
     super::frame::beside(ui, theme, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = s.s3;
+            // In one pane a pointer needs a way back to the list here too.
+            back_to_list(ui, theme, keymap, drawn);
             crate::component::avatar::avatar(ui, theme, &row.sender, &row.address, side);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // A reader that fills the window has no list beside it to go back to.

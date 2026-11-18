@@ -3131,3 +3131,22 @@ fn across_980_the_keyboard_stays_and_a_row_reached_by_tab_stays_behind_the_list(
     assert!(selected_focused(&harness), "the keyboard stays on it");
     assert_eq!(read_states(&harness), was, "narrowing read nothing");
 }
+
+#[test]
+fn in_one_pane_a_held_messages_head_starts_with_back_to_the_list_and_the_focus_on_it() {
+    let mut harness = wide(900.0);
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.get_by_label("Harbour Swim Club, Winter swim at the harbour steps, 06:00, unread, new sender").click();
+    harness.run();
+    harness.run();
+    harness.get_by_label("Let Harbour Swim Club in?");
+    assert_eq!(rows(&harness), 0, "the held message stands in the list's place");
+    let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
+    assert_eq!(focused_rect(&harness), Some(back), "a press put the focus on the head's first tool");
+    harness.get_by_role_and_label(Role::Button, "Back to the list").click();
+    harness.run();
+    harness.run();
+    assert_eq!(super::reader_rect(&harness.ctx), None, "a pointer gets back to the list");
+    harness.get_by_label("Who gets in?");
+}
