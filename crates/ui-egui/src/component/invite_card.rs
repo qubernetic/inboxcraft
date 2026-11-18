@@ -7,7 +7,7 @@
 //! `label` and `muted`. A `line` hairline parts it from the rest, 14 above and below and 16 at the sides, 10 between:
 //! the title in `heading` (struck through and `muted` when cancelled), the facts WHEN, WHERE, WHO and CAL (labels in a
 //! 56 wide column, the values 12 right of it, 22 high, 6 apart), then by state: Going (primary, but on an older card of a thread), Maybe and No with to
-//! whom the answer goes; what changed or what clashes in a `warn` box; the answer given and Change answer; that it is
+//! whom the answer goes (named the organiser, not the sender, when someone else sent the message); what changed or what clashes in a `warn` box; the answer given and Change answer; that it is
 //! cancelled in a `minus` box and Remove from calendar; the guests' answers; or why there is nothing to answer. A
 //! version a later one replaced is one line instead: the older-version clock and what it says, on the `panel` fill in a
 //! `panel_line` edge. Every word from the event is data: plain words on one line, cut between grapheme clusters with
@@ -44,6 +44,9 @@ pub struct CardEvent<'a> {
     pub who: &'a str,
     /// The calendar it goes into.
     pub cal: &'a str,
+    /// The organiser did not send the message: the line under the answers says the answer goes to the organiser, not to
+    /// the sender.
+    pub not_from_organiser: bool,
 }
 
 /// A guest's answer, on a card of replies.
@@ -266,7 +269,7 @@ pub fn invite_card_with(
     let part_top = rect.top() + PAD_Y + f.heading.line + GAP + facts_high + GAP;
     let part_left = if spread { rect.left() + PAD_X } else { info_left };
     let part_rect = Rect::from_min_max(pos2(part_left, part_top), pos2(rect.right() - PAD_X, rect.bottom() - PAD_Y));
-    let lower_part = Lower { rect: part_rect, buttons, placed, answered, why, keep };
+    let lower_part = Lower { rect: part_rect, buttons, placed, answered, why, keep, not_from_organiser: event.not_from_organiser };
     let asked = lower(ui, theme, keymap, state, lower_part);
     // The edge last, over the fills and the hairline.
     if ui.is_rect_visible(rect) {
@@ -324,18 +327,24 @@ struct Lower {
     answered: Option<AnsweredRow>,
     why: Option<std::sync::Arc<egui::Galley>>,
     keep: bool,
+    /// The organiser did not send the message ([`CardEvent::not_from_organiser`]).
+    not_from_organiser: bool,
 }
 
 /// The part of a card under its facts; what was pressed.
 fn lower(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: &CardState<'_>, part: Lower) -> Option<CardAsked> {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let Lower { rect, buttons, placed, answered, why, keep } = part;
+    let Lower { rect, buttons, placed, answered, why, keep, not_from_organiser } = part;
     let button = super::control_side(theme);
     let mut top = rect.top();
     let mut asked = None;
     let goes = |ui: &Ui, top: f32, to: &str| {
-        let whole = tr!("Your answer goes to {address} at once.", address = to);
+        let whole = if not_from_organiser {
+            tr!("Your answer goes at once to the organiser, not to the sender: {address}", address = to)
+        } else {
+            tr!("Your answer goes to {address} at once.", address = to)
+        };
         let words = super::fitted(ui, &whole, f.caption, p.muted, rect.width());
         said(ui, Rect::from_min_size(pos2(rect.left(), top), vec2(paint::run_box(words.size().x), f.caption.line)), &whole, ("goes", 0));
         paint::run_at(ui.painter(), pos2(rect.left(), top), words, p.muted);

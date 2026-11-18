@@ -204,6 +204,7 @@ fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         place: "Room 3",
         who: "Marit Solheim (organiser), Teodor Vasquez, Ines Okafor and you",
         cal: "Studio",
+        not_from_organiser: false,
     };
     let goes = "marit@example.org";
     let replies = [

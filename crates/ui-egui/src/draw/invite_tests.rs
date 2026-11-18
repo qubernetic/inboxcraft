@@ -749,3 +749,46 @@ fn a_held_sender_s_html_invitation_offers_no_answer() {
         assert!(!button(&harness, name), "{name} is offered to a held sender");
     }
 }
+
+/// The line of whom the answer goes to on an invitation `from` someone, organised by `organiser` (the ORGANIZER line's
+/// value), at `percent` %: the words a screen reader hears, and the card's height.
+fn goes_line(from: (&str, &str), organiser: &str, percent: u16) -> (Vec<String>, f32) {
+    let event = format!("ORGANIZER;CN=Odile Brannock:mailto:{organiser}\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:mira@example.org\r\n");
+    let mut harness = sending(from_whom(from, 1, 931, "Invitation: forwarded", Some(("REQUEST", &event)), None, 600));
+    harness.state_mut().set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+    open(&mut harness, "Invitation: forwarded");
+    harness.run();
+    let lines: Vec<String> = harness
+        .query_all_by_label_contains("Your answer goes")
+        .map(|node| node.accesskit_node().label().filter(|label| !label.is_empty()).or_else(|| node.accesskit_node().value()).unwrap_or_default())
+        .collect();
+    let card =
+        harness.query_all_by_role(Role::Group).find(|node| node.accesskit_node().label().is_some_and(|label| label.starts_with("Invitation: Party")));
+    (lines, card.map_or(0.0, |card| card.rect().height()))
+}
+
+#[test]
+fn an_invitation_the_organiser_did_not_send_says_whom_the_answer_goes_to() {
+    for percent in [100, 130] {
+        let (same, high) = goes_line(("Odile Brannock", "odile@example.org"), "odile@example.org", percent);
+        assert_eq!(same, ["Your answer goes to odile@example.org at once."], "{percent} %: from the organiser, as before");
+        // The case of the address does not make another person.
+        let (same, _) = goes_line(("Odile Brannock", "Odile@Example.org"), "odile@example.org", percent);
+        assert_eq!(same, ["Your answer goes to odile@example.org at once."], "{percent} %");
+        let (other, other_high) = goes_line(("Teodor Lisk", "teodor@example.org"), "odile@example.org", percent);
+        assert_eq!(other, ["Your answer goes at once to the organiser, not to the sender: odile@example.org"], "{percent} %");
+        assert!(high > 0.0 && other_high == high, "{percent} %: the card's height {other_high} as before {high}");
+    }
+}
+
+#[test]
+fn the_longest_organiser_address_the_answer_can_go_to_is_cut_inside_the_card() {
+    // 64 letters, then a domain of three 61-letter labels and `org`: 254 characters, the most a reply is sent to.
+    let label = "d".repeat(61);
+    let address = format!("{}@{label}.{label}.{label}.org", "o".repeat(64));
+    assert_eq!(address.len(), 254);
+    let (lines, high) = goes_line(("Teodor Lisk", "teodor@example.org"), &address, 130);
+    let wanted = format!("Your answer goes at once to the organiser, not to the sender: {address}");
+    assert_eq!(lines, [wanted], "a screen reader hears it whole");
+    assert!(high > 0.0 && high < 400.0, "{high}");
+}
