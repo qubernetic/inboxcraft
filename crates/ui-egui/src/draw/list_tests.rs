@@ -1708,34 +1708,76 @@ fn a_row_leaving_above_the_viewport_keeps_the_first_row_in_sight_where_it_stands
 #[test]
 fn the_lines_add_up_to_whole_pixels_while_a_row_closes() {
     use crate::theme::{Mode, TextScale, Theme};
-    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
-    mailbox.set_inbox_view(InboxView::List);
-    let rota = mailbox.messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
-    mailbox.start(rota, crate::mailbox::Act::Done);
-    let other = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
-    for scale in [TextScale::default(), TextScale::ALL[4]] {
-        let theme = Theme::new(Mode::Light, scale);
-        let mut last = f32::INFINITY;
-        for closed in [0.0, 0.1, 0.33, 0.5, 0.77, 0.99] {
-            let gone = super::list::Gone { closed, faded: closed };
-            let listing = super::list::lines(&theme, &mailbox, InboxView::List, &[], &other, false, &|_| true, Some(gone));
-            let ghost = (0..listing.lines.len()).find(|index| matches!(listing.lines[*index], super::list::Line::Leaving(..))).unwrap();
-            let (top, bottom) = listing.span(ghost).unwrap();
-            let high = bottom - top;
-            assert!(high <= last && high <= theme.size(56.0), "{scale:?} {closed}: {high} shrinks");
-            last = high;
-            let mut sum = 0.0;
-            for index in 0..listing.lines.len() {
-                let (top, bottom) = listing.span(index).unwrap();
-                assert_eq!(top, sum, "{scale:?} {closed}: line {index} starts where the one above ends");
-                for ppp in [1.0_f32, 1.5] {
-                    assert_eq!((bottom * ppp).fract(), 0.0, "{scale:?} {closed} at {ppp}: line {index} ends on a whole pixel");
+    for view in [InboxView::List, InboxView::Grouped, InboxView::Smart] {
+        let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+        let invented = sample::showcase(&mailbox);
+        mailbox.set_showcase(invented);
+        mailbox.set_inbox_view(view);
+        let rota = mailbox.messages().iter().find(|row| row.subject == "Allotment rota for November").map(|row| row.id).unwrap();
+        mailbox.start(rota, crate::mailbox::Act::Done);
+        let other = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
+        let groups = mailbox.groups();
+        assert_eq!(groups.is_empty(), view == InboxView::List, "{view:?}");
+        for scale in [TextScale::default(), TextScale::ALL[4]] {
+            let theme = Theme::new(Mode::Light, scale);
+            let mut last = f32::INFINITY;
+            for closed in [0.0, 0.1, 0.33, 0.5, 0.77, 0.99] {
+                let gone = super::list::Gone { closed, faded: closed };
+                let listing = super::list::lines(&theme, &mailbox, view, &groups, &other, true, &|_| false, Some(gone));
+                let ghost = (0..listing.lines.len()).find(|index| matches!(listing.lines[*index], super::list::Line::Leaving(..))).unwrap();
+                let (top, bottom) = listing.span(ghost).unwrap();
+                let high = bottom - top;
+                assert!(high <= last && high <= theme.size(56.0), "{scale:?} {closed}: {high} shrinks");
+                last = high;
+                let mut sum = 0.0;
+                for index in 0..listing.lines.len() {
+                    let (top, bottom) = listing.span(index).unwrap();
+                    assert_eq!(top, sum, "{scale:?} {closed}: line {index} starts where the one above ends");
+                    for ppp in [1.0_f32, 1.5] {
+                        assert_eq!((bottom * ppp).fract(), 0.0, "{scale:?} {closed} at {ppp}: line {index} ends on a whole pixel");
+                    }
+                    sum = bottom;
                 }
-                sum = bottom;
+                assert_eq!(listing.height, sum, "{view:?} {scale:?} {closed}: the content's height is the lines' sum");
             }
-            assert_eq!(listing.height, sum, "{scale:?} {closed}: the content's height is the lines' sum");
         }
     }
+}
+
+#[test]
+fn a_groups_head_leaves_with_its_last_row() {
+    use crate::mailbox::{GroupKind, MessageRow};
+    use crate::theme::{Mode, TextScale, Theme};
+    let mut mailbox = Mailbox::new(sample::session(clock()).unwrap(), clock());
+    mailbox.set_inbox_view(InboxView::Grouped);
+    let model = mailbox.messages().first().unwrap().clone();
+    let row = |id: u64, group: GroupKind| MessageRow { id, subject: format!("Message {id}"), group: Some(group), ..model.clone() };
+    mailbox.set_rows(vec![row(1, GroupKind::People), row(2, GroupKind::Newsletters), row(3, GroupKind::People)]);
+    mailbox.start(2, crate::mailbox::Act::Done);
+    // The engine lists the sample's own rows again: the test's list without the row that left.
+    mailbox.set_rows(vec![row(1, GroupKind::People), row(3, GroupKind::People)]);
+    assert_eq!(mailbox.left_row().map(|left| left.row.id), Some(2), "row 2 is leaving");
+    let other = crate::mailbox::Group { icon: crate::iconset::IconId::Inbox, name: "Other".to_owned(), messages: Vec::new() };
+    let groups = mailbox.groups();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut last = f32::INFINITY;
+    for closed in [0.0, 0.25, 0.5, 0.75, 0.99] {
+        let gone = super::list::Gone { closed, faded: closed };
+        let listing = super::list::lines(&theme, &mailbox, InboxView::Grouped, &groups, &other, false, &|_| true, Some(gone));
+        // Newsletters' only row is leaving: no bare head stands over nothing, the head closes with the row.
+        let heads: Vec<usize> =
+            (0..listing.lines.len()).filter(|index| matches!(listing.lines[*index], super::list::Line::HeadLeaving(..))).collect();
+        assert_eq!(heads.len(), 1, "{closed}: the leaving group's head leaves");
+        let (top, bottom) = listing.span(heads[0]).unwrap();
+        assert!(bottom - top <= last && bottom - top <= theme.size(32.0), "{closed}: {} shrinks", bottom - top);
+        last = bottom - top;
+        assert!(matches!(listing.lines.get(heads[0] + 1), Some(super::list::Line::Leaving(..))), "the row under it");
+    }
+    // Once the row is gone, the group is gone with its head.
+    let listing = super::list::lines(&theme, &mailbox, InboxView::Grouped, &groups, &other, false, &|_| true, None);
+    assert!(!listing.lines.iter().any(|line| matches!(line, super::list::Line::HeadLeaving(..))));
+    let heads = listing.lines.iter().filter(|line| matches!(line, super::list::Line::Head(..))).count();
+    assert_eq!(heads, 1, "only People's head");
 }
 
 #[test]
