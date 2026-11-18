@@ -238,16 +238,17 @@ fn hostile_event_words_stay_on_their_lines() {
 }
 
 #[test]
-fn an_organiser_who_is_not_the_sender_is_named_as_whom_the_answer_goes_to_on_one_line() {
-    // At 130 %: the card of an organiser who did not send the message is the same height, its line says so, and an
-    // address too long for the line is cut with one ellipsis inside the card.
+fn an_organiser_who_is_not_the_sender_is_named_and_the_address_gives_way_last() {
+    // At 130 % in a card 640 wide: an ordinary address stays whole on one line, the lead-in in its short form, and the
+    // card is as high as before; an address too long for a line of its own goes under the lead-in, cut with one
+    // ellipsis inside the card, and the card takes that one line more.
     let theme = Theme::new(Mode::Light, TextScale::ALL[4]);
     let long: &'static str = Box::leak(format!("{}@example.org", "o".repeat(600)).into_boxed_str());
     let card = |event: CardEvent<'static>, goes_to: &'static str| {
         let harness = staged(
             theme,
             |p| p.surface,
-            vec2(640.0 + 48.0, 420.0),
+            vec2(640.0 + 48.0, 460.0),
             move |ui, theme| {
                 ui.set_width(640.0);
                 invite_card(ui, theme, &Keymap::default(), &event, &CardState::Request { goes_to });
@@ -257,19 +258,31 @@ fn an_organiser_who_is_not_the_sender_is_named_as_whom_the_answer_goes_to_on_one
         let rect = harness.get_by_label(&label).rect();
         (painted(&harness, &label), rect)
     };
+    let words = |paint: &Paint| -> Vec<(Rect, String)> {
+        paint
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.look {
+                Look::Text { text, .. } => Some((shape.rect, text.clone())),
+                _ => None,
+            })
+            .collect()
+    };
     let (same, same_rect) = card(EVENT, GOES);
     assert!(text(&same, "Your answer goes to marit@example.org at once.").is_some(), "as today");
     let other = CardEvent { not_from_organiser: true, ..EVENT };
     let (paint, rect) = card(other, GOES);
-    assert_eq!(rect.height(), same_rect.height(), "one line either way");
-    assert!(text(&paint, "Your answer goes at once to the organiser, not to the sender: marit").is_some(), "{paint:#?}");
+    assert_eq!(rect.height(), same_rect.height(), "one line: the lead-in gave way, not the address");
+    assert!(text(&paint, "Answer goes to the organiser, not the sender: marit@example.org").is_some(), "the short form, whole");
     assert!(text(&paint, "Your answer goes to marit").is_none(), "the line of an organiser who sent it is not drawn");
     let (paint, rect) = card(other, long);
-    let (cut, ..) = text(&paint, "Your answer goes at once to the organiser").unwrap_or_else(|| panic!("{paint:#?}"));
-    assert!(cut.right() <= rect.right() - 16.0 + 1.0, "{cut:?} inside {rect:?}");
-    let words = paint.shapes.iter().find_map(|shape| match &shape.look {
-        Look::Text { text, .. } if text.starts_with("Your answer goes at once") => Some(text.clone()),
-        _ => None,
-    });
-    assert_eq!(words.map(|words| words.matches('…').count()), Some(1), "cut with one ellipsis");
+    let more = rect.height() - same_rect.height();
+    assert!((more - theme.fonts.caption.line).abs() <= 1.0, "one line more for the address: {more}");
+    let drawn = words(&paint);
+    let lead = drawn.iter().find(|(_, text)| text.starts_with("Answer goes to the organiser, not the sender:"));
+    let address = drawn.iter().find(|(_, text)| text.starts_with("oooo"));
+    let ((lead, _), (cut, address)) = (lead.unwrap(), address.unwrap());
+    assert!(cut.top() >= lead.bottom() - 0.5, "the address under the lead-in: {cut:?} {lead:?}");
+    assert!(cut.right() <= rect.right() - 16.0 + 1.0 && rect.contains_rect(*cut), "{cut:?} inside {rect:?}");
+    assert_eq!(address.matches('…').count(), 1, "cut with one ellipsis: {address:?}");
 }
