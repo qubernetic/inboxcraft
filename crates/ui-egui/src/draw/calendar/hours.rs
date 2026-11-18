@@ -13,7 +13,7 @@ use egui::{Id, Rect, ScrollArea, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use super::grid::{Lines, lane_pitch, line as line_width, pixels, snap};
 use super::{Asked, Kind, Sizes, Words, block};
-use crate::calendar::layout::{self, Piece};
+use crate::calendar::layout;
 use crate::calendar::{Calendar, EventRow, day};
 use crate::component::button::{LinkSize, link_sized};
 use crate::draw::paint::run_at;
@@ -50,17 +50,18 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     head(ui, theme, calendar, &cols, (rect.top(), head_bottom), days, asked);
     ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), head_bottom), pos2(rect.right(), head_bottom + line)), 0.0, p.line);
 
-    // The timed events of each day, and what is left out of each: bands past the lanes, events past the columns.
-    let pieces: Vec<Vec<Piece>> = (0..days).map(|index| layout::pieces(&events, day_of(index))).collect();
-    let bars = layout::bars(&events, first, days);
+    // The timed events of each day, and what is left out of each: bands past the lanes, events past the columns. Laid
+    // out once for these events and days, within the bounds.
+    let laid = super::laid::hours(ui.ctx(), calendar, &events, (first, days), (MOST_COLUMNS, MOST_LANES));
+    let (pieces, bars) = (&laid.pieces, &laid.bars);
     let left_out: Vec<usize> = (0..days)
         .map(|index| {
-            let bands = bars.iter().filter(|bar| bar.lane >= MOST_LANES && bar.from <= index && index <= bar.to).count();
-            let timed = pieces.get(index).map_or(0, |pieces| pieces.iter().filter(|piece| piece.column >= MOST_COLUMNS).count());
+            let bands = laid.bands_left.get(index).copied().unwrap_or(0);
+            let timed = pieces.get(index).map_or(0, |(_, left)| *left);
             bands.saturating_add(timed)
         })
         .collect();
-    let lanes = layout::lanes(&bars).min(MOST_LANES);
+    let lanes = layout::lanes(bars).min(MOST_LANES);
     let more = left_out.iter().any(|count| *count > 0);
     let rows = lanes + usize::from(more);
     let pitch = lane_pitch(z.lane, ppp);
@@ -134,8 +135,8 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
                 let label = crate::component::galley(ui, &format!("{hour:02}:00"), theme.fonts.mono_s, p.muted);
                 run_at(&painter, pos2(rect.left() + 10.0, at(hour * 60) + 4.0), label, p.muted);
             }
-            for (index, pieces) in pieces.iter().enumerate() {
-                for piece in pieces.iter().filter(|piece| piece.column < MOST_COLUMNS) {
+            for (index, (pieces, _)) in pieces.iter().enumerate() {
+                for piece in pieces {
                     let Some(event) = events.get(piece.event) else { continue };
                     let shared = piece.columns.clamp(1, MOST_COLUMNS);
                     let sub = Lines::cut(cols.line(index), cols.line(index + 1), shared, ppp);

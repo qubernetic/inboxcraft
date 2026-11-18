@@ -364,6 +364,15 @@ pub struct Calendar {
     more: Option<Day>,
     /// The seconds of the minute now, at the last tick: how long the now line rests.
     second: u8,
+    /// Changes whenever the events shown change (a read, a calendar shown or hidden): what the views laid out of the
+    /// events is kept while it stays the same.
+    serial: u64,
+}
+
+/// The next [`Calendar::serial`]: never the same twice in a run, whichever calendar takes it.
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What the keyboard is on in the calendar: the button the next frame hands the focus to.
@@ -468,10 +477,17 @@ impl Calendar {
     }
 
     /// Puts `events` in the days shown in place of what was read: a test's hostile events (zero or negative length,
-    /// far-off dates, hundreds at once) that no server gives this way.
-    #[cfg(test)]
-    pub(crate) fn set_events(&mut self, events: Vec<EventRow>) {
+    /// far-off dates, hundreds at once) and the bench's thousands, which no server gives this way.
+    #[doc(hidden)]
+    pub fn set_events(&mut self, events: Vec<EventRow>) {
         self.events = events;
+        self.serial = next_serial();
+    }
+
+    /// What the events shown are now: it changes whenever they change, and never comes back to an old value.
+    #[must_use]
+    pub fn serial(&self) -> u64 {
+        self.serial
     }
 
     /// The occurrences of the shown calendars in the days shown, by start.
@@ -661,6 +677,7 @@ impl Calendar {
             answer.get("calendars").and_then(Value::as_array).map(|rows| rows.iter().filter_map(calendar_row).collect()).unwrap_or_default();
         self.hidden.retain(|id| self.calendars.iter().any(|calendar| calendar.id == *id));
         self.events.clear();
+        self.serial = next_serial();
         (self.truncated, self.unreadable) = (false, 0);
         if self.calendars.is_empty() {
             return Ok(());
@@ -673,6 +690,7 @@ impl Calendar {
         self.events = rows.iter().filter_map(EventRow::read).filter(|event| event.last >= first && event.first <= last).collect();
         self.truncated = answer.get("truncated").and_then(Value::as_bool).unwrap_or(false);
         self.unreadable = answer.get("unreadable").and_then(Value::as_u64).unwrap_or(0);
+        self.serial = next_serial();
         Ok(())
     }
 
@@ -725,6 +743,7 @@ impl Calendar {
         if !self.hidden.remove(&id) {
             self.hidden.insert(id);
         }
+        self.serial = next_serial();
         if self.picked().is_none() {
             self.picked = None;
         }
@@ -741,6 +760,7 @@ impl Calendar {
             self.events.iter().find(|event| event.key() == exact).or_else(|| self.events.iter().find(|event| event.id == id && event.covers(at.day)));
         self.picked = found.map(EventRow::key);
         self.hidden.retain(|calendar| found.is_none_or(|event| event.calendar != *calendar));
+        self.serial = next_serial();
     }
 
     /// Picks an occurrence (`None` lets it go); the side panel shows its details.

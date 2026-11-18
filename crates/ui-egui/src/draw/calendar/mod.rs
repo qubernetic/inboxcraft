@@ -21,6 +21,7 @@ mod glide;
 mod grid;
 mod hours;
 pub(super) mod keys;
+mod laid;
 pub(super) use self::side::mini_id;
 pub(crate) use self::side::mini_month_board;
 mod month;

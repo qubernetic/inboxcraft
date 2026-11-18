@@ -11,6 +11,7 @@
 use egui::{Rect, Sense, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
 use super::grid::{Lines, lane_pitch, line as line_width, snap};
+use super::laid::MonthWeek;
 use super::{Asked, Kind, Sizes, Words, block};
 use crate::calendar::layout::{self, Bar};
 use crate::calendar::{Calendar, Day, EventRow, day};
@@ -108,15 +109,16 @@ fn week_row(
     let line = grid.cols.width;
     let (first, _) = calendar.span();
     let start = first.plus(i64::try_from(week.saturating_mul(7)).unwrap_or(0));
-    let bars = layout::bars(events, start, 7);
     let pitch = lane_pitch(Sizes::of(theme).lane, ppp);
     let top = grid.weeks.line(week);
     let row = grid.weeks.line(week + 1) - top;
     // The lanes that fit over one chip and the link, at most a few.
     let room = ((row - BANDS_TOP - CHIP.1 - 20.0) / pitch).floor();
     let fit = if room.is_finite() && room > 0.0 { (room as usize).min(MOST_LANES) } else { 0 };
-    let lanes = layout::lanes(&bars).min(fit);
-    for bar in bars.iter().filter(|bar| bar.lane < lanes) {
+    // Laid out once for these events and this week, within the lanes that fit.
+    let laid = super::laid::month_week(ui.ctx(), calendar, events, (week, start), fit);
+    let lanes = layout::lanes(&laid.bars).min(fit);
+    for bar in &laid.bars {
         let Some(event) = events.get(bar.event) else { continue };
         let (mut left, right) = grid.cols.cell(bar.from, bar.to.saturating_add(1));
         if bar.from == 0 && !bar.starts {
@@ -132,7 +134,7 @@ fn week_row(
         let day = start.plus(i64::try_from(index).unwrap_or(0));
         let cell = grid.cell(week, index);
         day_number(ui, theme, calendar, day, grid, cell, asked);
-        day_events(ui, theme, keymap, calendar, events, (cell, index, day), (&bars, lanes), asked);
+        day_events(ui, theme, keymap, calendar, events, (cell, index, day), (&laid, lanes), asked);
     }
 }
 
@@ -146,24 +148,25 @@ fn day_events(
     calendar: &Calendar,
     events: &[&EventRow],
     (cell, index, day): (Rect, usize, Day),
-    (bars, lanes): (&[Bar], usize),
+    (laid, lanes): (&MonthWeek, usize),
     asked: &mut Vec<Asked>,
 ) {
     let ppp = ui.pixels_per_point();
     let pitch = lane_pitch(Sizes::of(theme).lane, ppp);
     let over = |bar: &&Bar| bar.from <= index && index <= bar.to;
-    let hidden = bars.iter().filter(over).filter(|bar| bar.lane >= lanes).count();
-    let mine = bars.iter().filter(over).filter(|bar| bar.lane < lanes).map(|bar| bar.lane + 1).max().unwrap_or(0);
-    let timed: Vec<&EventRow> = events.iter().copied().filter(|event| !event.is_block() && event.covers(day)).collect();
+    let hidden = laid.bands_left.get(index).copied().unwrap_or(0);
+    let mine = laid.bars.iter().filter(over).map(|bar| bar.lane + 1).max().unwrap_or(0).min(lanes);
+    let (first, count) = laid.timed.get(index).map_or((&[][..], 0), |(first, count)| (first.as_slice(), *count));
+    let timed: Vec<&EventRow> = first.iter().filter_map(|at| events.get(*at).copied()).collect();
     let chips_top = snap(cell.top() + CHIPS_TOP + pitch * mine as f32, ppp);
     let bottom = cell.bottom();
-    let all = timed.len().saturating_add(hidden);
+    let all = count.saturating_add(hidden);
     // As many chips as fit; with a link under them when some are left out.
     let fits = |count: usize, link: bool| chips_top + CHIP.1 * count as f32 - 2.0 + if link { 4.0 + 16.0 } else { 0.0 } <= bottom;
-    let shown = if hidden == 0 && fits(timed.len(), false) {
+    let shown = if hidden == 0 && count == timed.len() && fits(timed.len(), false) {
         timed.len()
     } else {
-        let mut count = timed.len().min(64);
+        let mut count = timed.len().min(super::laid::MOST_CHIPS);
         while count > 0 && !fits(count, true) {
             count -= 1;
         }

@@ -38,8 +38,9 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
     let p = &theme.palette;
     let (first, last) = calendar.span();
     let events: Vec<&EventRow> = calendar.events().collect();
-    let held = |day: Day| events.iter().copied().filter(move |event| event.covers(day));
-    if (0..AGENDA_DAYS).all(|offset| held(first.plus(offset)).next().is_none()) {
+    // Laid out once for these events and days: at most a day's rows each, and its count.
+    let laid = super::laid::agenda(ui.ctx(), calendar, &events, (first, usize::try_from(AGENDA_DAYS).unwrap_or(0)), MOST_ROWS);
+    if laid.days.iter().all(|(_, count)| *count == 0) {
         let label = tr!("Agenda · {from} – {to}", from = day::short(first), to = day::short(last));
         let help = tr!("The arrows at the top step 30 days back or on. A day picked in the small month starts the agenda there.");
         ui.vertical_centered(|ui| {
@@ -56,9 +57,9 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
         let line = line_width(ppp);
         ui.add_space(TOP);
         let mut any = false;
-        for offset in 0..AGENDA_DAYS {
+        for (offset, (held, count)) in (0_i64..).zip(laid.days.iter()) {
             let day = first.plus(offset);
-            let rows: Vec<&EventRow> = held(day).collect();
+            let rows: Vec<&EventRow> = held.iter().filter_map(|at| events.get(*at).copied()).collect();
             if rows.is_empty() {
                 continue;
             }
@@ -77,14 +78,15 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
                 let note = crate::component::galley(ui, tr!("today"), theme.fonts.mono_s, p.muted);
                 run_at(ui.painter(), pos2(rect.left() + 16.0 + wide + 8.0, y), note, p.muted);
             }
-            let count = if rows.len() == 1 { tr!("1 event").to_owned() } else { tr!("{count} events", count = rows.len()) };
+            let all = *count;
+            let count = if all == 1 { tr!("1 event").to_owned() } else { tr!("{count} events", count = all) };
             let count_text = crate::component::galley(ui, &count, theme.fonts.mono_s, p.muted);
             run_right(ui.painter(), rect.right() - 16.0, y, count_text, p.muted);
             let under = snap(rect.top() + head, ppp);
             ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), under), pos2(rect.right(), under + line)), 0.0, p.panel_line);
             let spoken = if today { format!("{}, {}, {count}", day::dated(day), tr!("today")) } else { format!("{}, {count}", day::dated(day)) };
             response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Label, true, &spoken));
-            for event in rows.iter().take(MOST_ROWS) {
+            for event in &rows {
                 let (rect, _) = ui.allocate_exact_size(vec2(width, row), Sense::hover());
                 let (time, detail) = words(event, day);
                 let salt = 3000_i64.saturating_add(offset);
@@ -101,7 +103,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calen
                 ));
                 ui.painter().rect_filled(Rect::from_min_max(pos2(rect.left(), rect.bottom() - line), rect.max), 0.0, p.panel_line);
             }
-            if let Some(more) = rows.len().checked_sub(MOST_ROWS).filter(|more| *more > 0) {
+            if let Some(more) = all.checked_sub(rows.len()).filter(|more| *more > 0) {
                 let words = tr!("+{count} more", count = more);
                 let (rect, _) = ui.allocate_exact_size(vec2(width, row), Sense::hover());
                 let link = ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(16.0, 12.0))), |ui| {
