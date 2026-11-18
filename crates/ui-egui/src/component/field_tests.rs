@@ -1246,9 +1246,10 @@ fn a_pointer_press_in_the_frame_of_a_paste_does_not_let_the_text_pass_its_cap() 
     for kind in ONE_FRAME {
         let (mut harness, most) = at_the_cap(kind);
         one_frame(&mut harness, press(A, Modifiers::COMMAND).into());
-        // A point of the field in the window (a long text's node reaches far above and below it).
+        // The middle of the part of the field in the window: a long text's node reaches far above and below it, and
+        // its top clamped to the window can be the label over the box, where a press takes the focus away.
         let rect = harness.get_by_label(kind_name(kind)).rect();
-        let at = pos2(rect.center().x, rect.top().max(0.0) + 10.0);
+        let at = pos2(rect.center().x, (rect.top().max(0.0) + rect.bottom().min(500.0)) / 2.0);
         let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         // A press and its release in the frame of the paste: a click that puts the caret down.
         one_frame(&mut harness, vec![Event::PointerMoved(at), button(true), button(false), Event::Paste("z".repeat(most))]);
