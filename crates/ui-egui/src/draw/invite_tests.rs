@@ -180,6 +180,21 @@ fn an_answer_goes_at_once_and_shows_with_a_way_to_change_it() {
     assert!(shows(&harness, "You answered No."));
 }
 
+/// Each of the three sends its own answer: Going accepts, Maybe is tentative, No declines.
+#[test]
+fn going_maybe_and_no_each_send_their_own_answer() {
+    for (name, answer, said) in [("Going", "accepted", "Going"), ("Maybe", "tentative", "Maybe"), ("No", "declined", "No")] {
+        let mut harness = sending(Vec::new());
+        let id = open(&mut harness, "Updated invitation: Lunch with Odile");
+        harness.get_by_role_and_label(Role::Button, name).click();
+        harness.run();
+        assert_eq!(harness.state().reader().notice(), Some("Your answer is on its way."), "{name}");
+        let answered = harness.state_mut().mailbox_mut().run("invite.show", &json!({ "id": id })).unwrap();
+        assert_eq!(answered["invite"]["answer"], json!(answer), "{name}");
+        assert!(shows(&harness, &format!("You answered {said}.")), "{name}");
+    }
+}
+
 #[test]
 fn the_version_a_later_one_replaced_is_a_faint_strip() {
     let mut harness = sample_harness();
