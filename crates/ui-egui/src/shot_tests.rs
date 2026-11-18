@@ -202,11 +202,16 @@ fn a_shot_acts_on_the_selected_row_or_catches_it_sliding_out() {
     assert_ne!(stepped, toast);
     assert_ne!(toast, sliding);
     assert_ne!(toast, read, "another toast");
+    // Taken away as another device would: no toast, and the row gone.
+    let removed = shoot(&line(r#", "act": "removed""#)).unwrap();
+    assert_ne!(removed, stepped, "the row is gone");
+    assert_ne!(removed, toast, "no toast");
     for act in ["flag", "unflag", "archive", "delete", "unread"] {
         assert_ne!(shoot(&line(&format!(r#", "act": "{act}""#))).unwrap(), stepped, "{act}");
     }
     for (more, says) in [
-        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters"),
+        (r#", "act": "snooze""#, "not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block, newsletters or removed"),
+        (r#", "act": "removed", "slide": true"#, "only done, archive and delete slide"),
         (r#", "act": "read", "slide": true"#, "only done, archive and delete slide"),
         (r#", "slide": true"#, "slide needs an act"),
     ] {

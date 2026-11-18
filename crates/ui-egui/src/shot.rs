@@ -208,7 +208,8 @@ pub struct Shot {
     #[serde(default)]
     pub step: Option<u8>,
     /// An act on the selected row: `read`, `unread`, `flag`, `unflag`, `done`, `archive` or `delete`; for its sender
-    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it.
+    /// `accept` (into Updates), `accept_open`, `block` or `newsletters` (their group); the toast shows after it. `removed`
+    /// takes the row away as another device would: no act of the owner's, so nothing walks on.
     #[serde(default)]
     pub act: Option<String>,
     /// Whether `act` (`done` or `delete`) is caught with its row sliding out, before the toast.
@@ -452,6 +453,17 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
     let Some(name) = &shot.act else {
         return if shot.slide.is_some() { Err(bad(format!("{}: slide needs an act", shot.out))) } else { Ok(()) };
     };
+    // Taken away by another device (a sync, the server): no act of the owner's, so nothing walks on.
+    if name == "removed" {
+        if shot.slide.is_some() {
+            return Err(bad(format!("{}: only done, archive and delete slide out", shot.out)));
+        }
+        let Some(id) = app.mailbox().selected() else { return Err(bad(format!("{}: removed needs a selected row", shot.out))) };
+        let (_, mailbox) = app.reader_mut();
+        mailbox.run("mail.done", &serde_json::json!({ "id": id, "done": true }))?;
+        mailbox.refresh();
+        return Ok(());
+    }
     let act = match name.as_str() {
         "read" => Act::Read,
         "unread" => Act::Unread,
@@ -466,7 +478,7 @@ fn act(app: &mut InboxApp, shot: &Shot) -> Result<(), UiError> {
         "newsletters" => Act::Group(Some(GroupKind::Newsletters)),
         other => {
             return Err(bad(format!(
-                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block or newsletters",
+                "{}: act {other:?} is not read, unread, flag, unflag, done, archive, delete, accept, accept_open, block, newsletters or removed",
                 shot.out
             )));
         }
