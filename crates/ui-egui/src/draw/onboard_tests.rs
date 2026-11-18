@@ -78,8 +78,8 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
     assert!(harness.state().settings().is_open());
     assert_eq!(harness.state().settings().section(), Section::Accounts);
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "the list first");
-    harness.get_by_label("No account yet. Add one to read and send mail here.");
-    harness.get_by_label("Your accounts show up here");
+    harness.get_by_label("The mail accounts this computer reads and sends from.");
+    harness.get_by_role_and_label(Role::Group, "No account yet");
     harness.check_accessibility();
     on_sheet(&harness, "Add account").click();
     harness.run();
@@ -96,8 +96,52 @@ fn the_empty_window_offers_add_account_which_opens_settings_on_accounts_where_th
     harness.get_by_label("Back to the accounts").click();
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Closed);
-    harness.get_by_label("Your accounts show up here");
+    harness.get_by_role_and_label(Role::Group, "No account yet");
 }
+
+#[test]
+fn the_accounts_page_with_no_account_is_the_frames_box_with_add_account_in_it() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), theme);
+        harness.get_by_role_and_label(Role::Button, "Add account").click();
+        harness.run();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        harness.get_by_label("The mail accounts this computer reads and sends from.");
+        // `settings-accounts/empty`: no button in the head, no other group, one box 520 × 240 in the middle of the
+        // page's room under the head (the column 720 wide, 40 right of the sections' 232 and its hairline).
+        let card = harness.get_by_role_and_label(Role::Group, "No account yet").rect();
+        assert_eq!((card.width(), card.height()), (520.0, 240.0), "{theme:?}: {card:?}");
+        let column = sheet.left() + 1.0 + 232.0 + 1.0 + 40.0;
+        assert_eq!(card.left(), column + 100.0, "{theme:?}: in the middle of the 720 column");
+        let intro = harness.get_by_label("The mail accounts this computer reads and sends from.").rect();
+        let room = (intro.bottom(), sheet.bottom() - 1.0 - 16.0);
+        assert!((card.center().y - (room.0 + room.1) / 2.0).abs() <= 1.0, "{theme:?}: {card:?} in the middle of {room:?}");
+        let adds: Vec<_> = harness.get_all_by_role_and_label(Role::Button, "Add account").map(|node| node.rect()).collect();
+        let head = egui::Rect::from_x_y_ranges(sheet.x_range(), sheet.top()..=intro.bottom());
+        assert!(!adds.iter().any(|add| head.intersects(*add)), "{theme:?}: no Add account in the head: {adds:?}");
+        let add = *adds.iter().find(|add| card.contains_rect(**add)).unwrap();
+        assert!(harness.query_by_label("More").is_none() && harness.query_by_label("Your accounts show up here").is_none(), "{theme:?}");
+        // The empty state with its action: lines 24 in from the edge, 40 under its top, 12 apart; the button 8 under
+        // the gap after the help.
+        let lines = ["No account yet", "Add one to read and send mail here.", ACCOUNTS_HELP];
+        let rects: Vec<_> = lines
+            .iter()
+            .map(|line| harness.get_all_by_role_and_label(Role::Label, line).find(|node| card.contains_rect(node.rect())).unwrap().rect())
+            .collect();
+        for (line, rect) in lines.iter().zip(&rects).chain([(&"add", &add)]) {
+            assert_eq!(rect.left(), card.left() + 25.0, "{theme:?}: {line} {rect:?} in {card:?}");
+        }
+        assert_eq!(rects[0].top(), card.top() + 41.0, "{theme:?}");
+        assert_eq!(rects[1].top(), rects[0].bottom() + 12.0, "{theme:?}");
+        assert_eq!(rects[2].top(), rects[1].bottom() + 12.0, "{theme:?}");
+        assert_eq!((add.top(), add.height()), (rects[2].bottom() + 20.0, 32.0), "{theme:?}");
+        assert!(texts_in(harness.output(), add).iter().any(|text| text == "→"), "{theme:?}: the primary button carries the arrow");
+    }
+}
+
+/// The help of the Accounts page with no account, as `settings-accounts/empty` has it.
+const ACCOUNTS_HELP: &str =
+    "IMAP for the mail, SMTP to send, CalDAV for calendars. Detect proposes the servers from the address; nothing is sent until you have seen them.";
 
 #[test]
 fn the_welcome_is_a_box_520_wide_in_the_middle_with_add_account_and_its_arrow() {
@@ -656,11 +700,11 @@ fn another_account_s_row_over_a_kept_edit_opens_that_edit_and_both_stay_kept() {
 
 #[test]
 fn add_account_stands_at_the_right_end_of_the_accounts_title() {
-    for accounts in [false, true] {
+    // With an account only: with none, Add account stands in the page's box (`settings-accounts/empty`).
+    {
+        let accounts = true;
         let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
-        if accounts {
-            add_account(&mut harness, "carol@example.org");
-        }
+        add_account(&mut harness, "carol@example.org");
         harness.state_mut().open_accounts();
         harness.run();
         let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();

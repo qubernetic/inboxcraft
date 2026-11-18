@@ -369,6 +369,16 @@ pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdg
     painter.extend(shapes);
 }
 
+/// A box over `rect` with no shadow: its `fill` and a 1 px `edge` inside it, both on whole physical pixels at the
+/// painter's scale, as a [`float`]'s.
+pub(crate) fn boxed(painter: &Painter, rect: Rect, fill: Color32, edge: Color32) {
+    let ppp = painter.pixels_per_point();
+    let whole = snapped(rect, ppp);
+    let mut shapes = vec![Shape::rect_filled(whole, 0.0, fill)];
+    shapes.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, edge, ppp)));
+    painter.extend(shapes);
+}
+
 /// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.
 pub(crate) fn float_inside(rect: Rect, ppp: f32) -> Rect {
     let (ppp, pixels) = line_pixels(ppp);

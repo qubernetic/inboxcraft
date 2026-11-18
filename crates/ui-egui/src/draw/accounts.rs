@@ -4,12 +4,12 @@
 //! The Accounts page of the settings sheet: its head with Add account at the title's right end where the window can
 //! add one, then "Your accounts" with a row for each account: the bar of its colour, its name, its address and the
 //! link "open".
-//! With no account the page says so. What is not built yet follows as coming soon: each connection's state, removing
+//! With no account the page is one box in the middle of its room, with Add account in it. What is not built yet follows as coming soon: each connection's state, removing
 //! an account and setting up a phone. Adding happens on the same page: "Accounts" at the top leads back to the list,
 //! and the form, Detect and the check follow under it. An account's row opens its settings the same way: the add
 //! form's fields, without Detect.
 
-use egui::{CursorIcon, Frame, Rect, RichText, Role, Sense, Stroke, Ui, WidgetInfo, pos2, vec2};
+use egui::{CursorIcon, Rect, Role, Sense, Ui, WidgetInfo, pos2, vec2};
 
 use super::onboard;
 use super::paint::{self, Ring, focus_ring, line};
@@ -86,23 +86,68 @@ fn account(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &AccountRow) -> boo
     pressed
 }
 
-/// What the page says where the accounts would be when there are none.
-fn none_yet(ui: &mut Ui, theme: &Theme) {
+/// The box of the page with no account, in points: 520 wide, its lines 40 under its 1 px edge and 24 in from it, 12
+/// apart, and Add account 8 under the gap after the help.
+const NONE_WIDE: f32 = 520.0;
+const NONE_PAD_Y: f32 = 40.0;
+const NONE_PAD_X: f32 = 24.0;
+const NONE_GAP: f32 = 12.0;
+const NONE_ACTION_TOP: f32 = 8.0;
+
+/// The most lines the box's title and help each take.
+const NONE_ROWS: usize = 4;
+
+/// What the page says where the accounts would be when there are none, the design's `settings-accounts/empty`: a box
+/// 520 wide in the middle of the page's room, `surface` with a 1 px `line` edge, holding the empty state of no account
+/// with Add account where the window can add one (`can_add`). Whether Add account was pressed.
+fn none_yet(ui: &mut Ui, theme: &Theme, keymap: &Keymap, can_add: bool) -> bool {
     let p = &theme.palette;
-    let s = &theme.spacing;
-    Frame::new().stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(s.s6).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.vertical_centered(|ui| {
-            let side = theme.fonts.body.line * 2.4;
-            let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-            crate::iconset::paint(ui.painter(), rect, IconId::Inbox, p.cyan_text);
-            ui.add_space(s.s2);
-            ui.label(RichText::new(tr!("Your accounts show up here")).font(theme.fonts.heading.id()).color(p.ink));
-            ui.add_space(s.s1);
-            let about = tr!("IMAP for the mail. Detect proposes the servers from the address; nothing is sent until you have seen them.");
-            ui.add(egui::Label::new(RichText::new(about).font(theme.fonts.body.id()).color(p.muted)).wrap());
-        });
-    });
+    let f = &theme.fonts;
+    let room = ui.available_rect_before_wrap();
+    let width = NONE_WIDE.min(room.width()).floor().max(1.0);
+    let inner = (width - 2.0 - 2.0 * NONE_PAD_X).max(1.0);
+    let (title, help) = if can_add {
+        (
+            tr!("Add one to read and send mail here."),
+            tr!(
+                "IMAP for the mail, SMTP to send, CalDAV for calendars. Detect proposes the servers from the address; nothing is sent until you have seen them."
+            ),
+        )
+    } else {
+        (tr!("This window cannot add an account."), tr!("Start InboxCraft with --sample to look around an invented mailbox."))
+    };
+    let label = tr!("No account yet");
+    let lines = [
+        (crate::component::wrapped(ui, label, f.label, p.muted, inner, 1, egui::Align::LEFT), label),
+        (crate::component::wrapped(ui, title, f.title, p.muted, inner, NONE_ROWS, egui::Align::LEFT), title),
+        (crate::component::wrapped(ui, help, f.caption, p.muted, inner, NONE_ROWS, egui::Align::LEFT), help),
+    ];
+    let text_high: f32 = lines.iter().map(|(line, _)| line.size().y).sum::<f32>() + NONE_GAP * 2.0;
+    let action = if can_add { NONE_GAP + NONE_ACTION_TOP + crate::component::control_side(theme) } else { 0.0 };
+    let high = (2.0 + NONE_PAD_Y + text_high + action + NONE_PAD_Y).ceil();
+    // In the middle of the room under the head, on whole points; at its top where the room is shorter than the box.
+    let free = if room.height().is_finite() { (room.height() - high).max(0.0) } else { 0.0 };
+    let min = pos2(room.left() + ((room.width() - width) / 2.0).max(0.0), room.top() + free / 2.0).round();
+    let card = Rect::from_min_size(min, vec2(width, high));
+    ui.advance_cursor_after_rect(card);
+    let group = ui.interact(card, ui.scope_id().with("no-account"), Sense::hover());
+    group.widget_info(|| WidgetInfo::labeled(Role::Group, true, label));
+    if ui.is_rect_visible(card) {
+        paint::boxed(ui.painter(), card, p.surface, p.line);
+    }
+    let left = card.left() + 1.0 + NONE_PAD_X;
+    let mut top = card.top() + 1.0 + NONE_PAD_Y;
+    for (line, text) in lines {
+        let high = line.size().y;
+        onboard::said(ui, pos2(left, top), inner, line, p.muted, text);
+        top += high + NONE_GAP;
+    }
+    if !can_add {
+        return false;
+    }
+    let at = Rect::from_min_size(pos2(left, top + NONE_ACTION_TOP), vec2(inner, crate::component::control_side(theme)));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    TextButton::new(tr!("Add account")).primary().arrow().show(&mut child, theme, keymap).clicked()
 }
 
 /// "Accounts" with the back arrow before it, as a link to the list.
@@ -138,35 +183,30 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     }
     let accounts = mailbox.accounts();
     let mut asked = None;
-    let note = if accounts.is_empty() {
-        if can_add { tr!("No account yet. Add one to read and send mail here.") } else { tr!("No account yet.") }
-    } else {
-        tr!("The mail accounts this computer reads and sends from.")
-    };
-    head(ui, theme, Section::Accounts, &[note], |ui| {
-        if can_add {
-            let button = TextButton::new(tr!("Add account")).icon(IconId::Add);
-            let button = if accounts.is_empty() { button.primary() } else { button.secondary() };
+    head(ui, theme, Section::Accounts, &[tr!("The mail accounts this computer reads and sends from.")], |ui| {
+        if can_add && !accounts.is_empty() {
+            let button = TextButton::new(tr!("Add account")).icon(IconId::Add).secondary();
             if button.show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Add);
             }
         }
     });
-    body(ui, theme, "accounts", |ui| {
-        if accounts.is_empty() && can_add {
-            ui.add_space(theme.spacing.s4);
-            none_yet(ui, theme);
+    // With no account the page is the one box, as its frame draws it: nothing to scroll and nothing else to say.
+    if accounts.is_empty() {
+        if none_yet(ui, theme, keymap, can_add) {
+            asked = Some(Asked::Add);
         }
-        if !accounts.is_empty() {
-            let word = tr!("Your accounts · {count}", count = count(u64::try_from(accounts.len()).unwrap_or(u64::MAX)));
-            group(ui, theme, "A", &word, None);
-            for row in accounts {
-                if account(ui, theme, keymap, row) {
-                    asked = Some(Asked::Edit(row.id));
-                }
+        return asked;
+    }
+    body(ui, theme, "accounts", |ui| {
+        let word = tr!("Your accounts · {count}", count = count(u64::try_from(accounts.len()).unwrap_or(u64::MAX)));
+        group(ui, theme, "A", &word, None);
+        for row in accounts {
+            if account(ui, theme, keymap, row) {
+                asked = Some(Asked::Edit(row.id));
             }
         }
-        group(ui, theme, if accounts.is_empty() { "A" } else { "B" }, tr!("More"), None);
+        group(ui, theme, "B", tr!("More"), None);
         settings_row_soon_with(
             ui,
             theme,

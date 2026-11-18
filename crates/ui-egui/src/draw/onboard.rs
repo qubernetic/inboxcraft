@@ -107,7 +107,7 @@ const ASKED_GAP: f32 = 10.0;
 const MOST_ROWS: usize = 64;
 
 /// A line of words at `at` that a screen reader reads as `text`.
-fn said(ui: &mut Ui, at: Pos2, width: f32, galley: Arc<Galley>, colour: Color32, text: &str) {
+pub(super) fn said(ui: &mut Ui, at: Pos2, width: f32, galley: Arc<Galley>, colour: Color32, text: &str) {
     let rect = Rect::from_min_size(at, vec2(paint::run_box(galley.size().x).min(width), galley.size().y));
     // Named by where it stands: the same words may stand twice on a page.
     let response = ui.interact(rect, ui.scope_id().with(("said", rect.min.x.to_bits(), rect.min.y.to_bits())), Sense::hover());
