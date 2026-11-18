@@ -618,7 +618,8 @@ fn send_refuses_typed_text_in_a_line_not_drawn_and_shows_the_line() {
 fn composing_over(mailbox: Mailbox) -> Harness<'static, InboxApp> {
     let mut harness = Harness::builder()
         .with_size(vec2(1300.0, 820.0))
-        .with_max_steps(12)
+        // The composer's wipe runs 300 ms: 18 frames.
+        .with_max_steps(40)
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(mailbox));
     harness.run();
@@ -926,4 +927,85 @@ fn hostile_drafts_hold_their_layout() {
     let text = rect_of(&harness, Role::MultilineTextInput, "Message text");
     assert!(text.top() < send.top(), "the text above the foot");
     assert_eq!(harness.state().composer().unwrap().chips(Line::To).len(), 500);
+}
+
+#[test]
+fn the_design_ease_starts_fast_and_lands_without_overshooting() {
+    let ease = super::compose::ease;
+    assert!(ease(0.0).abs() < 1e-4 && (ease(1.0) - 1.0).abs() < 1e-4);
+    // cubic-bezier(.2, .7, .2, 1) at x = 0.5 is 0.92958 (worked out apart from the code).
+    assert!((ease(0.5) - 0.92958).abs() < 1e-4, "{}", ease(0.5));
+    let mut last = 0.0;
+    for step in 0..=100 {
+        let value = ease(step as f32 / 100.0);
+        assert!(value >= last - 1e-6 && value <= 1.0 + 1e-6, "monotone and never past its end at {step}");
+        last = value;
+    }
+    assert_eq!(ease(f32::NAN), 1.0);
+}
+
+/// Where the last frame painted a line of the accent's edge across the composer (its wipe's scan line), top down.
+fn scan_lines(harness: &Harness<'static, InboxApp>) -> Vec<f32> {
+    let edges = [crate::theme::Mode::Dark, crate::theme::Mode::Light]
+        .map(|mode| crate::theme::Theme::new(mode, crate::theme::TextScale::default()).palette.cyan_edge);
+    fn walk(shape: &egui::Shape, edges: &[egui::Color32], found: &mut Vec<f32>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, edges, found)),
+            egui::Shape::LineSegment { points, stroke }
+                if edges.contains(&stroke.color) && (points[0].y - points[1].y).abs() < 0.01 && (points[1].x - points[0].x).abs() > 500.0 =>
+            {
+                found.push(points[0].y);
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &edges, &mut found));
+    found
+}
+
+#[test]
+fn the_composer_wipes_in_over_300_ms_then_rests() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(60)
+        .with_step_dt(0.05)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.step();
+    // The caret of the line that has the keys blinks on its own: without it, only the wipe asks for frames.
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::field_id(Line::To)));
+    harness.step();
+    harness.step();
+    let moving = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap();
+    assert_eq!(moving, std::time::Duration::ZERO, "it moves frame by frame");
+    let first = scan_lines(&harness);
+    assert_eq!(first.len(), 1, "the scan line runs across the composer: {first:?}");
+    harness.step();
+    let second = scan_lines(&harness);
+    assert!(second.len() == 1 && second[0] > first[0], "and down it: {first:?} {second:?}");
+    for _ in 0..8 {
+        harness.step();
+    }
+    assert!(scan_lines(&harness).is_empty(), "gone at the end");
+    assert!(crate::component::tests::rests(&mut harness, 2), "and rests once in place");
+}
+
+#[test]
+fn typing_during_the_wipe_ends_it_at_once() {
+    let mut harness = Harness::builder()
+        .with_size(vec2(1300.0, 820.0))
+        .with_max_steps(60)
+        .with_step_dt(0.02)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.step();
+    harness.step();
+    assert_eq!(scan_lines(&harness).len(), 1, "wiping in");
+    harness.get_by_role_and_label(Role::TextInput, "To").type_text("o");
+    harness.step();
+    assert!(scan_lines(&harness).is_empty(), "the owner never waits");
+    assert_eq!(harness.state().composer().unwrap().typing(Line::To), "o");
 }

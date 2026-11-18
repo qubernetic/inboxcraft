@@ -734,14 +734,89 @@ fn body(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     asked
 }
 
-/// Draws the composer into `ui`, in the reader's place: 24 in above and below, 40 beside. What was asked for, applied
-/// after the frame.
+/// How long the composer takes to wipe into the reader's place, in seconds: the design's `medium`, 300 ms (M7, as the
+/// presentation opens it).
+const WIPE: f32 = 0.3;
+
+/// The design's `ease`, `cubic-bezier(.2, .7, .2, 1)`, at `t` (0 to 1): a curve local to the composer until the app
+/// has one of its own.
+pub(super) fn ease(t: f32) -> f32 {
+    const X: [f32; 2] = [0.2, 0.2];
+    const Y: [f32; 2] = [0.7, 1.0];
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
+    let bezier = |p: [f32; 2], s: f32| 3.0 * (1.0 - s) * (1.0 - s) * s * p[0] + 3.0 * (1.0 - s) * s * s * p[1] + s * s * s;
+    // The curve's parameter whose x is `t`, halved 20 times: x grows with it, so this finds it to a millionth.
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..20 {
+        let mid = (low + high) / 2.0;
+        if bezier(X, mid) < t {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    bezier(Y, (low + high) / 2.0)
+}
+
+/// How far the wipe of `id` has come, 0 to 1 over [`WIPE`] from the first frame it was drawn in (a frame missed
+/// starts it again), not eased; 1 with reduced motion. A key, typing or a press during it ends it at once: the owner
+/// never waits. A repaint is asked for while it runs.
+fn wiped(ctx: &egui::Context, id: Id) -> f32 {
+    if crate::motion::reduced(ctx) {
+        return 1.0;
+    }
+    let now = ctx.input(|input| input.time);
+    let pass = ctx.cumulative_pass_nr();
+    let acted = ctx.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key { pressed: true, .. }
+                    | egui::Event::Text(_)
+                    | egui::Event::Paste(_)
+                    | egui::Event::PointerButton { pressed: true, .. }
+            )
+        })
+    });
+    let start = ctx.data_mut(|data| {
+        let start = match data.get_temp::<(f64, u64)>(id) {
+            Some((start, last)) if last.saturating_add(1) >= pass => start,
+            _ => now,
+        };
+        let start = if acted { now - f64::from(WIPE) } else { start };
+        data.insert_temp(id, (start, pass));
+        start
+    });
+    // A share of a fraction of a second: the cast loses nothing that shows.
+    let shown = ((now - start) / f64::from(WIPE)) as f32;
+    let shown = if shown.is_finite() { shown.clamp(0.0, 1.0) } else { 1.0 };
+    if shown < 1.0 {
+        ctx.request_repaint();
+    }
+    shown
+}
+
+/// Draws the composer into `ui`, in the reader's place: 24 in above and below, 40 beside. It wipes in from the top
+/// behind a 1 px cyan line as it takes the place (M7). What was asked for, applied after the frame.
 pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer: &mut Composer) -> Vec<Asked> {
     let s = &theme.spacing;
     let whole = ui.max_rect();
     ui.allocate_rect(whole, Sense::hover());
     let area = Rect::from_min_max(whole.min + vec2(s.s10, s.s6), whole.max - vec2(s.s10, s.s6));
-    body(ui, theme, keymap, mailbox, composer, area, Place::Docked)
+    let shown = wiped(ui.ctx(), Id::unique("compose-wipe").with(composer.draft()));
+    if shown >= 1.0 {
+        return body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
+    }
+    let edge = whole.top() + whole.height() * ease(shown);
+    // Drawn and working whole; what the wipe has not reached yet is covered by the ground it stands on.
+    let asked = body(ui, theme, keymap, mailbox, composer, area, Place::Docked);
+    let cover = Rect::from_min_max(pos2(whole.left(), edge), whole.max);
+    ui.painter().rect_filled(cover, 0.0, theme.palette.surface);
+    // The scan line runs down with the edge, fading over the last tenth.
+    let fade = if shown < 0.9 { 1.0 } else { ((1.0 - shown) / 0.1).clamp(0.0, 1.0) };
+    let line = crate::theme::mix(theme.palette.surface, theme.palette.cyan_edge, fade);
+    paint::hairline(ui.painter(), pos2(whole.left(), edge), pos2(whole.right(), edge), line);
+    asked
 }
 
 /// The floating panel at the bottom right of `screen`, 3 px clear of its border: the whole composer, or folded its
