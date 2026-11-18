@@ -35,7 +35,7 @@ fn ci_context(failing: Vec<&'static str>) -> (Context, Rc<RefCell<Vec<String>>>)
     let calls = Rc::new(RefCell::new(Vec::new()));
     let runner = Recorder { report: tempfile::tempdir().unwrap(), calls: Rc::clone(&calls), failing };
     let lcov = Some(runner.report.path().join("lcov.info"));
-    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov }, calls)
+    (Context { root: crate::default_root(), cargo: OsString::from("cargo"), runner: Box::new(runner), lcov, shots: None }, calls)
 }
 
 fn report_of(ctx: &Context) -> String {

@@ -114,7 +114,7 @@ fn passing_passes_every_tool() {
 pub fn context(root: PathBuf) -> Context {
     let report = tempfile::tempdir().unwrap();
     let lcov = Some(report.path().join("lcov.info"));
-    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing { _report: report }), lcov }
+    Context { root, cargo: OsString::from("cargo"), runner: Box::new(Passing { _report: report }), lcov, shots: None }
 }
 
 /// Runs xtask with `args` against this workspace and returns the exit code, stdout and stderr.
