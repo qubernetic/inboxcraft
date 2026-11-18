@@ -769,7 +769,9 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
     let p = &theme.palette;
     let s = &theme.spacing;
     let screen = ctx.content_rect();
-    // A press beside the sheet leaves it, and reaches nothing under it.
+    // A press beside the sheet leaves it, and reaches nothing under it; while a list of choices is open on the sheet,
+    // the press is the list's, which it closes, and the sheet stays.
+    let float_open = ctx.memory(|memory| memory.top_modal_layer().is_some());
     let beside = Area::new(Id::unique("settings-dim"))
         .order(Order::Middle)
         .fixed_pos(screen.min)
@@ -777,11 +779,13 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
             let (rect, response) = ui.allocate_exact_size(screen.size(), Sense::click());
             ui.painter().rect_filled(rect, 0.0, p.scrim);
             // On the press, not the release: what lies under the press is no longer covered when the button comes up.
-            response.clicked() || (response.contains_pointer() && ui.input(|input| input.pointer.primary_pressed()))
+            // The release of that press is no second press (the press may have been an open list's, which it closed).
+            let pressed = response.contains_pointer() && ui.input(|input| input.pointer.primary_pressed());
+            pressed || (response.clicked() && !response.clicked_by(egui::PointerButton::Primary))
         })
         .inner;
     let rect = place(theme, screen);
-    let mut asked = beside.then_some(Asked::Close);
+    let mut asked = (beside && !float_open).then_some(Asked::Close);
     Area::new(Id::unique("settings-sheet")).order(Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));

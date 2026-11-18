@@ -753,3 +753,63 @@ fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
         assert!(missed.is_empty(), "{name}: Tab never reaches {missed:?}");
     }
 }
+
+/// The form with a password typed and the IMAP security's list open over the sheet.
+fn list_open(theme: egui::Theme) -> Harness<'static, InboxApp> {
+    let mut harness = form_open(theme, FakeWorkers::passing());
+    harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new(PASSWORD);
+    harness.state_mut().onboarding_mut().0.form_mut().host = "imap.example.org".to_owned();
+    harness.run();
+    harness.get_by_label("IMAP security").click();
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("STARTTLS").is_some(), "the list is open");
+    harness
+}
+
+#[test]
+fn esc_closes_the_open_list_and_only_the_list() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = list_open(theme);
+        harness.key_press(Key::Escape);
+        harness.run();
+        harness.run();
+        assert!(harness.query_by_label("STARTTLS").is_none(), "{theme:?}: the list closed");
+        assert!(harness.state().settings().is_open(), "{theme:?}: the sheet stays");
+        let onboarding = harness.state().onboarding();
+        assert_eq!(onboarding.stage(), Stage::Form, "{theme:?}");
+        assert!(!onboarding.form().password.is_empty(), "{theme:?}: nothing typed is dropped");
+        assert_eq!(onboarding.form().host, "imap.example.org", "{theme:?}");
+        // The next Esc is the sheet's.
+        harness.key_press(Key::Escape);
+        harness.run();
+        harness.run();
+        assert!(!harness.state().settings().is_open(), "{theme:?}");
+        assert_eq!(harness.state().onboarding().stage(), Stage::Closed, "{theme:?}");
+    }
+}
+
+#[test]
+fn a_press_beside_the_sheet_closes_the_open_list_and_only_the_list() {
+    let mut harness = list_open(egui::Theme::Dark);
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
+    assert!(!sheet.contains(beside));
+    harness.hover_at(beside);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    harness.run();
+    assert!(harness.query_by_label("STARTTLS").is_none(), "the list closed");
+    assert!(harness.state().settings().is_open(), "the sheet stays");
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    assert!(!harness.state().onboarding().form().password.is_empty(), "nothing typed is dropped");
+    // The next press beside is the sheet's.
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    assert!(!harness.state().settings().is_open());
+}

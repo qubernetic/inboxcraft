@@ -661,8 +661,9 @@ impl InboxApp {
             return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
         }
         let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
-        let (escape, down, up) =
-            ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
+        // Esc goes to the topmost surface only: a list of choices open over the window takes it, not what lies under.
+        let escape = crate::component::popup::escape(ctx);
+        let (down, up) = ctx.input(|input| (input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
         Keys { ran, escape, down, up, typing, quiet }
     }
 
