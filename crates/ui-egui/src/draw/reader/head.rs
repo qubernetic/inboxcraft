@@ -381,7 +381,8 @@ fn act_button(
 }
 
 /// The subject of the open message in `title`, on at most two lines, the second cut with one ellipsis; a screen reader
-/// hears it whole, and the menu of a secondary press copies it whole.
+/// hears it whole, and the menu of a secondary press copies it whole. It is a Tab stop with its ring; Enter or the menu
+/// key opens the same menu.
 fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>, drawn: &mut Drawn) {
     let p = &theme.palette;
     let f = &theme.fonts;
@@ -393,8 +394,17 @@ fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>,
     let galley = crate::component::wrapped(ui, &crate::component::plain(&kept), f.title, p.ink, width, SUBJECT_LINES, Align::LEFT);
     let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y.max(f.title.line)), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(whole)));
+    let run = egui::Rect::from_min_size(rect.min, vec2(galley.size().x.ceil().min(width), rect.height()));
     if ui.is_rect_visible(rect) {
         paint::run_at(ui.painter(), rect.min, galley, p.ink);
+        // A Tab stop: the ring around the words, as wide as they run.
+        if response.has_focus() {
+            paint::focus_ring(ui.painter(), theme, run, paint::Ring::Outside);
+        }
+    }
+    // Enter opens the menu a secondary press opens (the menu key and Shift+F10 do too), so the copy is the keyboard's.
+    if response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
+        popup::open_by_key(ui.ctx(), &response, subject_menu());
     }
     let copied = popup::context_menu(ui.ctx(), theme, &response, subject_menu(), MOVE_WIDTH, |ui| {
         let copy = popup::entry(ui, theme, keymap, tr!("Copy the subject"), None).clicked();

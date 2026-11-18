@@ -1035,3 +1035,58 @@ fn the_wipe_runs_on_the_design_s_curve() {
     }
     assert_eq!(ease(f32::NAN), 1.0, "a value that is no number lands at the end");
 }
+
+/// The rects of `colour`'s strokes the frame painted.
+fn stroked(harness: &Harness<'static, InboxApp>, colour: egui::Color32) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colour, found)),
+            egui::Shape::Rect(rect) if rect.stroke.color == colour && rect.stroke.width > 0.0 => found.push(rect.rect),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, colour, &mut found));
+    found
+}
+
+/// Presses Tab until the node `label` has the keyboard; whether it got it.
+fn tab_to(harness: &mut Harness<'static, InboxApp>, label: &str) -> bool {
+    for _ in 0..80 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        if harness.query_by_label(label).is_some_and(|node| node.accesskit_node().is_focused()) {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn the_subject_is_a_tab_stop_with_a_ring_and_enter_or_the_menu_key_copies_it() {
+    const SUBJECT: &str = "Photos from the coast walk";
+    for key in [Key::Enter, Key::Menu] {
+        let fetch = Recorder::default();
+        let mut harness = opened(&fetch, None, SUBJECT);
+        assert!(tab_to(&mut harness, SUBJECT), "Tab reaches the subject");
+        let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+        let subject = harness.get_by_label(SUBJECT).rect();
+        let ring = stroked(&harness, look.palette.cyan_edge);
+        assert!(
+            ring.iter().any(|ring| ring.contains_rect(egui::Rect::from_min_size(subject.min, vec2(40.0, subject.height())))
+                && (ring.left() - subject.left()).abs() <= 3.0),
+            "{key:?}: the subject shows its focus ring: {ring:?} {subject:?}"
+        );
+        harness.key_press(key);
+        harness.run();
+        harness.get_by_label("Copy the subject");
+        // The first Tab lands on the menu's first row.
+        harness.key_press(Key::Tab);
+        harness.run();
+        harness.key_press(Key::Enter);
+        settle(&mut harness);
+        // The copy says so in the reader's notice (the harness keeps the clipboard's text to itself).
+        harness.get_by_label("Subject copied");
+        assert!(harness.query_by_label("Copy the subject").is_none(), "{key:?}: the menu closed");
+    }
+}

@@ -656,9 +656,18 @@ pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f
 }
 
 /// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.
+/// The menu key and Shift+F10 on a focused `row` open its menu, as a secondary press does, under the row's left edge.
 pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
     refocus(ctx, row, id);
     let at = id.with("at");
+    let keyed = row.has_focus()
+        && !is_open(ctx, id)
+        && ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Menu) || input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)
+        });
+    if keyed {
+        open_by_key(ctx, row, id);
+    }
     if row.secondary_clicked() {
         let pointer = row.interact_pointer_pos().unwrap_or(row.rect.left_bottom());
         ctx.data_mut(|data| data.insert_temp(at, pointer));
@@ -667,6 +676,14 @@ pub fn context_menu<R>(ctx: &Context, theme: &Theme, row: &Response, id: Id, wid
     }
     let anchor = ctx.data(|data| data.get_temp::<Pos2>(at)).map_or(row.rect, |pointer| Rect::from_min_size(pointer - vec2(0.0, DROP), Vec2::ZERO));
     menu_at(ctx, theme, row, anchor, id, width, add)
+}
+
+/// Opens the context menu `id` of `row` from the keyboard: under the row's left edge, the first Tab on its first row,
+/// the keyboard going back to `row` when it closes.
+pub fn open_by_key(ctx: &Context, row: &Response, id: Id) {
+    ctx.data_mut(|data| data.insert_temp(id.with("at"), row.rect.left_bottom()));
+    ctx.data_mut(|data| data.insert_temp(by_key_id(id), true));
+    set_open(ctx, id, true);
 }
 
 /// The open menu `id` under `anchor`, giving `opener` the keyboard back when it closes as [`menu`] says.
