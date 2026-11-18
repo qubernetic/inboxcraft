@@ -192,7 +192,7 @@ fn status(ui: &Ui, theme: &Theme, room: Rect, text: &str) {
                     );
                     let left = boxed.left() + CAREFUL_X + label_width + CAREFUL_X;
                     let right = boxed.right() - CAREFUL_X - if copies { note_width + CAREFUL_X } else { 0.0 };
-                    let words = format!("{}:", crate::component::spoken(said));
+                    let words = tr!("{said}:", said = crate::component::spoken(said));
                     // The words as the design writes them: "The text says …", the first letter up.
                     let mut chars = words.chars();
                     let words: String = chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default();
@@ -201,7 +201,7 @@ fn status(ui: &Ui, theme: &Theme, room: Rect, text: &str) {
                     let target_top = top + f.caption.line + 2.0;
                     let target_galley = status_text(ui, target, f.mono, p.ink, right - left);
                     paint::run_at(painter, egui::pos2(left, target_top), target_galley, p.ink);
-                    heard(ui, boxed, &format!("{}: {words}", tr!("Careful")), "careful");
+                    heard(ui, boxed, &tr!("Careful: {words}", words = words), "careful");
                     heard(ui, Rect::from_min_size(egui::pos2(left, target_top), vec2((right - left).max(1.0), f.mono.line)), target, "target");
                     if let Some(note_galley) = note_galley {
                         let at = egui::pos2(boxed.right() - CAREFUL_X - note_width, (top + (f.caption.line - note_galley.size().y) / 2.0).round());

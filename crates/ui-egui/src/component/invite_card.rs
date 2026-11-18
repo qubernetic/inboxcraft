@@ -439,7 +439,7 @@ fn warning(ui: &Ui, theme: &Theme, rect: Rect, top: f32, label: &str, words: &st
     let f = &theme.fonts;
     let high = box_high(theme);
     let at = Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), high));
-    said(ui, at, &format!("{label}: {words}"), ("warning", 0));
+    said(ui, at, &tr!("{label}: {words}", label = label, words = words), ("warning", 0));
     if ui.is_rect_visible(at) {
         let painter = ui.painter();
         painter.rect_stroke(at, 0.0, Stroke::new(1.0, colour), StrokeKind::Inside);
@@ -461,7 +461,7 @@ fn replaced(ui: &mut Ui, theme: &Theme, event: &CardEvent<'_>, line: &str) -> Re
     let width = ui.available_width().max(1.0).floor();
     let high = (LINE_Y + f.caption.line + LINE_Y).ceil();
     let (rect, response) = ui.allocate_exact_size(vec2(width, high), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Group, true, format!("{}: {}", spoken(event), super::spoken(line))));
+    response.widget_info(|| WidgetInfo::labeled(Role::Group, true, tr!("{card}: {line}", card = spoken(event), line = super::spoken(line))));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect(rect, 0.0, p.panel, Stroke::new(1.0, p.panel_line), StrokeKind::Inside);

@@ -240,7 +240,7 @@ fn picture_boxes(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         cells(ui, theme, |ui| {
             cell(ui, theme, state, |ui| {
                 ui.set_width(360.0);
-                picture_box_with(ui, theme, keymap, look, "The new kiln, lit for the first time", Some((360, 144)), true);
+                picture_box_with(ui, theme, keymap, look, tr!("The new kiln, lit for the first time"), Some((360, 144)), true);
             });
         });
     }

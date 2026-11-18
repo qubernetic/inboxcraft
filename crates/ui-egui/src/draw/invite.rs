@@ -124,7 +124,7 @@ pub(super) fn card(ui: &mut Ui, theme: &Theme, keymap: &Keymap, reader: &Reader,
     let goes_to = invite.organizer_address.clone().unwrap_or_default();
     let changing = reader.changing(invite.message);
     // The engine's reason, as a sentence.
-    let why = invite.why_not.as_deref().map(|why| if why.ends_with('.') { why.to_owned() } else { format!("{why}.") }).unwrap_or_default();
+    let why = invite.why_not.as_deref().map(|why| if why.ends_with('.') { why.to_owned() } else { tr!("{why}.", why = why) }).unwrap_or_default();
     let answered = invite.answered().unwrap_or_default();
     // The box's label says "Changed": its words are what changed.
     let changed = invite.changed().map(|changed| changed.strip_prefix(tr!("Changed: ")).map_or_else(|| changed.clone(), str::to_owned));
