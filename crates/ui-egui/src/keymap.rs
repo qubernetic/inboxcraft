@@ -84,6 +84,9 @@ pub const COMPOSE: &str = "ui.compose.new";
 /// Send the message being written (`mail.send`).
 pub const SEND: &str = "ui.compose.send";
 
+/// Fold the floating composer to its head, or open it again.
+pub const FOLD: &str = "ui.compose.fold";
+
 /// The longest key text read, in bytes; `Command+Shift+Alt+ArrowRight` takes 28.
 pub const MAX_TEXT: usize = 64;
 
@@ -110,6 +113,7 @@ pub fn actions() -> Vec<Action> {
         action(LATER, tr!("Show later: snoozed, pins and parked"), IconId::Pin),
         action(COMPOSE, tr!("New message"), IconId::Compose),
         action(SEND, tr!("Send the message"), IconId::Send),
+        action(FOLD, tr!("Fold or open the floating draft"), IconId::Dock),
         action(CALENDAR, tr!("Show the calendar"), IconId::Calendar),
         action(DONE, tr!("Done"), IconId::Done),
         action(ARCHIVE, tr!("Archive"), IconId::Archive),

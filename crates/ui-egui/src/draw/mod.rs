@@ -478,6 +478,7 @@ impl InboxApp {
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
+            keymap::FOLD => self.composer.is_some() && !self.docked(),
             // Docked; or the floating panel open with the keys inside it.
             keymap::SEND => self.docked() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())),
             _ => keymap::action(id).is_some(),
@@ -526,6 +527,11 @@ impl InboxApp {
                 ctx.memory_mut(|memory| memory.request_focus(compose::field_id(crate::compose::Line::To)));
             }
             keymap::SEND => self.send_composer(),
+            keymap::FOLD => {
+                if let Some(composer) = self.composer.as_mut() {
+                    composer.toggle_fold();
+                }
+            }
             keymap::SETTINGS => {
                 if !self.settings.is_open() {
                     self.open_settings();
@@ -1067,6 +1073,7 @@ impl InboxApp {
             Asked::Close => return self.close_composer(),
             Asked::Discard => return self.discard_composer(),
             Asked::Open => return self.compose(),
+            Asked::Fold => return self.run_action(ctx, keymap::FOLD),
             _ => {}
         }
         let Some(composer) = &mut self.composer else { return };
@@ -1123,11 +1130,7 @@ impl InboxApp {
                 mailbox.load_presets();
                 Ok(())
             }
-            Asked::Fold => {
-                composer.toggle_fold();
-                Ok(())
-            }
-            Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
+            Asked::Send | Asked::Close | Asked::Discard | Asked::Open | Asked::Fold => Ok(()),
         };
         if let Err(error) = result {
             self.mailbox.fail(error);

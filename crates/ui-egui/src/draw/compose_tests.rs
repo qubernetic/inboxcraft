@@ -1177,3 +1177,21 @@ fn send_waits_for_a_composer_the_calendar_moved_until_painted_in_its_new_place()
     harness.state_mut().send_composer();
     assert!(queued(&mut harness, id));
 }
+
+#[test]
+fn fold_is_an_action_the_palette_offers_while_the_panel_floats() {
+    let mut harness = composing(egui::Theme::Dark);
+    let ctx = harness.ctx.clone();
+    assert!(!harness.state().can_run(keymap::FOLD), "nothing to fold in the reader's place");
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    assert!(harness.state().can_run(keymap::FOLD));
+    harness.state_mut().run_action(&ctx, keymap::FOLD);
+    harness.run();
+    assert!(harness.state().composer().unwrap().folded());
+    assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_none());
+    harness.state_mut().run_action(&ctx, keymap::FOLD);
+    harness.run();
+    assert!(!harness.state().composer().unwrap().folded(), "open again");
+    assert_eq!(keymap::action(keymap::FOLD).map(|action| action.id), Some("ui.compose.fold"));
+}
