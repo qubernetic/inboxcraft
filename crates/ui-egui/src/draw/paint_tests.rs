@@ -936,3 +936,21 @@ fn a_float_s_edge_stands_on_whole_pixels_at_every_scale() {
         }
     }
 }
+
+#[test]
+fn a_float_a_box_and_an_outline_at_a_scale_of_0_nan_or_infinity_have_finite_rects() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let rect = egui::Rect::from_min_size(pos2(10.3, 20.7), vec2(120.4, 80.2));
+    let (fill, edge) = (egui::Color32::WHITE, egui::Color32::BLACK);
+    for ppp in [0.0, f32::NAN, f32::INFINITY] {
+        let mut shapes = super::float_at(&theme, rect, FloatEdge::Keyboard, ppp);
+        shapes.extend(super::boxed_at(rect, fill, edge, ppp));
+        shapes.extend(super::outline_at(rect, edge, ppp));
+        for shape in &shapes {
+            let bounds = shape.visual_bounding_rect();
+            assert!(bounds.is_finite(), "{ppp}: {shape:?}");
+        }
+        // As at a scale of 1.
+        assert_eq!(super::outline_at(rect, edge, ppp), super::outline_at(rect, edge, 1.0), "{ppp}");
+    }
+}
