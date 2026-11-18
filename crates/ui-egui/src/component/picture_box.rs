@@ -190,7 +190,7 @@ pub(crate) fn measure(ui: &Ui, theme: &Theme, look: PictureLook<'_>, alt: &str, 
         _ => None,
     };
     let link_high = theme.boxes().row_link;
-    // `try again` stands only where it fits whole: a link that cannot be seen is not offered.
+    // `try again` is asked for only where it fits whole across the box; whether the box holds it is decided below.
     let retry = matches!(look, PictureLook::Failed(_)) && super::galley(ui, tr!("try again"), f.mono_s, p.cyan_text).size().x.ceil() <= inner;
     // What the box says, top to bottom: each part's height.
     let mut parts: Vec<f32> = Vec::new();
@@ -209,14 +209,17 @@ pub(crate) fn measure(ui: &Ui, theme: &Theme, look: PictureLook<'_>, alt: &str, 
     if size_galley.is_some() {
         parts.push(f.mono_s.line);
     }
-    if retry {
-        parts.push(link_high);
-    }
-    let content = parts.iter().sum::<f32>() + GAP * parts.len().saturating_sub(1) as f32;
-    let wanted = match size {
+    let said = parts.iter().sum::<f32>() + GAP * parts.len().saturating_sub(1) as f32;
+    let with_link = if parts.is_empty() { link_high } else { said + GAP + link_high };
+    let wanted = |content: f32| match size {
         Some(size) => shown_size(size, room),
         None => vec2(room, (content + BARE * 2.0).ceil()),
     };
+    // `try again` stands only where the box holds it whole, wide and high enough (the one rule `paint_box` draws by):
+    // a link that cannot be seen is neither offered nor a Tab stop.
+    let retry = retry && holds(with_link, wanted(with_link));
+    let content = if retry { with_link } else { said };
+    let wanted = wanted(content);
     Measured {
         size: wanted,
         spoken: spoken(look, alt, size),
@@ -232,6 +235,11 @@ pub(crate) fn measure(ui: &Ui, theme: &Theme, look: PictureLook<'_>, alt: &str, 
         dims: size_galley,
         content,
     }
+}
+
+/// Whether a box of `size` holds parts `content` high: what it says, 1 clear of its edge, and room for its sides' pad.
+fn holds(content: f32, size: Vec2) -> bool {
+    content + 2.0 <= size.y && PAD * 2.0 + 1.0 <= size.x
 }
 
 /// Paints the box `measured` at `rect`, clipped to it: nothing paints past its sides. The response of its `try again`
@@ -250,7 +258,7 @@ pub(crate) fn paint_box(ui: &mut Ui, theme: &Theme, keymap: &Keymap, measured: &
     }
     // A box smaller than what it says shows only its edge.
     let content = measured.content;
-    if content + 2.0 > rect.height() || PAD * 2.0 + 1.0 > rect.width() {
+    if !holds(content, rect.size()) {
         return None;
     }
     let inner = (rect.width() - PAD * 2.0).max(1.0);

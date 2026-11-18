@@ -340,8 +340,12 @@ fn filler(panes: usize) -> String {
 
 /// `document` in a pane 640 × 600 that scrolls, a button under the pane: what Tab reaches after the message.
 fn fitted_then_button(document: Document) -> Harness<'static, Seen> {
+    fitted_then_button_over(document, crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave)))
+}
+
+/// [`fitted_then_button`] drawn over `reader` (its pictures as it holds them).
+fn fitted_then_button_over(document: Document, reader: crate::reader::Reader) -> Harness<'static, Seen> {
     let theme = Theme::new(Mode::Light, TextScale::default());
-    let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
     let mut harness =
         Harness::builder().with_size(vec2(640.0, 640.0)).with_max_steps(64).with_context_setup(crate::theme::install_fonts).build_ui_state(
             move |ui, seen: &mut Seen| {
@@ -642,4 +646,32 @@ fn the_picture_banner_leaves_the_chosen_plain_view_and_stays_over_the_fallback()
     });
     harness.get_by_label("This message is shown as plain text: the reader holds as much fitted text as it keeps.");
     harness.get_by_label(BANNER);
+}
+
+/// A failed picture whose box cannot hold `try again` (short and wide, or narrow and tall, as a sender's tag may ask)
+/// offers no link and is no Tab stop: Tab from the link before it walks on to the link after it, however far.
+#[test]
+fn a_failed_box_too_short_or_too_narrow_for_try_again_is_no_tab_stop() {
+    let url = "https://pictures.example.org/broken.png";
+    for (width, height) in [(300, 20), (40, 400)] {
+        let html = format!(
+            "<p><a href=\"https://example.org/a\">link A</a></p>{}<img src=\"{url}\" alt=\"\" width={width} height={height}>{}\
+             <p><a href=\"https://example.org/b\">link B</a></p>",
+            filler(2),
+            filler(2)
+        );
+        let document = inboxcraft_html::display(&html, &inboxcraft_html::Options { remote_content: inboxcraft_html::RemoteContent::Allowed });
+        let mut reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+        reader.put_picture(url, crate::reader::PictureState::Failed("no answer".to_owned()));
+        let mut harness = fitted_then_button_over(document, reader);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            harness.key_press(Key::Tab);
+            harness.run();
+            harness.run();
+            seen.push(focused(&harness).map(|(_, label)| label));
+        }
+        assert_eq!(seen, ["link A", "link B", "Outside the reader"].map(|label| Some(label.to_owned())), "{width} × {height}");
+        assert!(harness.query_by_label("try again").is_none(), "{width} × {height}: no try again where none is drawn");
+    }
 }
