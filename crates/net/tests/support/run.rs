@@ -115,11 +115,34 @@ impl Run {
         Ok(id)
     }
 
-    /// The next event.
+    /// The next event but the progress and end of a sync round, which `rounds` reads.
     pub fn next(&self) -> Result<Event> {
+        loop {
+            let event = self.any()?;
+            if !matches!(event.kind, EventKind::SyncProgress { .. } | EventKind::SyncFinished { .. }) {
+                return Ok(event);
+            }
+        }
+    }
+
+    /// The next event of any kind.
+    fn any(&self) -> Result<Event> {
         let event = self.events.recv_timeout(WAIT)?;
         assert_eq!(event.account, ACCOUNT);
         Ok(event)
+    }
+
+    /// Every event, those of the sync rounds with them, up to and with the first one `last` takes.
+    pub fn rounds(&self, mut last: impl FnMut(&EventKind) -> bool) -> Result<Vec<EventKind>> {
+        let mut seen = Vec::new();
+        loop {
+            let event = self.any()?;
+            let done = last(&event.kind);
+            seen.push(event.kind);
+            if done {
+                return Ok(seen);
+            }
+        }
     }
 
     /// The events up to and with the first one `last` takes.

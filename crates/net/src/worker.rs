@@ -28,6 +28,12 @@
 //! fail, and the next job asks for it again. The password is asked for each time the worker signs in and is dropped
 //! right after.
 //!
+//! The folder syncs the worker takes while none is waiting make a round: it tells how far the round has come
+//! ([`EventKind::SyncProgress`], done of all) when it starts and as each of its folders ends, synced or failed, and
+//! when the last one ended and every one was synced, that the account was current ([`EventKind::SyncFinished`]); so
+//! does a resync of the watched folder outside a round. A round counts what the worker knows already: the jobs it
+//! holds, no request to the server.
+//!
 //! After each sign-in the worker tells what the server can do as far as the engine chooses by it
 //! ([`EventKind::Abilities`]): whether it removes only the messages named.
 //!
@@ -197,6 +203,7 @@ fn work(account: &Account, settings: &WorkerSettings, credentials: &dyn Credenti
         idle_refused: false,
         sign_in_lost: false,
         tries: HashMap::new(),
+        round: Round::default(),
     };
     while run.turn(queue) {}
     if let Some(open) = run.connection {
@@ -248,6 +255,19 @@ impl Out<'_> {
     }
 }
 
+/// The folder syncs of the round under way.
+#[derive(Debug, Clone, Copy, Default)]
+struct Round {
+    /// The folder syncs of the round that ended, synced or failed.
+    done: u32,
+    /// The folder syncs of the round.
+    of: u32,
+    /// One of them failed.
+    failed: bool,
+    /// The progress told last.
+    told: Option<(u32, u32)>,
+}
+
 /// The folder an Idle job asked to watch.
 #[derive(Debug, Clone)]
 struct Watch {
@@ -286,6 +306,8 @@ struct Run<'a> {
     sign_in_lost: bool,
     /// The write jobs a dropped connection cut off, with how often that happened.
     tries: HashMap<JobId, u32>,
+    /// The folder syncs of the round under way.
+    round: Round,
 }
 
 impl Run<'_> {
@@ -299,6 +321,7 @@ impl Run<'_> {
             }
         }
         self.drain(queue);
+        self.tell_round();
         // Stopped: the queued jobs run while online; offline, or with nothing queued, the worker ends.
         if !self.open && (self.pending.is_empty() || self.connection.is_none()) {
             return false;
@@ -316,7 +339,33 @@ impl Run<'_> {
                 None => self.watch(queue),
             }
         }
+        self.tell_round();
         self.out.listening
+    }
+
+    /// Tells the round's progress when it moved, and its end once every folder sync of it ended.
+    fn tell_round(&mut self) {
+        let Round { done, of, failed, told } = self.round;
+        if of == 0 {
+            return;
+        }
+        if told != Some((done, of)) {
+            self.round.told = Some((done, of));
+            self.out.say(None, EventKind::SyncProgress { done, of });
+        }
+        if done >= of {
+            if !failed {
+                let at = self.settings.connector.tls().clock().now();
+                self.out.say(None, EventKind::SyncFinished { at });
+            }
+            self.round = Round::default();
+        }
+    }
+
+    /// Counts a folder sync of the round as ended.
+    fn ended_sync(&mut self, synced: bool) {
+        self.round.done = self.round.done.saturating_add(1);
+        self.round.failed |= !synced;
     }
 
     /// Takes the jobs waiting in the channel without blocking.
@@ -346,6 +395,9 @@ impl Run<'_> {
         } else if self.pending.len() >= self.settings.max_queued {
             self.out.failed(&job, &NetError::new(ErrorKind::TooLarge, "the offline queue is full"));
         } else {
+            if matches!(job.kind, JobKind::SyncFolder { .. }) {
+                self.round.of = self.round.of.saturating_add(1);
+            }
             self.pending.push_back(job);
         }
     }
@@ -437,6 +489,9 @@ impl Run<'_> {
 
     fn fail_pending(&mut self, error: &NetError) {
         for job in std::mem::take(&mut self.pending) {
+            if matches!(job.kind, JobKind::SyncFolder { .. }) {
+                self.ended_sync(false);
+            }
             self.out.failed(&job, error);
         }
     }
@@ -514,7 +569,13 @@ impl Run<'_> {
             self.stale = true;
             return;
         }
-        let Some(open) = self.connection.as_mut() else { return };
+        let folder_sync = matches!(job.kind, JobKind::SyncFolder { .. });
+        let Some(open) = self.connection.as_mut() else {
+            if folder_sync {
+                self.ended_sync(false);
+            }
+            return;
+        };
         self.out.report(ConnectionState::Online);
         // The job may open another folder: IDLE must open the watched one again.
         self.stale |= self.watch.is_some();
@@ -523,6 +584,9 @@ impl Run<'_> {
         let out = &mut self.out;
         let done = sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event));
         let tried = self.tries.remove(&job.id).unwrap_or(0).saturating_add(1);
+        if folder_sync {
+            self.ended_sync(done.is_ok());
+        }
         match done {
             Ok(()) => self.attempt = 0,
             Err(error) => {
@@ -568,6 +632,9 @@ impl Run<'_> {
         sync::run(open, &job, &self.settings.sync, now, &mut |event| out.emit(event))?;
         self.stale = false;
         self.attempt = 0;
+        if self.round.of == 0 {
+            self.out.say(None, EventKind::SyncFinished { at: now });
+        }
         Ok(())
     }
 
