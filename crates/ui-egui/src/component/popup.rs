@@ -190,6 +190,9 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
     let at = placed(float.anchor.left_bottom() + vec2(0.0, DROP), size, ctx.content_rect(), ctx.pixels_per_point());
     // Only the float takes the keyboard and the pointer while it is open: Tab goes round its rows.
     ctx.memory_mut(|memory| memory.set_modal_layer(mine));
+    // It says itself that a float is open, for the window's Esc and a sheet's press beside ([`any_open`]): another
+    // surface may be a modal layer too.
+    ctx.data_mut(|data| data.insert_temp(shown_id(), pass));
     // Drawn after the float it may be opened from, it stands over it: a float opened from another is on top.
     ctx.move_to_top(mine);
     let shown = Area::new(float.id).order(Order::Foreground).pivot(Align2::LEFT_TOP).fixed_pos(at).fade_in(false).show(ctx, |ui| {
@@ -708,11 +711,23 @@ fn menu_at<R>(
     }
 }
 
+/// Where [`float`] notes the pass it last showed in.
+fn shown_id() -> Id {
+    Id::unique("inboxcraft-float-shown")
+}
+
+/// Whether a float (an open list or menu) showed in this pass or the one before: the surface on top, which takes Esc
+/// and a press beside it. Only a float says so; a sheet that is a modal layer itself is not one.
+#[must_use]
+pub fn any_open(ctx: &Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<u64>(shown_id())).is_some_and(|shown| shown.saturating_add(1) >= pass)
+}
+
 /// Whether `Esc` was pressed for a control under the floats: false while a float is open, which takes it.
 #[must_use]
 pub fn escape(ctx: &Context) -> bool {
-    let open = ctx.memory(|memory| memory.top_modal_layer().is_some());
-    !open && ctx.input(|input| input.key_pressed(Key::Escape))
+    !any_open(ctx) && ctx.input(|input| input.key_pressed(Key::Escape))
 }
 
 #[cfg(test)]

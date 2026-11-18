@@ -771,7 +771,7 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
     let screen = ctx.content_rect();
     // A press beside the sheet leaves it, and reaches nothing under it; while a list of choices is open on the sheet,
     // the press is the list's, which it closes, and the sheet stays.
-    let float_open = ctx.memory(|memory| memory.top_modal_layer().is_some());
+    let float_open = crate::component::popup::any_open(ctx);
     let beside = Area::new(Id::unique("settings-dim"))
         .order(Order::Middle)
         .fixed_pos(screen.min)

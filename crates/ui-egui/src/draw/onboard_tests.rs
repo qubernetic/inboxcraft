@@ -1014,3 +1014,72 @@ fn an_account_s_form_starts_16_under_its_title_s_row() {
     let title = harness.get_by_label("Account settings").rect();
     assert_eq!(field_top(&harness, "Address") - title.top(), 47.0, "1 down in a 32-high row, then 16");
 }
+
+/// The add form on a sheet that makes itself the modal layer every frame, as the settings sheet may, with a password
+/// typed; the IMAP security's list open when `list` is on.
+fn modal_sheet(list: bool) -> Harness<'static, InboxApp> {
+    let sheet = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("settings-sheet"));
+    let app = app(&Kept::default(), FakeWorkers::passing());
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 900.0)).build_ui_state(
+        move |ui, app: &mut InboxApp| {
+            app.ui(ui);
+            if app.settings().is_open() {
+                ui.ctx().memory_mut(|memory| memory.set_modal_layer(sheet));
+            }
+        },
+        app,
+    );
+    harness.run();
+    harness.state_mut().onboarding_mut().0.open();
+    harness.run();
+    harness.state_mut().onboarding_mut().0.form_mut().password = Secret::new(PASSWORD);
+    harness.run();
+    harness.run();
+    if list {
+        harness.get_by_label("IMAP security").click();
+        harness.run();
+        harness.run();
+        assert!(harness.query_by_label("STARTTLS").is_some(), "the list is open");
+    }
+    harness
+}
+
+/// A press of the pointer beside the sheet, down and up.
+fn press_beside(harness: &mut Harness<'static, InboxApp>) {
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let beside = egui::pos2(sheet.left() / 2.0, sheet.center().y);
+    harness.hover_at(beside);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: beside, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.run();
+    }
+    harness.run();
+}
+
+#[test]
+fn a_modal_sheet_closes_on_esc_and_on_a_press_beside_when_no_list_is_open() {
+    let mut harness = modal_sheet(false);
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().settings().is_open(), "Esc closes the sheet");
+    let mut harness = modal_sheet(false);
+    press_beside(&mut harness);
+    assert!(!harness.state().settings().is_open(), "a press beside closes the sheet");
+}
+
+#[test]
+fn on_a_modal_sheet_esc_and_a_press_beside_close_only_the_open_list() {
+    let mut harness = modal_sheet(true);
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(harness.query_by_label("STARTTLS").is_none(), "Esc closed the list");
+    assert!(harness.state().settings().is_open(), "and only the list");
+    assert!(!harness.state().onboarding().form().password.is_empty());
+    let mut harness = modal_sheet(true);
+    press_beside(&mut harness);
+    assert!(harness.query_by_label("STARTTLS").is_none(), "a press beside closed the list");
+    assert!(harness.state().settings().is_open(), "and only the list");
+}
