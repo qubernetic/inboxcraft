@@ -9,10 +9,10 @@
 //! (`EventKind::Failed`, the `failure` of `account.list`), the progress of its sync round
 //! (`EventKind::SyncProgress`) and the end of one (`EventKind::SyncFinished`). The state is the worst that holds:
 //!
-//! - `offline`: at least one account and none connected (no connection told yet, offline, or backing off), whatever
-//!   failed;
+//! - `offline`: at least one account and none signed in (no connection told yet, connecting, offline, or backing
+//!   off), whatever failed;
 //! - `failing`: an account's last connection or job failed, and it has not been online or ended a sync round since;
-//! - `syncing`: an account's sync round has folders left;
+//! - `syncing`: an account's sync round has folders left, or a signed-in account has not ended a round yet;
 //! - `synced`: none of these, and always with no account.
 //!
 //! `done` and `of` add up the last progress told of every account (each `done` at most its `of`, the sums saturate
@@ -75,9 +75,10 @@ pub(crate) fn finished(state: &mut State, account: AccountId, at: Timestamp, now
     true
 }
 
-/// Whether the account has a connection, or is on its way to one.
+/// Whether the account is signed in: one on its way to a connection is not connected yet, so an account retrying in
+/// its back-off reads the same at every attempt.
 fn connected(held: Option<&AccountState>) -> bool {
-    matches!(held.and_then(|held| held.connection), Some(ConnectionState::Connecting | ConnectionState::Online | ConnectionState::Watching))
+    matches!(held.and_then(|held| held.connection), Some(ConnectionState::Online | ConnectionState::Watching))
 }
 
 fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError> {
@@ -87,8 +88,11 @@ fn status(context: &Context<'_>, params: &Value) -> Result<Outcome, EngineError>
     let (mut done, mut of, mut failing, mut syncing, mut online) = (0_u32, 0_u32, 0_u32, false, false);
     let mut last: Option<Timestamp> = None;
     for state in &held {
-        online |= connected(*state);
+        let signed_in = connected(*state);
+        online |= signed_in;
         let Some(state) = state else { continue };
+        // Signed in and no round ended yet: the first sync is under way, even before the worker tells its round.
+        syncing |= signed_in && state.synced.is_none();
         if state.failure.is_some() {
             failing = failing.saturating_add(1);
         }

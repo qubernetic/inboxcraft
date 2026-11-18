@@ -5,10 +5,10 @@
 //! dropped or bounded.
 
 use inboxcraft_model::{AccountId, ConnectionState, ErrorKind, Event, EventKind};
-use inboxcraft_store::{Memory, StoreConfig};
+use inboxcraft_store::{Batch, Change, Memory, Storage, StoreConfig};
 use serde_json::{Value, json};
 
-use crate::test_support::{NOW, at, clock, mailbox};
+use crate::test_support::{NOW, account, at, clock, mailbox};
 use crate::{AgentClass, Applied, Caller, EngineError, Session};
 
 /// The two accounts of the test mailbox, 1 and 2.
@@ -45,6 +45,24 @@ fn online(session: &mut Session) {
     connection(session, 2, ConnectionState::Watching);
 }
 
+/// Both accounts signed in, each with a round that ended a day ago (`2026-11-04T09:00:00Z`).
+fn current(session: &mut Session) {
+    online(session);
+    assert_eq!(finished(session, 1, NOW - 86_400), Applied::Changed);
+    assert_eq!(finished(session, 2, NOW - 86_400), Applied::Changed);
+}
+
+/// A session with the one account 1, nothing told yet.
+fn single() -> Session {
+    let mut store = Memory::new(StoreConfig::default());
+    store.apply(&Batch::new().with(Change::PutAccount(account(1, "anna@example.org")))).unwrap();
+    Session::new(Box::new(store), Box::new(clock())).unwrap()
+}
+
+fn state(session: &mut Session) -> Value {
+    status(session)["state"].clone()
+}
+
 #[test]
 fn the_status_is_safe_and_takes_no_parameters() {
     let mut session = session();
@@ -64,7 +82,7 @@ fn accounts_with_no_connection_are_offline_and_offline_wins_over_failing() {
     let mut session = session();
     assert_eq!(status(&mut session)["state"], "offline", "no connection told yet");
     connection(&mut session, 1, ConnectionState::Connecting);
-    assert_eq!(status(&mut session)["state"], "synced", "one account on its way is not offline");
+    assert_eq!(status(&mut session)["state"], "offline", "an account on its way is not signed in yet");
     failed(&mut session, 1);
     connection(&mut session, 1, ConnectionState::BackingOff { attempt: 1, retry_in_secs: 2 });
     connection(&mut session, 2, ConnectionState::Offline);
@@ -77,9 +95,12 @@ fn accounts_with_no_connection_are_offline_and_offline_wins_over_failing() {
 fn the_worst_state_wins_through_a_sequence_of_events() {
     let mut session = session();
     online(&mut session);
+    assert_eq!(status(&mut session)["state"], "syncing", "signed in and no round ended yet");
+    finished(&mut session, 1, NOW - 600);
+    finished(&mut session, 2, NOW - 600);
     assert_eq!(status(&mut session)["state"], "synced");
     assert_eq!(progress(&mut session, 1, 1, 4), Applied::Changed);
-    assert_eq!(status(&mut session), json!({ "state": "syncing", "done": 1, "of": 4, "last_synced": null, "failing_accounts": 0 }));
+    assert_eq!(status(&mut session), json!({ "state": "syncing", "done": 1, "of": 4, "last_synced": "2026-11-05T08:50:00Z", "failing_accounts": 0 }));
     failed(&mut session, 2);
     assert_eq!(status(&mut session)["state"], "failing", "failing wins over syncing");
     connection(&mut session, 2, ConnectionState::Online);
@@ -94,7 +115,7 @@ fn the_worst_state_wins_through_a_sequence_of_events() {
 #[test]
 fn the_end_of_a_round_ends_the_failure_too() {
     let mut session = session();
-    online(&mut session);
+    current(&mut session);
     failed(&mut session, 1);
     assert_eq!(status(&mut session)["failing_accounts"], 1);
     finished(&mut session, 1, NOW);
@@ -137,22 +158,22 @@ fn the_sums_saturate_at_the_largest_count() {
 #[test]
 fn an_event_for_an_unknown_account_is_dropped() {
     let mut session = session();
-    online(&mut session);
+    current(&mut session);
     assert_eq!(progress(&mut session, 9, 1, 4), Applied::Dropped);
     assert_eq!(finished(&mut session, 9, NOW), Applied::Dropped);
-    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": null, "failing_accounts": 0 }));
+    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": "2026-11-04T09:00:00Z", "failing_accounts": 0 }));
 }
 
 #[test]
 fn a_removed_account_takes_its_progress_and_its_time_with_it() {
     let mut session = session();
-    online(&mut session);
+    current(&mut session);
     progress(&mut session, 2, 1, 5);
     finished(&mut session, 2, NOW);
     progress(&mut session, 2, 1, 5);
     failed(&mut session, 2);
     session.run("account.remove", &json!({ "account": 2 })).unwrap();
-    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": null, "failing_accounts": 0 }));
+    assert_eq!(status(&mut session), json!({ "state": "synced", "done": 0, "of": 0, "last_synced": "2026-11-04T09:00:00Z", "failing_accounts": 0 }));
     assert_eq!(progress(&mut session, 2, 1, 5), Applied::Dropped, "a late event of its worker");
 }
 
@@ -191,4 +212,33 @@ fn an_end_far_in_the_future_is_junk_and_dropped() {
     // A worker's clock a little ahead of the engine's is no junk.
     assert_eq!(finished(&mut session, 1, NOW + 60), Applied::Changed);
     assert_eq!(status(&mut session)["last_synced"], "2026-11-05T09:01:00Z");
+}
+
+#[test]
+fn an_account_retrying_in_its_back_off_reads_offline_at_every_attempt() {
+    let mut session = single();
+    for attempt in 1..=3 {
+        connection(&mut session, 1, ConnectionState::Connecting);
+        assert_eq!(state(&mut session), "offline", "attempt {attempt}, connecting");
+        failed(&mut session, 1);
+        assert_eq!(state(&mut session), "offline", "attempt {attempt}, failed");
+        connection(&mut session, 1, ConnectionState::BackingOff { attempt, retry_in_secs: 2 });
+        assert_eq!(state(&mut session), "offline", "attempt {attempt}, backing off");
+    }
+}
+
+#[test]
+fn the_first_sign_in_reads_offline_then_syncing_until_a_round_ends() {
+    let mut session = single();
+    assert_eq!(state(&mut session), "offline");
+    connection(&mut session, 1, ConnectionState::Connecting);
+    assert_eq!(state(&mut session), "offline");
+    connection(&mut session, 1, ConnectionState::Online);
+    assert_eq!(state(&mut session), "syncing", "signed in, before the worker tells its round");
+    progress(&mut session, 1, 0, 2);
+    assert_eq!(state(&mut session), "syncing");
+    connection(&mut session, 1, ConnectionState::Watching);
+    assert_eq!(state(&mut session), "syncing");
+    finished(&mut session, 1, NOW);
+    assert_eq!(state(&mut session), "synced");
 }
