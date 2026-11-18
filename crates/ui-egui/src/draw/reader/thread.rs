@@ -251,7 +251,7 @@ pub(super) fn message(
     let held = open && mailbox.held(opened.id);
     let bare = bare(mailbox, reader, opened);
     if let (true, false, true, Some(invite)) = (bare, held, restated(opened), &opened.invite) {
-        crate::draw::invite::card(ui, theme, keymap, reader, invite, false, drawn);
+        crate::draw::invite::card(ui, theme, keymap, reader, invite, mailbox.held(opened.id), drawn);
         return;
     }
     let parts = |ui: &mut Ui, textures: &mut Textures, drawn: &mut Drawn| {
