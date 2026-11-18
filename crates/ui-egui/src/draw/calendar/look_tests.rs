@@ -159,6 +159,26 @@ fn the_hours_draw_every_day_line_the_last_under_the_scroll_bar() {
     }
 }
 
+/// The thumbs painted in `muted` inside a scroll strip at the view's right, x over 900.
+fn thumbs_at_the_right(harness: &Harness<'static, InboxApp>) -> Vec<Rect> {
+    let p = Palette::of(Mode::Dark);
+    let strips: Vec<Rect> = harness.query_all_by_role(Role::ScrollBar).map(|node| node.rect()).filter(|strip| strip.left() > 900.0).collect();
+    rects(harness)
+        .into_iter()
+        .filter(|(rect, fill)| *fill == p.muted && rect.width() <= 6.0 && rect.height() >= 20.0)
+        .map(|(rect, _)| rect)
+        .filter(|rect| strips.iter().any(|strip| strip.contains_rect(*rect)))
+        .collect()
+}
+
+#[test]
+fn the_agenda_and_the_hours_paint_their_thumb_over_the_content() {
+    for view in [View::Agenda, View::Week, View::Day] {
+        let harness = window(view);
+        assert_eq!(thumbs_at_the_right(&harness).len(), 1, "{view:?}: one thumb in the strip at the right");
+    }
+}
+
 #[test]
 fn today_s_head_has_a_1_px_cyan_edge_under_it() {
     let p = Palette::of(Mode::Dark);
