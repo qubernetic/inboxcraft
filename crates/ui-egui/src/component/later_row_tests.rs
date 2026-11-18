@@ -5,7 +5,7 @@
 
 use egui::{Color32, Rect, StrokeKind, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::Pile;
 use crate::component::Shown;
@@ -74,7 +74,8 @@ fn a_later_row_looks_as_its_sheet_says_in_every_state() {
             let glyph = texts.iter().find(|t| t.3 == icons()).cloned().unwrap_or_else(|| panic!("the mark: {at}"));
             assert_eq!(glyph.2, mark, "{at}");
             assert!((glyph.0.center() - (o + vec2(417.0, 18.0))).length() < 1.01, "{:?}: {at}", glyph.0);
-            if state.shown == Shown::Hover {
+            // The link shows hovered and, so that `Tab` reaches it, focused (the sheet's focus state draws when).
+            if matches!(state.shown, Shown::Hover | Shown::Focus) {
                 let link = harness.get_by_label("bring back now").rect();
                 assert_eq!((link.right() - o.x, link.top() - o.y, link.height()), (424.0, 32.0, 16.0), "{at}");
                 assert!(texts.iter().all(|t| t.1 != state.when), "the link takes when's place: {at}");
@@ -109,4 +110,39 @@ fn a_later_row_is_the_scaled_height_at_130_percent() {
     let harness = harness(theme, state);
     let rect = harness.get_by_label(&later_spoken(&state)).rect();
     assert_eq!(rect.size(), vec2(440.0, theme.size(56.0)));
+}
+
+#[test]
+fn the_keyboard_on_a_snoozed_row_shows_bring_back_now_and_tab_reaches_it() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let state = later_states()[0];
+    let mut harness = harness(theme, state);
+    assert!(harness.query_by_label("bring back now").is_none(), "not at rest");
+    harness.key_press(egui::Key::Tab);
+    harness.run();
+    assert!(harness.get_by_label(&later_spoken(&state)).accesskit_node().is_focused(), "Tab comes to the row");
+    assert!(harness.query_by_label("bring back now").is_some(), "the focused row shows its link");
+    harness.key_press(egui::Key::Tab);
+    harness.run();
+    let link = harness.query_by_label("bring back now").map(|node| node.accesskit_node().is_focused());
+    assert_eq!(link, Some(true), "Tab goes on to it, and it stays");
+}
+
+#[test]
+fn a_later_rows_sender_is_cut_at_the_room_its_columns_leave() {
+    // The sheet's maxW of 355 would overrun the 390 text frame with the bar, the spacer and the mark (355 + 8 + 3 + 8
+    // + 3 + 8 + 14 = 399): the columns leave 390 − 14 − 8 − 3 − 8 − 3 − 8 = 346, which the row keeps.
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let state = LaterState { who: "Annelise Vandenberghe-Okonkwo-Halvorssen of the Studio Collective", ..later_states()[0] };
+    let harness = harness(theme, state);
+    let rect = harness.get_by_label(&later_spoken(&state)).rect();
+    let paint = painted(&harness, &later_spoken(&state));
+    let who = paint.shapes.iter().find_map(|shape| match &shape.look {
+        Look::Text { text, .. } if text.starts_with("Annelise") => Some((shape.rect, text.clone())),
+        _ => None,
+    });
+    let (at, words) = who.unwrap();
+    assert!(words.ends_with('…'), "{words}");
+    assert!(run_box(at.width()) <= 346.0 && run_box(at.width()) > 330.0, "{at:?}");
+    assert_eq!(at.left() - rect.left(), 34.0);
 }

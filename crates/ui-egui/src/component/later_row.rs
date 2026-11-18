@@ -6,7 +6,9 @@
 //! the right the pile's mark, 14 px: the snoozed pile's clock and a returned row's arrow in `warn`, the pin in `ink`,
 //! the park pile's pause in `muted`. Line two: the subject in `caption` (`ink` when unread) and, 12 right of it at the
 //! line's end, when the mail comes back in `mono_s` (`warn`) or the message's own date (`muted`). A snoozed row the
-//! pointer is over, or the keyboard is on, shows "bring back now" in the date's place.
+//! pointer is over, or the keyboard is on (keyed or focused), shows "bring back now" in the date's place, and `Tab`
+//! goes on to it. The sender's room is what the columns leave (346 with the account bar), not the sheet's maxW of
+//! 355, which would overrun the 390 text frame by 9.
 
 use egui::{Color32, Id, Rect, Role, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -96,6 +98,9 @@ pub struct Drawn {
 pub fn later_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &LaterRow<'_>, keyed: bool, shown: Option<Shown>) -> Drawn {
     let p = &theme.palette;
     let f = &theme.fonts;
+    // Taken before the row asks for the focus: in the frame `Tab` leaves the row it has given the focus away, and its
+    // link must be there to take it.
+    let had_focus = ui.memory(|memory| memory.has_focus(row.id));
     let drawn = row_with(ui, theme, row.id, HEIGHT, RowGround::Surface, row.current, row.last, shown);
     let spoken = row.spoken;
     drawn.response.widget_info(|| WidgetInfo::selected(Role::ListBoxOption, true, row.current, spoken));
@@ -119,7 +124,10 @@ pub fn later_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &LaterRow<'_>
     top(ui, theme, Rect::from_min_max(pos2(left, one), pos2(right, one + f.body.line)), &first, None);
     // Line two: the subject, and at its end when, or the link in its place.
     let low = f.caption.line;
-    let link = row.link.filter(|_| drawn.hovered || keyed);
+    // Where the link's own id is kept: while it has the focus, it stays.
+    let kept = row.id.with("link-id");
+    let link_focused = ui.data(|data| data.get_temp::<Id>(kept)).is_some_and(|id| ui.memory(|memory| memory.has_focus(id)));
+    let link = row.link.filter(|_| drawn.hovered || drawn.focused || had_focus || link_focused || keyed);
     let mut pressed = false;
     let end = if let Some(words) = link {
         let wide = super::galley(ui, words, f.mono_s, p.cyan_text).size().x.ceil();
@@ -127,7 +135,9 @@ pub fn later_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, row: &LaterRow<'_>
         let at = Rect::from_min_size(pos2(right - wide, two + ((low - high) / 2.0).round()), vec2(wide, high));
         pressed = ui
             .scope_builder(UiBuilder::new().max_rect(at).id_salt("link"), |ui| {
-                link_with(ui, theme, keymap, words, LinkSize::Small, true, None).clicked()
+                let response = link_with(ui, theme, keymap, words, LinkSize::Small, true, None);
+                ui.data_mut(|data| data.insert_temp(kept, response.id));
+                response.clicked()
             })
             .inner;
         at.left()
