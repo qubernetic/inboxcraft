@@ -252,32 +252,85 @@ fn snooze_state() -> Id {
     Id::unique("list-snooze-picker-state")
 }
 
-/// Where the row's time picker hangs from, kept from its opening: the rect of the row's Snooze, relative to the row's
-/// top left, so the float follows the row while the group hides (the pointer gone into the float).
-fn snooze_anchor(id: u64) -> Id {
-    snooze_popup(id).with("anchor")
+/// Where the list keeps the open time picker ([`SnoozeOpen`]) and where the row of its message was drawn
+/// ([`SnoozeRow`]).
+fn snooze_open_id() -> Id {
+    Id::unique("list-snooze-open")
+}
+
+fn snooze_row_id() -> Id {
+    Id::unique("list-snooze-row")
+}
+
+/// The time picker open from a row's Snooze: it belongs to a message, not to the row drawn for it.
+#[derive(Debug, Clone, Copy)]
+struct SnoozeOpen {
+    /// The message it snoozes.
+    message: u64,
+    /// Where it hangs from: the rect of the row's Snooze when it opened, relative to the row's top left, so it follows
+    /// the row while the group hides (the pointer gone into the float) or the row moves (mail coming in above).
+    anchor: Rect,
+    /// The last pass that showed it: a pass between without it (the list not drawn) closes it.
+    shown: u64,
+}
+
+/// The row of the open picker's message as a pass drew it, in sight.
+#[derive(Debug, Clone, Copy)]
+struct SnoozeRow {
+    message: u64,
+    rect: Rect,
+    /// The row's response, which the keyboard goes back to.
+    row: Id,
+    pass: u64,
 }
 
 /// Opens the time picker of the message `message`'s row from its Snooze (the hover action's `id`) on the row `rect`.
 fn open_snooze(ctx: &egui::Context, message: u64, action: Id, rect: Rect) {
-    let anchor = ctx.read_response(action).map_or(rect, |response| response.rect);
+    let anchor = ctx.read_response(action).map_or(rect, |response| response.rect).translate(-rect.min.to_vec2());
+    let shown = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| {
-        data.insert_temp(snooze_anchor(message), anchor.translate(-rect.min.to_vec2()));
+        data.insert_temp(snooze_open_id(), SnoozeOpen { message, anchor, shown });
         data.get_temp_mut_or_default::<TimePicker>(snooze_state()).open();
     });
-    popup::set_open(ctx, snooze_popup(message), true);
 }
 
-/// The time picker of the message `message`'s row `rect` (`row` the row's response), while it is open: the time
-/// chosen, which snoozes the message. A choice or Cancel closes it and gives the row the keyboard; so do `Esc` and a
-/// press outside it, through the float.
-fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox, message: u64, rect: Rect, row: &Response) -> Option<Act> {
-    let popup = snooze_popup(message);
-    if !popup::is_open(ctx, popup) {
-        return None;
+/// The row of `message` was drawn in sight at `rect` (`row` its response): the open picker of that message, if any,
+/// stands under it this frame.
+fn note_snooze_row(ctx: &egui::Context, message: u64, rect: Rect, row: Id) {
+    let open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())).is_some_and(|open| open.message == message);
+    if open {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| data.insert_temp(snooze_row_id(), SnoozeRow { message, rect, row, pass }));
     }
-    let anchor = ctx.data(|data| data.get_temp::<Rect>(snooze_anchor(message))).map_or(rect, |anchor| anchor.translate(rect.min.to_vec2()));
-    let float = popup::Float { id: popup, anchor, width: time_picker::WIDTH, returns_to: row.id };
+}
+
+/// Closes the row's time picker, whichever message it is open on.
+fn close_snooze(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<SnoozeOpen>(snooze_open_id());
+        data.remove::<SnoozeRow>(snooze_row_id());
+    });
+}
+
+/// The time picker open from a row's Snooze, after the list drew its rows: under its message's row if this pass drew
+/// that row in sight, and the pass before showed it; else it closes for good (scrolled away, another list or screen,
+/// the message gone), whichever list drew or did not draw the row, and the keyboard it held goes nowhere. The time chosen snoozes the message. A choice or Cancel
+/// closes it and gives the row the keyboard; so do `Esc` and a press outside it, through the float.
+fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox) -> Option<(u64, Act)> {
+    let open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id()))?;
+    let pass = ctx.cumulative_pass_nr();
+    let drawn = ctx.data(|data| data.get_temp::<SnoozeRow>(snooze_row_id())).filter(|row| row.message == open.message && row.pass == pass);
+    let Some(drawn) = drawn.filter(|_| open.shown.saturating_add(1) >= pass) else {
+        close_snooze(ctx);
+        return None;
+    };
+    ctx.data_mut(|data| data.insert_temp(snooze_open_id(), SnoozeOpen { shown: pass, ..open }));
+    let float = popup::Float {
+        id: snooze_popup(open.message),
+        anchor: open.anchor.translate(drawn.rect.min.to_vec2()),
+        width: time_picker::WIDTH,
+        returns_to: drawn.row,
+    };
     let shown = popup::float(ctx, theme, &float, |ui| {
         let presets: Vec<Preset<'_>> = mailbox.presets().iter().map(|(name, at)| Preset { name, at: *at }).collect();
         let ask = Ask { title: tr!("Snooze until"), confirm: tr!("Snooze"), alert: None, presets: &presets, extra: None, note: None };
@@ -288,18 +341,19 @@ fn snooze_picker(ctx: &egui::Context, theme: &Theme, mailbox: &Mailbox, message:
     });
     match shown {
         Some(Picked::At { at, .. }) => {
-            popup::set_open(ctx, popup, false);
-            row.request_focus();
-            Some(Act::Snooze(at))
+            close_snooze(ctx);
+            ctx.memory_mut(|memory| memory.request_focus(drawn.row));
+            Some((open.message, Act::Snooze(at)))
         }
         Some(Picked::Cancelled | Picked::Extra) => {
-            popup::set_open(ctx, popup, false);
-            row.request_focus();
+            close_snooze(ctx);
+            ctx.memory_mut(|memory| memory.request_focus(drawn.row));
             None
         }
         Some(Picked::Open) => None,
+        // Esc or a press outside: the float already gave the row the keyboard.
         None => {
-            popup::set_open(ctx, popup, false);
+            close_snooze(ctx);
             None
         }
     }
@@ -367,11 +421,11 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     let selected = mailbox.selected() == Some(message.id);
     response.widget_info(|| WidgetInfo::selected(WidgetRole::ListBoxOption, true, selected, mailbox.spoken(message)));
     let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
-    // Drawn whether the row shows or not, so a picker stays with its row scrolled away.
-    let snoozed = snooze_picker(ui.ctx(), theme, mailbox, message.id, rect, &response);
     if !ui.is_rect_visible(rect) {
-        return Drawn { clicked: response.clicked(), acted: snoozed, out: leaving, presets: false };
+        return Drawn { clicked: response.clicked(), acted: None, out: leaving, presets: false };
     }
+    // In sight: the time picker open on this message, if any, stands under this row ([`snooze_picker`]).
+    note_snooze_row(ui.ctx(), message.id, rect, response.id);
     let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
     let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
     if leaving {
@@ -384,10 +438,11 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
     }
     let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
     let pressed = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
-    let mut acted = pressed.and_then(|index| act(message, index)).or(snoozed);
+    let mut acted = pressed.and_then(|index| act(message, index));
     let presets = pressed == Some(SNOOZE_ACTION);
     if presets {
         open_snooze(ui.ctx(), message.id, actions_id(message.id).with(SNOOZE_ACTION), rect);
+        note_snooze_row(ui.ctx(), message.id, rect, response.id);
     }
     if response.has_focus() {
         focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
@@ -999,6 +1054,16 @@ pub fn rows_built(ctx: &egui::Context) -> Option<usize> {
 
 /// The rows, or what to say when there are none. Returns the message clicked this frame.
 pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
+    let mut asked = drawn_rows(ui, theme, keymap, mailbox);
+    // After every row of every list path: the picker stands under its message's row only if one was drawn.
+    if let Some(snoozed) = snooze_picker(ui.ctx(), theme, mailbox) {
+        asked.acted = asked.acted.or(Some(snoozed));
+    }
+    asked
+}
+
+/// [`rows`] before the row's time picker.
+fn drawn_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox) -> Asked {
     if mailbox.place() == Place::Outbox && mailbox.query().is_empty() {
         return Asked { out: true, outbox: outbox(ui, theme, keymap, mailbox), ..Asked::default() };
     }

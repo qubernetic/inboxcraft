@@ -836,3 +836,78 @@ fn the_keyboard_opens_the_hover_snooze_s_picker_and_esc_gives_the_row_back_its_f
     assert!(harness.query_by_label("Snooze until").is_none());
     assert!(harness.state().mailbox().undoable().is_none());
 }
+
+/// The id of the listed message with `subject`.
+fn id_with(harness: &Harness<'static, InboxApp>, subject: &str) -> u64 {
+    harness.state().mailbox().messages().iter().find(|row| row.subject == subject).map(|row| row.id).unwrap()
+}
+
+#[test]
+fn the_hover_snooze_s_picker_closes_for_good_when_its_row_is_not_drawn() {
+    let mut harness = still();
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    // Another list: the row is not drawn, the picker goes, and does not come back with the row.
+    harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Archive));
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none(), "gone with its row");
+    harness.state_mut().mailbox_mut().open(Place::View(inboxcraft_model::Role::Inbox));
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and stays closed with the row back");
+    assert!(harness.state().mailbox().undoable().is_none(), "nothing snoozed");
+    // The list itself undrawn (the calendar, then Mail again): the same.
+    snooze_odile(&mut harness);
+    harness.get_by_label("Snooze until");
+    harness.state_mut().show_calendar();
+    harness.run();
+    assert!(harness.query_by_label("Snooze until").is_none());
+    harness.state_mut().run_action(&egui::Context::default(), crate::keymap::MAIL);
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "no picker comes back with the list");
+}
+
+#[test]
+fn the_hover_snooze_s_picker_closes_when_its_message_goes_and_stays_closed_when_it_comes_back() {
+    let mut harness = still();
+    let rota = id_with(&harness, "Allotment rota for November");
+    snooze_odile(&mut harness);
+    harness.state_mut().mailbox_mut().act(rota, crate::mailbox::Act::Done);
+    harness.run_steps(5);
+    assert!(harness.query_by_label(ODILE).is_none(), "the message is done");
+    assert!(harness.query_by_label("Snooze until").is_none(), "its picker went with it");
+    harness.state_mut().mailbox_mut().undo();
+    harness.run_steps(5);
+    harness.get_by_label(ODILE);
+    assert!(harness.query_by_label("Snooze until").is_none(), "and does not come back with it");
+}
+
+#[test]
+fn the_hover_snooze_s_picker_stays_with_its_message_when_mail_comes_in_above() {
+    let mut harness = still();
+    let rota = id_with(&harness, "Allotment rota for November");
+    harness.state_mut().mailbox_mut().act(rota, crate::mailbox::Act::Done);
+    harness.run_steps(3);
+    // Teodor's row, its picker open.
+    let row = harness.get_by_label(TEODOR).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    let snooze = on_row(&harness, row, "Snooze");
+    harness.hover_at(snooze.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Snooze").find(|node| node.rect() == snooze).unwrap().click();
+    harness.run();
+    let before = harness.get_by_label("Snooze until").rect();
+    // The rota comes back above it: Teodor's row moves down, and the picker with it.
+    harness.state_mut().mailbox_mut().undo();
+    harness.run_steps(3);
+    let moved = harness.get_by_label(TEODOR).rect().top() - row.top();
+    assert!(moved > 0.0, "the row moved down");
+    let after = harness.get_by_label("Snooze until").rect();
+    assert!((after.top() - before.top() - moved).abs() < 0.5, "the picker followed it: {before:?} {after:?} {moved}");
+    harness.get_by_label("Tomorrow morning, Fri 08:00").click();
+    harness.run_steps(4);
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Photos from the coast walk"), "Teodor's message snoozed");
+    harness.get_by_label(ODILE);
+}
