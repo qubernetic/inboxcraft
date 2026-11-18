@@ -108,14 +108,26 @@ pub enum IconId {
     Changed,
     /// Older: a clock turning back, an invitation a later one replaced.
     Older,
-    /// Back in the reader's place: the floating composer's (its frame's glyph, not one of the icon sheet's 45, so not
-    /// in [`IconId::ALL`]).
+    /// Check: a plain tick, the mark of a done row under "Show done".
+    Check,
+    /// Countdown: a clock counting down, a send in its hold.
+    Countdown,
+    /// Pause: two bars, the park pile's mark on a row of Later.
+    Pause,
+    /// Came back: an arrow turning up and back, a row back from a snooze.
+    CameBack,
+    /// Back in the reader's place: the floating composer's (its frame's glyph, past the icon sheet's own).
     Dock,
 }
 
 impl IconId {
+    /// How many of [`IconId::ALL`], from the first, the icon set's own sheet draws; the ids after them are marks that
+    /// only a row's sheet draws (the done row's tick, the send's countdown, the park pile's pause, the row back from a
+    /// snooze).
+    pub const SHEET: usize = 45;
+
     /// Every id, in the order of [`IconId::index`].
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 50] = [
         Self::Inbox,
         Self::Done,
         Self::Archive,
@@ -161,6 +173,11 @@ impl IconId {
         Self::Globe,
         Self::Changed,
         Self::Older,
+        Self::Check,
+        Self::Countdown,
+        Self::Pause,
+        Self::CameBack,
+        Self::Dock,
     ];
 
     /// Its place in [`IconId::ALL`]; a test checks the two agree, so a new id must join the list.
@@ -212,7 +229,11 @@ impl IconId {
             Self::Globe => 42,
             Self::Changed => 43,
             Self::Older => 44,
-            Self::Dock => 45,
+            Self::Check => 45,
+            Self::Countdown => 46,
+            Self::Pause => 47,
+            Self::CameBack => 48,
+            Self::Dock => 49,
         }
     }
 }

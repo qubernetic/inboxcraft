@@ -59,6 +59,10 @@ pub(super) const fn glyph(id: IconId) -> char {
         IconId::Globe => '\u{e288}',     // globe
         IconId::Changed => '\u{e094}',   // arrows-clockwise
         IconId::Older => '\u{e1a0}',     // clock-counter-clockwise
+        IconId::Check => '\u{e182}',     // check
+        IconId::Countdown => '\u{ed2c}', // clock-countdown
+        IconId::Pause => '\u{e39e}',     // pause
+        IconId::CameBack => '\u{e08a}',  // arrow-u-up-left
         IconId::Dock => '\u{e0a6}',      // the composer frame's glyph for its place
     }
 }
