@@ -112,7 +112,7 @@ pub(crate) fn chip_with(ui: &mut Ui, theme: &Theme, name: &str, spoken: &str, st
         crate::iconset::paint_glyph(&painter, at, WARNING, if enabled { p.minus } else { p.dim });
         left += glyph + s.s1;
     }
-    painter.galley(pos2(left, rect.center().y - words.size().y / 2.0), words, ink);
+    paint::run_at(&painter, pos2(left, rect.center().y - words.size().y / 2.0), words, ink);
     crate::iconset::paint(&painter, cross, IconId::Close, cross_ink);
     response
 }
@@ -225,7 +225,7 @@ pub(crate) fn recipient_field_with(
         let top = if wrapped { rect.top() + (height - inner(shown_rows)) / 2.0 } else { rect.top() + (height - chip) / 2.0 };
         let first = top + chip / 2.0;
         let name = galley(ui, line.name, label, p.muted);
-        painter.galley(pos2(rect.left() + pad, first - name.size().y / 2.0), name, p.muted);
+        paint::run_at(&painter, pos2(rect.left() + pad, first - name.size().y / 2.0), name, p.muted);
         let mut typed = None;
         // The chips and the typing, from `origin`: in the box, or in the area that scrolls in it.
         let mut content = |ui: &mut Ui, origin: egui::Pos2| {
@@ -274,7 +274,7 @@ pub(crate) fn recipient_field_with(
             let response = ui.interact(place, id.with("copies"), if enabled { Sense::click() } else { Sense::hover() });
             response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, tr!("Cc  Bcc")));
             let ink = if enabled && (response.hovered() || response.has_focus()) { p.ink } else { p.muted };
-            painter.galley(place.min, copies, ink);
+            paint::run_at(&painter, place.min, copies, ink);
             if response.has_focus() {
                 paint::focus_ring(&painter, theme, place, paint::Ring::Outside);
             }
@@ -291,7 +291,7 @@ pub(crate) fn recipient_field_with(
             if bring {
                 response.scroll_to_me(None);
             }
-            painter.galley(place.min, text, p.minus);
+            paint::rows_at(&painter, place.min, width, text, p.minus);
         }
         RecipientsOutput { field: typed, removed, copies: copies_pressed }
     })

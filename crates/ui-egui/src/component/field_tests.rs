@@ -82,6 +82,34 @@ pub(crate) fn one(harness: &Harness<'_, impl Sized>, text: &str) -> Drawn {
     all.into_iter().next().unwrap_or_else(|| panic!("{text}"))
 }
 
+/// The one sentence `text` painted in the last frame row by row (`paint::rows_at` paints each row of its own): its rows
+/// one after the other, as one text over all of them.
+pub(crate) fn rows(harness: &Harness<'_, impl Sized>, text: &str) -> Drawn {
+    let all = drawn(harness);
+    let found: Vec<Drawn> = (0..all.len())
+        .filter_map(|from| {
+            let mut joined = String::new();
+            for (at, row) in all.iter().enumerate().skip(from) {
+                if !joined.is_empty() {
+                    joined.push(' ');
+                }
+                joined.push_str(&row.text);
+                if joined == text {
+                    let rect = all.get(from..=at)?.iter().fold(Rect::NOTHING, |rect, row| rect.union(row.rect));
+                    let first = all.get(from)?;
+                    return Some(Drawn { text: joined, rect, ..first.clone() });
+                }
+                if !text.starts_with(&joined) {
+                    return None;
+                }
+            }
+            None
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "{text}: {found:#?}");
+    found.into_iter().next().unwrap_or_else(|| panic!("{text}"))
+}
+
 /// The caret a field painted: a filled 7 × 16 block in `cyan_edge`.
 pub(crate) fn caret(own_paint: &crate::component::tests::Paint, colour: Color32) -> Option<Rect> {
     own_paint.rects().find_map(|shape| match shape.look {
@@ -844,7 +872,7 @@ fn a_password_field_looks_as_its_sheet_says_in_every_state() {
                     let hint = one(&harness, "empty keeps the stored one");
                     assert_eq!(hint.rect.min, rect.min + vec2(13.0, 7.0), "{at}");
                     assert_eq!((hint.colour, hint.family.as_str(), hint.size), (p.muted, "Proportional", 14.0), "{at}");
-                    let note = one(&harness, "The stored password is in your system's credential store and is never shown.");
+                    let note = rows(&harness, "The stored password is in your system's credential store and is never shown.");
                     assert_eq!((note.rect.min, note.colour, note.size), (rect.left_bottom() + vec2(0.0, 8.0), p.muted, 12.0), "{at}");
                     assert!((note.rect.height() - 36.0).abs() < 0.01, "{at}: two lines in 320 {note:?}");
                 }

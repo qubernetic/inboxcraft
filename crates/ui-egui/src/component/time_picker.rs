@@ -29,6 +29,7 @@ use super::popup::{self, Item, ItemState};
 use super::switch::switch;
 use super::typed_time::{self, short};
 use super::{solid, soon};
+use crate::draw::paint;
 
 pub use super::typed_time::MAX_TYPED;
 
@@ -154,7 +155,7 @@ fn title(ui: &mut Ui, theme: &Theme, text: &str) {
     let right = rect.right() - pad - size.x;
     chip.paint(&painter, pos2(right, (rect.center().y - size.y / 2.0).round()));
     let words = super::cut(ui, text, theme.fonts.label, p.muted, right - theme.spacing.s2 - rect.left() - pad);
-    painter.galley(pos2(rect.left() + pad, rect.center().y - words.size().y / 2.0), words, p.muted);
+    paint::run_at(&painter, pos2(rect.left() + pad, rect.center().y - words.size().y / 2.0), words, p.muted);
 }
 
 /// A preset row: the name, and its time in `mono_s` at the right end; clicked when chosen. A screen reader hears both.
@@ -226,7 +227,7 @@ pub(crate) fn show_with(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask:
             let text = ui.painter().layout_job(job);
             let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
-            solid(ui).galley(rect.min, text, p.muted);
+            paint::rows_at(&solid(ui), rect.min, rect.width(), text, p.muted);
         }
         state.chosen(now, offset)
     });
@@ -239,7 +240,7 @@ pub(crate) fn show_with(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask:
             state.alert = !state.alert;
         }
         let words = super::cut(ui, name, theme.fonts.body, p.ink, row.min_rect().left() - s.s2 - rect.left() - s.s3);
-        solid(ui).galley(pos2(rect.left() + s.s3, rect.center().y - words.size().y / 2.0), words, p.ink);
+        paint::run_at(&solid(ui), pos2(rect.left() + s.s3, rect.center().y - words.size().y / 2.0), words, p.ink);
     }
     rule(ui, p.line);
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), theme.boxes().button + s.s2 * 2.0), Sense::hover());
@@ -265,7 +266,7 @@ pub(crate) fn show_with(ui: &mut Ui, theme: &Theme, state: &mut TimePicker, ask:
             let text = ui.painter().layout_job(job);
             let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), text.size().y), Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(Role::Label, true, note));
-            solid(ui).galley(rect.min, text, p.muted);
+            paint::rows_at(&solid(ui), rect.min, rect.width(), text, p.muted);
         });
     }
     // Esc cancels where no float takes it.

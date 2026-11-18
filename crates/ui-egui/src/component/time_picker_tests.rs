@@ -341,7 +341,7 @@ fn a_time_picker_looks_as_its_sheet_says_in_every_state() {
             let hovered = found.iter().any(|(rect, fill)| *fill == p.stage && rect.height() == 32.0);
             assert_eq!(hovered, state == Sheet::Hover, "{at}");
             if state == Sheet::EmptyHint {
-                let hint = one(&harness, "It counts as soon as it reads as a time: no Enter needed.");
+                let hint = crate::component::field::tests::rows(&harness, "It counts as soon as it reads as a time: no Enter needed.");
                 assert_eq!((hint.rect.min, hint.colour, hint.rect.height()), (field.left_bottom() + vec2(0.0, 8.0), p.muted, 36.0), "{at}");
             }
             if state == Sheet::WithAlert {

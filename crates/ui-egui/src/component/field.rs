@@ -576,7 +576,7 @@ fn label_row(ui: &mut Ui, theme: &Theme, label: &str, width: f32) {
     let text = ui.painter().layout_job(job);
     let (rect, _) = ui.allocate_exact_size(vec2(width, text.size().y.max(font.line)), Sense::hover());
     if ui.is_rect_visible(rect) {
-        super::solid(ui).galley(rect.min, text, theme.palette.muted);
+        paint::rows_at(&super::solid(ui), rect.min, width, text, theme.palette.muted);
     }
 }
 
@@ -594,7 +594,7 @@ fn under(ui: &mut Ui, theme: &Theme, error: Option<&str>, note: Option<&str>, wi
         response.scroll_to_me(None);
     }
     if ui.is_rect_visible(rect) {
-        super::solid(ui).galley(rect.min, text, colour);
+        paint::rows_at(&super::solid(ui), rect.min, width, text, colour);
     }
 }
 
@@ -668,7 +668,7 @@ fn paint_hint(ui: &Ui, theme: &Theme, hint: &str, font: Font, at: egui::Pos2, cl
     }
     let shift = if focus { caret_size(theme).x + theme.spacing.s2 } else { 0.0 };
     let text = layout(ui, hint, font, theme.palette.muted, None, false);
-    super::solid(ui).with_clip_rect(clip).galley(at + vec2(shift, 0.0), text, theme.palette.muted);
+    paint::run_at(&super::solid(ui).with_clip_rect(clip), at + vec2(shift, 0.0), text, theme.palette.muted);
 }
 
 /// The label and screen-reader name of a field.
@@ -797,7 +797,7 @@ pub(crate) fn bare_line(ui: &mut Ui, theme: &Theme, id: Id, text: &mut String, f
     if empty && !field.hint.is_empty() {
         let shift = if seen.focus { caret_size(theme).x + theme.spacing.s1 } else { 0.0 };
         let hint = layout(ui, field.hint, font, p.muted, None, false);
-        super::solid(ui).with_clip_rect(rect).galley(inner.min + vec2(shift, 0.0), hint, p.muted);
+        paint::run_at(&super::solid(ui).with_clip_rect(rect), inner.min + vec2(shift, 0.0), hint, p.muted);
     }
     if seen.focus {
         paint_caret(ui, theme, id, &output, rect, seen.forced);

@@ -280,10 +280,10 @@ pub fn title(ui: &mut Ui, theme: &Theme, label: &str, count: Option<&str>) {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, p.panel);
         let name = galley(ui, label, theme.fonts.label, p.muted);
-        painter.galley(pos2(rect.left() + s.s3, rect.center().y - name.size().y / 2.0), name, p.muted);
+        paint::run_at(&painter, pos2(rect.left() + s.s3, rect.center().y - name.size().y / 2.0), name, p.muted);
         if let Some(count) = count {
             let count = galley(ui, count, theme.fonts.mono_s, p.muted);
-            painter.galley(pos2(rect.right() - s.s3 - count.size().x, rect.center().y - count.size().y / 2.0), count, p.muted);
+            paint::run_at(&painter, pos2(rect.right() - s.s3 - count.size().x, rect.center().y - count.size().y / 2.0), count, p.muted);
         }
     }
     hairline(ui, theme);
@@ -299,7 +299,7 @@ pub fn empty(ui: &mut Ui, theme: &Theme, text: &str) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, text.size().y + s.s3 * 2.0), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
     if ui.is_rect_visible(rect) {
-        ui.painter().galley(rect.min + vec2(s.s3, s.s3), text, theme.palette.muted);
+        paint::rows_at(ui.painter(), rect.min + vec2(s.s3, s.s3), width - s.s3 * 2.0, text, theme.palette.muted);
     }
 }
 
@@ -456,12 +456,12 @@ pub(crate) fn menu_item_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, item: 
         let caption = galley(ui, caption, theme.fonts.mono_s, p.muted);
         right -= caption.size().x;
         let colour = arriving(theme, p.muted, shown);
-        painter.galley(pos2(right, mid - caption.size().y / 2.0), caption, colour);
+        paint::run_at(&painter, pos2(right, mid - caption.size().y / 2.0), caption, colour);
         right -= s.s2;
     }
     let ink = arriving(theme, name_ink, shown);
     let text = cut(ui, item.name, theme.fonts.body, ink, right - left);
-    painter.galley(pos2(left, mid - text.size().y / 2.0), text, ink);
+    paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
     response
 }
 
@@ -505,12 +505,12 @@ pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool,
     if let Some(reason) = reason.filter(|reason| !reason.is_empty()) {
         let reason = galley(ui, reason, theme.fonts.mono_s, p.muted);
         right -= reason.size().x;
-        painter.galley(pos2(right, mid - reason.size().y / 2.0), reason, arriving(theme, p.muted, shown));
+        paint::run_at(&painter, pos2(right, mid - reason.size().y / 2.0), reason, arriving(theme, p.muted, shown));
         right -= s.s2;
     }
     let ink = arriving(theme, if available && !soon { p.ink } else { p.muted }, shown);
     let text = cut(ui, name, theme.fonts.body, ink, right - left);
-    painter.galley(pos2(left, mid - text.size().y / 2.0), text, ink);
+    paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
     response
 }
 
@@ -560,12 +560,12 @@ pub(crate) fn suggestion_row_with(ui: &mut Ui, theme: &Theme, name: &str, addres
     let most = NAME.min((right - left).max(1.0));
     let text = cut(ui, name, theme.fonts.body, ink, most);
     let name_width = text.size().x;
-    painter.galley(pos2(left, mid - text.size().y / 2.0), text, ink);
+    paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
     let start = (left + name_width).round() + s.s2;
     if right - start > 1.0 && !address.is_empty() {
         let muted = arriving(theme, p.muted, shown);
         let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
-        painter.galley(pos2(start, mid - address.size().y / 2.0), address, muted);
+        paint::run_at(&painter, pos2(start, mid - address.size().y / 2.0), address, muted);
     }
     response
 }

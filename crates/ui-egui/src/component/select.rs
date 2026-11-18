@@ -202,7 +202,7 @@ impl<T: Copy + PartialEq> Select<'_, T> {
         };
         painter.add(Shape::convex_polygon(points, mark, Stroke::NONE));
         let text = cut(ui, self.shown, theme.fonts.mono, value, caret.left() - GAP - rect.left() - PAD);
-        painter.galley(pos2(rect.left() + PAD, rect.center().y - text.size().y / 2.0), text, value);
+        paint::run_at(&painter, pos2(rect.left() + PAD, rect.center().y - text.size().y / 2.0), text, value);
         if lit.focus {
             paint::focus_ring(&painter, theme, rect, Ring::Outside);
         }

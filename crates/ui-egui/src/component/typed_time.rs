@@ -373,7 +373,7 @@ pub(crate) fn typed_time_with(
                 left += side + theme.spacing.s1;
             }
             let words = super::cut(ui, &words, font, colour, rect.right() - left);
-            painter.galley(pos2(left, rect.top()), words, colour);
+            crate::draw::paint::run_at(&painter, pos2(left, rect.top()), words, colour);
         }
         response
     })
