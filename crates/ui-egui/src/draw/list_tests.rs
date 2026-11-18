@@ -2657,3 +2657,100 @@ fn in_one_pane_the_reader_starts_with_back_to_the_list() {
     harness.run();
     assert!(harness.query_by_label("Back to the list").is_none(), "two panes: the list is beside the reader");
 }
+
+/// The read state of every message of the list.
+fn read_states(harness: &Harness<'static, InboxApp>) -> Vec<(u64, bool)> {
+    harness.state().mailbox().messages().iter().map(|row| (row.id, row.seen)).collect()
+}
+
+/// Where the widget with the keyboard's focus stands, as a screen reader is told.
+fn focused_rect(harness: &Harness<'static, InboxApp>) -> Option<egui::Rect> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).map(|node| node.rect())
+}
+
+#[test]
+fn in_one_pane_with_nothing_open_tab_walks_the_list_and_it_stays_in_front() {
+    let mut harness = wide(900.0);
+    let was = read_states(&harness);
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "nothing open: the list is in front");
+    let mut reached = Vec::new();
+    for _ in 0..80 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        if let Some(row) = super::list::focused_row(&harness.ctx) {
+            if !reached.contains(&row) {
+                reached.push(row);
+            }
+            assert!(rows(&harness) > 0, "Tab onto {row}: the list stays in front");
+            assert_eq!(super::reader_rect(&harness.ctx), None, "and the reader is not shown");
+            assert_eq!(harness.state().mailbox().selected(), Some(row), "the row is keyed");
+        }
+        if reached.len() == 3 {
+            break;
+        }
+    }
+    assert_eq!(reached.len(), 3, "Tab walks on from row to row: {reached:?}");
+    assert_eq!(read_states(&harness), was, "Tab read nothing");
+}
+
+#[test]
+fn in_one_pane_with_nothing_open_j_moves_the_keyed_row_and_reads_nothing() {
+    let mut harness = wide(900.0);
+    let was = read_states(&harness);
+    harness.key_press(Key::J);
+    harness.run();
+    let first = harness.state().mailbox().selected();
+    assert!(first.is_some(), "J keys a row");
+    harness.key_press(Key::J);
+    harness.run();
+    assert_ne!(harness.state().mailbox().selected(), first, "and moves on");
+    assert!(rows(&harness) > 0 && super::reader_rect(&harness.ctx).is_none(), "the list stays in front");
+    assert!(selected_focused(&harness), "the keyed row has the focus");
+    assert_eq!(read_states(&harness), was, "J read nothing it did not show");
+}
+
+#[test]
+fn in_one_pane_enter_opens_into_the_reader_and_esc_goes_back_to_the_row_it_left() {
+    let mut harness = wide(900.0);
+    // A row keyed by J, then the walk: list, Enter, reader, Esc, list.
+    for _ in 0..2 {
+        harness.key_press(Key::J);
+        harness.run();
+    }
+    let keyed = harness.state().mailbox().selected().unwrap();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "Enter: the message in the list's place");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    assert!(seen(&harness, keyed), "Enter reads it");
+    let focus = focused_rect(&harness).expect("the focus goes into the reader, not nowhere");
+    assert!(reader.contains_rect(focus), "the focus is in the reader: {focus:?} in {reader:?}");
+    harness.key_press(Key::Tab);
+    harness.run();
+    let focus = focused_rect(&harness).expect("Tab walks on in the reader");
+    assert!(reader.contains_rect(focus), "Tab stays in the reader: {focus:?}");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "Esc: the list is back");
+    assert_eq!(harness.state().mailbox().selected(), Some(keyed));
+    assert!(selected_focused(&harness), "the keyboard on the row it left");
+    // J after Esc walks the list and reads nothing.
+    let was = read_states(&harness);
+    harness.key_press(Key::J);
+    harness.run();
+    assert_ne!(harness.state().mailbox().selected(), Some(keyed));
+    assert!(rows(&harness) > 0);
+    assert_eq!(read_states(&harness), was, "J after Esc reads nothing");
+    // A press opens too, into the reader.
+    let pressed = harness.state().mailbox().selected().unwrap();
+    let label = harness.state().mailbox().messages().iter().find(|row| row.id == pressed).map(|row| harness.state().mailbox().spoken(row)).unwrap();
+    harness.get_by_label(&label).click();
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "a press: the message in the list's place");
+    assert!(seen(&harness, pressed), "a press reads it");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    assert!(focused_rect(&harness).is_some_and(|focus| reader.contains_rect(focus)), "the focus in the reader");
+}

@@ -131,9 +131,14 @@ pub struct InboxApp {
     /// A row of the list was pressed or keyed last, not the reader: with nothing else focused the list has the keyboard
     /// ([`InboxApp::list_has_keyboard`]).
     list_keys: bool,
-    /// In one pane ([`ONE_PANE`]), the list stands in the open message's place (`Esc` there); otherwise the message
-    /// does.
-    list_front: bool,
+    /// In one pane ([`ONE_PANE`]), the open message stands in the list's place: `Enter` or a press put it there, `Esc`
+    /// or "Back to the list" take it away. With nothing open, or while a person walks the list, the list is in front.
+    reading: bool,
+    /// In one pane, the list stands in the docked composer's place (`Esc` in the composer); "New message" brings the
+    /// composer back.
+    list_over_composer: bool,
+    /// In one pane, the reader takes the focus once it is drawn: `Enter` or a press opened a message into it.
+    focus_reader: bool,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -252,7 +257,9 @@ impl InboxApp {
             hover: None,
             list_row: None,
             list_keys: true,
-            list_front: false,
+            reading: false,
+            list_over_composer: false,
+            focus_reader: false,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -585,7 +592,9 @@ impl InboxApp {
             self.mailbox.select_keyed(from);
         }
         self.mailbox.step_in(&list::order(ctx), forward, rows);
-        let hidden = one_pane(ctx) && self.list_front;
+        // In one pane a message in front stays in front as the keys read on; behind the list, they only walk it.
+        let hidden = one_pane(ctx) && !self.message_in_front();
+        self.reading = !hidden && one_pane(ctx);
         if let Some(to) = self.mailbox.selected() {
             // In one pane with the list in front the reader is not shown: the keyed message is not read yet.
             if hidden {
@@ -609,18 +618,22 @@ impl InboxApp {
         self.mailbox.select_keyed(id);
         ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(id)));
         self.list_keys = false;
-        self.list_front = false;
+        self.reading = true;
+        self.focus_reader = one_pane(ctx);
         ctx.request_repaint();
     }
 
     /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
     fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
-        let swapped = one_pane(ctx) && !self.list_front && self.reader.open_id().is_some();
-        if self.screen != Screen::Mail || (self.list_keys && !swapped) || self.docked() {
+        let single = one_pane(ctx);
+        let composing = self.docked() && !self.list_over_composer;
+        let swapped = single && (composing || (!self.docked() && self.message_in_front() && self.reader.open_id().is_some()));
+        if self.screen != Screen::Mail || (self.list_keys && !swapped) || (self.docked() && !swapped) {
             return false;
         }
         self.list_keys = true;
-        self.list_front = one_pane(ctx);
+        self.reading = false;
+        self.list_over_composer = single && self.docked();
         if let Some(id) = self.mailbox.selected() {
             self.mailbox.select_keyed(id);
             ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
@@ -636,7 +649,8 @@ impl InboxApp {
             self.mailbox.read_preview(id);
             self.mailbox.select(clicked);
             self.list_keys = true;
-            self.list_front = false;
+            self.reading = true;
+            self.focus_reader = one_pane(ctx);
             if let Some(focused) = self.list_row.filter(|focused| Some(*focused) != clicked) {
                 ctx.memory_mut(|memory| memory.surrender_focus(list::row_id(focused)));
             }
@@ -645,6 +659,37 @@ impl InboxApp {
             self.mailbox.select_by_focus(id);
             self.list_keys = true;
         }
+    }
+
+    /// Which panes the body shows: whether it holds one pane, whether the list shows, whether the reader (or the
+    /// composer in its place) does. In one pane what is in front follows what is open: nothing open, the list; a
+    /// message the person opened, or the docked composer, in its place.
+    fn panes(&mut self, ctx: &egui::Context, docked: bool, full: bool) -> (bool, bool, bool) {
+        let single = one_pane(ctx);
+        if self.reader.open_id().is_none() {
+            self.reading = false;
+        }
+        if !docked {
+            self.list_over_composer = false;
+        }
+        let front = (docked && !self.list_over_composer) || (!docked && self.message_in_front() && self.reader.open_id().is_some());
+        (single, !single || !front, !single || front || full)
+    }
+
+    /// A message opened into the one pane: the focus goes to the reader's first tool, not nowhere.
+    fn focus_reader_tool(&mut self, ctx: &egui::Context) {
+        let back = reader::take_back_id(ctx);
+        if std::mem::take(&mut self.focus_reader)
+            && let Some(back) = back
+        {
+            ctx.memory_mut(|memory| memory.request_focus(back));
+        }
+    }
+
+    /// In one pane, whether the open message stands in the list's place: one the person opened (`Enter`, a press) or
+    /// one selected from outside (a script); never one the keys or the focus walked to, which stays behind the list.
+    fn message_in_front(&self) -> bool {
+        self.reading || !self.mailbox.keyed()
     }
 
     /// Whether the list has the keyboard: a row has the focus, or a row was pressed or keyed last and nothing else has
@@ -989,13 +1034,17 @@ impl InboxApp {
     /// at a time.
     pub fn compose(&mut self) {
         self.show_mail();
+        self.list_over_composer = false;
         self.reader.set_full_width(false);
         if let Some(composer) = &mut self.composer {
             composer.set_floating(false);
             return;
         }
         match Composer::start(&mut self.mailbox) {
-            Ok(composer) => self.composer = Some(composer),
+            Ok(composer) => {
+                self.composer = Some(composer);
+                self.list_over_composer = false;
+            }
             Err(error) => self.mailbox.fail(error),
         }
     }
@@ -1015,6 +1064,7 @@ impl InboxApp {
         match Composer::answer(&mut self.mailbox, id, answer) {
             Ok(composer) => {
                 self.composer = Some(composer);
+                self.list_over_composer = false;
                 true
             }
             Err(error) => {
@@ -1095,7 +1145,10 @@ impl InboxApp {
         self.show_mail();
         self.reader.set_full_width(false);
         match Composer::open(&mut self.mailbox, draft) {
-            Ok(composer) => self.composer = Some(composer),
+            Ok(composer) => {
+                self.composer = Some(composer);
+                self.list_over_composer = false;
+            }
             Err(error) => self.mailbox.fail(error),
         }
     }
@@ -1433,10 +1486,7 @@ impl InboxApp {
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
         // In one pane the open message (or the composer in its place) and the list swap.
-        let single = one_pane(ui.ctx());
-        let front = docked || (!self.list_front && self.reader.open_id().is_some());
-        let list_shown = !single || !front;
-        let reader_shown = !single || front || full;
+        let (single, list_shown, reader_shown) = self.panes(ui.ctx(), docked, full);
         let mut layers = Panes::begin(ui.painter());
         #[cfg(test)]
         ui.data_mut(|data| data.remove::<egui::Rect>(egui::Id::unique("reader-rect")));
@@ -1526,6 +1576,7 @@ impl InboxApp {
             });
             // A press in the reader: someone reads there, and the list's keys rest until a row is pressed or keyed.
             let reader = shown.response.rect;
+            self.focus_reader_tool(ui.ctx());
             #[cfg(test)]
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("reader-rect"), reader));
             if ui.input(|input| input.pointer.any_pressed() && input.pointer.press_origin().is_some_and(|at| reader.contains(at))) {

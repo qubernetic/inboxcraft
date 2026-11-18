@@ -306,17 +306,31 @@ fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
 
 /// The toolbar of mail actions, then the subject under it with who wrote in the thread.
 /// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
-/// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Whether it was drawn.
+/// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Its id is kept for [`take_back_id`]. Whether it was drawn.
 pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {
     if !super::one_pane(ui.ctx()) {
         return false;
     }
-    if IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap).clicked() {
+    let response = IconButton::new(IconId::Back, tr!("Back to the list")).action(keymap::BACK).show(ui, theme, keymap);
+    ui.data_mut(|data| data.insert_temp(back_kept_id(), response.id));
+    if response.clicked() {
         drawn.asked.push(Asked::Back);
     }
     true
 }
 
+/// Where the id of the "Back to the list" drawn in this pass is kept.
+fn back_kept_id() -> egui::Id {
+    egui::Id::unique("reader-back")
+}
+
+/// Takes the id of the "Back to the list" the reader drew since the last take: where the focus goes when a message is
+/// opened into the one pane.
+pub(super) fn take_back_id(ctx: &egui::Context) -> Option<egui::Id> {
+    let id = ctx.data(|data| data.get_temp::<egui::Id>(back_kept_id()));
+    ctx.data_mut(|data| data.remove::<egui::Id>(back_kept_id()));
+    id
+}
 fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let s = &theme.spacing;
