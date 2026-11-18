@@ -28,27 +28,33 @@ struct Seen {
 
 /// `document` drawn by the reader's blocks in a pane `width` × `high` that scrolls, its quotes shown or not.
 fn fitted(document: Document, quotes: bool, width: f32, high: f32) -> Harness<'static, Seen> {
+    fitted_at(document, quotes, width, high, 1.0)
+}
+
+/// [`fitted`] at `ppp` physical pixels a point.
+fn fitted_at(document: Document, quotes: bool, width: f32, high: f32, ppp: f32) -> Harness<'static, Seen> {
     let theme = Theme::new(Mode::Light, TextScale::default());
     let mut reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
     if quotes {
         reader.toggle_quotes(1);
     }
-    let mut harness = Harness::builder().with_size(vec2(width, high)).with_context_setup(crate::theme::install_fonts).build_ui_state(
-        move |ui, seen: &mut Seen| {
-            let room = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, high));
-            ui.scope_builder(UiBuilder::new().max_rect(room), |ui| {
-                let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-                crate::component::scroll::show(ui, &theme, area, |ui| {
-                    let mut textures = super::reader::Textures::default();
-                    let mut drawn = super::reader::Drawn::default();
-                    super::reader::blocks(ui, &theme, &reader, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
-                    seen.asked.extend(drawn.asked);
-                    seen.hover = drawn.hover;
+    let mut harness =
+        Harness::builder().with_size(vec2(width, high)).with_pixels_per_point(ppp).with_context_setup(crate::theme::install_fonts).build_ui_state(
+            move |ui, seen: &mut Seen| {
+                let room = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, high));
+                ui.scope_builder(UiBuilder::new().max_rect(room), |ui| {
+                    let area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                    crate::component::scroll::show(ui, &theme, area, |ui| {
+                        let mut textures = super::reader::Textures::default();
+                        let mut drawn = super::reader::Drawn::default();
+                        super::reader::blocks(ui, &theme, &reader, 1, &document, &document.blocks, 0, &mut textures, &mut drawn);
+                        seen.asked.extend(drawn.asked);
+                        seen.hover = drawn.hover;
+                    });
                 });
-            });
-        },
-        Seen::default(),
-    );
+            },
+            Seen::default(),
+        );
     harness.run();
     harness
 }
@@ -162,6 +168,17 @@ fn table_columns_stand_on_whole_pixels() {
     let html = "<table><tr><td>Loose leaf Assam, second flush, from the Halmari estate, 250 g in a tin</td><td>2</td>\
                 <td>A note on the delivery that is long enough to ask for room</td></tr>\
                 <tr><td>Stoneware teapot</td><td>1</td><td>38.00</td></tr></table>";
+    // Each column's words start on a whole pixel and its width is whole pixels, at 1 and at 1.5 pixels a point (a
+    // screen reader's box of a cell is its column's).
+    for ppp in [1.0_f32, 1.5] {
+        let harness = fitted_at(display(html), false, 561.0, 400.0, ppp);
+        let cells: Vec<Rect> = ["Stoneware teapot", "1", "38.00"].iter().map(|words| harness.get_by_label(words).rect()).collect();
+        let whole = |points: f32| ((points * ppp) - (points * ppp).round()).abs() < 1e-3;
+        for cell in &cells {
+            assert!(whole(cell.left()), "a column's left on a whole pixel at {ppp}: {cells:?}");
+            assert!(whole(cell.width()), "a column whole pixels wide at {ppp}: {cells:?}");
+        }
+    }
     let harness = fitted(display(html), false, 561.0, 400.0);
     let p = Palette::of(Mode::Light);
     let texts: Vec<f32> =
@@ -232,6 +249,9 @@ fn a_message_of_two_megabytes_of_text_lays_out_only_what_is_in_sight() {
         harness.run();
         let painted = shapes(&harness);
         assert!(painted < 5_000, "{scene}: {painted} shapes");
+        // Only what lies near sight is given to a screen reader: three panes of thousands of paragraphs.
+        let heard = harness.query_all_by_role(Role::Label).count();
+        assert!(heard < 200, "{scene}: {heard} labels");
     }
     // A plain text's open quote of two megabytes.
     let theme = Theme::new(Mode::Light, TextScale::default());
