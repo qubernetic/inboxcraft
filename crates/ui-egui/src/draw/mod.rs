@@ -169,6 +169,8 @@ pub struct InboxApp {
     /// The list's least width beside the docked composer and what it was measured for: the mailbox's revision, whether
     /// something is searched, the text size and the scale ([`InboxApp::list_least`]).
     list_least: Option<((u64, bool, u32, u32), f32)>,
+    /// For how many more frames the keyboard is given to the composer's text, the list having gone with it.
+    keys_to_text: u8,
     /// How often [`list::least_width`] was measured (for the tests).
     #[cfg(test)]
     measured: usize,
@@ -300,6 +302,7 @@ impl InboxApp {
             list_hidden: false,
             list_rect: None,
             list_least: None,
+            keys_to_text: 0,
             #[cfg(test)]
             measured: 0,
             frame: 0,
@@ -1271,19 +1274,32 @@ impl InboxApp {
         left + least
     }
 
-    /// Notes whether the list is `hidden` this frame. When it goes with the keyboard in it, the keyboard goes to the
-    /// composer that took its place: nothing of the hidden list keeps it.
+    /// Notes whether the list is `hidden` this frame. When it goes, its floats (a row's time picker, a group's menu)
+    /// close, and the keyboard in it or in one of them goes to the composer that took its place: nothing of the hidden
+    /// list keeps it.
     fn hide_list(&mut self, ctx: &egui::Context, hidden: bool) {
         self.list_hidden = hidden;
         if !hidden {
+            self.keys_to_text = 0;
             return;
         }
-        let list = self.list_rect.take();
-        let focused = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id));
-        if focused.is_some_and(|response| list.is_some_and(|list| list.contains_rect(response.rect))) {
-            ctx.memory_mut(|memory| memory.request_focus(compose::text_id()));
-            // Drawn again with the keys where they are now.
-            ctx.request_repaint();
+        // Drawn the frame before: it goes now. Its floats close first and do not come back with it.
+        if let Some(list) = self.list_rect.take() {
+            let floated = list::close_floats(ctx, &self.mailbox);
+            let focused = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id));
+            let in_list = focused.is_some_and(|response| list.contains_rect(response.rect));
+            if in_list || (floated && !compose::has_keys(ctx)) {
+                // This frame and the next: a float shown the frame before still holds the keys from what lies under it.
+                self.keys_to_text = 2;
+            }
+        }
+        if self.keys_to_text > 0 {
+            self.keys_to_text = self.keys_to_text.saturating_sub(1);
+            if ctx.memory(|memory| memory.focused()) != Some(compose::text_id()) {
+                ctx.memory_mut(|memory| memory.request_focus(compose::text_id()));
+                // Drawn again with the keys where they are now.
+                ctx.request_repaint();
+            }
         }
     }
 

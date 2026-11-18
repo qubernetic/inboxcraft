@@ -276,3 +276,30 @@ fn the_list_s_least_width_is_measured_again_only_when_the_mailbox_or_the_scale_c
     harness.run();
     assert_eq!(harness.state().measured, once + 2, "another text size: measured again");
 }
+
+#[test]
+fn a_list_float_open_when_the_list_goes_closes_and_does_not_come_back() {
+    let mut harness = composing(1100.0, 100);
+    let id = harness.state().mailbox().messages().iter().find(|row| row.subject == "Allotment rota for November").unwrap().id;
+    let menu = super::list::group_menu_id(id);
+    let row = harness.query_all_by_label_contains("Allotment rota for November").next().unwrap().rect().center();
+    harness.event(egui::Event::PointerMoved(row));
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        harness.step();
+    }
+    harness.run();
+    assert!(crate::component::popup::is_open(&harness.ctx, menu), "the group menu is open over the row");
+    // Into the menu with the keyboard.
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    harness.set_size(vec2(720.0, 800.0));
+    harness.run();
+    assert!(search_box(&harness).is_none());
+    assert!(!crate::component::popup::is_open(&harness.ctx, menu), "closed with the list");
+    assert!(super::compose::has_keys(&harness.ctx), "the keyboard went to the composer");
+    harness.set_size(vec2(1100.0, 800.0));
+    harness.run();
+    assert!(search_box(&harness).is_some());
+    assert!(!crate::component::popup::is_open(&harness.ctx, menu) && !crate::component::popup::any_open(&harness.ctx), "not back with the list");
+}

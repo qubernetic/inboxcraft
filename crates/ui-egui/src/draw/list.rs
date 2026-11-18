@@ -348,6 +348,21 @@ fn close_snooze(ctx: &egui::Context) {
     });
 }
 
+/// Closes the list's floats, a row's time picker and a group's menu on a row, without handing the keyboard back to
+/// the row; whether one was open.
+pub(super) fn close_floats(ctx: &egui::Context, mailbox: &Mailbox) -> bool {
+    let mut open = ctx.data(|data| data.get_temp::<SnoozeOpen>(snooze_open_id())).is_some();
+    close_snooze(ctx);
+    for row in mailbox.messages() {
+        let menu = group_menu_id(row.id);
+        if popup::is_open(ctx, menu) {
+            popup::set_open(ctx, menu, false);
+            open = true;
+        }
+    }
+    open
+}
+
 /// The time picker open from a row's Snooze, after the list drew its rows: under its message's row if this pass drew
 /// that row in sight, and the pass before showed it; else it closes for good (scrolled away, another list or screen,
 /// the message gone), whichever list drew or did not draw the row, and the keyboard it held goes nowhere. The time chosen snoozes the message. A choice or Cancel
