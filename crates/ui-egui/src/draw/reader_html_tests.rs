@@ -552,3 +552,71 @@ fn a_message_s_headings_are_set_as_the_frames_set_them() {
         assert_eq!(set(words), Some((theme.fonts.strong.id(), Some(22.0))), "{words}");
     }
 }
+
+/// The sample window with the message of `subject` open in `folder`, its remote pictures fetched through `fetch`.
+fn opened_with(fetch: &Recorder, folder: u64, subject: &str) -> Harness<'static, InboxApp> {
+    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+    app.mailbox_mut().open(crate::mailbox::Place::Folder(folder));
+    let id = app.mailbox().messages().iter().find(|row| row.subject == subject).unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let mut harness = Harness::builder().with_size(vec2(1280.0, 800.0)).with_max_steps(12).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    for _ in 0..4 {
+        harness.run();
+    }
+    harness
+}
+
+/// Whether the node labelled `name` has the focus.
+fn has_focus(harness: &Harness<'static, InboxApp>, name: &str) -> bool {
+    harness.query_by_label(name).is_some_and(|node| node.accesskit_node().is_focused())
+}
+
+/// A fitted message's remote picture is the picture box in each of its states: not loaded, here, failed with `try
+/// again` (reached by Tab, and it asks once more) and here but not drawable, whose box says so and offers no `try
+/// again`, as trying again would get the same bytes.
+#[test]
+fn a_fitted_message_s_remote_picture_is_its_box_in_every_state() {
+    let fetch = Recorder::default();
+    let mut harness = opened_with(&fetch, 5, "You have won a lighthouse");
+    let url = "https://track.example.net/open.png?id=4417";
+    let settle = |harness: &mut Harness<'static, InboxApp>| {
+        for _ in 0..4 {
+            harness.run();
+        }
+    };
+    // Not loaded: the dashed box, nothing asked.
+    harness.get_by_label_contains("Remote picture not loaded");
+    assert!(harness.query_by_label("try again").is_none());
+    assert!(fetch.asked.lock().unwrap().is_empty());
+    // Loaded: the picture itself, no box.
+    harness.get_by_label("always for prize-desk@example.org").click();
+    settle(&mut harness);
+    assert_eq!(fetch.asked.lock().unwrap().len(), 1);
+    harness.get_by_role_and_label(Role::Image, "Picture");
+    assert!(harness.query_by_label_contains("Remote picture not loaded").is_none());
+    // Failed: why, and `try again`, which Tab reaches and Enter presses: the picture is asked for once more.
+    harness.state_mut().reader_mut().0.put_picture(url, crate::reader::PictureState::Failed("no answer".to_owned()));
+    settle(&mut harness);
+    harness.get_by_label_contains("Picture could not be shown: no answer");
+    let mut reached = false;
+    for _ in 0..60 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        if has_focus(&harness, "try again") {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached, "Tab reaches try again");
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    assert_eq!(fetch.asked.lock().unwrap().len(), 2, "try again asks for the picture once more");
+    harness.get_by_role_and_label(Role::Image, "Picture");
+    // Here but not drawable: its own reason, no `try again`.
+    let broken = crate::picture::Decoded { width: 2, height: 2, rgba: vec![0; 3] };
+    harness.state_mut().reader_mut().0.put_picture(url, crate::reader::PictureState::Ready(std::sync::Arc::new(broken)));
+    settle(&mut harness);
+    harness.get_by_label_contains("Picture not shown: its data could not be drawn");
+    assert!(harness.query_by_label_contains("could not be shown").is_none(), "not the failed box");
+    assert!(harness.query_by_label("try again").is_none(), "a try again that can do nothing");
+}

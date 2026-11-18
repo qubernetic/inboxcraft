@@ -36,8 +36,10 @@ use egui::{
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, LinkTarget, Marker, Span, TextKind};
 
+use crate::component::picture_box::{self, Measured, PictureLook};
 use crate::component::quote_fold::{FOLD_EDGE, fold_line};
 use crate::draw::paint::{self, Ring};
+use crate::keymap::Keymap;
 use crate::picture::Decoded;
 use crate::reader::{PictureState, Reader, inline_key, link_status};
 use crate::theme::{Font, Theme};
@@ -166,8 +168,9 @@ enum Kind {
     Rule,
     /// A picture that is here, at its size.
     Picture { image: Image, key: String },
-    /// A picture that is not, and why, in its box.
-    Missing { galley: Arc<Galley>, alt: String, link: Option<usize> },
+    /// A picture that is not, in its box that says why ([`picture_box`]): the box measured, the picture's link and
+    /// the key `try again` asks for again.
+    Missing { measured: Box<Measured>, link: Option<usize>, key: Option<String> },
     /// A quote's fold line.
     Fold { lines: usize, open: bool },
     /// A table.
@@ -181,7 +184,7 @@ impl Kind {
         match self {
             Self::Text { links, .. } => !links.is_empty(),
             Self::Picture { image, .. } => linked(image.link),
-            Self::Missing { link, .. } => linked(*link),
+            Self::Missing { measured, link, .. } => linked(*link) || measured.retry,
             Self::Fold { .. } => true,
             Self::Table(grid) => !grid.stops.is_empty(),
             Self::Pre { .. } | Self::Rule => false,
@@ -414,7 +417,8 @@ fn glyphs(laid: &Laid) -> usize {
         .iter()
         .map(|item| match &item.kind {
             Kind::Text { galley, mark, .. } => of(galley).saturating_add(mark.as_ref().map_or(0, |mark| of(mark))),
-            Kind::Pre { galley, .. } | Kind::Missing { galley, .. } => of(galley),
+            Kind::Pre { galley, .. } => of(galley),
+            Kind::Missing { measured, .. } => measured.galleys().map(|galley| of(galley)).fold(0, usize::saturating_add),
             Kind::Table(grid) => grid
                 .rows
                 .iter()
@@ -770,44 +774,36 @@ fn key_of(id: u64, image: &Image) -> Option<String> {
     }
 }
 
-/// A picture laid out `room` wide: at its size when it is here, else a box that says why not; nothing for a picture
-/// that cannot be shown and says nothing.
+/// Whether `decoded` can be made into a texture: a size and as many bytes as it says.
+fn drawable(decoded: &Decoded) -> bool {
+    decoded.width > 0 && decoded.height > 0 && decoded.rgba.len() == decoded.width.saturating_mul(decoded.height).saturating_mul(4)
+}
+
+/// A picture laid out `room` wide: at its size when it is here and can be drawn, else the box that says why not
+/// ([`picture_box`]); nothing for a picture that cannot be shown and says nothing.
 fn picture(context: &Context<'_>, image: &Image, room: f32) -> Option<(Kind, Vec2)> {
-    let theme = context.theme;
     let key = key_of(context.id, image);
     let state = key.as_deref().and_then(|key| context.reader.picture(key));
-    if let (Some(key), Some(PictureState::Ready(decoded))) = (key.as_ref(), state) {
+    if let (Some(key), Some(PictureState::Ready(decoded))) = (key.as_ref(), state)
+        && drawable(decoded)
+    {
         let (w, h) = (decoded.width as f32, decoded.height as f32);
-        if w > 0.0 && h > 0.0 {
-            let scale = (room / w).min(MAX_PICTURE_HEIGHT / h).min(1.0);
-            return Some((
-                Kind::Picture { image: image.clone(), key: key.clone() },
-                vec2((w * scale).floor().max(1.0), (h * scale).floor().max(1.0)),
-            ));
-        }
+        let scale = (room / w).min(MAX_PICTURE_HEIGHT / h).min(1.0);
+        return Some((Kind::Picture { image: image.clone(), key: key.clone() }, vec2((w * scale).floor().max(1.0), (h * scale).floor().max(1.0))));
     }
-    let why = match (&image.source, state) {
+    let look = match (&image.source, state) {
         (ImageSource::Unsupported, _) if image.alt.is_empty() => return None,
-        (ImageSource::Unsupported, _) => tr!("Picture not shown").to_owned(),
-        (ImageSource::Blocked, _) => tr!("Remote picture not loaded").to_owned(),
-        (_, Some(PictureState::Failed(reason))) => tr!("Picture could not be shown: {reason}", reason = reason),
-        (_, Some(PictureState::Waiting) | None) => tr!("Loading picture…").to_owned(),
-        (_, Some(PictureState::Ready(_))) => tr!("Picture could not be shown").to_owned(),
+        (ImageSource::Unsupported, _) => PictureLook::NotShown,
+        (ImageSource::Blocked, _) => PictureLook::NotLoaded,
+        (_, Some(PictureState::Failed(reason))) => PictureLook::Failed(reason),
+        (_, Some(PictureState::Waiting) | None) => PictureLook::Loading,
+        // Here, but its data cannot be drawn: trying again would get the same bytes, so it offers no `try again`.
+        (_, Some(PictureState::Ready(_))) => PictureLook::Undrawable,
     };
-    let alt = crate::component::spoken(crate::component::capped(&image.alt, MOST_SPOKEN).0);
-    let words = if alt.is_empty() { why } else { format!("{why}: {alt}") };
-    let inner = (room - 18.0).max(1.0);
-    let galley = crate::component::wrapped(
-        context.ui,
-        &crate::component::plain(&words),
-        theme.fonts.caption,
-        theme.palette.muted,
-        inner,
-        4,
-        egui::Align::LEFT,
-    );
-    let size = vec2((galley.size().x.ceil() + 18.0).min(room), galley.size().y.ceil() + 18.0);
-    Some((Kind::Missing { galley, alt: words, link: image.link }, size))
+    let alt = crate::component::capped(&image.alt, MOST_SPOKEN).0;
+    let measured = picture_box::measure(context.ui, context.theme, look, alt, image.size, room);
+    let size = measured.size;
+    Some((Kind::Missing { measured: Box::new(measured), link: image.link, key }, size))
 }
 
 /// How wide `block` asks to be on one line.
@@ -1079,7 +1075,8 @@ impl Show<'_> {
                 false
             }
             Kind::Picture { image, key } => {
-                let response = self.picture_response(ui, rect, id, &image.alt, image.link);
+                let name = if image.alt.is_empty() { tr!("Picture").to_owned() } else { crate::component::spoken(&image.alt) };
+                let response = self.picture_response(ui, rect, id, &name, image.link);
                 if shows
                     && let Some(PictureState::Ready(decoded)) = self.reader.picture(key)
                     && let Some(handle) = texture(ui, self.textures, key, decoded)
@@ -1088,13 +1085,25 @@ impl Show<'_> {
                 }
                 self.picture_link(ui, &response, rect, image.link)
             }
-            Kind::Missing { galley, alt, link } => {
-                let response = self.picture_response(ui, rect, id, alt, *link);
-                if shows {
-                    ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, p.muted), StrokeKind::Inside);
-                    paint::rows_at(ui.painter(), rect.min + vec2(9.0, 9.0), (rect.width() - 18.0).max(1.0), galley.clone(), p.muted);
+            Kind::Missing { measured, link, key } => {
+                let response = self.picture_response(ui, rect, id, &measured.spoken, *link);
+                let mut holds = self.picture_link(ui, &response, rect, *link);
+                // The box is painted where it is in sight; its `try again`, a Tab stop, wherever the reach asks.
+                if shows || measured.retry {
+                    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).id_salt(id.with("box")));
+                    if let Some(retry) = picture_box::paint_box(&mut child, theme, &Keymap::empty(), measured, rect, false) {
+                        if retry.gained_focus() {
+                            retry.scroll_to_me(None);
+                        }
+                        if retry.clicked()
+                            && let Some(key) = key
+                        {
+                            self.drawn.asked.push(Asked::Retry(self.id, key.clone()));
+                        }
+                        holds |= retry.has_focus();
+                    }
                 }
-                self.picture_link(ui, &response, rect, *link)
+                holds
             }
             Kind::Fold { lines, open } => {
                 if fold_line(ui, theme, rect, rect.bottom(), id.with("fold"), *lines, *open, None).clicked() {
@@ -1194,13 +1203,12 @@ impl Show<'_> {
     }
 
     /// The widget of a picture: a link (a Tab stop) when it is one, else what a screen reader hears of it.
-    fn picture_response(&self, ui: &mut Ui, rect: Rect, id: Id, alt: &str, link: Option<usize>) -> egui::Response {
+    fn picture_response(&self, ui: &mut Ui, rect: Rect, id: Id, name: &str, link: Option<usize>) -> egui::Response {
         let linked = link.and_then(|index| self.document.links.get(index));
         let sense = if linked.is_some() { Sense::click() } else { Sense::hover() };
         let response = ui.interact(rect, id.with("picture"), sense);
-        let name = if alt.is_empty() { tr!("Picture").to_owned() } else { crate::component::spoken(alt) };
         let role = if linked.is_some() { Role::Link } else { Role::Image };
-        response.widget_info(|| WidgetInfo::labeled(role, true, &name));
+        response.widget_info(|| WidgetInfo::labeled(role, true, name));
         response
     }
 

@@ -20,7 +20,9 @@
 //! box asks for nothing to load: only `try again` does, on the owner's press. Nothing moves but the progress line's
 //! mark.
 
-use egui::{Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2};
+use std::sync::Arc;
+
+use egui::{Color32, Galley, Rect, Response, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2};
 
 use crate::draw::paint;
 use crate::iconset;
@@ -129,9 +131,48 @@ pub(crate) fn picture_box_with(
     size: Option<(u32, u32)>,
     still: bool,
 ) -> (Response, Option<PictureAsked>) {
+    let room = ui.available_width().max(1.0).floor();
+    let measured = measure(ui, theme, look, alt, size, room);
+    let (rect, response) = ui.allocate_exact_size(measured.size, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &measured.spoken));
+    let asked = paint_box(ui, theme, keymap, &measured, rect, still).and_then(|retry| retry.clicked().then_some(PictureAsked::Retry));
+    (response, asked)
+}
+
+/// A picture's box measured for `room`, ready to paint where it is placed: its size, what a screen reader hears, its
+/// parts laid out, and whether it offers `try again`. It holds no borrow, so a fitted message keeps it with its layout.
+pub(crate) struct Measured {
+    /// The box's size, in points.
+    pub(crate) size: Vec2,
+    /// What a screen reader hears for the box.
+    pub(crate) spoken: String,
+    /// Whether the box offers `try again` (a failed picture, where the link fits whole).
+    pub(crate) retry: bool,
+    dashed: bool,
+    loading: bool,
+    edge: Color32,
+    mark: Option<char>,
+    why_ink: Color32,
+    alt_ink: Color32,
+    why: Option<Arc<Galley>>,
+    alt: Option<Arc<Galley>>,
+    dims: Option<Arc<Galley>>,
+    content: f32,
+}
+
+impl Measured {
+    /// The galleys the box holds: what keeping it costs.
+    pub(crate) fn galleys(&self) -> impl Iterator<Item = &Arc<Galley>> {
+        self.why.iter().chain(self.alt.iter()).chain(self.dims.iter())
+    }
+}
+
+/// Measures the box of a picture in `look` with the sender's text `alt`, `size` pixels by its tag, in `room` points:
+/// as wide as the picture stands (`shown_size(...).x`), or the room without a size; every part fitted to the box.
+pub(crate) fn measure(ui: &Ui, theme: &Theme, look: PictureLook<'_>, alt: &str, size: Option<(u32, u32)>, room: f32) -> Measured {
     let p = &theme.palette;
     let f = &theme.fonts;
-    let room = ui.available_width().max(1.0).floor();
+    let room = if room.is_finite() { room.max(1.0).floor() } else { 1.0 };
     // Its parts are fitted to the box, which may be narrower than the room: nothing paints past its sides.
     let width = size.map_or(room, |size| shown_size(size, room).x);
     let inner = (width - PAD * 2.0).max(1.0);
@@ -176,31 +217,52 @@ pub(crate) fn picture_box_with(
         Some(size) => shown_size(size, room),
         None => vec2(room, (content + BARE * 2.0).ceil()),
     };
-    let (rect, response) = ui.allocate_exact_size(wanted, Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, spoken(look, alt, size)));
-    // A box smaller than what it says shows only its edge.
-    let fits = content + 2.0 <= rect.height() && PAD * 2.0 + 1.0 <= rect.width();
+    Measured {
+        size: wanted,
+        spoken: spoken(look, alt, size),
+        retry,
+        dashed: look == PictureLook::NotLoaded,
+        loading: look == PictureLook::Loading,
+        edge,
+        mark,
+        why_ink,
+        alt_ink,
+        why: why_galley,
+        alt: alt_galley,
+        dims: size_galley,
+        content,
+    }
+}
+
+/// Paints the box `measured` at `rect`, clipped to it: nothing paints past its sides. The response of its `try again`
+/// where it offers one (a Tab stop); `still` draws the loading mark whole and standing.
+pub(crate) fn paint_box(ui: &mut Ui, theme: &Theme, keymap: &Keymap, measured: &Measured, rect: Rect, still: bool) -> Option<Response> {
+    let p = &theme.palette;
+    let f = &theme.fonts;
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     if ui.is_rect_visible(rect) {
         painter.rect_filled(rect, 0.0, p.panel);
-        if look == PictureLook::NotLoaded {
-            paint::dashed(&painter, rect, edge);
+        if measured.dashed {
+            paint::dashed(&painter, rect, measured.edge);
         } else {
-            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, measured.edge), StrokeKind::Inside);
         }
     }
-    if !fits {
-        return (response, None);
+    // A box smaller than what it says shows only its edge.
+    let content = measured.content;
+    if content + 2.0 > rect.height() || PAD * 2.0 + 1.0 > rect.width() {
+        return None;
     }
+    let inner = (rect.width() - PAD * 2.0).max(1.0);
     let middle = rect.center().x;
     let mut top = (rect.center().y - content / 2.0).round();
-    let centred = |galley: &std::sync::Arc<egui::Galley>, top: f32| pos2((middle - paint::run_box(galley.size().x) / 2.0).round(), top);
-    if let Some(glyph) = mark {
+    let centred = |galley: &Arc<Galley>, top: f32| pos2((middle - paint::run_box(galley.size().x) / 2.0).round(), top);
+    if let Some(glyph) = measured.mark {
         let at = Rect::from_min_size(pos2((middle - ICON / 2.0).round(), top), vec2(ICON, ICON));
-        iconset::paint_glyph(&painter, at, glyph, why_ink);
+        iconset::paint_glyph(&painter, at, glyph, measured.why_ink);
         top += ICON + GAP;
     }
-    if look == PictureLook::Loading {
+    if measured.loading {
         let line = theme.boxes().strip;
         let spot = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(inner, line));
         let mut child = ui.new_child(UiBuilder::new().max_rect(spot).layout(egui::Layout::top_down(egui::Align::Center)));
@@ -208,22 +270,23 @@ pub(crate) fn picture_box_with(
         progress_with(&mut child, theme, keymap, tr!("loading picture"), ProgressState::Running(0.0), "", still);
         top += line + GAP;
     }
-    let lines = [(why_galley, f.mono_s.line, why_ink), (alt_galley, f.caption.line, alt_ink), (size_galley, f.mono_s.line, p.muted)];
+    let lines = [
+        (&measured.why, f.mono_s.line, measured.why_ink),
+        (&measured.alt, f.caption.line, measured.alt_ink),
+        (&measured.dims, f.mono_s.line, p.muted),
+    ];
     for (galley, line, ink) in lines {
         let Some(galley) = galley else { continue };
-        paint::run_at(&painter, centred(&galley, top), galley.clone(), ink);
+        paint::run_at(&painter, centred(galley, top), galley.clone(), ink);
         top += line + GAP;
     }
-    let mut asked = None;
-    if retry {
-        let spot = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(inner, link_high));
-        let mut child = ui.new_child(UiBuilder::new().max_rect(spot).layout(egui::Layout::top_down(egui::Align::Center)));
-        child.set_clip_rect(rect.intersect(ui.clip_rect()));
-        if link_sized(&mut child, theme, keymap, tr!("try again"), LinkSize::Small).clicked() {
-            asked = Some(PictureAsked::Retry);
-        }
+    if !measured.retry {
+        return None;
     }
-    (response, asked)
+    let spot = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(inner, theme.boxes().row_link));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(spot).layout(egui::Layout::top_down(egui::Align::Center)));
+    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    Some(link_sized(&mut child, theme, keymap, tr!("try again"), LinkSize::Small))
 }
 
 #[cfg(test)]

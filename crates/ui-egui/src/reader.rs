@@ -735,10 +735,15 @@ impl Reader {
         self.thread.iter().find(|row| row.id == id).and_then(|row| row.opened.as_ref())
     }
 
-    /// The picture `key` as it would stand in `state` (the tests' pictures that are here but cannot be drawn).
+    /// The picture `key` as it would stand in `state` (the tests' pictures that are here but cannot be drawn). The
+    /// open messages take a new generation, as a picture that comes does: what was laid out with the old one is not
+    /// drawn again.
     #[cfg(test)]
     pub(crate) fn put_picture(&mut self, key: &str, state: PictureState) {
         self.pictures.insert(key.to_owned(), state);
+        for opened in self.thread.iter_mut().filter_map(|row| row.opened.as_mut()) {
+            opened.generation = next_generation();
+        }
     }
 
     /// Message `id` of the thread as it would stand with `content` and `cut` (the tests' states without text).
