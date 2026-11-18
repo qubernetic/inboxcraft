@@ -465,3 +465,24 @@ fn a_fitted_table_and_preformatted_text_look_as_the_design_draws_them() {
         .unwrap_or_else(|| panic!("no box"));
     assert_eq!(boxed.height(), 8.0 + theme.fonts.mono_s.line + 8.0, "{boxed:?}");
 }
+
+#[test]
+fn the_plain_view_is_set_in_mono() {
+    let mut harness = opened(None, "Your bike is due for a service");
+    harness.get_by_label("plain text").click();
+    harness.run();
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let mut sizes = Vec::new();
+    fn walk(shape: &Shape, sizes: &mut Vec<f32>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, sizes)),
+            Shape::Text(text) if text.galley.text().contains("Book a slot") => {
+                sizes.extend(text.galley.job.sections.iter().map(|section| section.format.font_id.size));
+            }
+            _ => {}
+        }
+    }
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut sizes));
+    // The message's words in `mono` 13/20, not in the reading style (a row's preview of them stays in its caption).
+    assert!(sizes.contains(&theme.fonts.mono.size) && !sizes.contains(&theme.fonts.read.size), "{sizes:?}");
+}

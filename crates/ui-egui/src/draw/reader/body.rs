@@ -125,14 +125,13 @@ pub(in crate::draw) fn blocks(
     super::fitted::blocks(ui, theme, reader, id, generation, document, list, depth, textures, drawn);
 }
 
-/// A plain-text body in `read`, its quotes folded until the owner opens them ([`quote_fold`]).
-fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segment], drawn: &mut Drawn) {
+/// A plain-text body in `font`, its quotes folded until the owner opens them ([`quote_fold`]).
+fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segment], font: Font, drawn: &mut Drawn) {
     let p = &theme.palette;
-    let f = &theme.fonts;
     for segment in segments {
         match segment {
             Segment::Text(text) => {
-                ui.label(RichText::new(text).font(f.read.id()).color(p.ink));
+                ui.label(RichText::new(text).font(font.id()).color(p.ink));
             }
             Segment::Quote { attribution, text, lines } => {
                 if quote_fold(ui, theme, *lines, reader.shows_quotes(id), attribution.as_deref(), text).clicked() {
@@ -179,9 +178,10 @@ pub(super) fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened,
         Content::NotKept => say(ui, tr!("The text of this message is not here yet. It comes with the next connection.")),
         Content::TooLarge => say(ui, tr!("This message is too large to keep, so it cannot be shown.")),
         Content::Unreadable => say(ui, tr!("This message cannot be read.")),
-        Content::Text(segments) => text(ui, theme, reader, opened.id, segments, drawn),
-        // The plain-text view: the message as a text-only program shows it, its quotes folded as a text's are.
-        Content::Html(_) if reader.shows_plain(opened.id) => text(ui, theme, reader, opened.id, &opened.plain, drawn),
+        Content::Text(segments) => text(ui, theme, reader, opened.id, segments, theme.fonts.read, drawn),
+        // The plain-text view: the message as a text-only program shows it, in `mono` as the design sets it, its
+        // quotes folded as a text's are.
+        Content::Html(_) if reader.shows_plain(opened.id) => text(ui, theme, reader, opened.id, &opened.plain, theme.fonts.mono, drawn),
         Content::Html(document) => blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn),
     }
     if opened.cut {
