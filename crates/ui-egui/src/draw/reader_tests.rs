@@ -1366,6 +1366,71 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     harness.run();
     harness.get_by_label_contains("Not delivered: This message did not arrive: petra@example.org: 550 5.1.1");
     walks_and_rests(&mut harness, "a bounced message");
+    // The reader's notice, at the top of the message.
+    let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    harness.state_mut().reader_mut().0.set_notice("Subject copied".to_owned());
+    harness.run();
+    walks_and_rests(&mut harness, "a notice");
+    // Remote pictures held back: the banner and the boxes in their place.
+    let mut harness = opened(&fetch, Some(5), "You have won a lighthouse");
+    harness.get_by_label_contains("Pictures: ");
+    walks_and_rests(&mut harness, "remote pictures");
+    // The states without text, and a cut text.
+    for (scene, content, cut) in [
+        ("not kept yet", crate::reader::Content::NotKept, false),
+        ("too large", crate::reader::Content::TooLarge, false),
+        ("unreadable", crate::reader::Content::Unreadable, false),
+        ("cut", crate::reader::Content::Text(vec![crate::quote::Segment::Text("The first lines.".to_owned())]), true),
+    ] {
+        let mut harness = opened_as(&fetch, "Photos from the coast walk", content, cut);
+        walks_and_rests(&mut harness, scene);
+    }
+    // Loading: walked; its progress mark turns every 125 ms by design (M9), so it is no scene at rest.
+    let mut harness = opened_as(&fetch, "Photos from the coast walk", crate::reader::Content::Loading, false);
+    let missed = crate::component::tests::keyboard_walk(&mut harness);
+    assert!(missed.is_empty(), "loading: Tab never reaches {missed:?}");
+    // An attachment saved, and one that failed.
+    let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    harness.get_by_label("Save sketch-2.png").click();
+    harness.run();
+    walks_and_rests(&mut harness, "an attachment that failed");
+    let mut app = InboxApp::with_outside(Mailbox::new(sample::session(clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(Kept));
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").unwrap().id;
+    app.mailbox_mut().select(Some(id));
+    let mut harness = harness_with(app, egui::Theme::Light);
+    settle(&mut harness);
+    harness.get_by_label("Save sketch-2.png").click();
+    harness.run();
+    walks_and_rests(&mut harness, "an attachment saved");
+    // The invitations: the update that asks, the version a later one replaced.
+    use inboxcraft_store::Storage as _;
+    let now = Timestamp::from_unix(1_793_869_200, 0).unwrap();
+    for subject in ["Updated invitation: Lunch with Odile", "Invitation: Lunch with Odile"] {
+        let mut store = sample::mailbox(now).unwrap();
+        let mut batch = inboxcraft_store::Batch::new();
+        for change in sample::invitations(now).unwrap() {
+            batch.push(change);
+        }
+        store.apply(&batch).unwrap();
+        let mut app =
+            InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+        let found = app.mailbox_mut().run("mail.search", &json!({ "subject": subject })).unwrap();
+        let id = found["messages"].as_array().unwrap().iter().find(|row| row["subject"] == json!(subject)).unwrap()["id"].as_u64().unwrap();
+        app.mailbox_mut().select(Some(id));
+        let mut harness = harness_with(app, egui::Theme::Light);
+        settle(&mut harness);
+        assert!(harness.query_all_by_label_contains("Invitation: Lunch with Odile, ").next().is_some(), "{subject}: the card");
+        walks_and_rests(&mut harness, subject);
+    }
+    // An older message unfolded beside the open one, with its line's menu open.
+    let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+    settle(&mut harness);
+    walks_and_rests(&mut harness, "an older message unfolded");
+    harness.get_by_label_contains("Odile Brannock, 08:35, open: ").click_secondary();
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItem, "Show the full header");
+    assert!(crate::component::tests::rests(&mut harness, 8), "the open line's menu repaints at rest");
 }
 
 #[test]
