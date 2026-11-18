@@ -513,6 +513,86 @@ pub(crate) fn menu_choice_with(ui: &mut Ui, theme: &Theme, name: &str, on: bool,
     response
 }
 
+/// An account's row of a menu, 32 high (the composer's From menu): the tick in `cyan_text` when it is the one `on`,
+/// the account's bar in its colour (the account `index` counted from 0), its `name` in `body` and its `address` in
+/// `mono_s` and `muted` after it, cut with an ellipsis. Clicked when chosen.
+pub fn account_choice(ui: &mut Ui, theme: &Theme, name: &str, address: &str, index: u64, on: bool) -> Response {
+    account_choice_with(ui, theme, name, address, index, on, None)
+}
+
+/// [`account_choice`] drawn in `shown`: a board of the gallery.
+pub(crate) fn account_choice_with(ui: &mut Ui, theme: &Theme, name: &str, address: &str, index: u64, on: bool, shown: Option<Shown>) -> Response {
+    let p = &theme.palette;
+    let s = &theme.spacing;
+    let available = ui.is_enabled();
+    let (response, row) = row_rect(ui, theme, theme.boxes().menu_row, available, shown);
+    let spoken = tr!("{name}, {address}", name = name, address = address);
+    response.widget_info(|| WidgetInfo::selected(Role::MenuItemRadio, available && !soon::is_soon(ui), on, &spoken));
+    if !ui.is_rect_visible(row.rect) {
+        return response;
+    }
+    let painter = solid(ui);
+    if row.pressed && on {
+        painter.rect(row.rect, 0.0, p.cyan_muted, Stroke::new(1.0, p.cyan_edge), StrokeKind::Inside);
+    } else {
+        paint_ground(&painter, theme, row, false);
+    }
+    let shown = row.shown;
+    let drop = RISE * (1.0 - shown);
+    let inset = s.s3 + if row.focus { 1.0 } else { 0.0 };
+    let mid = row.rect.center().y - drop;
+    let side = theme.boxes().icon;
+    let mut left = row.rect.left() + inset;
+    if on {
+        let at = Rect::from_min_size(pos2(left, mid - side / 2.0), vec2(side, side));
+        crate::iconset::paint_glyph(&painter, at, CHECK, arriving(theme, p.cyan_text, shown));
+    }
+    left += side + s.s2;
+    let bar = Rect::from_min_size(pos2(left, (mid - ACCOUNT_BAR.y / 2.0).round()), ACCOUNT_BAR);
+    painter.rect_filled(bar, 0.0, arriving(theme, theme.account_colour(index), shown));
+    left = bar.right() + s.s2;
+    let right = row.rect.right() - inset;
+    let ink = arriving(theme, p.ink, shown);
+    let words = galley(ui, name, theme.fonts.body, ink);
+    let most = (right - left).max(1.0);
+    let name_box = if words.size().x > most { most } else { paint::run_box(words.size().x) };
+    let text = cut(ui, name, theme.fonts.body, ink, most);
+    paint::run_at(&painter, pos2(left, mid - text.size().y / 2.0), text, ink);
+    let start = left + name_box + s.s2;
+    if right - start > 1.0 && !address.is_empty() {
+        let muted = arriving(theme, p.muted, shown);
+        let address = cut(ui, address, theme.fonts.mono_s, muted, right - start);
+        paint::run_at(&painter, pos2(start, mid - address.size().y / 2.0), address, muted);
+    }
+    response
+}
+
+/// The account bar beside an account's name in a menu, as [`super::account_bar`] draws it.
+const ACCOUNT_BAR: Vec2 = vec2(3.0, 12.0);
+
+/// A note under a float's rows, after a hairline: `text` in `caption` and `muted`, 8 above, 12 beside and 10 under.
+pub fn note(ui: &mut Ui, theme: &Theme, text: &str) {
+    let s = &theme.spacing;
+    hairline_in(ui, theme, theme.palette.panel_line);
+    let width = ui.available_width();
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), theme.fonts.caption.format(theme.palette.muted));
+    job.wrap.max_width = (width - s.s3 * 2.0).max(1.0);
+    let text = ui.painter().layout_job(job);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, text.size().y + s.s2 + s.s2 + 2.0), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.text()));
+    if ui.is_rect_visible(rect) {
+        paint::rows_at(ui.painter(), rect.min + vec2(s.s3, s.s2), width - s.s3 * 2.0, text, theme.palette.muted);
+    }
+}
+
+/// A line across a float in `colour`.
+fn hairline_in(ui: &mut Ui, _theme: &Theme, colour: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect_filled(rect, 0.0, colour);
+    }
+}
+
 /// The tick of a chosen choice: Phosphor's check.
 pub(crate) const CHECK: char = '\u{e182}';
 
@@ -643,6 +723,12 @@ fn by_key_id(id: Id) -> Id {
 /// its row; one opened by the pointer, chosen or closed by a press outside, leaves the keyboard with nothing, as it
 /// was (the window's keys then act). What `add` gave while it is open.
 pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    toggle(ctx, opener, id);
+    menu_at(ctx, theme, opener, opener.rect, id, width, add)
+}
+
+/// Opens or closes the menu `id` as a press on `opener` asks, and keeps whether it was the keyboard's.
+fn toggle(ctx: &Context, opener: &Response, id: Id) {
     refocus(ctx, opener, id);
     if clicked(ctx, opener, id) {
         let open = !is_open(ctx, id);
@@ -652,7 +738,23 @@ pub fn menu<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f
         let by_key = open && !opener.clicked_by(egui::PointerButton::Primary);
         ctx.data_mut(|data| data.insert_temp(by_key_id(id), by_key));
     }
-    menu_at(ctx, theme, opener, opener.rect, id, width, add)
+}
+
+/// [`menu`] that stands 4 px over `opener`, its right edge on the opener's: the menu of a button at a foot (the
+/// composer's Templates). Its height is measured in a first pass of the frame it opens in, so it never jumps.
+pub fn menu_up<R>(ctx: &Context, theme: &Theme, opener: &Response, id: Id, width: f32, add: impl FnOnce(&mut Ui) -> (R, bool)) -> Option<R> {
+    toggle(ctx, opener, id);
+    let pass = ctx.cumulative_pass_nr();
+    let kept = ctx.data(|data| data.get_temp::<Kept>(id.with("float-kept"))).filter(|kept| kept.pass.saturating_add(1) >= pass);
+    if is_open(ctx, id) && kept.is_none() {
+        ctx.request_discard("a menu over its button measures its height first");
+    }
+    let height = kept.map_or(0.0, |kept| kept.rect.height());
+    let width = sane(width);
+    let top = opener.rect.top() - DROP - height;
+    // The float hangs `DROP` under its anchor: the anchor stands that much over the menu's top.
+    let anchor = Rect::from_min_size(pos2(opener.rect.right() - width, top - DROP), Vec2::ZERO);
+    menu_at(ctx, theme, opener, anchor, id, width, add)
 }
 
 /// A menu that a secondary press on `row` opens where the pointer is (a row's context menu), as [`menu`] shows it.

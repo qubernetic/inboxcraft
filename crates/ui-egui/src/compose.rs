@@ -225,6 +225,10 @@ pub struct Composer {
     later: Option<Timestamp>,
     /// Whether the whole composer was painted since it was opened or moved to another place: Send waits for it.
     painted: bool,
+    /// Whether the floating panel is folded to its head.
+    folded: bool,
+    /// When the engine last kept the draft.
+    saved: Option<Timestamp>,
     /// Why the last fill of a blank was refused (it would make the subject or the text longer than the engine keeps),
     /// and the text it refused: said while that text stands.
     fill_refused: Option<(String, String)>,
@@ -314,6 +318,8 @@ impl Composer {
             later: None,
             fill_refused: None,
             painted: false,
+            folded: false,
+            saved: None,
         };
         composer.take_answer(answer);
         Ok(composer)
@@ -324,6 +330,7 @@ impl Composer {
     /// typed text, so nothing the draft holds is in a line that is not drawn.
     fn take_answer(&mut self, answer: &Value) {
         self.account = answer.get("account").and_then(Value::as_u64).unwrap_or(self.account);
+        self.saved = answer.get("saved").and_then(Value::as_str).and_then(parse_date).or(self.saved);
         for line in Line::ALL {
             if let Some(list) = answer.get(line.key()).and_then(Value::as_array)
                 && let Some(chips) = self.lines.get_mut(line.index())
@@ -457,6 +464,27 @@ impl Composer {
             self.painted = false;
         }
         self.floating = floating;
+        if !floating {
+            self.folded = false;
+        }
+    }
+
+    /// Whether the floating panel is folded to its head.
+    #[must_use]
+    pub fn folded(&self) -> bool {
+        self.folded
+    }
+
+    /// Folds the floating panel to its head, or opens it again.
+    pub fn toggle_fold(&mut self) {
+        self.folded = !self.folded;
+        self.painted = false;
+    }
+
+    /// When the engine last kept the draft, if it said.
+    #[must_use]
+    pub fn saved(&self) -> Option<Timestamp> {
+        self.saved
     }
 
     /// Whether the whole composer was painted since it was opened or moved to another place, so that the person has
@@ -520,6 +548,16 @@ impl Composer {
             return Some(tr!("The forwarded message is no longer here, so this cannot be sent").to_owned());
         }
         (!self.blocks.is_empty()).then(|| tr!("This draft cannot be sent yet").to_owned())
+    }
+
+    /// Whether [`Composer::problem`] only waits for something still to do (a recipient, a blank to fill in) rather than
+    /// saying something is wrong: the composer says the first in `muted`, the second in `minus` with a warning.
+    #[must_use]
+    pub fn only_waits(&self) -> bool {
+        let wrong =
+            Line::ALL.iter().any(|line| self.refusal(*line).is_some()) || Line::ALL.iter().flat_map(|line| self.chips(*line)).any(|chip| !chip.ok);
+        let waiting = self.blocks.iter().all(|block| block == "no_recipient" || block == "blank");
+        !wrong && waiting
     }
 
     /// The prompt of the first blank still to fill in, fit for one line.

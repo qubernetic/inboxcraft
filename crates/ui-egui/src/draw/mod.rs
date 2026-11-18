@@ -472,7 +472,8 @@ impl InboxApp {
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
-            keymap::SEND => self.docked(),
+            // Docked, or the floating panel open: both show Send with its key.
+            keymap::SEND => self.docked() || self.composer.as_ref().is_some_and(|composer| !composer.folded()),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -1091,6 +1092,10 @@ impl InboxApp {
                 mailbox.load_presets();
                 Ok(())
             }
+            Asked::Fold => {
+                composer.toggle_fold();
+                Ok(())
+            }
             Asked::Send | Asked::Close | Asked::Discard | Asked::Open => Ok(()),
         };
         if let Err(error) = result {
@@ -1106,6 +1111,14 @@ impl InboxApp {
             .frame(around(left, theme.spacing.s2, theme.spacing.s2))
             .show(ui, |ui| layers.card(ui, Margin::ZERO, |ui| compose::show(ui, theme, keymap, mailbox, composer)))
             .inner
+    }
+
+    /// The composer's floating panel while it is not `docked`; what was asked in it.
+    fn floating_composer(&mut self, ui: &Ui, theme: &Theme, docked: bool) -> Vec<compose::Asked> {
+        match self.composer.as_mut() {
+            Some(composer) if !docked => compose::floating(ui.ctx(), theme, &self.keymap, &self.mailbox, composer, ui.ctx().content_rect()),
+            _ => Vec::new(),
+        }
     }
 
     /// Applies what was asked in the composer this frame and keeps its draft; a message `clicked` in the list takes
@@ -1435,13 +1448,7 @@ impl InboxApp {
         } else {
             None
         };
-        composed.extend(
-            self.composer
-                .as_ref()
-                .filter(|_| !docked)
-                .map(|composer| compose::floating(ui.ctx(), &theme, &self.keymap, composer, ui.max_rect()))
-                .unwrap_or_default(),
-        );
+        composed.extend(self.floating_composer(ui, &theme, docked));
         let (undone, unsent) = self.toasts(ui, &theme, quiet);
         let acted = acted.or(keyed);
         let leaving = self.mailbox.leaving().is_some();

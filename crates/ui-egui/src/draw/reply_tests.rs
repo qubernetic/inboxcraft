@@ -97,6 +97,8 @@ fn a_reply_keeps_the_draft_that_was_being_written() {
     harness.query_all_by_label_contains(ROTA).next().unwrap().click();
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
+    // The floating panel stands over the reader's foot: folded, it leaves Reply in sight.
+    press(&mut harness, "Fold the draft New message");
     press(&mut harness, "Reply");
     let reply = harness.state().composer().unwrap();
     assert_ne!(reply.draft(), first);

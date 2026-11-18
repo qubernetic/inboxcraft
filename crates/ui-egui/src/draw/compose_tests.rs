@@ -182,7 +182,7 @@ fn a_message_pressed_in_the_list_floats_the_composer_and_it_comes_back_whole() {
     harness.run();
     assert!(harness.state().composer().unwrap().floating());
     assert!(harness.state().reader().open_id().is_some(), "the reader has its place back");
-    harness.get_by_role_and_label(Role::Button, "Open the draft New message").click();
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place").click();
     harness.run();
     assert!(!harness.state().composer().unwrap().floating());
     assert_eq!(harness.state().composer().unwrap().text(), "Half a thought");
@@ -221,7 +221,7 @@ fn the_from_menu_changes_the_account_and_its_signature() {
     harness.run();
     harness.get_by_role_and_label(Role::ComboBox, "From Mira Holloway <mira@example.org>").click();
     harness.run();
-    harness.get_by_label("Studio (holloway.studio@example.org)").click();
+    harness.get_by_label("Studio, holloway.studio@example.org").click();
     harness.run();
     let composer = harness.state().composer().unwrap();
     assert_eq!(composer.account(), 2);
@@ -296,8 +296,11 @@ fn the_composer_floats_over_the_calendar_and_new_message_brings_it_back() {
     harness.state_mut().run_action(&ctx, keymap::CALENDAR);
     harness.run();
     assert_eq!(harness.state().screen(), Screen::Calendar);
-    harness.get_by_role_and_label(Role::Button, "Open the draft New message");
-    assert!(!harness.state().can_run(keymap::SEND), "Send waits for the composer in the reader's place");
+    harness.get_by_role_and_label(Role::Button, "Back to the reader's place");
+    assert!(harness.state().can_run(keymap::SEND), "the floating panel shows Send with its key");
+    harness.get_by_role_and_label(Role::Button, "Fold the draft New message").click();
+    harness.run();
+    assert!(!harness.state().can_run(keymap::SEND), "folded, Send waits for the composer to show");
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
     harness.run();
     assert_eq!(harness.state().screen(), Screen::Mail);
@@ -336,13 +339,13 @@ fn the_from_menu_opens_by_the_pointer_enter_and_space_and_keeps_tab_inside() {
 }
 
 #[test]
-fn a_recipient_that_is_not_an_address_is_named_under_its_line() {
+fn a_recipient_that_is_not_an_address_is_named_beside_send() {
     let mut harness = composing(egui::Theme::Light);
     type_into(&mut harness, "To", "ansel.example.org,");
-    let line = harness.get_by_role_and_label(Role::TextInput, "To").rect();
-    let under: Vec<egui::Rect> = harness.query_all_by_label("ansel.example.org is not an address").map(|node| node.rect()).collect();
-    assert_eq!(under.len(), 1, "under the line only, not again beside Send: {under:?}");
-    assert!(under.iter().any(|rect| rect.top() > line.bottom() && rect.top() < line.bottom() + 24.0), "{under:?} under {line:?}");
+    let send = harness.get_by_role_and_label(Role::Button, "Send").rect();
+    let said: Vec<egui::Rect> = harness.query_all_by_label("ansel.example.org is not an address").map(|node| node.rect()).collect();
+    assert_eq!(said.len(), 1, "beside Send only, not again under the line: {said:?}");
+    assert!(said.iter().all(|rect| rect.left() > send.right() && (rect.center().y - send.center().y).abs() < 1.0), "{said:?} beside {send:?}");
 }
 
 #[test]
@@ -729,4 +732,198 @@ fn send_waits_for_a_composer_moved_to_another_place_until_painted_there() {
     harness.run();
     harness.state_mut().send_composer();
     assert!(queued(&mut harness, id));
+}
+
+fn rect_of(harness: &Harness<'static, InboxApp>, role: Role, label: &str) -> egui::Rect {
+    harness.get_by_role_and_label(role, label).rect()
+}
+
+#[test]
+fn send_stands_at_the_left_with_its_key() {
+    let mut harness = composing(egui::Theme::Dark);
+    let waiting = rect_of(&harness, Role::Button, "Send");
+    type_into(&mut harness, "To", "odile@example.org,");
+    harness.run();
+    let send = rect_of(&harness, Role::Button, "Send");
+    let text = rect_of(&harness, Role::MultilineTextInput, "Message text");
+    let templates = rect_of(&harness, Role::Button, "Templates");
+    let discard = rect_of(&harness, Role::Button, "Discard the draft");
+    // At the left of the foot, in line with the text's box (17 out from the text: its edge and 16 in).
+    assert!((send.left() - (text.left() - 17.0)).abs() < 1.0, "{send:?} {text:?}");
+    assert!(send.top() > text.bottom(), "under the text");
+    assert!(send.right() < templates.left() && templates.right() < discard.left(), "Templates and Discard at the right");
+    assert!((discard.center().y - send.center().y).abs() < 0.5, "on one line");
+    // With its key: the chip `Ctrl Enter` widens it past its name; waiting, the disabled Send of the frames has none.
+    assert!(send.width() > waiting.width() + 40.0, "{send:?} has its key, {waiting:?} not");
+    assert_eq!(harness.state().keymap().chip(&harness.ctx, keymap::SEND).as_deref(), Some("Ctrl Enter"));
+}
+
+#[test]
+fn the_reason_stands_beside_send_when_it_waits() {
+    let mut harness = composing(egui::Theme::Dark);
+    let send = rect_of(&harness, Role::Button, "Send");
+    let why = rect_of(&harness, Role::Label, "Add a recipient to send");
+    let later = rect_of(&harness, Role::Button, "Send later");
+    assert!(why.left() > later.right() && why.left() - later.right() < 16.0, "after Send later: {why:?} {later:?}");
+    assert!((why.center().y - send.center().y).abs() < 0.5, "beside Send: {why:?} {send:?}");
+    assert!(why.right() < rect_of(&harness, Role::Button, "Templates").left());
+    type_into(&mut harness, "To", "odile@example.org,");
+    harness.run();
+    assert!(harness.query_by_label("Add a recipient to send").is_none(), "gone once it can go");
+}
+
+#[test]
+fn the_tab_order_is_the_reading_order() {
+    let mut harness = harness(egui::Theme::Dark);
+    harness.state_mut().mailbox_mut().run("template.save", &json!({ "account": 1, "name": "Thanks", "text": "Thank you." })).unwrap();
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    type_into(&mut harness, "To", "odile@example.org,");
+    harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
+    harness.run();
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::field_id(Line::To)));
+    harness.run();
+    let mut walked = Vec::new();
+    for _ in 0..40 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+        if let Some(label) = focused.and_then(|node| node.accesskit_node().label())
+            && walked.last() != Some(&label)
+        {
+            walked.push(label);
+        }
+        if walked.last().is_some_and(|label| label == "Discard the draft") {
+            break;
+        }
+    }
+    let order = ["Cc", "Bcc", "Subject", "Message text", "Send", "Send later", "Templates", "Discard the draft"];
+    let places: Vec<usize> = order.iter().map(|label| walked.iter().position(|walked| walked == label).unwrap_or(usize::MAX)).collect();
+    assert!(places.windows(2).all(|pair| pair[0] < pair[1] && pair[1] != usize::MAX), "{walked:?}");
+    // Tab in the text typed nothing and went on.
+    assert!(!harness.state().composer().unwrap().text().contains('\t'));
+}
+
+#[test]
+fn from_comes_before_to_on_the_way_round() {
+    let mut harness = composing(egui::Theme::Dark);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::subject_id()));
+    harness.run();
+    let mut walked = Vec::new();
+    for _ in 0..60 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let focused = harness.root().children_recursive().find(|node| node.accesskit_node().is_focused());
+        if let Some(label) = focused.and_then(|node| node.accesskit_node().label()) {
+            if label == "To" {
+                break;
+            }
+            walked.push(label);
+        }
+    }
+    assert!(walked.iter().any(|label| label.starts_with("From ")), "From before To: {walked:?}");
+}
+
+#[test]
+fn escape_in_the_suggestions_closes_them_and_keeps_the_text() {
+    let mut harness = composing(egui::Theme::Dark);
+    type_into(&mut harness, "To", "teo");
+    assert!(!harness.state().composer().unwrap().suggestions().1.is_empty(), "suggested");
+    harness.key_press(Key::Escape);
+    harness.run();
+    let composer = harness.state().composer().unwrap();
+    assert!(composer.suggestions().1.is_empty());
+    assert_eq!(composer.typing(Line::To), "teo");
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::compose::field_id(Line::To))), "the line keeps the keys");
+}
+
+#[test]
+fn the_lines_stand_as_the_frame_draws_them() {
+    let mut harness = composing(egui::Theme::Dark);
+    type_into(&mut harness, "To", "ansel.example.org, odile@example.org,");
+    harness.run();
+    let from = rect_of(&harness, Role::ComboBox, "From Mira Holloway <mira@example.org>");
+    let to = rect_of(&harness, Role::TextInput, "To");
+    let subject = rect_of(&harness, Role::TextInput, "Subject");
+    let chip = harness.query_all_by_role(Role::ListItem).next().unwrap().rect();
+    // The values 76 in from the names (a column of 64 and 12), the lines 37 apart (36 and the hairline).
+    assert!((chip.left() - from.left()).abs() < 0.5, "chips start under the sender: {chip:?} {from:?}");
+    let left = rect_of(&harness, Role::MultilineTextInput, "Message text").left() - 17.0;
+    assert!((from.left() - left - 76.0).abs() < 0.5, "{from:?} 76 in from {left}");
+    assert!((subject.left() - from.left()).abs() < 0.5);
+    assert!((chip.top() - (from.top() + 37.0)).abs() < 0.5, "{chip:?} {from:?}");
+    assert!((subject.top() - (from.top() + 74.0 - 6.0)).abs() < 0.5, "{subject:?} {from:?}");
+    assert!(to.left() > chip.right(), "the typing after the chips");
+    // No box round the line: its chips stand on the composer's ground, the invalid one said beside Send.
+    assert!(harness.query_by_label("ansel.example.org is not an address").is_some());
+}
+
+#[test]
+fn the_floating_panel_is_520_by_560_three_clear_of_the_corner_and_folds_to_its_head() {
+    let mut harness = composing(egui::Theme::Dark);
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    let screen = harness.ctx.content_rect();
+    let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
+    // Close stands 20 in from the panel's right edge and 12 under its top.
+    assert!((close.right() - (screen.right() - 3.0 - 20.0)).abs() < 0.5, "{close:?} in {screen:?}");
+    assert!((close.top() - (screen.bottom() - 3.0 - 560.0 + 12.0)).abs() < 0.5, "{close:?} in {screen:?}");
+    assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_some(), "the whole composer");
+    harness.get_by_role_and_label(Role::Button, "Fold the draft New message").click();
+    harness.run();
+    let folded = rect_of(&harness, Role::Button, "Close; the draft is kept");
+    assert!((folded.top() - (screen.bottom() - 3.0 - 56.0 + 12.0)).abs() < 0.5, "one line: {folded:?}");
+    assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_none());
+    assert!(harness.state().composer().unwrap().folded());
+    harness.get_by_role_and_label(Role::Button, "Open the draft New message").click();
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::MultilineTextInput, "Message text").is_some(), "open again");
+}
+
+#[test]
+fn every_control_of_the_composer_is_reached_and_it_rests_with_a_blinking_caret() {
+    let mut harness = composing(egui::Theme::Dark);
+    type_into(&mut harness, "To", "odile@example.org,");
+    harness.get_by_role_and_label(Role::Button, "Cc  Bcc").click();
+    harness.run();
+    let missed: Vec<String> = crate::component::tests::keyboard_walk(&mut harness)
+        .into_iter()
+        // The rest of the window has its own walk; the composer's controls are reached.
+        .filter(|label| {
+            ["From", "To", "Cc", "Bcc", "Subject", "Message text", "Send", "Templates", "Discard", "Close", "Remove"]
+                .iter()
+                .any(|ours| label.starts_with(ours))
+        })
+        .collect();
+    assert!(missed.is_empty(), "never reached: {missed:?}");
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::compose::text_id()));
+    harness.run();
+    // The caret blinks by a frame asked for at its next change, never continuously.
+    harness.run_steps(3);
+    let delay = harness.output().viewport_output.values().map(|viewport| viewport.repaint_delay).min().unwrap();
+    assert!(delay >= std::time::Duration::from_millis(1) && delay <= std::time::Duration::from_millis(500), "{delay:?}");
+    harness.ctx.memory_mut(|memory| memory.surrender_focus(super::compose::text_id()));
+    assert!(crate::component::tests::rests(&mut harness, 6), "without the keys it rests");
+}
+
+#[test]
+fn hostile_drafts_hold_their_layout() {
+    let mut harness = sending();
+    let mailbox = harness.state_mut().mailbox_mut();
+    let id = mailbox.run_for_agent("compose.new", &json!({})).unwrap()["id"].as_u64().unwrap();
+    let subject = "ő".repeat(499);
+    let chips: Vec<String> = (0..500).map(|n| format!("person{n}@example.org")).collect();
+    let text = "A line of a long letter, written without end. ".repeat(23_000);
+    let text = text.get(..(1 << 20) - 4096).unwrap().to_owned();
+    mailbox.run_for_agent("compose.update", &json!({ "id": id, "to": chips, "subject": subject, "text": text })).unwrap();
+    harness.state_mut().reopen(id);
+    harness.run();
+    let screen = harness.ctx.content_rect();
+    let send = rect_of(&harness, Role::Button, "Send");
+    let discard = rect_of(&harness, Role::Button, "Discard the draft");
+    assert!(screen.contains_rect(send) && screen.contains_rect(discard), "the foot stays in the window: {send:?} {discard:?}");
+    assert!(send.bottom() > screen.bottom() - 60.0, "and at its place: {send:?}");
+    let text = rect_of(&harness, Role::MultilineTextInput, "Message text");
+    assert!(text.top() < send.top(), "the text above the foot");
+    assert_eq!(harness.state().composer().unwrap().chips(Line::To).len(), 500);
 }

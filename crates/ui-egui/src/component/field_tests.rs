@@ -406,7 +406,7 @@ pub(super) fn field_built(kind: Kind, text: &str, theme: Theme) -> Harness<'stat
                     crate::component::recipient::recipient_field(ui, &theme, egui::Id::unique("to"), text, &line);
                 }
                 Kind::PlainLine => {
-                    super::plain_line(ui, &theme, egui::Id::unique("subject"), text, "Subject", super::Cap::Chars(super::MAX_LINE));
+                    super::plain_line(ui, &theme, egui::Id::unique("subject"), text, "Subject", "", super::Cap::Chars(super::MAX_LINE), 24.0);
                 }
                 Kind::PlainText => {
                     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, width: f32| {

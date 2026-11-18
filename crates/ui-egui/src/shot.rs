@@ -29,7 +29,7 @@
 //! `edit`, on the picked one, and `delete_event` set to `true` deletes the picked event, so its toast shows. `compose`
 //! opens the
 //! composer: `new`, `written`, `bad` (a recipient that is no address), `suggest` (the people a half-typed name could
-//! be), `floating` (a message opened over it), `reply` (a reply to Odile's rota, a line written over the quote) or
+//! be), `floating` (a message opened over it), `folded` (the same, the floating panel folded), `reply` (a reply to Odile's rota, a line written over the quote) or
 //! `template` (two people and a template with a blank); the first account then has an invented signature.
 //! `first` set to `true` draws the window with no account yet instead of the sample, one that can add accounts.
 //! `open` takes `{"role": "senders"}` for "New senders", and `view` shows the inbox's groups as `cards` (when left
@@ -165,7 +165,7 @@ pub struct Shot {
     pub view: Option<String>,
     /// The composer, the first account signed: `new`, `written` (two people, a subject and a few lines), `bad`
     /// (written, with a recipient that is no address), `suggest` (one person, and a name half typed with the people it
-    /// could be under it), `floating` (written, then a message opened), `reply` (a reply with a line written) or
+    /// could be under it), `floating` (written, then a message opened), `folded` (the same, folded), `reply` (a reply with a line written) or
     /// `template` (two people and a template whose blank is left).
     #[serde(default)]
     pub compose: Option<String>,
@@ -464,8 +464,8 @@ fn sign(app: &mut InboxApp) {
 
 /// Opens the composer as `scene` asks.
 fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
-    if !["new", "written", "bad", "suggest", "floating", "reply", "template"].contains(&scene) {
-        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, reply or template")));
+    if !["new", "written", "bad", "suggest", "floating", "folded", "reply", "template"].contains(&scene) {
+        return Err(bad(format!("{out}: compose {scene:?} is not new, written, bad, suggest, floating, folded, reply or template")));
     }
     sign(app);
     if scene == "reply" {
@@ -489,7 +489,7 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
         composer.typed(mailbox, Line::To)
     };
     match scene {
-        "written" | "bad" | "floating" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
+        "written" | "bad" | "floating" | "folded" | "template" => to("Odile Brannock <odile@example.org>, Teodor Lisk <teodor@example.org>,")?,
         "suggest" => to("Odile Brannock <odile@example.org>, te")?,
         _ => {}
     }
@@ -521,7 +521,10 @@ fn compose(app: &mut InboxApp, out: &str, scene: &str) -> Result<(), UiError> {
     if scene == "suggest" {
         composer.step(true);
     }
-    if scene == "floating" {
+    if scene == "folded" {
+        composer.toggle_fold();
+    }
+    if scene == "floating" || scene == "folded" {
         let id = app.mailbox().messages().iter().find(|row| row.subject == "Draft logo for the bakery").map(|row| row.id);
         app.mailbox_mut().select(id);
     }

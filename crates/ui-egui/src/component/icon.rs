@@ -69,6 +69,7 @@ pub const fn name(id: IconId) -> &'static str {
         IconId::Globe => "globe",
         IconId::Changed => "changed",
         IconId::Older => "older",
+        IconId::Dock => "dock",
     }
 }
 

@@ -108,6 +108,9 @@ pub enum IconId {
     Changed,
     /// Older: a clock turning back, an invitation a later one replaced.
     Older,
+    /// Back in the reader's place: the floating composer's (its frame's glyph, not one of the icon sheet's 45, so not
+    /// in [`IconId::ALL`]).
+    Dock,
 }
 
 impl IconId {
@@ -209,6 +212,7 @@ impl IconId {
             Self::Globe => 42,
             Self::Changed => 43,
             Self::Older => 44,
+            Self::Dock => 45,
         }
     }
 }
