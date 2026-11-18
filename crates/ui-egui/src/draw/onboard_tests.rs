@@ -565,3 +565,21 @@ fn another_account_s_row_over_a_parked_edit_brings_that_edit_back_as_typed() {
     harness.run();
     assert_eq!(harness.state().onboarding().stage(), Stage::Edit(2));
 }
+
+#[test]
+fn add_account_stands_at_the_right_end_of_the_accounts_title() {
+    for accounts in [false, true] {
+        let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+        if accounts {
+            add_account(&mut harness, "carol@example.org");
+        }
+        harness.state_mut().open_accounts();
+        harness.run();
+        let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+        let add = on_sheet(&harness, "Add account").rect();
+        let title = harness.get_by_role_and_label(Role::Heading, "Accounts").rect();
+        // The page's column ends 40 in from the sheet's edge, its words 16 further in.
+        assert!((add.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 0.5, "{accounts}: {add:?} in {sheet:?}");
+        assert!((add.center().y - title.center().y).abs() <= 1.0, "{accounts}: on the title's line: {add:?} {title:?}");
+    }
+}

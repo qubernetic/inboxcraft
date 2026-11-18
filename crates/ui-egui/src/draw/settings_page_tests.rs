@@ -49,7 +49,8 @@ fn focused(harness: &Harness<'static, InboxApp>) -> Option<(String, egui::Rect)>
 #[test]
 fn the_nine_sections_stand_in_the_design_s_order() {
     let mut harness = opened();
-    harness.get_by_label("11 sections");
+    // The design counts its nine; AI and Plugins come after them.
+    harness.get_by_label("9 sections");
     let tops: Vec<f32> = NAMES.iter().map(|name| harness.get_by_label(&format!("{name}, settings page")).rect().top()).collect();
     assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "the design's order, then AI and Plugins: {tops:?}");
     let first = harness.get_by_label("Appearance, settings page").rect();
@@ -74,6 +75,26 @@ fn the_nine_sections_stand_in_the_design_s_order() {
     harness.run();
     let row = harness.get_by_role_and_label(Role::Group, "Mode. Auto follows the computer's light or dark choice.").rect();
     assert!((row.width() - 720.0).abs() <= 1.0, "a row fills the 720 column: {}", row.width());
+}
+
+#[test]
+fn the_sections_column_stands_as_the_design_draws_it() {
+    let harness = opened();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    // Inside the sheet's 1 px edge: the head 48, its hairline, 8, then the rows 30 high one under the other.
+    let mut top = sheet.top() + 1.0 + 48.0 + 1.0 + 8.0;
+    for name in NAMES {
+        let row = harness.get_by_label(&format!("{name}, settings page")).rect();
+        assert_eq!((row.top(), row.height()), (top, 30.0), "{name}");
+        assert_eq!((row.left(), row.width()), (sheet.left() + 1.0, 232.0), "{name}");
+        top = row.bottom();
+    }
+    // Close, which the design does not have, stands at the right end of the column's head, out of every page's way.
+    let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
+    let head = egui::Rect::from_min_size(sheet.min + vec2(1.0, 1.0), vec2(232.0, 48.0));
+    assert!(head.contains_rect(close), "Close {close:?} in the head {head:?}");
+    assert!((close.right() - (head.right() - 16.0)).abs() <= 0.5, "16 from the column's edge: {close:?}");
+    assert!((close.center().y - head.center().y).abs() <= 0.5, "in the head's middle: {close:?}");
 }
 
 #[test]

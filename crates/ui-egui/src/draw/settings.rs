@@ -24,7 +24,7 @@ use inboxcraft_engine::ScreenerMode;
 use inboxcraft_engine::appearance::{Appearance, Motion, ThemeMode, WindowFrame};
 use inboxcraft_engine::notify::Level;
 
-use super::paint::{NavRow, Ring, focus_ring, nav_row};
+use super::paint::{Ring, focus_ring};
 use crate::component::button::{IconButton, LinkSize, TextButton, link_sized};
 use crate::component::field;
 use crate::component::key::{Chip, ChipState};
@@ -249,9 +249,14 @@ pub(super) fn inset<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// A `panel_line` hairline across `ui` at its cursor, and the pixel it takes.
 pub(super) fn rule(ui: &mut Ui, theme: &Theme) {
+    rule_in(ui, theme.palette.panel_line);
+}
+
+/// A hairline in `colour` across `ui` at its cursor, and the pixel it takes.
+fn rule_in(ui: &mut Ui, colour: egui::Color32) {
     let y = ui.cursor().top();
     let x = ui.max_rect().x_range();
-    paint::hairline(ui.painter(), pos2(x.min, y), pos2(x.max - 1.0, y), theme.palette.panel_line);
+    paint::hairline(ui.painter(), pos2(x.min, y), pos2(x.max - 1.0, y), colour);
     ui.add_space(1.0);
 }
 
@@ -284,8 +289,6 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, section: Section, intro: &[&str],
             let title = crate::component::label(ui, theme.fonts.title, section.name(), p.ink);
             title.widget_info(|| WidgetInfo::labeled(Role::Heading, true, section.name()));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // The sheet's Close stands at the title's right end.
-                ui.add_space(crate::component::control_side(theme) + 12.0);
                 if section.planned() {
                     crate::component::soon::soon_tag(ui, theme);
                 }
@@ -387,40 +390,90 @@ fn appearance(ui: &mut Ui, theme: &Theme, current: &Appearance, reduce: bool, vi
     asked
 }
 
-/// The list of sections: its head, a hairline, then a row per section, the one shown selected. The section pressed.
-fn nav(ui: &mut Ui, theme: &Theme, shown: Section) -> Option<Section> {
+/// The height of a section's row, in points (at 100 %).
+const SECTION_ROW: f32 = 30.0;
+
+/// Where a section row's icon starts, from the row's left edge (its 2 px bar, then 42), in points.
+const SECTION_ICON_AT: f32 = 44.0;
+
+/// The room between a section row's icon and its name, and right of the name, in points.
+const SECTION_GAP: f32 = 10.0;
+
+/// The room right of a section row's name, in points.
+const SECTION_RIGHT: f32 = 14.0;
+
+/// One section in the list, the design's `mailbox-row`: 30 high, the icon 16 and the name in `body`, both `muted`;
+/// hovered, the `grid` fill and both `ink`; the section shown, the `stage` fill, a 2 px `cyan_edge` bar at its left
+/// and both `ink`; focused, the inside ring.
+fn section_row(ui: &mut Ui, theme: &Theme, section: Section, shown: bool) -> Response {
+    let p = &theme.palette;
+    let name = section.name();
+    let height = theme.size(SECTION_ROW).max(theme.fonts.body.line + 8.0).ceil();
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, shown, tr!("{section}, settings page", section = name)));
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let hovered = response.hovered() && !shown;
+        if shown {
+            painter.rect_filled(rect, 0.0, p.stage);
+            painter.rect_filled(Rect::from_min_size(rect.min, vec2(2.0, rect.height())), 0.0, p.cyan_edge);
+        } else if hovered {
+            painter.rect_filled(rect, 0.0, p.grid);
+        }
+        let ink = if shown || hovered { p.ink } else { p.muted };
+        let side = theme.icon_side();
+        let left = rect.left() + SECTION_ICON_AT;
+        let icon = Rect::from_min_size(pos2(left, (rect.center().y - side / 2.0).round()), vec2(side, side));
+        crate::iconset::paint(painter, icon, section_icon(section), ink);
+        let at = icon.right() + SECTION_GAP;
+        let words = paint::line(ui, &[(name, theme.fonts.body, ink)], (rect.right() - SECTION_RIGHT - at).max(1.0));
+        ui.painter().galley(pos2(at, (rect.center().y - words.size().y / 2.0).round()), words, ink);
+        if response.has_focus() {
+            focus_ring(ui.painter(), theme, rect, Ring::Inside);
+        }
+    }
+    response
+}
+
+/// The list of sections: its head ("Settings", how many sections are built, and the sheet's Close at its right end), a
+/// `line` hairline, then a row per section, the one shown selected. The section pressed, or Close.
+fn nav(ui: &mut Ui, theme: &Theme, keymap: &Keymap, shown: Section) -> Option<Asked> {
     let p = &theme.palette;
     let f = &theme.fonts;
     let width = ui.available_width();
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let tall = NAV_HEAD.max(f.heading.line);
+    let mut asked = None;
     ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_height(tall);
         ui.add_space(INSET);
         crate::component::label(ui, f.heading, tr!("Settings"), p.ink);
         ui.add_space(10.0);
-        crate::component::label(ui, f.mono_s, &tr!("{count} sections", count = Section::ALL.len()), p.muted);
+        // The design counts its nine sections; the two planned ones, AI and Plugins, come after them uncounted.
+        let nine = Section::ALL.iter().filter(|section| !matches!(section, Section::Ai | Section::Plugins)).count();
+        let count = tr!("{count} sections", count = nine);
+        // Cut where large text leaves it no room beside Close.
+        let room = ui.available_width() - INSET - crate::component::control_side(theme) - 8.0;
+        let words = crate::component::cut(ui, &count, f.mono_s, p.muted, room);
+        let (at, said) = ui.allocate_exact_size(words.size(), Sense::hover());
+        said.widget_info(|| WidgetInfo::labeled(Role::Label, true, &count));
+        ui.painter().galley(at.min, words, p.muted);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(INSET);
+            // The sheet's Close, which the design does not have (settings are a place of the window there).
+            if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, keymap).clicked() {
+                asked = Some(Asked::Close);
+            }
+        });
     });
-    rule(ui, theme);
+    rule_in(ui, p.line);
     ui.add_space(NAV_GAP);
-    let mut pressed = None;
     for section in Section::ALL {
-        let name = section.name();
-        let row = NavRow {
-            text: name,
-            spoken: tr!("{section}, settings page", section = name),
-            badge: 0,
-            selected: section == shown,
-            // As far in as the design's rows: the index's rows under a place.
-            depth: 3,
-            icon: Some(section_icon(section)),
-            enabled: true,
-        };
-        if nav_row(ui, theme, &row).clicked() && section != shown {
-            pressed = Some(section);
+        if section_row(ui, theme, section, section == shown).clicked() && section != shown {
+            asked = Some(Asked::Section(section));
         }
     }
-    pressed
+    asked
 }
 
 /// The page shown.
@@ -882,11 +935,13 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         let nav_width = NAV.min((inner.width() * 0.3).floor());
         let left = Rect::from_min_size(inner.min, vec2(nav_width, inner.height()));
         let divider = left.right();
-        paint::hairline(ui.painter(), pos2(divider, left.top()), pos2(divider, left.bottom() - 1.0), p.panel_line);
+        paint::hairline(ui.painter(), pos2(divider, left.top()), pos2(divider, left.bottom() - 1.0), p.line);
         let shown = view.settings.section();
-        let pressed = ui.scope_builder(UiBuilder::new().max_rect(left).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, shown)).inner;
-        if let Some(section) = pressed {
-            asked = Some(Asked::Section(section));
+        let keymap = view.keymap;
+        let pressed =
+            ui.scope_builder(UiBuilder::new().max_rect(left).layout(Layout::top_down(Align::Min)), |ui| nav(ui, theme, keymap, shown)).inner;
+        if pressed.is_some() {
+            asked = pressed;
         }
         let room =
             Rect::from_min_max(pos2(divider + 1.0 + PAGE_X, inner.top() + PAGE_TOP), pos2(inner.right() - PAGE_X, inner.bottom() - PAGE_BOTTOM));
@@ -896,15 +951,6 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
             ui.spacing_mut().item_spacing.y = 0.0;
             if let Some(on_page) = page(ui, theme, &mut view) {
                 asked = Some(on_page);
-            }
-        });
-        // Close at the right end of the page's title.
-        let side = crate::component::control_side(theme);
-        let y = column.top() + where_high(theme) + HEAD_GAP + ((title_high(theme) - side) / 2.0).round();
-        let corner = Rect::from_min_size(pos2(column.right() - INSET - side, y), vec2(side, side));
-        ui.scope_builder(UiBuilder::new().max_rect(corner).layout(Layout::right_to_left(Align::Min)), |ui| {
-            if IconButton::new(IconId::Close, tr!("Close")).show(ui, theme, view.keymap).clicked() {
-                asked = Some(Asked::Close);
             }
         });
     });
