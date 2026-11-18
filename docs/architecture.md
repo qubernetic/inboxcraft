@@ -306,9 +306,11 @@ typed, or of an account without a Drafts folder, stays here; a failed upload wai
 `compose.update` also takes `typed`: the text in the To, Cc and Bcc lines that is not a recipient yet, three lines of
 at most 4 096 characters (a shorter list empties the lines it leaves out; a stored line past the cap reads as empty).
 It is kept here and `compose.show` and `compose.list` answer it, but it never leaves the machine: it is in neither the
-sent message nor the Drafts copy, and a change of it alone uploads no copy. It never becomes a recipient unseen: the
-composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients only from the lines it
-draws, and refuses Send while a line it does not draw holds some.
+sent message nor the Drafts copy, and a change of it alone uploads no copy. It becomes a recipient only from a line
+the composer lays out: the composer draws Cc and Bcc whenever either holds typed text, takes typed text as recipients
+only from the lines it draws, refuses Send while a line it does not draw holds some, and sends only once it has been
+painted since it opened or moved. A line laid out is not always in sight whole: past four rows of chips it scrolls,
+and typed text longer than the field's width runs past its right end.
 
 Replies and forwards (`engine::reply`) are drafts made from a message, from the account that holds it, all `safe`.
 `compose.reply` goes to the message's `Reply-To`, else its `From`, and a reply to the owner's own message to its `To`;
