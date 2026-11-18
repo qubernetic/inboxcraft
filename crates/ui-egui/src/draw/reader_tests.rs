@@ -1306,6 +1306,30 @@ fn every_reader_scene_is_walked_by_the_keyboard_and_rests() {
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     done(&mut harness);
     walks_and_rests(&mut harness, "nothing open");
+    // Full width.
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    full_width(&mut harness, "Full width");
+    assert!(harness.state().reader().full_width());
+    walks_and_rests(&mut harness, "full width");
+    // The screener's preview of held mail.
+    let mut harness = harness_with(app_with(&fetch), egui::Theme::Light);
+    harness.get_by_role_and_label(Role::Button, "Review").click();
+    harness.run();
+    harness.get_by_label("Harbour Swim Club, Winter swim at the harbour steps, 06:00, unread, new sender").click();
+    harness.run();
+    harness.get_by_label("Let Harbour Swim Club in?");
+    walks_and_rests(&mut harness, "a held message");
+    // A sent message that bounced, under its banner.
+    let mut store = sample::mailbox(Timestamp::from_unix(1_793_869_200, 0).unwrap()).unwrap();
+    sample::bounce(&mut store).unwrap();
+    let app = InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch.clone()), Box::new(NoSave));
+    let mut harness = harness_with(app, egui::Theme::Light);
+    harness.state_mut().mailbox_mut().open(crate::mailbox::Place::View(inboxcraft_model::Role::Sent));
+    harness.run();
+    harness.get_by_label_contains("not delivered").click();
+    harness.run();
+    harness.get_by_label_contains("Not delivered: petra@example.org: 550 5.1.1");
+    walks_and_rests(&mut harness, "a bounced message");
 }
 
 #[test]
