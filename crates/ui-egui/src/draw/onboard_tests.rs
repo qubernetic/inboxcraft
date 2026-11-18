@@ -713,6 +713,8 @@ fn add_account_stands_at_the_right_end_of_the_accounts_title() {
         // The page's column ends 40 in from the sheet's edge, its words 16 further in.
         assert!((add.right() - (sheet.right() - 1.0 - 40.0 - 16.0)).abs() <= 0.5, "{accounts}: {add:?} in {sheet:?}");
         assert!((add.center().y - title.center().y).abs() <= 1.0, "{accounts}: on the title's line: {add:?} {title:?}");
+        // `settings-accounts/list`: a secondary text button 110 × 32, its word only.
+        assert_eq!((add.width(), add.height()), (110.0, 32.0), "{accounts}: {add:?}");
     }
 }
 

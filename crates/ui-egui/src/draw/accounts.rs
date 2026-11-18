@@ -185,7 +185,7 @@ pub(super) fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let mut asked = None;
     head(ui, theme, Section::Accounts, &[tr!("The mail accounts this computer reads and sends from.")], |ui| {
         if can_add && !accounts.is_empty() {
-            let button = TextButton::new(tr!("Add account")).icon(IconId::Add).secondary();
+            let button = TextButton::new(tr!("Add account")).secondary();
             if button.show(ui, theme, keymap).clicked() {
                 asked = Some(Asked::Add);
             }
