@@ -16,8 +16,11 @@
 //! 256 KiB and 1 MiB (just under the composer's cap, so typing fits), its text focused, at rest and typing one
 //! character a frame at its start, each without AccessKit and with it (`-ak`, as while a screen reader listens).
 //!
+//! With `--calendar` it runs the calendar's scene instead: `calendar-week-200`, the week view holding 200 invented
+//! events (overlapping, over whole days), left alone.
+//!
 //! ```text
-//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose]
+//! cargo run --release -p inboxcraft-ui-egui --example ui_bench [-- --pinned] [--compose] [--calendar]
 //! ```
 
 use std::process::ExitCode;
@@ -64,6 +67,8 @@ enum Scene {
     ReaderHtml,
     /// The composer with a message text of `kib` KiB, focused; `typing` a character a frame; `accesskit` on.
     Compose { kib: usize, typing: bool, accesskit: bool },
+    /// The calendar's week holding [`WEEK_EVENTS`] events, left alone.
+    CalendarWeek,
 }
 
 impl Scene {
@@ -88,6 +93,7 @@ impl Scene {
             Self::ListRest => "inbox-list-rest".to_owned(),
             Self::ListScroll => "inbox-list-scroll".to_owned(),
             Self::ReaderHtml => "reader-html".to_owned(),
+            Self::CalendarWeek => "calendar-week-200".to_owned(),
             Self::Compose { kib, typing, accesskit } => {
                 format!("compose-{kib}k-{}{}", if typing { "typing" } else { "rest" }, if accesskit { "-ak" } else { "" })
             }
@@ -98,7 +104,7 @@ impl Scene {
     fn view(self) -> Option<InboxView> {
         match self {
             Self::ListRest | Self::ListScroll => Some(InboxView::List),
-            Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } => None,
+            Self::DefaultRest | Self::ReaderHtml | Self::Compose { .. } | Self::CalendarWeek => None,
         }
     }
 }
@@ -124,7 +130,10 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
     let time = Timestamp::from_unix(TIME, 0).ok_or_else(|| UiError::Shot("no time".to_owned()))?;
     let clock = FakeClock::new(time);
     let store = sample::grown(time, MESSAGES)?;
-    let session = sample::session_over(store, Box::new(clock.clone()))?;
+    let mut session = sample::session_over(store, Box::new(clock.clone()))?;
+    if scene == Scene::CalendarWeek {
+        week_of_events(&mut session)?;
+    }
     let mailbox = Mailbox::new(session, Box::new(clock));
     let mut app = InboxApp::with_outside(mailbox, Box::new(sample::Pictures::default()), Box::new(NoSave));
     app.set_reduce_motion(true);
@@ -135,6 +144,13 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
         let id = app.mailbox().messages().iter().find(|row| row.subject == HTML_SUBJECT).map(|row| row.id);
         let Some(id) = id else { return Err(UiError::Shot(format!("no row {HTML_SUBJECT:?}"))) };
         app.mailbox_mut().select(Some(id));
+    }
+    if scene == Scene::CalendarWeek {
+        app.show_calendar();
+        let shown = app.calendar().events().count();
+        if shown < WEEK_EVENTS {
+            return Err(UiError::Shot(format!("the week shows {shown} events, not {WEEK_EVENTS}")));
+        }
     }
     if let Scene::Compose { kib, .. } = scene {
         app.compose();
@@ -149,6 +165,33 @@ fn app(scene: Scene) -> Result<InboxApp, UiError> {
         }
     }
     Ok(app)
+}
+
+/// The events of the calendar's scene, in the week the sample shows.
+const WEEK_EVENTS: usize = 200;
+
+/// Puts [`WEEK_EVENTS`] invented events into the sample's first calendar, in the week of 2 November 2026: every day,
+/// every hour from 07:00, some overlapping, some over whole days.
+fn week_of_events(session: &mut inboxcraft_engine::Session) -> Result<(), UiError> {
+    let failed = |error: inboxcraft_engine::EngineError| UiError::Shot(format!("event.create: {error}"));
+    let calendars = session.run("calendar.list", &serde_json::json!({})).map_err(failed)?;
+    let calendar = calendars["calendars"][0]["id"].as_u64().ok_or_else(|| UiError::Shot("no calendar".to_owned()))?;
+    for index in 0..WEEK_EVENTS {
+        let day = 2 + index % 7;
+        let hour = 7 + (index / 7) % 14;
+        let all_day = index % 25 == 0;
+        let (start, end) = if all_day {
+            (format!("2026-11-{day:02}"), format!("2026-11-{:02}", day + 1))
+        } else {
+            (format!("2026-11-{day:02}T{hour:02}:{:02}:00Z", (index % 3) * 15), format!("2026-11-{day:02}T{:02}:30:00Z", hour + 1))
+        };
+        let params = serde_json::json!({
+            "calendar": calendar, "summary": format!("Invented event {index} at the yard"), "start": start, "end": end,
+            "all_day": all_day, "busy": true, "private": false, "repeat": "none", "guests": [],
+        });
+        session.run("event.create", &params).map_err(failed)?;
+    }
+    Ok(())
 }
 
 /// Where the composer's message text is, from the AccessKit tree of a frame (in points: the bench runs at 1 pixel a
@@ -279,7 +322,13 @@ fn main() -> ExitCode {
         println!("governor: {governor}");
     }
     let clock = SystemClock::new();
-    let scenes = if std::env::args().any(|arg| arg == "--compose") { Scene::compose() } else { Scene::ALL.to_vec() };
+    let scenes = if std::env::args().any(|arg| arg == "--compose") {
+        Scene::compose()
+    } else if std::env::args().any(|arg| arg == "--calendar") {
+        vec![Scene::CalendarWeek]
+    } else {
+        Scene::ALL.to_vec()
+    };
     for scene in scenes {
         match measure(scene) {
             Ok(measured) => {
