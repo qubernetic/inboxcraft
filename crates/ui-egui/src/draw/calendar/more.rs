@@ -42,13 +42,13 @@ pub(super) fn row_id(event: &EventRow) -> Id {
     Id::unique(("calendar-more-row", event.id, event.start))
 }
 
-/// The float of `day`'s events.
-pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Calendar, day: Day, asked: &mut Vec<Asked>) {
+/// The float of `day`'s events; while `over` the palette or the settings sheet lies over it and has the keys.
+pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Calendar, (day, over): (Day, bool), asked: &mut Vec<Asked>) {
     let anchor =
         ctx.data(|data| data.get_temp::<Rect>(anchor_id(day))).unwrap_or_else(|| Rect::from_center_size(ctx.content_rect().center(), vec2(1.0, 1.0)));
     let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: Id::NULL };
     let events: Vec<&EventRow> = calendar.events().filter(|event| event.covers(day)).collect();
-    let shown = popup::float(ctx, theme, &float, |ui| {
+    let rows = |ui: &mut Ui| {
         let count = if events.len() == 1 { tr!("1 event").to_owned() } else { tr!("{count} events", count = events.len()) };
         popup::title(ui, theme, &day::dated(day), Some(&count));
         let mut out = Vec::new();
@@ -66,7 +66,9 @@ pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Cal
             out.push(Asked::More(None));
         }
         out
-    });
+    };
+    // Under the palette or the sheet the float stays as it is and takes no key.
+    let shown = if over { popup::held(ctx, theme, &float, true, rows).map(|(out, _)| out) } else { popup::float(ctx, theme, &float, rows) };
     match shown {
         Some(out) => asked.extend(out),
         None => asked.push(Asked::More(None)),

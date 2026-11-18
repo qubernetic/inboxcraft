@@ -1330,6 +1330,8 @@ impl InboxApp {
         let left_settings = escape && self.settings.is_open();
         if left_settings {
             self.close_settings();
+            // The sheet on top took the Esc: nothing under it sees it (the calendar's pick, the editor).
+            ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, Key::Escape));
         }
         let setting = self.settings.is_open();
         self.calendar_before(ui.ctx(), setting);
@@ -1433,7 +1435,9 @@ impl InboxApp {
         }
         layers.finish(ui.painter(), &theme);
         if self.screen == Screen::Calendar {
-            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, false));
+            // The palette and the settings sheet lie over the editor: they have the keys and the pointer.
+            let over = setting || self.palette.is_open();
+            on_calendar.extend(calendar::editor(ui.ctx(), &theme, &self.keymap, &mut self.calendar, over));
         }
         if setting {
             changed = self.settings_sheet(ui.ctx(), &theme);
@@ -1655,7 +1659,9 @@ impl InboxApp {
             middle_card(ui, theme, layers, |ui| calendar::empty(ui, theme));
             return Vec::new();
         }
-        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers)
+        // The palette and the settings sheet lie over the screen's floats: they have the keys.
+        let over = self.palette.is_open() || self.settings.is_open();
+        calendar::screen(ui, theme, &self.keymap, &self.calendar, layers, over)
     }
 
     /// Where the rail sits: the window's `corner`, and its mark one `gap` down, under the strip when there is one,

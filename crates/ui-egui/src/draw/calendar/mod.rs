@@ -128,8 +128,9 @@ pub(super) fn empty(ui: &mut Ui, theme: &Theme) {
     crate::component::empty::empty_state(ui, theme, tr!("Calendar · no calendars"), tr!("No calendars yet."), about);
 }
 
-/// The calendar screen with its calendars: the view and the side panel; what was pressed.
-pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Panes) -> Vec<Asked> {
+/// The calendar screen with its calendars: the view and the side panel; what was pressed. While `over` the palette or
+/// the settings sheet lies over the screen's floats and has the keys.
+pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, layers: &mut Panes, over: bool) -> Vec<Asked> {
     let mut asked = Vec::new();
     CentralPanel::no_frame().frame(Frame::NONE).show(ui, |ui| {
         layers.card(ui, Margin::ZERO, |ui| {
@@ -145,7 +146,7 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
             }
             ui.scope_builder(UiBuilder::new().max_rect(view).id_salt("calendar-view"), |ui| {
                 ui.set_clip_rect(view.intersect(ui.clip_rect()));
-                view_part(ui, theme, keymap, calendar, &mut asked);
+                view_part(ui, theme, keymap, calendar, over, &mut asked);
             });
             if with_side {
                 let side = Rect::from_min_max(pos2(side_left, all.top()), all.max);
@@ -160,7 +161,7 @@ pub(super) fn screen(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Cal
 }
 
 /// The view: its toolbar, a `line` hairline, and the days.
-fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, asked: &mut Vec<Asked>) {
+fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, over: bool, asked: &mut Vec<Asked>) {
     let z = Sizes::of(theme);
     let ppp = ui.pixels_per_point();
     let line = line_width(ppp);
@@ -177,7 +178,7 @@ fn view_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, a
         View::Agenda => agenda::show(ui, theme, keymap, calendar, asked),
     });
     if let Some(day) = calendar.more() {
-        more::show(ui.ctx(), theme, keymap, calendar, day, asked);
+        more::show(ui.ctx(), theme, keymap, calendar, (day, over), asked);
     }
 }
 
@@ -493,3 +494,7 @@ mod grid_screen_tests;
 #[cfg(test)]
 #[path = "leave_tests.rs"]
 mod leave_tests;
+
+#[cfg(test)]
+#[path = "esc_tests.rs"]
+mod esc_tests;
