@@ -131,9 +131,9 @@ pub struct InboxApp {
     reader: Reader,
     textures: reader::Textures,
     hover: Option<String>,
-    /// The row the next-message rule names when the open message left the list, and the rule: the reader shows nothing
-    /// open and the list selects no row until the owner opens a message; an arrow starts from it, and "Open the message
-    /// the rule names" opens it.
+    /// The row the next-message rule names when the open message left the list, and which side of the gap it stands
+    /// on: the reader shows nothing open and the list selects no row until the owner opens a message; an arrow opens
+    /// the row beside the gap, and "Open the message the rule names" opens the rule's row.
     held_back: Option<Held>,
     search: String,
     /// The appearance installed in the context, once installed.

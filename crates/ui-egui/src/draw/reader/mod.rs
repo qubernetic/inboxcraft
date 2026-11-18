@@ -6,8 +6,9 @@
 //! reader hears it whole), the facts of a message alone or who wrote and how many messages for a thread, the why line
 //! and the content bar. The thread follows, oldest first: the open message and the ones the owner unfolded in full
 //! (the remote-content banner, the text, the attachments), the rest folded to their line. Reply, Reply all and Forward
-//! stand at the foot under a hairline, on lines of their own in a pane narrower than they are. More holds Archive (with its key), flag, read or unread and the rest of the acts
-//! on the open message, then what is not a mail action: full width, closing the reader and the next-message rule. Move
+//! stand at the foot under a hairline, on lines of their own in a pane narrower than they are. More holds Archive
+//! (with its key), flag, read or unread and the rest of the acts on the open message, then what is not a mail action:
+//! full width, closing the reader and the next-message rule. Move
 //! to a folder opens a menu of the folders of the message's account. While the pointer is on a link, a float at the
 //! bottom says where it goes. Tab goes from the head through the message to the answers.
 //!
