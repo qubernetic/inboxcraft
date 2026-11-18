@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! A fitted HTML message: its links, paragraphs, quotes and tables, and a message far larger than the pane.
+//! A fitted HTML message: its links, paragraphs, quotes and tables, a message far larger than the pane, and the content
+//! bar's choice between `fitted` and `plain text`.
 
 use egui::accesskit::Role;
 use egui::{Key, Rect, Shape, UiBuilder, pos2, vec2};
@@ -279,6 +280,22 @@ fn opened(folder: Option<u64>, subject: &str) -> Harness<'static, InboxApp> {
 }
 
 #[test]
+fn the_content_bar_switches_between_fitted_and_plain_text() {
+    let mut harness = opened(None, "Your bike is due for a service");
+    harness.get_by_label_contains("Content: HTML, 1 picture held back");
+    harness.get_by_label("Time for a check-up");
+    harness.get_by_label("plain text").click();
+    harness.run();
+    // The message's own text part, as a text-only program shows it.
+    harness.get_by_label_contains("Content: HTML, as a text-only program shows it");
+    harness.get_by_label_contains("Book a slot: https://cycles.example.org/book");
+    assert!(harness.query_by_label("Time for a check-up").is_none());
+    harness.get_by_label("fitted").click();
+    harness.run();
+    harness.get_by_label("Time for a check-up");
+}
+
+#[test]
 fn every_fitted_scene_is_walked_by_the_keyboard_and_rests() {
     let walk = |harness: &mut Harness<'static, InboxApp>, scene: &str| {
         let missed = crate::component::tests::keyboard_walk(harness);
@@ -289,6 +306,10 @@ fn every_fitted_scene_is_walked_by_the_keyboard_and_rests() {
     walk(&mut harness, "a fitted message with a link");
     let mut harness = opened(Some(5), "You have won a lighthouse");
     walk(&mut harness, "a link that says one place and goes to another");
+    let mut harness = opened(None, "Your bike is due for a service");
+    harness.get_by_label("plain text").click();
+    harness.run();
+    walk(&mut harness, "the plain-text view");
     // The blocks alone: a folded and an open quote, a table, preformatted text.
     let html = "<p>See <a href=\"https://example.org/\">the plan</a>.</p><table><tr><th>Item</th><th>Qty</th></tr>\
                 <tr><td>Teapot</td><td><a href=\"https://example.org/teapot\">1</a></td></tr></table><pre>x = 1</pre>\

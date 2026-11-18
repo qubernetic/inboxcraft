@@ -88,6 +88,8 @@ pub(super) enum Asked {
     Details(u64),
     /// Show or hide the quotes.
     Quotes(u64),
+    /// Show an HTML message fitted or as plain text.
+    View(u64, crate::component::content_bar::View),
     /// Load the remote pictures of this message once.
     Once(u64),
     /// Load the remote pictures of this sender always.

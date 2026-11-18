@@ -1953,6 +1953,7 @@ impl InboxApp {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
             reader::Asked::Details(id) => reader.toggle_details(id),
             reader::Asked::Quotes(id) => reader.toggle_quotes(id),
+            reader::Asked::View(id, view) => reader.set_plain(id, view == crate::component::content_bar::View::Plain),
             reader::Asked::Once(id) => reader.allow_once(mailbox, id),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
             reader::Asked::Save(id, index) => reader.save(mailbox, id, index),

@@ -135,6 +135,8 @@ pub struct Opened {
     pub sender_allowed: bool,
     /// The invitation it carries, as its card shows it.
     pub invite: Option<Invite>,
+    /// The text of an HTML message as a text-only program shows it: its own text part, or the text of its blocks.
+    pub plain: Vec<Segment>,
     html: Option<String>,
     inline: BTreeSet<String>,
 }
@@ -275,6 +277,7 @@ pub struct Reader {
     expanded: BTreeSet<u64>,
     details: BTreeSet<u64>,
     quotes: BTreeSet<u64>,
+    plain: BTreeSet<u64>,
     once: BTreeSet<u64>,
     full_width: bool,
     fetch: Box<dyn Fetch>,
@@ -306,6 +309,7 @@ impl Reader {
             expanded: BTreeSet::new(),
             details: BTreeSet::new(),
             quotes: BTreeSet::new(),
+            plain: BTreeSet::new(),
             once: BTreeSet::new(),
             full_width: false,
             fetch,
@@ -408,15 +412,29 @@ impl Reader {
             .and_then(Value::as_array)
             .map(|parts| parts.iter().filter_map(|part| part.get("content_id").and_then(Value::as_str)).map(str::to_owned).collect())
             .unwrap_or_default();
-        let mut opened =
-            Opened { id, header, content: Content::NotKept, files: Vec::new(), cut: false, sender_allowed, invite: None, html: None, inline };
+        let mut opened = Opened {
+            id,
+            header,
+            content: Content::NotKept,
+            files: Vec::new(),
+            cut: false,
+            sender_allowed,
+            invite: None,
+            plain: Vec::new(),
+            html: None,
+            inline,
+        };
         opened.content = match body {
             None if answer.get("fetching").and_then(Value::as_bool) == Some(true) => Content::Loading,
             None if answer.get("body_error").and_then(Value::as_str) == Some("too_large") => Content::TooLarge,
             None => Content::NotKept,
             Some(body) if body.get("readable").and_then(Value::as_bool) != Some(true) => Content::Unreadable,
             Some(_) => match (&html, text) {
-                (Some(_), _) => Content::Html(Document::default()),
+                (Some(_), text) => {
+                    // The plain-text view shows the message's own text part where it has one.
+                    opened.plain = text.filter(|text| !text.trim().is_empty()).map(split).unwrap_or_default();
+                    Content::Html(Document::default())
+                }
                 (None, Some(text)) => {
                     opened.cut = text.len() > MAX_TEXT;
                     Content::Text(split(text))
@@ -511,6 +529,9 @@ impl Reader {
         let mut remote = Vec::new();
         remote_pictures(&document.blocks, &mut remote);
         let remote: Vec<String> = remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect();
+        if opened.plain.is_empty() {
+            opened.plain = split(&crate::fitted_text::plain(&document));
+        }
         opened.content = Content::Html(document);
         for content_id in inline {
             let key = inline_key(id, &content_id);
@@ -692,6 +713,21 @@ impl Reader {
         if !self.quotes.remove(&id) {
             self.quotes.insert(id);
         }
+    }
+
+    /// Shows HTML message `id` as plain text, or fitted.
+    pub fn set_plain(&mut self, id: u64, plain: bool) {
+        if plain {
+            self.plain.insert(id);
+        } else {
+            self.plain.remove(&id);
+        }
+    }
+
+    /// Whether HTML message `id` shows as plain text.
+    #[must_use]
+    pub fn shows_plain(&self, id: u64) -> bool {
+        self.plain.contains(&id)
     }
 
     /// How many pictures are asked for, here and failed: it changes whenever one comes, fails or is forgotten, so a

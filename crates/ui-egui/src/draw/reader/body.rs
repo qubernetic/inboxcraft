@@ -179,6 +179,8 @@ pub(super) fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened,
         Content::TooLarge => say(ui, tr!("This message is too large to keep, so it cannot be shown.")),
         Content::Unreadable => say(ui, tr!("This message cannot be read.")),
         Content::Text(segments) => text(ui, theme, reader, opened.id, segments, drawn),
+        // The plain-text view: the message as a text-only program shows it, its quotes folded as a text's are.
+        Content::Html(_) if reader.shows_plain(opened.id) => text(ui, theme, reader, opened.id, &opened.plain, drawn),
         Content::Html(document) => blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn),
     }
     if opened.cut {
