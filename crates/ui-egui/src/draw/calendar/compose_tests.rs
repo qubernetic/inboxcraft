@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::Queryable as _;
 use inboxcraft_engine::Session;
 use inboxcraft_model::{AccountId, Host, Security, Server};
 use inboxcraft_store::{Batch, Change, Storage as _};
