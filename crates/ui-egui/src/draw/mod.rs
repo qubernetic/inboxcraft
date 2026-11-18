@@ -123,6 +123,9 @@ pub struct InboxApp {
     reader: Reader,
     textures: reader::Textures,
     hover: Option<String>,
+    /// The row the next-message rule selected when the open message left the list: the reader stays closed on it until
+    /// the owner opens a message.
+    held_back: Option<u64>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -230,6 +233,7 @@ impl InboxApp {
             reader: Reader::new(fetch, save),
             textures: reader::Textures::new(),
             hover: None,
+            held_back: None,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -809,15 +813,25 @@ impl InboxApp {
 
     /// Opens the selected message in the reader, or closes it, when the selection changed; a message selected while
     /// the composer has the reader's place sends the composer to its floating panel.
+    ///
+    /// When the open message leaves the list (done, snoozed, moved), the reader shows nothing open: the row the
+    /// next-message rule selects is not opened by itself, only when the owner picks a message.
     fn sync(&mut self) {
-        if self.reader.open_id() != self.mailbox.selected() {
-            let selected = self.mailbox.selected();
-            if selected.is_some()
+        let selected = self.mailbox.selected();
+        let open = self.reader.open_id();
+        if open.is_some_and(|id| Some(id) != selected && !self.mailbox.messages().iter().any(|row| row.id == id)) {
+            self.held_back = selected;
+        } else if self.held_back.is_some() && self.held_back != selected {
+            self.held_back = None;
+        }
+        let opening = selected.filter(|id| Some(*id) != self.held_back);
+        if open != opening {
+            if opening.is_some()
                 && let Some(composer) = &mut self.composer
             {
                 composer.set_floating(true);
             }
-            self.reader.open(&mut self.mailbox, selected);
+            self.reader.open(&mut self.mailbox, opening);
             self.hover = None;
         }
     }
@@ -1079,6 +1093,31 @@ impl InboxApp {
         if let Err(error) = result {
             self.mailbox.fail(error);
         }
+    }
+
+    /// The reader on a card `left` from the list: the open message, or nothing open; what was asked in it.
+    fn reader_card(&mut self, ui: &mut Ui, theme: &Theme, layers: &mut Panes, left: f32) -> reader::Drawn {
+        let gap = 0.0;
+        if self.reader.open_id().is_none() {
+            CentralPanel::no_frame().frame(around(left, gap, gap)).show(ui, |ui| {
+                layers.card(ui, Margin::ZERO, |ui| reader::nothing_open(ui, theme, &self.keymap));
+            });
+            return reader::Drawn::default();
+        }
+        let hover = self.hover.take();
+        let mut drawn = CentralPanel::no_frame()
+            .frame(around(left, gap, gap))
+            .show(ui, |ui| {
+                layers.card(ui, Margin::ZERO, |ui| {
+                    reader::show(ui, theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
+                })
+            })
+            .inner;
+        if drawn.hover != hover {
+            ui.ctx().request_repaint();
+        }
+        self.hover = drawn.hover.take();
+        drawn
     }
 
     /// The composer on a card in the reader's place; what was asked in it.
@@ -1350,7 +1389,10 @@ impl InboxApp {
                     (searched, listed)
                 })
             };
-            (header, listed) = if self.reader.open_id().is_some() || docked {
+            // The reader stands beside the list while a message is open, and stays, with nothing open, when the open
+            // message left the list.
+            let reading = self.reader.open_id().is_some() || self.held_back.is_some();
+            (header, listed) = if reading || docked {
                 Panel::left("list")
                     .resizable(true)
                     .default_size(LIST_WIDTH)
@@ -1369,21 +1411,8 @@ impl InboxApp {
         self.textures.retain(|key, _| matches!(self.reader.picture(key), Some(PictureState::Ready(_))));
         if docked {
             composed = self.composer_card(ui, &theme, &mut layers, half);
-        } else if self.screen == Screen::Mail && self.reader.open_id().is_some() {
-            let hover = self.hover.take();
-            let left = if full { gap } else { half };
-            drawn = CentralPanel::no_frame()
-                .frame(around(left, gap, gap))
-                .show(ui, |ui| {
-                    layers.card(ui, Margin::ZERO, |ui| {
-                        reader::show(ui, &theme, &self.keymap, &self.mailbox, &self.reader, &mut self.textures, hover.as_deref())
-                    })
-                })
-                .inner;
-            if drawn.hover != hover {
-                ui.ctx().request_repaint();
-            }
-            self.hover = drawn.hover.take();
+        } else if self.screen == Screen::Mail && (self.reader.open_id().is_some() || self.held_back.is_some()) {
+            drawn = self.reader_card(ui, &theme, &mut layers, if full { gap } else { half });
         }
         layers.finish(ui.painter(), &theme);
         if self.screen == Screen::Calendar {
@@ -1460,6 +1489,7 @@ impl InboxApp {
         }
         self.go(&asked, header, review);
         if clicked.is_some() {
+            self.held_back = None;
             self.mailbox.select(clicked);
         }
         self.composed(ui.ctx(), clicked.is_some(), composed);
@@ -1880,6 +1910,10 @@ impl InboxApp {
             reader::Asked::Copy(url) => {
                 reader.set_notice(tr!("Link copied: {url}", url = crate::mailbox::shown(&url)));
                 ui.ctx().copy_text(url);
+            }
+            reader::Asked::CopySubject(subject) => {
+                reader.set_notice(tr!("Subject copied").to_owned());
+                ui.ctx().copy_text(subject);
             }
             reader::Asked::Dismiss => reader.dismiss_notice(),
             reader::Asked::Act(id, act) => mailbox.start(id, act),

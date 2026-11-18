@@ -4,23 +4,27 @@
 //! The reader's head: the toolbar of mail actions with its menus and the time picker, the subject and who wrote,
 //! and what stands in their place over a message the screener holds.
 
-use egui::{Align, Frame, Id, Layout, Rect, RichText, Sense, Stroke, Ui, vec2};
+use egui::{Align, Id, Layout, Rect, RichText, Role as Spoken, Sense, Ui, UiBuilder, WidgetInfo, vec2};
+use inboxcraft_model::Role;
 
 use crate::component::button::{self, IconButton, TextButton};
+use crate::component::content_bar::{BarKind, ContentBar, View, content_bar};
+use crate::component::facts::{Facts, facts_of};
 use crate::component::pill::pill;
+use crate::component::popup;
+use crate::component::tag::{TagKind, tag};
 use crate::component::time_picker::{self, Ask, Picked, Preset, TimePicker};
 use crate::component::typed_time;
-use crate::component::{badge, popup};
-use crate::draw::margin;
+use crate::component::why_line::why_line;
 use crate::draw::paint;
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, After, GroupKind, Mailbox};
-use crate::reader::{Opened, Reader};
+use crate::mailbox::{Act, After, GroupKind, Mailbox, MessageRow};
+use crate::reader::{Content, Header, Opened, Person, Reader};
 use crate::theme::Theme;
 use crate::tr;
 
-use super::thread::bare;
+use super::thread::addressed;
 use super::{Asked, Drawn};
 
 fn after_text(after: After) -> &'static str {
@@ -36,21 +40,27 @@ fn not_yet() -> &'static str {
     tr!("Not available yet")
 }
 
-/// The width of the More menu, in body text sizes.
-const MENU_WIDTH: f32 = 18.0;
+/// The width of the More menu, in points.
+const MORE_WIDTH: f32 = 288.0;
 
-/// A thin upright line between groups of the toolbar.
-fn divider(ui: &mut Ui, theme: &Theme) {
-    let side = crate::component::control_side(theme);
-    let (rect, _) = ui.allocate_exact_size(vec2(theme.spacing.s2, side), Sense::hover());
-    ui.painter().vline(rect.center().x, rect.shrink2(vec2(0.0, side / 4.0)).y_range(), Stroke::new(1.0, theme.palette.line));
-}
+/// The width of the Move menu, in points.
+const MOVE_WIDTH: f32 = 256.0;
 
-/// The More menu: flag and read or unread for the open message, full width, close, and the next-message rule.
+/// The room between the head's tools and between its tags, in points.
+const TOOL_GAP: f32 = 8.0;
+
+/// The lines the subject takes before it is cut.
+const SUBJECT_LINES: usize = 2;
+
+/// The More menu: archive, flag and read or unread for the open message, the rest of its acts, full width, close, and
+/// the next-message rule.
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
     let open = reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id));
     if let Some(row) = open {
+        if popup::item(ui, theme, keymap, IconId::Archive, tr!("Archive"), Some(keymap::ARCHIVE)).clicked() {
+            drawn.asked.push(Asked::Act(row.id, Act::Archive));
+        }
         let (name, act) = if row.flagged { (tr!("Take the flag off"), Act::Unflag) } else { (tr!("Flag"), Act::Flag) };
         if popup::item(ui, theme, keymap, IconId::Flag, name, Some(keymap::FLAG)).clicked() {
             drawn.asked.push(Asked::Act(row.id, act));
@@ -88,7 +98,7 @@ fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: 
     if popup::entry(ui, theme, keymap, name, None).clicked() {
         drawn.asked.push(Asked::FullWidth(full));
     }
-    if popup::entry(ui, theme, keymap, tr!("Close"), None).clicked() {
+    if popup::item(ui, theme, keymap, IconId::Close, tr!("Close"), None).clicked() {
         drawn.asked.push(Asked::Close);
     }
     paint::rule(ui, p.line);
@@ -109,13 +119,22 @@ fn move_to(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, open:
         return;
     };
     let response = button.show(ui, theme, keymap);
-    let width = theme.fonts.body.size * MENU_WIDTH;
-    popup::menu(ui.ctx(), theme, &response, move_menu(), width, |ui| {
-        popup::title(ui, theme, tr!("Move to"), None);
+    let targets = mailbox.move_targets(id);
+    // The title's caption: the account and how many folders it offers.
+    let account =
+        mailbox.messages().iter().find(|row| row.id == id).and_then(|row| mailbox.accounts().iter().find(|account| account.id == row.account));
+    let caption = account.map(|account| format!("{} · {}", crate::component::spoken(&account.label), targets.len()));
+    popup::menu(ui.ctx(), theme, &response, move_menu(), MOVE_WIDTH, |ui| {
+        popup::title(ui, theme, tr!("Move to"), caption.as_deref());
         let mut chosen = false;
-        for folder in mailbox.move_targets(id) {
-            // The full path, so a folder inside another says where it is.
-            let item = popup::Item { icon: None, name: &folder.name, caption: None, action: None, state: popup::ItemState::Default };
+        for folder in targets {
+            // The full path, so a folder inside another says where it is; the icon of what the folder is for.
+            let icon = match folder.role {
+                Some(Role::Archive) => IconId::Archive,
+                Some(Role::Trash) => IconId::Delete,
+                _ => IconId::Move,
+            };
+            let item = popup::Item { icon: Some(icon), name: &folder.name, caption: None, action: None, state: popup::ItemState::Default };
             if popup::menu_item(ui, theme, keymap, &item).clicked() {
                 drawn.asked.push(Asked::Act(id, Act::Move(folder.id)));
                 chosen = true;
@@ -228,112 +247,238 @@ fn states(mailbox: &Mailbox, id: u64) -> Vec<(String, String)> {
     chips
 }
 
-/// The toolbar of mail actions, then the subject under it with who wrote in the thread.
-pub(super) fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+/// The reader's head over the open message, as the design puts it from the top: its tags and its acts, the subject on
+/// at most two lines, the facts of a message alone (who wrote and how many messages for a longer thread), why it is
+/// here and what it holds. The caller sets the room between the parts.
+pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
     let p = &theme.palette;
-    let s = &theme.spacing;
+    let f = &theme.fonts;
     let open = reader.open_id();
-    // The actions sit on a small card of their own; they wrap onto a second line when the text scale leaves no room.
-    // In the top row the window controls sit at the end of the actions' line.
-    crate::draw::frame::beside(ui, theme, |ui| {
-        Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s1)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = s.s1;
-                let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
-                    let button = IconButton::new(icon, name);
-                    let button = match (act, open) {
-                        (Some((act, key)), Some(id)) => {
-                            if button.action(key).show(ui, theme, keymap).clicked() {
-                                drawn.asked.push(Asked::Act(id, act));
-                            }
-                            return;
-                        }
-                        (Some((_, key)), None) => button.action(key),
-                        (None, _) => button,
-                    };
-                    button.unavailable(not_yet()).show(ui, theme, keymap);
-                };
-                // A done message, open under "Show done", is brought back by the same button.
-                let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
-                let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
-                action(ui, IconId::Done, name, Some((act, keymap::DONE)));
-                action(ui, IconId::Archive, tr!("Archive"), Some((Act::Archive, keymap::ARCHIVE)));
-                action(ui, IconId::Delete, tr!("Delete"), Some((Act::Delete, keymap::DELETE)));
-                divider(ui, theme);
-                picker(ui, theme, keymap, mailbox, open, drawn);
-                pin(ui, theme, keymap, mailbox, open, drawn);
-                move_to(ui, theme, keymap, mailbox, open, drawn);
-                divider(ui, theme);
-                let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
-                let width = theme.fonts.body.size * MENU_WIDTH;
-                popup::menu(ui.ctx(), theme, &response, more_menu(), width, |ui| {
-                    // Any row chosen closes it: each asks for something.
-                    let before = drawn.asked.len();
-                    more(ui, theme, keymap, mailbox, reader, drawn);
-                    ((), drawn.asked.len() > before)
-                });
-            });
-        });
-    });
-    let subject = reader
-        .open_id()
-        .and_then(|id| reader.opened(id))
-        .map(|opened| opened.header.subject.clone())
-        .filter(|subject| !subject.is_empty())
-        .unwrap_or_else(|| tr!("(no subject)").to_owned());
-    ui.add_space(s.s6);
-    ui.add(egui::Label::new(RichText::new(subject).font(theme.fonts.title.id()).color(p.ink)).wrap());
+    let opened = open.and_then(|id| reader.opened(id));
+    crate::draw::frame::beside(ui, theme, |ui| tools(ui, theme, keymap, mailbox, reader, drawn));
+    subject(ui, theme, keymap, opened, drawn);
+    let count = reader.thread().len();
+    match opened {
+        Some(opened) if count <= 1 => facts(ui, theme, keymap, mailbox, reader, opened, drawn),
+        _ => {
+            let line = tr!("{writers}  ·  {count} messages", writers = reader.writers().join(", "), count = count);
+            let width = ui.available_width();
+            let galley = crate::component::fitted(ui, &line, f.mono_s, p.muted, width);
+            let (rect, response) = ui.allocate_exact_size(vec2(width, f.mono_s.line), Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&line)));
+            paint::run_at(ui.painter(), rect.min, galley, p.muted);
+        }
+    }
+    if let Some(row) = open.and_then(|id| mailbox.messages().iter().find(|row| row.id == id)) {
+        why_line(ui, theme, keymap, &reasons(mailbox, row));
+    }
+    if let Some((kind, held)) = opened.and_then(|opened| holds(reader, opened)) {
+        let bar = ContentBar { kind, view: View::Fitted, views: false, held: &held, waiting: false, links: &[] };
+        content_bar(ui, theme, keymap, &bar);
+    }
+}
+
+/// The tags of the open message: its group in the accent, its state (until when it is snoozed, when its reminder is due,
+/// that it came back) and its account, each with what a screen reader hears.
+fn tags(mailbox: &Mailbox, id: u64) -> Vec<(String, String, TagKind)> {
+    let mut tags = Vec::new();
+    let Some(row) = mailbox.messages().iter().find(|row| row.id == id) else { return tags };
     // Held mail is in no group until its sender is let in.
-    let group = reader.open_id().filter(|id| !mailbox.held(*id)).and_then(|id| {
-        let row = mailbox.messages().iter().find(|row| row.id == id);
-        mailbox
+    if !mailbox.held(id) {
+        let group = mailbox
             .groups()
             .into_iter()
             .find(|group| group.messages.contains(&id))
             .map(|group| group.name)
-            .or_else(|| row.and_then(|row| row.group).map(|kind| kind.text().to_owned()))
-    });
-    let count = reader.thread().len();
-    let chips = reader.open_id().map(|id| states(mailbox, id)).unwrap_or_default();
-    // A message without a header: who wrote it stands here. Otherwise who wrote in the thread.
-    let bare_id = reader.open_id().and_then(|id| reader.opened(id)).filter(|opened| bare(mailbox, reader, opened));
-    let line = bare_id
-        .and_then(|opened| from_line(mailbox, opened))
-        .or_else(|| (count > 1).then(|| tr!("{writers} · {count} messages", writers = reader.writers().join(", "), count = count)));
-    if group.is_some() || line.is_some() || !chips.is_empty() {
-        // The message's group and its state as chips, then the line.
-        let near = pointer_near(ui, theme.fonts.button.line + s.s2);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = s.s2;
-            if let Some(group) = &group {
-                badge::chip(ui, theme, group, &tr!("In {group}", group = group));
+            .or_else(|| row.group.map(|kind| kind.text().to_owned()));
+        tags.extend(group.map(|group| (group.clone(), group, TagKind::Accent)));
+    }
+    for (shown, spoken) in states(mailbox, id) {
+        let kind = if shown == tr!("Returned") { TagKind::Warn } else { TagKind::Default };
+        tags.push((shown, spoken, kind));
+    }
+    tags.extend(
+        mailbox
+            .accounts()
+            .iter()
+            .find(|account| account.id == row.account)
+            .map(|account| (account.label.clone(), account.label.clone(), TagKind::Default)),
+    );
+    tags
+}
+
+/// How wide a tag of `words` is drawn: its words (at most 240) and 6 on each side.
+fn tag_width(ui: &Ui, theme: &Theme, words: &str) -> f32 {
+    crate::component::fitted(ui, words, theme.fonts.mono_s, theme.palette.muted, TAG_WIDEST).size().x.ceil().min(TAG_WIDEST) + 12.0
+}
+
+/// The widest a tag's words get, in points.
+const TAG_WIDEST: f32 = 240.0;
+
+/// The head's first line: the tags at the left, the acts at the right (Done, Snooze, Pin, Move, Delete and More).
+fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, drawn: &mut Drawn) {
+    let side = crate::component::control_side(theme);
+    let open = reader.open_id();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = TOOL_GAP;
+        let acts = 6.0 * side + 5.0 * TOOL_GAP;
+        let room = (ui.available_width() - acts - TOOL_GAP).max(0.0);
+        let (_, place) = ui.allocate_space(vec2(room, side));
+        let mut child = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
+        child.set_clip_rect(place.intersect(ui.clip_rect()));
+        child.spacing_mut().item_spacing.x = TOOL_GAP;
+        let mut left = place.width();
+        for (text, spoken, kind) in open.map(|id| tags(mailbox, id)).unwrap_or_default() {
+            // A tag that does not fit whole is left out, never cut at the side.
+            let words = crate::component::spoken(&text);
+            let wide = tag_width(&child, theme, &words);
+            if wide > left {
+                continue;
             }
-            for (name, spoken) in &chips {
-                badge::chip(ui, theme, name, spoken);
-            }
-            if let Some(line) = line {
-                ui.add(egui::Label::new(RichText::new(line).font(theme.fonts.caption.id()).color(p.muted)).truncate());
-            }
-            if let Some(opened) = bare_id
-                && quiet(ui, theme, keymap, tr!("Details"), ("details", opened.id), near).clicked()
-            {
-                drawn.asked.push(Asked::Details(opened.id));
-            }
+            left -= wide + TOOL_GAP;
+            let shown = tag(&mut child, theme, &words, kind);
+            shown.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(&spoken)));
+        }
+        // A done message, open under "Show done", is brought back by the same button.
+        let done = open.is_some_and(|id| mailbox.messages().iter().any(|row| row.id == id && row.done));
+        let (name, act) = if done { (tr!("Not done"), Act::Undone) } else { (tr!("Done"), Act::Done) };
+        act_button(ui, theme, keymap, open, (IconId::Done, name, keymap::DONE), act, drawn);
+        picker(ui, theme, keymap, mailbox, open, drawn);
+        pin(ui, theme, keymap, mailbox, open, drawn);
+        move_to(ui, theme, keymap, mailbox, open, drawn);
+        act_button(ui, theme, keymap, open, (IconId::Delete, tr!("Delete"), keymap::DELETE), Act::Delete, drawn);
+        let response = IconButton::new(IconId::More, tr!("More")).show(ui, theme, keymap);
+        popup::menu(ui.ctx(), theme, &response, more_menu(), MORE_WIDTH, |ui| {
+            // Any row chosen closes it: each asks for something.
+            let before = drawn.asked.len();
+            more(ui, theme, keymap, mailbox, reader, drawn);
+            ((), drawn.asked.len() > before)
         });
+    });
+}
+
+/// The button of an act on the open message: `icon`, `name` and the key of `action`; unavailable without a message.
+fn act_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    open: Option<u64>,
+    (icon, name, action): (IconId, &str, &str),
+    act: Act,
+    drawn: &mut Drawn,
+) {
+    let button = IconButton::new(icon, name).action(action);
+    match open {
+        Some(id) => {
+            if button.show(ui, theme, keymap).clicked() {
+                drawn.asked.push(Asked::Act(id, act));
+            }
+        }
+        None => {
+            button.unavailable(not_yet()).show(ui, theme, keymap);
+        }
     }
 }
 
-/// The sender's name, their address and the date, for a message without a header of its own.
-fn from_line(mailbox: &Mailbox, opened: &Opened) -> Option<String> {
-    let person = opened.header.from.first()?;
-    let mut parts = vec![person.shown().to_owned()];
-    if !person.name.is_empty() {
-        parts.push(person.address.clone());
+/// The subject of the open message in `title`, on at most two lines, the second cut with one ellipsis; a screen reader
+/// hears it whole, and the menu of a secondary press copies it whole.
+fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>, drawn: &mut Drawn) {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let whole = opened.map(|opened| opened.header.subject.as_str()).filter(|subject| !subject.trim().is_empty()).unwrap_or(tr!("(no subject)"));
+    let (kept, cut) = crate::component::capped(whole, crate::component::MOST);
+    // A subject longer than the cap ends with the ellipsis even when its lines would hold what is kept.
+    let kept = if cut { format!("{}…", kept.trim_end()) } else { kept.to_owned() };
+    let width = ui.available_width().max(1.0);
+    let galley = crate::component::wrapped(ui, &crate::component::plain(&kept), f.title, p.ink, width, SUBJECT_LINES, Align::LEFT);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, galley.size().y.max(f.title.line)), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Spoken::Label, true, crate::component::spoken(whole)));
+    if ui.is_rect_visible(rect) {
+        paint::run_at(ui.painter(), rect.min, galley, p.ink);
     }
-    if let Some(date) = opened.header.date {
-        parts.push(mailbox.short_date(date));
+    let copied = popup::context_menu(ui.ctx(), theme, &response, subject_menu(), MOVE_WIDTH, |ui| {
+        let copy = popup::entry(ui, theme, keymap, tr!("Copy the subject"), None).clicked();
+        (copy, copy)
+    });
+    if copied == Some(true) {
+        drawn.asked.push(Asked::CopySubject(whole.to_owned()));
     }
-    Some(parts.join(" · "))
+}
+
+/// The id of the subject's menu.
+fn subject_menu() -> Id {
+    Id::unique("reader-subject-menu")
+}
+
+/// The facts of a message alone in its thread: who wrote, to whom and when, and all its addresses with the details
+/// open; its link opens and closes them.
+fn facts(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader: &Reader, opened: &Opened, drawn: &mut Drawn) {
+    let Header { from, reply_to, to, cc, date, .. } = &opened.header;
+    let full = addressed;
+    let shown = |people: &[Person]| people.iter().map(Person::shown).collect::<Vec<_>>().join(", ");
+    let from = if from.is_empty() { tr!("(no sender)").to_owned() } else { full(from) };
+    let (to_line, cc, reply_to) = (shown(to), full(cc), full(reply_to));
+    let date = date.map(|date| mailbox.full_date(date)).unwrap_or_default();
+    let open = reader.shows_details(opened.id);
+    let shown = Facts {
+        from: &from,
+        to: &to_line,
+        date: &date,
+        cc: &cc,
+        reply_to: &reply_to,
+        checked: "",
+        id: "",
+        recipients: Some(opened.header.to.len().saturating_add(opened.header.cc.len())),
+    };
+    if facts_of(ui, theme, keymap, &shown, open).clicked() {
+        drawn.asked.push(Asked::Details(opened.id));
+    }
+}
+
+/// Why `row` is here, in words from what the app knows of it: a new sender, its group, held by the screener, its folder.
+fn reasons(mailbox: &Mailbox, row: &MessageRow) -> String {
+    let mut parts = Vec::new();
+    if row.new_sender {
+        parts.push(tr!("new sender").to_owned());
+    }
+    if mailbox.held(row.id) {
+        parts.push(tr!("held by the screener").to_owned());
+    } else if let Some(group) = mailbox
+        .groups()
+        .into_iter()
+        .find(|group| group.messages.contains(&row.id))
+        .map(|group| group.name)
+        .or_else(|| row.group.map(|kind| kind.text().to_owned()))
+    {
+        parts.push(tr!("grouped as {group}", group = group));
+    }
+    if let Some(folder) = mailbox.folders_of(row.account).into_iter().find(|folder| folder.id == row.folder) {
+        parts.push(tr!("in {folder}", folder = folder.name));
+    }
+    parts.join("  ·  ")
+}
+
+/// What kind of message `opened` is and what was held back of it, for the content bar; nothing while its text is not
+/// here (that state says so in the text's place).
+fn holds(reader: &Reader, opened: &Opened) -> Option<(BarKind, String)> {
+    let invite = opened.invite.is_some();
+    match &opened.content {
+        Content::Text(_) if invite => Some((BarKind::Invite, tr!("read into the card below").to_owned())),
+        Content::Text(_) => Some((BarKind::Text, tr!("plain text, shown as sent").to_owned())),
+        Content::Html(_) if invite => Some((BarKind::Invite, tr!("read into the card below").to_owned())),
+        Content::Html(document) => {
+            let count = document.remote_blocked;
+            let held = match (count, reader.remote_allowed(opened.id)) {
+                (0, _) => tr!("nothing held back").to_owned(),
+                (1, false) => tr!("1 picture held back").to_owned(),
+                (count, false) => tr!("{count} pictures held back", count = count),
+                (1, true) => tr!("1 remote picture loaded").to_owned(),
+                (count, true) => tr!("{count} remote pictures loaded", count = count),
+            };
+            Some((BarKind::Html, held))
+        }
+        Content::Loading | Content::NotKept | Content::TooLarge | Content::Unreadable => None,
+    }
 }
 
 /// Whether the pointer is over the `height` of `ui` to come.

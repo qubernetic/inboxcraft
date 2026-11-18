@@ -50,8 +50,9 @@ fn opened(fetch: &Recorder, folder: Option<u64>, subject: &str) -> Harness<'stat
 #[test]
 fn the_reader_shows_the_sender_s_avatar_on_the_stage() {
     let fetch = Recorder::default();
-    let harness = opened(&fetch, None, "Allotment rota for November");
-    assert!(harness.query_all_by_role(Role::Image).any(|node| node.accesskit_node().label().as_deref() == Some("Odile Brannock")));
+    // A thread's lines carry the writers' avatars.
+    let harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
+    harness.get_by_label_contains("Odile Brannock, 08:35, folded");
     let stages = [crate::theme::Mode::Light, crate::theme::Mode::Dark].map(|mode| crate::theme::Palette::of(mode).stage);
     let square = egui::CornerRadius::same(2);
     let filled = |shape: &egui::Shape| matches!(shape, egui::Shape::Rect(rect) if stages.contains(&rect.fill) && rect.corner_radius == square);
@@ -72,7 +73,7 @@ fn selecting_a_row_opens_the_reader_beside_the_list() {
     harness.run();
     assert!(harness.state().reader().open_id().is_some());
     harness.get_by_label("Photos from the coast walk");
-    harness.get_by_label("Teodor Lisk · teodor@example.org · 04:00");
+    harness.get_by_label_contains("From Teodor Lisk  <teodor@example.org>");
     harness.get_by_label("Save cliff-path.png");
     harness.get_by_label("Save lighthouse.png");
     harness.get_by_label("Accounts");
@@ -97,7 +98,7 @@ fn every_reader_control_has_an_accessible_name_in_both_modes() {
         harness.get_by_label("Load once").click();
         harness.run();
         harness.check_accessibility();
-        harness.get_by_label("Details").click();
+        harness.get_by_label("details ▾").click();
         harness.run();
         harness.check_accessibility();
     }
@@ -201,7 +202,7 @@ fn the_link_under_the_pointer_shows_where_it_goes_and_a_click_copies_it() {
 fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
-    harness.get_by_label("Show quoted text (8 lines)").click();
+    harness.get_by_label("Show 8 quoted lines").click();
     harness.run();
     harness.get_by_label("Odile Brannock wrote:");
     harness.get_by_label("Hide quoted text").click();
@@ -210,14 +211,15 @@ fn quotes_fold_and_the_older_message_unfolds_on_a_click() {
     harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
     harness.run();
     harness.get_by_label_contains("Could you take the second week?");
-    harness.get_by_label("Fold").click();
+    // A click on its open line folds it again.
+    harness.get_by_label_contains("Odile Brannock, 08:35, open").click();
     harness.run();
     harness.get_by_label_contains("Odile Brannock, 08:35, folded");
-    harness.get_by_label("Details").click();
+    harness.get_by_label("details ▾").click();
     harness.run();
-    harness.get_by_label("Mira Holloway <mira@example.org>");
-    harness.get_by_label("Thursday 5 Nov 2026, 08:40");
-    harness.get_by_label("Hide details").click();
+    harness.get_by_label_contains("From Mira Holloway  <mira@example.org>");
+    harness.get_by_label_contains("Thursday 5 Nov 2026, 08:40");
+    harness.get_by_label("hide details ▴").click();
     harness.run();
 }
 
@@ -272,11 +274,11 @@ fn the_toolbar_holds_the_mail_actions() {
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     full_width(&mut harness, "Full width");
     let disabled = |name: &str| harness.get_by_role_and_label(Role::Button, name).accesskit_node().is_disabled();
-    for name in ["Done", "Archive", "Delete", "Snooze", "Pin", "Move to a folder"] {
+    for name in ["Done", "Delete", "Snooze", "Pin", "Move to a folder"] {
         assert!(!disabled(name), "{name} acts on the open message");
     }
     assert!(!disabled("More"));
-    for icon in [IconId::Done, IconId::Archive, IconId::Delete, IconId::Snooze, IconId::Pin, IconId::Move, IconId::More] {
+    for icon in [IconId::Done, IconId::Delete, IconId::Snooze, IconId::Pin, IconId::Move, IconId::More] {
         assert!(super::tests::drew_icon(harness.output(), icon), "{icon:?}");
     }
 }
@@ -341,7 +343,7 @@ fn the_subject_heads_the_thread_with_who_wrote_and_how_many_messages() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
     full_width(&mut harness, "Full width");
-    harness.get_by_label("Odile Brannock, Mira Holloway · 2 messages");
+    harness.get_by_label("Odile Brannock, Mira Holloway  ·  2 messages");
     let size = |text: &str| super::tests::font_of(&harness, text).size;
     let subject = size("Re: Allotment rota for November");
     for other in ["Mira Holloway", "The second week works for me."] {
@@ -350,18 +352,16 @@ fn the_subject_heads_the_thread_with_who_wrote_and_how_many_messages() {
 }
 
 #[test]
-fn a_long_subject_wraps_and_is_never_cut_by_the_toolbar() {
+fn a_long_subject_wraps_under_the_toolbar() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     full_width(&mut harness, "Full width");
-    harness.set_size(vec2(300.0, 800.0));
+    harness.set_size(vec2(320.0, 800.0));
     harness.run();
     let subject = harness.get_by_label("Photos from the coast walk").rect();
     let more = harness.get_by_role_and_label(Role::Button, "More").rect();
     assert!(subject.top() >= more.bottom(), "the subject sits under the toolbar, not beside it");
-    let galley = super::tests::galley_of(&harness, "Photos from the coast walk");
-    assert!(!galley.elided, "the subject is never cut");
-    assert!(galley.rows.len() > 1, "it wraps instead");
+    assert!(subject.height() >= 60.0, "it wraps onto a second line: {subject:?}");
 }
 
 #[test]
@@ -387,9 +387,10 @@ fn the_subject_is_set_large_with_the_message_s_group_as_a_chip_beside_who_wrote(
         harness.output().shapes.iter().find_map(|clipped| find(&clipped.shape, wanted))
     };
     assert_eq!(size("Allotment rota for November"), Some(theme.fonts.title.size), "the subject is in the title style");
-    let chip = harness.get_by_label("In People").rect();
+    // The list's group is called so too: the reader's tag is the one at the right.
+    let tag = harness.query_all_by_label("People").map(|node| node.rect()).max_by(|a, b| a.left().total_cmp(&b.left())).unwrap();
     let subject_line = harness.get_by_label("Allotment rota for November");
-    assert!(chip.top() >= subject_line.rect().bottom() - 1.0, "the chip sits under the subject");
+    assert!(tag.bottom() <= subject_line.rect().top(), "the group's tag heads the reader, over the subject");
 }
 
 /// Runs a few frames, so a press, the act, the list read again and the toast all show.
@@ -420,13 +421,14 @@ fn opening_a_message_marks_it_read_and_ctrl_z_marks_it_unread_again() {
 }
 
 #[test]
-fn archive_in_the_toolbar_moves_the_open_message_to_the_archive_and_undo_brings_it_back() {
+fn archive_in_more_moves_the_open_message_to_the_archive_and_undo_brings_it_back() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, None, "Photos from the coast walk");
     let id = harness.state().reader().open_id().unwrap();
-    // Full width, so the folder pane's Archive is not drawn beside the toolbar's.
-    full_width(&mut harness, "Full width");
-    harness.get_by_role_and_label(Role::Button, "Archive").click();
+    // The design puts Archive first in More, with its key.
+    harness.get_by_label("More").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItem, "Archive").click();
     settle(&mut harness);
     assert!(row_of(&harness, id).is_none(), "it left the inbox");
     harness.get_by_label("Moved to Archive");
@@ -530,12 +532,12 @@ fn delete_in_the_trash_deletes_for_good_with_a_toast_without_undo() {
 fn a_thread_s_header_is_the_name_and_whom_it_went_to_and_details_stays_reachable() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
-    assert!(harness.query_by_label("Mira Holloway <mira@example.org>").is_none(), "no address in the resting header");
-    assert_eq!(harness.query_all_by_role(Role::Image).filter(|node| node.accesskit_node().label().as_deref() == Some("Mira Holloway")).count(), 1);
-    harness.get_by_role_and_label(Role::Button, "Details").click();
+    assert!(harness.query_by_label_contains("From Mira Holloway").is_none(), "no facts under the resting line");
+    harness.get_by_label_contains("Mira Holloway, 08:40, open: mira@example.org  ·  to ");
+    harness.get_by_role_and_label(Role::Button, "details ▾").click();
     harness.run();
-    harness.get_by_label("Mira Holloway <mira@example.org>");
-    harness.get_by_role_and_label(Role::Button, "Hide details");
+    harness.get_by_label_contains("From Mira Holloway  <mira@example.org>");
+    harness.get_by_role_and_label(Role::Button, "hide details ▴");
 }
 
 #[test]
@@ -552,10 +554,9 @@ fn a_message_alone_in_its_thread_has_no_header_and_more_shows_the_full_one() {
     harness.run();
     harness.get_by_label("Show the full header").click();
     harness.run();
-    harness.get_by_label("Teodor Lisk <teodor@example.org>");
-    harness.get_by_role_and_label(Role::Button, "Hide details").click();
+    harness.get_by_role_and_label(Role::Button, "hide details ▴").click();
     harness.run();
-    harness.get_by_label("Teodor Lisk · teodor@example.org · 04:00");
+    harness.get_by_label_contains("From Teodor Lisk  <teodor@example.org>");
 }
 
 #[test]
@@ -646,7 +647,7 @@ fn people_s_words_are_in_plex_sans_and_the_app_s_in_plex_mono() {
 fn the_quote_fold_is_a_link_that_enter_and_space_press() {
     let fetch = Recorder::default();
     let mut harness = opened(&fetch, Some(3), "Re: Allotment rota for November");
-    harness.get_by_role_and_label(Role::Button, "Show quoted text (8 lines)").focus();
+    harness.get_by_role_and_label(Role::Button, "Show 8 quoted lines").focus();
     harness.run();
     harness.key_press(Key::Enter);
     harness.run();
@@ -726,4 +727,141 @@ fn the_html_quote_fold_asks_for_the_quotes_and_nothing_else() {
     assert_eq!(pressable, vec!["Hide quoted text".to_owned()]);
     harness.get_by_label_contains("Run mail.delete now");
     assert!(harness.state().is_empty(), "drawing message text asks for nothing");
+}
+
+/// The sample with one more plain message in the unified inbox, from Teodor, titled `subject`; its id.
+fn with_subject(subject: &str) -> (InboxApp, u64) {
+    use inboxcraft_mime::{Mailbox as Sender, MessageBuilder};
+    use inboxcraft_model::{AccountId, Address, EmailAddress, Envelope, FolderId, Message, MessageId, Summary, Uid};
+    use inboxcraft_store::{Batch, Body, Change, Storage as _};
+    let now = Timestamp::from_unix(1_793_869_200, 0).unwrap();
+    let mut store = sample::mailbox(now).unwrap();
+    let id = 990_u64;
+    let raw = MessageBuilder::new()
+        .from(Sender::named("Teodor Vasquez", "teodor@example.org"))
+        .to(Sender::new("mira@example.org"))
+        .subject(subject)
+        .text("Two directions attached.")
+        .build()
+        .unwrap();
+    let from = Address::new(Some("Teodor Vasquez"), EmailAddress::new("teodor@example.org").unwrap());
+    let received = Timestamp::from_unix(1_793_869_200 - 60, 0);
+    let envelope = Envelope::new(subject).with_from(vec![from]).with_date(received);
+    let summary = Summary::new(Uid::new(990).unwrap(), envelope).with_received(received);
+    let message = Message::new(MessageId::new(id), AccountId::new(1), FolderId::new(1), summary);
+    let batch =
+        Batch::new().with(Change::PutMessage(message)).with(Change::PutBody(MessageId::new(id), Body::new(raw, "Two directions attached.").unwrap()));
+    store.apply(&batch).unwrap();
+    let fetch = Recorder::default();
+    let app = InboxApp::with_outside(Mailbox::new(sample::session_over(store, clock()).unwrap(), clock()), Box::new(fetch), Box::new(NoSave));
+    (app, id)
+}
+
+/// The texts painted inside `rect` in the last frame: `(rect, rows, elided, size)`.
+fn texts_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> Vec<(egui::Rect, usize, bool, f32)> {
+    fn walk(shape: &egui::Shape, rect: egui::Rect, found: &mut Vec<(egui::Rect, usize, bool, f32)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, rect, found)),
+            egui::Shape::Text(text) => {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if rect.expand(1.0).contains_rect(at) {
+                    let size = text.galley.job.sections.first().map_or(0.0, |section| section.format.font_id.size);
+                    found.push((at, text.galley.rows.len(), text.galley.elided, size));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, rect, &mut found));
+    found
+}
+
+#[test]
+fn a_subject_takes_two_lines_then_an_ellipsis() {
+    let long = "Draft logo for the bakery on the corner of the market square, the second round of sketches with the colours we \
+                talked about on Thursday and the shop front";
+    let spaceless: String = "Bakerylogo".repeat(40);
+    for (subject, percent) in [(long.to_owned(), 100), (spaceless.clone(), 130), (long.to_owned(), 130)] {
+        let (mut app, id) = with_subject(&subject);
+        app.set_text_scale(crate::theme::TextScale::from_percent(percent).unwrap());
+        app.mailbox_mut().select(Some(id));
+        let harness = harness_with(app, egui::Theme::Dark);
+        let theme = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+        let title = theme.fonts.title;
+        // A screen reader hears the subject whole, as the reader keeps it.
+        let kept = harness.state().reader().opened(id).unwrap().header.subject.clone();
+        assert!(subject.starts_with(&kept), "{kept}");
+        let node = harness.get_by_label(&kept);
+        let rect = node.rect();
+        let runs: Vec<(egui::Rect, usize, bool, f32)> = texts_in(&harness, rect).into_iter().filter(|text| text.3 == title.size).collect();
+        let at = format!("{percent} %: {runs:#?}");
+        assert_eq!(runs.len(), 1, "one run: {at}");
+        let (drawn, rows, elided, _) = runs[0];
+        assert_eq!((rows, elided), (2, true), "two lines, the second cut with an ellipsis: {at}");
+        assert!((rect.height() - 2.0 * title.line).abs() < 0.5, "as high as two lines: {rect:?} {at}");
+        assert!(drawn.right() <= rect.right() + 0.5, "nothing passes the head's width: {at}");
+    }
+}
+
+#[test]
+fn after_done_the_reader_shows_nothing_open() {
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Photos from the coast walk");
+    let done = harness.state().reader().open_id().unwrap();
+    assert_eq!(harness.state().mailbox().after(), After::Next, "the rule that selects the next row");
+    // The reader's pane: its parts stand 40 in from its sides.
+    let pane = (harness.get_by_label("Photos from the coast walk").rect().left() - 40.0, harness.get_by_label("More").rect().right() + 40.0);
+    harness.get_by_role_and_label(Role::Button, "Done").click();
+    settle(&mut harness);
+    assert!(row_of(&harness, done).is_none(), "it left the list");
+    let next = harness.state().mailbox().selected();
+    assert!(next.is_some(), "the next row is selected in the list");
+    assert_eq!(harness.state().reader().open_id(), None, "but no message opens by itself");
+    assert!(harness.query_by_role_and_label(Role::Button, "Reply").is_none());
+    // The bare empty state, its lines centred in the reader's pane.
+    let label = harness.get_by_label("Pick a message.\nIt opens here.").rect();
+    let pane_middle = (pane.0 + pane.1) / 2.0;
+    assert!((label.center().x - pane_middle).abs() <= 1.0, "in the middle of the reader's pane: {label:?} {pane:?}");
+    // A row picked opens again.
+    let row = harness.state().mailbox().messages().iter().find(|row| Some(row.id) == next).map(|row| row.id).unwrap();
+    harness.state_mut().mailbox_mut().select(None);
+    harness.run();
+    harness.state_mut().mailbox_mut().select(Some(row));
+    harness.run();
+    assert_eq!(harness.state().reader().open_id(), Some(row));
+}
+
+#[test]
+fn reply_is_the_one_primary_button() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let fetch = Recorder::default();
+        let mut app = app_with(&fetch);
+        let id = app.mailbox().messages().iter().find(|row| row.subject == "Photos from the coast walk").unwrap().id;
+        app.mailbox_mut().select(Some(id));
+        let harness = harness_with(app, theme);
+        let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+        let cyan = look.palette.cyan;
+        fn filled(shape: &egui::Shape, cyan: egui::Color32, found: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| filled(shape, cyan, found)),
+                egui::Shape::Rect(rect) if rect.fill == cyan && rect.rect.height() >= 20.0 => found.push(rect.rect),
+                _ => {}
+            }
+        }
+        let mut primary = Vec::new();
+        harness.output().shapes.iter().for_each(|clipped| filled(&clipped.shape, cyan, &mut primary));
+        let reply = harness.get_by_role_and_label(Role::Button, "Reply").rect();
+        // The reader's pane: 40 left of its parts.
+        primary.retain(|rect| rect.left() >= reply.left() - 40.0);
+        assert_eq!(primary, vec![reply], "{theme:?}: the reader's one cyan button is Reply");
+        for other in ["Reply all", "Forward"] {
+            assert!(!primary.contains(&harness.get_by_role_and_label(Role::Button, other).rect()), "{other}");
+        }
+        // Reply carries its arrow: wider than its word and the room beside it.
+        assert!(reply.width() > 70.0, "{reply:?}");
+        // The answers stand at the foot, under the message.
+        let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+        assert!(reply.top() > more.bottom() + 200.0, "{reply:?}");
+    }
 }

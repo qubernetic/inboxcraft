@@ -7,12 +7,14 @@ use std::sync::Arc;
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
-    Align, Color32, ColorImage, Frame, Galley, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui, WidgetInfo,
-    pos2, vec2,
+    Align, Color32, ColorImage, Frame, Galley, Layout, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
 
+use crate::component::attachment::{FileAsked, FileState, attachment};
 use crate::component::button;
+use crate::component::quote_fold::quote_fold;
+use crate::component::soon::soon_tag;
 use crate::draw::margin;
 use crate::draw::paint;
 use crate::iconset::IconId;
@@ -376,86 +378,45 @@ pub(in crate::draw) fn blocks(
     }
 }
 
-/// A plain-text body, its quotes folded until the owner opens them.
+/// A plain-text body in `read`, its quotes folded until the owner opens them ([`quote_fold`]).
 fn text(ui: &mut Ui, theme: &Theme, reader: &Reader, id: u64, segments: &[Segment], drawn: &mut Drawn) {
     let p = &theme.palette;
     let f = &theme.fonts;
     for segment in segments {
         match segment {
             Segment::Text(text) => {
-                ui.label(RichText::new(text).font(f.body.id()).color(p.ink));
+                ui.label(RichText::new(text).font(f.read.id()).color(p.ink));
             }
             Segment::Quote { attribution, text, lines } => {
-                let shown = reader.shows_quotes(id);
-                let label = if shown {
-                    tr!("Hide quoted text").to_owned()
-                } else if *lines == 1 {
-                    tr!("Show quoted text (1 line)").to_owned()
-                } else {
-                    tr!("Show quoted text ({count} lines)", count = lines)
-                };
-                if button::link_sized(ui, theme, &Keymap::empty(), &label, button::LinkSize::Small).clicked() {
+                if quote_fold(ui, theme, *lines, reader.shows_quotes(id), attribution.as_deref(), text).clicked() {
                     drawn.asked.push(Asked::Quotes(id));
-                }
-                if shown {
-                    let (bar, inner) = (p.muted, margin(theme.spacing.s2));
-                    let response = Frame::new().inner_margin(Margin { left: inner.left.saturating_add(4), ..inner }).show(ui, |ui| {
-                        if let Some(attribution) = attribution {
-                            ui.label(RichText::new(attribution).font(f.caption.id()).color(p.muted));
-                        }
-                        ui.label(RichText::new(text).font(f.body.id()).color(p.muted));
-                    });
-                    let rect = response.response.rect;
-                    ui.painter().vline(rect.left() + 1.5, rect.y_range(), Stroke::new(3.0, bar));
                 }
             }
         }
-        ui.add_space(theme.spacing.s2);
     }
 }
 
-/// The attachment tiles, side by side as far as they fit: a file mark, the name (cut to fit) and the size, and a Save
-/// button. Each tile is measured first, so the row wraps before a tile rather than cutting it at the side.
+/// The attachments, side by side as far as they fit, 8 apart, each as wide as what it holds ([`attachment`]): Enter
+/// or `save` saves it. Opening a file is not built yet: the strip ends with the `coming soon` tag once.
 pub(super) fn files(ui: &mut Ui, theme: &Theme, keymap: &Keymap, id: u64, files: &[File], drawn: &mut Drawn) {
     if files.is_empty() {
         return;
     }
-    let p = &theme.palette;
-    let f = &theme.fonts;
-    let s = &theme.spacing;
-    ui.add_space(s.s2);
-    let gap = ui.spacing().item_spacing.x;
-    let side = f.body.line * 1.5;
-    let width = |ui: &Ui, text: &str, font: Font| crate::draw::paint::line(ui, &[(text, font, p.ink)], f32::INFINITY).size().x;
-    let save = width(ui, tr!("Save"), f.button) + button::LINK_PAD * 2.0;
-    let row = ui.available_width();
-    ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(STRIP_GAP, STRIP_GAP);
         for file in files {
             let size = size_text(file.size);
-            let text = width(ui, &file.name, f.body).max(width(ui, &size, f.caption));
-            let tile = (side + text + save + gap * 2.0 + s.s2 * 2.0 + 2.0).min(row);
-            ui.allocate_ui(vec2(tile, side), |ui| {
-                Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).inner_margin(margin(s.s2)).corner_radius(0.0).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                        crate::iconset::paint(ui.painter(), rect, IconId::File, p.cyan_text);
-                        ui.vertical(|ui| {
-                            ui.set_max_width((ui.available_width() - save - gap).max(1.0));
-                            ui.add(egui::Label::new(RichText::new(&file.name).font(f.body.id()).color(p.ink)).truncate());
-                            ui.label(RichText::new(&size).font(f.caption.id()).color(p.muted));
-                        });
-                        let response = button::link(ui, theme, keymap, tr!("Save"));
-                        let spoken = tr!("Save {name}", name = file.name);
-                        response.widget_info(|| WidgetInfo::labeled(egui::Role::Button, true, &spoken));
-                        if response.clicked() {
-                            drawn.asked.push(Asked::Save(id, file.index));
-                        }
-                    });
-                });
-            });
+            let (_, asked) = attachment(ui, theme, keymap, &file.name, &size, FileState::Ready);
+            if asked == Some(FileAsked::Save) {
+                drawn.asked.push(Asked::Save(id, file.index));
+            }
         }
+        soon_tag(ui, theme);
     });
 }
+
+/// The room between two attachments, in points.
+const STRIP_GAP: f32 = 8.0;
 
 /// The text of a message, and what stands for its text when it is not here.
 pub(super) fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened, textures: &mut Textures, drawn: &mut Drawn) {

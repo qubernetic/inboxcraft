@@ -46,7 +46,7 @@ use super::margin;
 use crate::component::button;
 use crate::compose::Answer;
 use crate::draw::paint::{self, FloatEdge};
-use crate::keymap::Keymap;
+use crate::keymap::{self, Keymap};
 use crate::mailbox::{Act, After, Mailbox};
 use crate::reader::Reader;
 use crate::theme::Theme;
@@ -56,8 +56,25 @@ use body::bounced;
 #[cfg(test)]
 pub(super) use body::{blocks, column_widths};
 pub(super) use head::{more_menu, move_menu, picker_id, picker_popup};
-use head::{screening, sender_header, toolbar};
-use thread::{folded, message};
+use head::{screening, sender_header};
+use thread::{answers, folded, message};
+
+/// The room left and right of the reader's parts, in points.
+const SIDE: f32 = 40.0;
+
+/// The room above the head, in points.
+const HEAD_TOP: f32 = 16.0;
+
+/// The room between the parts of the head, in points.
+const HEAD_GAP: f32 = 12.0;
+
+/// The room above and below the answers at the foot, in points.
+const FOOT_PAD: f32 = 12.0;
+
+/// The room above a message alone, above a thread's lines, and under either, in points.
+const MESSAGE_TOP: f32 = 16.0;
+const THREAD_TOP: f32 = 4.0;
+const MESSAGE_FOOT: f32 = 24.0;
 
 /// What the person asked for in the reader this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +99,8 @@ pub(super) enum Asked {
     After(After),
     /// Copy a link's address.
     Copy(String),
+    /// Copy the subject, whole.
+    CopySubject(String),
     /// Hide the notice.
     Dismiss,
     /// Do `Act` to a message.
@@ -127,6 +146,20 @@ fn status(ui: &Ui, theme: &Theme, rect: Rect, text: &str) {
         });
 }
 
+/// The reader with no message open: the bare empty state in the middle of the pane, 40 from its sides.
+pub(super) fn nothing_open(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    let palette = keymap.shortcut(keymap::PALETTE).map(|shortcut| crate::component::key::key_words(&shortcut));
+    let help = match palette {
+        Some(key) => tr!("The arrow keys move in the list and open a message. {key} runs any command.", key = key),
+        None => tr!("The arrow keys move in the list and open a message.").to_owned(),
+    };
+    let side = margin(SIDE).left;
+    Frame::new().inner_margin(Margin { left: side, right: side, top: 0, bottom: 0 }).show(ui, |ui| {
+        ui.set_min_size(ui.available_size());
+        crate::component::empty::empty_state(ui, theme, tr!("Reader · nothing open"), tr!("Pick a message.\nIt opens here."), &help);
+    });
+}
+
 /// Draws the reader over the whole of `ui` and returns what was asked for.
 pub(super) fn show(
     ui: &mut Ui,
@@ -151,38 +184,48 @@ pub(super) fn show(
         });
     }
     let held = reader.open_id().filter(|id| mailbox.held(*id));
-    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s4))).show(
-        ui,
-        |ui| match held {
-            Some(id) => sender_header(ui, theme, keymap, mailbox, reader, id, &mut drawn),
-            None => toolbar(ui, theme, keymap, mailbox, reader, &mut drawn),
-        },
-    );
+    let side = margin(SIDE).left;
+    let head = match held {
+        Some(_) => Frame::new().inner_margin(margin(theme.spacing.s4)),
+        None => Frame::new().inner_margin(Margin { left: side, right: side, top: margin(HEAD_TOP).top, bottom: 0 }),
+    };
+    egui::Panel::top("reader-toolbar").show_separator_line(false).frame(head).show(ui, |ui| match held {
+        Some(id) => sender_header(ui, theme, keymap, mailbox, reader, id, &mut drawn),
+        None => {
+            ui.spacing_mut().item_spacing.y = HEAD_GAP;
+            head::head(ui, theme, keymap, mailbox, reader, &mut drawn);
+        }
+    });
+    // The answers at the foot, under a `panel_line`, for the open message (not for a preview of held mail).
+    let alone = reader.open_id().and_then(|id| reader.opened(id)).is_some_and(|opened| thread::card_alone(mailbox, reader, opened));
+    if let (Some(id), None, false) = (reader.open_id(), held, alone) {
+        let foot = Frame::new().inner_margin(Margin { left: side, right: side, top: margin(FOOT_PAD + 1.0).top, bottom: margin(FOOT_PAD).bottom });
+        let shown =
+            egui::Panel::bottom("reader-answers").show_separator_line(false).frame(foot).show(ui, |ui| answers(ui, theme, keymap, id, &mut drawn));
+        let rect = shown.response.rect;
+        paint::hairline(ui.painter(), rect.left_top(), egui::pos2(rect.right() - 1.0, rect.top()), p.panel_line);
+    }
+    // A message alone in its thread stands 16 under the head; a thread's lines 4 under it.
+    let top = if reader.thread().len() > 1 { THREAD_TOP } else { MESSAGE_TOP };
     crate::component::scroll::show(ui, theme, ScrollArea::vertical().auto_shrink([false, false]).id_salt("reader"), |ui| {
-        ui.spacing_mut().item_spacing.y = theme.spacing.s2;
-        Frame::new()
-            .inner_margin(Margin {
-                left: margin(theme.spacing.s4).left,
-                right: margin(theme.spacing.s4).right,
-                top: 0,
-                bottom: margin(theme.spacing.s4).bottom,
-            })
-            .show(ui, |ui| {
-                if let Some(id) = held {
-                    screening(ui, theme, keymap, mailbox, id, &mut drawn);
+        ui.spacing_mut().item_spacing.y = 0.0;
+        Frame::new().inner_margin(Margin { left: side, right: side, top: margin(top).top, bottom: margin(MESSAGE_FOOT).bottom }).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if let Some(id) = held {
+                screening(ui, theme, keymap, mailbox, id, &mut drawn);
+            }
+            if let Some(reason) =
+                reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())
+            {
+                bounced(ui, theme, reason);
+            }
+            for row in reader.thread() {
+                match (&row.opened, reader.is_expanded(row.id)) {
+                    (Some(opened), true) => message(ui, theme, keymap, mailbox, reader, opened, textures, &mut drawn),
+                    _ => folded(ui, theme, keymap, mailbox, row, &mut drawn),
                 }
-                if let Some(reason) =
-                    reader.open_id().and_then(|id| mailbox.messages().iter().find(|row| row.id == id)).and_then(|row| row.bounced.as_deref())
-                {
-                    bounced(ui, theme, reason);
-                }
-                for row in reader.thread() {
-                    match (&row.opened, reader.is_expanded(row.id)) {
-                        (Some(opened), true) => message(ui, theme, keymap, mailbox, reader, opened, textures, &mut drawn),
-                        _ => folded(ui, theme, mailbox, row, &mut drawn),
-                    }
-                }
-            });
+            }
+        });
     });
     if let Some(text) = hover {
         status(ui, theme, whole, text);

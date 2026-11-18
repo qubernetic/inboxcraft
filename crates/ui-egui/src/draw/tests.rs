@@ -488,17 +488,6 @@ fn translucent(shape: &egui::Shape) -> bool {
 }
 
 /// Every shape of `shapes`, groups opened, with its clip, in paint order.
-/// The galley of the first text that starts with `start`.
-pub(super) fn galley_of(harness: &Harness<'static, InboxApp>, start: &str) -> std::sync::Arc<egui::Galley> {
-    flat(&harness.output().shapes)
-        .into_iter()
-        .find_map(|(_, shape)| match shape {
-            egui::Shape::Text(text) if text.galley.job.text.starts_with(start) => Some(text.galley),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("no text starts with {start:?}"))
-}
-
 fn flat(shapes: &[egui::epaint::ClippedShape]) -> Vec<(egui::Rect, egui::Shape)> {
     fn open(clip: egui::Rect, shape: &egui::Shape, out: &mut Vec<(egui::Rect, egui::Shape)>) {
         if let egui::Shape::Vec(inner) = shape {
@@ -579,7 +568,12 @@ fn the_window_is_flat() {
                 {
                     Some(format!("{rect:?}"))
                 }
-                egui::Shape::Mesh(_) => Some("a mesh".to_owned()),
+                // A dashed edge (an unavailable control) is a mesh of square pixels in one colour: flat too.
+                egui::Shape::Mesh(mesh)
+                    if mesh.texture_id != egui::TextureId::default() || mesh.vertices.windows(2).any(|pair| pair[0].color != pair[1].color) =>
+                {
+                    Some("a mesh".to_owned())
+                }
                 _ => None,
             })
             .collect();
