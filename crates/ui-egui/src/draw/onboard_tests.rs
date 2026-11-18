@@ -939,6 +939,13 @@ fn scene(name: &str, theme: egui::Theme) -> Harness<'static, InboxApp> {
     harness
 }
 
+/// Where `node` lies, as AccessKit says.
+fn node_rect(node: &egui_kittest::Node<'_>) -> Option<egui::Rect> {
+    node.accesskit_node()
+        .bounding_box()
+        .map(|at| egui::Rect::from_min_max(egui::pos2(at.x0 as f32, at.y0 as f32), egui::pos2(at.x1 as f32, at.y1 as f32)))
+}
+
 #[test]
 fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
     for name in ["welcome", "form", "error", "detected", "running", "failed", "passed"] {
@@ -956,12 +963,13 @@ fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
             .map(|node| node.rect())
             .unwrap();
         // What the window draws under the sheet (the sheet is wide enough to cover most of it) is not the page's: the
-        // controls found in the same place with the sheet closed.
-        let beneath: Vec<String> = if harness.query_by_role_and_label(Role::Dialog, "Settings").is_some() {
+        // controls found in the same place, their rects under the sheet's, with the sheet closed. A sheet control of
+        // the same name elsewhere stays the page's.
+        let beneath: Vec<egui::Rect> = if harness.query_by_role_and_label(Role::Dialog, "Settings").is_some() {
             let mut bare = scene(name, egui::Theme::Light);
             bare.state_mut().close_settings();
             bare.run();
-            bare.root().children_recursive().filter_map(|node| node.accesskit_node().label()).collect()
+            bare.root().children_recursive().filter_map(|node| node_rect(&node)).filter(|at| place.contains_rect(*at)).collect()
         } else {
             Vec::new()
         };
@@ -969,15 +977,12 @@ fn every_scene_of_the_page_rests_and_tab_reaches_its_controls() {
             .root()
             .children_recursive()
             .filter(|node| {
-                let inside = node.accesskit_node().bounding_box().is_some_and(|at| {
-                    let at = egui::Rect::from_min_max(egui::pos2(at.x0 as f32, at.y0 as f32), egui::pos2(at.x1 as f32, at.y1 as f32));
-                    place.contains_rect(at)
-                });
+                let at = node_rect(node);
+                let inside = at.is_some_and(|at| place.contains_rect(at) && !beneath.contains(&at));
                 inside && node.accesskit_node().role() != Role::Label
             })
             .filter(|node| node.accesskit_node().data().supports_action(egui::accesskit::Action::Focus) && !node.accesskit_node().is_disabled())
             .filter_map(|node| node.accesskit_node().label())
-            .filter(|label| !beneath.contains(label))
             .collect();
         assert!(!own.is_empty(), "{name}");
         let missed = crate::component::tests::keyboard_walk(&mut harness);
