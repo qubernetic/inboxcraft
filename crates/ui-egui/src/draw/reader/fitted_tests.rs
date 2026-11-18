@@ -11,7 +11,7 @@ use inboxcraft_html::Document;
 use crate::save::NoSave;
 use crate::theme::{Mode, TextScale, Theme};
 
-use super::{KEPT_GLYPHS, kept_now};
+use super::{KEPT_GLYPHS, kept_now, made_now};
 
 /// `html` as the reader's cleaner gives it.
 fn display(html: &str) -> Document {
@@ -45,6 +45,41 @@ fn opening_nine_large_messages_keeps_the_layout_of_the_one_shown_only() {
         let (count, glyphs) = kept_now(&harness.ctx);
         assert_eq!(count, 1, "message {which}: {count} layouts kept");
         assert!(glyphs > 100_000 && glyphs <= KEPT_GLYPHS, "message {which}: {glyphs} letters kept");
+    }
+}
+
+#[test]
+fn a_thread_over_the_cap_keeps_its_letters_under_it_and_lays_nothing_out_again_at_rest() {
+    // Three unfolded messages of about 1.4 million letters each, one under another: more than the kept layouts hold.
+    let documents: Vec<Document> =
+        (0..3).map(|index| display(&format!("<p>{index} {}</p>", "The minutes of the allotment meeting, read again. ".repeat(33_000)))).collect();
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let mut harness =
+        Harness::builder().with_size(vec2(800.0, 600.0)).with_max_steps(16).with_context_setup(crate::theme::install_fonts).build_ui_state(
+            move |ui, fitted: &mut Vec<bool>| {
+                let reader = crate::reader::Reader::new(Box::<crate::fetch::Offline>::default(), Box::new(NoSave));
+                crate::component::scroll::show(ui, &theme, egui::ScrollArea::vertical(), |ui| {
+                    let mut textures = super::Textures::default();
+                    let mut drawn = super::Drawn::default();
+                    fitted.clear();
+                    for (id, document) in (1_u64..).zip(&documents) {
+                        fitted.push(super::blocks(ui, &theme, &reader, id, 1, document, &document.blocks, 0, &mut textures, &mut drawn));
+                    }
+                });
+            },
+            Vec::new(),
+        );
+    harness.run();
+    let (count, glyphs) = kept_now(&harness.ctx);
+    assert!(glyphs > 2_000_000 && glyphs <= KEPT_GLYPHS, "{count} layouts kept, {glyphs} letters");
+    // The one that does not fit beside the others is shown plain, and says so (the reader's body draws the notice).
+    assert_eq!(harness.state(), &vec![true, true, false]);
+    // At rest nothing is laid out again: not the two kept, not the one refused.
+    let made = made_now(&harness.ctx);
+    for frame in 0..10 {
+        harness.step();
+        assert_eq!(made_now(&harness.ctx), made, "frame {frame}: laid out again");
+        assert_eq!(kept_now(&harness.ctx), (count, glyphs), "frame {frame}");
     }
 }
 

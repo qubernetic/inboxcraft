@@ -99,7 +99,8 @@ const LETTER: f32 = 0.55;
 const MOST_SPOKEN: usize = 4_096;
 
 /// The most letters the kept layouts hold together: about two messages as large as the cleaner lets one be. Only the
-/// layouts drawn in the frame are kept at all (a thread may show more than one message).
+/// layouts drawn in the frame are kept at all (a thread may show more than one message); a message that does not fit
+/// beside them is shown in the plain view instead.
 const KEPT_GLYPHS: usize = 4 * 1024 * 1024;
 
 /// A message's blocks laid out: what stands where, relative to the top left of the message.
@@ -246,7 +247,8 @@ struct Context<'a> {
 }
 
 /// Draws `list`, blocks of message `id`'s `document` (its `generation`, which changes whenever the reader lays the
-/// message's content out again), tables `depth` deep, across `ui`'s width.
+/// message's content out again), tables `depth` deep, across `ui`'s width; whether it did. It draws nothing where the
+/// layout does not fit beside the ones kept for the other messages in sight (the caller shows the plain view).
 #[expect(clippy::too_many_arguments, reason = "the drawing context of a message's blocks")]
 pub(super) fn blocks(
     ui: &mut Ui,
@@ -259,7 +261,7 @@ pub(super) fn blocks(
     depth: usize,
     textures: &mut Textures,
     drawn: &mut Drawn,
-) {
+) -> bool {
     let width = ui.available_width().max(1.0).floor();
     let quotes = reader.shows_quotes(id);
     let ppp = ui.ctx().pixels_per_point();
@@ -277,10 +279,12 @@ pub(super) fn blocks(
         hasher.finish()
     };
     let probe = ui.painter().layout_job(LayoutJob::single_section("fitted".to_owned(), theme.fonts.read.format(theme.palette.ink)));
-    let laid = kept(ui, probe, who, key, || {
+    let Some(laid) = kept(ui, probe, who, key, || {
         let context = Context { ui, theme, reader, document, id, quotes, ppp };
         Arc::new(lay(&context, list, width, Style { text: theme.fonts.read, head: false }, depth))
-    });
+    }) else {
+        return false;
+    };
     let (_, rect) = ui.allocate_space(vec2(width, laid.height));
     let base = ui.scope_id().with(("fitted", id, depth));
     let mut show = Show { theme, reader, id, document, textures, drawn };
@@ -288,13 +292,26 @@ pub(super) fn blocks(
     // words round what is shown; Tab reaches the links beyond through the nearest stop before and after.
     let sight = ui.clip_rect();
     show.laid(ui, &laid, rect.min, base, Reach::Near(sight.expand2(vec2(0.0, sight.height().max(1.0)))));
+    true
 }
 
-/// The layouts kept, and the galley that shows whether egui built its font atlas afresh since they were made.
+/// The layouts kept, the ones refused, the galley that shows whether egui built its font atlas afresh since they were
+/// made, and how many layouts were made.
 #[derive(Default)]
 struct Store {
     probe: Option<Arc<Galley>>,
     keeps: Vec<Keep>,
+    refused: Vec<Refused>,
+    made: usize,
+}
+
+/// A layout made and not kept, as it did not fit beside the others: whose it is, what for, the pass that last asked for
+/// it and how many letters it holds. Its message is shown plain while it would not fit.
+struct Refused {
+    who: u64,
+    key: u64,
+    pass: u64,
+    glyphs: usize,
 }
 
 /// A layout kept: whose it is, what it was laid out for, the pass that last drew it and how many letters it holds.
@@ -315,14 +332,16 @@ fn kept_slot() -> Id {
 }
 
 /// The layout kept for `who` under `key`, or the one `make` lays out, kept in its place. Only what is drawn is kept:
-/// before a layout is made, every layout this pass has not drawn is dropped (a message left, an old width), and the
-/// letters kept together stay under [`KEPT_GLYPHS`], so a folder of huge messages opened one after another holds one.
+/// before a layout is made, every layout this pass has not drawn is dropped (a message left, an old width). The letters
+/// kept together never pass [`KEPT_GLYPHS`]: a layout that does not fit beside the others is not kept, and its message
+/// gets none (`None`, shown plain) until it fits, without being laid out again each frame; so a thread of huge messages
+/// lays out nothing at rest, and a folder of them opened one after another holds one.
 ///
 /// A kept layout's letters point into egui's font atlas as it was, and egui builds the atlas afresh when it fills or
 /// the text options change, dropping every galley it keeps. `probe`, a word laid out through egui each frame, is the
 /// same galley until then: when it is not, every kept layout is dropped and laid out again. Nothing else is laid out,
 /// copied or hashed again per frame.
-fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Arc<Laid> {
+fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> Arc<Laid>) -> Option<Arc<Laid>> {
     let pass = ui.ctx().cumulative_pass_nr();
     let store: Kept = ui.data_mut(|data| data.get_temp_mut_or_default::<Kept>(kept_slot()).clone());
     let mut store = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -330,22 +349,32 @@ fn kept(ui: &Ui, probe: Arc<Galley>, who: u64, key: u64, make: impl FnOnce() -> 
         store.keeps.clear();
         store.probe = Some(probe);
     }
-    let kept = &mut store.keeps;
-    if let Some(keep) = kept.iter_mut().find(|keep| keep.who == who && keep.key == key) {
+    let Store { keeps, refused, made, .. } = &mut *store;
+    if let Some(keep) = keeps.iter_mut().find(|keep| keep.who == who && keep.key == key) {
         keep.pass = pass;
-        return keep.laid.clone();
+        return Some(keep.laid.clone());
     }
-    // Not kept: what this pass has not drawn goes before the new layout is made.
-    kept.retain(|keep| keep.pass == pass && keep.who != who);
+    let total = keeps.iter().map(|keep| keep.glyphs).fold(0, usize::saturating_add);
+    // Refused before: still plain while it would not fit beside what is kept, and not laid out again to see.
+    if let Some(refusal) = refused.iter_mut().find(|refusal| refusal.who == who && refusal.key == key) {
+        refusal.pass = pass;
+        if refusal.glyphs.saturating_add(total) > KEPT_GLYPHS {
+            return None;
+        }
+    }
+    // Not kept: what this pass has not drawn or refused goes before the new layout is made.
+    keeps.retain(|keep| keep.pass == pass && keep.who != who);
+    refused.retain(|refusal| refusal.pass == pass && refusal.who != who);
     let laid = make();
+    *made = made.saturating_add(1);
     let count = glyphs(&laid);
-    let mut total = kept.iter().map(|keep| keep.glyphs).fold(count, usize::saturating_add);
-    while total > KEPT_GLYPHS && !kept.is_empty() {
-        let dropped = kept.remove(0);
-        total = total.saturating_sub(dropped.glyphs);
+    let total = keeps.iter().map(|keep| keep.glyphs).fold(count, usize::saturating_add);
+    if total > KEPT_GLYPHS {
+        refused.push(Refused { who, key, pass, glyphs: count });
+        return None;
     }
-    kept.push(Keep { who, key, pass, glyphs: count, laid: laid.clone() });
-    laid
+    keeps.push(Keep { who, key, pass, glyphs: count, laid: laid.clone() });
+    Some(laid)
 }
 
 /// How many letters `laid` holds laid out: what a kept layout costs, about.
@@ -365,6 +394,13 @@ fn glyphs(laid: &Laid) -> usize {
             Kind::Rule | Kind::Picture { .. } | Kind::Fold { .. } => 0,
         })
         .fold(0, usize::saturating_add)
+}
+
+/// How many layouts were made since the window began.
+#[cfg(test)]
+fn made_now(ctx: &egui::Context) -> usize {
+    let store = ctx.data(|data| data.get_temp::<Kept>(kept_slot()));
+    store.map_or(0, |store| store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).made)
 }
 
 /// How many layouts are kept, and how many letters they hold together.

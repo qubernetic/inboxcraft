@@ -108,7 +108,7 @@ pub(in crate::draw) fn column_widths(wanted: &[f32], room: f32, gap: f32) -> Vec
 }
 
 /// The blocks of an HTML message, fitted to the app ([`super::fitted`]): `list`, blocks of message `id`'s `document`,
-/// tables `depth` deep.
+/// tables `depth` deep; whether it did (where it did not, the reader holds too much fitted text to keep this too).
 #[expect(clippy::too_many_arguments, reason = "the drawing context of a message's blocks")]
 pub(in crate::draw) fn blocks(
     ui: &mut Ui,
@@ -120,9 +120,9 @@ pub(in crate::draw) fn blocks(
     depth: usize,
     textures: &mut Textures,
     drawn: &mut Drawn,
-) {
+) -> bool {
     let generation = reader.opened(id).map_or(0, crate::reader::Opened::generation);
-    super::fitted::blocks(ui, theme, reader, id, generation, document, list, depth, textures, drawn);
+    super::fitted::blocks(ui, theme, reader, id, generation, document, list, depth, textures, drawn)
 }
 
 /// A plain-text body in `font`, its quotes folded until the owner opens them ([`quote_fold`]).
@@ -182,7 +182,13 @@ pub(super) fn body(ui: &mut Ui, theme: &Theme, reader: &Reader, opened: &Opened,
         // The plain-text view: the message as a text-only program shows it, in `mono` as the design sets it, its
         // quotes folded as a text's are.
         Content::Html(_) if reader.shows_plain(opened.id) => text(ui, theme, reader, opened.id, &opened.plain, theme.fonts.mono, drawn),
-        Content::Html(document) => blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn),
+        Content::Html(document) => {
+            // A message that does not fit beside the fitted ones the reader keeps is shown plain, and says why.
+            if !blocks(ui, theme, reader, opened.id, document, &document.blocks, 0, textures, drawn) {
+                say(ui, tr!("This message is shown as plain text: the reader holds as much fitted text as it keeps."));
+                text(ui, theme, reader, opened.id, &opened.plain, theme.fonts.mono, drawn);
+            }
+        }
     }
     if opened.cut {
         say(ui, tr!("The text is cut here: the rest is longer than the reader shows."));
