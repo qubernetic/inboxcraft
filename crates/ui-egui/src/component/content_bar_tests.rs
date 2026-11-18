@@ -82,21 +82,28 @@ fn the_content_bar_looks_as_its_sheet_says_in_every_state() {
             // 12 after the tag (39 wide, INVITE 52).
             let after_tag = if kind == BarKind::Invite { 76.0 } else { 63.0 };
             assert_eq!((group.left() - rect.left(), group.width(), group.height()), (after_tag, 176.0, 32.0), "{at}");
-            // The browser's copy is not built: its link at the right end, unavailable, the coming-soon tag before it.
+            // The browser's copy is not built: its link at the right end where the sheet puts it (595), unavailable.
             let browser = harness.get_by_label("open in browser ↗");
             assert!(browser.accesskit_node().is_disabled(), "{at}");
             assert_eq!(browser.rect().right(), rect.right() - 12.0, "{at}");
-            assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "{at}");
-            let tag_left = harness.get_by_label("coming soon").rect().left();
-            // The links stand 12 before the tag; the words 12 before the links (or the tag), right-aligned.
-            let mut end = tag_left - 12.0;
+            assert_eq!(browser.rect().left() - rect.left(), 595.0, "{at}");
+            // The links stand 12 before it; the words 12 before the links (or the browser's link), right-aligned, as
+            // the sheet has them (the words end at 583, or 12 before the links).
+            let mut end = browser.rect().left() - 12.0;
             for word in words.iter().rev() {
                 let link = harness.get_by_label(word).rect();
                 assert_eq!(link.right(), end, "{word}: {at}");
                 assert!(!harness.get_by_label(word).accesskit_node().is_disabled(), "{at}");
                 end = link.left() - 10.0;
             }
-            let words_end = if words.is_empty() { tag_left - 12.0 } else { end + 10.0 - 12.0 };
+            let words_end = if words.is_empty() { browser.rect().left() - 12.0 } else { end + 10.0 - 12.0 };
+            // The coming-soon tag once at most, 12 after the choice of view, only where it leaves the words their place.
+            let tags: Vec<egui::Rect> = harness.query_all_by_label("coming soon").map(|tag| tag.rect()).collect();
+            assert!(tags.len() <= 1, "{at}");
+            for tag in tags {
+                assert_eq!(tag.left(), group.right() + 12.0, "{at}");
+                assert!(tag.right() + 12.0 <= words_rect.left() + 0.5, "the tag leaves the words their place: {tag:?} {words_rect:?} {at}");
+            }
             assert!((words_rect.right() - words_end).abs() <= 1.0, "the words end at {words_end}: {at}");
         }
     }

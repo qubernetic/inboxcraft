@@ -8,7 +8,9 @@
 //! tag; otherwise they stand at the right, before the links. The words and the links' words are data where they name
 //! an address: plain words, cut between grapheme clusters with one ellipsis; a screen reader hears them whole. A link
 //! gives back the id the caller gave it. The browser's cleaned copy is not built yet, and the choice of view waits for
-//! the fitted view: what is not built stands unavailable, with the `coming soon` tag once. Nothing in it moves.
+//! the fitted view: what is not built stands unavailable, with the `coming soon` tag once, 12 after the choice of view,
+//! where the words leave it room. The words keep the places the sheet gives them: the browser's link gives way first in
+//! a narrow bar, then the tag; the words are cut last. Nothing in it moves.
 
 use egui::{Align, Layout, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2};
 
@@ -123,17 +125,16 @@ pub fn content_bar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, bar: &ContentBar
         };
         asked.view = chosen.filter(|view| *view != bar.view);
     }
-    // The right end, measured first: the browser's link and the coming-soon tag; then the links before them. The words
-    // take what is left.
+    // The right end, measured first: the browser's link; then the links before it. The words take what is left,
+    // right-aligned before them, where the sheet puts them.
     let small = |text: &str| super::galley(ui, text, f.mono_s, p.muted).size().x.ceil();
     let browser = tr!("open in browser ↗");
-    let soon_width = small(tr!("coming soon")) + 12.0;
     let links: Vec<(String, &BannerLink<'_>)> = bar.links.iter().map(|link| (super::spoken(link.name), link)).collect();
     let links_width = links.iter().map(|(name, _)| small(name)).sum::<f32>() + LINK_GAP * links.len().saturating_sub(1) as f32;
     let links_room = if links.is_empty() { 0.0 } else { links_width + PAD };
     let words_left = child.cursor().left();
-    // The browser's link and its tag give way first in a narrow bar, so nothing lies over another.
-    let wanted = soon_width + PAD + small(browser) + PAD;
+    // The browser's link (not built) gives way first in a narrow bar, so nothing lies over another.
+    let wanted = PAD + small(browser);
     let browsing = !plain && inner.right() - wanted - links_room >= words_left + LEAST_WORDS;
     let end = if browsing { wanted } else { 0.0 };
     let words_right = (inner.right() - end - links_room).max(words_left + 1.0);
@@ -143,12 +144,21 @@ pub fn content_bar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, bar: &ContentBar
     let top = (rect.center().y - words.size().y / 2.0).round();
     if ui.is_rect_visible(rect) {
         if plain {
-            paint::run_at(ui.painter(), pos2(words_left, top), words, ink);
+            paint::run_at(ui.painter(), pos2(words_left, top), words.clone(), ink);
         } else {
-            paint::run_right(ui.painter(), words_right, top, words, ink);
+            paint::run_right(ui.painter(), words_right, top, words.clone(), ink);
         }
     }
-    let after = Rect::from_min_max(pos2(words_right + PAD, rect.top()), pos2(inner.right(), rect.bottom()));
+    // The coming-soon tag once for what is not built (the choice of view, the browser's copy): 12 after the choice,
+    // in the room the right-aligned words leave; where they leave none it gives way, never the words.
+    let tag_width = super::tag::width(ui, theme, tr!("coming soon"));
+    let words_start = words_right - paint::run_box(words.size().x);
+    if !plain && words_left + tag_width + PAD <= words_start {
+        let place = Rect::from_min_max(pos2(words_left, rect.top()), pos2(words_left + tag_width, rect.bottom()));
+        let mut tag_ui = ui.new_child(UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
+        soon(&mut tag_ui, theme, |ui| soon_tag(ui, theme));
+    }
+    let after = Rect::from_min_max(pos2(words_right + PAD, rect.top()), pos2(inner.right().max(words_right + PAD), rect.bottom()));
     let mut right = ui.new_child(UiBuilder::new().max_rect(after).layout(Layout::left_to_right(Align::Center)));
     right.spacing_mut().item_spacing.x = LINK_GAP;
     let mut left = (inner.right() - end - words_right - PAD).max(0.0);
@@ -167,11 +177,7 @@ pub fn content_bar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, bar: &ContentBar
     if browsing {
         let end_rect = Rect::from_min_max(pos2(inner.right() - end + PAD, rect.top()), pos2(inner.right(), rect.bottom()));
         let mut tail = ui.new_child(UiBuilder::new().max_rect(end_rect).layout(Layout::left_to_right(Align::Center)));
-        tail.spacing_mut().item_spacing.x = PAD;
-        soon(&mut tail, theme, |ui| {
-            soon_tag(ui, theme);
-            link_sized(ui, theme, keymap, browser, LinkSize::Small);
-        });
+        soon(&mut tail, theme, |ui| link_sized(ui, theme, keymap, browser, LinkSize::Small));
     }
     asked
 }
