@@ -3704,8 +3704,8 @@ fn acts_on(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> Vec<(Strin
 
 #[test]
 fn beside_the_reader_a_row_with_room_for_three_acts_offers_done_snooze_and_delete() {
-    // The owner's ruling: where the 440 list holds three of the four, Read gives way, not Delete; it stays on its key
-    // and the row's menu. Where all four fit (100 %), nothing changes.
+    // The owner's ruling: where the 440 list holds three of the four, Read gives way, not Delete; it stays reachable by
+    // its key (R) and the command palette. Where all four fit (100 %), nothing changes.
     for (percent, wanted) in [(130, &["Done", "Snooze", "Delete"][..]), (100, &["Done", "Snooze", "Mark as read", "Delete"][..])] {
         let mut harness = beside_the_reader();
         harness.state_mut().set_reduce_motion(true);

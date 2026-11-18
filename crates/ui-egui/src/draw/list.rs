@@ -15,8 +15,8 @@
 //!
 //! A hovered row and a row selected by keyboard show the hover actions alike: Done, Snooze, mark read or unread, Delete,
 //! on a real account as on the sample; where the row holds only three (beside the reader at 130 %), Read gives way and
-//! stays on its key and the row's menu. Done and Delete act at once, and the toast with Undo shows; the row's gap closes over
-//! the `row_collapse` token (at once with motion off).
+//! stays reachable by its key (R) and the command palette. Done and Delete act at once, and the toast with Undo shows;
+//! the row's gap closes over the `row_collapse` token (at once with motion off).
 //!
 //! Under the header, pills: over a wide unified inbox with groups the view switch (the one of the Triage settings
 //! page), and in a folder or a view "Show done", which lists the done mail in its old place, dimmed, and
