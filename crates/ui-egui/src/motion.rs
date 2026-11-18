@@ -22,8 +22,8 @@ pub struct Motion {
     pub fast: f32,
     /// A tooltip appearing.
     pub tooltip: f32,
-    /// A row sliding out of the list when it is done.
-    pub row_slide: f32,
+    /// The `row_collapse` token: the gap of a row that left the list (Done, Snooze) closing.
+    pub row_collapse: f32,
     /// A card or a popup opening and closing.
     pub card: f32,
     /// A toast rising from the bottom edge.
@@ -34,12 +34,12 @@ impl Motion {
     /// Every token.
     #[must_use]
     pub const fn all(&self) -> [f32; 6] {
-        [self.hover_fade, self.fast, self.tooltip, self.row_slide, self.card, self.toast]
+        [self.hover_fade, self.fast, self.tooltip, self.row_collapse, self.card, self.toast]
     }
 }
 
 /// The motion tokens.
-pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_slide: 0.18, card: 0.16, toast: 0.2 };
+pub const MOTION: Motion = Motion { hover_fade: 0.12, fast: 0.125, tooltip: 0.1, row_collapse: 0.18, card: 0.16, toast: 0.2 };
 
 /// No token is longer than this.
 pub const LONGEST: f32 = 0.25;

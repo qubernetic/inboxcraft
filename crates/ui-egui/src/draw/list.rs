@@ -13,9 +13,9 @@
 //! the rows no group holds come last. A row of a grouped account has a context menu that puts its sender's mail in
 //! another group. `ui_shot` can show invented senders and groups instead ([`crate::mailbox::Showcase`]).
 //!
-//! A hovered row and a row selected by keyboard show the hover actions alike, the row's text fading out before them:
-//! Done, mark read or unread, Delete, on a real account as on the sample. Done and Delete let the row slide out first;
-//! the window does the act once it is out and shows the toast with Undo.
+//! A hovered row and a row selected by keyboard show the hover actions alike: Done, mark read or unread, Delete, on a
+//! real account as on the sample. Done and Delete act at once, and the toast with Undo shows; the row's gap closes over
+//! the `row_collapse` token (at once with motion off).
 //!
 //! Under the header, pills: over a wide unified inbox with groups the view switch (the one of the Triage settings
 //! page), and in a folder or a view "Show done", which lists the done mail in its old place, dimmed, and
@@ -48,7 +48,7 @@ use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
 use crate::keymap::{self, Keymap};
-use crate::mailbox::{Act, Group, GroupKind, InboxView, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
+use crate::mailbox::{Act, Group, GroupKind, InboxView, Leaving, Mailbox, MessageRow, OutboxRow, Pile, Place, SendState, Waiting};
 use crate::motion;
 use crate::theme::Theme;
 use crate::tr;
@@ -260,17 +260,14 @@ struct Drawn {
     clicked: bool,
     /// A hover action was pressed.
     acted: Option<Act>,
-    /// It is the row sliding out, and it is all the way out.
-    out: bool,
     /// It has the keyboard's focus.
     focused: bool,
 }
 
 /// One message row across `ui`'s width, the mail row of the design; a click selects it.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, set: (usize, usize)) -> Drawn {
-    let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
     let selected = mailbox.selected() == Some(message.id);
-    let keyed = !leaving && selected && mailbox.keyed();
+    let keyed = selected && mailbox.keyed();
     let spoken = mailbox.spoken(message);
     let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
     let line = format!("{subject}{}", after_subject(&message.preview));
@@ -306,7 +303,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         checked: false,
     };
     // Built only for the row whose group can show: the other rows hand the group nothing.
-    let reach = !leaving && (keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap()));
+    let reach = keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap());
     let built = reach.then(|| actions(message));
     let list: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
     let drawn = mail_row(ui, theme, keymap, &shown, keyed, list, None);
@@ -322,7 +319,7 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
         node.set_size_of_set(set.1);
     });
     let mut acted = drawn.acted.and_then(|index| act(message, index));
-    if message.group.is_some() && !leaving {
+    if message.group.is_some() {
         let width = theme.fonts.body.size * MENU_WIDTH;
         Popup::context_menu(response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, width, |ui| {
@@ -333,13 +330,41 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
             });
         });
     }
-    let out = leaving && (!ui.is_rect_visible(drawn.row.rect) || motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) >= 1.0);
-    Drawn { clicked: response.clicked(), acted, out, focused: response.has_focus() }
+    Drawn { clicked: response.clicked(), acted, focused: response.has_focus() }
 }
 
 /// The id of message `id`'s row: its focus and its context menu, wherever it is built.
 pub(super) fn row_id(id: u64) -> Id {
     Id::unique("list-row").with(id)
+}
+
+/// The row of `message`, which has left the list, in the line `ui` gives it: drawn whole from the line's top and cut
+/// to the line, as its gap closes; it takes no pointer, focus or act.
+fn leaving_row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool) {
+    let line = ui.max_rect();
+    let whole = Rect::from_min_size(line.min, vec2(line.width(), row_height(theme)));
+    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
+    let words = format!("{subject}{}", after_subject(&message.preview));
+    let time = mailbox.row_date(message);
+    let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
+    let shown = MailRow {
+        id: Id::unique("list-leaving").with(message.id),
+        spoken: "",
+        sender: &message.sender,
+        line: &words,
+        time: &time,
+        unread: !message.seen,
+        current: false,
+        last: false,
+        account,
+        tag: None,
+        marks: &[],
+        done: false,
+        checked: false,
+    };
+    let mut face = ui.new_child(UiBuilder::new().max_rect(whole));
+    face.shrink_clip_rect(line);
+    let _ = mail_row(&mut face, theme, keymap, &shown, false, &[], Some(crate::component::Shown::Rest));
 }
 
 /// What follows a row's subject: a dash and the preview, as the design's line two, or nothing without one.
@@ -369,7 +394,7 @@ pub(super) struct Asked {
     pub(super) clicked: Option<u64>,
     /// A hover action pressed, and on which message.
     pub(super) acted: Option<(u64, Act)>,
-    /// The row sliding out is all the way out, or was not drawn: its act can be done.
+    /// The gap of the row that left the list has closed, or no list was drawn: it is let go.
     pub(super) out: bool,
     /// Review on the screener card: "New senders" opens.
     pub(super) review: bool,
@@ -496,8 +521,6 @@ struct Rows<'a> {
     clicked: Cell<Option<u64>>,
     /// A hover action pressed this frame.
     acted: Cell<Option<(u64, Act)>>,
-    /// Whether the row sliding out was drawn, and whether it is out.
-    leaving: Cell<(bool, bool)>,
     /// "Done all" pressed this frame: the group's messages.
     done_all: Cell<Option<Vec<u64>>>,
     /// Review pressed on the screener card.
@@ -518,9 +541,6 @@ impl Rows<'_> {
         }
         if let Some(act) = drawn.acted {
             self.acted.set(Some((message.id, act)));
-        }
-        if self.mailbox.leaving().is_some_and(|(id, _)| id == message.id) {
-            self.leaving.set((true, drawn.out));
         }
     }
 }
@@ -573,6 +593,9 @@ pub(super) enum Line<'a> {
     Head(&'a Group, HeadState),
     /// A message's row.
     Mail(&'a MessageRow),
+    /// The row of a message that has just left the list, and how far its gap has closed (0 to 1): its height closes
+    /// over the `row_collapse` token.
+    Leaving(&'a MessageRow, f32),
     /// "Show all (n)" or "Show fewer" under a group's first rows on its card.
     More(&'a Group, HeadState),
     /// The screener card, while senders wait.
@@ -608,6 +631,7 @@ pub(super) fn line_height(theme: &Theme, line: &Line<'_>) -> f32 {
     match line {
         Line::Head(..) | Line::More(..) => boxes.group_head,
         Line::Mail(_) => boxes.mail_row,
+        Line::Leaving(_, gone) => even(boxes.mail_row * (1.0 - gone.clamp(0.0, 1.0))),
         Line::Send(row) if matches!(row.state, SendState::Refused { .. }) => boxes.mail_row + even(f.caption.line + s.s1),
         Line::Send(_) => boxes.mail_row,
         Line::Card(_) => {
@@ -716,36 +740,60 @@ impl<'a, 't> Stack<'a, 't> {
     }
 }
 
-/// The messages of each of `groups` and those no group holds, in the list's order: one pass over the list.
-fn sorted<'m>(mailbox: &'m Mailbox, groups: &[Group]) -> (Vec<Vec<&'m MessageRow>>, Vec<&'m MessageRow>) {
+/// The rows of the list in its order as lines: each message's, and the row that has just left the list (`leaving`,
+/// how far its gap has closed) at its old place.
+fn listed<'m>(mailbox: &'m Mailbox, leaving: Option<(&'m Leaving, f32)>) -> impl Iterator<Item = (Line<'m>, Option<&'m str>)> {
+    let ghost = move |at: usize| {
+        leaving.filter(|(left, _)| left.at == at).map(|(left, gone)| (Line::Leaving(&left.row, gone), Some(left.group.as_deref().unwrap_or(""))))
+    };
+    let count = mailbox.messages().len();
+    mailbox
+        .messages()
+        .iter()
+        .enumerate()
+        .flat_map(move |(at, message)| ghost(at).into_iter().chain(std::iter::once((Line::Mail(message), None))))
+        .chain(leaving.filter(|(left, _)| left.at >= count).map(|(left, gone)| (Line::Leaving(&left.row, gone), Some(left.group.as_deref().unwrap_or("")))))
+}
+
+/// The rows of each of `groups` and those no group holds, in the list's order, the row that has just left among them
+/// (`leaving`): one pass over the list.
+fn sorted<'m>(mailbox: &'m Mailbox, groups: &[Group], leaving: Option<(&'m Leaving, f32)>) -> (Vec<Vec<Line<'m>>>, Vec<Line<'m>>) {
     let sets: Vec<HashSet<u64>> = groups.iter().map(|group| group.messages.iter().copied().collect()).collect();
     let mut members = vec![Vec::new(); groups.len()];
     let mut rest = Vec::new();
-    for message in mailbox.messages() {
+    for (line, left_from) in listed(mailbox, leaving) {
         let mut held = false;
-        for (set, members) in sets.iter().zip(members.iter_mut()) {
-            if set.contains(&message.id) {
-                members.push(message);
+        for ((set, members), group) in sets.iter().zip(members.iter_mut()).zip(groups) {
+            let holds = match (line, left_from) {
+                (_, Some(name)) => name == group.name,
+                (Line::Mail(message), None) => set.contains(&message.id),
+                _ => false,
+            };
+            if holds {
+                members.push(line);
                 held = true;
             }
         }
         if !held {
-            rest.push(message);
+            rest.push(line);
         }
     }
     (members, rest)
 }
 
-/// The head of a group of `messages`.
-fn head_state(messages: &[&MessageRow], open: bool, card: bool) -> HeadState {
-    let unread = u64::try_from(messages.iter().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
-    HeadState { unread, count: messages.len(), open, card }
+/// The head of a group of `lines`: its messages' rows counted, the row that has left not.
+fn head_state(lines: &[Line<'_>], open: bool, card: bool) -> HeadState {
+    let messages = || lines.iter().filter_map(|line| if let Line::Mail(message) = line { Some(*message) } else { None });
+    let unread = u64::try_from(messages().filter(|message| !message.seen).count()).unwrap_or(u64::MAX);
+    HeadState { unread, count: messages().count(), open, card }
 }
 
 /// The whole list as lines, laid out: in the cards `view` the screener card while senders `wait`, a card for each of
 /// `groups` (its head, its first rows or all of them as `open` says, and "Show all") and one for the rows no group
 /// holds; in the grouped list the screener card and one card with each group's rows under its head and the rest
-/// under `other`'s; in the simple list every row, on the one card around the scroll area.
+/// under `other`'s; in the simple list every row, on the one card around the scroll area. The row that has just left
+/// the list stands at its old place while its gap closes, `gone` of the way (from 0 to 1; closed, it is left out).
+#[expect(clippy::too_many_arguments, reason = "what the lines of a list are made of")]
 pub(super) fn lines<'a>(
     theme: &Theme,
     mailbox: &'a Mailbox,
@@ -754,11 +802,13 @@ pub(super) fn lines<'a>(
     other: &'a Group,
     wait: bool,
     open: &dyn Fn(&Group) -> bool,
+    gone: f32,
 ) -> Listing<'a> {
+    let leaving = mailbox.left_row().filter(|_| gone < 1.0).map(|left| (left, gone.max(0.0)));
     if view == InboxView::Simple {
         let mut stack = Stack::new(theme, 0.0);
-        for message in mailbox.messages() {
-            stack.push(Line::Mail(message));
+        for (line, _) in listed(mailbox, leaving) {
+            stack.push(line);
         }
         return stack.finish();
     }
@@ -766,41 +816,47 @@ pub(super) fn lines<'a>(
     if wait {
         stack.push(Line::Card(mailbox.waiting()));
     }
-    let (members, rest) = sorted(mailbox, groups);
-    let parts = groups.iter().zip(&members).filter(|(_, messages)| !messages.is_empty());
+    let (members, rest) = sorted(mailbox, groups, leaving);
+    let parts = groups.iter().zip(&members).filter(|(_, lines)| lines.iter().any(|line| matches!(line, Line::Mail(_))));
     if view == InboxView::Cards {
-        for (group, messages) in parts {
-            let state = head_state(messages, open(group), true);
+        for (group, lines) in parts {
+            let state = head_state(lines, open(group), true);
             stack.open();
             stack.push(Line::Head(group, state));
-            let shown = if state.open { messages.len() } else { messages.len().min(GROUP_ROWS) };
-            for message in messages.iter().take(shown) {
-                stack.push(Line::Mail(message));
+            let shown = if state.open { state.count } else { state.count.min(GROUP_ROWS) };
+            let mut rows = 0;
+            for line in lines {
+                let row = matches!(line, Line::Mail(_));
+                if row && rows == shown {
+                    break;
+                }
+                rows += usize::from(row);
+                stack.push(*line);
             }
-            if messages.len() > GROUP_ROWS {
+            if state.count > GROUP_ROWS {
                 stack.push(Line::More(group, state));
             }
             stack.close();
         }
-        if !rest.is_empty() {
+        if rest.iter().any(|line| matches!(line, Line::Mail(_))) {
             stack.open();
-            for message in rest {
-                stack.push(Line::Mail(message));
+            for line in rest {
+                stack.push(line);
             }
             stack.close();
         }
         return stack.finish();
     }
-    let rest = Some((other, &rest)).filter(|(_, rest)| !rest.is_empty());
+    let rest = Some((other, &rest)).filter(|(_, rest)| rest.iter().any(|line| matches!(line, Line::Mail(_))));
     let mut started = false;
-    for (group, messages) in parts.chain(rest) {
+    for (group, lines) in parts.chain(rest) {
         if !started {
             stack.open();
             started = true;
         }
-        stack.push(Line::Head(group, head_state(messages, true, false)));
-        for message in messages {
-            stack.push(Line::Mail(message));
+        stack.push(Line::Head(group, head_state(lines, true, false)));
+        for line in lines {
+            stack.push(*line);
         }
     }
     stack.finish()
@@ -862,6 +918,7 @@ fn salt(line: &Line<'_>) -> Id {
     match line {
         Line::Head(group, _) => Id::unique("list-head").with(&group.name),
         Line::Mail(message) => Id::unique("list-mail").with(message.id),
+        Line::Leaving(message, _) => Id::unique("list-leaving-line").with(message.id),
         Line::More(group, _) => Id::unique("list-more").with(&group.name),
         Line::Card(_) => Id::unique("list-screener"),
         Line::Send(row) => Id::unique("list-send").with(row.draft),
@@ -879,6 +936,7 @@ fn draw_line(ui: &mut Ui, rows: &Rows<'_>, line: &Line<'_>, rank: usize, size: u
             }
         }
         Line::Mail(message) => rows.mail(ui, message, rank, size),
+        Line::Leaving(message, _) => leaving_row(ui, theme, keymap, mailbox, message, rows.account_marker),
         Line::More(group, state) => {
             if more(ui, theme, keymap, *state) {
                 ui.data_mut(|data| data.insert_temp(group_open_id(&group.name), !state.open));
@@ -1225,14 +1283,15 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         account_marker: !grouping && mailbox.narrowed().is_none() && mailbox.accounts().len() > 1,
         clicked: Cell::new(None),
         acted: Cell::new(None),
-        leaving: Cell::new((false, false)),
         done_all: Cell::new(None),
         review: Cell::new(false),
         outbox: Cell::new(None),
     };
     let other = Group { icon: IconId::Inbox, name: tr!("Other").to_owned(), messages: Vec::new() };
     let open = |group: &Group| ui.data(|data| data.get_temp::<bool>(group_open_id(&group.name))).unwrap_or(false);
-    let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open) };
+    // The gap of the row that left closes over `row_collapse`; with motion off it is closed at once.
+    let gone = mailbox.left_row().map_or(1.0, |left| motion::appear(ui.ctx(), Id::unique("row-leaving").with(left.row.id), theme.motion.row_collapse));
+    let listing = if outbox { sends(theme, mailbox) } else { lines(theme, mailbox, view, &groups, &other, wait, &open, gone) };
     let mut screener_mode = None;
     let built = if outbox {
         on_card(ui, &rows, &listing, "outbox-list")
@@ -1253,11 +1312,10 @@ pub(super) fn rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
         data.insert_temp(rows_built_id(), built.count);
         data.insert_temp(built_id(), built);
     });
-    let (drawn, out) = rows.leaving.get();
     Asked {
         clicked: rows.clicked.get(),
         acted: rows.acted.get(),
-        out: !drawn || out,
+        out: mailbox.left_row().is_some() && gone >= 1.0,
         review: rows.review.get(),
         done_all: rows.done_all.take(),
         outbox: rows.outbox.get(),

@@ -170,6 +170,21 @@ impl Pile {
     }
 }
 
+/// A row that has just left the list (Done, Delete, Snooze …): its message as it was listed, where it stood, the
+/// group it stood in and the act done to it. The act is done when it starts; the row is only drawn while its gap
+/// closes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Leaving {
+    /// The message as its row showed it.
+    pub row: MessageRow,
+    /// Its place in the list it left.
+    pub at: usize,
+    /// The name of the group of the inbox it stood in.
+    pub group: Option<String>,
+    /// What was done to it.
+    pub act: Act,
+}
+
 /// A group of the grouped inbox, as the engine names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GroupKind {
@@ -555,8 +570,8 @@ pub struct Mailbox {
     inbox_view: InboxView,
     /// The message an accept-and-open opens in the inbox.
     opening: Option<u64>,
-    /// The message sliding out of the list, and what is done to it once it is out.
-    leaving: Option<(u64, Act)>,
+    /// The row that just left the list, while its gap closes.
+    leaving: Option<Leaving>,
     /// The act the toast shows.
     undo: Option<Undo>,
     acts: u64,
@@ -1169,29 +1184,42 @@ impl Mailbox {
         self.folders.iter().filter(|folder| folder.account == row.account && folder.id != row.folder && folder.selectable).collect()
     }
 
-    /// Starts `act` on the message `id`: an act that takes the row out of the list lets it slide out first
-    /// ([`Mailbox::leaving`], then [`Mailbox::left`]); the others are done at once. A row still sliding is done first.
+    /// Does `act` on the message `id` at once. When the act takes its row out of the list (and "Show done" does not
+    /// keep a done row in place), the row is kept as [`Mailbox::leaving`] while its gap closes, until
+    /// [`Mailbox::left`]; a row still closing is let go first.
     pub fn start(&mut self, id: u64, act: Act) {
         self.left();
         // With "show done" a done message stays where it is, dimmed.
-        if act.slides() && !(act == Act::Done && self.show_done) {
-            self.leaving = Some((id, act));
-        } else {
+        if !act.slides() || (act == Act::Done && self.show_done) {
             self.act(id, act);
+            return;
+        }
+        let at = self.messages.iter().position(|row| row.id == id);
+        let row = at.and_then(|at| self.messages.get(at)).cloned();
+        let group = row.as_ref().and_then(|_| self.groups().into_iter().find(|group| group.messages.contains(&id)).map(|group| group.name));
+        self.act(id, act);
+        // A row the act left in the list (it failed) closes no gap.
+        let gone = !self.messages.iter().any(|row| row.id == id);
+        if let (Some(row), Some(at), true) = (row, at, gone) {
+            self.leaving = Some(Leaving { row, at, group, act });
         }
     }
 
-    /// The row sliding out of the list and what is done to it once it is out.
+    /// The message whose row has just left the list and the act done to it, while its gap closes.
     #[must_use]
     pub fn leaving(&self) -> Option<(u64, Act)> {
-        self.leaving
+        self.leaving.as_ref().map(|leaving| (leaving.row.id, leaving.act))
     }
 
-    /// The sliding row is out: its act is done.
+    /// The row that has just left the list, while its gap closes.
+    #[must_use]
+    pub fn left_row(&self) -> Option<&Leaving> {
+        self.leaving.as_ref()
+    }
+
+    /// The gap of the row that left has closed: it is drawn no more.
     pub fn left(&mut self) {
-        if let Some((id, act)) = self.leaving.take() {
-            self.act(id, act);
-        }
+        self.leaving = None;
     }
 
     /// The last act while its toast shows.
@@ -1211,6 +1239,7 @@ impl Mailbox {
     /// Without a toast that can be undone it takes the newest act of the history back: again and again, it walks back
     /// through the session.
     pub fn undo(&mut self) {
+        self.left();
         let toast = self.undo.take();
         let floor = match &toast {
             Some(undo) if undo.undoable => undo.depth,

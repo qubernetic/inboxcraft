@@ -602,18 +602,21 @@ fn a_move_to_another_account_s_folder_is_refused_and_shown() {
 }
 
 #[test]
-fn acts_that_take_the_row_out_slide_first_and_a_new_act_finishes_the_sliding_one() {
+fn acts_that_take_the_row_out_act_at_once_and_keep_the_row_while_its_gap_closes() {
     assert!([Act::Done, Act::Archive, Act::Delete, Act::Move(7)].iter().all(|act| act.slides()));
     assert!(![Act::Read, Act::Unread, Act::Flag, Act::Unflag].iter().any(|act| act.slides()));
     let mut mailbox = mailbox();
     let (rota, photos) = (id_of(&mailbox, ROTA), id_of(&mailbox, PHOTOS));
+    let at = mailbox.messages().iter().position(|row| row.id == rota);
     mailbox.start(rota, Act::Done);
+    assert_eq!(listed(&mailbox, rota), None, "done at once");
+    assert!(mailbox.undoable().is_some(), "its toast at once");
     assert_eq!(mailbox.leaving(), Some((rota, Act::Done)));
-    assert_eq!(listed(&mailbox, rota), Some(false), "still in the list while it slides");
-    assert_eq!(mailbox.undoable(), None);
+    let left = mailbox.left_row().cloned().unwrap();
+    assert_eq!((left.row.subject.as_str(), Some(left.at)), (ROTA, at), "the row as it stood, where it stood");
     mailbox.start(photos, Act::Delete);
-    assert_eq!(listed(&mailbox, rota), None, "done before the next one starts");
-    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)));
+    assert_eq!(listed(&mailbox, photos), None);
+    assert_eq!(mailbox.leaving(), Some((photos, Act::Delete)), "the next one lets the first go");
     mailbox.left();
     assert_eq!(listed(&mailbox, photos), None);
     assert_eq!(mailbox.leaving(), None);

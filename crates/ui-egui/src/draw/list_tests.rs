@@ -219,34 +219,61 @@ fn keys_typed_into_the_search_field_do_not_act() {
     harness.get_by_label("Marked as done");
 }
 
+/// The spoken name of the row after Odile's in the simple list.
+fn after_odile(harness: &Harness<'static, InboxApp>) -> String {
+    let mailbox = harness.state().mailbox();
+    let at = mailbox.messages().iter().position(|row| row.subject == "Allotment rota for November").unwrap();
+    mailbox.spoken(&mailbox.messages()[at + 1])
+}
+
 #[test]
-fn the_slide_out_and_the_toast_obey_the_reduced_motion_flag() {
-    // Reduced motion: the row is out in the frame after the press, the toast stands at its place at once.
+fn a_row_that_leaves_acts_at_once_and_its_gap_closes_as_the_motion_level_says() {
+    // Motion off: the act and the list without the row in the frame after the press, the toast at its place at once.
     let mut harness = still();
+    let next = after_odile(&harness);
+    let below = harness.get_by_label(&next).rect();
     harness.get_by_label(ODILE).hover();
     harness.run();
+    let count = harness.state().mailbox().list_count();
     harness.get_by_role_and_label(Role::Button, "Done").click();
-    // The press, the slide (done at once), the list without the row and the toast's measuring frame, the toast.
-    harness.run_steps(4);
+    harness.step();
+    harness.step();
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Allotment rota for November"), "done at once");
+    assert_ne!(harness.state().mailbox().list_count(), count, "the count changes with the act");
     assert!(harness.query_by_label(ODILE).is_none());
+    harness.run_steps(3);
+    assert!(harness.state().mailbox().left_row().is_none(), "no gap to close");
+    assert_eq!(harness.get_by_label(&next).rect().top(), below.top() - 56.0, "the row under it moved up at once");
     let at_once = harness.get_by_role_and_label(Role::Button, "Undo").rect();
     harness.run();
     assert_eq!(harness.get_by_role_and_label(Role::Button, "Undo").rect(), at_once);
-    // Motion: the row slides out over the row slide token, the toast rises into its place after.
+    // Motion on: the act at once too; the gap closes over `row_collapse` (180 ms), the rows under it rising.
     let mut harness = moving();
+    let next = after_odile(&harness);
+    let below = harness.get_by_label(&next).rect().top();
     harness.get_by_label(ODILE).hover();
     harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Done").click();
-    harness.run_steps(3);
-    assert!(harness.query_by_label(ODILE).is_some(), "still sliding");
-    assert!(harness.query_by_label("Undo").is_none());
-    harness.run_steps(12);
-    assert!(harness.query_by_label(ODILE).is_none(), "out after the slide");
+    harness.step();
+    harness.step();
+    assert!(harness.state().mailbox().messages().iter().all(|row| row.subject != "Allotment rota for November"), "done at once");
+    assert!(harness.state().mailbox().left_row().is_some(), "its gap still closing");
+    assert!(harness.query_by_label(ODILE).is_none(), "the leaving row is no row of the list");
+    let mut tops = vec![harness.get_by_label(&next).rect().top()];
+    for _ in 0..14 {
+        harness.step();
+        tops.push(harness.get_by_label(&next).rect().top());
+    }
+    assert!(tops.windows(2).all(|pair| pair[1] <= pair[0]), "the row under it only rises: {tops:?}");
+    assert!(tops.first().is_some_and(|first| *first > below - 56.0), "it rises over frames: {tops:?}");
+    assert_eq!(tops.last().copied(), Some(below - 56.0), "the gap closed: {tops:?}");
+    harness.run_steps(2);
+    assert!(harness.state().mailbox().left_row().is_none(), "let go once closed");
     let rising = harness.get_by_role_and_label(Role::Button, "Undo").rect();
     harness.run_steps(20);
     let risen = harness.get_by_role_and_label(Role::Button, "Undo").rect();
-    assert!(rising.top() > risen.top(), "the toast rose from {rising:?} to {risen:?}");
-    assert_eq!(risen.top(), at_once.top(), "to where it stands at once with reduced motion");
+    assert!(rising.top() >= risen.top(), "the toast rose from {rising:?} to {risen:?}");
+    assert_eq!(risen.top(), at_once.top(), "to where it stands at once with motion off");
 }
 
 #[test]
@@ -1079,7 +1106,7 @@ fn the_lines_of_ten_thousand_messages_add_up_to_whole_pixels_at_every_text_scale
         for view in [InboxView::Simple, InboxView::List, InboxView::Cards] {
             let grouped = mailbox.groups();
             assert_eq!(grouped.len(), 4);
-            let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true);
+            let listing = super::list::lines(&theme, mailbox, view, &grouped, &other, true, &|_| true, 1.0);
             let rows = listing.lines.iter().filter(|line| matches!(line, super::list::Line::Mail(_))).count();
             assert_eq!(rows, 10_000, "{percent} {view:?}: every message a line");
             let spans: Vec<(f32, f32)> = (0..listing.lines.len()).map(|index| listing.span(index).unwrap()).collect();
