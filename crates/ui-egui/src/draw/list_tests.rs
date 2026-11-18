@@ -3174,3 +3174,40 @@ fn a_landing_no_list_took_never_lands_later_in_another_place() {
     assert_eq!(super::list::focused_row(&harness.ctx), None, "no row took a stale landing");
     assert_eq!(harness.state().mailbox().selected(), None, "and nothing was keyed by it");
 }
+
+#[test]
+fn back_to_the_list_stands_8_before_the_next_tool_with_no_divider_and_runs_only_where_it_does_something() {
+    use crate::keymap::BACK;
+    let mut harness = wide(900.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    harness.run();
+    let back = harness.get_by_role_and_label(Role::Button, "Back to the list").rect();
+    let next = harness
+        .query_all_by_role(Role::Button)
+        .map(|node| node.rect())
+        .filter(|rect| (rect.center().y - back.center().y).abs() < 1.0 && rect.left() > back.right())
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    assert_eq!(next.left() - back.right(), 8.0, "the frame's gap of 8 and nothing between");
+    let between = egui::Rect::from_min_max(egui::pos2(back.right(), back.top()), egui::pos2(next.left(), back.bottom()));
+    let lines = flat_shapes(&harness).into_iter().filter(|shape| between.contains_rect(shape.visual_bounding_rect())).count();
+    assert_eq!(lines, 0, "no divider the frame does not draw");
+    assert!(harness.state().can_run(BACK), "one pane, the message in front: Back runs");
+    // Where it does nothing the palette does not offer it.
+    harness.get_by_role_and_label(Role::Button, "Back to the list").click();
+    harness.run();
+    harness.run();
+    assert!(!harness.state().can_run(BACK), "one pane, the list in front of a keyed message");
+    let mut harness = wide(1300.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    assert!(!harness.state().can_run(BACK), "two panes: the list is beside the reader");
+    let mut harness = wide(900.0);
+    write_to_odile(&mut harness);
+    assert!(harness.state().can_run(BACK), "one pane, the composer in front");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().can_run(BACK), "one pane, the list in front of the composer");
+}

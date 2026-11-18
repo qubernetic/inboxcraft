@@ -492,7 +492,7 @@ impl InboxApp {
             keymap::DONE | keymap::ARCHIVE | keymap::READ | keymap::FLAG | keymap::DELETE => self.row_act(id).is_some(),
             keymap::UNDO => self.mailbox.can_undo(),
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
-            keymap::BACK => self.screen == Screen::Mail && self.reader.open_id().is_some(),
+            keymap::BACK => self.screen == Screen::Mail && self.single == Some(true) && self.in_place_of_list(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
             keymap::SEND => self.composer_in_front(),
@@ -634,11 +634,15 @@ impl InboxApp {
         ctx.request_repaint();
     }
 
+    /// In one pane, whether something stands in the list's place: the docked composer, or a message the person opened.
+    fn in_place_of_list(&self) -> bool {
+        self.composer_in_front() || (!self.docked() && self.message_in_front() && self.reader.open_id().is_some())
+    }
+
     /// `Esc` in the reader gives the keyboard back to the list: its keyed row takes the focus. Whether it did.
     fn back_to_list(&mut self, ctx: &egui::Context) -> bool {
         let single = one_pane(ctx);
-        let composing = self.composer_in_front();
-        let swapped = single && (composing || (!self.docked() && self.message_in_front() && self.reader.open_id().is_some()));
+        let swapped = single && self.in_place_of_list();
         if self.screen != Screen::Mail || (self.list_keys && !swapped) || (self.docked() && !swapped) {
             return false;
         }

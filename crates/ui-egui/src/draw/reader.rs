@@ -341,8 +341,9 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reade
         Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.line)).corner_radius(0.0).inner_margin(margin(s.s1)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = s.s1;
+                // The design's tools stand 8 apart after it, with no divider.
                 if back_to_list(ui, theme, keymap, drawn) {
-                    divider(ui, theme);
+                    ui.add_space(s.s2 - s.s1);
                 }
                 let mut action = |ui: &mut Ui, icon: IconId, name: &str, act: Option<(Act, &str)>| {
                     let button = IconButton::new(icon, name);
