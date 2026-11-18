@@ -584,3 +584,49 @@ fn add_account_stands_at_the_right_end_of_the_accounts_title() {
         assert!((add.center().y - title.center().y).abs() <= 1.0, "{accounts}: on the title's line: {add:?} {title:?}");
     }
 }
+
+/// The line over a form that came back in place of the one asked for.
+const INSTEAD: &str = "You left this form unfinished, so it came back in place of the one you asked for: Cancel it to open that one.";
+
+#[test]
+fn a_form_that_comes_back_in_place_of_the_one_asked_for_says_so() {
+    let mut harness = harness(app(&Kept::default(), FakeWorkers::passing()), egui::Theme::Dark);
+    add_account(&mut harness, "carol@example.org");
+    add_account(&mut harness, "dana@example.org");
+    harness.state_mut().open_accounts();
+    harness.run();
+    // Carol's edit, left and asked for again: the same form, nothing to say.
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert!(harness.query_by_label(INSTEAD).is_none(), "a form asked for says nothing");
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1));
+    assert!(harness.query_by_label(INSTEAD).is_none(), "the form asked for came back: nothing to say");
+    // Dana's row, and Add account, over carol's left edit: carol's comes back and says why.
+    for ask in ["dana@example.org, dana@example.org", "Add account"] {
+        leave_and_come_back(&mut harness);
+        if ask == "Add account" {
+            on_sheet(&harness, ask).click()
+        } else {
+            harness.get_by_label(ask).click()
+        }
+        harness.run();
+        assert_eq!(harness.state().onboarding().stage(), Stage::Edit(1), "{ask}");
+        harness.get_by_label(INSTEAD);
+    }
+    // Cancel lets it go; then the form asked for opens, and says nothing.
+    harness.get_by_label("Cancel").click();
+    harness.run();
+    on_sheet(&harness, "Add account").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    assert!(harness.query_by_label(INSTEAD).is_none(), "the add form asked for says nothing");
+    // The add form left, and carol's row asked for: the add form comes back and says why.
+    leave_and_come_back(&mut harness);
+    harness.get_by_label("carol@example.org, carol@example.org").click();
+    harness.run();
+    assert_eq!(harness.state().onboarding().stage(), Stage::Form);
+    harness.get_by_label(INSTEAD);
+}

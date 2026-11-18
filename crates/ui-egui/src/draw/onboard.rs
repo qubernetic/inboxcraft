@@ -394,6 +394,15 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
             note(ui, theme, error, p.minus);
             ui.add_space(theme.spacing.s2);
         }
+        if onboarding.came_back_instead() {
+            note(
+                ui,
+                theme,
+                tr!("You left this form unfinished, so it came back in place of the one you asked for: Cancel it to open that one."),
+                p.ink,
+            );
+            ui.add_space(theme.spacing.s2);
+        }
         asked = match onboarding.stage() {
             Stage::Form => form(ui, theme, keymap, onboarding),
             Stage::Edit(_) => edit_form(ui, theme, keymap, onboarding),

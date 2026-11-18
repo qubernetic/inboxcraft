@@ -628,6 +628,8 @@ pub struct Onboarding {
     /// The form a way out of the settings sheet left ([`Onboarding::park`]), as it was typed, until Add account or an
     /// account's row brings it back.
     parked: Option<Stage>,
+    /// Whether the form shown came back in place of another one asked for: it says so.
+    instead: bool,
 }
 
 impl fmt::Debug for Onboarding {
@@ -659,6 +661,7 @@ impl Onboarding {
             detect,
             held: None,
             parked: None,
+            instead: false,
         }
     }
 
@@ -666,9 +669,10 @@ impl Onboarding {
     /// was typed: a typed form is never dropped by asking for another one, the owner cancels it to start another.
     pub fn open(&mut self) {
         if self.parked.is_some() {
-            self.resume();
+            self.resume(Stage::Form);
             return;
         }
+        self.instead = false;
         self.form = Form::default();
         self.found = None;
         self.error = None;
@@ -694,17 +698,25 @@ impl Onboarding {
         }
     }
 
-    /// Brings back the form [`Onboarding::park`] left.
-    fn resume(&mut self) {
+    /// Brings back the form [`Onboarding::park`] left, where `asked` was asked for.
+    fn resume(&mut self, asked: Stage) {
         if let Some(stage) = self.parked.take() {
             self.stage = stage;
+            self.instead = stage != asked;
         }
+    }
+
+    /// Whether the form shown came back in place of the one asked for (a form left unfinished comes back first).
+    #[must_use]
+    pub fn came_back_instead(&self) -> bool {
+        self.instead && matches!(self.stage, Stage::Form | Stage::Edit(_))
     }
 
     /// Closes onboarding; a password typed and not used is forgotten, and so is a form a way out left. An added account
     /// stays, and an edited one stays as it was unless it was saved.
     pub fn close(&mut self) {
         self.parked = None;
+        self.instead = false;
         self.form.password.clear();
         self.detecting = false;
         self.held = None;
@@ -717,9 +729,10 @@ impl Onboarding {
     /// row was pressed.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
         if self.parked.is_some() {
-            self.resume();
+            self.resume(Stage::Edit(id));
             return;
         }
+        self.instead = false;
         self.error = None;
         let answer = match mailbox.run("account.list", &json!({})) {
             Ok(answer) => answer,
