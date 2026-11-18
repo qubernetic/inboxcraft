@@ -663,6 +663,8 @@ impl InboxApp {
         };
         if let Some(target) = target {
             calendar::keys::want(ctx, target);
+            // The key moved the pick: egui does not move the focus on as well.
+            ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         }
     }
 

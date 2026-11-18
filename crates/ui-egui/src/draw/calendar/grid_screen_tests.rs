@@ -415,3 +415,105 @@ fn the_details_show_the_whole_text_and_scroll_to_the_rest() {
     let edit = harness.get_by_role_and_label(Role::Button, "Edit").rect();
     assert!(edit.bottom() <= 900.0 && edit.top() >= 0.0, "Edit scrolls into sight: {edit:?}");
 }
+
+/// The picked event's start day and title.
+fn picked(harness: &Harness<'static, InboxApp>) -> Option<(Day, String)> {
+    harness.state().calendar().picked().map(|event| (event.start.day, event.summary.clone()))
+}
+
+/// Presses `key` and lets the frame run.
+fn press(harness: &mut Harness<'static, InboxApp>, key: Key) {
+    harness.key_press(key);
+    harness.run();
+}
+
+/// The name of the node the keyboard is on.
+fn focused_name(harness: &Harness<'static, InboxApp>) -> Option<String> {
+    harness.root().children_recursive().find(|node| node.accesskit_node().is_focused()).and_then(|node| node.accesskit_node().label())
+}
+
+#[test]
+fn arrows_move_the_picked_event_in_the_week() {
+    let mut harness = window(1.0, 100, View::Week);
+    let order: Vec<(Day, String)> = harness.state().calendar().events().map(|event| (event.start.day, event.summary.clone())).collect();
+    press(&mut harness, Key::ArrowDown);
+    assert_eq!(picked(&harness).as_ref(), order.first(), "the first event of the week");
+    press(&mut harness, Key::ArrowDown);
+    assert_eq!(picked(&harness).as_ref(), order.get(1), "the next one");
+    press(&mut harness, Key::ArrowUp);
+    assert_eq!(picked(&harness).as_ref(), order.first(), "back");
+    // Right goes to the first event of a later day, Left back to the last of an earlier one.
+    let from = picked(&harness).map(|(day, _)| day).unwrap();
+    press(&mut harness, Key::ArrowRight);
+    let to = picked(&harness).map(|(day, _)| day).unwrap();
+    assert!(to > from, "Right goes to a later day: {from:?} to {to:?}");
+    let expected = order.iter().find(|(day, _)| *day >= from.plus(1));
+    assert_eq!(picked(&harness).as_ref(), expected);
+    press(&mut harness, Key::ArrowLeft);
+    let back = picked(&harness).map(|(day, _)| day).unwrap();
+    assert!(back < to, "Left goes to an earlier day");
+    // The keyboard is on the picked event: a screen reader hears it.
+    let name = focused_name(&harness).unwrap_or_default();
+    assert!(name.contains(&picked(&harness).unwrap().1), "focus on the pick: {name}");
+    press(&mut harness, Key::Enter);
+    assert_eq!(focused_name(&harness).as_deref(), Some("Close the details"), "Enter takes the keyboard to the details");
+}
+
+#[test]
+fn arrows_step_the_day_and_move_the_picked_event_in_the_day_view() {
+    let mut harness = window(1.0, 100, View::Day);
+    let thursday = Day::new(2026, 11, 5).unwrap();
+    assert_eq!(harness.state().calendar().focus(), thursday);
+    press(&mut harness, Key::ArrowDown);
+    let first = picked(&harness);
+    assert!(first.as_ref().is_some_and(|(day, _)| *day == thursday), "the day's first event: {first:?}");
+    press(&mut harness, Key::ArrowDown);
+    assert_ne!(picked(&harness), first, "the next event of the day");
+    press(&mut harness, Key::ArrowRight);
+    assert_eq!(harness.state().calendar().focus(), thursday.plus(1), "Right steps a day on");
+    press(&mut harness, Key::ArrowLeft);
+    press(&mut harness, Key::ArrowLeft);
+    assert_eq!(harness.state().calendar().focus(), thursday.plus(-1), "Left steps a day back");
+}
+
+#[test]
+fn arrows_move_the_picked_event_in_the_agenda() {
+    let mut harness = window(1.0, 100, View::Agenda);
+    let order: Vec<(Day, String)> = harness.state().calendar().events().map(|event| (event.start.day, event.summary.clone())).collect();
+    assert!(order.len() >= 3);
+    press(&mut harness, Key::ArrowDown);
+    press(&mut harness, Key::ArrowDown);
+    press(&mut harness, Key::ArrowDown);
+    assert_eq!(picked(&harness).as_ref(), order.get(2), "three down: the third event");
+    press(&mut harness, Key::ArrowUp);
+    assert_eq!(picked(&harness).as_ref(), order.get(1));
+    press(&mut harness, Key::ArrowRight);
+    assert_eq!(picked(&harness).as_ref(), order.get(2), "in the agenda Right is the next event");
+    press(&mut harness, Key::ArrowLeft);
+    assert_eq!(picked(&harness).as_ref(), order.get(1), "and Left the one before");
+    let name = focused_name(&harness).unwrap_or_default();
+    assert!(name.contains(&picked(&harness).unwrap().1), "focus on the pick: {name}");
+    press(&mut harness, Key::Escape);
+    assert!(picked(&harness).is_none(), "Esc lets the pick go");
+}
+
+#[test]
+fn arrows_move_the_picked_day_in_the_mini_month() {
+    let mut harness = window(1.0, 100, View::Week);
+    let day = |date: u8| Day::new(2026, 11, date).unwrap();
+    // The keyboard on today in the mini month, in the side panel (the week's head has a button of that name too).
+    let side = 1440.0 - 252.0;
+    harness.query_all(by().role(Role::Button).label("Thursday 5 November 2026, today")).find(|node| node.rect().left() >= side).unwrap().focus();
+    harness.run();
+    assert_eq!(harness.state().calendar().picked_day(), Some(day(5)), "Tab or focus on a day of the mini month picks it");
+    for (key, date) in [(Key::ArrowRight, 6), (Key::ArrowDown, 13), (Key::ArrowLeft, 12), (Key::ArrowUp, 5), (Key::ArrowUp, 29)] {
+        press(&mut harness, key);
+        let want = if date == 29 { Day::new(2026, 10, 29).unwrap() } else { day(date) };
+        assert_eq!(harness.state().calendar().picked_day(), Some(want), "{key:?}");
+    }
+    assert_eq!(harness.state().calendar().month(), Day::new(2026, 10, 1).unwrap(), "the mini month follows into October");
+    assert_eq!(harness.state().calendar().view(), View::Week, "the view stays a week");
+    assert_eq!(focused_name(&harness).as_deref(), Some("Thursday 29 October 2026"), "the keyboard follows the pick");
+    press(&mut harness, Key::Enter);
+    assert_eq!(harness.state().calendar().focus(), Day::new(2026, 10, 29).unwrap(), "Enter puts the view there");
+}
