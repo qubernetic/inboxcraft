@@ -1599,23 +1599,27 @@ impl InboxApp {
         let keyed = if typing { None } else { self.keyed_act(ui.ctx()) };
         self.follow_adding();
         let adding = self.onboarding.stage() != Stage::Closed;
-        let left_settings = escape && self.settings.is_open();
+        // One Esc closes one surface: a float open (a menu, a picker, a select) takes it before anything under it.
+        let closed_popup = escape && crate::component::popup::any_open(ui.ctx());
+        let left_settings = escape && !closed_popup && self.settings.is_open();
         if left_settings {
             self.close_settings();
         }
         let setting = self.settings.is_open();
         // Escape closes a list of choices open in the editor first; the list's own control takes the key.
-        let left_editor =
-            escape && !left_settings && self.screen == Screen::Calendar && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
+        let left_editor = escape
+            && !closed_popup
+            && !left_settings
+            && self.screen == Screen::Calendar
+            && self.calendar.editor().is_some_and(|editor| editor.menu().is_none());
         if left_editor {
             self.calendar.close_editor();
         }
-        let left_full = escape && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
+        let left_full = escape && !closed_popup && !left_settings && self.screen == Screen::Mail && self.reader.full_width();
         if left_full {
             self.reader.set_full_width(false);
         }
         // Esc that closes a menu or a picker in the reader closes only that: the keyboard stays the reader's.
-        let closed_popup = escape && crate::component::popup::any_open(ui.ctx());
         let back_to_list = escape && !left_settings && !left_full && !closed_popup && self.back_to_list(ui.ctx());
         // The window's ground first, under the error banner too; then the place for the panes, then everything else.
         // The panes touch; a hairline divides them.

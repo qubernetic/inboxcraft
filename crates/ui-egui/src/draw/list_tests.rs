@@ -3541,3 +3541,39 @@ fn a_rows_menu_the_keyboard_opened_gives_the_row_the_keyboard_however_it_closes(
         }
     }
 }
+
+#[test]
+fn one_esc_closes_the_float_over_the_reader_and_nothing_under_it() {
+    // Over the full-width reader: More closes, the reader stays full width.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(TEODOR).click();
+    harness.run();
+    harness.state_mut().run_action(&egui::Context::default(), crate::keymap::FULL_WIDTH);
+    harness.run();
+    harness.run();
+    assert!(harness.state().reader().full_width(), "full width");
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    harness.run();
+    assert!(crate::component::popup::any_open(&harness.ctx), "More is open");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!crate::component::popup::any_open(&harness.ctx), "Esc closes More");
+    assert!(harness.state().reader().full_width(), "and only More: the reader stays full width");
+    // Over the reader in one pane: More closes, the message stays in front.
+    let mut harness = wide(900.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "the message in front");
+    harness.get_by_role_and_label(Role::Button, "More").click();
+    harness.run();
+    harness.run();
+    assert!(crate::component::popup::any_open(&harness.ctx), "More is open");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!crate::component::popup::any_open(&harness.ctx), "Esc closes More");
+    assert!(rows(&harness) == 0 && super::reader_rect(&harness.ctx).is_some(), "and only More: the message stays in front");
+}
