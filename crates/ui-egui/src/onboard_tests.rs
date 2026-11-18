@@ -1110,3 +1110,18 @@ fn after_change_settings_detect_still_knows_what_it_filled() {
     detect_now(&mut onboarding, &detect, "carol@new.example.org");
     assert_eq!((onboarding.form().host.as_str(), onboarding.form().username.as_str()), ("imap.new.example.org", "carol@new.example.org"));
 }
+
+#[test]
+fn an_account_s_form_that_cannot_open_leaves_the_add_form_as_it_was() {
+    let mut mailbox = mailbox();
+    let mut onboarding = onboarding(&Kept::default());
+    onboarding.form_mut().address = "carol@example.org".to_owned();
+    onboarding.form_mut().host = "imap.example.org".to_owned();
+    onboarding.edit(&mut mailbox, 4242);
+    assert_eq!(onboarding.stage(), Stage::Form);
+    assert!(onboarding.error().is_some(), "it says why");
+    assert_eq!((onboarding.form().address.as_str(), onboarding.form().host.as_str()), ("carol@example.org", "imap.example.org"));
+    onboarding.close();
+    onboarding.open();
+    assert_eq!(onboarding.form().address, "carol@example.org");
+}

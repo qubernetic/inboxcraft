@@ -855,7 +855,6 @@ impl Onboarding {
     /// Opens the form of the account `id` with everything `account.list` shows of it. The password is not among
     /// it: the field starts empty, and an empty field keeps the stored one.
     pub fn edit(&mut self, mailbox: &mut Mailbox, id: u64) {
-        self.keep();
         self.error = None;
         self.slot = None;
         let answer = match mailbox.run("account.list", &json!({})) {
@@ -870,6 +869,8 @@ impl Onboarding {
             self.error = Some(UiError::Answer { command: "account.list", detail: "no such account".to_owned() }.to_string());
             return;
         };
+        // Found: only now is the form on the page left for the account's, so one that cannot open leaves it as it was.
+        self.keep();
         let text = |value: Option<&Value>| value.and_then(Value::as_str).unwrap_or_default().to_owned();
         let port = |server: Option<&Value>| {
             server.and_then(|server| server.get("port")).and_then(Value::as_u64).map(|port| port.to_string()).unwrap_or_default()
