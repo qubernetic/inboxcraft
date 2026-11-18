@@ -194,6 +194,11 @@ fn detail(event: &EventRow, one_day: bool) -> String {
     }
 }
 
+/// The id of `day`'s head over the hours in the week: the same each frame, so the keyboard can be handed to it.
+pub(super) fn head_id(day: crate::calendar::Day) -> Id {
+    Id::unique(("calendar-day-head", day))
+}
+
 /// The days' heads over the hours: each a button that opens its day in the week (the day view's own is a label).
 fn head(ui: &mut Ui, theme: &Theme, calendar: &Calendar, cols: &Lines, (top, bottom): (f32, f32), days: usize, asked: &mut Vec<Asked>) {
     let p = &theme.palette;
@@ -226,7 +231,7 @@ fn head(ui: &mut Ui, theme: &Theme, calendar: &Calendar, cols: &Lines, (top, bot
         }
         let spoken = format!("{}{}", day::long(day), if today { format!(", {}", tr!("today")) } else { String::new() });
         if days > 1 {
-            let response = ui.interact(cell, ui.scope_id().with(("calendar-day", index)), Sense::click());
+            let response = ui.interact(cell, head_id(day), Sense::click());
             response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Button, true, &spoken));
             if response.clicked() {
                 asked.push(Asked::Open(day));

@@ -103,3 +103,63 @@ fn the_day_s_float_gives_the_keyboard_back_to_its_link() {
     assert_eq!(harness.state().calendar().more(), None);
     assert_eq!(focused(&harness).as_deref(), Some(name.as_str()));
 }
+
+/// Picks a timed event of today, opens Edit on it and types into the title.
+fn editing(harness: &mut Harness<'static, InboxApp>) -> u64 {
+    let today = harness.state().calendar().today();
+    let event = harness.state().calendar().events().find(|event| !event.all_day && event.start.day == today).map(EventRow::key);
+    harness.state_mut().calendar_mut().0.pick(event);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::TextInput, "Title").focus();
+    harness.get_by_role_and_label(Role::TextInput, "Title").type_text(" moved");
+    harness.run();
+    harness.state().calendar().editor().and_then(crate::calendar::Editor::id).unwrap()
+}
+
+/// Cancel, by the model, and two frames for the keyboard to land.
+fn cancel(harness: &mut Harness<'static, InboxApp>) {
+    harness.state_mut().calendar_mut().0.close_editor();
+    harness.run();
+    harness.run();
+}
+
+#[test]
+fn with_its_opener_gone_the_editor_gives_the_keyboard_to_the_grid_s_picked_day() {
+    // Edit hidden by a narrow window: the week's head of the day the view is on (today) has the keyboard.
+    let mut harness = window(View::Week);
+    editing(&mut harness);
+    harness.set_size(vec2(560.0, 900.0));
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "Edit").is_none(), "under 600 the details hide");
+    cancel(&mut harness);
+    assert_eq!(focused(&harness).as_deref(), Some("Thursday 5 November 2026, today"), "the grid's picked day");
+    // The event deleted under the editor: the same.
+    let mut harness = window(View::Week);
+    let id = editing(&mut harness);
+    {
+        let (calendar, mailbox) = harness.state_mut().calendar_mut();
+        mailbox.run("event.delete", &serde_json::json!({ "id": id })).unwrap();
+        calendar.refresh(mailbox);
+    }
+    harness.run();
+    cancel(&mut harness);
+    assert_eq!(focused(&harness).as_deref(), Some("Thursday 5 November 2026, today"));
+    // In the month: the picked day's number.
+    let mut harness = window(View::Month);
+    editing(&mut harness);
+    harness.set_size(vec2(560.0, 900.0));
+    harness.run();
+    cancel(&mut harness);
+    assert_eq!(focused(&harness).as_deref(), Some("Thursday 5 November 2026, today"));
+    // The day view and the agenda draw no day's button: New event.
+    for view in [View::Day, View::Agenda] {
+        let mut harness = window(view);
+        editing(&mut harness);
+        harness.set_size(vec2(560.0, 900.0));
+        harness.run();
+        cancel(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("New event"), "{view:?}: never nowhere");
+    }
+}

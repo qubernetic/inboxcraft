@@ -222,7 +222,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         let new = TextButton::new(tr!("New event")).primary().arrow();
         let new = if calendar.editor().is_some() { new.shown(crate::component::Shown::Pressed) } else { new };
         let new = new.show(ui, theme, keymap);
-        ui.ctx().data_mut(|data| data.insert_temp(new_event_id(), new.rect));
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(new_event_id(), new.rect);
+            data.insert_temp(new_event_id().with("id"), new.id);
+        });
         if new.clicked() {
             opened_from(ui.ctx(), new.id);
             asked.push(Asked::New);
@@ -504,13 +507,24 @@ fn stroke(painter: &egui::Painter, rect: Rect, line: f32, colour: Color32) {
 
 /// The event editor over the screen while it is open, hanging from New event; what was pressed in it.
 /// While `quiet` another surface lies over it and has the keys.
-/// The frame after it closed, the keyboard goes back to the control that opened it.
+/// The frame after it closed, the keyboard goes back to the control that opened it; when that is gone (Edit hidden by
+/// a narrow window, or with its event deleted), to the grid's picked day (the month's number, the week's head), and
+/// where the view draws no day's button (the day, the agenda), to New event. It is never left nowhere.
 pub(super) fn editor(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, calendar: &mut Calendar, quiet: bool) -> Vec<Asked> {
     let anchor = ctx.data(|data| data.get_temp::<Rect>(new_event_id()));
     let open = calendar.editor().is_some();
     if let Some((opener, was_open)) = ctx.data(|data| data.get_temp::<(Id, bool)>(opener_id())) {
         if was_open && !open {
-            ctx.memory_mut(|memory| memory.request_focus(opener));
+            // The screen was drawn before this: what it drew this frame can take the keyboard.
+            let day = if calendar.view() == View::Month { calendar.picked_day().unwrap_or_else(|| calendar.focus()) } else { calendar.focus() };
+            let new_event = ctx.data(|data| data.get_temp::<Id>(new_event_id().with("id")));
+            let to = [Some(opener), Some(month::number_id(day)), Some(hours::head_id(day)), new_event]
+                .into_iter()
+                .flatten()
+                .find(|id| ctx.read_response(*id).is_some());
+            if let Some(to) = to {
+                ctx.memory_mut(|memory| memory.request_focus(to));
+            }
         }
         ctx.data_mut(|data| data.insert_temp(opener_id(), (opener, open)));
     }
