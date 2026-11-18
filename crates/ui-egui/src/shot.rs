@@ -254,6 +254,9 @@ pub struct Shot {
     /// picked) or `bounce` (the bounced message open).
     #[serde(default)]
     pub outbox: Option<String>,
+    /// How the selected HTML message shows: `fitted` (the default) or `plain` (as a text-only program shows it).
+    #[serde(default)]
+    pub html_view: Option<String>,
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -1182,6 +1185,11 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
         if shot.quotes == Some(true) {
             reader.toggle_quotes(id);
+        }
+        match shot.html_view.as_deref() {
+            Some("plain") => reader.set_plain(id, true),
+            Some("fitted") | None => {}
+            Some(other) => return Err(bad(format!("{}: html_view {other:?} is not fitted or plain", shot.out))),
         }
     } else if shot.pictures.is_some() || shot.full_width.is_some() || shot.details.is_some() || shot.quotes.is_some() {
         return Err(bad(format!("{}: the reader settings need a selected row", shot.out)));

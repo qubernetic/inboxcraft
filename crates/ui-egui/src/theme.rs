@@ -455,6 +455,13 @@ pub struct Fonts {
 }
 
 impl Fonts {
+    /// A first-level heading a message's writer wrote, as the frames set it: Plex Sans SemiBold 22/29 (people's words),
+    /// the title's size on a line a point lower. A deeper one is set in `strong`.
+    #[must_use]
+    pub fn written_title(&self) -> Font {
+        Font { face: Face::SansSemiBold, line: self.title.size * 29.0 / 22.0, ..self.title }
+    }
+
     /// The caption in SemiBold: an event's summary and today's number in the calendar.
     #[must_use]
     pub fn caption_strong(&self) -> Font {

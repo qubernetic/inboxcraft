@@ -39,6 +39,7 @@
 //! Drawing only reads the [`Reader`]; what the person asks for comes back as [`Asked`] and is applied after the frame.
 
 mod body;
+mod fitted;
 mod head;
 mod held;
 mod thread;
@@ -59,6 +60,9 @@ use crate::tr;
 use body::bounced;
 #[cfg(test)]
 pub(super) use body::{blocks, column_widths};
+pub(crate) use fitted::board as fitted_board;
+#[cfg(test)]
+pub(super) use fitted::with_cap;
 pub(super) use head::{more_menu, move_menu, picker_id, picker_popup};
 use thread::{answers, folded, message};
 
@@ -88,6 +92,8 @@ pub(super) enum Asked {
     Details(u64),
     /// Show or hide the quotes.
     Quotes(u64),
+    /// Show an HTML message fitted or as plain text.
+    View(u64, crate::component::content_bar::View),
     /// Load the remote pictures of this message once.
     Once(u64),
     /// Load the remote pictures of this sender always.

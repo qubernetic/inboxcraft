@@ -45,6 +45,7 @@ pub(crate) mod paint;
 mod palette;
 mod pane;
 mod reader;
+pub(crate) use reader::fitted_board;
 mod settings;
 
 pub use list::rows_built;
@@ -1953,6 +1954,7 @@ impl InboxApp {
             reader::Asked::Expand(id) => reader.expand(mailbox, id),
             reader::Asked::Details(id) => reader.toggle_details(id),
             reader::Asked::Quotes(id) => reader.toggle_quotes(id),
+            reader::Asked::View(id, view) => reader.set_plain(id, view == crate::component::content_bar::View::Plain),
             reader::Asked::Once(id) => reader.allow_once(mailbox, id),
             reader::Asked::Retry(id, key) => reader.retry(mailbox, id, &key),
             reader::Asked::Always(id) => reader.allow_always(mailbox, id),
@@ -2024,6 +2026,9 @@ mod palette_tests;
 #[cfg(test)]
 #[path = "pane_tests.rs"]
 mod pane_tests;
+#[cfg(test)]
+#[path = "reader_html_tests.rs"]
+mod reader_html_tests;
 #[cfg(test)]
 #[path = "reader_tests.rs"]
 mod reader_tests;

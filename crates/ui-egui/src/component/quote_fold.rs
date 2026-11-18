@@ -73,22 +73,10 @@ pub(crate) fn quote_fold_with(
     let total = if open { (high + below + FOOT).ceil() } else { high };
     let (id, whole) = ui.allocate_space(vec2(width, total));
     let head = Rect::from_min_size(whole.min, vec2(width, high));
-    let response = ui.interact(head, id.with("head"), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken(lines, open)));
-    let lit = lit(ui, theme, &response, true, shown, Hover::AtOnce);
+    let response = fold_line(ui, theme, head, whole.bottom(), id.with("head"), lines, open, shown);
     if ui.is_rect_visible(whole) {
         let painter = ui.painter();
-        if lit.hover {
-            painter.rect_filled(head, 0.0, p.stage);
-        }
-        painter.rect_filled(Rect::from_min_size(whole.min, vec2(EDGE, total)), 0.0, p.line);
-        let ink = if lit.hover { p.ink } else { p.muted };
         let left = whole.left() + PAD;
-        let middle = head.center().y;
-        let caret = if open { Caret::Down } else { Caret::Right };
-        paint_caret(painter, f.mono_s, left, baseline(f.mono_s, middle), caret, ink);
-        let line = super::cut(ui, &format!(" {}", words(lines, open)), f.mono_s, ink, room - caret_width(f.mono_s));
-        paint::run_at(painter, pos2(left + caret_width(f.mono_s), (middle - line.size().y / 2.0).round()), line, ink);
         let mut top = head.bottom();
         if let Some(said) = said.clone() {
             let high = said.size().y;
@@ -97,9 +85,6 @@ pub(crate) fn quote_fold_with(
         }
         if let Some(quoted) = quoted.clone() {
             paint::rows_at(painter, pos2(left, top), room, quoted, p.muted);
-        }
-        if lit.focus {
-            paint::focus_ring(painter, theme, head, Ring::Inside);
         }
     }
     // The quote's words for a screen reader, whole.
@@ -114,6 +99,56 @@ pub(crate) fn quote_fold_with(
     }
     response
 }
+
+/// The fold's line over `head` (28 high), `id` its widget: the `stage` fill under the pointer, the 2 px `line` edge at
+/// its left down to `edge_foot` (the foot of what an open fold shows), the caret and the words 12 in, the focus ring inside; one Tab stop, a click or Enter opens or folds. What
+/// stands under an open fold is the caller's (a fitted message draws its quoted blocks there).
+#[expect(clippy::too_many_arguments, reason = "a fold line's place, its edge, its words and the state a board forces")]
+pub(crate) fn fold_line(
+    ui: &mut Ui,
+    theme: &Theme,
+    head: Rect,
+    edge_foot: f32,
+    id: egui::Id,
+    lines: usize,
+    open: bool,
+    shown: Option<Shown>,
+) -> Response {
+    let p = &theme.palette;
+    let f = &theme.fonts;
+    let response = ui.interact(head, id, Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, spoken(lines, open)));
+    let lit = lit(ui, theme, &response, true, shown, Hover::AtOnce);
+    // The edge runs down beside what the open fold shows, also once the line itself has scrolled out of sight.
+    let edge = Rect::from_min_max(head.min, pos2(head.left() + EDGE, edge_foot.max(head.bottom())));
+    if ui.is_rect_visible(head) {
+        let painter = ui.painter();
+        if lit.hover {
+            painter.rect_filled(head, 0.0, p.stage);
+        }
+    }
+    if ui.is_rect_visible(edge) {
+        ui.painter().rect_filled(edge, 0.0, p.line);
+    }
+    if ui.is_rect_visible(head) {
+        let painter = ui.painter();
+        let ink = if lit.hover { p.ink } else { p.muted };
+        let left = head.left() + PAD;
+        let middle = head.center().y;
+        let caret = if open { Caret::Down } else { Caret::Right };
+        paint_caret(painter, f.mono_s, left, baseline(f.mono_s, middle), caret, ink);
+        let room = (head.width() - PAD - PAD_RIGHT).max(1.0);
+        let line = super::cut(ui, &format!(" {}", words(lines, open)), f.mono_s, ink, room - caret_width(f.mono_s));
+        paint::run_at(painter, pos2(left + caret_width(f.mono_s), (middle - line.size().y / 2.0).round()), line, ink);
+        if lit.focus {
+            paint::focus_ring(painter, theme, head, Ring::Inside);
+        }
+    }
+    response
+}
+
+/// The width of a fold's edge, in points: what stands under an open fold keeps it at its left.
+pub(crate) const FOLD_EDGE: f32 = EDGE;
 
 /// `text` of many lines from outside, its line breaks kept ([`super::plain_lines`]), wrapped at `room`. The galley is
 /// kept under `slot` with what it was laid out from, so an open quote is not copied and laid out again every frame:

@@ -78,16 +78,31 @@ impl Table<'_> {
     }
 }
 
-/// What a screen reader hears for `table`: its head and its rows drawn, cell by cell, each cell capped.
+/// What a screen reader hears for `table`: its head and its rows drawn, cell by cell, each cell capped, the whole
+/// capped too. It is built only up to its cap: a table of 16 × 200 long cells costs no more than the words heard.
 pub(crate) fn spoken(table: &Table<'_>) -> String {
+    let most = super::MOST * 8;
     let columns = table.shown_columns();
-    let line =
-        |cells: &[&str]| (0..columns).map(|index| super::spoken(super::capped(cell(cells, index), super::MOST).0)).collect::<Vec<_>>().join(", ");
-    let mut lines = vec![line(table.heads)];
-    lines.extend(table.rows.iter().take(MOST_ROWS).map(|row| line(row)));
-    lines.extend(table.total.map(line));
-    let all = lines.join("; ");
-    super::capped(&all, super::MOST * 8).0.to_owned()
+    let lines = std::iter::once(table.heads).chain(table.rows.iter().take(MOST_ROWS).copied()).chain(table.total);
+    let mut all = String::new();
+    let mut letters = 0_usize;
+    'built: for (line, cells) in lines.enumerate() {
+        for index in 0..columns {
+            let joint = match (line, index) {
+                (0, 0) => "",
+                (_, 0) => "; ",
+                _ => ", ",
+            };
+            let words = super::spoken(super::capped(cell(cells, index), super::MOST).0);
+            all.push_str(joint);
+            all.push_str(&words);
+            letters = letters.saturating_add(joint.len()).saturating_add(words.chars().count());
+            if letters > most {
+                break 'built;
+            }
+        }
+    }
+    super::capped(&all, most).0.to_owned()
 }
 
 /// The cell `index` of `cells`, or nothing.
@@ -109,16 +124,25 @@ pub fn hairline_table(ui: &mut Ui, theme: &Theme, table: &Table<'_>) -> Response
         drawn(ui, theme, table, &widths, room)
     };
     let (columns, rows) = (table.columns().saturating_sub(MOST_COLUMNS), table.rows.len().saturating_sub(MOST_ROWS));
-    let note = match (columns, rows) {
-        (0, 0) => None,
-        (columns, 0) => Some(tr!("{columns} more columns are not shown", columns = columns)),
-        (0, rows) => Some(tr!("{rows} more rows are not shown", rows = rows)),
-        (columns, rows) => Some(tr!("{columns} more columns and {rows} more rows are not shown", columns = columns, rows = rows)),
-    };
+    let note = left_out(columns, rows);
     if let Some(note) = note {
         super::label(ui, theme.fonts.caption, &note, theme.palette.muted);
     }
     response
+}
+
+/// The line under a table that says how many of its `columns` and `rows` were left out; nothing when none was.
+pub(crate) fn left_out(columns: usize, rows: usize) -> Option<String> {
+    let columns_out = |count: usize| if count == 1 { tr!("1 more column").to_owned() } else { tr!("{count} more columns", count = count) };
+    let rows_out = |count: usize| if count == 1 { tr!("1 more row").to_owned() } else { tr!("{count} more rows", count = count) };
+    match (columns, rows) {
+        (0, 0) => None,
+        (1, 0) => Some(tr!("1 more column is not shown").to_owned()),
+        (columns, 0) => Some(tr!("{columns} more columns are not shown", columns = columns)),
+        (0, 1) => Some(tr!("1 more row is not shown").to_owned()),
+        (0, rows) => Some(tr!("{rows} more rows are not shown", rows = rows)),
+        (columns, rows) => Some(tr!("{columns} and {rows} are not shown", columns = columns_out(columns), rows = rows_out(rows))),
+    }
 }
 
 /// The table `width` wide: what [`hairline_table`] draws in its room or inside its sideways scroll.

@@ -239,3 +239,26 @@ fn a_table_wider_than_the_pane_scrolls_sideways_inside_itself() {
     let (after, _) = price(&harness).unwrap_or_else(|| panic!("the price"));
     assert!(after.left() < before.left() - 100.0, "the table scrolled sideways: {before:?} {after:?}");
 }
+
+#[test]
+fn one_column_or_row_left_out_is_said_in_the_singular() {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let harness = huge(theme, 17, 3, 560.0, 400.0);
+    harness.get_by_label("1 more column is not shown");
+    let harness = huge(theme, 2, 201, 560.0, 400.0);
+    harness.get_by_label("1 more row is not shown");
+    let harness = huge(theme, 17, 201, 560.0, 400.0);
+    harness.get_by_label("1 more column and 1 more row are not shown");
+}
+
+#[test]
+fn what_a_screen_reader_hears_of_a_huge_table_stops_at_its_cap() {
+    // 16 columns of 200 rows of 400 letters: about 1.3 million letters, of which 3 200 are heard.
+    let long = "w".repeat(1_000);
+    let row: Vec<&str> = vec![long.as_str(); 16];
+    let rows: Vec<&[&str]> = vec![row.as_slice(); 200];
+    let table = Table { heads: &HEADS, widths: &WIDTHS, rows: &rows, total: None };
+    let name = spoken(&table);
+    assert!(name.chars().count() <= super::super::MOST * 8, "{} letters", name.chars().count());
+    assert!(name.starts_with("Item, Qty, EUR") && name.contains(&"w".repeat(super::super::MOST)), "{name:.80}");
+}

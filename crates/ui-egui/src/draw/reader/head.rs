@@ -278,9 +278,15 @@ pub(super) fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     if open.is_some() {
         why_line(ui, theme, keymap, "");
     }
-    if let Some((kind, held)) = opened.and_then(|opened| holds(reader, opened)) {
-        let bar = ContentBar { kind, view: View::Fitted, views: false, held: &held, waiting: false, links: &[] };
-        content_bar(ui, theme, keymap, &bar);
+    if let Some(opened) = opened
+        && let Some((kind, held)) = holds(reader, opened)
+    {
+        // An HTML message shows fitted or as plain text, as the owner chooses on the bar.
+        let view = if reader.shows_plain(opened.id) { View::Plain } else { View::Fitted };
+        let bar = ContentBar { kind, view, views: kind == BarKind::Html, held: &held, waiting: false, links: &[] };
+        if let Some(view) = content_bar(ui, theme, keymap, &bar).view {
+            drawn.asked.push(Asked::View(opened.id, view));
+        }
     }
 }
 
@@ -527,6 +533,7 @@ fn holds(reader: &Reader, opened: &Opened) -> Option<(BarKind, String)> {
         Content::Text(_) if invite => Some((BarKind::Invite, tr!("read into the card below").to_owned())),
         Content::Text(_) => Some((BarKind::Text, tr!("plain text, shown as sent").to_owned())),
         Content::Html(_) if invite => Some((BarKind::Invite, tr!("read into the card below").to_owned())),
+        Content::Html(_) if reader.shows_plain(opened.id) => Some((BarKind::Html, tr!("as a text-only program shows it").to_owned())),
         Content::Html(document) => {
             let count = document.remote_blocked;
             let held = match (count, reader.remote_allowed(opened.id)) {

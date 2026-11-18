@@ -14,8 +14,8 @@ use crate::motion;
 use crate::theme::{Mode, TextScale, Theme};
 
 /// The boards the page holds, by title.
-pub(crate) const BOARDS: [&str; 8] =
-    ["Why line", "Content bar", "Thread row", "Quote fold", "Attachment", "Hairline table", "Invitation card", "Picture box"];
+pub(crate) const BOARDS: [&str; 9] =
+    ["Why line", "Content bar", "Thread row", "Quote fold", "Attachment", "Hairline table", "Invitation card", "Picture box", "Fitted message"];
 
 /// The page in `mode`, motion reduced or not.
 fn harness(mode: Mode, reduce: bool) -> Harness<'static> {
@@ -67,4 +67,14 @@ fn the_reader_page_holds_every_board() {
             assert!(harness.query_all_by_label(title).count() >= 1, "{mode:?}: the {title} board");
         }
     }
+}
+
+#[test]
+fn the_fitted_message_board_shows_its_quote_folded_and_open() {
+    let harness = harness(Mode::Dark, true);
+    harness.get_by_role_and_label(Role::Button, "Show 3 quoted lines");
+    // The quote fold's own board has an open fold too.
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, "Hide quoted text").count(), 2);
+    assert_eq!(harness.query_all_by_role_and_label(Role::Link, "the full rota").count(), 2);
+    harness.get_by_label("The shed key is under the pot.");
 }
