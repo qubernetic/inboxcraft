@@ -254,7 +254,8 @@ fn over_bar<R>(ui: &Ui, theme: &Theme, output: &ScrollAreaOutput<R>, was: Option
     // very edge, is the content's.
     let inset = theme.spacing.s1 / 2.0;
     let sensed = Rect::from_x_y_ranges(Rangef::new(strip.left() + inset, strip.right() - inset), thumb.y_range());
-    let response = ui.interact(sensed, output.id.with("over-thumb"), egui::Sense::drag());
+    // Dragged, never focused: `Sense::drag()` would make the thumb an unnamed Tab stop.
+    let response = ui.interact(sensed, output.id.with("over-thumb"), egui::Sense::DRAG);
     let held = (response.dragged() || response.is_pointer_button_down_on()).then(|| {
         // Taken where the press began; kept while held, as the bar moves under it.
         let grab = was

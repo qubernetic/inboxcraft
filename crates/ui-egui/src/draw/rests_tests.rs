@@ -351,3 +351,48 @@ fn the_one_bar_over_the_content_drags_by_its_thumb_and_gives_a_press_beside_it_t
     press_at(&mut harness, at);
     assert!(harness.state().calendar().picked().is_some(), "the agenda: a press in the strip beside the thumb picks the event");
 }
+
+/// Tabs `presses` times from the window's first stop; fails where the focus lands on the thumb of the bar over the
+/// content (as it is laid out at that step).
+fn tab_never_onto_the_thumb(harness: &mut Harness<'static, InboxApp>, presses: usize, what: &str) {
+    let mut seen = false;
+    for step in 0..presses {
+        harness.key_press(Key::Tab);
+        harness.run();
+        let Some(thumb) = crate::component::scroll::over_thumb(&harness.ctx) else { continue };
+        seen = true;
+        let focused = harness.ctx.memory(|memory| memory.focused()).and_then(|id| harness.ctx.read_response(id));
+        if let Some(focused) = focused {
+            assert!(!thumb.expand(0.5).contains_rect(focused.rect), "{what}: Tab {step} lands on the thumb {thumb:?}");
+        }
+    }
+    assert!(seen, "{what}: the bar over the content is drawn");
+}
+
+#[test]
+fn the_thumb_of_the_bar_over_the_content_is_no_tab_stop() {
+    // A mail list short enough to scroll.
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_reduce_motion(true);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 420.0))
+        .with_max_steps(40)
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    tab_never_onto_the_thumb(&mut harness, 120, "the list");
+
+    // The calendar's agenda.
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_reduce_motion(true);
+    app.show_calendar();
+    let (calendar, mailbox) = app.calendar_mut();
+    calendar.set_view(mailbox, crate::calendar::View::Agenda);
+    let mut harness = Harness::builder()
+        .with_size(vec2(1440.0, 600.0))
+        .with_max_steps(40)
+        .with_context_setup(crate::theme::install_fonts)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.run();
+    tab_never_onto_the_thumb(&mut harness, 120, "the agenda");
+}
