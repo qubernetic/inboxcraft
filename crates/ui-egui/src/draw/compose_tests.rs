@@ -1462,3 +1462,29 @@ fn the_send_later_picker_stands_over_the_foot_4_above_its_caret() {
         assert_eq!(later_picker(&harness), picker);
     }
 }
+
+#[test]
+fn the_floating_panel_casts_its_shadow_beyond_its_edge() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut harness = composing(theme);
+        harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+        harness.run();
+        let close = rect_of(&harness, Role::Button, "Close; the draft is kept");
+        let panel = egui::Rect::from_min_max(
+            egui::pos2(close.right() + 20.0 - 520.0, close.top() - 12.0),
+            egui::pos2(close.right() + 20.0, close.top() - 12.0 + 560.0),
+        );
+        // The shadow's mesh reaches past the panel, and what it is clipped to lets it show there: 24 to its left and
+        // over its top (its frame: 0, 12, blur 32).
+        let shadow = harness.output().shapes.iter().find(|clipped| match &clipped.shape {
+            egui::Shape::Mesh(mesh) => {
+                let bounds = mesh.calc_bounds();
+                bounds.contains_rect(panel.expand(8.0)) && bounds.width() < panel.width() + 200.0
+            }
+            _ => false,
+        });
+        let shadow = shadow.expect("the panel's shadow");
+        let round = egui::Rect::from_min_max(panel.min - egui::vec2(24.0, 8.0), panel.max);
+        assert!(shadow.clip_rect.contains_rect(round), "{:?} clips the shadow of {panel:?}", shadow.clip_rect);
+    }
+}

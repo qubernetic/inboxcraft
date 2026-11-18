@@ -890,10 +890,12 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mail
         .fixed_pos(rect.min)
         .fade_in(false)
         .show(ctx, |ui| {
-            ui.set_clip_rect(rect.intersect(screen));
+            // The shadow falls on the window round the panel (its frames); what is drawn in the panel stays in it.
+            let shadow = ui.painter().with_clip_rect(screen);
             for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard) {
-                ui.painter().add(shape);
+                shadow.add(shape);
             }
+            ui.set_clip_rect(rect.intersect(screen));
             ui.allocate_rect(rect, Sense::hover());
             mark_drawn(ui, rect);
             // 12 above the head, 20 beside and under the rest.
