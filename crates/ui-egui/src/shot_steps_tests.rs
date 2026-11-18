@@ -1,0 +1,196 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The script steps of `ui_shot`: what a line may ask, what a junk line gets, and what a step does to the window.
+
+use egui::{Key, KeyboardShortcut, Modifiers, vec2};
+use inboxcraft_time::{FakeClock, Timestamp};
+
+use super::{
+    Do, MAX_LINE, MAX_NAME, MAX_NTH, MAX_SCRIPT, MAX_SHOTS, MAX_STEPS, MAX_TIMES, Picture, Pointer, SHOT_TIME, parse_script, render_steps, shoot,
+};
+use crate::keymap;
+use crate::mailbox::Mailbox;
+use crate::theme::Mode;
+use crate::{InboxApp, sample};
+
+/// The accessible name of Teodor's row in the sample's inbox.
+const ROW: &str = "Teodor Lisk, Photos from the coast walk, 04:00, flagged";
+
+fn picture(line: &str) -> Picture {
+    shoot(&parse_script(line).unwrap().remove(0)).unwrap()
+}
+
+fn refusal(line: &str) -> String {
+    match parse_script(line) {
+        Ok(mut shots) => shoot(&shots.remove(0)).unwrap_err().to_string(),
+        Err(error) => error.to_string(),
+    }
+}
+
+fn line(steps: &str) -> String {
+    format!(r#"{{"out": "a.png", "mode": "light", "steps": {steps}}}"#)
+}
+
+#[test]
+fn each_step_kind_is_read() {
+    let shots =
+        parse_script(&line(r#"[{"key": "Command+K"}, {"tab": 3}, {"shift_tab": 1}, {"focus": "Search mail"}, {"press": "Snooze", "nth": 2}]"#))
+            .unwrap();
+    let read: Vec<Do> = shots[0].steps.as_deref().unwrap().iter().map(|step| step.read().unwrap()).collect();
+    assert_eq!(
+        read,
+        vec![
+            Do::Key(KeyboardShortcut::new(Modifiers::COMMAND, Key::K)),
+            Do::Tab { back: false, times: 3 },
+            Do::Tab { back: true, times: 1 },
+            Do::Focus { name: "Search mail".to_owned(), nth: None },
+            Do::Press { name: "Snooze".to_owned(), nth: Some(2) },
+        ]
+    );
+}
+
+#[test]
+fn a_step_the_script_cannot_take_is_refused_naming_its_line() {
+    let long = "x".repeat(MAX_NAME + 1);
+    let many = format!("[{}]", vec![r#"{"tab": 1}"#; MAX_STEPS + 1].join(", "));
+    for (steps, says) in [
+        (r#"[{"jump": 1}]"#.to_owned(), "jump"),
+        (r#"[{"tab": 1, "key": "A"}]"#.to_owned(), "one of"),
+        (r"[{}]".to_owned(), "one of"),
+        (r#"[{"tab": 0}]"#.to_owned(), "tab 0"),
+        (format!(r#"[{{"tab": {}}}]"#, MAX_TIMES + 1), "is not 1 to"),
+        (r#"[{"shift_tab": -1}]"#.to_owned(), "-1"),
+        (r#"[{"tab": 1e30}]"#.to_owned(), "floating point"),
+        (r#"[{"tab": 1, "nth": 1}]"#.to_owned(), "nth goes with"),
+        (r#"[{"focus": "Search mail", "nth": 0}]"#.to_owned(), "nth 0"),
+        (format!(r#"[{{"press": "Snooze", "nth": {}}}]"#, MAX_NTH + 1), "is not 1 to"),
+        (r#"[{"press": ""}]"#.to_owned(), "a name of 1 to"),
+        (format!(r#"[{{"focus": "{long}"}}]"#), "a name of 1 to"),
+        (r#"[{"key": "Ctrl+Nonsense"}]"#.to_owned(), "is not a key"),
+        (r#"[{"key": "Hyper+K"}]"#.to_owned(), "is not a key"),
+        (r#"[{"key": 7}]"#.to_owned(), "invalid type"),
+        (r#"{"tab": 1}"#.to_owned(), "invalid type"),
+        (many, "more than"),
+    ] {
+        let script = format!("# a comment\n\n{}\n", line(&steps));
+        let error = parse_script(&script).unwrap_err().to_string();
+        assert!(error.contains("line 3") && error.contains(says), "{steps}: {error}");
+    }
+}
+
+#[test]
+fn a_script_too_long_or_too_many_pictures_is_refused() {
+    let long = format!(r#"{{"out": "{}", "mode": "light"}}"#, "a".repeat(MAX_LINE));
+    assert!(parse_script(&long).unwrap_err().to_string().contains("line 1: longer than"));
+    let many = vec![r#"{"out": "a.png", "mode": "light"}"#; MAX_SHOTS + 1].join("\n");
+    let error = parse_script(&many).unwrap_err().to_string();
+    assert!(error.contains(&format!("line {}: more than {MAX_SHOTS}", MAX_SHOTS + 1)), "{error}");
+    assert!(parse_script(&" ".repeat(MAX_SCRIPT + 1)).unwrap_err().to_string().contains("longer than"));
+}
+
+#[test]
+fn junk_lines_never_panic() {
+    let junk = [
+        "\u{0}\u{1}\u{2}",
+        "{",
+        "[]",
+        "null",
+        r#"{"out": "a.png", "mode": "light", "steps": null}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": []}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [null]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"key": "Shift+Shift+Shift"}]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"key": "+"}]}"#,
+        "{\"out\": \"a.png\", \"mode\": \"light\", \"steps\": [{\"key\": \"\\u202eK\"}]}",
+        "{\"out\": \"a.png\", \"mode\": \"light\", \"steps\": [{\"focus\": \"\\u202e\\u0000\\r\\nRow\"}]}",
+        r#"{"out": "a.png", "mode": "light", "steps": [{"press": "é́́́"}]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"press": "Snooze", "nth": 4294967295}]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"press": "Search"}]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"focus": "Search"}]}"#,
+        r#"{"out": "a.png", "mode": "light", "pointer": [1, 1], "click": [2, 2], "steps": [{"shift_tab": 64}]}"#,
+        r#"{"out": "a.png", "mode": "light", "steps": [{"key": "Escape"}, {"key": "Command+Z"}]}"#,
+        r#"{"out": "a.png", "mode": "light", "lists": true, "steps": [{"tab": 1}]}"#,
+    ];
+    for text in junk {
+        if let Ok(shots) = parse_script(text) {
+            for shot in shots {
+                // An error or a picture; never a panic.
+                let _ = shoot(&shot);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_name_no_control_has_or_several_have_is_an_error_not_a_silent_step() {
+    let error = refusal(&line(r#"[{"focus": "Photos from the coast walk"}]"#));
+    assert!(error.contains("step 1: no control that takes the focus is named"), "{error}");
+    assert!(error.contains(ROW), "the names that hold it are offered: {error}");
+    let selected = |steps: &str| format!(r#"{{"out": "a.png", "mode": "light", "step": 2, "steps": {steps}}}"#);
+    let error = refusal(&selected(r#"[{"press": "Snooze"}]"#));
+    assert!(error.contains("2 controls are named \"Snooze\"; nth says which"), "{error}");
+    let error = refusal(&selected(r#"[{"press": "Snooze", "nth": 3}]"#));
+    assert!(error.contains("nth 3, but only 2 controls"), "{error}");
+    let error = refusal(&line(r#"[{"tab": 1}, {"press": "Nothing at all"}]"#));
+    assert!(error.contains("step 2: no enabled control is named"), "{error}");
+    let error = refusal(r#"{"out": "a.png", "mode": "light", "lists": true, "steps": [{"tab": 1}]}"#);
+    assert!(error.contains("has no window"), "{error}");
+}
+
+#[test]
+fn a_focus_step_rings_the_named_row_and_draws_the_same_bytes_every_time() {
+    let focused = line(&format!(r#"[{{"focus": "{ROW}"}}]"#));
+    let first = picture(&focused);
+    assert_eq!(first, picture(&focused), "the same script draws the same bytes");
+    assert_ne!(first, picture(r#"{"out": "a.png", "mode": "light"}"#), "the focus shows");
+}
+
+#[test]
+fn tab_and_shift_tab_walk_the_focus_both_ways() {
+    let one = picture(&line(r#"[{"tab": 1}]"#));
+    assert_eq!(one, picture(&line(r#"[{"tab": 3}, {"shift_tab": 2}]"#)), "three on and two back is one on");
+    assert_ne!(one, picture(&line(r#"[{"tab": 2}]"#)));
+    assert_ne!(one, picture(r#"{"out": "a.png", "mode": "light"}"#));
+}
+
+#[test]
+fn a_press_lands_on_a_hover_action_once_it_is_laid_out() {
+    let pressed = r#"{"out": "a.png", "mode": "light", "size": [1400, 860], "step": 2, "steps": [{"press": "Snooze", "nth": 2}]}"#;
+    let first = picture(pressed);
+    assert_eq!(first, picture(pressed), "the same script draws the same bytes");
+    assert_ne!(first, picture(r#"{"out": "a.png", "mode": "light", "size": [1400, 860], "step": 2}"#), "the picker opened");
+}
+
+#[test]
+fn a_step_that_reaches_a_command_only_the_owner_runs_fails_the_picture() {
+    for (key, command) in [("D", "mail.done"), ("Delete", "mail.delete")] {
+        let error = refusal(&format!(r#"{{"out": "a.png", "mode": "light", "step": 2, "steps": [{{"key": "{key}"}}]}}"#));
+        assert!(error.contains(command) && error.contains("safe commands only"), "{key}: {error}");
+    }
+    // Flag is safe.
+    picture(r#"{"out": "a.png", "mode": "light", "step": 2, "steps": [{"key": "S"}]}"#);
+}
+
+/// The sample window at the pictures' time, the second row selected.
+fn window() -> InboxApp {
+    let clock = || Box::new(FakeClock::new(Timestamp::from_unix(SHOT_TIME, 0).unwrap()));
+    let mut app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    app.set_reduce_motion(true);
+    app.mailbox_mut().step(true);
+    app.mailbox_mut().step(true);
+    app
+}
+
+#[test]
+fn a_key_goes_through_the_keymap_so_a_rebinding_is_honoured() {
+    let delete = [Do::Key(KeyboardShortcut::new(Modifiers::NONE, Key::Delete))];
+    let draw = |app: &mut InboxApp| render_steps(app, vec2(1200.0, 760.0), 1.0, Mode::Light, Pointer::default(), &delete);
+    let mut app = window();
+    assert!(draw(&mut app).unwrap_err().contains("mail.delete"));
+    let mut app = window();
+    let flagged = app.mailbox().messages().iter().filter(|row| row.flagged).count();
+    app.keymap_mut().bind(keymap::FLAG, KeyboardShortcut::new(Modifiers::NONE, Key::Delete));
+    draw(&mut app).unwrap();
+    assert_ne!(app.mailbox().messages().iter().filter(|row| row.flagged).count(), flagged, "Delete flags now");
+    assert_eq!(app.mailbox().refused(), None);
+}

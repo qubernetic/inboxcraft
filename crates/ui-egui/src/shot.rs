@@ -56,7 +56,9 @@
 //! hold, one scheduled and one the server refused, `countdown` the toast of a message just sent, `schedule` the
 //! composer with a time picked and its send-later picker open, `bounce` the bounced message open in the reader;
 //! the window takes them through the `ui.*.set` commands. Every picture but a `slide` one is taken with reduced
-//! motion, so it shows where each motion ends.
+//! motion, so it shows where each motion ends. `steps` then drive the set window as a person would, one after
+//! another: a `key`, `tab` or `shift_tab` presses, `focus` or `press` a control by its accessible name ([`Step`]);
+//! the picture is taken when the window rests after the last.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -255,6 +257,119 @@ pub struct Shot {
     /// picked) or `bounce` (the bounced message open).
     #[serde(default)]
     pub outbox: Option<String>,
+    /// What a person does to the window once the scene is set, in order ([`Step`]); none when left out.
+    #[serde(default)]
+    pub steps: Option<Vec<Step>>,
+}
+
+/// The most steps one picture takes.
+pub const MAX_STEPS: usize = 32;
+/// The most presses of Tab (or Shift Tab) one step makes.
+pub const MAX_TIMES: u32 = 64;
+/// The longest accessible name a step aims at, in bytes.
+pub const MAX_NAME: usize = 256;
+/// The highest `nth` a step names.
+pub const MAX_NTH: u32 = 64;
+/// The longest script line, in bytes.
+pub const MAX_LINE: usize = 16 * 1024;
+/// The longest script, in bytes.
+pub const MAX_SCRIPT: usize = 4 * 1024 * 1024;
+/// The most pictures one script asks for.
+pub const MAX_SHOTS: usize = 1024;
+/// The most frames the window is given to come to rest after a step.
+pub const MAX_SETTLE: usize = 240;
+/// How often a press aims again at a control that moved when the pointer came over it.
+pub const MAX_AIM: usize = 4;
+
+/// One thing a person does to the window, written as one key of an object:
+///
+/// - `{"key": "Command+K"}` presses a key with its modifiers (written as the keymap writes them,
+///   [`crate::keymap::read`]) and lets go, through the window's input, so the keymap decides what it does;
+/// - `{"tab": 3}` and `{"shift_tab": 1}` press Tab or Shift Tab that many times (1 to [`MAX_TIMES`]);
+/// - `{"focus": "Search mail"}` gives the keyboard focus to the control with that accessible name, as a screen
+///   reader asks for it;
+/// - `{"press": "Snooze"}` brings the pointer over the control with that name once the frame has laid it out, and
+///   presses and lets go of the first button there.
+///
+/// `focus` and `press` take `nth` (1 is the topmost, then leftmost) when more than one control has the name; a name
+/// no control has, or one that several have without `nth`, is an error. After each step the window is drawn until it
+/// rests, at most [`MAX_SETTLE`] frames. While steps drive the window its commands run for an agent, so only a `safe`
+/// command runs and a refused one fails the picture.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    /// A key with its modifiers.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// How many times Tab is pressed.
+    #[serde(default)]
+    pub tab: Option<u32>,
+    /// How many times Shift Tab is pressed.
+    #[serde(default)]
+    pub shift_tab: Option<u32>,
+    /// The accessible name of the control that takes the focus.
+    #[serde(default)]
+    pub focus: Option<String>,
+    /// The accessible name of the control pressed.
+    #[serde(default)]
+    pub press: Option<String>,
+    /// Which of the controls with the name, from 1.
+    #[serde(default)]
+    pub nth: Option<u32>,
+}
+
+/// A [`Step`] read and checked.
+#[derive(Debug, Clone, PartialEq)]
+enum Do {
+    Key(egui::KeyboardShortcut),
+    Tab { back: bool, times: u32 },
+    Focus { name: String, nth: Option<u32> },
+    Press { name: String, nth: Option<u32> },
+}
+
+impl Step {
+    /// What the step does, or why it is not a step.
+    fn read(&self) -> Result<Do, String> {
+        let named = |kind: &str, name: &str| {
+            if name.is_empty() || name.len() > MAX_NAME {
+                return Err(format!("{kind} needs a name of 1 to {MAX_NAME} bytes"));
+            }
+            match self.nth {
+                Some(nth) if nth == 0 || nth > MAX_NTH => Err(format!("nth {nth} is not 1 to {MAX_NTH}")),
+                nth => Ok((name.to_owned(), nth)),
+            }
+        };
+        let times = |kind: &str, times: u32| {
+            if times == 0 || times > MAX_TIMES { Err(format!("{kind} {times} is not 1 to {MAX_TIMES}")) } else { Ok(times) }
+        };
+        let kinds = [self.key.is_some(), self.tab.is_some(), self.shift_tab.is_some(), self.focus.is_some(), self.press.is_some()];
+        if kinds.iter().filter(|kind| **kind).count() != 1 {
+            return Err("a step is one of key, tab, shift_tab, focus or press".to_owned());
+        }
+        if self.nth.is_some() && self.focus.is_none() && self.press.is_none() {
+            return Err("nth goes with focus or press only".to_owned());
+        }
+        if let Some(text) = &self.key {
+            return crate::keymap::read(text).map(Do::Key).ok_or_else(|| format!("key {:?} is not a key", cut(text)));
+        }
+        if let Some(n) = self.tab {
+            return Ok(Do::Tab { back: false, times: times("tab", n)? });
+        }
+        if let Some(n) = self.shift_tab {
+            return Ok(Do::Tab { back: true, times: times("shift_tab", n)? });
+        }
+        if let Some(name) = &self.focus {
+            let (name, nth) = named("focus", name)?;
+            return Ok(Do::Focus { name, nth });
+        }
+        let (name, nth) = named("press", self.press.as_deref().unwrap_or_default())?;
+        Ok(Do::Press { name, nth })
+    }
+}
+
+/// At most the first 40 characters of `text`, for an error.
+fn cut(text: &str) -> String {
+    text.chars().take(40).collect()
 }
 
 /// The credential store of a picture: it takes the password and keeps nothing.
@@ -630,6 +745,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.picker.is_some()
         || shot.menu.is_some()
         || shot.outbox.is_some()
+        || shot.steps.is_some()
         || [shot.icons, shot.components, shot.blocks, shot.fields, shot.lists].iter().filter(|page| **page == Some(true)).count() > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
@@ -721,15 +837,34 @@ fn bad(detail: impl Into<String>) -> UiError {
 ///
 /// # Errors
 ///
-/// [`UiError::Shot`] naming the first line that is not a picture.
+/// [`UiError::Shot`] naming the first line that is not a picture (also a line longer than [`MAX_LINE`], more than
+/// [`MAX_STEPS`] steps, or a step [`Step`] does not take), for a script longer than [`MAX_SCRIPT`], or for more than
+/// [`MAX_SHOTS`] pictures.
 pub fn parse_script(text: &str) -> Result<Vec<Shot>, UiError> {
+    if text.len() > MAX_SCRIPT {
+        return Err(bad(format!("the script is longer than {MAX_SCRIPT} bytes")));
+    }
     let mut shots = Vec::new();
     for (index, line) in text.lines().enumerate() {
+        let number = index.saturating_add(1);
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let shot: Shot = serde_json::from_str(line).map_err(|error| bad(format!("line {}: {error}", index.saturating_add(1))))?;
+        if line.len() > MAX_LINE {
+            return Err(bad(format!("line {number}: longer than {MAX_LINE} bytes")));
+        }
+        if shots.len() >= MAX_SHOTS {
+            return Err(bad(format!("line {number}: more than {MAX_SHOTS} pictures")));
+        }
+        let shot: Shot = serde_json::from_str(line).map_err(|error| bad(format!("line {number}: {error}")))?;
+        let steps = shot.steps.as_deref().unwrap_or_default();
+        if steps.len() > MAX_STEPS {
+            return Err(bad(format!("line {number}: {} steps, more than {MAX_STEPS}", steps.len())));
+        }
+        for (at, step) in steps.iter().enumerate() {
+            step.read().map_err(|error| bad(format!("line {number}: step {}: {error}", at.saturating_add(1))))?;
+        }
         shots.push(shot);
     }
     Ok(shots)
@@ -984,6 +1119,27 @@ pub fn render_clicked(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, po
     paint_pointed(size, scale, mode, Pointer { rest: pointer, click: Some(click) }, |ui| app.ui(ui))
 }
 
+/// The sample window after `pointer` and then `steps`, each followed by frames until the window rests. The window's
+/// commands run for an agent meanwhile, so a step that reaches a command which is not `safe` fails the picture.
+fn render_steps(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer: Pointer, steps: &[Do]) -> Result<Picture, String> {
+    let mut run = Run::new(size, scale, mode).map_err(|error| error.to_string())?;
+    run.ctx.enable_accesskit();
+    app.mailbox_mut().set_caller(inboxcraft_engine::Caller::Agent);
+    let mut draw = |ui: &mut egui::Ui| app.ui(ui);
+    for frame in 0..pointer.frames() {
+        run.frame(pointer.events(frame), &mut draw);
+    }
+    run.settle(&mut draw)?;
+    let mut at = pointer.rest.or(pointer.click);
+    for (index, step) in steps.iter().enumerate() {
+        run.step(step, &mut at, &mut draw).map_err(|error| format!("step {}: {error}", index.saturating_add(1)))?;
+    }
+    if let Some(command) = app.mailbox().refused() {
+        return Err(format!("the steps reached {command}, which only the owner runs; a step runs safe commands only"));
+    }
+    run.picture().map_err(|error| error.to_string())
+}
+
 /// What the pointer does while a picture is drawn: where it rests, and where it presses first.
 #[derive(Debug, Clone, Copy, Default)]
 struct Pointer {
@@ -1028,37 +1184,187 @@ pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, draw: impl FnMut(&mut eg
 
 /// [`paint`] with the pointer resting at `pointer`.
 fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Pointer, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
-    if !(1.0..=4.0).contains(&scale) {
-        return Err(bad(format!("scale {scale} is not between 1 and 4")));
-    }
-    let side = |points: f32| {
-        let pixels = (points * scale).round();
-        if pixels.is_finite() && pixels >= 1.0 && pixels <= MAX_SIDE as f32 { Some(pixels as usize) } else { None }
-    };
-    let (Some(width), Some(height)) = (side(size.x), side(size.y)) else {
-        return Err(bad(format!("a window of {} by {} points at scale {scale} is not 1 to {MAX_SIDE} pixels a side", size.x, size.y)));
-    };
-    let ctx = egui::Context::default();
-    ctx.set_pixels_per_point(scale);
-    ctx.set_theme(match mode {
-        Mode::Light => egui::Theme::Light,
-        Mode::Dark => egui::Theme::Dark,
-    });
-    let mut textures = HashMap::new();
-    let mut last = None;
+    let mut run = Run::new(size, scale, mode)?;
     for frame in 0..pointer.frames() {
-        let events = pointer.events(frame);
-        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..RawInput::default() };
-        let mut output = ctx.run_ui(input, |ui| {
+        run.frame(pointer.events(frame), &mut draw);
+    }
+    run.picture()
+}
+
+/// The frames of one picture: egui's context, the textures it set, and the last frame's output.
+struct Run {
+    ctx: egui::Context,
+    size: Vec2,
+    width: usize,
+    height: usize,
+    textures: HashMap<TextureId, Texture>,
+    last: Option<egui::FullOutput>,
+}
+
+impl Run {
+    /// A window of `size` points at `scale` pixels per point in `mode`, no frame drawn yet.
+    fn new(size: Vec2, scale: f32, mode: Mode) -> Result<Self, UiError> {
+        if !(1.0..=4.0).contains(&scale) {
+            return Err(bad(format!("scale {scale} is not between 1 and 4")));
+        }
+        let side = |points: f32| {
+            let pixels = (points * scale).round();
+            if pixels.is_finite() && pixels >= 1.0 && pixels <= MAX_SIDE as f32 { Some(pixels as usize) } else { None }
+        };
+        let (Some(width), Some(height)) = (side(size.x), side(size.y)) else {
+            return Err(bad(format!("a window of {} by {} points at scale {scale} is not 1 to {MAX_SIDE} pixels a side", size.x, size.y)));
+        };
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(scale);
+        ctx.set_theme(match mode {
+            Mode::Light => egui::Theme::Light,
+            Mode::Dark => egui::Theme::Dark,
+        });
+        Ok(Self { ctx, size, width, height, textures: HashMap::new(), last: None })
+    }
+
+    /// Draws one frame with `events`.
+    fn frame(&mut self, events: Vec<egui::Event>, draw: &mut impl FnMut(&mut egui::Ui)) {
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), events, ..RawInput::default() };
+        let mut output = self.ctx.run_ui(input, |ui| {
             motion::set_reduced(ui.ctx(), true);
             draw(ui);
         });
-        apply_textures(&mut textures, &mut output.textures_delta);
-        last = Some(output);
+        apply_textures(&mut self.textures, &mut output.textures_delta);
+        self.last = Some(output);
     }
-    let Some(output) = last else { return Err(bad("no frame")) };
-    let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
-    Ok(fill(&primitives, &textures, width, height, output.pixels_per_point))
+
+    /// Draws frames without input until egui asks for no frame at once (nothing moves any more), at least one and at
+    /// most [`MAX_SETTLE`].
+    fn settle(&mut self, draw: &mut impl FnMut(&mut egui::Ui)) -> Result<(), String> {
+        for _ in 0..MAX_SETTLE {
+            self.frame(Vec::new(), draw);
+            let delay =
+                self.last.as_ref().and_then(|output| output.viewport_output.get(&egui::ViewportId::ROOT)).map(|viewport| viewport.repaint_delay);
+            if delay != Some(std::time::Duration::ZERO) {
+                return Ok(());
+            }
+        }
+        Err(format!("the window did not come to rest in {MAX_SETTLE} frames"))
+    }
+
+    /// The last frame's AccessKit tree.
+    fn tree(&self) -> Option<&egui::accesskit::TreeUpdate> {
+        self.last.as_ref().and_then(|output| output.platform_output.accesskit_update.as_ref())
+    }
+
+    /// The control named `name` in the last frame that `fits`: the `nth` of them, topmost then leftmost, or the only
+    /// one.
+    fn find(
+        &self,
+        name: &str,
+        nth: Option<u32>,
+        what: &str,
+        fits: impl Fn(&egui::accesskit::Node) -> bool,
+    ) -> Result<(egui::accesskit::NodeId, Rect), String> {
+        let tree = self.tree().ok_or("the window gave no AccessKit tree")?;
+        let mut found: Vec<(egui::accesskit::NodeId, Rect)> = tree
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some(name) && fits(node))
+            .filter_map(|(id, node)| {
+                let bounds = node.bounds()?;
+                Some((*id, Rect::from_min_max(pos2(bounds.x0 as f32, bounds.y0 as f32), pos2(bounds.x1 as f32, bounds.y1 as f32))))
+            })
+            .collect();
+        found.sort_by(|(a_id, a), (b_id, b)| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)).then(a_id.0.cmp(&b_id.0)));
+        match (nth, found.len()) {
+            (_, 0) => {
+                // The names that hold it, so a script's author sees what the window calls its controls.
+                let near: Vec<String> = tree
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| node.label())
+                    .filter(|label| label.contains(name))
+                    .take(3)
+                    .map(|label| format!("{:?}", label.chars().take(120).collect::<String>()))
+                    .collect();
+                let near = if near.is_empty() { String::new() } else { format!(" (named so: {})", near.join(", ")) };
+                Err(format!("no {what} is named {:?}{near}", cut(name)))
+            }
+            (None, 1) => found.first().copied().ok_or_else(|| "no control".to_owned()),
+            (None, many) => Err(format!("{many} controls are named {:?}; nth says which", cut(name))),
+            (Some(nth), many) => usize::try_from(nth)
+                .ok()
+                .and_then(|nth| found.get(nth.saturating_sub(1)))
+                .copied()
+                .ok_or_else(|| format!("nth {nth}, but only {many} controls are named {:?}", cut(name))),
+        }
+    }
+
+    /// Does `step`, then lets the window come to rest. `pointer` is where the pointer rests, and moves with a press.
+    fn step(&mut self, step: &Do, pointer: &mut Option<Pos2>, draw: &mut impl FnMut(&mut egui::Ui)) -> Result<(), String> {
+        use egui::accesskit::{Action, ActionRequest, TreeId};
+        // The modifiers go down before the key and stay down for the frame; they are let go of in the next.
+        let key = |key: egui::Key, modifiers: egui::Modifiers| {
+            let event = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
+            vec![egui::Event::ModifiersChanged(modifiers), event(true), event(false)]
+        };
+        let up = vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)];
+        match step {
+            Do::Key(shortcut) => {
+                // Held as a Linux keyboard sends them: Command is Ctrl, and Ctrl is Command.
+                let mut modifiers = shortcut.modifiers;
+                modifiers.ctrl |= modifiers.command;
+                modifiers.command = modifiers.ctrl;
+                self.frame(key(shortcut.logical_key, modifiers), draw);
+                self.frame(up, draw);
+            }
+            Do::Tab { back, times } => {
+                let modifiers = if *back { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE };
+                for _ in 0..*times {
+                    self.frame(key(egui::Key::Tab, modifiers), draw);
+                }
+                self.frame(up, draw);
+            }
+            Do::Focus { name, nth } => {
+                let (node, _) = self.find(name, *nth, "control that takes the focus", |node| node.supports_action(Action::Focus))?;
+                let request = ActionRequest { action: Action::Focus, target_tree: TreeId::ROOT, target_node: node, data: None };
+                self.frame(vec![egui::Event::AccessKitActionRequest(request)], draw);
+                self.settle(draw)?;
+                if self.tree().map(|tree| tree.focus) != Some(node) {
+                    return Err(format!("{:?} did not take the focus", cut(name)));
+                }
+            }
+            Do::Press { name, nth } => {
+                let screen = Rect::from_min_size(Pos2::ZERO, self.size);
+                let mut aimed = None;
+                for _ in 0..MAX_AIM {
+                    let (_, rect) = self.find(name, *nth, "enabled control", |node| !node.is_disabled())?;
+                    let at = rect.center();
+                    if !screen.contains(at) {
+                        return Err(format!("{:?} is not in the window", cut(name)));
+                    }
+                    if *pointer == Some(at) {
+                        aimed = Some(at);
+                        break;
+                    }
+                    *pointer = Some(at);
+                    self.frame(vec![egui::Event::PointerMoved(at)], draw);
+                    self.settle(draw)?;
+                }
+                let Some(at) = aimed else { return Err(format!("{:?} moved each time the pointer came over it", cut(name))) };
+                for pressed in [true, false] {
+                    let event =
+                        egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+                    self.frame(vec![event], draw);
+                }
+            }
+        }
+        self.settle(draw)
+    }
+
+    /// Fills the last frame into a picture.
+    fn picture(self) -> Result<Picture, UiError> {
+        let Some(output) = self.last else { return Err(bad("no frame")) };
+        let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        Ok(fill(&primitives, &self.textures, self.width, self.height, output.pixels_per_point))
+    }
 }
 
 /// The sample window as `shot` asks for it.
@@ -1228,6 +1534,12 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         }
     }
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
+    if let Some(steps) = shot.steps.as_deref().filter(|steps| !steps.is_empty()) {
+        let steps = steps.iter().map(Step::read).collect::<Result<Vec<_>, _>>().map_err(|error| bad(format!("{}: {error}", shot.out)))?;
+        let pointer = Pointer { rest: pointer, click: shot.click.map(|[x, y]| pos2(x, y)) };
+        return render_steps(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, &steps)
+            .map_err(|error| bad(format!("{}: {error}", shot.out)));
+    }
     match shot.click {
         Some([x, y]) => render_clicked(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, pos2(x, y)),
         None => render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer),
@@ -1237,3 +1549,7 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
 #[cfg(test)]
 #[path = "shot_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shot_steps_tests.rs"]
+mod steps_tests;
