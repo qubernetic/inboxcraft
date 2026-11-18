@@ -630,7 +630,8 @@ impl Composer {
         let typed = self.typing(line).to_owned();
         if let Some(at) = typed.rfind(SEPARATORS) {
             // Through the last separator, which stays with what the line refuses; what follows is typed on.
-            let (done, rest) = typed.split_at(at.saturating_add(1).min(typed.len()));
+            let cut = at.saturating_add(1).min(typed.len());
+            let (done, rest) = (typed.get(..cut).unwrap_or(typed.as_str()), typed.get(cut..).unwrap_or_default());
             let before = self.chips(line).len();
             let kept = self.add(line, done);
             if let Some(field) = self.typing_mut(line) {
