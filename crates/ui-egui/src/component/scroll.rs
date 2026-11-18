@@ -7,9 +7,7 @@
 //! its own: the presentation gives it none.
 //!
 //! egui keeps the scrolling and the bar's pointer ([`style`] makes it paint nothing of its own); [`show`] and
-//! [`show_rows`] show an area and paint its bar as the sheet has it ([`bar`]).
-
-use std::ops::Range;
+//! [`show_viewport`] show an area and paint its bar as the sheet has it ([`bar`]).
 
 use egui::scroll_area::ScrollAreaOutput;
 use egui::style::{ScrollFadeStyle, ScrollStyle};
@@ -120,20 +118,6 @@ pub fn show<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&m
 /// sight, from the content's top), and paints its bar: the list that builds only the lines in sight.
 pub fn show_viewport<R>(ui: &mut Ui, theme: &Theme, area: ScrollArea, add: impl FnOnce(&mut Ui, Rect) -> R) -> ScrollAreaOutput<R> {
     let output = area.show_viewport(ui, add);
-    bar(ui, theme, &output);
-    output
-}
-
-/// Shows `area` in `ui` as `rows` rows `height` high, `add` drawing the rows in sight, and paints its bar.
-pub fn show_rows<R>(
-    ui: &mut Ui,
-    theme: &Theme,
-    area: ScrollArea,
-    height: f32,
-    rows: usize,
-    add: impl FnOnce(&mut Ui, Range<usize>) -> R,
-) -> ScrollAreaOutput<R> {
-    let output = area.show_rows(ui, height, rows, add);
     bar(ui, theme, &output);
     output
 }
