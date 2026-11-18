@@ -338,10 +338,15 @@ fn a_round_of_folder_syncs_tells_its_progress_and_its_end() -> Result {
     sync(&mut run, 10, "INBOX")?;
     sync(&mut run, 11, "Sent")?;
     sync(&mut run, 12, "Lists/Rust")?;
-    let mut synced = 0;
+    // Up to the end of the round that brings the folders counted to three.
+    let mut ended = 0;
     let events = run.rounds(|kind| {
-        synced += usize::from(matches!(kind, EventKind::FolderSynced { .. }));
-        synced == 3 && matches!(kind, EventKind::SyncFinished { .. })
+        if let EventKind::SyncProgress { done, of } = kind
+            && done == of
+        {
+            ended += *of;
+        }
+        ended == 3 && matches!(kind, EventKind::SyncFinished { .. })
     })?;
     // The jobs may come in one round or more, as the worker takes them; each round starts at 0, counts up by one
     // and ends with every folder done.
@@ -362,6 +367,20 @@ fn a_round_of_folder_syncs_tells_its_progress_and_its_end() -> Result {
         all += of;
     }
     assert_eq!(all, 3, "{events:?}");
+    // Each step comes after the sync of its folder: the folders counted never outrun the folders synced.
+    let (mut synced, mut counted) = (0_u32, 0_u32);
+    for kind in &events {
+        match kind {
+            EventKind::FolderSynced { .. } => synced += 1,
+            EventKind::SyncProgress { done, of } => {
+                assert!(counted + *done <= synced, "progress {done} of {of} before its folder's sync: {events:?}");
+                if done == of {
+                    counted += *of;
+                }
+            }
+            _ => {}
+        }
+    }
     let Some(EventKind::SyncFinished { at }) = events.last() else { return Err("no end".into()) };
     assert!(*at >= before, "the worker's clock");
     run.finish()?;

@@ -373,10 +373,11 @@ impl Run<'_> {
         }
     }
 
-    /// Counts a folder sync of the round as ended; its failure, if any, was told before.
+    /// Counts a folder sync of the round as ended, right after its last event and its failure, and tells it.
     fn ended_sync(&mut self, synced: bool) {
         self.round.done = self.round.done.saturating_add(1);
         self.round.failed |= !synced;
+        self.tell_round();
     }
 
     /// Takes the jobs waiting in the channel without blocking.
