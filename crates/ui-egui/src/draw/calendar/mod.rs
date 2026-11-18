@@ -54,6 +54,9 @@ const TOOLBAR_PAD: f32 = 16.0;
 /// Between the toolbar's controls, in points; the groups stand twice as far apart.
 const TOOLBAR_GAP: f32 = 8.0;
 
+/// From the toolbar's title to its note (the week's number, the agenda's days), in points, as the design draws it.
+const NOTE_GAP: f32 = 20.0;
+
 /// The width of an event's account bar, in points (H8: an event is coloured by its account's bar only).
 const BAR: f32 = 3.0;
 
@@ -215,7 +218,10 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
     let inner = ui.max_rect().shrink2(vec2(TOOLBAR_PAD, 0.0));
     ui.scope_builder(UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
         ui.spacing_mut().item_spacing.x = TOOLBAR_GAP;
-        let new = TextButton::new(tr!("New event")).primary().arrow().show(ui, theme, keymap);
+        // Pressed while the editor hangs from it, as the design draws it.
+        let new = TextButton::new(tr!("New event")).primary().arrow();
+        let new = if calendar.editor().is_some() { new.shown(crate::component::Shown::Pressed) } else { new };
+        let new = new.show(ui, theme, keymap);
         ui.ctx().data_mut(|data| data.insert_temp(new_event_id(), new.rect));
         if new.clicked() {
             opened_from(ui.ctx(), new.id);
@@ -249,7 +255,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
             View::Month => None,
         };
         let note = note.map(|note| crate::component::galley(ui, &note, theme.fonts.mono_s, p.muted));
-        let note_room = note.as_ref().map_or(0.0, |note| note.size().x + TOOLBAR_GAP * 1.5);
+        let note_room = note.as_ref().map_or(0.0, |note| note.size().x + NOTE_GAP);
         let words = calendar.title();
         let title = crate::component::cut(ui, &words, theme.fonts.heading, p.ink, (room - note_room).max(1.0));
         let middle = inner.center().y;
@@ -258,7 +264,7 @@ fn toolbar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, calendar: &Calendar, ask
         let at = pos2(left, snap(middle - title.size().y / 2.0, ppp));
         spoken_text(ui, at, title, p.ink, &words);
         if let Some(note) = note {
-            let at = pos2(left + wide + TOOLBAR_GAP * 1.5, snap(middle - note.size().y / 2.0, ppp));
+            let at = pos2(left + wide + NOTE_GAP, snap(middle - note.size().y / 2.0, ppp));
             let said = note.text().to_owned();
             spoken_text(ui, at, note, p.muted, &said);
         }
@@ -528,3 +534,7 @@ mod esc_tests;
 #[cfg(test)]
 #[path = "focus_tests.rs"]
 mod focus_tests;
+
+#[cfg(test)]
+#[path = "look_tests.rs"]
+mod look_tests;

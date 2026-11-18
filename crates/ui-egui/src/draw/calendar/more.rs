@@ -69,8 +69,8 @@ pub(super) fn show(ctx: &Context, theme: &Theme, keymap: &Keymap, calendar: &Cal
     let float = Float { id: float_id(), anchor, width: WIDTH, returns_to: link };
     let events: Vec<&EventRow> = calendar.events().filter(|event| event.covers(day)).collect();
     let rows = |ui: &mut Ui| {
-        let count = if events.len() == 1 { tr!("1 event").to_owned() } else { tr!("{count} events", count = events.len()) };
-        popup::title(ui, theme, &day::dated(day), Some(&count));
+        // The count alone, as the design writes it.
+        popup::title(ui, theme, &day::dated(day), Some(&events.len().to_string()));
         let mut out = Vec::new();
         popup::scrolled(ui, theme, float_id().with("rows"), ROW * 12.0, |ui| {
             for event in events.iter().take(MOST_ROWS) {
