@@ -167,7 +167,7 @@ impl Cap {
     }
 
     /// What the field says under itself when it refused something.
-    fn sentence(self) -> String {
+    pub(crate) fn sentence(self) -> String {
         match self {
             Self::Chars(most) => tr!("Too long: this field holds at most {count} characters, and nothing was added.", count = most),
             Self::Bytes(most) => tr!("Too long: this text holds at most {size}, and nothing was added.", size = bytes(most)),

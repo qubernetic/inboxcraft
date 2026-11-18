@@ -552,3 +552,22 @@ fn an_address_past_998_bytes_stays_typed_whole_and_the_line_says_so() {
         assert_eq!(composer.refusal(Line::Cc), None);
     }
 }
+
+#[test]
+fn a_fill_that_would_pass_the_subject_s_998_bytes_is_refused_and_loses_nothing() {
+    let mut mailbox = mailbox();
+    template(&mut mailbox, "Plot", "At {?time}", "We meet at {?time}.");
+    let mut composer = Composer::start(&mut mailbox).unwrap();
+    composer.use_template(&mut mailbox, "Plot").unwrap();
+    let long = "ő".repeat(500);
+    long.clone_into(composer.filling_mut());
+    assert!(composer.fill(&mut mailbox).is_ok(), "no raw refusal of the engine");
+    assert_eq!(composer.subject(), "At [[time]]", "the blank stays");
+    assert_eq!(composer.filling(), long, "what was typed stays");
+    assert_eq!(composer.fill_refused(), Some("Too long: this text holds at most 998 bytes, and nothing was added."));
+    // What fits is filled in, and the line goes.
+    "ten".clone_into(composer.filling_mut());
+    composer.fill(&mut mailbox).unwrap();
+    assert_eq!(composer.subject(), "At ten");
+    assert_eq!(composer.fill_refused(), None);
+}

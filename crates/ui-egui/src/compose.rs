@@ -234,6 +234,8 @@ pub struct Composer {
     later: Option<Timestamp>,
     /// What each line refused of what was typed in it, the last time it took chips: it stays typed.
     refused: [Refused; 3],
+    /// Why the last fill of a blank was refused: it would make the subject or the text longer than the engine keeps.
+    fill_refused: Option<String>,
 }
 
 /// What a line refused of what was typed in it, which stays in its typed text as it was written.
@@ -319,6 +321,7 @@ impl Composer {
             templates: Vec::new(),
             later: None,
             refused: [Refused::default(); 3],
+            fill_refused: None,
         };
         composer.take_answer(answer);
         composer.copies = !(composer.chips(Line::Cc).is_empty() && composer.chips(Line::Bcc).is_empty());
@@ -521,6 +524,12 @@ impl Composer {
         &mut self.filling
     }
 
+    /// Why the last fill was refused, as the blank's field says it under itself.
+    #[must_use]
+    pub fn fill_refused(&self) -> Option<&str> {
+        self.fill_refused.as_deref()
+    }
+
     /// Puts what is typed for the first blank in its mark's place, in the subject and the text, and keeps the draft;
     /// nothing typed fills nothing.
     ///
@@ -534,8 +543,21 @@ impl Composer {
         if typed.is_empty() {
             return Ok(());
         }
-        self.subject = self.subject.replace(&mark, typed);
-        self.text = self.text.replace(&mark, typed);
+        let (subject, text) = (self.subject.replace(&mark, typed), self.text.replace(&mark, typed));
+        // Refused whole, said under the blank's field as a field says it: the blank and what was typed stay.
+        let refused = if subject.len() > MAX_SUBJECT_BYTES && subject.len() > self.subject.len() {
+            Some(crate::component::field::Cap::Bytes(MAX_SUBJECT_BYTES))
+        } else if text.len() > MAX_TEXT_BYTES && text.len() > self.text.len() {
+            Some(crate::component::field::Cap::Bytes(MAX_TEXT_BYTES))
+        } else {
+            None
+        };
+        self.fill_refused = refused.map(crate::component::field::Cap::sentence);
+        if self.fill_refused.is_some() {
+            return Ok(());
+        }
+        self.subject = subject;
+        self.text = text;
         self.filling.clear();
         self.edited();
         self.save(mailbox)

@@ -368,7 +368,9 @@ fn blank(ui: &mut Ui, theme: &Theme, keymap: &Keymap, composer: &mut Composer, a
             let response = ui
                 .allocate_ui(vec2(room, theme.boxes().field), |ui| {
                     ui.set_width(room);
-                    field::text_field(ui, theme, blank_id(), composer.filling_mut(), &Field::new("", &spoken))
+                    let refused = composer.fill_refused().map(str::to_owned);
+                    let field = Field { error: refused.as_deref(), ..Field::new("", &spoken) };
+                    field::text_field(ui, theme, blank_id(), composer.filling_mut(), &field)
                 })
                 .inner;
             if response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
