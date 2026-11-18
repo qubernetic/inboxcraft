@@ -46,7 +46,6 @@ use std::collections::HashMap;
 use egui::{Align2, Area, Frame, Id, Margin, Order, Rect, RichText, ScrollArea, Shape, TextureHandle, Ui, vec2};
 
 use super::margin;
-use crate::component::button;
 use crate::compose::Answer;
 use crate::draw::paint::{self, FloatEdge};
 use crate::keymap::{self, Keymap};
@@ -176,21 +175,12 @@ pub(super) fn show(
     let mut drawn = Drawn::default();
     let p = &theme.palette;
     let whole = ui.max_rect();
+    let unwiped = ui.clip_rect();
     // A message opening wipes in from the top behind a scan line (M7): what is under the line is not shown yet.
     let (time, wipe) = reader.open_id().map_or((1.0, 1.0), |id| wiped(ui.ctx(), id));
     if wipe < 1.0 {
         let edge = whole.top() + (whole.height() * wipe).round();
         ui.set_clip_rect(Rect::from_min_max(whole.min, egui::pos2(whole.right(), edge)).intersect(ui.clip_rect()));
-    }
-    if let Some(notice) = reader.notice() {
-        egui::Panel::bottom("reader-notice").show_separator_line(false).frame(Frame::new().inner_margin(margin(theme.spacing.s2))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(notice).font(theme.fonts.caption.id()).color(p.ink));
-                if button::link_sized(ui, theme, keymap, tr!("Dismiss"), button::LinkSize::Small).clicked() {
-                    drawn.asked.push(Asked::Dismiss);
-                }
-            });
-        });
     }
     let held = reader.open_id().filter(|id| mailbox.held(*id));
     let side = margin(SIDE).left;
@@ -221,6 +211,8 @@ pub(super) fn show(
         _ => None,
     };
     let message_room = foot.map_or(room, |(_, _, foot)| Rect::from_min_max(room.min, egui::pos2(room.right(), foot.top())));
+    // Warnings show whole while the message wipes in: they are drawn clipped to the message's room only.
+    body::keep_unwiped(ui.ctx(), message_room.intersect(unwiped));
     // A message alone in its thread stands 16 under the head; a thread's lines 4 under it.
     let top = if reader.thread().len() > 1 { THREAD_TOP } else { MESSAGE_TOP };
     ui.scope_builder(egui::UiBuilder::new().max_rect(message_room), |ui| {
@@ -228,6 +220,11 @@ pub(super) fn show(
             ui.spacing_mut().item_spacing.y = 0.0;
             Frame::new().inner_margin(Margin { left: side, right: side, top: margin(top).top, bottom: margin(MESSAGE_FOOT).bottom }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                // The reader's notice: what was done, or what failed, at the top of the message, after the head.
+                if let Some(notice) = reader.notice() {
+                    body::notice(ui, theme, keymap, notice, reader.notice_failed(), &mut drawn);
+                    ui.add_space(theme.spacing.s4);
+                }
                 if let Some(id) = held {
                     screening(ui, theme, keymap, mailbox, id, &mut drawn);
                 }

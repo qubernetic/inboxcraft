@@ -282,6 +282,8 @@ pub struct Reader {
     pictures: BTreeMap<String, PictureState>,
     owners: BTreeMap<String, u64>,
     notice: Option<String>,
+    /// Whether the notice says something failed.
+    failed: bool,
     /// The invitations whose answer the owner is changing: their card offers the three answers again.
     changing: BTreeSet<u64>,
 }
@@ -313,6 +315,7 @@ impl Reader {
             pictures: BTreeMap::new(),
             owners: BTreeMap::new(),
             notice: None,
+            failed: false,
             changing: BTreeSet::new(),
         }
     }
@@ -353,7 +356,7 @@ impl Reader {
                     })
                     .collect();
             }
-            Err(error) => self.notice = Some(error.to_string()),
+            Err(error) => self.fail(error.to_string()),
         }
         if self.thread.iter().all(|row| row.id != id) {
             self.thread.push(ThreadRow { id, sender: String::new(), address: String::new(), preview: String::new(), date: None, opened: None });
@@ -382,7 +385,7 @@ impl Reader {
                     }
                     self.load_pictures(mailbox, id);
                 }
-                Err(error) => self.notice = Some(error.to_string()),
+                Err(error) => self.fail(error.to_string()),
             }
         }
     }
@@ -456,11 +459,11 @@ impl Reader {
         match mailbox.run("invite.answer", &json!({ "id": id, "answer": answer.id() })) {
             Ok(_) => {
                 self.changing.remove(&id);
-                self.notice = Some(tr!("Your answer is on its way.").to_owned());
+                self.set_notice(tr!("Your answer is on its way.").to_owned());
                 mailbox.refresh();
                 self.refresh_invites(mailbox);
             }
-            Err(error) => self.notice = Some(error.to_string()),
+            Err(error) => self.fail(error.to_string()),
         }
     }
 
@@ -482,7 +485,7 @@ impl Reader {
     pub fn remove_invite(&mut self, mailbox: &mut Mailbox, id: u64) {
         match mailbox.event_act("invite.remove", &json!({ "id": id }), tr!("Removed from your calendar")) {
             Ok(_) => self.refresh_invites(mailbox),
-            Err(error) => self.notice = Some(error.to_string()),
+            Err(error) => self.fail(error.to_string()),
         }
     }
 
@@ -557,7 +560,7 @@ impl Reader {
     pub fn allow_always(&mut self, mailbox: &mut Mailbox, id: u64) {
         let Some(address) = self.opened(id).and_then(|opened| opened.header.from.first()).map(|person| person.address.clone()) else { return };
         if let Err(error) = mailbox.run("remote.allow", &json!({ "address": address })) {
-            self.notice = Some(error.to_string());
+            self.fail(error.to_string());
             return;
         }
         let same: Vec<u64> = self
@@ -717,9 +720,22 @@ impl Reader {
         self.notice.as_deref()
     }
 
+    /// Whether the notice says something failed (an error), rather than what was done.
+    #[must_use]
+    pub fn notice_failed(&self) -> bool {
+        self.notice.is_some() && self.failed
+    }
+
     /// Shows `text` as the notice.
     pub fn set_notice(&mut self, text: String) {
         self.notice = Some(text);
+        self.failed = false;
+    }
+
+    /// Shows `text` as the notice of something that failed.
+    fn fail(&mut self, text: String) {
+        self.notice = Some(text);
+        self.failed = true;
     }
 
     /// Hides the notice.

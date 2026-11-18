@@ -12,6 +12,7 @@ use egui::{
 use inboxcraft_html::{Block, Cell, Document, Image, ImageSource, Marker, TextKind};
 
 use crate::component::attachment::{FileAsked, FileState, attachment};
+use crate::component::banner::{BannerKind, BannerLink, banner as component_banner};
 use crate::component::button;
 use crate::component::quote_fold::quote_fold;
 use crate::component::soon::soon_tag;
@@ -32,6 +33,37 @@ const MAX_DEPTH: usize = 4;
 
 /// The tallest picture shown, in points.
 const MAX_PICTURE_HEIGHT: f32 = 480.0;
+
+/// The id under which the reader keeps the room its warnings are clipped to.
+fn unwiped_id() -> egui::Id {
+    egui::Id::unique("reader-unwiped")
+}
+
+/// Keeps `room`, the message's room unclipped by the wipe, for this frame's warnings.
+pub(super) fn keep_unwiped(ctx: &egui::Context, room: Rect) {
+    ctx.data_mut(|data| data.insert_temp(unwiped_id(), room));
+}
+
+/// Draws `add` clipped to the message's room only, not to the wipe: a warning shows whole while a message wipes in.
+fn unwiped<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let room = ui.ctx().data(|data| data.get_temp::<Rect>(unwiped_id()));
+    ui.scope(|ui| {
+        if let Some(room) = room {
+            ui.set_clip_rect(room);
+        }
+        add(ui)
+    })
+    .inner
+}
+
+/// The reader's notice as a banner: a note of what was done, or an error when something failed, with `dismiss`.
+pub(super) fn notice(ui: &mut Ui, theme: &Theme, keymap: &Keymap, text: &str, failed: bool, drawn: &mut Drawn) {
+    let kind = if failed { BannerKind::Error } else { BannerKind::Notice };
+    let links = [BannerLink { name: tr!("dismiss"), id: "dismiss" }];
+    if unwiped(ui, |ui| component_banner(ui, theme, keymap, kind, text, &links)).is_some() {
+        drawn.asked.push(Asked::Dismiss);
+    }
+}
 
 /// The banner over a sent message that did not get through: the warning and the reason the delivery report gave.
 pub(super) fn bounced(ui: &mut Ui, theme: &Theme, reason: &str) {

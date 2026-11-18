@@ -193,7 +193,7 @@ fn the_link_under_the_pointer_shows_where_it_goes_and_a_click_copies_it() {
     harness.hover_at(egui::pos2(5.0, 5.0));
     harness.run();
     harness.get_by_label("Link copied: https://prize-desk.example.net/claim");
-    harness.get_by_label("Dismiss").click();
+    harness.get_by_label("dismiss").click();
     harness.run();
     assert_eq!(harness.state().reader().notice(), None);
 }
@@ -672,7 +672,7 @@ fn the_notice_s_dismiss_is_a_link_that_space_presses() {
     harness.get_by_label("https://bank.example.org/login").click();
     harness.run();
     harness.get_by_label("Link copied: https://prize-desk.example.net/claim");
-    harness.get_by_role_and_label(Role::Button, "Dismiss").focus();
+    harness.get_by_role_and_label(Role::Button, "dismiss").focus();
     harness.run();
     harness.key_press(Key::Space);
     harness.run();
@@ -1744,4 +1744,60 @@ fn a_secondary_press_on_an_open_line_opens_its_menu() {
     harness.get_by_role_and_label(Role::MenuItem, "Show the full header").click();
     settle(&mut harness);
     assert!(harness.state().reader().shows_details(older));
+}
+
+#[test]
+fn the_reader_notice_is_a_banner_after_the_head_in_tab_order() {
+    const SAID: &str = "Subject copied";
+    let fetch = Recorder::default();
+    let mut harness = opened(&fetch, None, "Draft logo for the bakery");
+    harness.state_mut().reader_mut().0.set_notice(SAID.to_owned());
+    harness.run();
+    // A note: the banner's label, then its words, at the top of the message.
+    let banner = harness.get_by_label(&format!("Note: {SAID}")).rect();
+    let more = harness.get_by_role_and_label(Role::Button, "More").rect();
+    assert!(banner.top() > more.bottom(), "the notice stands under the head: {banner:?}");
+    let order = tab_order(&mut harness);
+    let at = |label: &str| order.iter().position(|reached| reached.starts_with(label)).unwrap_or_else(|| panic!("{label} not reached: {order:?}"));
+    assert!(at("More") < at("dismiss") && at("dismiss") < at("sketch-"), "head, the notice, then the message: {order:?}");
+    harness.state_mut().reader_mut().0.dismiss_notice();
+    harness.run();
+    assert!(harness.query_by_label(&format!("Note: {SAID}")).is_none(), "dismissed");
+}
+
+#[test]
+fn a_warning_shows_whole_while_the_message_wipes_in() {
+    const SAID: &str = "The message could not be moved: the server refused.";
+    let fetch = Recorder::default();
+    let mut app = app_with(&fetch);
+    app.set_reduce_motion(false);
+    let id = app.mailbox().messages().iter().find(|row| row.subject == "Photos from the coast walk").unwrap().id;
+    // Frames a sixtieth of a second apart: the wipe is a fifth of the way in.
+    let mut harness = Harness::builder()
+        .with_size(vec2(1280.0, 800.0))
+        .with_theme(egui::Theme::Dark)
+        .with_step_dt(1.0 / 60.0)
+        .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.step();
+    harness.state_mut().mailbox_mut().select(Some(id));
+    harness.step();
+    harness.state_mut().reader_mut().0.set_notice(SAID.to_owned());
+    harness.step();
+    let look = crate::theme::Theme::current(&harness.ctx, &crate::theme::Look::of(harness.state().mailbox().appearance()));
+    assert_eq!(scan_lines(&harness, look.palette.cyan).len(), 1, "still wiping in");
+    // The banner's words are painted and not clipped away by the wipe.
+    fn find(shape: &egui::Shape, clip: egui::Rect, found: &mut Vec<(egui::Rect, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| find(shape, clip, found)),
+            egui::Shape::Text(text) if text.galley.job.text.starts_with("The message could not") => {
+                found.push((egui::Rect::from_min_size(text.pos, text.galley.size()), clip));
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    harness.output().shapes.iter().for_each(|clipped| find(&clipped.shape, clipped.clip_rect, &mut found));
+    assert_eq!(found.len(), 1, "the notice's words: {found:?}");
+    let (words, clip) = found[0];
+    assert!(clip.contains_rect(words), "the wipe clips the warning: {words:?} in {clip:?}");
 }
