@@ -188,3 +188,9 @@
 {"out": "docs/images/list-scrolling-dark.png", "mode": "dark", "size": [1440, 520], "view": "list", "step": 1}
 {"out": "docs/images/one-pane-800-light.png", "mode": "light", "size": [800, 700], "select": "Allotment rota for November"}
 {"out": "docs/images/one-pane-800-dark.png", "mode": "dark", "size": [800, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-list-light.png", "mode": "light", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-list-dark.png", "mode": "dark", "size": [900, 700]}
+{"out": "docs/images/one-pane-900-reader-light.png", "mode": "light", "size": [900, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-reader-dark.png", "mode": "dark", "size": [900, 700], "select": "Allotment rota for November"}
+{"out": "docs/images/one-pane-900-composer-light.png", "mode": "light", "size": [900, 700], "compose": "written"}
+{"out": "docs/images/one-pane-900-composer-dark.png", "mode": "dark", "size": [900, 700], "compose": "written"}
