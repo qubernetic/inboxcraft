@@ -268,6 +268,20 @@ fn people(value: &Value) -> Vec<Person> {
         .unwrap_or_default()
 }
 
+/// The pictures a message asks for: its inline parts `held` names (each once, up to the cap: a `cid:` naming nothing
+/// costs nothing) and its remote addresses up to the cap.
+fn asked_for(held: &BTreeSet<String>, document: &Document) -> (Vec<String>, Vec<String>) {
+    let mut inline: Vec<String> = Vec::new();
+    for content_id in &document.inline_images {
+        if inline.len() < MAX_INLINE && held.contains(content_id) && !inline.contains(content_id) {
+            inline.push(content_id.clone());
+        }
+    }
+    let mut remote = Vec::new();
+    remote_pictures(&document.blocks, &mut remote);
+    (inline, remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect())
+}
+
 /// The remote addresses of the pictures in `blocks`, tables included.
 fn remote_pictures<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
     for block in blocks {
@@ -537,6 +551,15 @@ impl Reader {
         }
     }
 
+    /// Whether open message `id`'s document asks for the picture `key`, as [`Reader::load_pictures`] asks for them: any
+    /// open message that shows a picture may ask for it again, not only the one that last loaded it.
+    fn names(&self, id: u64, key: &str) -> bool {
+        let Some(opened) = self.opened(id) else { return false };
+        let Content::Html(document) = &opened.content else { return false };
+        let (inline, remote) = asked_for(&opened.inline, document);
+        remote.iter().any(|url| url == key) || inline.iter().any(|content_id| inline_key(id, content_id) == key)
+    }
+
     /// Lays out the HTML of message `id` with the consent that now holds, and asks for the pictures it names: the
     /// inline ones from the message, the remote ones (only once allowed) through the fetch.
     fn load_pictures(&mut self, mailbox: &mut Mailbox, id: u64) {
@@ -545,16 +568,7 @@ impl Reader {
         let Some(html) = opened.html.as_deref() else { return };
         let remote_content = if allowed { RemoteContent::Allowed } else { RemoteContent::Blocked };
         let document = display(html, &Options { remote_content });
-        // Only the parts the message has, each once, up to the cap: a `cid:` naming nothing costs nothing.
-        let mut inline: Vec<String> = Vec::new();
-        for content_id in &document.inline_images {
-            if inline.len() < MAX_INLINE && opened.inline.contains(content_id) && !inline.contains(content_id) {
-                inline.push(content_id.clone());
-            }
-        }
-        let mut remote = Vec::new();
-        remote_pictures(&document.blocks, &mut remote);
-        let remote: Vec<String> = remote.into_iter().take(MAX_REMOTE).map(str::to_owned).collect();
+        let (inline, remote) = asked_for(&opened.inline, &document);
         if opened.plain.is_empty() {
             opened.plain = split(&crate::fitted_text::plain(&document));
         }
@@ -603,7 +617,7 @@ impl Reader {
     /// Asks for picture `key` of message `id` once more, when it failed: the owner's `try again`. A picture that did
     /// not fail, or one the message does not hold, is left as it is.
     pub fn retry(&mut self, mailbox: &mut Mailbox, id: u64, key: &str) {
-        if matches!(self.pictures.get(key), Some(PictureState::Failed(_))) && self.owners.get(key) == Some(&id) {
+        if matches!(self.pictures.get(key), Some(PictureState::Failed(_))) && self.names(id, key) {
             self.pictures.remove(key);
             self.load_pictures(mailbox, id);
         }
