@@ -66,7 +66,7 @@ use crate::desk::Desk;
 use crate::fetch::{Fetch, Offline};
 use crate::keep::{Keep, NoKeep, Triage};
 use crate::keymap::{self, Captured, Keymap};
-use crate::mailbox::{Act, Mailbox, Pile, Place};
+use crate::mailbox::{Act, InboxView, Mailbox, Pile, Place};
 use crate::motion;
 use crate::onboard::{Detect, Keychain, Onboarding, Stage};
 use crate::palette::Palette;
@@ -545,6 +545,9 @@ impl InboxApp {
                 let reduce = !self.reduce_motion();
                 self.set_reduce_motion(reduce);
             }
+            keymap::VIEW_GROUPED => self.mailbox.set_inbox_view(InboxView::Grouped),
+            keymap::VIEW_SMART => self.mailbox.set_inbox_view(InboxView::Smart),
+            keymap::VIEW_LIST => self.mailbox.set_inbox_view(InboxView::List),
             keymap::OPEN => self.open_from_list(ctx),
             keymap::MENU | keymap::MENU_KEY => {
                 if let Some(id) = self.list_row.or_else(|| self.mailbox.selected()) {
