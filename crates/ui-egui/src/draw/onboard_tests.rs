@@ -1594,6 +1594,7 @@ fn a_failed_sign_in_or_calendar_step_names_only_the_cause_the_check_reported() {
 }
 
 const OLDER: &str = "The servers below come from an earlier Detect, for another address.";
+const OLDER_USER: &str = "The servers and the user name below come from an earlier Detect, for another address.";
 
 /// The add form open, `address` typed and Detect run on it.
 fn detected(address: &str) -> Harness<'static, InboxApp> {
@@ -1609,9 +1610,16 @@ fn detected(address: &str) -> Harness<'static, InboxApp> {
 #[test]
 fn a_line_says_the_servers_come_from_an_earlier_detect_until_detect_or_a_server_field_changes() {
     let mut harness = detected("carol@example.org");
-    assert!(harness.query_by_label(OLDER).is_none(), "Detect answered for the address in the form");
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none(), "Detect answered for the address in the form");
     harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
     harness.run();
+    // Detect filled the user name too, and it is still Detect's: the line names it.
+    harness.get_by_label(OLDER_USER);
+    assert!(harness.query_by_label(OLDER).is_none(), "one line, not two");
+    // The user name typed by hand: the line names the servers only.
+    harness.state_mut().onboarding_mut().0.form_mut().username = "dave".to_owned();
+    harness.run();
+    assert!(harness.query_by_label(OLDER_USER).is_none(), "the user name is the owner's now");
     let line = harness.get_by_label(OLDER).rect();
     // The form's hint style: one caption line, 18 high, in the form's column.
     assert_eq!(line.height(), 18.0, "{line:?}");
@@ -1623,10 +1631,10 @@ fn a_line_says_the_servers_come_from_an_earlier_detect_until_detect_or_a_server_
     let mut harness = detected("carol@example.org");
     harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
     harness.run();
-    harness.get_by_label(OLDER);
+    harness.get_by_label(OLDER_USER);
     press(&mut harness, "Detect");
     harness.run();
-    assert!(harness.query_by_label(OLDER).is_none(), "Detect ran again");
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none(), "Detect ran again");
 }
 
 #[test]
@@ -1641,7 +1649,7 @@ fn a_form_filled_by_hand_never_says_detect_filled_it() {
     harness.run();
     harness.state_mut().onboarding_mut().0.form_mut().address = "dave@example.org".to_owned();
     harness.run();
-    assert!(harness.query_by_label(OLDER).is_none());
+    assert!(harness.query_by_label(OLDER).is_none() && harness.query_by_label(OLDER_USER).is_none());
 }
 
 #[test]
@@ -1651,7 +1659,7 @@ fn a_long_address_does_not_widen_the_earlier_detect_line_or_the_form() {
     let before = harness.get_by_label(hint).rect();
     harness.state_mut().onboarding_mut().0.form_mut().address = format!("{}@example.org", "d".repeat(10_000));
     harness.run();
-    let line = harness.get_by_label(OLDER).rect();
+    let line = harness.get_by_label(OLDER_USER).rect();
     let after = harness.get_by_label(hint).rect();
     assert_eq!(after.width(), before.width(), "the form keeps its width");
     assert!(line.left() >= after.left() && line.right() <= after.left() + 720.0, "{line:?} in the form's column from {after:?}");

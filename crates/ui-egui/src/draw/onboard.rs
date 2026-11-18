@@ -414,7 +414,13 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
     let f = &theme.fonts;
     let detecting = onboarding.detecting();
     let found = onboarding.found_shared();
-    let older = onboarding.detect_older();
+    let older = onboarding.detect_older().then(|| {
+        if onboarding.detect_older_user_name() {
+            tr!("The servers and the user name below come from an earlier Detect, for another address.")
+        } else {
+            tr!("The servers below come from an earlier Detect, for another address.")
+        }
+    });
     let form = onboarding.form_mut();
     let (mut detect, mut edited) = (false, false);
     let name = if detecting { tr!("Detecting…") } else { tr!("Detect") };
@@ -446,8 +452,8 @@ fn detect_part(ui: &mut Ui, theme: &Theme, keymap: &Keymap, onboarding: &mut Onb
             found_note(ui, theme, keymap, found);
             // The address changed since Detect answered and the rows below still hold its servers: one line in the
             // form's hint style says so, until Detect runs again or a server field is edited by hand.
-            if older {
-                words(ui, tr!("The servers below come from an earlier Detect, for another address."), f.caption, theme.palette.muted, width);
+            if let Some(older) = older {
+                words(ui, older, f.caption, theme.palette.muted, width);
             }
         }
         None => {

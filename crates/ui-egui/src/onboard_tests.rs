@@ -1325,3 +1325,21 @@ fn the_registered_ports_say_which_encryption_is_usual_and_others_say_nothing() {
 fn usual_port(security: Security) -> u16 {
     security.imap_port()
 }
+
+#[test]
+fn the_earlier_detect_line_names_the_user_name_while_it_is_still_detects() {
+    let first = found_at("imap.first.example.org", None, "a@first.example.org");
+    let (mut onboarding, detect) = detecting(vec![first]);
+    detect_now(&mut onboarding, &detect, "a@first.example.org");
+    assert_eq!(onboarding.form().username, "a@first.example.org", "Detect filled the user name");
+    assert!(!onboarding.detect_older_user_name(), "Detect answered for the address in the form");
+    onboarding.form_mut().address = "b@second.example.org".to_owned();
+    assert!(onboarding.detect_older() && onboarding.detect_older_user_name());
+    // The user name typed by hand: the servers are still the earlier Detect's, the user name is not.
+    onboarding.form_mut().username = "b".to_owned();
+    assert!(onboarding.detect_older() && !onboarding.detect_older_user_name());
+    // A server edited by hand: nothing is said, whatever the user name.
+    onboarding.form_mut().username = "a@first.example.org".to_owned();
+    onboarding.form_mut().host = "imap.second.example.org".to_owned();
+    assert!(!onboarding.detect_older() && !onboarding.detect_older_user_name());
+}

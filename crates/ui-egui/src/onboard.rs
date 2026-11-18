@@ -28,7 +28,8 @@
 //! where the owner typed nothing, or kept what Detect put there before; a host the owner typed keeps the row theirs,
 //! and the note says Detect's server was left out. A Detect that finds nothing takes out what an earlier one put there.
 //! While the server rows still hold what Detect put there and the address has changed since it answered, a line says
-//! they come from an earlier Detect, until Detect runs again or a server field is edited by hand.
+//! they come from an earlier Detect (and the user name, while it is Detect's too), until Detect runs again or a server
+//! field is edited by hand.
 //! A field whose text is wrong says so under itself ([`Slot`]): a port or a CalDAV address as it is
 //! typed, a missing address, password or IMAP server when the form is sent.
 //!
@@ -1387,6 +1388,13 @@ impl Onboarding {
             && filled.all(|((host, port, security), (now_host, now_port, now_security))| {
                 host == *now_host && port == *now_port && security == now_security
             })
+    }
+
+    /// Whether the user name, too, is the earlier Detect's that [`Self::detect_older`] says the servers are: Detect
+    /// filled it and it stands as Detect put it.
+    #[must_use]
+    pub fn detect_older_user_name(&self) -> bool {
+        self.detect_older() && self.detected.username.as_deref().is_some_and(|username| !username.is_empty() && username == self.form.username)
     }
 
     /// The encryption Detect set in each server row (IMAP, outgoing) where it replaced one the owner had picked, as long
