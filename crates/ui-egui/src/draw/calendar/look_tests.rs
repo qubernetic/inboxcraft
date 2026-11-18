@@ -100,8 +100,13 @@ fn the_side_panel_s_content_stands_16_in_and_the_mini_month_is_220_wide() {
     // The panel 252 wide at the right of the card, after its hairline; its scrolling part 15 in, its content 1 further,
     // as the frame pads it.
     let found = rects(&harness);
-    let (edge, _) =
-        found.iter().copied().find(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 1000.0).unwrap();
+    // The leftmost such line: the card's own right edge, a band of the same look, stands further right.
+    let (edge, _) = found
+        .iter()
+        .copied()
+        .filter(|(rect, fill)| *fill == p.line && rect.width() == 1.0 && rect.height() > 500.0 && rect.left() > 1000.0)
+        .min_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+        .unwrap();
     let mini = found.into_iter().find(|(rect, fill)| *fill == p.surface && rect.left() > edge.right() && (rect.height() - 240.0).abs() < 41.0);
     let (mini, _) = mini.unwrap();
     assert_eq!(mini.left(), edge.right() + 16.0, "{mini:?}");

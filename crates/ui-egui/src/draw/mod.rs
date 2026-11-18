@@ -697,9 +697,9 @@ impl InboxApp {
         }
     }
 
-    /// Opens the settings sheet on Shortcuts, leaving the add-account form as it is typed.
+    /// Opens the settings sheet on Shortcuts, keeping the account forms as they are typed, all but the password.
     pub fn open_shortcuts(&mut self) {
-        self.onboarding.park();
+        self.onboarding.close();
         self.settings.open_at(Section::Shortcuts);
     }
 
@@ -756,8 +756,9 @@ impl InboxApp {
             return Keys { ran: Vec::new(), escape: false, down: false, up: false, typing, quiet };
         }
         let ran = self.pressed(ctx, focused || self.settings.is_open() || self.docked());
-        let (escape, down, up) =
-            ctx.input(|input| (input.key_pressed(Key::Escape), input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
+        // Esc goes to the topmost surface only: a list of choices open over the window takes it, not what lies under.
+        let escape = crate::component::popup::escape(ctx);
+        let (down, up) = ctx.input(|input| (input.key_pressed(Key::ArrowDown), input.key_pressed(Key::ArrowUp)));
         Keys { ran, escape, down, up, typing, quiet }
     }
 
@@ -829,9 +830,9 @@ impl InboxApp {
         &mut self.settings
     }
 
-    /// Opens the settings sheet on Appearance, leaving the add-account form as it is typed.
+    /// Opens the settings sheet on Appearance, keeping the account forms as they are typed, all but the password.
     pub fn open_settings(&mut self) {
-        self.onboarding.park();
+        self.onboarding.close();
         self.settings.open();
     }
 
@@ -840,9 +841,9 @@ impl InboxApp {
         self.settings.open_at(Section::Accounts);
     }
 
-    /// Closes the settings sheet and leaves the add-account form on it as it is typed.
+    /// Closes the settings sheet, keeping the account forms on it as they are typed, all but the password.
     pub fn close_settings(&mut self) {
-        self.onboarding.park();
+        self.onboarding.close();
         self.settings.close();
     }
 
@@ -1734,8 +1735,7 @@ impl InboxApp {
 
     /// The window with no account: one card in the middle, as tall as what it says; whether Add account was pressed.
     fn welcome(&self, ui: &mut Ui, theme: &Theme, layers: &mut Panes) -> bool {
-        let (keymap, can_add) = (&self.keymap, self.can_add);
-        middle_card(ui, theme, layers, |ui| list::welcome(ui, theme, keymap, can_add))
+        onboard::welcome(ui, theme, &self.keymap, layers, self.can_add)
     }
 
     /// The calendar screen: its empty state on one card in the middle until there are calendars; what was pressed.
@@ -1937,12 +1937,12 @@ impl InboxApp {
             settings::Asked::ReduceMotion(reduce) => self.set_reduce_motion(reduce),
             settings::Asked::Frame(frame) => self.set_frame(frame),
             settings::Asked::Section(section) => {
-                self.onboarding.park();
+                self.onboarding.close();
                 self.settings.show(section);
             }
             settings::Asked::Add => self.onboarding.open(),
             settings::Asked::Edit(account) => self.onboarding.edit(&mut self.mailbox, account),
-            settings::Asked::Back => self.onboarding.park(),
+            settings::Asked::Back => self.onboarding.close(),
             settings::Asked::Page(asked) => self.apply_page(asked),
             settings::Asked::Capture(action) => self.settings.capture(action),
             settings::Asked::Unbind(action) => self.keymap.unbind(action),
@@ -1987,6 +1987,7 @@ impl InboxApp {
             onboard::Asked::CheckAgain => onboarding.check_again(mailbox),
             onboard::Asked::Change => onboarding.change(mailbox),
             onboard::Asked::Close => onboarding.close(),
+            onboard::Asked::Cancel => onboarding.cancel(),
         }
         // The new account's jobs go out in this frame.
         self.pump();

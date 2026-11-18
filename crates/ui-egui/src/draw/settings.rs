@@ -1030,7 +1030,10 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
     ctx.memory_mut(|memory| memory.set_modal_layer(layer));
     // The dim covers the window, so a press there reaches nothing under it; a press beside the sheet (on the press, not
     // the release: what lies under the press is no longer covered when the button comes up) leaves it. A press on the
-    // window's own controls, which stand above the dim, is theirs.
+    // window's own controls, which stand above the dim, is theirs. While a list of choices is open on the sheet, the
+    // press is the list's, which it closes, and the sheet stays: only a float says it is open ([`popup::any_open`]),
+    // never the modal layer, which the sheet always is.
+    let float_open = crate::component::popup::any_open(ctx);
     Area::new(Id::unique("settings-dim")).order(Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(screen.size(), Sense::click());
         ui.painter().rect_filled(rect, 0.0, p.scrim);
@@ -1039,7 +1042,7 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         input.pointer.primary_pressed()
             && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at) && !controls.is_some_and(|controls| controls.contains(at)))
     });
-    let mut asked = beside.then_some(Asked::Close);
+    let mut asked = (beside && !float_open).then_some(Asked::Close);
     Area::new(sheet_id()).order(Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (whole, response) = ui.allocate_exact_size(rect.size(), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));

@@ -355,12 +355,12 @@ fn rendering_any_app_needs_a_sane_size() {
 
 #[test]
 fn a_shot_shows_the_add_account_page_in_each_state_and_refuses_another() {
-    for state in ["form", "detected", "checking", "passed", "failed"] {
+    for state in ["empty", "form", "invalid", "detected", "checking", "passed", "failed"] {
         let picture = shoot(&shot(&format!(r#"{{"out": "x.png", "mode": "dark", "size": [700, 500], "onboard": "{state}"}}"#))).unwrap();
         assert_eq!((picture.width(), picture.height()), (700, 500), "{state}");
     }
     let error = shoot(&shot(r#"{"out": "x.png", "mode": "light", "onboard": "half"}"#)).unwrap_err().to_string();
-    assert!(error.contains("onboard \"half\" is not form, detected, checking, passed or failed"), "{error}");
+    assert!(error.contains("onboard \"half\" is not empty, form, invalid, detected, checking, passed or failed"), "{error}");
 }
 
 #[test]
