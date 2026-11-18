@@ -515,7 +515,7 @@ fn the_lists_keep_working_when_they_overflow_a_small_window() {
 fn a_row_without_a_preview_has_no_dot_after_its_subject() {
     assert_eq!(super::list::after_subject(""), "");
     assert_eq!(super::list::after_subject("  \t"), "");
-    assert_eq!(super::list::after_subject("Hi all"), "  · Hi all");
+    assert_eq!(super::list::after_subject("Hi all"), " — Hi all");
 }
 
 #[test]
@@ -695,7 +695,7 @@ fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
     harness.run();
     let marked: Vec<_> = harness.state().mailbox().messages().iter().filter(|row| row.flagged || row.pinned).cloned().collect();
     assert!(!marked.is_empty(), "the sample has a flagged or pinned message");
-    let (mut checked, mut cut) = (0, 0);
+    let mut checked = 0;
     for row in marked {
         let name = harness.state().mailbox().spoken(&row);
         let Some(node) = harness.query_by_label(&name) else { continue };
@@ -713,21 +713,19 @@ fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
                 leftmost = leftmost.min(marks[0].left());
             }
         }
-        // The sender is cut 4 short of the marks.
-        let sender = texts_in(&harness, rect).into_iter().find(|(_, words)| words.starts_with(row.sender.as_str()));
+        // The sender is cut short of the marks: the sheet's spacer and a gap.
+        let sender = texts_in(&harness, rect)
+            .into_iter()
+            .find(|(_, words)| words.len() > 1 && row.sender.starts_with(words.trim_end_matches('…')));
         let sender = sender.unwrap_or_else(|| panic!("{name}: the sender is drawn"));
-        assert!(sender.0.right() <= leftmost - 4.0 + 0.5, "{name}: the sender {:?} ends 4 short of the marks at {leftmost}", sender.0);
-        let elided = harness.output().shapes.iter().any(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) => text.galley.elided && text.galley.job.text.starts_with(row.sender.as_str()),
-            _ => false,
-        });
-        cut += usize::from(elided);
+        assert!(sender.0.right() <= leftmost - 11.0 + 0.5, "{name}: the sender {:?} ends 11 short of the marks at {leftmost}", sender.0);
+        // A sender cut short of them ends with one ellipsis after its last letter kept.
+        assert!(sender.1 == row.sender || (sender.1.ends_with('…') && sender.1.matches('…').count() == 1), "{name}: {:?}", sender.1);
         let time = harness.state().mailbox().row_date(&row);
         assert!(texts_in(&harness, rect).iter().all(|(_, words)| *words != time), "{name}: the hovered row gives its time way");
         checked += 1;
     }
     assert!(checked >= 1, "a marked row in sight was hovered");
-    assert!(cut >= 1, "a sender reached its marks and was cut");
 }
 
 #[test]

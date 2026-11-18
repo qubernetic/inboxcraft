@@ -17,9 +17,10 @@
 //! - [`label`]: the bracketed section label and the written form of a count.
 //! - [`avatar`]: a person's initials, `muted` on a `stage` square.
 //! - [`badge`]: an unread count, or a group's outline icon.
-//! - [`icon`]: one of the 45 icons on its own, `muted`.
+//! - [`icon`]: one of the 49 icons on its own, `muted`.
 //! - [`scroll`]: the scroll bar, 12 wide beside what scrolls, and the style egui scrolls with.
 //! - [`hover`]: the action group that fades in over a hovered or selected row.
+//! - [`mail_row`]: a message of a list: sender, account bar, tag, marks and time over its subject and preview.
 //! - [`toast`]: a message that rises from the bottom edge, with Undo and its key chip.
 //! - [`popup`]: a float with menu rows, over sharp text or content that fades.
 //! - [`switch`]: a square box with a square knob, on or off, waiting or unavailable.
@@ -42,10 +43,12 @@ pub mod facts;
 pub mod field;
 pub mod gallery;
 pub mod gallery_blocks;
+pub mod gallery_lists;
 pub mod hover;
 pub mod icon;
 pub mod key;
 pub mod label;
+pub mod mail_row;
 pub mod pill;
 pub mod popup;
 pub mod progress;

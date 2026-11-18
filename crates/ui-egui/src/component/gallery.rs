@@ -815,10 +815,10 @@ fn marks_left(ui: &mut Ui, theme: &Theme, _: &Keymap) {
     account_bars(ui, theme);
 }
 
-/// The icon's board: the 45 icons at 16 px in `muted`, in the sheet's order, eight to a row.
+/// The icon's board: the 45 icons of its sheet at 16 px in `muted`, in the sheet's order, eight to a row.
 fn icons(ui: &mut Ui, theme: &Theme) {
     title(ui, theme, tr!("Icon"));
-    for row in IconId::ALL.chunks(8) {
+    for row in IconId::ALL.get(..IconId::SHEET).unwrap_or(&[]).chunks(8) {
         cells(ui, theme, |ui| {
             for id in row {
                 let name = icon::name(*id);

@@ -216,16 +216,18 @@ fn sender_and_subject_are_strong_the_preview_muted_and_unread_rows_heavier() {
     assert_eq!(font_of(&harness, "Teodor Lisk"), fonts.body.id());
     assert_eq!(font_of(&harness, "Photos from the coast walk"), fonts.caption.id());
     assert_ne!(fonts.body.id(), fonts.strong.id());
-    let preview = flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
-        egui::Shape::Text(text) if text.galley.job.text.starts_with("Teodor Lisk") => None,
-        egui::Shape::Text(text) if text.galley.job.text.starts_with("Photos from the coast walk") => {
-            text.galley.job.sections.get(1).map(|section| section.format.clone())
-        }
-        _ => None,
-    });
-    let preview = preview.unwrap();
-    assert_eq!(preview.font_id, fonts.caption.id());
-    assert_eq!(preview.color, Theme::new(Mode::Light, TextScale::default()).palette.muted);
+    // Line two is one run, the subject and the preview: `muted` on a read row, `ink` on an unread one.
+    let palette = Theme::new(Mode::Light, TextScale::default()).palette;
+    let line_two = |start: &str| {
+        flat(&harness.output().shapes).into_iter().find_map(|(_, shape)| match shape {
+            egui::Shape::Text(text) if text.galley.job.text.starts_with(start) => {
+                Some((text.galley.job.sections.len(), text.galley.job.sections.first().map(|section| section.format.color)))
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(line_two("Photos from the coast walk"), Some((1, Some(palette.muted))));
+    assert_eq!(line_two("Allotment rota for November"), Some((1, Some(palette.ink))));
 }
 
 #[test]

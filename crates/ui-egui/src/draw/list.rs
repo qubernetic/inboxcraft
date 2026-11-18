@@ -4,9 +4,10 @@
 //! The list side: the header with the view's name, whose mail it is and the search field; the rows on a card; the
 //! empty states.
 //!
-//! A row shows the sender's avatar, the sender and the date, the subject and the preview; an unread row its dot and
-//! a heavier sender and subject; the selected row the selection; a row from a new sender says so after the
-//! sender. On top of the unified inbox, while senders wait, the screener card with Review, which opens "New senders".
+//! A row is the design's mail row ([`crate::component::mail_row`]): the sender and the time, the subject and the
+//! preview on line two; an unread row its square, a heavier sender and its line two in `ink`; the selected row the
+//! `stage` fill and its bar; a row from a new sender, one back from a snooze or one that was not delivered its tag
+//! after the sender. On top of the unified inbox, while senders wait, the screener card with Review, which opens "New senders".
 //! The unified inbox shows its groups as the owner chose ([`InboxView`]): a card for each (badge, name, unread count,
 //! "Done all", the first rows and "Show all (n)"), one list with a heading for each, or the simple list without them;
 //! the rows no group holds come last. A row of a grouped account has a context menu that puts its sender's mail in
@@ -32,15 +33,17 @@ use std::collections::HashSet;
 
 use egui::accesskit::Role as AccessRole;
 use egui::{
-    Align, Color32, Frame, Id, Key, Layout, Margin, Popup, Rect, Response, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
+    Align, Color32, Frame, Id, Key, Layout, Margin, Popup, Rect, RichText, Role as WidgetRole, ScrollArea, Sense, Shape, Stroke,
     StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
 use inboxcraft_model::Role;
 
-use super::paint::{Ring, focus_ring, line, selection};
+use super::paint::line;
 use inboxcraft_engine::ScreenerMode;
 
-use crate::component::hover::{self, Action};
+use crate::component::hover::Action;
+use crate::component::mail_row::{Mark, MailRow, mail_row};
+use crate::component::tag::TagKind;
 use crate::component::pill::pill;
 use crate::component::{avatar, badge, button, field, margin, popup, tooltip};
 use crate::iconset::IconId;
@@ -190,16 +193,6 @@ fn face_side(theme: &Theme) -> f32 {
     (first + second - theme.spacing.s1 / 2.0).max(1.0)
 }
 
-/// How far right of a row's left edge the avatar starts: past the room for the unread dot.
-fn face_indent(theme: &Theme) -> f32 {
-    theme.spacing.s4 + theme.spacing.s2
-}
-
-/// How far right of a row's left edge its text starts: past the room for the unread dot and the avatar.
-fn text_indent(theme: &Theme) -> f32 {
-    face_indent(theme) + face_side(theme) + theme.spacing.s3
-}
-
 /// The gap between a row's two lines.
 fn line_gap(theme: &Theme) -> f32 {
     theme.spacing.s1 / 2.0
@@ -209,13 +202,6 @@ fn line_gap(theme: &Theme) -> f32 {
 pub(super) fn row_height(theme: &Theme) -> f32 {
     theme.boxes().mail_row
 }
-
-/// How far the account's stripe stands from a row's left edge, and how much further in it pushes the row's content.
-const STRIPE_INSET: f32 = 6.0;
-const STRIPE_ROOM: f32 = 15.0;
-
-/// The width of the account's stripe.
-const STRIPE_WIDTH: f32 = 3.0;
 
 /// The hover actions of `message`: Done (or "Not done" for a done one), mark read or unread, Delete.
 fn actions(message: &MessageRow) -> [Action<'static>; 4] {
@@ -280,46 +266,65 @@ struct Drawn {
     focused: bool,
 }
 
-/// One message row across `ui`'s width; a click selects it. The row leaving the list slides to the right and fades
-/// over the row slide token, a frame's worth at a time; with reduced motion it is out at once.
+/// One message row across `ui`'s width, the mail row of the design; a click selects it.
 fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: &MessageRow, account_marker: bool, set: (usize, usize)) -> Drawn {
-    let height = row_height(theme);
-    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), height));
-    let response = ui.interact(rect, row_id(message.id), Sense::click());
+    let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
+    let selected = mailbox.selected() == Some(message.id);
+    let keyed = !leaving && selected && mailbox.keyed();
+    let spoken = mailbox.spoken(message);
+    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
+    let line = format!("{subject}{}", after_subject(&message.preview));
+    let time = mailbox.row_date(message);
+    let tag = if message.bounced.is_some() {
+        Some((tr!("Not delivered"), TagKind::Minus))
+    } else if message.new_sender {
+        Some((tr!("New sender"), TagKind::Accent))
+    } else if mailbox.returned(message) {
+        Some((tr!("Returned"), TagKind::Warn))
+    } else {
+        None
+    };
+    // The pin, the flag nearest the time (or the actions), the done row's tick.
+    let marks: Vec<Mark> = [(message.pinned, Mark::Pin), (message.flagged, Mark::Flag), (message.done, Mark::Done)]
+        .into_iter()
+        .filter_map(|(shown, mark)| shown.then_some(mark))
+        .collect();
+    let account = account_marker.then(|| mailbox.account(message.account).map_or(0, |account| u64::try_from(account.index).unwrap_or(0)));
+    let shown = MailRow {
+        id: row_id(message.id),
+        spoken: &spoken,
+        sender: &message.sender,
+        line: &line,
+        time: &time,
+        unread: !message.seen,
+        current: selected,
+        last: false,
+        account,
+        tag,
+        marks: &marks,
+        done: message.done,
+        checked: false,
+    };
+    // Built only for the row whose group can show: the other rows hand the group nothing.
+    let reach = !leaving && (keyed || ui.rect_contains_pointer(ui.available_rect_before_wrap()));
+    let built = reach.then(|| actions(message));
+    let list: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
+    let drawn = mail_row(ui, theme, keymap, &shown, keyed, list, None);
+    let response = &drawn.row.response;
     // egui does not scroll to what gains the focus: a row Tab reaches (the next one is always built, two below the
     // viewport) comes into sight, so Tab walks the whole list.
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
-    let selected = mailbox.selected() == Some(message.id);
-    response.widget_info(|| WidgetInfo::selected(WidgetRole::ListBoxOption, true, selected, mailbox.spoken(message)));
     // Its place among all the list's rows, built or not: a screen reader says "12 of 1000".
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_position_in_set(set.0);
         node.set_size_of_set(set.1);
     });
-    let leaving = mailbox.leaving().is_some_and(|(id, _)| id == message.id);
-    if !ui.is_rect_visible(rect) {
-        return Drawn { clicked: response.clicked(), acted: None, out: leaving, focused: response.has_focus() };
-    }
-    let gone = if leaving { motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) } else { 0.0 };
-    let mut face = ui.new_child(UiBuilder::new().max_rect(rect));
-    if leaving {
-        face.shrink_clip_rect(rect);
-        face.multiply_opacity(1.0 - gone);
-    }
-    if message.done {
-        // "Show done": a done message in its old place, dimmed.
-        face.multiply_opacity(DONE_OPACITY);
-    }
-    let shifted = rect.translate(vec2(rect.width() * gone, 0.0));
-    let mut acted = paint_row(&mut face, theme, keymap, mailbox, message, account_marker, shifted, &response, leaving);
-    if response.has_focus() {
-        focus_ring(ui.painter(), theme, response.rect, Ring::Inside);
-    }
+    let mut acted = drawn.acted.and_then(|index| act(message, index));
     if message.group.is_some() && !leaving {
         let width = theme.fonts.body.size * MENU_WIDTH;
-        Popup::context_menu(&response).frame(Frame::NONE).show(|ui| {
+        Popup::context_menu(response).frame(Frame::NONE).show(|ui| {
             popup::panel(ui, theme, width, |ui| {
                 if let Some(chosen) = group_menu(ui, theme, message.group, &message.address) {
                     acted = Some(chosen);
@@ -328,7 +333,8 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, message: 
             });
         });
     }
-    Drawn { clicked: response.clicked(), acted, out: leaving && gone >= 1.0, focused: response.has_focus() }
+    let out = leaving && (!ui.is_rect_visible(drawn.row.rect) || motion::appear(ui.ctx(), Id::unique("row-leaving").with(message.id), theme.motion.row_slide) >= 1.0);
+    Drawn { clicked: response.clicked(), acted, out, focused: response.has_focus() }
 }
 
 /// The id of message `id`'s row: its focus and its context menu, wherever it is built.
@@ -336,130 +342,9 @@ pub(super) fn row_id(id: u64) -> Id {
     Id::unique("list-row").with(id)
 }
 
-/// How strongly a done row shows under "Show done".
-const DONE_OPACITY: f32 = 0.55;
-
-/// Paints a message row into `rect`; the hover action pressed. A leaving row shows no actions.
-#[expect(clippy::too_many_arguments, reason = "the parts of one row")]
-fn paint_row(
-    ui: &mut Ui,
-    theme: &Theme,
-    keymap: &Keymap,
-    mailbox: &Mailbox,
-    message: &MessageRow,
-    account_marker: bool,
-    rect: Rect,
-    response: &Response,
-    leaving: bool,
-) -> Option<Act> {
-    let s = &theme.spacing;
-    let p = &theme.palette;
-    let f = &theme.fonts;
-    let height = rect.height();
-    let selected = mailbox.selected() == Some(message.id);
-    if selected {
-        selection(ui.painter(), theme, rect, 0.0);
-    } else if pointer_on(ui, rect) {
-        ui.painter().rect_filled(rect, 0.0, p.stage);
-    }
-    let (first_height, second_height) = row_lines(theme);
-    let first = rect.top() + lines_top(theme);
-    let second = first + first_height + line_gap(theme);
-    // With the account's stripe the dot, the avatar and the text stand further in.
-    let inset = if account_marker {
-        let index = mailbox.account(message.account).map_or(0, |account| account.index);
-        let marker = Rect::from_min_size(pos2(rect.left() + STRIPE_INSET, rect.top() + s.s2), vec2(STRIPE_WIDTH, (height - 2.0 * s.s2).max(1.0)));
-        ui.painter().rect_filled(marker, 1.0, theme.account_colour(u64::try_from(index).unwrap_or(0)));
-        STRIPE_ROOM
-    } else {
-        0.0
-    };
-    if !message.seen {
-        ui.painter().circle_filled(pos2(rect.left() + inset + s.s2, rect.center().y), 3.0, p.cyan_edge);
-    }
-    let side = face_side(theme);
-    let face = Rect::from_center_size(pos2(rect.left() + inset + face_indent(theme) + side / 2.0, rect.center().y), vec2(side, side));
-    avatar::paint(ui.painter(), theme, face, &message.sender, &message.address);
-    let left = rect.left() + inset + text_indent(theme);
-    let right = rect.right() - s.s3;
-    // Unread shows on the first line (the sender in `strong`) and in the dot; the second line is `caption` either way.
-    let sender_font = if message.seen { f.body } else { f.strong };
-    // The hover actions, as the mail row's sheet places them: on the first line, their right edge 16 in from the row's.
-    // The row keeps its middle: the group has the line right of the middle (4 clear of it), and what does not fit there
-    // gives way from the end, so a press on the row's middle opens it at every width of the list. A hovered row gives
-    // its time way to the group (`.row:hover .time` is hidden); the keyed row keeps its time, as the sheet's focus
-    // state, and its group stands left of it. A flag or pin stays, 8 left of the group (or of the time), 8 apart, and
-    // the sender is cut 4 short of them.
-    let hovered = !leaving && pointer_on(ui, response.rect);
-    let keyed = !leaving && selected && mailbox.keyed();
-    let reach = hovered || keyed;
-    // Built only for the row whose group shows: the other rows hand the group nothing.
-    let built = reach.then(|| actions(message));
-    let actions: &[Action<'static>] = built.as_ref().map_or(&[], |built| built.as_slice());
-    let flag_size = theme.mark_side();
-    let mut cursor = right;
-    if !hovered {
-        // Both lines sit on the middle of their line, so a smaller date lines up with the sender.
-        let date = line(ui, &[(&mailbox.row_date(message), f.mono_s, p.muted)], f32::INFINITY);
-        let date_left = right - date.size().x;
-        ui.painter().galley(pos2(date_left, first + (first_height - date.size().y) / 2.0), date, p.muted);
-        cursor = date_left - s.s2;
-    }
-    // Laid out only for the row whose group shows: the other rows of a long list lay out no chip.
-    let actions_line = reach.then(|| {
-        let line_right = if hovered { rect.right() - s.s4 } else { cursor };
-        Rect::from_min_max(pos2(rect.center().x + s.s1, first), pos2(line_right.max(rect.center().x + s.s1), first + first_height))
-    });
-    if let Some(at) = actions_line {
-        let group = hover::place(ui, theme, keymap, at, actions);
-        if group.width() > 0.0 {
-            cursor = group.left() - s.s2;
-        }
-    }
-    // The flag nearest the time or the group, the pin left of it, on the sender's line.
-    for (shown, icon, colour) in [(message.flagged, IconId::Flag, p.ink), (message.pinned, IconId::Pin, p.cyan_text)] {
-        if shown {
-            let at = Rect::from_min_size(pos2(cursor - flag_size, first + (first_height - flag_size) / 2.0), vec2(flag_size, flag_size));
-            crate::iconset::paint(ui.painter(), at, icon, colour);
-            cursor -= flag_size + s.s2;
-        }
-    }
-    let end = cursor;
-    let mark = if message.bounced.is_some() {
-        Some((tr!("Not delivered"), p.minus))
-    } else if message.new_sender {
-        Some((tr!("New sender"), p.cyan_text))
-    } else if mailbox.returned(message) {
-        Some((tr!("Returned"), p.cyan_text))
-    } else {
-        None
-    };
-    let sender = match mark {
-        Some((mark, ink)) => {
-            let mark = format!("  {mark}");
-            line(ui, &[(&message.sender, sender_font, p.ink), (&mark, f.caption, ink)], end - s.s1 - left)
-        }
-        None => line(ui, &[(&message.sender, sender_font, p.ink)], end - s.s1 - left),
-    };
-    ui.painter().galley(pos2(left, first + (first_height - sender.size().y) / 2.0), sender, p.ink);
-    let subject = if message.subject.is_empty() { tr!("(no subject)") } else { message.subject.as_str() };
-    let preview = after_subject(&message.preview);
-    let text = line(ui, &[(subject, f.caption, p.ink), (&preview, f.caption, p.muted)], right - left);
-    ui.painter().galley(pos2(left, second + (second_height - text.size().y) / 2.0), text, p.ink);
-    // Last, so the solid float covers whatever of the row lies under it.
-    let shown = hover::actions(ui, theme, keymap, Id::unique("row-actions").with(message.id), actions_line.unwrap_or(rect), reach, actions);
-    shown.clicked.and_then(|index| act(message, index))
-}
-
-/// Whether the pointer is on `rect`, a row of the list: rows touch, so a row owns its top edge and not its bottom one,
-/// and the pointer on their shared edge is the lower row's alone.
-fn pointer_on(ui: &Ui, rect: Rect) -> bool {
-    ui.rect_contains_pointer(rect) && ui.ctx().pointer_latest_pos().is_some_and(|at| at.y < rect.bottom())
-}
-
-/// What follows a row's subject: a dot and the preview, or nothing without one.
+/// What follows a row's subject: a dash and the preview, as the design's line two, or nothing without one.
 pub(super) fn after_subject(preview: &str) -> String {
-    if preview.trim().is_empty() { String::new() } else { format!("  · {preview}") }
+    if preview.trim().is_empty() { String::new() } else { format!(" — {preview}") }
 }
 
 /// A square card across `ui`'s width with `add` drawn inside; `edge` rings it with the accent's edge.
@@ -963,7 +848,7 @@ fn head(ui: &mut Ui, theme: &Theme, keymap: &Keymap, group: &Group, state: HeadS
 
 /// "Show all (n)" or "Show fewer" across `ui`, as far in as the rows' text; whether it was pressed.
 fn more(ui: &mut Ui, theme: &Theme, keymap: &Keymap, state: HeadState) -> bool {
-    ui.add_space((text_indent(theme) - theme.spacing.s4 - button::LINK_PAD).max(0.0));
+    ui.add_space((crate::component::mail_row::TEXT_LEFT - theme.spacing.s4 - button::LINK_PAD).max(0.0));
     let label = if state.open { tr!("Show fewer").to_owned() } else { tr!("Show all ({count})", count = state.count) };
     let link = button::link(ui, theme, keymap, &label);
     if link.gained_focus() {
