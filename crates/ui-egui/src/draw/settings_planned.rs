@@ -44,7 +44,7 @@ pub(super) fn calendar(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Ma
 }
 
 /// The Privacy page: what a remote picture tells, and the senders whose pictures always load.
-pub(super) fn privacy(ui: &mut Ui, theme: &Theme) -> Option<Asked> {
+pub(super) fn privacy(ui: &mut Ui, theme: &Theme, keymap: &Keymap) -> Option<Asked> {
     let intro = [
         tr!(
             "A remote picture tells its server that the message was opened, when and from where. InboxCraft asks every time before it loads one, unless you chose “always for this sender” in the reader."
@@ -55,11 +55,14 @@ pub(super) fn privacy(ui: &mut Ui, theme: &Theme) -> Option<Asked> {
     body(ui, theme, "privacy", |ui| {
         let note = tr!("The senders whose remote pictures load without asking. “ask again” takes one off the list: its pictures are held again.");
         group(ui, theme, "A", tr!("Pictures always load"), Some(note));
-        settings_row_soon(
+        settings_row_soon_with(
             ui,
             theme,
             tr!("Senders whose pictures always load"),
             tr!("The list, with “ask again” beside each sender, comes with this page."),
+            |ui| {
+                link_sized(ui, theme, keymap, tr!("ask again"), LinkSize::Small);
+            },
         );
     });
     None

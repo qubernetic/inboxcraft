@@ -435,7 +435,7 @@ fn page(ui: &mut Ui, theme: &Theme, view: &mut Sheet<'_>) -> Option<Asked> {
         Section::Triage => triage(ui, theme, mailbox),
         Section::Notifications => notifications(ui, theme, mailbox, view.settings, view.desk),
         Section::Calendar => planned::calendar(ui, theme, keymap, mailbox),
-        Section::Privacy => planned::privacy(ui, theme),
+        Section::Privacy => planned::privacy(ui, theme, keymap),
         Section::About => planned::about(ui, theme),
         Section::Ai => planned::ai(ui, theme),
         Section::Plugins => planned::plugins(ui, theme),
