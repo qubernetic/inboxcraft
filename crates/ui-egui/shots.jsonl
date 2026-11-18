@@ -196,3 +196,13 @@
 {"out": "docs/images/menu-templates-dark.png", "mode": "dark", "size": [1400, 860], "compose": "template", "menu": "templates"}
 {"out": "docs/images/menu-group-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
 {"out": "docs/images/menu-group-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "menu": "group"}
+# The reader's banners, cards and states (#237): remote pictures held back with their boxes, a held sender's let-in
+# card, an invitation that asks and a narrow reader at 130 % with an invitation and a held sender.
+{"out": "docs/images/reader-remote-light.png", "mode": "light", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
+{"out": "docs/images/reader-remote-dark.png", "mode": "dark", "size": [1440, 900], "open": {"folder": 5}, "select": "You have won a lighthouse"}
+{"out": "docs/images/reader-held-light.png", "mode": "light", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-held-dark.png", "mode": "dark", "size": [1440, 900], "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-invite-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/reader-invite-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "invitations": true, "select": "Updated invitation: Lunch with Odile"}
+{"out": "docs/images/reader-held-narrow-130-light.png", "mode": "light", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
+{"out": "docs/images/reader-held-narrow-130-dark.png", "mode": "dark", "size": [1024, 800], "text_scale": 130, "open": {"role": "senders"}, "select": "Winter swim at the harbour steps"}
