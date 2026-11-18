@@ -297,8 +297,17 @@ fn the_composer_floats_over_the_calendar_and_new_message_brings_it_back() {
     harness.run();
     assert_eq!(harness.state().screen(), Screen::Calendar);
     harness.get_by_role_and_label(Role::Button, "Back to the reader's place");
-    assert!(harness.state().can_run(keymap::SEND), "the floating panel shows Send with its key");
-    harness.get_by_role_and_label(Role::Button, "Fold the draft New message").click();
+    // The keys elsewhere: on the calendar, nothing of the composer has them.
+    let focused = harness.ctx.memory(|memory| memory.focused());
+    if let Some(focused) = focused {
+        harness.ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+    harness.run();
+    assert!(!harness.state().can_run(keymap::SEND), "Send waits for the composer in the reader's place");
+    // With the keys in the floating panel, Send goes from it.
+    type_into(&mut harness, "Subject", "Plot");
+    assert!(harness.state().can_run(keymap::SEND), "the floating panel with the keys");
+    harness.get_by_role_and_label(Role::Button, "Fold the draft Plot").click();
     harness.run();
     assert!(!harness.state().can_run(keymap::SEND), "folded, Send waits for the composer to show");
     harness.state_mut().run_action(&ctx, keymap::COMPOSE);
@@ -1008,4 +1017,83 @@ fn typing_during_the_wipe_ends_it_at_once() {
     harness.step();
     assert!(scan_lines(&harness).is_empty(), "the owner never waits");
     assert_eq!(harness.state().composer().unwrap().typing(Line::To), "o");
+}
+
+/// The sending harness with a new message written, ready to go: a recipient and a subject; its draft's id.
+fn written(harness: &mut Harness<'static, InboxApp>) -> u64 {
+    harness.get_by_role_and_label(Role::Button, "New message").click();
+    harness.run();
+    type_into(harness, "To", "odile@example.org,");
+    type_into(harness, "Subject", "Plot");
+    let composer = harness.state().composer().unwrap();
+    assert!(composer.sendable(), "ready to go");
+    composer.draft()
+}
+
+/// Ctrl Enter, the composer's Send key, pressed wherever the keys are.
+fn ctrl_enter(harness: &mut Harness<'static, InboxApp>) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+}
+
+#[test]
+fn ctrl_enter_in_the_calendar_event_editor_sends_nothing() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().run_action(&ctx, keymap::CALENDAR);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "New event").click();
+    harness.run();
+    type_into(&mut harness, "Title", "Pottery class");
+    ctrl_enter(&mut harness);
+    assert!(!queued(&mut harness, id), "the floating draft did not go from the editor's field");
+    assert!(harness.state().composer().is_some());
+}
+
+#[test]
+fn ctrl_enter_in_the_search_field_sends_nothing() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    harness.ctx.memory_mut(|memory| memory.request_focus(super::list::search_id()));
+    harness.run();
+    assert!(harness.ctx.memory(|memory| memory.has_focus(super::list::search_id())), "the search field has the keys");
+    harness.event(egui::Event::Text("rota".to_owned()));
+    harness.run();
+    ctrl_enter(&mut harness);
+    assert!(!queued(&mut harness, id), "the docked draft did not go from the search field");
+    assert!(harness.state().composer().is_some());
+}
+
+#[test]
+fn ctrl_enter_in_the_settings_sheet_sends_nothing() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    harness.state_mut().open_settings();
+    harness.run();
+    harness.get_by_label("Sending, settings page").click();
+    harness.run();
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Signature of Personal").focus();
+    harness.run();
+    harness.get_by_role_and_label(Role::MultilineTextInput, "Signature of Personal").type_text("Mira");
+    harness.run();
+    ctrl_enter(&mut harness);
+    assert!(!queued(&mut harness, id), "the draft under the sheet did not go from its field");
+    assert!(harness.state().composer().is_some());
+}
+
+#[test]
+fn ctrl_enter_in_the_composer_sends_docked_and_floating() {
+    let mut harness = sending();
+    let id = written(&mut harness);
+    ctrl_enter(&mut harness);
+    assert!(queued(&mut harness, id), "docked, from its subject");
+    let mut harness = sending();
+    let id = written(&mut harness);
+    harness.query_all_by_label_contains("Draft logo for the bakery").next().unwrap().click();
+    harness.run();
+    assert!(harness.state().composer().unwrap().floating());
+    type_into(&mut harness, "Subject", " work");
+    ctrl_enter(&mut harness);
+    assert!(queued(&mut harness, id), "floating, from its subject");
 }

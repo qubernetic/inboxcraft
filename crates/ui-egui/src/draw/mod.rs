@@ -161,6 +161,8 @@ pub struct InboxApp {
     frame_applied: Option<WindowFrame>,
     /// The message being written, in the reader's place or floating.
     composer: Option<Composer>,
+    /// Whether the keyboard focus was inside the composer at the start of this frame: Send's key acts only then.
+    composer_keys: bool,
     /// What the composer's last step says in a toast (the draft kept, the message on its way), and since when.
     notice: Option<(String, Option<f64>)>,
     /// The time picker opens over the open message in the next frame, with this text typed.
@@ -265,6 +267,7 @@ impl InboxApp {
             own_frame: false,
             frame_applied: None,
             composer: None,
+            composer_keys: false,
             notice: None,
             picker: None,
             sending: None,
@@ -472,8 +475,8 @@ impl InboxApp {
             keymap::FULL_WIDTH => self.reader.open_id().is_some(),
             keymap::SNOOZE => self.screen == Screen::Mail && self.reader.open_id().is_some() && !self.docked(),
             keymap::COMPOSE => !self.mailbox.accounts().is_empty(),
-            // Docked, or the floating panel open: both show Send with its key.
-            keymap::SEND => self.docked() || self.composer.as_ref().is_some_and(|composer| !composer.folded()),
+            // Docked; or the floating panel open with the keys inside it.
+            keymap::SEND => self.docked() || (self.composer_keys && self.composer.as_ref().is_some_and(|composer| !composer.folded())),
             _ => keymap::action(id).is_some(),
         }
     }
@@ -668,6 +671,9 @@ impl InboxApp {
     /// the keys are theirs; the settings sheet, the palette and the calendar lie over the list or in its place, so the
     /// mail's keys (the arrows, the acts on a row) rest while they show.
     fn keys(&mut self, ctx: &egui::Context) -> Keys {
+        // Send's key acts only from inside the composer, open and not under the settings sheet: never from a field in
+        // front of it or beside it.
+        self.composer_keys = !self.settings.is_open() && self.composer.as_ref().is_some_and(|composer| !composer.folded()) && compose::has_keys(ctx);
         let held = self.settings.capturing().is_some() || self.palette.is_open();
         self.capture_key(ctx);
         let focused = ctx.memory(|memory| memory.focused().is_some());
@@ -693,6 +699,7 @@ impl InboxApp {
             .map(|action| action.id)
             .filter(|id| !ROW_ACTS.iter().any(|(act, _)| act == id))
             .filter(|id| *id != keymap::UNDO || !(quiet || toasted))
+            .filter(|id| *id != keymap::SEND || self.composer_keys)
             .filter(|id| {
                 let bare = self.keymap.shortcut(id).is_some_and(|key| {
                     let held = key.modifiers;

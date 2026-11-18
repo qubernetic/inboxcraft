@@ -142,6 +142,36 @@ pub(super) fn blank_id() -> Id {
     Id::unique("compose-blank")
 }
 
+/// Where the composer was drawn: its layer, its rect and the pass it was drawn in.
+#[derive(Clone, Copy)]
+struct Drawn {
+    layer: egui::LayerId,
+    rect: Rect,
+    pass: u64,
+}
+
+fn drawn_id() -> Id {
+    Id::unique("compose-drawn")
+}
+
+/// Keeps where the composer is drawn in this pass, for [`has_keys`].
+fn mark_drawn(ui: &Ui, rect: Rect) {
+    let drawn = Drawn { layer: ui.layer_id(), rect, pass: ui.ctx().cumulative_pass_nr() };
+    ui.ctx().data_mut(|data| data.insert_temp(drawn_id(), drawn));
+}
+
+/// Whether the keyboard focus is inside the composer drawn in the last pass: a widget on its layer, in its rect. A
+/// field of a float over it (the settings sheet, the calendar's editor, a menu) or of the window beside it (the search
+/// field) is not.
+pub(super) fn has_keys(ctx: &egui::Context) -> bool {
+    let Some(focused) = ctx.memory(|memory| memory.focused()) else { return false };
+    let pass = ctx.cumulative_pass_nr();
+    let Some(drawn) = ctx.data(|data| data.get_temp::<Drawn>(drawn_id())).filter(|drawn| drawn.pass.saturating_add(1) >= pass) else {
+        return false;
+    };
+    ctx.read_response(focused).is_some_and(|response| response.layer_id == drawn.layer && drawn.rect.contains(response.rect.center()))
+}
+
 /// Whether `id` is one of the composer's fields that take typing: a recipient line, the subject, the text, a blank.
 pub(super) fn is_field(id: Id) -> bool {
     id == subject_id() || id == text_id() || id == blank_id() || Line::ALL.iter().any(|line| id == field_id(*line))
@@ -802,6 +832,7 @@ pub(super) fn show(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbo
     let s = &theme.spacing;
     let whole = ui.max_rect();
     ui.allocate_rect(whole, Sense::hover());
+    mark_drawn(ui, whole);
     let area = Rect::from_min_max(whole.min + vec2(s.s10, s.s6), whole.max - vec2(s.s10, s.s6));
     let shown = wiped(ui.ctx(), Id::unique("compose-wipe").with(composer.draft()));
     if shown >= 1.0 {
@@ -839,6 +870,7 @@ pub(super) fn floating(ctx: &egui::Context, theme: &Theme, keymap: &Keymap, mail
                 ui.painter().add(shape);
             }
             ui.allocate_rect(rect, Sense::hover());
+            mark_drawn(ui, rect);
             // 12 above the head, 20 beside and under the rest.
             let pad = s.s4 + s.s1;
             let area = Rect::from_min_max(rect.min + vec2(pad, s.s3), rect.max - vec2(pad, if composer.folded() { s.s3 } else { pad }));
