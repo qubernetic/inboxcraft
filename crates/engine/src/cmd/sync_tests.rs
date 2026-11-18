@@ -213,9 +213,12 @@ fn an_end_far_in_the_future_is_junk_and_dropped() {
     let end = Event::new(AccountId::new(1), None, EventKind::SyncFinished { at: inboxcraft_time::Timestamp::MAX });
     assert_eq!(session.apply(&end).unwrap(), Applied::Dropped);
     assert_eq!(status(&mut session), json!({ "state": "syncing", "done": 1, "of": 4, "last_synced": null, "failing_accounts": 0 }));
-    // A worker's clock a little ahead of the engine's is no junk.
+    // A worker's clock a little ahead of the engine's is no junk, and is taken as the engine's.
     assert_eq!(finished(&mut session, 1, NOW + 60), Applied::Changed);
-    assert_eq!(status(&mut session)["last_synced"], "2026-11-05T09:01:00Z");
+    assert_eq!(status(&mut session)["last_synced"], "2026-11-05T09:00:00Z");
+    assert_eq!(finished(&mut session, 1, NOW + 300), Applied::Changed, "five minutes ahead");
+    assert_eq!(finished(&mut session, 1, NOW + 301), Applied::Dropped);
+    assert_eq!(status(&mut session)["last_synced"], "2026-11-05T09:00:00Z");
 }
 
 #[test]

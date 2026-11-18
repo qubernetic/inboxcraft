@@ -25,7 +25,8 @@
 //!
 //! The state is the session's and bounded by the accounts: one progress and one time each, replaced by every event,
 //! dropped with the account. An event for an account the session does not hold is dropped before it gets here, and
-//! an end of a round that lies more than [`FUTURE_SLACK`] past the engine's clock is junk and dropped.
+//! an end of a round that lies more than [`FUTURE_SLACK`] (five minutes) past the engine's clock is junk and dropped;
+//! one less far ahead is taken as the clock, so it cannot pin `last_synced` ahead of it.
 
 use std::time::Duration;
 
@@ -46,8 +47,8 @@ pub(crate) const COMMANDS: &[CommandSpec] = &[STATUS];
 pub(crate) const FIELDS: &[&str] = &["account"];
 
 /// How far past the engine's clock the end of a sync round may lie: the worker's clock is the same computer's, so
-/// anything further is junk.
-pub(crate) const FUTURE_SLACK: Duration = Duration::from_secs(24 * 60 * 60);
+/// anything further is junk. An end within it is taken as the engine's clock.
+pub(crate) const FUTURE_SLACK: Duration = Duration::from_secs(5 * 60);
 
 /// `sync.status`: how the syncing of every account stands.
 pub(crate) const STATUS: CommandSpec = CommandSpec {
@@ -66,12 +67,13 @@ pub(crate) fn progress(state: &mut State, account: AccountId, done: u32, of: u32
 }
 
 /// Takes the end of `account`'s sync round at `at`; whether the event is kept. An end past `now` and
-/// [`FUTURE_SLACK`] is junk and dropped; otherwise the round's progress and the account's failure end, and the newest
-/// end is kept.
+/// [`FUTURE_SLACK`] is junk and dropped, one past `now` within it counts as `now`; otherwise the round's progress and
+/// the account's failure end, and the newest end is kept.
 pub(crate) fn finished(state: &mut State, account: AccountId, at: Timestamp, now: Timestamp) -> bool {
     if at > now.saturating_add(FUTURE_SLACK) {
         return false;
     }
+    let at = at.min(now);
     let Some(held) = state.accounts.get_mut(&account) else { return false };
     held.progress = None;
     held.failure = None;
