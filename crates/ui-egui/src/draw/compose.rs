@@ -990,21 +990,30 @@ pub(super) fn floating(
     let size = vec2(FLOATING.x.min(room.x), if composer.folded() { folded_height } else { FLOATING.y }.min(room.y));
     let corner = pos2(screen.right() - FLOATING_IN, foot - FLOATING_IN);
     let rect = Rect::from_min_size(corner - size, size);
+    // The panel's card and the shadow it casts, on a layer of their own under it that takes no pointer: the shadow
+    // falls on the window round the panel (its frames), under its foot too, over the reader's answers.
+    Area::new(Id::unique("compose-floating-shadow"))
+        .order(Order::Middle)
+        .interactable(false)
+        .pivot(Align2::LEFT_TOP)
+        .fixed_pos(rect.min)
+        .fade_in(false)
+        .show(ctx, |ui| {
+            let shadow = ui.painter().with_clip_rect(screen);
+            for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard) {
+                shadow.add(shape);
+            }
+        });
     Area::new(Id::unique("compose-floating"))
         .order(Order::Middle)
-        // While it folds its content is still taller than the panel: the area is never moved to fit the window, and
-        // what takes the pointer ends at the panel's foot, never over the reader's answers.
-        .constrain(false)
+        // While it folds its content is still taller than the panel: what takes the pointer, and what is painted,
+        // ends at the panel's foot, never over the reader's answers.
         .constrain_to(Rect::from_min_max(screen.min, pos2(screen.right(), rect.bottom())))
         .pivot(Align2::LEFT_TOP)
         .fixed_pos(rect.min)
         .fade_in(false)
         .show(ctx, |ui| {
-            // The shadow falls on the window round the panel (its frames); what is drawn in the panel stays in it.
-            let shadow = ui.painter().with_clip_rect(screen);
-            for shape in paint::float_shapes(theme, rect, paint::FloatEdge::Keyboard) {
-                shadow.add(shape);
-            }
+            // What is drawn in the panel stays in it.
             ui.set_clip_rect(rect.intersect(screen));
             ui.allocate_rect(rect, Sense::hover());
             mark_drawn(ui, rect);

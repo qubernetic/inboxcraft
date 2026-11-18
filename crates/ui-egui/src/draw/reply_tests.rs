@@ -220,6 +220,27 @@ fn the_floating_panel_folded_or_open_never_covers_the_reader_s_answers_and_a_pre
 }
 
 #[test]
+fn the_floating_panel_s_shadow_falls_whole_under_its_foot() {
+    for folded in [true, false] {
+        let harness = floating_over_a_message(folded);
+        let panel = panel(&harness);
+        // The shadow reaches 12 + 3 × 16 under the box: painted, not cut, at least 40 of it.
+        let reach = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if panel.x_range().contains(mesh.calc_bounds().center().x) => {
+                    Some(mesh.calc_bounds().bottom().min(clipped.clip_rect.bottom()))
+                }
+                _ => None,
+            })
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(reach >= panel.bottom() + 40.0, "folded {folded}: the shadow painted down to {reach}, the panel's foot {}", panel.bottom());
+    }
+}
+
+#[test]
 fn with_no_message_open_the_floating_panel_stands_where_it_did() {
     let mut harness = harness(egui::Theme::Light);
     press(&mut harness, "New message");
