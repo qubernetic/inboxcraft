@@ -506,3 +506,226 @@ fn a_cut_row_line_ends_its_last_word_with_the_ellipsis_and_no_space_before_it() 
     assert_eq!(got[1], "Liste");
     assert_eq!(got[2], "Zusammenfassung des Posteingangs", "the text stays whole");
 }
+
+/// The ring [`super::focus_ring`] paints round `rect` in `place` at `ppp`: its rect, stroke width and colour, and kind.
+fn ring_at(rect: egui::Rect, place: super::Ring, ppp: f32) -> Vec<RectShape> {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(ppp);
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
+    let mut output = ctx.run_ui(input, |ui| super::focus_ring(ui.painter(), &theme, rect, place));
+    output.textures_delta.clear();
+    let shapes: Vec<Shape> = output.shapes.into_iter().map(|clipped| clipped.shape).collect();
+    rects(&shapes).into_iter().cloned().collect()
+}
+
+#[test]
+fn a_focus_ring_stands_on_whole_pixels_at_every_scale_its_clearance_kept() {
+    let edge = Theme::new(Mode::Dark, TextScale::default()).palette.cyan_edge;
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        for rect in [egui::Rect::from_min_size(pos2(10.0, 10.0), vec2(40.0, 20.0)), egui::Rect::from_min_size(pos2(10.5, 11.25), vec2(33.5, 17.75))] {
+            for place in [super::Ring::Inside, super::Ring::Outside] {
+                let at = format!("{ppp} {rect:?} {place:?}");
+                let rings = ring_at(rect, place, ppp);
+                assert_eq!(rings.len(), 1, "{at}");
+                let ring = &rings[0];
+                assert_eq!(ring.stroke.color, edge, "{at}");
+                let thick = ring.stroke.width * ppp;
+                assert!(thick >= 1.0 && (thick - thick.round()).abs() < 1e-3, "{at}: {thick} pixels thick");
+                for side in [ring.rect.left(), ring.rect.top(), ring.rect.right(), ring.rect.bottom()] {
+                    assert!((side * ppp - (side * ppp).round()).abs() < 1e-3, "{at}: {:?} off the pixel grid", ring.rect);
+                }
+                // Inside: the line starts 2 in from the control; outside: it ends 2 clear of it (half a pixel either way).
+                let (inner, gap) = match place {
+                    super::Ring::Inside => {
+                        assert_eq!(ring.stroke_kind, egui::StrokeKind::Inside, "{at}");
+                        (ring.rect, ring.rect.min - rect.min)
+                    }
+                    super::Ring::Outside => {
+                        assert_eq!(ring.stroke_kind, egui::StrokeKind::Outside, "{at}");
+                        (ring.rect, rect.min - ring.rect.min)
+                    }
+                };
+                let _ = inner;
+                assert!((gap.x - 2.0).abs() <= 0.5 / ppp + 1e-3 && (gap.y - 2.0).abs() <= 0.5 / ppp + 1e-3, "{at}: {gap:?}");
+                if ppp == 1.0 && rect.min.x.fract() == 0.0 {
+                    // Nothing moves at 1.0 on a whole-point control: the ring of before, exactly.
+                    let before = match place {
+                        super::Ring::Inside => rect.shrink(2.0),
+                        super::Ring::Outside => rect.expand(2.0),
+                    };
+                    assert_eq!((ring.rect, ring.stroke.width), (before, 1.0), "{at}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_focus_ring_round_a_hostile_rect_never_panics_and_stays_one_shape() {
+    let (nan, inf) = (f32::NAN, f32::INFINITY);
+    let hostile = [
+        egui::Rect::from_min_max(pos2(nan, nan), pos2(nan, nan)),
+        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(nan, 10.0)),
+        egui::Rect::from_min_max(pos2(-inf, -inf), pos2(inf, inf)),
+        egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(inf, 10.0)),
+        egui::Rect::from_min_max(pos2(50.0, 50.0), pos2(10.0, 10.0)),
+        egui::Rect::from_min_max(pos2(20.0, 20.0), pos2(20.0, 20.0)),
+        egui::Rect::from_min_max(pos2(-1.0e9, -1.0e9), pos2(1.0e9, 1.0e9)),
+        egui::Rect::NOTHING,
+        egui::Rect::EVERYTHING,
+    ];
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+        for rect in hostile {
+            for place in [super::Ring::Inside, super::Ring::Outside] {
+                assert!(ring_at(rect, place, ppp).len() <= 1, "{rect:?} {place:?} at {ppp}: one ring at most");
+                // Painted all the way to triangles, it stays a bounded mesh.
+                let ctx = egui::Context::default();
+                ctx.set_pixels_per_point(ppp);
+                let input =
+                    egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 200.0))), ..egui::RawInput::default() };
+                let mut output = ctx.run_ui(input, |ui| super::focus_ring(ui.painter(), &theme, rect, place));
+                output.textures_delta.clear();
+                let meshes = ctx.tessellate(output.shapes, ppp);
+                let vertices: usize = meshes
+                    .iter()
+                    .map(|mesh| match &mesh.primitive {
+                        egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                        egui::epaint::Primitive::Callback(_) => 0,
+                    })
+                    .sum();
+                assert!(vertices <= 64, "{rect:?} {place:?} at {ppp}: {vertices} vertices");
+            }
+        }
+    }
+}
+
+/// The ink centre of each row of a run.
+type Centres = Vec<(f32, f32)>;
+
+/// The ink centres of the rows of `text` in the caption wrapped at `width` and painted by [`super::rows_at`] at `at`
+/// in `align`, and of each row's words laid out alone and put where the design puts that row: at the box's left, or
+/// in the middle of `width`, with [`super::run_at`]. `(rows, alone)`, one centre each per row.
+fn rows_and_alone(text: &'static str, at: egui::Pos2, width: f32, align: egui::Align) -> (Centres, Centres) {
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let (ground, ink) = (theme.palette.surface, theme.palette.ink);
+    let font = theme.fonts.caption;
+    let line = font.line;
+    let centres = |picture: &crate::shot::Picture, rows: usize| -> Vec<(f32, f32)> {
+        (0..rows)
+            .filter_map(|row| {
+                let top = (at.y + row as f32 * line) as usize;
+                crate::component::tests::ink_centre(picture, 0..picture.width(), top..top + line as usize, ground, ink)
+            })
+            .collect()
+    };
+    let size = vec2(width + 2.0 * at.x, at.y * 2.0 + 4.0 * line);
+    let mut rows = 0;
+    let wrapped = crate::shot::paint(size, 1.0, Mode::Dark, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect().expand(100.0), 0.0, ground);
+        let galley = crate::component::wrapped(ui, text, font, ink, width, 4, align);
+        rows = galley.rows.len();
+        super::rows_at(ui.painter(), at, width, galley, ink);
+    });
+    let wrapped = wrapped.unwrap_or_else(|error| panic!("{error:?}"));
+    let mut pieces: Vec<String> = Vec::new();
+    let alone = crate::shot::paint(size, 1.0, Mode::Dark, |ui| {
+        crate::theme::install_fonts(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect().expand(100.0), 0.0, ground);
+        let galley = crate::component::wrapped(ui, text, font, ink, width, 4, egui::Align::LEFT);
+        pieces = galley.rows.iter().map(|row| row.glyphs.iter().map(|glyph| glyph.chr).collect::<String>().trim_end().to_owned()).collect();
+        for (index, piece) in pieces.iter().enumerate() {
+            let one = crate::component::galley(ui, piece, font, ink);
+            let x = if align == egui::Align::Center { at.x + (width - one.size().x) / 2.0 } else { at.x };
+            super::run_at(ui.painter(), pos2(x, at.y + index as f32 * line), one, ink);
+        }
+    });
+    let alone = alone.unwrap_or_else(|error| panic!("{error:?}"));
+    assert!(rows >= 2, "{text:?} wraps: {rows} rows");
+    (centres(&wrapped, rows), centres(&alone, rows))
+}
+
+#[test]
+fn every_row_of_a_wrapped_run_stands_where_the_design_puts_it() {
+    // The settings row's help: its second row started 0.8 px right of the box's left; the empty state's centred rows
+    // half a pixel right of the middle.
+    let help = "Reduced keeps what explains a change and drops the text effects. Off: everything at once.";
+    let centred = "This folder holds no unread messages. “Show done” brings back what you finished.";
+    for (text, at, width, align) in [
+        (help, pos2(24.0, 8.0), 397.0, egui::Align::LEFT),
+        (help, pos2(24.5, 8.0), 397.0, egui::Align::LEFT),
+        (centred, pos2(24.0, 8.0), 392.0, egui::Align::Center),
+        (centred, pos2(23.0, 8.0), 391.0, egui::Align::Center),
+    ] {
+        let (rows, alone) = rows_and_alone(text, at, width, align);
+        assert_eq!(rows.len(), alone.len(), "{text:?}");
+        for (index, (row, want)) in rows.iter().zip(&alone).enumerate() {
+            assert!(
+                (row.0 - want.0).abs() <= 0.05 && (row.1 - want.1).abs() <= 0.05,
+                "row {index} of {text:?} at {at:?}: {row:?}, the design's {want:?}"
+            );
+        }
+    }
+}
+
+/// The baselines of `font`'s rows as [`crate::component::galley`] and [`crate::component::wrapped`] lay them out at
+/// `ppp`, against the top of their galley, with the design's top of each row (the line heights over it), and the
+/// design's baseline against a row's top: half the leading (the line height less the face's ascent
+/// and descent) over the ascent.
+fn baselines(font: crate::theme::Font, ppp: f32) -> (Vec<(f32, f32)>, f32) {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(ppp);
+    crate::theme::install_fonts(&ctx);
+    let mut got = Vec::new();
+    for _ in 0..2 {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 200.0))), ..egui::RawInput::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            let one = crate::component::galley(ui, "Hxg", font, egui::Color32::WHITE);
+            let two = crate::component::wrapped(ui, "Hxg words that wrap onto a second row", font, egui::Color32::WHITE, 60.0, 4, egui::Align::LEFT);
+            got = [one, two]
+                .iter()
+                .flat_map(|galley| galley.rows.iter().enumerate().map(|(index, row)| (index, row.pos.y, row.glyphs.first().map(|g| g.pos.y))))
+                .filter_map(|(index, top, glyph)| glyph.map(|y| (top + y, index as f32 * font.line)))
+                .collect();
+        });
+        output.textures_delta.clear();
+    }
+    let (ascent, descent) = font.face.extent();
+    (got, (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size)
+}
+
+#[test]
+fn every_line_of_text_stands_on_the_whole_pixel_nearest_the_designs_baseline() {
+    // The caption (Plex Sans 12/18) has its baseline on a half pixel, 13.5 under its top: egui rounded it down the page
+    // to 14, where hinting sets the letters lower still; it goes on 13. A run's second row at 125 % stood 0.625 px off.
+    let theme = Theme::new(Mode::Dark, TextScale::default());
+    let f = theme.fonts;
+    for (name, font) in [
+        ("caption", f.caption),
+        ("body", f.body),
+        ("strong", f.strong),
+        ("read", f.read),
+        ("heading", f.heading),
+        ("title", f.title),
+        ("label", f.label),
+        ("mono", f.mono),
+        ("mono_s", f.mono_s),
+        ("button", f.button),
+        ("key", f.key),
+        ("display", f.display),
+    ] {
+        for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+            let (got, design) = baselines(font, ppp);
+            assert!(got.len() >= 3, "{name}: one row and a wrapped run");
+            for (baseline, top) in got {
+                assert!(((baseline * ppp) - (baseline * ppp).round()).abs() < 1e-3, "{name} at {ppp}: on a whole pixel: {baseline}");
+                let off = (top + design - baseline) * ppp;
+                assert!(off > -0.5 + 1e-3 && off <= 0.5 + 1e-3, "{name} at {ppp}: the baseline at {baseline}, the design's at {top} + {design}");
+            }
+        }
+    }
+    let (got, _) = baselines(f.caption, 1.0);
+    assert!(got.iter().all(|(baseline, top)| baseline - top == 13.0), "the caption's baseline 13 under its top: {got:?}");
+}

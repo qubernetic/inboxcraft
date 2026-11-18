@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: Qubernetic and the InboxCraft contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! The page of the shared rows and blocks walked by the keyboard, left alone, and read for its names and its ground.
+
+use egui::accesskit::Role;
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+use super::{page, size};
+use crate::component::gallery::keymap;
+use crate::component::tests::{builder, keyboard_walk, painted, rests};
+use crate::motion;
+use crate::theme::{Mode, TextScale, Theme};
+
+/// The page in `mode`, motion reduced or not.
+fn harness(mode: Mode, reduce: bool) -> Harness<'static> {
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = keymap();
+    let mut harness = builder().with_size(size()).build_ui(move |ui| {
+        motion::set_reduced(ui.ctx(), reduce);
+        page(ui, &theme, &keymap);
+    });
+    harness.run_ok();
+    harness
+}
+
+#[test]
+fn every_control_of_the_blocks_page_is_reached_by_tab() {
+    let mut harness = harness(Mode::Light, true);
+    let missed = keyboard_walk(&mut harness);
+    assert!(missed.is_empty(), "the controls Tab never reaches: {missed:?}");
+}
+
+#[test]
+fn the_blocks_page_rests() {
+    for reduce in [true, false] {
+        let mut harness = harness(Mode::Light, reduce);
+        assert!(rests(&mut harness, 8), "the page keeps asking for frames with motion reduced: {reduce}");
+    }
+}
+
+#[test]
+fn every_control_of_the_blocks_page_has_a_name_and_fits_the_page() {
+    let harness = harness(Mode::Dark, true);
+    let page = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), size());
+    for role in [Role::Button, Role::Label, Role::Group, Role::Switch, Role::RadioGroup, Role::ProgressIndicator] {
+        for node in harness.query_all_by_role(role) {
+            let label = node.accesskit_node().label();
+            if role == Role::Button {
+                assert!(label.as_ref().is_some_and(|label| !label.is_empty()), "{role:?} without a name");
+            }
+            assert!(page.contains_rect(node.rect()), "{label:?} {:?} leaves the page", node.rect());
+        }
+    }
+}
+
+#[test]
+fn the_boards_of_the_blocks_page_stand_on_bg_with_every_set() {
+    for mode in [Mode::Light, Mode::Dark] {
+        let theme = Theme::new(mode, TextScale::default());
+        let harness = harness(mode, true);
+        for title in ["Row", "Hover actions", "Banner", "Empty state", "Progress", "Settings row", "Check step", "Facts"] {
+            assert!(harness.query_all_by_label(title).count() >= 1, "{mode:?}: the {title} board");
+        }
+        let words = "This message did not arrive: 550 5.1.1 The address ansel@example.org does not exist.";
+        let banner = crate::component::banner::spoken(&theme, crate::component::banner::BannerKind::Bounce, words);
+        assert_eq!(painted(&harness, &banner).ground, Some(theme.palette.bg), "{mode:?}");
+        assert_eq!(harness.query_all_by_label("coming soon").count(), 1, "the settings row's unavailable state");
+    }
+}
+
+#[test]
+fn the_long_facts_carry_the_boards_words_whole() {
+    // The board's long-text state holds more than its lines show: the cut part is the board's words too.
+    let harness = harness(Mode::Dark, true);
+    let from = "Annelise Vandenberghe-Okonkwo-Halvorssen  <annelise.vandenberghe-okonkwo-halvorssen@studio-collective.example.org>";
+    let to = "studio@example.org, Marit Solheim, Ines Okafor, Pavel Hruska, Greta Lindqvist, Tobias Wren, Halvard Engen, \
+              Sunniva Aalto, Dmitri Vale, Rosalind Thackeray, Kettle & Co, Type Weekly";
+    let shown = crate::component::facts::Facts { from, to, date: "Mon 16 Nov 2026, 14:02", ..Default::default() };
+    assert_eq!(harness.query_all_by_label(&crate::component::facts::spoken(&shown)).count(), 1, "the long-text facts in the board's words");
+}

@@ -166,10 +166,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, f32::INFINITY);
-    let at = pos2(rect.left() + s.s3, rect.center().y - text.size().y / 2.0);
+    // The group stands at the line's right end, the row's text cut short of it.
+    let line = rect.shrink2(vec2(s.s4, 0.0));
+    let room = line.width() - hover::width(ui, theme, keymap, &actions) - s.s2;
+    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, room);
+    let at = pos2(line.left(), rect.center().y - text.size().y / 2.0);
     ui.painter().galley(at, text, p.ink);
-    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
+    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), line, true, &actions);
 }
 
 /// The right column: buttons, pills, badges, a row with hover actions, a tooltip and a popup.
@@ -254,14 +257,14 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
 }
 
 /// A board's title: the set's name.
-fn title(ui: &mut Ui, theme: &Theme, text: &str) {
+pub(super) fn title(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.s2);
     ui.label(galley(ui, text, theme.fonts.heading, theme.palette.ink));
     ui.add_space(theme.spacing.s1);
 }
 
 /// One state of a board: its name in `mono_s` and `muted` over the control `add` draws.
-fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s1;
         ui.label(galley(ui, state, theme.fonts.mono_s, theme.palette.muted));
@@ -270,7 +273,7 @@ fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
 }
 
 /// A row of a board's cells, apart enough that a focus ring never touches the next control.
-fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = theme.spacing.s4;
         add(ui);

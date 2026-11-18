@@ -298,7 +298,7 @@ fn in_the_own_frame_the_error_banner_stands_under_the_strip() {
         let colours = [p.line, p.minus];
         let upper = super::tests::level_line_rows(&harness, &colours, strip - 3.0, words.top() - 1.0);
         assert!(one_run(&upper), "{ppp}: one line between the strip and the banner: {upper:?}");
-        let dismiss = harness.get_by_role_and_label(Role::Button, "Dismiss").rect();
+        let dismiss = harness.get_by_role_and_label(Role::Button, "dismiss").rect();
         let lower = super::tests::level_line_rows(&harness, &colours, dismiss.bottom(), dismiss.bottom() + 16.0);
         assert!(one_run(&lower), "{ppp}: one line between the banner and the panes: {lower:?}");
         // The strip still moves the window.
