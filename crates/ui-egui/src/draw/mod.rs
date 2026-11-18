@@ -141,6 +141,10 @@ pub struct InboxApp {
     focus_reader: bool,
     /// Whether the window held one pane in the last frame drawn; `None` before the first.
     single: Option<bool>,
+    /// Whether the list was shown in the last frame drawn.
+    list_was_shown: bool,
+    /// The message the reader showed last, so the keyboard can land near its row once it has gone.
+    left: Option<u64>,
     search: String,
     /// The appearance installed in the context, once installed.
     themed: Option<Appearance>,
@@ -263,6 +267,8 @@ impl InboxApp {
             list_over_composer: false,
             focus_reader: false,
             single: None,
+            list_was_shown: true,
+            left: None,
             search: String::new(),
             themed: None,
             keep: Box::new(NoKeep),
@@ -641,7 +647,15 @@ impl InboxApp {
         self.list_over_composer = single && self.docked();
         if let Some(id) = self.mailbox.selected() {
             self.mailbox.select_keyed(id);
-            ctx.memory_mut(|memory| memory.request_focus(list::row_id(id)));
+        }
+        // The reader's widget with the focus goes: the keyboard lands on the row left, or the nearest in sight.
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        if let Some(id) = self.row_left(ctx) {
+            list::land(ctx, id);
         }
         true
     }
@@ -664,6 +678,8 @@ impl InboxApp {
         if let Some(id) = gained.filter(|id| self.mailbox.selected() != Some(*id) && clicked != Some(*id)) {
             self.mailbox.select_by_focus(id);
             self.list_keys = true;
+            // A row the focus walked to is a preview: in one pane it stays behind the list.
+            self.reading = false;
         }
     }
 
@@ -672,7 +688,7 @@ impl InboxApp {
     /// message the person opened, or the docked composer, in its place.
     fn panes(&mut self, ctx: &egui::Context, docked: bool, full: bool) -> (bool, bool, bool) {
         let single = one_pane(ctx);
-        self.single = Some(single);
+        let was = self.single.replace(single);
         if self.reader.open_id().is_none() {
             self.reading = false;
         }
@@ -680,8 +696,54 @@ impl InboxApp {
         if !docked || !single {
             self.list_over_composer = false;
         }
-        let front = (docked && !self.list_over_composer) || (!docked && self.message_in_front() && self.reader.open_id().is_some());
-        (single, !single || !front, !single || front || full)
+        let message = !docked && self.message_in_front() && self.reader.open_id().is_some();
+        let front = (docked && !self.list_over_composer) || message;
+        let list_shown = !single || !front;
+        self.keep_keyboard(ctx, was.is_some_and(|was| was != single), single, list_shown, message);
+        (single, list_shown, !single || front || full)
+    }
+
+    /// The keyboard is never lost when the panes change: crossing 980 into one pane with the message in front, the
+    /// focus goes to the reader's first tool; when the list comes back in front in one pane (the message gone) or
+    /// the window crosses 980 with the list shown, it lands on the row left ([`list::land`]): in one pane on it or the
+    /// nearest row in sight, beside the reader on it brought into sight, as the reader shows its message.
+    fn keep_keyboard(&mut self, ctx: &egui::Context, crossed: bool, single: bool, list_shown: bool, message: bool) {
+        let came = single && list_shown && !self.list_was_shown;
+        self.list_was_shown = list_shown;
+        if let Some(open) = self.reader.open_id() {
+            self.left = Some(open);
+        }
+        if self.screen != Screen::Mail {
+            return;
+        }
+        let free = ctx.memory(|memory| memory.focused().is_none()) || list::focused_row(ctx).is_some();
+        if crossed && single && message && free {
+            self.focus_reader = true;
+        }
+        if (crossed || came)
+            && list_shown
+            && let Some(id) = self.row_left(ctx)
+        {
+            if !single {
+                list::bring(ctx, id);
+            }
+            list::land(ctx, id);
+        }
+    }
+
+    /// The row the keyboard goes back to: the selected message's, or once it has gone (the reader showed it last),
+    /// the row next to where it stood in the list as last drawn, below it first.
+    fn row_left(&self, ctx: &egui::Context) -> Option<u64> {
+        let listed = |id: &u64| self.mailbox.messages().iter().any(|row| row.id == *id);
+        if let Some(id) = self.mailbox.selected().filter(listed) {
+            return Some(id);
+        }
+        let gone = self.left?;
+        let order = list::order(ctx);
+        let at = order.iter().position(|id| *id == gone)?;
+        let below = order.get(at.saturating_add(1)..).unwrap_or_default();
+        let above = order.get(..at).unwrap_or_default();
+        below.iter().chain(above.iter().rev()).copied().find(listed)
     }
 
     /// A message opened into the one pane: the focus goes to the reader's first tool, not nowhere.

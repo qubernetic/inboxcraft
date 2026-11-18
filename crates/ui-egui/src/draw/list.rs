@@ -566,6 +566,42 @@ fn bring_id() -> Id {
     Id::unique("list-bring-into-sight")
 }
 
+/// Brings message `id`'s row into sight in the list's next pass, as a newly keyed row is.
+pub(super) fn bring(ctx: &egui::Context, id: u64) {
+    ctx.data_mut(|data| data.insert_temp(bring_id(), id));
+}
+
+/// Where the row the keyboard lands on is kept, with the pass that asked for it ([`land`]).
+fn land_id() -> Id {
+    Id::unique("list-land")
+}
+
+/// The keyboard lands on message `id`'s row when the list is next drawn with nothing else focused (`Esc` from the
+/// reader, the list back in front, the window crossing 980): on the row if it is in sight, else on the nearest row in
+/// sight. Asked while a widget about to go (the reader's) still has the focus, it waits for egui to drop it, two
+/// passes at most; a widget that keeps the focus keeps it.
+pub(super) fn land(ctx: &egui::Context, id: u64) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(land_id(), (id, pass)));
+}
+
+/// The row the keyboard lands on for `wanted` in a viewport from `top` to `bottom`: `wanted` when its row is wholly in
+/// sight, else the nearest message row wholly in sight (the first one when `wanted` is above or not listed, the last
+/// one when it is below).
+fn landing(listing: &Listing<'_>, wanted: u64, top: f32, bottom: f32) -> Option<u64> {
+    let (first, end) = listing.in_sight(top, bottom);
+    let whole = |index: &usize| match listing.lines.get(*index) {
+        Some(Line::Mail(message)) => listing.span(*index).filter(|(above, below)| *above >= top && *below <= bottom).map(|_| message.id),
+        _ => None,
+    };
+    let at = listing.find(wanted);
+    if let Some(id) = at.as_ref().and_then(whole) {
+        return Some(id);
+    }
+    let below = at.and_then(|at| listing.span(at)).is_some_and(|(above, _)| above >= bottom);
+    if below { (first..end).rev().find_map(|index| whole(&index)) } else { (first..end).find_map(|index| whole(&index)) }
+}
+
 /// Where the menu the keyboard opened is kept: the message whose row asked for it, and the popup.
 fn by_keys_id() -> Id {
     Id::unique("list-menu-by-keys")
@@ -1297,6 +1333,36 @@ struct Kept {
     keyed: Option<u64>,
 }
 
+/// Lands the keyboard asked for by [`land`] on its row before the lines are built, so the row sees the focus it
+/// gained (and the window keys it) in this pass; `forced` is the offset this pass sets, if any.
+fn land_now(ui: &Ui, listing: &Listing<'_>, kept: Option<&Kept>, forced: Option<f32>) {
+    let ctx = ui.ctx();
+    let Some((wanted, asked)) = ctx.data(|data| data.get_temp::<(u64, u64)>(land_id())) else { return };
+    let free = ctx.memory(|memory| memory.focused().is_none());
+    if !free && ctx.cumulative_pass_nr() <= asked.saturating_add(2) {
+        // The widget about to go still has the focus: egui drops it at the end of the pass.
+        ctx.request_repaint();
+        return;
+    }
+    ctx.data_mut(|data| data.remove::<(u64, u64)>(land_id()));
+    if !free {
+        return;
+    }
+    let target = match kept {
+        Some(kept) if kept.height > 0 => {
+            let room = ui.available_rect_before_wrap().height();
+            let view = if room.is_finite() && room > 0.0 { room } else { points(kept.height) };
+            let offset = forced.unwrap_or_else(|| points(kept.offset));
+            landing(listing, wanted, offset, offset + view)
+        }
+        // The list first drawn: its row comes into sight as a keyed one does.
+        _ => listing.find(wanted).map(|_| wanted),
+    };
+    if let Some(target) = target {
+        ctx.memory_mut(|memory| memory.request_focus(row_id(target)));
+    }
+}
+
 /// Hundredths of a point, which [`Kept`] compares exactly.
 fn hundredths(points: f32) -> i64 {
     if points.is_finite() { (f64::from(points) * 100.0).round() as i64 } else { 0 }
@@ -1359,6 +1425,7 @@ fn show_lines(ui: &mut Ui, rows: &Rows<'_>, listing: &Listing<'_>, id_salt: &str
             _ => scroll_to = Some((top, bottom)),
         }
     }
+    land_now(ui, listing, kept.as_ref(), forced);
     let mut area = ScrollArea::vertical().id_salt(id_salt).auto_shrink([false, false]);
     // egui springs an offset past last frame's end back to it (rubber-banding), and the offset that keeps a message
     // in place after the lines above it grew can lie past that end: the frame that sets an offset does not

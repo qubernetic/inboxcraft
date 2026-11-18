@@ -3034,3 +3034,100 @@ fn in_one_pane_an_act_on_the_keyed_row_keys_the_next_and_reads_nothing_unseen() 
     assert_eq!(harness.state().reader().open_id(), Some(next), "two panes: the next message shows");
     assert!(seen(&harness, next), "and is read");
 }
+
+#[test]
+fn in_one_pane_esc_with_the_row_left_out_of_sight_lands_on_the_nearest_row_in_sight() {
+    let mut harness = ten_thousand(InboxView::List);
+    harness.set_size(vec2(900.0, 900.0));
+    harness.run();
+    for _ in 0..20 {
+        harness.key_press(Key::J);
+        harness.run();
+    }
+    let keyed = harness.state().mailbox().selected().unwrap();
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "Enter: the message in front");
+    // The window gets short while the message is read: the row left is out of sight once the list is back.
+    harness.set_size(vec2(900.0, 300.0));
+    harness.run();
+    harness.run();
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "Esc: the list is back");
+    assert!(!in_sight(&harness, keyed), "the row left is out of sight");
+    let landed = super::list::focused_row(&harness.ctx).expect("the keyboard is not lost: a row has the focus");
+    assert!(in_sight(&harness, landed), "the focused row is in sight");
+    // The nearest: no row in sight stands between it and the row left.
+    let order = super::list::order(&harness.ctx);
+    let (from, to) = (order.iter().position(|id| *id == landed).unwrap(), order.iter().position(|id| *id == keyed).unwrap());
+    let between = if from < to { &order[from + 1..to] } else { &order[to + 1..from] };
+    assert!(between.iter().all(|id| !in_sight(&harness, *id)), "the nearest row in sight to the row left");
+    assert_eq!(harness.state().mailbox().selected(), Some(landed), "keyed, as a row the focus reaches is");
+}
+
+#[test]
+fn in_one_pane_when_the_message_in_front_goes_the_keyboard_lands_on_the_row_nearest_it() {
+    let mut harness = wide(900.0);
+    harness.state_mut().mailbox_mut().set_after(crate::mailbox::After::List);
+    for _ in 0..2 {
+        harness.key_press(Key::J);
+        harness.run();
+    }
+    let keyed = harness.state().mailbox().selected().unwrap();
+    let order = super::list::order(&harness.ctx);
+    let below = order[order.iter().position(|id| *id == keyed).unwrap() + 1];
+    harness.key_press(Key::Enter);
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "Enter: the message in front");
+    let was = seen(&harness, below);
+    // The message leaves from outside (a notification's Done): nothing is selected after it.
+    harness.state_mut().mailbox_mut().act(keyed, crate::mailbox::Act::Done);
+    for _ in 0..4 {
+        harness.run();
+    }
+    assert!(rows(&harness) > 0, "the list is back in front");
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(below), "the keyboard lands on the row that took its place");
+    assert_eq!(seen(&harness, below), was, "landing reads nothing");
+}
+
+#[test]
+fn across_980_the_keyboard_stays_and_a_row_reached_by_tab_stays_behind_the_list() {
+    // A press opens a message beside the list; narrowed, it stands in front with the focus in it; widened, the
+    // focus goes to its row, not nowhere.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    let odile = harness.state().mailbox().selected().unwrap();
+    harness.set_size(vec2(900.0, 900.0));
+    harness.run();
+    harness.run();
+    assert_eq!(rows(&harness), 0, "the message pressed stands in front");
+    let reader = super::reader_rect(&harness.ctx).unwrap();
+    assert!(focused_rect(&harness).is_some_and(|focus| reader.contains_rect(focus)), "narrowed: the focus in the reader");
+    harness.set_size(vec2(1300.0, 900.0));
+    for _ in 0..3 {
+        harness.run();
+    }
+    assert_eq!(harness.state().reader().open_id(), Some(odile));
+    assert_eq!(super::list::focused_row(&harness.ctx), Some(odile), "widened: the focus on its row");
+    // A row reached by Tab after a press is a preview: narrowed, it stays behind the list, the keyboard on it.
+    let mut harness = wide(1300.0);
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    harness.query_all_by_label_contains("Teodor Lisk").next().unwrap().focus();
+    harness.run();
+    harness.run();
+    let teodor = harness.state().mailbox().selected().unwrap();
+    assert_ne!(teodor, odile);
+    let was = read_states(&harness);
+    harness.set_size(vec2(900.0, 900.0));
+    harness.run();
+    harness.run();
+    assert!(rows(&harness) > 0, "the row reached by Tab does not jump in front");
+    assert!(selected_focused(&harness), "the keyboard stays on it");
+    assert_eq!(read_states(&harness), was, "narrowing read nothing");
+}
