@@ -41,10 +41,12 @@
 //! motion on.
 //! `icons` set to `true` draws every icon
 //! in every style in the theme's colours instead of the window, `components` set to `true` the gallery of
-//! the components ([`crate::component::gallery`]), `fields` set to `true` the page of the fields, pickers and menus
+//! the components ([`crate::component::gallery`]), `blocks` set to `true` the page of the shared rows and blocks
+//! ([`crate::component::gallery_blocks`]), `fields` set to `true` the page of the fields, pickers and menus
 //! ([`crate::component::gallery_fields`]). The typeface and the icons are fixed, so a script that names a
 //! `font` or an `icon_set` is refused like any unknown key. `frame` draws the app's own window frame as a native window does (`strip` or `top_row`); `pointer` rests the pointer
-//! at `[x, y]` points, so what lies under it shows its hover; `put_away` set to `true` snoozes, pins, parks and marks
+//! at `[x, y]` points, so what lies under it shows its hover; `click` presses its first button at `[x, y]` points
+//! before the picture, so what that opens (a menu, a list) is in it; `put_away` set to `true` snoozes, pins, parks and marks
 //! done some of the sample's mail first ([`sample::put_away`]), `later` opens a pile of "Later" (`snoozed`, `pins`
 //! or `parked`), `show_done` set to `true` lists the done mail in its old place, `menu` opens a menu (`more`, `move`,
 //! `from`, `templates`, `group`), and `picker` opens the time picker
@@ -216,12 +218,19 @@ pub struct Shot {
     /// The page of the fields, pickers and menus instead of the window.
     #[serde(default)]
     pub fields: Option<bool>,
+    /// The page of the shared rows and blocks instead of the window.
+    #[serde(default)]
+    pub blocks: Option<bool>,
     /// The app's own window frame, as a native window draws it: `strip` or `top_row`; none when left out.
     #[serde(default)]
     pub frame: Option<String>,
     /// Where the pointer rests, in points, so what lies under it shows its hover; nowhere when left out.
     #[serde(default)]
     pub pointer: Option<[f32; 2]>,
+    /// A press of the pointer's first button at this place, in points, before the picture, so what it opens (a menu,
+    /// a list) is in it; the pointer then rests there unless `pointer` puts it elsewhere.
+    #[serde(default)]
+    pub click: Option<[f32; 2]>,
     /// Some of the sample's mail snoozed, pinned, parked, done and back from a snooze first ([`sample::put_away`]).
     #[serde(default)]
     pub put_away: Option<bool>,
@@ -582,6 +591,7 @@ fn outbox(app: &mut InboxApp, clock: &FakeClock, out: &str, scene: &str) -> Resu
 /// Refuses the window settings for a page of `shot` that shows no window.
 fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
     let window = shot.narrow.is_some()
+        || shot.click.is_some()
         || shot.open.is_some()
         || shot.search.is_some()
         || shot.select.is_some()
@@ -615,8 +625,7 @@ fn no_window(shot: &Shot, page: &str) -> Result<(), UiError> {
         || shot.picker.is_some()
         || shot.menu.is_some()
         || shot.outbox.is_some()
-        || (shot.icons == Some(true) && shot.components == Some(true))
-        || (shot.fields == Some(true) && (shot.icons == Some(true) || shot.components == Some(true)));
+        || [shot.icons, shot.components, shot.blocks, shot.fields].iter().filter(|page| **page == Some(true)).count() > 1;
     if window {
         return Err(bad(format!("{}: {page} has no window to narrow, open, search, select, scale or size", shot.out)));
     }
@@ -652,6 +661,21 @@ fn fields_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
             Theme::apply(ui.ctx(), &theme::Look::default());
         }
         crate::component::gallery_fields::page(ui, &theme, &keymap);
+    })
+}
+
+/// The page of the shared rows and blocks of `shot` in `mode`.
+fn blocks_gallery(shot: &Shot, mode: Mode) -> Result<Picture, UiError> {
+    no_window(shot, "the page of the shared rows and blocks")?;
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = gallery::keymap();
+    let mut fonts = true;
+    paint(crate::component::gallery_blocks::size(), shot.scale.unwrap_or(1.0), mode, |ui| {
+        if std::mem::take(&mut fonts) {
+            theme::install_fonts(ui.ctx());
+            Theme::apply(ui.ctx(), &theme::Look::default());
+        }
+        crate::component::gallery_blocks::page(ui, &theme, &keymap);
     })
 }
 
@@ -928,7 +952,48 @@ pub fn render(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode) -> Result<
 ///
 /// The errors of [`render`].
 pub fn render_pointed(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>) -> Result<Picture, UiError> {
-    paint_pointed(size, scale, mode, pointer, |ui| app.ui(ui))
+    paint_pointed(size, scale, mode, Pointer { rest: pointer, click: None }, |ui| app.ui(ui))
+}
+
+/// [`render_pointed`] after a press of the pointer's first button at `click`, so what it opens is in the picture.
+///
+/// # Errors
+///
+/// The errors of [`render`].
+pub fn render_clicked(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, click: Pos2) -> Result<Picture, UiError> {
+    paint_pointed(size, scale, mode, Pointer { rest: pointer, click: Some(click) }, |ui| app.ui(ui))
+}
+
+/// What the pointer does while a picture is drawn: where it rests, and where it presses first.
+#[derive(Debug, Clone, Copy, Default)]
+struct Pointer {
+    rest: Option<Pos2>,
+    click: Option<Pos2>,
+}
+
+impl Pointer {
+    /// How many frames are drawn: four, and five more for a press so what it opens has settled.
+    fn frames(self) -> usize {
+        if self.click.is_some() { 9 } else { 4 }
+    }
+
+    /// The input of frame `frame`: for a press the pointer comes to its place in the first (so the widget under it is
+    /// known), presses in the second, lets go in the third, and rests after.
+    fn events(self, frame: usize) -> Vec<egui::Event> {
+        let button = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        match (self.click, frame) {
+            (Some(at), 0) => vec![egui::Event::PointerMoved(at)],
+            (Some(at), 1) => vec![button(at, true)],
+            (Some(at), 2) => vec![button(at, false)],
+            (Some(at), _) => vec![egui::Event::PointerMoved(self.rest.unwrap_or(at))],
+            (None, _) => self.rest.map(egui::Event::PointerMoved).into_iter().collect(),
+        }
+    }
 }
 
 /// Runs `draw` for a few frames on a transparent window of `size` points at `scale` pixels per point in `mode`, and
@@ -938,11 +1003,11 @@ pub fn render_pointed(app: &mut InboxApp, size: Vec2, scale: f32, mode: Mode, po
 ///
 /// [`UiError::Shot`] for a size of nothing, a scale outside 1 to 4, or a picture side over [`MAX_SIDE`].
 pub(crate) fn paint(size: Vec2, scale: f32, mode: Mode, draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
-    paint_pointed(size, scale, mode, None, draw)
+    paint_pointed(size, scale, mode, Pointer::default(), draw)
 }
 
 /// [`paint`] with the pointer resting at `pointer`.
-fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
+fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Pointer, mut draw: impl FnMut(&mut egui::Ui)) -> Result<Picture, UiError> {
     if !(1.0..=4.0).contains(&scale) {
         return Err(bad(format!("scale {scale} is not between 1 and 4")));
     }
@@ -961,8 +1026,8 @@ fn paint_pointed(size: Vec2, scale: f32, mode: Mode, pointer: Option<Pos2>, mut 
     });
     let mut textures = HashMap::new();
     let mut last = None;
-    for _ in 0..4 {
-        let events = pointer.map(egui::Event::PointerMoved).into_iter().collect();
+    for frame in 0..pointer.frames() {
+        let events = pointer.events(frame);
         let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), events, ..RawInput::default() };
         let mut output = ctx.run_ui(input, |ui| {
             motion::set_reduced(ui.ctx(), true);
@@ -992,6 +1057,9 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
     }
     if shot.fields == Some(true) {
         return fields_gallery(shot, mode);
+    }
+    if shot.blocks == Some(true) {
+        return blocks_gallery(shot, mode);
     }
     if shot.icons == Some(true) {
         return icon_sheet(shot, mode);
@@ -1126,8 +1194,18 @@ pub fn shoot(shot: &Shot) -> Result<Picture, UiError> {
         outbox(&mut app, &clock, &shot.out, scene)?;
     }
     let [width, height] = shot.size.unwrap_or([1200.0, 760.0]);
+    for (key, at) in [("pointer", shot.pointer), ("click", shot.click)] {
+        if let Some([x, y]) = at
+            && !((0.0..=width).contains(&x) && (0.0..=height).contains(&y))
+        {
+            return Err(bad(format!("{}: {key} [{x}, {y}] is not inside the window of {width} by {height} points", shot.out)));
+        }
+    }
     let pointer = shot.pointer.map(|[x, y]| pos2(x, y));
-    render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer)
+    match shot.click {
+        Some([x, y]) => render_clicked(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer, pos2(x, y)),
+        None => render_pointed(&mut app, vec2(width, height), shot.scale.unwrap_or(1.0), mode, pointer),
+    }
 }
 
 #[cfg(test)]

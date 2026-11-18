@@ -51,14 +51,14 @@ pub use list::rows_built;
 
 use std::sync::Arc;
 
-use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, RichText, Stroke, Ui, UiBuilder};
+use egui::{Align, CentralPanel, Frame, Key, Layout, Margin, Panel, Rect, Ui, UiBuilder, pos2};
 use inboxcraft_engine::appearance::{Appearance, Motion, WindowFrame};
 use inboxcraft_engine::notify::Settings as NotifySettings;
 use inboxcraft_model::Role;
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
-use crate::component::button;
+use crate::component::banner::{self, BannerKind, BannerLink};
 use crate::component::soon;
 use crate::component::toast::{self, Toast};
 use crate::compose::Composer;
@@ -1291,17 +1291,12 @@ impl InboxApp {
         if left_full {
             self.reader.set_full_width(false);
         }
-        let mut dismiss = false;
-        if let Some(error) = self.mailbox.error() {
-            // The error banner of the design: the `panel` ground in a `minus` edge, its act a small link.
-            let ground = Frame::new().fill(p.panel).stroke(Stroke::new(1.0, p.minus)).inner_margin(margin(s.s2));
-            Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(error).font(theme.fonts.caption.id()).color(p.ink));
-                    dismiss = button::link_sized(ui, &theme, &self.keymap, tr!("Dismiss"), button::LinkSize::Small).clicked();
-                });
-            });
-        }
+        // The window's ground first, under the error banner too; then the place for the panes, then everything else.
+        // The panes touch; a hairline divides them.
+        let corner = self.window_corner(ui.ctx());
+        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
+        // In the app's own frame the banner stands under the strip and beside the rail, so it comes after them.
+        let early = self.error_banner(ui, &theme, corner, false);
         let mut asked = pane::Asked::default();
         let mut add = false;
         let mut header = list::Header::default();
@@ -1316,10 +1311,6 @@ impl InboxApp {
         let mut screener_mode = None;
         let docked = self.docked();
         let full = self.reader.full_width() && !docked;
-        // The window's ground first, then the place for the panes, then everything else. The panes touch; a hairline
-        // divides them.
-        let corner = self.window_corner(ui.ctx());
-        ui.painter().rect_filled(ui.max_rect(), corner, p.bg);
         let mut layers = Panes::begin(ui.painter());
         let (gap, half) = (0.0, 0.0);
         let width = pane::rail_width(&theme);
@@ -1333,6 +1324,9 @@ impl InboxApp {
         layers.edged(rail.response.rect);
         let clicked_rail = rail.inner;
         self.own_frame_parts(ui, &theme, corner);
+        let late = self.error_banner(ui, &theme, corner, true);
+        let (dismiss, banner) = (early.0 | late.0, early.1.or(late.1));
+        layers.capped(banner);
         ran.extend(clicked_rail.actions());
         let mut on_calendar = Vec::new();
         if self.screen == Screen::Calendar {
@@ -1533,6 +1527,47 @@ impl InboxApp {
                 .show(ui, |ui| frame::strip(ui, theme, &self.keymap, &title, corner));
         }
         frame::edges(ui.ctx());
+    }
+
+    /// The error banner of the design, when there is an error: the `panel` ground, 8 above and below and 12 at the
+    /// sides, its act a small link. Its last row holds the one `minus` hairline between it and what stands under it;
+    /// the panes there draw no line of their own ([`Panes::capped`]). In the system's frame it runs across the window
+    /// with a `minus` hairline on its top and sides. In the app's own frame (`framed`) it stands under the strip and
+    /// beside the rail, whose lines are its top and left edges, and the frame's outline its right one; where it
+    /// reaches the window's top (the top row) its top right corner is the window's `corner`. Whether Dismiss was
+    /// pressed, and the banner's rect. Called twice a frame, before the rail and strip and after them; it draws in
+    /// the call `framed` names (the own frame's or not).
+    fn error_banner(&self, ui: &mut Ui, theme: &Theme, corner: f32, framed: bool) -> (bool, Option<Rect>) {
+        let Some(error) = self.mailbox.error().filter(|_| self.draws_frame() == framed) else { return (false, None) };
+        let p = theme.palette;
+        let mut dismiss = false;
+        // A corner of a few points; the clamp keeps the cast inside u8.
+        let round = corner.clamp(0.0, 255.0) as u8;
+        let on_top = (ui.available_rect_before_wrap().top() - ui.ctx().content_rect().top()).abs() < 0.5;
+        let corners = match (framed, on_top) {
+            (false, _) => egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 },
+            (true, true) => egui::CornerRadius { nw: 0, ne: round, sw: 0, se: 0 },
+            (true, false) => egui::CornerRadius::ZERO,
+        };
+        // The banner component in its `Error` kind on the window's ground: it pads itself (8 above and below, 12 at the
+        // sides) and draws its ERROR label, words and link; the ground's corner and the edges are the window's, here.
+        let ground = Frame::new().fill(p.panel).corner_radius(corners);
+        let shown = Panel::top("error").show_separator_line(false).frame(ground).show(ui, |ui| {
+            let links = [BannerLink { name: tr!("dismiss"), id: "dismiss" }];
+            let (pressed, _) = banner::banner_in(ui, theme, &self.keymap, BannerKind::Error, error, &links, banner::Ground::Bare);
+            dismiss = pressed.as_deref() == Some("dismiss");
+        });
+        let r = shown.response.rect;
+        let painter = ui.painter();
+        let (right, bottom) = (r.right() - 1.0, r.bottom() - 1.0);
+        if !framed {
+            paint::hairline(painter, r.left_top(), r.right_top(), p.minus);
+            paint::hairline(painter, r.left_top(), pos2(r.left(), bottom), p.minus);
+            paint::hairline(painter, pos2(right, r.top()), pos2(right, bottom), p.minus);
+        }
+        // Its `minus` edge at the foot is the one line between it and the panes, which draw none there.
+        paint::hairline(painter, pos2(r.left(), bottom), pos2(r.right(), bottom), p.minus);
+        (dismiss, Some(r))
     }
 
     /// The app's own frame over the panes, when it draws one: the controls of the top row at the end of the right

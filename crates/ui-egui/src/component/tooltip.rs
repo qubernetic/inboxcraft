@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use egui::layers::ShapeIdx;
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{Galley, Response, Role, Sense, Tooltip, Ui, WidgetInfo, pos2, vec2};
 
@@ -54,6 +55,18 @@ pub fn bubble(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: O
 
 /// The bubble with `note`, why the control cannot be used, in `muted` under the name, when there is one.
 pub fn bubble_noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, note: Option<&str>) {
+    bubble_in(ui, theme, keymap, name, action, note, None);
+}
+
+/// [`bubble_noted`] as a board draws it under a control: its shadow goes into `under`, a place kept on the same layer
+/// before the control was drawn, so the control stands over the shadow and keeps its colours, as on the design's
+/// boards.
+pub(crate) fn bubble_noted_under(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, note: Option<&str>, under: ShapeIdx) {
+    bubble_in(ui, theme, keymap, name, action, note, Some(under));
+}
+
+/// [`bubble_noted`], its shadow in the kept place `under` when there is one.
+fn bubble_in(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, action: Option<&str>, note: Option<&str>, under: Option<ShapeIdx>) {
     let p = &theme.palette;
     let font = theme.fonts.mono_s;
     let room = WIDEST - PAD.x * 2.0;
@@ -70,7 +83,15 @@ pub fn bubble_noted(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, act
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Tooltip, true, name));
     let painter = ui.painter();
-    paint::float(painter, theme, rect, FloatEdge::Quiet);
+    let mut float = paint::float_shapes(theme, rect, FloatEdge::Quiet).into_iter();
+    // The shadow comes first; on a board it goes into the place kept under the control.
+    if let Some(under) = under
+        && let Some(shadow) = float.next()
+    {
+        painter.set(under, shadow);
+    }
+    painter.extend(float);
+
     let left = rect.left() + PAD.x;
     let top = rect.top() + PAD.y;
     painter.galley(pos2(left, top + ((first - title.size().y) / 2.0).round()), title, p.ink);

@@ -413,6 +413,58 @@ pub fn link_sized(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size:
 
 /// [`link_sized`], `enabled` or not, drawn in `shown` when it is given (the gallery's boards).
 pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str, size: LinkSize, enabled: bool, shown: Option<Shown>) -> Response {
+    link_drawn(ui, theme, keymap, name, None, size, enabled, shown)
+}
+
+/// The caret after a link's words that opens (`▾`) or closes (`▴`) what follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Caret {
+    /// `▾`: opens.
+    Down,
+    /// `▴`: closes.
+    Up,
+}
+
+impl Caret {
+    /// The sign the caret stands for, as a screen reader hears it.
+    const fn sign(self) -> char {
+        match self {
+            Self::Down => '▾',
+            Self::Up => '▴',
+        }
+    }
+}
+
+/// The sheet's caret drawn in code, as shares of the text size: Plex Mono holds no such sign and the design draws it
+/// from another face, a triangle half the size wide and high (measured on the design's board): how far the next text
+/// would stand, its left and right, and its top and foot over the baseline.
+const CARET: (f32, f32, f32, f32, f32) = (0.502, 0.003, 0.499, 0.509, 0.011);
+
+/// A small link of `words` followed by `caret`, drawn as the design draws it: the words, a space, and the caret's
+/// triangle; a screen reader hears the words and the caret's sign.
+pub(crate) fn link_caret(ui: &mut Ui, theme: &Theme, keymap: &Keymap, words: &str, caret: Caret) -> Response {
+    let name = format!("{words} {}", caret.sign());
+    link_drawn(ui, theme, keymap, &name, Some((words, caret)), LinkSize::Small, true, None)
+}
+
+/// The width of a [`link_caret`] of `words`: its text box hugging the words, the space and the caret.
+pub(crate) fn link_caret_width(ui: &Ui, theme: &Theme, words: &str) -> f32 {
+    let font = theme.fonts.mono_s;
+    paint::run_box(super::galley(ui, &format!("{words} "), font, theme.palette.cyan_text).size().x + CARET.0 * font.size)
+}
+
+/// A link called `name`; with `caret`, its words and the caret drawn in place of `name`.
+#[expect(clippy::too_many_arguments, reason = "a link's arguments, its caret and the state a board forces")]
+fn link_drawn(
+    ui: &mut Ui,
+    theme: &Theme,
+    keymap: &Keymap,
+    name: &str,
+    caret: Option<(&str, Caret)>,
+    size: LinkSize,
+    enabled: bool,
+    shown: Option<Shown>,
+) -> Response {
     let p = &theme.palette;
     let enabled = enabled && !soon::is_soon(ui) && ui.is_enabled();
     let (font, pad, height) = match size {
@@ -420,8 +472,18 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
         LinkSize::Small => (theme.fonts.mono_s, 0.0, theme.boxes().row_link),
     };
     let ink = if enabled { p.cyan_text } else { p.muted };
-    let galley = super::galley(ui, name, font, ink);
-    let width = galley.size().x.ceil();
+    let (galley, width) = match caret {
+        Some((words, _)) => {
+            let galley = super::galley(ui, &format!("{words} "), font, ink);
+            let width = paint::run_box(galley.size().x + CARET.0 * font.size);
+            (galley, width)
+        }
+        None => {
+            let galley = super::galley(ui, name, font, ink);
+            let width = galley.size().x.ceil();
+            (galley, width)
+        }
+    };
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(vec2(width + pad * 2.0, height), sense);
     response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
@@ -432,19 +494,33 @@ pub(crate) fn link_with(ui: &mut Ui, theme: &Theme, keymap: &Keymap, name: &str,
             painter.rect_filled(rect, 0.0, p.cyan_muted);
         }
         let top = (rect.center().y - galley.size().y / 2.0).round();
+        // The baseline is the design's text box's (the box of the line height in the middle, half the leading over the
+        // ascent), not the hinted one egui puts the letters on, which lies a fraction of a pixel lower.
+        let (ascent, descent) = font.face.extent();
+        let baseline = rect.center().y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size;
         // The underline, under the pointer and while pressed: the font's own, as the sheet's text decoration draws it,
         // its thickness and its place under the baseline from the face, so its edges may fall between pixels.
         if lit.pressed || lit.hover {
-            let baseline = galley.rows.first().and_then(|row| row.glyphs.first().map(|glyph| row.pos.y + glyph.pos.y)).unwrap_or(font.size);
             let (below, thick) = font.face.underline();
-            let middle = top + baseline + below * font.size;
-            let line = egui::Rect::from_x_y_ranges(
-                rect.left() + pad..=rect.left() + pad + width,
-                middle - thick * font.size / 2.0..=middle + thick * font.size / 2.0,
-            );
-            painter.rect_filled(line, 0.0, p.cyan_text);
+            let middle = baseline + below * font.size;
+            let band = (middle - thick * font.size / 2.0, middle + thick * font.size / 2.0);
+            paint::sampled_band(painter, rect.left() + pad..=rect.left() + pad + width, band, p.cyan_text);
         }
-        painter.galley(egui::pos2(rect.left() + pad, top), galley, ink);
+        let text_left = rect.left() + pad;
+        let after = text_left + galley.size().x;
+        painter.galley(egui::pos2(text_left, top), galley, ink);
+        if let Some((_, caret)) = caret {
+            let (_, left, right, high, low) = CARET;
+            let s = font.size;
+            let (top, foot) = (baseline - high * s, baseline - low * s);
+            let (left, right) = (after + left * s, after + right * s);
+            let middle = (left + right) / 2.0;
+            let points = match caret {
+                Caret::Down => vec![egui::pos2(left, top), egui::pos2(right, top), egui::pos2(middle, foot)],
+                Caret::Up => vec![egui::pos2(left, foot), egui::pos2(middle, top), egui::pos2(right, foot)],
+            };
+            painter.add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
+        }
         if lit.focus {
             paint::focus_ring(painter, theme, rect, Ring::Outside);
         }

@@ -8,7 +8,8 @@
 //! sheet's order, and under them the marks: avatar, badge, scroll bar, account bar and the icons. The data is
 //! invented; the keys come from [`keymap`], a keymap with a key for each action shown.
 
-use egui::{Id, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
+use egui::layers::ShapeIdx;
+use egui::{Id, Rect, Shape, Ui, UiBuilder, Vec2, pos2, vec2};
 use inboxcraft_time::{CivilDateTime, Offset, Timestamp};
 
 use crate::draw::paint::Panes;
@@ -165,10 +166,13 @@ fn row(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         Action { icon: IconId::MarkRead, name: tr!("Mark as read"), action: Some("mail.read"), unavailable: None },
         Action { icon: IconId::Delete, name: tr!("Delete"), action: Some("mail.delete"), unavailable: None },
     ];
-    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, f32::INFINITY);
-    let at = pos2(rect.left() + s.s3, rect.center().y - text.size().y / 2.0);
+    // The group stands at the line's right end, the row's text cut short of it.
+    let line = rect.shrink2(vec2(s.s4, 0.0));
+    let room = line.width() - hover::width(ui, theme, keymap, &actions) - s.s2;
+    let text = cut(ui, "Odile Brannock  Allotment rota for November: the beds by the shed", theme.fonts.body, p.ink, room);
+    let at = pos2(line.left(), rect.center().y - text.size().y / 2.0);
     ui.painter().galley(at, text, p.ink);
-    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), rect, true, &actions);
+    hover::actions(ui, theme, keymap, Id::unique("gallery-row"), line, true, &actions);
 }
 
 /// The right column: buttons, pills, badges, a row with hover actions, a tooltip and a popup.
@@ -260,14 +264,14 @@ fn picker(ui: &mut Ui, theme: &Theme, _: &Keymap) {
 }
 
 /// A board's title: the set's name.
-fn title(ui: &mut Ui, theme: &Theme, text: &str) {
+pub(super) fn title(ui: &mut Ui, theme: &Theme, text: &str) {
     ui.add_space(theme.spacing.s2);
     ui.label(galley(ui, text, theme.fonts.heading, theme.palette.ink));
     ui.add_space(theme.spacing.s1);
 }
 
 /// One state of a board: its name in `mono_s` and `muted` over the control `add` draws.
-fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = theme.spacing.s1;
         ui.label(galley(ui, state, theme.fonts.mono_s, theme.palette.muted));
@@ -276,7 +280,7 @@ fn cell(ui: &mut Ui, theme: &Theme, state: &str, add: impl FnOnce(&mut Ui)) {
 }
 
 /// A row of a board's cells, apart enough that a focus ring never touches the next control.
-fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
+pub(super) fn cells(ui: &mut Ui, theme: &Theme, add: impl FnOnce(&mut Ui)) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = theme.spacing.s4;
         add(ui);
@@ -292,10 +296,11 @@ const REASON_ROOM: f32 = 48.0;
 
 /// The reason tooltip of the unavailable control `name` at `control`, as the boards draw it: 36 under its top, its
 /// left edge on the control's, over what follows (it takes no room of its own).
-fn reason_under(ui: &mut Ui, theme: &Theme, keymap: &Keymap, control: Rect, name: &str, reason: &str) {
+/// Its shadow goes into `under`, kept before the control was drawn: the board's control stands over it.
+fn reason_under(ui: &mut Ui, theme: &Theme, keymap: &Keymap, control: Rect, name: &str, reason: &str, under: ShapeIdx) {
     let at = Rect::from_min_size(control.left_top() + vec2(0.0, REASON_DROP), vec2(320.0, 120.0));
     let mut child = ui.new_child(UiBuilder::new().max_rect(at).layout(egui::Layout::top_down(egui::Align::Min)));
-    tooltip::bubble_noted(&mut child, theme, keymap, name, None, Some(reason));
+    tooltip::bubble_noted_under(&mut child, theme, keymap, name, None, Some(reason), under);
 }
 
 /// The icon button's board: default, hover, focus, pressed, selected, disabled, unavailable.
@@ -318,8 +323,9 @@ fn icon_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
         });
         cell(ui, theme, tr!("unavailable"), |ui| {
             let reason = tr!("Not yet: choose a message first");
+            let under = ui.painter().add(Shape::Noop);
             let control = pin().unavailable(reason).show(ui, theme, keymap).rect;
-            reason_under(ui, theme, keymap, control, tr!("Pin"), reason);
+            reason_under(ui, theme, keymap, control, tr!("Pin"), reason, under);
         });
     });
     ui.add_space(REASON_ROOM);
@@ -353,8 +359,9 @@ fn text_buttons(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
                 TextButton::new(label).tone(tone).enabled(false).show(ui, theme, keymap);
             });
             cell(ui, theme, tr!("unavailable"), |ui| {
+                let under = ui.painter().add(Shape::Noop);
                 let control = TextButton::new(label).tone(tone).unavailable(reason).show(ui, theme, keymap).rect;
-                reason_under(ui, theme, keymap, control, label, reason);
+                reason_under(ui, theme, keymap, control, label, reason, under);
             });
         });
         ui.add_space(REASON_ROOM);
@@ -596,9 +603,11 @@ fn switches(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     });
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("unavailable"), |ui| {
+            let under = ui.painter().add(Shape::Noop);
             switch::switch_noted(ui, theme, name, SwitchState::Unavailable, Some(tr!("Not there in the Flatpak yet")));
-            // The tooltip the switch shows under the pointer, drawn in place as the sheet draws it.
-            tooltip::bubble_noted(ui, theme, keymap, name, None, Some(tr!("Not there in the Flatpak yet")));
+            // The tooltip the switch shows under the pointer, drawn in place as the sheet draws it, its shadow under
+            // the switch.
+            tooltip::bubble_noted_under(ui, theme, keymap, name, None, Some(tr!("Not there in the Flatpak yet")), under);
         });
     });
 }
@@ -662,7 +671,8 @@ fn segments(ui: &mut Ui, theme: &Theme) {
     });
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("long-label"), |ui| {
-            let long = [(0, tr!("Grouped"), font), (1, tr!("A summary of everything in the inbox"), font), (2, tr!("List"), font)];
+            // The board's own sample words, so the cut at 136 is compared glyph by glyph.
+            let long = [(0, tr!("Gruppiert"), font), (1, tr!("Zusammenfassung des Posteingangs"), font), (2, tr!("Liste"), font)];
             segmented(ui, theme, &long, 0);
         });
     });
@@ -726,8 +736,9 @@ fn selects(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     cells(ui, theme, |ui| {
         cell(ui, theme, tr!("unavailable"), |ui| {
             let calendar = Select { name: tr!("Calendar"), ..select };
+            let under = ui.painter().add(Shape::Noop);
             calendar.show_noted(ui, theme, &mut false, Some(tr!("Not yet: add a calendar account first")));
-            tooltip::bubble_noted(ui, theme, keymap, tr!("Calendar"), None, Some(tr!("Not yet: add a calendar account first")));
+            tooltip::bubble_noted_under(ui, theme, keymap, tr!("Calendar"), None, Some(tr!("Not yet: add a calendar account first")), under);
         });
     });
 }

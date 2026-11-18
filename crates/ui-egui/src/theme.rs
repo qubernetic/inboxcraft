@@ -228,6 +228,10 @@ pub struct Sizes {
     pub float_title: f32,
     /// A recipient suggestion's height.
     pub suggestion: f32,
+    /// The height of a row's hover action, a progress line and a check step's line.
+    pub strip: f32,
+    /// The least height of a settings row.
+    pub settings_row: f32,
 }
 
 pub(crate) const SIZES: Sizes = Sizes {
@@ -251,6 +255,8 @@ pub(crate) const SIZES: Sizes = Sizes {
     multiline: [96.0, 240.0],
     float_title: 28.0,
     suggestion: 40.0,
+    strip: 24.0,
+    settings_row: 56.0,
 };
 
 /// The one shadow, under what floats over the window: 12 px down, 32 px blur, black at 40 %.
@@ -283,6 +289,16 @@ impl Face {
             Self::Sans => (0.095, 0.060),
             Self::SansSemiBold => (0.075, 0.088),
             Self::Brand => (154.0 / 2048.0, 102.0 / 2048.0),
+        }
+    }
+
+    /// The face's ascent and descent from its `hhea` table, as shares of the size: a design text box puts its
+    /// baseline half the leading (line height less their sum) under its top, plus the ascent.
+    #[must_use]
+    pub const fn extent(self) -> (f32, f32) {
+        match self {
+            Self::Mono | Self::MonoSemiBold | Self::Sans | Self::SansSemiBold => (1.025, 0.275),
+            Self::Brand => (2027.0 / 2048.0, 584.0 / 2048.0),
         }
     }
 
@@ -797,6 +813,8 @@ impl Theme {
             multiline: z.multiline.map(|height| self.size(height)),
             float_title: self.size(z.float_title),
             suggestion: self.size(z.suggestion),
+            strip: self.size(z.strip),
+            settings_row: self.size(z.settings_row),
             ..z
         }
     }

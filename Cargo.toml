@@ -77,6 +77,9 @@ egui = { version = "0.37", default-features = false, features = ["default_fonts"
 # ui-egui and the desktop app only (already in the graph through egui): reads a font face the way egui does, so a face
 # egui cannot read is never handed to it, and a found face counts only where it has an outline egui can draw
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
+# ui-egui only (already in the graph through egui): the grapheme clusters of text from mail, so a cut never splits a
+# letter from its marks or an emoji sequence
+unicode-segmentation = { version = "1.13", default-features = false }
 # the desktop app only, native only: reads the names and style of the computer's own fonts found for the scripts IBM
 # Plex lacks (pure Rust, no C library). Without its own folder walk (`fontconfig`), which loops over a collection
 # claiming billions of faces, and without `memmap`: files are read, not mapped.

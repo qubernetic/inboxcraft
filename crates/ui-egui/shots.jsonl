@@ -16,6 +16,19 @@
 {"out": "docs/images/reader-pictures-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "pictures": "once", "details": true}
 {"out": "docs/images/reader-full-light.png", "mode": "light", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
 {"out": "docs/images/reader-full-dark.png", "mode": "dark", "size": [1400, 860], "select": "Draft logo for the bakery", "full_width": true}
+# The reader's More menu open, its dividers between the groups of rows; the service mail ends with a rule (<hr>)
+# (#233).
+{"out": "docs/images/reader-more-light.png", "mode": "light", "size": [1400, 860], "select": "Your bike is due for a service", "click": [961, 37]}
+{"out": "docs/images/reader-more-dark.png", "mode": "dark", "size": [1400, 860], "select": "Your bike is due for a service", "click": [961, 37]}
+# The error banner over the panes, one line between them (#233).
+{"out": "docs/images/error-banner-light.png", "mode": "light", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-dark.png", "mode": "dark", "open": {"folder": 4242}}
+# The error banner in the app's own frame: under the title strip, beside the rail (#233).
+{"out": "docs/images/error-banner-strip-light.png", "mode": "light", "frame": "strip", "open": {"folder": 4242}}
+{"out": "docs/images/error-banner-strip-dark.png", "mode": "dark", "frame": "strip", "open": {"folder": 4242}}
+# The account picker open in a low window, so its list scrolls and shows its thumb (#233).
+{"out": "docs/images/account-picker-open-light.png", "mode": "light", "size": [1200, 180], "click": [184, 82]}
+{"out": "docs/images/account-picker-open-dark.png", "mode": "dark", "size": [1200, 180], "click": [184, 82]}
 # Acting on mail (#131): the open message archived, the next one open (and read) and the toast with Undo.
 {"out": "docs/images/reader-archive-light.png", "mode": "light", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
 {"out": "docs/images/reader-archive-dark.png", "mode": "dark", "size": [1400, 860], "select": "Allotment rota for November", "act": "archive"}
@@ -47,6 +60,10 @@
 # and the time picker, on a page of their own.
 {"out": "docs/images/components-fields-light.png", "mode": "light", "fields": true}
 {"out": "docs/images/components-fields-dark.png", "mode": "dark", "fields": true}
+# The shared rows and blocks (#235): row, hover actions, banner, empty state, progress, settings row, check step,
+# facts, on a page of their own.
+{"out": "docs/images/components-blocks-light.png", "mode": "light", "blocks": true}
+{"out": "docs/images/components-blocks-dark.png", "mode": "dark", "blocks": true}
 # The appearance settings page (E1.16b).
 {"out": "docs/images/settings-light.png", "mode": "light", "size": [1200, 820], "settings": true}
 {"out": "docs/images/settings-dark.png", "mode": "dark", "size": [1200, 820], "settings": true}
@@ -54,6 +71,13 @@
 # keyboard, with invented data the app does not show yet.
 {"out": "docs/images/list-showcase-light.png", "mode": "light", "size": [1400, 860], "showcase": true, "step": 2}
 {"out": "docs/images/list-showcase-dark.png", "mode": "dark", "size": [1400, 860], "showcase": true, "step": 2}
+# A hovered row beside the reader (#235): its hover actions on the first line right of its middle, its flag left of
+# them, its time given way.
+{"out": "docs/images/list-hover-light.png", "mode": "light", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
+{"out": "docs/images/list-hover-dark.png", "mode": "dark", "size": [1400, 860], "select": "Photos from the coast walk", "pointer": [470, 335]}
+# The row the keyboard is on, with the app's own keys (#235): its time kept, its actions left of it.
+{"out": "docs/images/list-keyed-light.png", "mode": "light", "size": [1400, 860], "step": 2}
+{"out": "docs/images/list-keyed-dark.png", "mode": "dark", "size": [1400, 860], "step": 2}
 {"out": "docs/images/list-slide-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
 {"out": "docs/images/list-slide-dark.png", "mode": "dark", "size": [1400, 860], "step": 1, "act": "done", "slide": true}
 {"out": "docs/images/list-toast-light.png", "mode": "light", "size": [1400, 860], "step": 1, "act": "done"}

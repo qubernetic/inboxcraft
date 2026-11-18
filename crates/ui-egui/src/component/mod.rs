@@ -34,11 +34,16 @@
 
 pub mod avatar;
 pub mod badge;
+pub mod banner;
 pub mod button;
 pub mod card;
+pub mod check_step;
 pub mod checkbox;
+pub mod empty;
+pub mod facts;
 pub mod field;
 pub mod gallery;
+pub mod gallery_blocks;
 pub mod gallery_fields;
 pub mod hover;
 pub mod icon;
@@ -46,10 +51,13 @@ pub mod key;
 pub mod label;
 pub mod pill;
 pub mod popup;
+pub mod progress;
 pub mod recipient;
+pub mod row;
 pub mod scroll;
 pub mod segmented;
 pub mod select;
+pub mod settings_row;
 pub mod slider;
 pub mod soon;
 pub mod switch;
@@ -174,15 +182,118 @@ pub(crate) fn galley(ui: &Ui, text: &str, font: Font, colour: egui::Color32) -> 
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap.max_width = f32::INFINITY;
     job.break_on_newline = false;
-    ui.painter().layout_job(job)
+    crate::draw::paint::on_baseline(ui.painter().layout_job(job))
 }
 
-/// [`galley`], cut with an ellipsis at `width`.
+/// [`galley`], cut with an ellipsis at `width`. As the design cuts a line, the ellipsis follows the last letter kept:
+/// spaces the cut leaves before it are dropped.
 pub(crate) fn cut(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32) -> Arc<Galley> {
     let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
     job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     job.break_on_newline = false;
-    ui.painter().layout_job(job)
+    crate::draw::paint::on_baseline(crate::draw::paint::tight_cut(ui.painter(), ui.painter().layout_job(job)))
+}
+
+/// `text` in `font` and `colour`, wrapped at `width` onto at most `rows` lines (at least one), the last cut with one
+/// ellipsis; each line placed as `align` says (centred lines centre on the galley's origin). Text from outside (a
+/// mail's words, a server's answer) goes through [`plain`] first.
+pub(crate) fn wrapped(ui: &Ui, text: &str, font: Font, colour: egui::Color32, width: f32, rows: usize, align: egui::Align) -> Arc<Galley> {
+    let mut job = egui::text::LayoutJob::single_section(font.text(text), font.format(colour));
+    job.wrap = egui::text::TextWrapping { max_width: width.max(1.0), max_rows: rows.max(1), break_anywhere: false, overflow_character: Some('…') };
+    job.halign = align;
+    crate::draw::paint::on_baseline(ui.painter().layout_job(job))
+}
+
+/// `text` with every control character (a NUL, a line break, a tab) put as a space and every explicit bidi embedding,
+/// override and isolate left out: text from outside drawn as plain words, never as layout. egui applies the bidi
+/// algorithm, so an override in a mail's words would turn round what follows it. The direction marks (U+200E, U+200F,
+/// U+061C) stay: they only settle where brackets and digits of a right-to-left name fall, and the words' own direction
+/// (Hebrew, Arabic) still shows.
+pub(crate) fn plain(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().any(|c| c.is_control() || bidi_override(c)) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !bidi_override(*c)).map(|c| if c.is_control() { ' ' } else { c }).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// `text` cut after at most `most` characters, between grapheme clusters (a letter with its marks, an emoji sequence
+/// is never split), and whether it was: a bound on what one line lays out, so a mail's 10 000 combining marks (which
+/// take no width and so are never cut by the line) cost no more than a line. One cluster longer than `most` is left out
+/// whole.
+pub(crate) fn capped(text: &str, most: usize) -> (&str, bool) {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let mut chars = 0_usize;
+    for (at, grapheme) in text.grapheme_indices(true) {
+        chars = chars.saturating_add(grapheme.chars().count());
+        if chars > most {
+            return (text.get(..at).unwrap_or_default(), true);
+        }
+    }
+    (text, false)
+}
+
+/// `text` as it fits on one line of `room` points in `font`: whole, or its longest beginning in the written order that
+/// ends at a grapheme boundary, with no space before one closing `…`; empty when not even the `…` fits. A right-to-left
+/// name is cut at its logical end and laid out once, so it is never mirrored.
+pub(crate) fn fit(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    use unicode_segmentation::UnicodeSegmentation as _;
+    let width = |text: &str| galley(ui, text, font, egui::Color32::PLACEHOLDER).size().x;
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    let ends: Vec<usize> = text.grapheme_indices(true).map(|(at, grapheme)| at + grapheme.len()).collect();
+    let cut = |count: usize| {
+        let end = if count == 0 { 0 } else { ends.get(count - 1).copied().unwrap_or(0) };
+        format!("{}…", text.get(..end).unwrap_or_default().trim_end())
+    };
+    // The most clusters whose cut fits: a binary search, each step one layout (egui keeps the galleys it laid out).
+    let (mut low, mut high) = (0_usize, ends.len());
+    if width(&cut(0)) > room {
+        return String::new();
+    }
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if width(&cut(middle)) <= room {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    cut(low)
+}
+
+/// The most characters of one line of words from outside that are laid out at all: far more than a line shows.
+pub(crate) const MOST: usize = 400;
+
+/// `text` as it fits on one line of `room` points in `font` ([`fit`]), of which at most [`MOST`] characters are laid out
+/// at all: a value as long as a header costs no more than a line. A cut at the cap ends with the ellipsis too.
+pub(crate) fn fit_capped(ui: &Ui, text: &str, font: Font, room: f32) -> String {
+    let (kept, capped) = capped(text, MOST);
+    let shown = fit(ui, kept, font, room);
+    if capped && !shown.ends_with('…') {
+        // The line held all it was given: the ellipsis says the rest was left out.
+        return fit(ui, &format!("{}…", kept.trim_end()), font, room);
+    }
+    shown
+}
+
+/// `text` from outside on one line of `room` points in `font` and `colour`: [`plain`], capped and cut between grapheme
+/// clusters with one ellipsis ([`fit_capped`]).
+pub(crate) fn fitted(ui: &Ui, text: &str, font: Font, colour: egui::Color32, room: f32) -> Arc<Galley> {
+    galley(ui, &fit_capped(ui, &plain(text), font, room), font, colour)
+}
+
+/// Whether `c` is an explicit bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069): what could turn
+/// round the words after it.
+fn bidi_override(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// `text` from outside as a name a screen reader hears or a link carries: [`plain`], so no name carries an override
+/// that could turn round what follows it.
+pub(crate) fn spoken(text: &str) -> String {
+    plain(text).into_owned()
 }
 
 /// `text` as a label in `font` and `colour`. A style in capitals paints capitals, but a screen reader hears `text` as

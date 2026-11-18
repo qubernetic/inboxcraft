@@ -318,30 +318,33 @@ fn keyboard_selection_shows_the_same_actions_on_the_selected_row() {
 }
 
 #[test]
-fn the_hover_actions_cover_the_row_text_on_a_solid_float() {
-    /// Whether `shape` holds an opaque rectangle under `point`.
-    fn solid_under(shape: &egui::Shape, point: egui::Pos2) -> bool {
-        match shape {
-            egui::Shape::Rect(rect) => rect.fill.a() == 255 && rect.rect.contains(point),
-            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| solid_under(shape, point)),
-            _ => false,
-        }
-    }
+fn the_hover_actions_stand_clear_of_the_row_text_and_the_time_gives_way() {
+    // The design's group has no float of its own: the row cuts its sender short of it and hides its time.
     let mut harness = harness(true);
     harness.get_by_label(ODILE).hover();
     harness.run();
-    let done = harness.get_by_role_and_label(Role::Button, "Done").rect();
     let row = harness.get_by_label(ODILE).rect();
-    let shapes = &harness.output().shapes;
-    let float = shapes.iter().rposition(|clipped| solid_under(&clipped.shape, done.center()));
-    let float = float.expect("the float under the Done button");
+    let time = date_of(&harness, "Allotment rota for November");
+    let buttons: Vec<egui::Rect> = ["Done", "Mark as read", "Delete", "Snooze"]
+        .iter()
+        .flat_map(|name| harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).collect::<Vec<_>>())
+        .filter(|rect| row.contains(rect.center()))
+        .collect();
+    assert_eq!(buttons.len(), 4, "the row's group");
     let mut seen = 0;
-    for (index, clipped) in shapes.iter().enumerate() {
+    for clipped in &harness.output().shapes {
         let egui::Shape::Text(text) = &clipped.shape else { continue };
         let rect = text.visual_bounding_rect();
-        if row.contains(rect.left_center()) && (text.galley.job.text.starts_with("Odile") || text.galley.job.text.starts_with("Allotment")) {
+        if !row.contains(rect.left_center()) {
+            continue;
+        }
+        let words = &text.galley.job.text;
+        assert!(*words != time, "the time is hidden while the actions show");
+        if words.starts_with("Odile") || words.starts_with("Allotment") {
             seen += 1;
-            assert!(index < float, "{:?} is drawn over the float", text.galley.job.text);
+            for button in &buttons {
+                assert!(!rect.intersects(*button), "{words:?} at {rect:?} runs under an action at {button:?}");
+            }
         }
     }
     assert!(seen >= 2, "the sender and the subject were drawn");
@@ -536,4 +539,238 @@ fn the_key_of_an_action_only_a_coming_soon_control_offers_runs_nothing() {
         harness.run();
         assert_eq!(harness.state().palette().is_open(), normal, "its key opens the palette, a usable control offering it too: {normal}");
     }
+}
+
+/// Opens Teodor's message with a pointer press on its row, so the list stands beside the reader at its default width.
+fn beside_the_reader() -> Harness<'static, InboxApp> {
+    let mut harness = harness(false);
+    harness.query_all_by_label_contains("Photos from the coast walk").next().unwrap().click();
+    harness.run();
+    assert!(harness.state().reader().open_id().is_some(), "Teodor's message is open");
+    harness
+}
+
+/// Presses Odile's row in its middle with the pointer, the way a person does: the pointer comes, the row shows its
+/// hover actions, then the press. The row opens and nothing is acted on.
+fn press_odile_in_the_middle(harness: &mut Harness<'static, InboxApp>, width: &str) {
+    let before = harness.state().reader().open_id();
+    let middle = harness.get_by_label(ODILE).rect().center();
+    harness.hover_at(middle);
+    harness.run();
+    for name in ["Done", "Mark as read", "Delete", "Snooze"] {
+        for button in harness.query_all_by_role_and_label(Role::Button, name) {
+            assert!(!button.rect().contains(middle), "{width}: {name} at {:?} lies under the row's middle {middle:?}", button.rect());
+        }
+    }
+    harness.get_by_label(ODILE).click();
+    harness.run();
+    assert!(harness.query_by_label("Marked as done").is_none(), "{width}: nothing was done");
+    assert_ne!(harness.state().reader().open_id(), before, "{width}: Odile's message opened");
+}
+
+#[test]
+fn a_pointer_press_on_a_rows_middle_opens_it_at_the_default_and_the_narrowest_list() {
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    assert!((row.width() - (380.0 - 36.0)).abs() <= 12.0, "the default list: {row:?}");
+    press_odile_in_the_middle(&mut harness, "380");
+    // The list's edge dragged as far left as it goes.
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    let y = row.center().y;
+    let mut narrowest = row;
+    for x in 1..40 {
+        let from = egui::pos2(row.right() + x as f32, y);
+        harness.hover_at(from);
+        harness.drag_at(from);
+        harness.run();
+        harness.hover_at(egui::pos2(10.0, y));
+        harness.run();
+        harness.drop_at(egui::pos2(10.0, y));
+        harness.run();
+        narrowest = harness.get_by_label(ODILE).rect();
+        if narrowest.width() < row.width() - 100.0 {
+            break;
+        }
+    }
+    assert!(narrowest.width() < 120.0, "the list is at its narrowest: {narrowest:?}");
+    press_odile_in_the_middle(&mut harness, "narrowest");
+}
+
+#[test]
+fn a_pointer_press_on_done_beside_the_reader_marks_the_message_done() {
+    let mut harness = beside_the_reader();
+    let row = harness.get_by_label(ODILE).rect();
+    harness.hover_at(row.center());
+    harness.run();
+    // The row's own Done, not the reader's.
+    let done = harness.query_all_by_role_and_label(Role::Button, "Done").map(|node| node.rect()).find(|rect| row.contains(rect.center()));
+    let done = done.unwrap_or_else(|| panic!("no Done on the hovered row"));
+    harness.hover_at(done.center());
+    harness.run();
+    harness.query_all_by_role_and_label(Role::Button, "Done").find(|node| node.rect() == done).unwrap().click();
+    // The row slides out over a few frames.
+    harness.run_steps(12);
+    harness.get_by_label("Marked as done");
+    assert!(harness.query_by_label(ODILE).is_none(), "the row has left the inbox");
+}
+
+#[test]
+fn a_hovered_rows_snooze_shows_its_key_as_the_sheet_does_though_it_cannot_run_yet() {
+    let mut harness = harness(true);
+    harness.get_by_label(ODILE).hover();
+    harness.run();
+    let row = harness.get_by_label(ODILE).rect();
+    let width = |harness: &Harness<'static, InboxApp>, name: &str| {
+        harness
+            .query_all_by_role_and_label(Role::Button, name)
+            .map(|node| node.rect())
+            .find(|rect| row.contains(rect.center()))
+            .map(|rect| rect.width())
+    };
+    // Its icon and its dashed one-letter chip, as wide as Done with its own.
+    assert_eq!(width(&harness, "Snooze"), width(&harness, "Done"));
+}
+
+/// The date the list writes for the message with `subject`.
+fn date_of(harness: &Harness<'static, InboxApp>, subject: &str) -> String {
+    let mailbox = harness.state().mailbox();
+    let row = mailbox.messages().iter().find(|row| row.subject == subject).cloned();
+    row.map(|row| mailbox.row_date(&row)).unwrap_or_default()
+}
+
+/// The texts the last frame drew whose left middle lies in `rect`: `(rect, words)`.
+fn texts_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect) -> Vec<(egui::Rect, String)> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some((text.visual_bounding_rect(), text.galley.job.text.clone())),
+            _ => None,
+        })
+        .filter(|(at, _)| rect.contains(at.left_center()))
+        .collect()
+}
+
+/// The rects of the buttons called `name` in `rect`.
+fn buttons_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect, name: &str) -> Vec<egui::Rect> {
+    harness.query_all_by_role_and_label(Role::Button, name).map(|node| node.rect()).filter(|at| rect.contains(at.center())).collect()
+}
+
+#[test]
+fn the_keyed_row_keeps_its_time_and_its_actions_stand_left_of_it() {
+    let mut harness = harness(true);
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    let selected = harness.state().mailbox().selected().unwrap();
+    let row = harness.state().mailbox().messages().iter().find(|row| row.id == selected).unwrap().clone();
+    let time = harness.state().mailbox().row_date(&row);
+    let rect = harness.get_by_label(&harness.state().mailbox().spoken(&row)).rect();
+    let shown: Vec<_> = texts_in(&harness, rect).into_iter().filter(|(_, words)| *words == time).collect();
+    assert_eq!(shown.len(), 1, "the keyed row shows its time {time:?}, as the mail row's focus state");
+    // Done gives way last: whatever else fits left of the time, Done shows.
+    let done = buttons_in(&harness, rect, "Done");
+    assert_eq!(done.len(), 1, "the keyed row shows its actions");
+    for name in ["Done", "Mark as read", "Mark as unread", "Delete", "Snooze"] {
+        for button in buttons_in(&harness, rect, name) {
+            assert!(button.right() < shown[0].0.left(), "{name} stands left of the time: {button:?} {shown:?}");
+        }
+    }
+}
+
+/// The icon glyphs `id` the last frame drew in `rect`.
+fn marks_in(harness: &Harness<'static, InboxApp>, rect: egui::Rect, id: crate::iconset::IconId) -> Vec<egui::Rect> {
+    let glyph = crate::iconset::glyph(id).to_string();
+    texts_in(harness, rect).into_iter().filter(|(_, words)| *words == glyph).map(|(at, _)| at).collect()
+}
+
+#[test]
+fn a_hovered_rows_flag_and_pin_stay_left_of_its_actions() {
+    use crate::iconset::IconId;
+    // Beside the reader at 130 % the list is narrow and the words large: a marked row's sender reaches its marks.
+    let mut harness = beside_the_reader();
+    harness.state_mut().set_text_scale(crate::theme::TextScale::ALL[4]);
+    harness.run();
+    let marked: Vec<_> = harness.state().mailbox().messages().iter().filter(|row| row.flagged || row.pinned).cloned().collect();
+    assert!(!marked.is_empty(), "the sample has a flagged or pinned message");
+    let (mut checked, mut cut) = (0, 0);
+    for row in marked {
+        let name = harness.state().mailbox().spoken(&row);
+        let Some(node) = harness.query_by_label(&name) else { continue };
+        let rect = node.rect();
+        harness.hover_at(egui::pos2(rect.left() + 40.0, rect.center().y));
+        harness.run();
+        let done = buttons_in(&harness, rect, "Done");
+        assert_eq!(done.len(), 1, "{name}: hovered, it shows its actions");
+        let mut leftmost = f32::INFINITY;
+        for (shown, id) in [(row.flagged, IconId::Flag), (row.pinned, IconId::Pin)] {
+            let marks = marks_in(&harness, rect, id);
+            if shown {
+                assert_eq!(marks.len(), 1, "{name}: its {id:?} stays while the actions show");
+                assert!(marks[0].right() <= done[0].left() - 8.0 + 0.5, "{name}: {id:?} {marks:?} left of the group {done:?}");
+                leftmost = leftmost.min(marks[0].left());
+            }
+        }
+        // The sender is cut 4 short of the marks.
+        let sender = texts_in(&harness, rect).into_iter().find(|(_, words)| words.starts_with(row.sender.as_str()));
+        let sender = sender.unwrap_or_else(|| panic!("{name}: the sender is drawn"));
+        assert!(sender.0.right() <= leftmost - 4.0 + 0.5, "{name}: the sender {:?} ends 4 short of the marks at {leftmost}", sender.0);
+        let elided = harness.output().shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => text.galley.elided && text.galley.job.text.starts_with(row.sender.as_str()),
+            _ => false,
+        });
+        cut += usize::from(elided);
+        let time = harness.state().mailbox().row_date(&row);
+        assert!(texts_in(&harness, rect).iter().all(|(_, words)| *words != time), "{name}: the hovered row gives its time way");
+        checked += 1;
+    }
+    assert!(checked >= 1, "a marked row in sight was hovered");
+    assert!(cut >= 1, "a sender reached its marks and was cut");
+}
+
+#[test]
+fn two_touching_rows_never_both_take_the_pointer_on_their_shared_edge() {
+    let mut harness = harness(true);
+    let upper = harness.get_by_label(ODILE).rect();
+    let rows: Vec<egui::Rect> = harness
+        .state()
+        .mailbox()
+        .messages()
+        .iter()
+        .filter_map(|row| harness.query_by_label(&harness.state().mailbox().spoken(row)).map(|node| node.rect()))
+        .collect();
+    let lower = rows.into_iter().find(|rect| (rect.top() - upper.bottom()).abs() < 0.01 && (rect.left() - upper.left()).abs() < 0.01);
+    let lower = lower.expect("a row right under Odile's");
+    harness.hover_at(egui::pos2(upper.left() + 40.0, upper.bottom()));
+    harness.run();
+    let groups = [upper, lower].iter().filter(|rect| !buttons_in(&harness, **rect, "Done").is_empty()).count();
+    assert_eq!(groups, 1, "one row owns the shared edge");
+    // The one that owns it is the lower: a row's top edge is its own, its bottom edge the next row's.
+    assert_eq!(buttons_in(&harness, lower, "Done").len(), 1);
+}
+
+#[test]
+fn a_frame_of_a_thousand_rows_none_hovered_or_keyed_lays_out_no_hover_action() {
+    let clock = FakeClock::new(Timestamp::from_unix(1_793_869_200, 0).unwrap());
+    let store = sample::grown(Timestamp::from_unix(1_793_869_200, 0).unwrap(), 1_200).unwrap();
+    let session = sample::session_over(store, Box::new(clock.clone())).unwrap();
+    let mut mailbox = Mailbox::new(session, Box::new(clock));
+    mailbox.set_inbox_view(InboxView::List);
+    let mut harness = harness_of(InboxApp::new(mailbox));
+    harness.hover_at(egui::pos2(1.0, 1.0));
+    harness.run();
+    crate::component::hover::tests::reset_laid();
+    ACTIONS_BUILT.with(|built| built.set(0));
+    harness.step();
+    let built = crate::rows_built(&harness.ctx).unwrap_or(0);
+    assert!(built >= 1_000, "{built} rows laid out");
+    assert_eq!(crate::component::hover::tests::laid(), 0, "no row's actions were laid out");
+    assert_eq!(ACTIONS_BUILT.with(std::cell::Cell::get), 0, "no row's list of actions was built");
+}
+
+thread_local! {
+    /// How many rows' lists of hover actions were built on this thread (`list::actions`).
+    pub(super) static ACTIONS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

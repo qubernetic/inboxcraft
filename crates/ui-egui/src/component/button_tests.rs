@@ -879,3 +879,45 @@ fn a_press_during_a_hover_fade_shows_the_pressed_look_in_that_frame() {
         assert_eq!((look.fill, look.edge, &look.texts), (held.fill, held.edge, &held.texts), "{mode:?}: pressed at once, mid-fade");
     }
 }
+
+/// The share of `cyan_text` the underline of a hovered link of `size` adds to each pixel row, at scale 1 in `mode`:
+/// the rows it touches, from the hovered picture less the resting one.
+fn underline_rows(mode: Mode, size: LinkSize) -> Vec<(usize, f32)> {
+    let theme = Theme::new(mode, TextScale::default());
+    let keymap = Keymap::empty();
+    let (ground, ink) = (theme.palette.bg, theme.palette.cyan_text);
+    let draw = |shown: Shown| {
+        crate::shot::paint(egui::vec2(120.0, 32.0), 1.0, mode, |ui| {
+            crate::theme::install_fonts(ui.ctx());
+            ui.painter().rect_filled(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(120.0, 32.0)), 0.0, ground);
+            super::link_with(ui, &theme, &keymap, "open log", size, true, Some(shown));
+        })
+        .unwrap()
+    };
+    let (rest, hover) = (draw(Shown::Rest), draw(Shown::Hover));
+    let towards = f32::from(ink.b()) - f32::from(ground.b());
+    (0..rest.height())
+        .filter_map(|y| {
+            // The middle of the line under the words (both links run from x 8 to 40 at least), so a letter's tail in
+            // that row does not count.
+            let mut shares: Vec<f32> =
+                (8..40).map(|x| (f32::from(hover.pixel(x, y).unwrap().b()) - f32::from(rest.pixel(x, y).unwrap().b())) / towards).collect();
+            shares.sort_by(f32::total_cmp);
+            let share = shares.get(shares.len() / 2).copied().unwrap_or(0.0);
+            (share.abs() > 0.01).then_some((y, share))
+        })
+        .collect()
+}
+
+#[test]
+fn a_link_s_underline_covers_its_row_as_the_design_s_four_samples_a_pixel_do() {
+    // The sheet's underline: the face's own, 0.06 of the size thick (0.66 at 11, 0.78 at 13), which the design's
+    // renderer covers with three of a pixel's four sample rows: 0.75 of the colour in one row, at both sizes.
+    for mode in [Mode::Dark, Mode::Light] {
+        for size in [LinkSize::Line, LinkSize::Small] {
+            let rows = underline_rows(mode, size);
+            assert_eq!(rows.len(), 1, "{mode:?} {size:?}: one row: {rows:?}");
+            assert!((rows[0].1 - 0.75).abs() <= 0.02, "{mode:?} {size:?}: {rows:?}");
+        }
+    }
+}

@@ -138,7 +138,8 @@ fn a_slider_looks_as_its_sheet_says_in_every_state() {
                     (false, false, false, _) => p.muted,
                 };
                 assert_eq!(*colour, want, "{at} {index}");
-                assert!((shape.center().x - (rect.left() + x(index) + 0.5)).abs() < 0.6 && shape.top() >= rect.top() + 28.0 - 0.01, "{at} {index}");
+                // Centred on the tick's left edge, as the sheet's slots centre the names (not on the 1 px tick's middle).
+                assert!((shape.center().x - (rect.left() + x(index))).abs() < 0.6 && shape.top() >= rect.top() + 28.0 - 0.01, "{at} {index}");
             }
             let look = own(&paint, rect);
             // The ring holds the handle, not the whole slider: read from the strokes, its outer bound.
@@ -373,5 +374,37 @@ fn a_slider_painted_on_any_rect_returns() {
             super::paint_slider(ui, &theme, rect, (1, None), true, crate::component::Lit::default());
         });
         output.textures_delta.clear();
+    }
+}
+
+#[test]
+fn every_size_s_name_is_centred_on_the_left_edge_of_its_tick_as_the_sheet_s_slots_centre_it() {
+    // The sheet: a fixed 40 wide slot for each name at 0, 50, 100 …, its text centred in it, so each run is centred on
+    // 20 + 50 k, the tick's left edge, a fraction of a pixel included.
+    for scale in [1.0, 1.5] {
+        let theme = Theme::new(Mode::Dark, TextScale::default());
+        let mut harness = builder().with_pixels_per_point(scale).build_ui(move |ui| {
+            ui.add_space(0.3);
+            text_size(ui, &theme, TextScale::default());
+        });
+        harness.run();
+        let rect = harness.get_by_label("Text size").rect();
+        let mut names = Vec::new();
+        for clipped in &harness.output().shapes {
+            if let egui::Shape::Text(text) = &clipped.shape
+                && text.galley.job.text.ends_with('%')
+            {
+                let lead = text.galley.job.sections.first().map_or(0.0, |first| first.leading_space);
+                names.push((text.pos.x + lead, text.galley.size().x - lead, text.pos.x));
+            }
+        }
+        names.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(names.len(), 5, "{scale}: {names:?}");
+        for (k, (left, wide, origin)) in names.iter().enumerate() {
+            let centre = ((rect.left() + 20.0 + 50.0 * k as f32) * scale).round() / scale;
+            let want = centre - wide / 2.0;
+            assert!((left - want).abs() < 0.02, "{scale} name {k}: its box at {left}, the sheet's at {want} (layout counts in 64ths of a pixel)");
+            assert!(((origin * scale).round() - origin * scale).abs() < 1e-3, "{scale} name {k}: the run's origin on a whole pixel");
+        }
     }
 }

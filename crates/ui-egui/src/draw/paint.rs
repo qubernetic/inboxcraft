@@ -13,6 +13,51 @@ use egui::{Color32, Frame, Galley, Margin, Painter, Pos2, Rect, Response, Role, 
 use crate::iconset::IconId;
 use crate::theme::{FLOAT_SHADOW, Font, Theme};
 
+/// `galley` with every row's baseline on the whole pixel nearest the design's, one half way between two pixels going to
+/// the upper one. A text box of the design puts its baseline half the leading (line height less the face's ascent and
+/// descent) under its top, plus the ascent, a fraction of a pixel included, and a row's top is the line heights over
+/// it. egui puts a baseline and a row's top on whole pixels too, but rounds a half down the page, where the hinting it
+/// draws with sets the letters a little lower still: a caption (Plex Sans 12/18, its baseline 13.5 under its top) stood
+/// 0.6 to 0.7 px low; on 13 it stands 0.3 to 0.4 px high. A run's second row at 125 % stood 0.6 px off.
+///
+/// Whole pixels only: egui draws a glyph's pixels on whole pixel rows, and a glyph put between two (sampled between
+/// texels) loses its top row, since the font atlas keeps no clear texel over its first row of glyphs. A row of glyphs
+/// of more than one line height is left as egui lays it out.
+pub(crate) fn on_baseline(galley: Arc<Galley>) -> Arc<Galley> {
+    let ppp = if galley.pixels_per_point.is_finite() && galley.pixels_per_point > 0.0 { galley.pixels_per_point } else { 1.0 };
+    let mut top = 0.0_f32;
+    let mut shifts = Vec::with_capacity(galley.rows.len());
+    for row in &galley.rows {
+        let first = row.glyphs.first();
+        let even = first.is_some_and(|glyph| row.glyphs.iter().all(|other| other.line_height == glyph.line_height));
+        let off = match first {
+            Some(glyph) if even => {
+                let exact =
+                    top + glyph.font_face_ascent + 0.5 * (glyph.line_height - glyph.font_height) + 0.5 * (glyph.font_height - glyph.font_face_height);
+                // The nearest whole pixel, a half going up.
+                let nearest = (exact * ppp - 0.5).ceil() / ppp;
+                ((nearest - (row.pos.y + glyph.pos.y)) * ppp).round() / ppp
+            }
+            _ => 0.0,
+        };
+        shifts.push(if off.is_finite() { off } else { 0.0 });
+        top += match first {
+            Some(glyph) if even => glyph.line_height,
+            _ => row.size.y,
+        };
+    }
+    if shifts.iter().all(|off| *off == 0.0) {
+        return galley;
+    }
+    let mut moved = (*galley).clone();
+    let reach = shifts.iter().fold(0.0_f32, |most, off| most.max(off.abs()));
+    for (row, off) in moved.rows.iter_mut().zip(shifts) {
+        row.pos.y += off;
+    }
+    moved.mesh_bounds = moved.mesh_bounds.expand2(vec2(0.0, reach));
+    Arc::new(moved)
+}
+
 /// One line of `sections` (text, font token and colour), cut with an ellipsis at `width`.
 pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> Arc<Galley> {
     let mut job = LayoutJob {
@@ -23,7 +68,145 @@ pub(super) fn line(ui: &Ui, sections: &[(&str, Font, Color32)], width: f32) -> A
     for (text, font, colour) in sections {
         job.append(&font.text(text), 0.0, font.format(*colour));
     }
-    ui.painter().layout_job(job)
+    on_baseline(tight_cut(ui.painter(), ui.painter().layout_job(job)))
+}
+
+/// A one-line `galley` cut with an ellipsis as the design cuts a line: the ellipsis follows the last letter kept, so
+/// the spaces a cut leaves before it are dropped. It is laid out again just wide enough for the letters and the
+/// ellipsis; the text stays whole. A galley that is not cut, or ends in a letter, is given back as it is.
+pub(crate) fn tight_cut(painter: &Painter, galley: Arc<Galley>) -> Arc<Galley> {
+    let shown = |galley: &Galley| -> String { galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|glyph| glyph.chr)).collect() };
+    if !galley.elided || galley.rows.len() != 1 {
+        return galley;
+    }
+    let Some((ellipsis, before)) = galley.rows.first().and_then(|row| row.glyphs.split_last()) else { return galley };
+    let Some(last) = before.iter().rposition(|glyph| !glyph.chr.is_whitespace()) else { return galley };
+    let Some(space) = before.get(last + 1) else { return galley };
+    if ellipsis.chr != '…' {
+        return galley;
+    }
+    let mut job = (*galley.job).clone();
+    // Half the space to spare: the space still does not fit, and rounding to pixels later cuts nothing.
+    job.wrap.max_width = space.pos.x + ellipsis.advance_width + space.advance_width / 2.0;
+    let want: String = before.iter().take(last + 1).map(|glyph| glyph.chr).chain(std::iter::once('…')).collect();
+    let again = on_baseline(painter.layout_job(job));
+    if shown(&again) == want { again } else { galley }
+}
+
+/// The width the design gives a run of text `wide` points long: its text box hugs the run, rounded up to a whole
+/// point.
+pub(crate) fn run_box(wide: f32) -> f32 {
+    if wide.is_finite() { (wide - 0.01).ceil().max(0.0) } else { 0.0 }
+}
+
+/// Paints `galley` with its left edge at `at.x` exactly, a fraction of a pixel included, and its top at `at.y`.
+///
+/// epaint puts a galley's origin on a whole physical pixel, but places the glyphs inside it on quarter pixels. So the
+/// origin goes on the whole pixel at or left of `at.x` and the rest is laid out as leading space before the run: a
+/// text box of the design at x.5 is drawn at x.5, as the design draws it, and every other run keeps its sharp edges.
+pub(crate) fn run_at(painter: &Painter, at: Pos2, galley: Arc<Galley>, colour: Color32) {
+    if !at.x.is_finite() || !at.y.is_finite() {
+        return;
+    }
+    let ppp = painter.pixels_per_point();
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    let whole = (at.x * ppp).floor() / ppp;
+    let rest = at.x - whole;
+    let galley = match galley.job.sections.first() {
+        Some(_) if rest > 0.01 => {
+            let mut job = (*galley.job).clone();
+            if let Some(first) = job.sections.first_mut() {
+                first.leading_space += rest;
+            }
+            // epaint counts leading space against the wrap width: widen it by as much, so a cut run is not cut again.
+            if job.wrap.max_width.is_finite() && job.wrap.max_width >= 0.0 {
+                job.wrap.max_width += rest;
+            }
+            on_baseline(painter.layout_job(job))
+        }
+        _ => galley,
+    };
+    painter.galley(pos2(whole, at.y), galley, colour);
+}
+
+/// Paints `galley` in the middle of `rect` as the design centres a text box: the box ([`run_box`]) in the middle,
+/// on a half pixel when the room left over is odd, and the run at the box's left ([`run_at`]).
+pub(crate) fn run_centred(painter: &Painter, rect: Rect, galley: Arc<Galley>, colour: Color32) {
+    let size = galley.size();
+    let at = pos2(rect.center().x - run_box(size.x) / 2.0, rect.center().y - size.y / 2.0);
+    run_at(painter, at, galley, colour);
+}
+
+/// Paints the rows of the wrapped `galley` in a text box `width` wide at `at` as the design places them: each row at the
+/// box's left, or in its middle (the galley's `halign`), a fraction of a pixel included, as [`run_at`] puts a run.
+///
+/// egui places a wrapped row's glyphs at the sub-pixel phase they had in the unwrapped line and puts a centred row on a
+/// whole pixel, so a second row starts up to a pixel right of the first. Each row is laid out again alone here (the
+/// row's words from the galley's own text, in the written order, at the breaks egui chose) and put where the design
+/// puts it. A galley of more than one section is painted as it is.
+pub(crate) fn rows_at(painter: &Painter, at: Pos2, width: f32, galley: Arc<Galley>, colour: Color32) {
+    let align = galley.job.halign;
+    let (Some(section), 1) = (galley.job.sections.first(), galley.job.sections.len()) else {
+        painter.galley(at, galley, colour);
+        return;
+    };
+    let text = galley.job.text.as_str();
+    let mut start = 0_usize;
+    // A row's top as the design has it: the line heights of the rows over it (egui rounds each).
+    let mut top = 0.0_f32;
+    let count = galley.rows.len();
+    for (index, row) in galley.rows.iter().enumerate() {
+        let row_top = top;
+        top += row.glyphs.first().map_or(row.size.y, |glyph| glyph.line_height);
+        // The row's characters, the newline it ends with included, follow the rows before it in the text.
+        let end = if index + 1 == count {
+            text.len()
+        } else {
+            let chars: usize = row.char_count_including_newline().into();
+            text.get(start..).and_then(|rest| rest.char_indices().nth(chars)).map_or(text.len(), |(at, _)| start + at)
+        };
+        let words = text.get(start..end).unwrap_or_default().trim_end();
+        start = end;
+        let mut job = LayoutJob::single_section(words.to_owned(), section.format.clone());
+        job.wrap = TextWrapping { max_width: width.max(1.0), max_rows: 1, ..galley.job.wrap.clone() };
+        job.break_on_newline = false;
+        let one = on_baseline(painter.layout_job(job));
+        let wide = one.size().x;
+        let x = match align {
+            egui::Align::Center => at.x + (width - wide) / 2.0,
+            egui::Align::Max => at.x + width - wide,
+            egui::Align::Min => at.x,
+        };
+        run_at(painter, pos2(x, at.y + row_top), one, colour);
+    }
+}
+
+/// How many rows a physical pixel is sampled at by [`sampled_band`], as the design's renderer samples it.
+const BAND_SAMPLES: usize = 4;
+
+/// Paints the band from `top` to `bottom` (points) across `across` in `colour` as the design's renderer covers it: each
+/// physical pixel row it touches in the share of its [`BAND_SAMPLES`] sample rows the band holds. A thin line (an
+/// underline 0.66 high) then has the design's weight wherever its edges fall.
+pub(crate) fn sampled_band(painter: &Painter, across: std::ops::RangeInclusive<f32>, (top, bottom): (f32, f32), colour: Color32) {
+    let ppp = painter.pixels_per_point();
+    if !ppp.is_finite() || ppp <= 0.0 || !top.is_finite() || !bottom.is_finite() || bottom <= top || bottom - top > 64.0 {
+        return;
+    }
+    let (first, last) = ((top * ppp).floor(), (bottom * ppp).ceil());
+    let mut row = first;
+    while row < last {
+        let hits = (0..BAND_SAMPLES).filter(|k| {
+            let at = (row + (*k as f32 + 0.5) / BAND_SAMPLES as f32) / ppp;
+            top <= at && at < bottom
+        });
+        let share = hits.count() as f32 / BAND_SAMPLES as f32;
+        if share > 0.0 {
+            // The colour itself over that share of the row's height: the row takes the share of it.
+            let line = Rect::from_x_y_ranges(across.clone(), row / ppp..=(row + share) / ppp);
+            painter.rect_filled(line, 0.0, colour);
+        }
+        row += 1.0;
+    }
 }
 
 /// The edge of a float: whether it takes the keyboard.
@@ -147,11 +330,18 @@ pub(crate) fn pane(painter: &Painter, theme: &Theme, rect: Rect) {
     painter.rect_filled(rect, 0.0, theme.palette.surface);
 }
 
+/// The scale `ppp` made safe (a scale that is not a positive number counts as 1), and how many whole physical pixels a
+/// line one point wide takes there: one point rounded, at least one (1, 1, 2, 2 at 1, 1.25, 1.5 and 2). What a
+/// [`hairline`] and a [`focus_ring`] share.
+fn line_pixels(ppp: f32) -> (f32, f32) {
+    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
+    (ppp, ppp.round().max(1.0))
+}
+
 /// The shape of a [`hairline`] at `ppp` physical pixels per point: a line one point wide rounded to whole physical
 /// pixels (at least one), across the physical pixels the ends fall in, its edges on pixel boundaries.
 fn hairline_shape(a: Pos2, b: Pos2, colour: Color32, ppp: f32) -> Shape {
-    let ppp = if ppp.is_finite() && ppp > 0.0 { ppp } else { 1.0 };
-    let pixels = ppp.round().max(1.0);
+    let (ppp, pixels) = line_pixels(ppp);
     // The middle of a run of `pixels` physical pixels from the one `at` falls in.
     let snap = |at: f32| ((at * ppp).floor() + pixels / 2.0) / ppp;
     Shape::line_segment([pos2(snap(a.x), snap(a.y)), pos2(snap(b.x), snap(b.y))], Stroke::new(pixels / ppp, colour))
@@ -178,13 +368,20 @@ pub(crate) struct Panes {
     slot: ShapeIdx,
     rects: Vec<Rect>,
     edged: Vec<Rect>,
+    capped: Vec<Rect>,
 }
 
 impl Panes {
     /// Keeps the place for the panes in `painter`'s list, after what it holds now.
     #[must_use]
     pub(crate) fn begin(painter: &Painter) -> Self {
-        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new() }
+        Self { slot: painter.add(Shape::Noop), rects: Vec::new(), edged: Vec::new(), capped: Vec::new() }
+    }
+
+    /// Notes `rect`, a strip above the panes that draws the line on its bottom edge itself (the error banner): a pane
+    /// that starts under it draws no line on its top.
+    pub(crate) fn capped(&mut self, rect: Option<Rect>) {
+        self.capped.extend(rect);
     }
 
     /// Notes `rect`, a strip beside the panes that draws the line on its right edge itself (the rail, whose edge
@@ -219,7 +416,9 @@ impl Panes {
             if !near(rect.right(), window.right()) && !followed {
                 shapes.push(hairline_shape(pos2(right, top), pos2(right, rect.bottom()), colour, ppp));
             }
-            if !near(rect.top(), window.top()) {
+            // A strip's own bottom edge is the line between it and this pane.
+            let under_cap = self.capped.iter().any(|strip| near(strip.bottom(), rect.top()));
+            if !near(rect.top(), window.top()) && !under_cap {
                 shapes.push(hairline_shape(pos2(left, top), pos2(rect.right(), top), colour, ppp));
             }
             // The pane under this one starts at its bottom: that pane's top line is the one line between them.
@@ -246,12 +445,18 @@ pub(crate) enum Ring {
     Inside,
 }
 
-/// The focus ring of a control over `rect`: a 1 px `cyan_edge` line, square, 2 px clear of the control (`place`).
+/// The focus ring of a control over `rect`: a `cyan_edge` line one point wide, square, 2 points clear of the control
+/// (`place`), on whole physical pixels at every scale: its clear edge put on the pixel nearest 2 points from the
+/// control, its weight one point rounded to whole pixels, as a [`hairline`]'s (2 px at 1.5, where a 1 point line would
+/// be 1.5 px and no pixel of it whole). At 1.0 a control on whole points keeps the ring it always had.
 pub(crate) fn focus_ring(painter: &Painter, theme: &Theme, rect: Rect, place: Ring) {
-    let stroke = Stroke::new(1.0, theme.palette.cyan_edge);
+    let (ppp, pixels) = line_pixels(painter.pixels_per_point());
+    let snap = |at: f32| (at * ppp).round() / ppp;
+    let on_pixels = |r: Rect| Rect::from_min_max(pos2(snap(r.left()), snap(r.top())), pos2(snap(r.right()), snap(r.bottom())));
+    let stroke = Stroke::new(pixels / ppp, theme.palette.cyan_edge);
     match place {
-        Ring::Outside => painter.rect_stroke(rect.expand(2.0), 0.0, stroke, StrokeKind::Outside),
-        Ring::Inside => painter.rect_stroke(rect.shrink(2.0), 0.0, stroke, StrokeKind::Inside),
+        Ring::Outside => painter.rect_stroke(on_pixels(rect.expand(2.0)), 0.0, stroke, StrokeKind::Outside),
+        Ring::Inside => painter.rect_stroke(on_pixels(rect.shrink(2.0)), 0.0, stroke, StrokeKind::Inside),
     };
 }
 
@@ -337,6 +542,9 @@ const LARGEST_CORNER: i64 = 32;
 /// How many samples a side of a corner pixel takes to measure how much of it the arc covers.
 const SAMPLES: i64 = 8;
 
+/// How many samples a pixel of a straight side takes along the side to measure how much of it a dash covers.
+const SIDE_SAMPLES: usize = 4;
+
 /// Paints a dashed edge around `rect`, inside it: a line in `colour` as heavy as a solid 1 point edge, dashes 2 points
 /// on and 2 off along one path clockwise from the top left (after the corner's arc), the phase carried round the
 /// corners; square corners.
@@ -366,15 +574,25 @@ impl DashScale {
         let dash = self.dash as f32;
         at.rem_euclid(2.0 * dash) < dash
     }
+
+    /// The share of the pixel of a straight side from path position `at` to `at + 1` that lies in a dash, sampled at
+    /// [`SIDE_SAMPLES`] even places along it, as the design's renderer samples it: a dash that begins or ends inside
+    /// the pixel (after a round corner the phase is a fraction) covers it in part.
+    fn share(self, at: f32) -> f32 {
+        let step = 1.0 / SIDE_SAMPLES as f32;
+        let hits = (0..SIDE_SAMPLES).filter(|k| self.on(at + (*k as f32 + 0.5) * step)).count();
+        hits as f32 / SIDE_SAMPLES as f32
+    }
 }
 
 /// [`dashed`] with corners of `radius` points.
 ///
 /// The edge is laid out in physical pixels on the pixel grid: the box is rounded to it, the line lies inside the box,
 /// as thick as a solid 1 point edge rounded to whole pixels, and the dashes and gaps are 2 points rounded to whole
-/// pixels ([`DashScale`]). A pixel of a straight side is on when its centre falls in a dash of the path. A corner's
-/// pixels are covered by the arc's ring, sampled, and drawn in that share of `colour`. Every pixel is painted once: at
-/// a square corner, where two sides cross, a pixel is on when either side has it on.
+/// pixels ([`DashScale`]). The dashes run along one path, their phase carried round each corner by the arc's length,
+/// so after a round corner a dash may begin or end inside a pixel: a pixel of a straight side is drawn in the share of
+/// it its dashes cover ([`DashScale::share`]), a corner's pixels in the share the arc's ring covers, both sampled.
+/// Every pixel is painted once: at a square corner, where two sides cross, a pixel takes the larger share.
 pub(crate) fn dashed_round(painter: &Painter, rect: Rect, colour: Color32, radius: f32) {
     // The rect first: `clamp` panics on a negative or NaN bound, so only a finite, positive box reaches the radius.
     if !rect.is_finite() || !rect.is_positive() {
@@ -440,9 +658,11 @@ fn dashed_mesh(ppp: f32, scale: DashScale, [left, top, right, bottom]: [i64; 4],
     let mut start = 0.0_f32;
     for (long, (x, y), (dx, dy), (ix, iy), centre, from, square) in pieces {
         for d in 0..long.clamp(0, LONGEST_SIDE) {
-            if scale.on(start + d as f32 + 0.5) {
+            let share = scale.share(start + d as f32);
+            if share > 0.0 {
                 for k in 0..thick {
-                    on.insert((x + dx * d + ix * k, y + dy * d + iy * k), 1.0);
+                    let pixel = on.entry((x + dx * d + ix * k, y + dy * d + iy * k)).or_insert(0.0);
+                    *pixel = pixel.max(share);
                 }
             }
         }
