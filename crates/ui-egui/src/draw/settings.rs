@@ -339,7 +339,14 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
     let given = crate::component::scroll::show(&mut child, theme, area, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.set_width(width);
-        on_page(ui, add)
+        let given = on_page(ui, add);
+        // The keyboard just came to a control of the page: the page scrolls to it, wherever it was.
+        let ctx = ui.ctx().clone();
+        let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
+        if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| ui.min_rect().contains_rect(control.rect)) {
+            ui.scroll_to_rect(control.rect, None);
+        }
+        given
     })
     .inner;
     ui.advance_cursor_after_rect(child.min_rect());
@@ -347,8 +354,8 @@ pub(super) fn body<R>(ui: &mut Ui, theme: &Theme, salt: &str, add: impl FnOnce(&
 }
 
 /// Draws `add`, one row of a page that has a row for every account, only where it is near enough to be seen: within a
-/// view's height above or below what the page shows, so `Tab` still reaches the next row, which the page then scrolls
-/// to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of accounts builds the
+/// view's height above or below what the page shows, so `Tab` still reaches the next row, which the page ([`body`])
+/// then scrolls to. Elsewhere the row takes the height it last had and lays nothing out: a page with hundreds of accounts builds the
 /// rows in sight only. The first time a row is drawn it is laid out wherever it is.
 pub(super) fn culled(ui: &mut Ui, id: Id, add: impl FnOnce(&mut Ui)) {
     let width = ui.available_width();
@@ -367,13 +374,6 @@ pub(super) fn culled(ui: &mut Ui, id: Id, add: impl FnOnce(&mut Ui)) {
     let height = (ui.cursor().top() - top).max(0.0);
     if known != Some(height) {
         ui.ctx().data_mut(|data| data.insert_temp(id, height));
-    }
-    // The keyboard just came to a control of this row: the page scrolls to it.
-    let row = Rect::from_min_size(pos2(ui.max_rect().left(), top), vec2(width, height));
-    let ctx = ui.ctx().clone();
-    let arrived = ctx.memory(|memory| memory.focused().filter(|focused| !memory.had_focus_last_frame(*focused)));
-    if let Some(control) = arrived.and_then(|focused| ctx.read_response(focused)).filter(|control| row.contains_rect(control.rect)) {
-        ui.scroll_to_rect(control.rect, None);
     }
 }
 

@@ -390,3 +390,23 @@ fn a_page_with_many_accounts_lays_out_the_rows_in_sight_and_tab_still_reaches_ev
     }
     assert!(reached, "Tab reaches {last}");
 }
+
+#[test]
+fn tab_to_a_control_below_the_page_s_view_scrolls_the_page_to_it() {
+    let app = InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock()));
+    // Too low for the whole Appearance page: its last row, the window frame, starts out of sight.
+    let mut harness = Harness::builder().with_size(vec2(1100.0, 600.0)).build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), app);
+    harness.state_mut().settings_mut().open_at(Section::Appearance);
+    harness.run();
+    let sheet = harness.get_by_role_and_label(Role::Dialog, "Settings").rect();
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        harness.key_press(Key::Tab);
+        harness.run();
+        if let Some((label, rect)) = focused(&harness) {
+            assert!(sheet.contains_rect(rect), "{label} {rect:?} has the keyboard out of sight of the sheet {sheet:?}");
+            seen.push(label);
+        }
+    }
+    assert!(seen.iter().any(|label| label == "Own / System"), "Tab reaches the window frame: {seen:?}");
+}
