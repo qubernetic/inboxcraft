@@ -1048,7 +1048,7 @@ pub(super) fn sheet(ctx: &egui::Context, theme: &Theme, mut view: Sheet<'_>) -> 
         response.widget_info(|| WidgetInfo::labeled(Role::Dialog, true, tr!("Settings")));
         // The float's shadow and edge, then a solid surface: nothing of the window shows through the text.
         paint::float(ui.painter(), theme, whole, FloatEdge::Keyboard);
-        ui.painter().rect_filled(whole.shrink(1.0), 0.0, p.surface);
+        ui.painter().rect_filled(paint::float_inside(whole, ctx.pixels_per_point()), 0.0, p.surface);
         let inner = whole.shrink(1.0);
         let nav_width = NAV.min((inner.width() * 0.3).floor());
         let left = Rect::from_min_size(inner.min, vec2(nav_width, inner.height()));

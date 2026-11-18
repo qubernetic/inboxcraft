@@ -352,9 +352,27 @@ pub(crate) fn shadow_box(mesh: &egui::epaint::Mesh) -> Option<Rect> {
     black.then(|| Rect::from_points(&mesh.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()).shrink(reach))
 }
 
-/// Paints a float over `rect`: the one shadow, the `surface` fill and its 1 px edge.
+/// Paints a float over `rect`: the one shadow, the `surface` fill and its edge, both on whole physical pixels at the
+/// painter's scale: the fill [`snapped`], the edge a pane's band on each side ([`edge_shape`]), a [`hairline`]'s
+/// pixels thick, so no side has a half-tone fringe at 1.25, 1.5 or 1.75. At 1 a float on whole points is painted as
+/// [`float_shapes`] paints it.
 pub(crate) fn float(painter: &Painter, theme: &Theme, rect: Rect, edge: FloatEdge) {
-    painter.extend(float_shapes(theme, rect, edge));
+    let ppp = painter.pixels_per_point();
+    let p = theme.palette;
+    let colour = match edge {
+        FloatEdge::Keyboard => p.cyan_edge,
+        FloatEdge::Quiet => p.line,
+    };
+    let whole = snapped(rect, ppp);
+    let mut shapes = vec![Shape::mesh(shadow_mesh(rect)), Shape::rect_filled(whole, 0.0, p.surface)];
+    shapes.extend([Side::Left, Side::Top, Side::Right, Side::Bottom].map(|side| edge_shape(whole, side, colour, ppp)));
+    painter.extend(shapes);
+}
+
+/// The inside of a [`float`] over `rect` at `ppp`: its fill less the edge's band on every side, on whole pixels.
+pub(crate) fn float_inside(rect: Rect, ppp: f32) -> Rect {
+    let (ppp, pixels) = line_pixels(ppp);
+    snapped(rect, ppp).shrink(pixels / ppp)
 }
 
 /// Paints a pane over `rect`: the flat `surface`, no edge (a [`hairline`] divides two panes).
