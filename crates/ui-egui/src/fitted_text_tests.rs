@@ -33,3 +33,20 @@ fn two_megabytes_of_text_stop_near_the_reader_s_cap() {
     let text = of(&html);
     assert!(text.len() <= 2 * crate::quote::MAX_TEXT, "{} bytes", text.len());
 }
+
+#[test]
+fn a_message_of_deep_quotes_and_many_lines_builds_no_more_than_the_cap() {
+    let cap = crate::quote::MAX_TEXT;
+    // Two megabytes of lines 255 quotes deep, a big table as deep, and tables in tables with many rows.
+    let deep = format!("{}{}", "<blockquote>".repeat(255), "x<br>".repeat(400_000));
+    let table = format!("{}<table>{}</table>", "<blockquote>".repeat(255), format!("<tr>{}</tr>", "<td>cell".repeat(100)).repeat(1_000));
+    let nested = format!("{}<table>{}</table>", "<table><tr><td>".repeat(7), "<tr><td>a<td>b</tr>".repeat(1_000));
+    for html in [deep, table, nested] {
+        let text = of(&html);
+        assert!(text.len() <= cap, "{} bytes", text.len());
+        // A quote shows at most four marks, as the fitted view draws at most four levels.
+        assert!(!text.contains("> > > > >"), "more than four marks");
+    }
+    let text = of(&format!("{}x</blockquote></blockquote></blockquote></blockquote></blockquote>", "<blockquote>".repeat(5)));
+    assert_eq!(text, "> > > > x\n> > > >\n");
+}

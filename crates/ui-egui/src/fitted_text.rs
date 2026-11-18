@@ -4,7 +4,8 @@
 //! An HTML message as a text-only program shows it, for the reader's `plain text` view of a message that has no text
 //! part of its own: its blocks as lines, a quote's lines after `> `, a list's items after their marks, a table's rows
 //! as lines of cells, a link's address after its words. The words are data: nothing in them is followed. The text
-//! stops at [`MAX_TEXT`] bytes, where the reader cuts a text part too.
+//! stops at [`MAX_TEXT`] bytes, where the reader cuts a text part too, and is never built far past it; a quote deeper
+//! than four reads after four marks.
 
 use inboxcraft_html::{Block, Document, LinkTarget, Marker, TextKind};
 
@@ -13,20 +14,25 @@ use crate::quote::MAX_TEXT;
 /// How deep tables inside tables are followed; deeper ones are left out.
 const DEEPEST: usize = 16;
 
-/// `document` as plain text, at most [`MAX_TEXT`] bytes and a line more.
+/// The most quote marks before a line: a deeper quote reads as deep as the fitted view draws it.
+const MOST_MARKS: u8 = 4;
+
+/// `document` as plain text, at most [`MAX_TEXT`] bytes.
 pub(crate) fn plain(document: &Document) -> String {
     let mut out = String::new();
-    blocks(document, &document.blocks, 0, &mut out);
-    out.truncate(out.trim_end().len());
+    blocks(document, &document.blocks, 0, &mut out, MAX_TEXT);
+    let kept = crate::quote::cut(out.trim_end(), MAX_TEXT.saturating_sub(1)).len();
+    out.truncate(kept);
     out.push('\n');
     out
 }
 
-/// Appends `list` to `out`, tables `depth` deep.
-fn blocks(document: &Document, list: &[Block], depth: usize, out: &mut String) {
+/// Appends `list` to `out`, tables `depth` deep, until `out` holds `most` bytes: the cap is checked line by line and
+/// cell by cell, so nothing is built far past it.
+fn blocks(document: &Document, list: &[Block], depth: usize, out: &mut String, most: usize) {
     let mut in_list = false;
     for block in list {
-        if out.len() > MAX_TEXT {
+        if out.len() >= most {
             return;
         }
         let quote = match block {
@@ -37,9 +43,11 @@ fn blocks(document: &Document, list: &[Block], depth: usize, out: &mut String) {
             out.push('\n');
         }
         in_list = listed;
-        let mut text = String::new();
+        let mark = "> ".repeat(usize::from(quote.min(MOST_MARKS)));
         match block {
             Block::Text { kind, spans, .. } => {
+                let room = most.saturating_sub(out.len());
+                let mut text = String::new();
                 if let TextKind::ListItem { depth, marker } = kind {
                     text.push_str(&"  ".repeat(usize::from((*depth).clamp(1, 6)).saturating_sub(1)));
                     match marker {
@@ -53,49 +61,64 @@ fn blocks(document: &Document, list: &[Block], depth: usize, out: &mut String) {
                         address(document, link, &mut text);
                         link = span.link;
                     }
-                    text.push_str(crate::quote::cut(&span.text, MAX_TEXT.saturating_sub(text.len())));
-                    if text.len() >= MAX_TEXT {
+                    text.push_str(crate::quote::cut(&span.text, room.saturating_sub(text.len())));
+                    if text.len() >= room {
                         break;
                     }
                 }
                 address(document, link, &mut text);
+                lines(out, &mark, &text, most);
             }
-            Block::Rule { .. } => text.push_str("----------"),
+            Block::Rule { .. } => lines(out, &mark, "----------", most),
             Block::Image { image, .. } if !image.alt.trim().is_empty() => {
-                text.push('[');
-                text.push_str(image.alt.trim());
-                text.push(']');
+                lines(out, &mark, &format!("[{}]", crate::quote::cut(image.alt.trim(), most.saturating_sub(out.len()))), most);
             }
             Block::Image { .. } => continue,
             Block::Table { rows, .. } if depth < DEEPEST => {
-                let lines: Vec<String> = rows
-                    .iter()
-                    .map(|row| {
-                        let cells: Vec<String> = row
-                            .iter()
-                            .map(|cell| {
-                                let mut inner = String::new();
-                                blocks(document, &cell.blocks, depth.saturating_add(1), &mut inner);
-                                inner.split_whitespace().collect::<Vec<_>>().join(" ")
-                            })
-                            .collect();
-                        cells.join("  ")
-                    })
-                    .collect();
-                text.push_str(&lines.join("\n"));
+                'rows: for row in rows {
+                    if out.len() >= most {
+                        break;
+                    }
+                    let mut line = String::new();
+                    for (index, cell) in row.iter().enumerate() {
+                        let room = most.saturating_sub(out.len().saturating_add(mark.len()).saturating_add(line.len()));
+                        if room == 0 {
+                            lines(out, &mark, &line, most);
+                            break 'rows;
+                        }
+                        let mut inner = String::new();
+                        blocks(document, &cell.blocks, depth.saturating_add(1), &mut inner, room);
+                        if index > 0 {
+                            line.push_str("  ");
+                        }
+                        for (at, word) in inner.split_whitespace().enumerate() {
+                            if at > 0 {
+                                line.push(' ');
+                            }
+                            line.push_str(word);
+                        }
+                    }
+                    lines(out, &mark, &line, most);
+                }
             }
             Block::Table { .. } => continue,
         }
-        let mark = "> ".repeat(usize::from(quote));
-        for line in text.split('\n') {
-            out.push_str(&mark);
-            out.push_str(line);
-            out.push('\n');
-        }
-        if !listed {
+        if !listed && out.len() < most {
             out.push_str(mark.trim_end());
             out.push('\n');
         }
+    }
+}
+
+/// Appends each line of `text` after `mark` to `out`, until `out` holds `most` bytes.
+fn lines(out: &mut String, mark: &str, text: &str, most: usize) {
+    for line in text.split('\n') {
+        if out.len() >= most {
+            return;
+        }
+        out.push_str(mark);
+        out.push_str(crate::quote::cut(line, most.saturating_sub(out.len())));
+        out.push('\n');
     }
 }
 
