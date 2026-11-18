@@ -170,16 +170,7 @@ fn table_columns_stand_on_whole_pixels() {
     for x in &texts {
         assert_eq!(x.fract(), 0.0, "a cell's words stand on a whole pixel: {texts:?}");
     }
-    // The rules between the columns and the rows are `panel_line`, the edge round the table `line`.
-    let columns: Vec<f32> = leaves(&harness)
-        .into_iter()
-        .filter_map(|shape| match shape {
-            Shape::LineSegment { points: [a, b], stroke } if stroke.color == p.panel_line && a.x == b.x => Some(a.x),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(columns.len(), 2, "two rules between three columns: {columns:?}");
-    assert!(columns.iter().all(|x| (x - 0.5).fract() == 0.0), "each rule fills one whole pixel column: {columns:?}");
+    // The rule between the rows is `panel_line`, the edge round the table `line`; no rule stands between columns.
     let rows = leaves(&harness)
         .into_iter()
         .filter(|shape| matches!(shape, Shape::LineSegment { points: [a, b], stroke } if stroke.color == p.panel_line && a.y == b.y))
@@ -414,4 +405,63 @@ fn a_focused_link_in_a_table_keeps_the_focus_far_from_sight() {
         next.push(focused(&harness).map(|(_, label)| label));
     }
     assert_eq!(next, ["second", "third", "Outside the reader"].map(|label| Some(label.to_owned())));
+}
+
+#[test]
+fn a_fitted_table_and_preformatted_text_look_as_the_design_draws_them() {
+    // The hairline table's sheet: a head 28 high on `panel`, rows 32 high, a `panel_line` between two rows and none
+    // between the columns, the words 12 in and the columns 12 apart, a 1 px `line` edge; preformatted text in
+    // `mono_s` 11/16, 8 × 12 inside its box.
+    let html = "<table><tr><th>Week</th><th>Who</th></tr><tr><td>1</td><td>Odile</td></tr><tr><td>2</td><td>Mira</td></tr></table>\
+                <pre>gate code: 4417</pre>";
+    let harness = fitted(display(html), false, 640.0, 400.0);
+    let p = Palette::of(Mode::Light);
+    let theme = Theme::new(Mode::Light, TextScale::default());
+    let edge = leaves(&harness)
+        .into_iter()
+        .find_map(|shape| match shape {
+            Shape::Rect(rect) if rect.stroke.color == p.line && rect.fill == egui::Color32::TRANSPARENT => Some(rect.rect),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no edge"));
+    assert_eq!(edge.height(), 28.0 + 1.0 + 32.0 + 1.0 + 32.0, "{edge:?}");
+    let hairlines: Vec<_> = leaves(&harness)
+        .into_iter()
+        .filter_map(|shape| match shape {
+            Shape::LineSegment { points: [a, b], stroke } if stroke.color == p.panel_line => Some((a, b)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hairlines.len(), 2, "rules between the rows only: {hairlines:?}");
+    assert!(hairlines.iter().all(|(a, b)| a.y == b.y), "no rule between columns: {hairlines:?}");
+    let head = leaves(&harness).into_iter().find_map(|shape| match shape {
+        Shape::Rect(rect) if rect.fill == p.panel => Some(rect.rect),
+        _ => None,
+    });
+    assert_eq!(head.map(|head| head.height()), Some(28.0), "{head:?}");
+    // A head's labels are set in capitals, and heard as they are shown.
+    let week = harness.get_by_label("WEEK").rect();
+    let who = harness.get_by_label("WHO").rect();
+    let odile = harness.get_by_label("Odile").rect();
+    assert_eq!(week.left() - edge.left(), 12.0, "the words 12 in");
+    assert_eq!(who.left() - week.right(), 12.0, "the columns 12 apart: {week:?} {who:?}");
+    assert_eq!(week.top() - edge.top(), 6.0, "a head's label 6 under the top");
+    assert_eq!(odile.top() - edge.top(), 29.0 + 5.0, "a row's words 5 under its top");
+    let pre = leaves(&harness)
+        .into_iter()
+        .find_map(|shape| match shape {
+            Shape::Text(text) if text.galley.text().contains("gate code") => Some(text),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no preformatted text"));
+    let size = pre.galley.job.sections.first().map(|section| section.format.font_id.size);
+    assert_eq!(size, Some(theme.fonts.mono_s.size), "preformatted text in mono_s");
+    let boxed = leaves(&harness)
+        .into_iter()
+        .find_map(|shape| match shape {
+            Shape::Rect(rect) if rect.fill == p.term => Some(rect.rect),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no box"));
+    assert_eq!(boxed.height(), 8.0 + theme.fonts.mono_s.line + 8.0, "{boxed:?}");
 }

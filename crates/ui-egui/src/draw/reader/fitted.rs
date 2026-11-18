@@ -3,8 +3,8 @@
 
 //! An HTML message fitted to the app: its blocks set in the app's type and colours, 12 apart. Paragraphs and list
 //! items in `read` (a list's marks in a column of 24), a heading in the title's or the heading's size in Plex Sans
-//! SemiBold (a heading is the writer's words, and people's words are in Plex Sans), preformatted text in `mono` on
-//! `term` in a 1 px `line` box, a rule as a `panel_line` hairline. A link is `cyan_text`, underlined, a Tab stop with
+//! SemiBold (a heading is the writer's words, and people's words are in Plex Sans), preformatted text in `mono_s` on
+//! `term` in a 1 px `line` box, 8 × 12 inside, a rule as a `panel_line` hairline. A link is `cyan_text`, underlined, a Tab stop with
 //! the focus ring round its words; Enter or a click copies its address and the status float says where it goes;
 //! nothing opens. A paragraph is no Tab stop: a screen reader hears it as a label.
 //!
@@ -13,10 +13,12 @@
 //! level with a 1 px `line` rule at its left, 12 in per level, to depth 4. A quote before any text of the message's own
 //! stands open with a rule for each level.
 //!
-//! A table is a hairline table: a 1 px `line` edge round it, 1 px `panel_line` between its rows and its columns, cells
-//! padded 8 × 12, a row of head cells on `panel` with its words in `label` and `muted`. Its columns get their widths
-//! from [`column_widths`], cut at whole pixels; a column keeps at least 48, and a table that cannot keep that in its
-//! room scrolls sideways inside itself. Tables nest 4 deep; a deeper one is set as its cells' blocks one after another.
+//! A table is a hairline table as its sheet draws one: a 1 px `line` edge round it, a 1 px `panel_line` between two
+//! rows and none between the columns, the words 12 in from the sides and the columns 12 apart, a row of one line 32
+//! high (a row of head cells 28, on `panel`, its words in `label` and `muted`) and a taller one 6 above and below its
+//! words. Its columns get their widths from [`column_widths`], each what its words ask while all fit (the cleaner
+//! keeps no widths of the mail's own), cut at whole pixels; a column keeps at least 36, and a table that cannot keep
+//! that in its room scrolls sideways inside itself. Tables nest 4 deep; a deeper one is set as its cells' blocks one after another.
 //! At most 64 columns and 1 000 rows are drawn; a line under the table says what was left out.
 //!
 //! Everything in a message is data and bounded: the blocks are laid out once for a message, a width and the state of
@@ -58,13 +60,16 @@ const LEVEL: f32 = 12.0;
 const MOST_LEVELS: u8 = 4;
 
 /// The room inside preformatted text's box, left and right and above and below, in points.
-const PRE_PAD: Vec2 = vec2(12.0, 6.0);
+const PRE_PAD: Vec2 = vec2(12.0, 8.0);
 
-/// The room inside a table's cell, left and right and above and below, in points.
-const CELL_PAD: Vec2 = vec2(12.0, 8.0);
+/// The room left and right of a table's cells and between two of its columns, in points.
+const CELL_GAP: f32 = 12.0;
 
-/// The least width of a table's column, its padding included, in points.
-const LEAST_COLUMN: f32 = 48.0;
+/// The room above and below the words of a table's row that holds more than a line, in points.
+const CELL_PAD_Y: f32 = 6.0;
+
+/// The least width of a table's column's words, in points (48 with the room after it).
+const LEAST_COLUMN: f32 = 36.0;
 
 /// The most columns of a table drawn.
 const MOST_COLUMNS: usize = 64;
@@ -214,6 +219,8 @@ struct GridRow {
     high: f32,
     head: bool,
     cells: Vec<Laid>,
+    /// How far under the row's top each cell's words stand.
+    tops: Vec<f32>,
     /// The cells that hold a Tab stop, in order.
     stops: Vec<usize>,
 }
@@ -557,7 +564,7 @@ fn place<'b>(
 fn font_of(theme: &Theme, kind: TextKind, style: Style) -> Font {
     let f = &theme.fonts;
     match kind {
-        TextKind::Preformatted => f.mono,
+        TextKind::Preformatted => f.mono_s,
         _ if style.head => f.label,
         // A heading in a message is its writer's words: in Plex Sans SemiBold, in the title's or the heading's size.
         TextKind::Heading(1) => f.written_title(),
@@ -588,7 +595,7 @@ fn text(context: &Context<'_>, kind: TextKind, spans: &[Span], quoted: bool, sty
         _ => (None, 0.0),
     };
     let pre = kind == TextKind::Preformatted;
-    let wrap = if pre { room - PRE_PAD.x * 2.0 - 2.0 } else { room - left };
+    let wrap = if pre { room - PRE_PAD.x * 2.0 } else { room - left };
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap.max(1.0);
     job.wrap.break_anywhere = pre;
@@ -749,7 +756,7 @@ fn wanted_width(context: &Context<'_>, block: &Block, depth: usize) -> f32 {
         },
         Block::Table { rows, .. } if depth < MAX_DEPTH => {
             let columns = wanted_columns(context, rows, depth.saturating_add(1));
-            columns.iter().map(|column| column + CELL_PAD.x * 2.0 + 1.0).sum::<f32>() + 1.0
+            columns.iter().map(|column| column + CELL_GAP).sum::<f32>() + CELL_GAP
         }
         Block::Table { .. } => 0.0,
     }
@@ -768,43 +775,53 @@ fn wanted_columns(context: &Context<'_>, rows: &[Vec<Cell>], depth: usize) -> Ve
     wanted
 }
 
-/// A table laid out in `room`: its columns from [`column_widths`] cut at whole pixels, each at least
-/// [`LEAST_COLUMN`] (wider than the room, it scrolls), its cells laid out, its rows as high as their highest cell.
+/// A table laid out in `room` as the hairline table's sheet draws one: its columns' words 12 in from the sides and 12
+/// apart, their widths from [`column_widths`] (each what its widest words ask while all fit, the table no wider) cut at
+/// whole pixels and at least [`LEAST_COLUMN`] (wider than the room, it scrolls); a row of one line 32 high and a head
+/// 28, its cells' words in the middle; a row of more lines 6 above and below its tallest cell, its cells at the top; a
+/// 1 px rule between two rows.
 fn grid(context: &Context<'_>, rows: &[Vec<Cell>], room: f32, depth: usize) -> Grid {
     let theme = context.theme;
-    let wanted: Vec<f32> = wanted_columns(context, rows, depth).into_iter().map(|width| width + CELL_PAD.x * 2.0).collect();
+    let wanted = wanted_columns(context, rows, depth);
     let count = wanted.len();
-    let rules = count as f32 + 1.0;
+    let gaps = CELL_GAP * (count as f32 + 1.0);
     let least = LEAST_COLUMN * count as f32;
-    let widths = column_widths(&wanted, (room - rules).max(least), 0.0);
+    let widths = column_widths(&wanted, (room - gaps).max(least), 0.0);
     let ppp = if context.ppp.is_finite() && context.ppp > 0.0 { context.ppp } else { 1.0 };
     let widths: Vec<f32> = widths.into_iter().map(|width| ((width * ppp).floor() / ppp).max(1.0)).collect();
     let mut lefts = Vec::with_capacity(count);
-    let mut x = 1.0_f32;
+    let mut x = CELL_GAP;
     for width in &widths {
         lefts.push(x);
-        x += width + 1.0;
+        x += width + CELL_GAP;
     }
+    let [head_high, row_high, _] = theme.boxes().table;
     let mut laid_rows = Vec::new();
-    let mut top = 1.0_f32;
+    let mut top = 0.0_f32;
     for row in rows.iter().take(MOST_ROWS) {
+        if !laid_rows.is_empty() {
+            top += 1.0;
+        }
         let head = !row.is_empty() && row.iter().all(|cell| cell.header);
         let style = Style { text: theme.fonts.body, head };
         let cells: Vec<Laid> = widths
             .iter()
             .enumerate()
             .map(|(index, width)| match row.get(index) {
-                Some(cell) => lay(context, &cell.blocks, (width - CELL_PAD.x * 2.0).max(1.0), style, depth.saturating_add(1)),
+                Some(cell) => lay(context, &cell.blocks, *width, style, depth.saturating_add(1)),
                 None => Laid::empty(),
             })
             .collect();
-        // A row is at least one line high: of a head's labels, or of the cells' words.
-        let least = if head { theme.fonts.label.line } else { theme.fonts.body.line };
-        let tallest = cells.iter().map(|cell| cell.height).fold(least, f32::max);
-        let high = (tallest + CELL_PAD.y * 2.0).ceil();
+        // A row of one line (of a head's labels, or of the cells' words) stands as high as the sheet's; a taller one
+        // takes its tallest cell and 6 above and below.
+        let (line, least) = if head { (theme.fonts.label.line, head_high) } else { (theme.fonts.body.line, row_high) };
+        let tallest = cells.iter().map(|cell| cell.height).fold(0.0, f32::max);
+        let single = tallest <= line;
+        let high = if single { least } else { (tallest + CELL_PAD_Y * 2.0).ceil().max(least) };
+        let tops = cells.iter().map(|cell| if single { ((high - cell.height) / 2.0).round().max(0.0) } else { CELL_PAD_Y }).collect();
         let stops = cells.iter().enumerate().filter(|(_, cell)| !cell.stops.is_empty()).map(|(index, _)| index).collect();
-        laid_rows.push(GridRow { top, high, head, cells, stops });
-        top += high + 1.0;
+        laid_rows.push(GridRow { top, high, head, cells, tops, stops });
+        top += high;
     }
     let shown_columns = rows.iter().take(MOST_ROWS).map(Vec::len).max().unwrap_or(0);
     let note = crate::component::hairline_table::left_out(shown_columns.saturating_sub(count), rows.len().saturating_sub(MOST_ROWS))
@@ -983,13 +1000,7 @@ impl Show<'_> {
                 if shows {
                     let painter = ui.painter();
                     painter.rect(rect, 0.0, p.term, Stroke::new(1.0, p.line), StrokeKind::Inside);
-                    paint::rows_at(
-                        painter,
-                        rect.min + PRE_PAD + vec2(1.0, 0.0),
-                        (rect.width() - PRE_PAD.x * 2.0 - 2.0).max(1.0),
-                        galley.clone(),
-                        p.ink,
-                    );
+                    paint::rows_at(painter, rect.min + PRE_PAD, (rect.width() - PRE_PAD.x * 2.0).max(1.0), galley.clone(), p.ink);
                 }
                 false
             }
@@ -1062,22 +1073,11 @@ impl Show<'_> {
             let first = grid.rows.partition_point(|row| origin.y + row.top + row.high < sight.top());
             for row in grid.rows.iter().skip(first).take_while(|row| origin.y + row.top <= sight.bottom()) {
                 if row.head {
-                    painter.rect_filled(
-                        Rect::from_min_size(pos2(origin.x + 1.0, origin.y + row.top), vec2(grid.size.x - 2.0, row.high)),
-                        0.0,
-                        p.panel,
-                    );
+                    painter.rect_filled(Rect::from_min_size(pos2(origin.x, origin.y + row.top), vec2(grid.size.x, row.high)), 0.0, p.panel);
                 }
-                if row.top > 1.0 {
+                if row.top > 0.0 {
                     let y = origin.y + row.top - 1.0;
                     paint::hairline(painter, pos2(origin.x, y), pos2(origin.x + grid.size.x - 1.0, y), p.panel_line);
-                }
-            }
-            for left in grid.lefts.iter().skip(1) {
-                let x = origin.x + left - 1.0;
-                let (top, bottom) = ((origin.y + 1.0).max(sight.top() - 1.0), (origin.y + grid.size.y - 1.0).min(sight.bottom() + 1.0));
-                if top < bottom {
-                    paint::hairline(painter, pos2(x, top), pos2(x, bottom - 1.0), p.panel_line);
                 }
             }
         }
@@ -1111,7 +1111,7 @@ impl Show<'_> {
             }
             for (column, part) in cells {
                 let (Some(cell), Some(left)) = (row.cells.get(column), grid.lefts.get(column)) else { continue };
-                let at = pos2(origin.x + left + CELL_PAD.x, origin.y + row.top + CELL_PAD.y);
+                let at = pos2(origin.x + left, origin.y + row.top + row.tops.get(column).copied().unwrap_or(CELL_PAD_Y));
                 if self.laid(ui, cell, at, id.with(("cell", row_index, column)), part) {
                     holds = Some((row_index, column));
                 }
