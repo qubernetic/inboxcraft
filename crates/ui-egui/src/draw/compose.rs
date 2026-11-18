@@ -81,6 +81,12 @@ pub(super) fn from_name_most(value: f32, floating: bool) -> f32 {
 /// The warning before a reason that something is wrong: Phosphor's warning, as the frames draw it.
 const WARNING: char = '\u{e4e0}';
 
+/// The widest a text button's words get before they are cut, in points (`component/button.rs`).
+const SEND_WIDEST: f32 = 240.0;
+
+/// The room the coming-soon tag keeps round its words, in points: its 6 at each side (`component/tag.rs`).
+const TAG_PADS: f32 = 12.0;
+
 /// The width of the draft's caret's mark beside the sender, in points (Phosphor's caret-down at 14).
 const FROM_CARET: f32 = 14.0;
 
@@ -587,8 +593,14 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
     row.spacing_mut().item_spacing.x = s.s2;
     let (label, problem, waits) = send_label(mailbox, composer);
-    // Waiting, Send is the disabled button of its frames, without its key.
-    let send = TextButton::new(&label).primary().action(keymap::SEND).key(problem.is_none());
+    // Waiting, Send is the disabled button of its frames, without its key. In a pane too narrow for Send with its key,
+    // the caret, Templates and Discard on one line, the key's chip gives way (the key still sends).
+    let chip = keymap
+        .chip(ui.ctx(), keymap::SEND)
+        .map_or(0.0, |key| crate::component::key::Chip::new(ui, theme, &key, crate::component::key::ChipState::OnCyan).size().x + s.s2);
+    let send_width = cut(ui, &label, theme.fonts.button, p.ink, SEND_WIDEST).size().x.ceil() + s.s3 * 2.0 + chip;
+    let fits = send_width + (s.s2 + side) * 3.0 + s.s2 <= rect.width();
+    let send = TextButton::new(&label).primary().action(keymap::SEND).key(problem.is_none() && fits);
     match &problem {
         Some(problem) => {
             send.unavailable(problem).show(&mut row, theme, keymap);
@@ -631,13 +643,19 @@ fn foot(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, composer
     {
         asked.push(Asked::Discard);
     }
-    // Coming soon: attaching a file, its tag before it.
-    let soon_row = Rect::from_min_max(pos2(rect.left(), rect.top()), pos2(attach.right(), rect.bottom()));
+    // Coming soon: attaching a file, its tag before it, between the caret (8 clear of it) and Templates. In a narrow
+    // pane the tag gives way, then the button: nothing is drawn through Send or its caret.
+    let tag_width = galley(ui, tr!("coming soon"), theme.fonts.mono_s, p.muted).size().x.ceil() + TAG_PADS;
+    let soon_row = Rect::from_min_max(pos2(reason_left.min(attach.right()), rect.top()), pos2(attach.right(), rect.bottom()));
     ui.scope_builder(UiBuilder::new().max_rect(soon_row).layout(Layout::right_to_left(Align::Center)), |ui| {
         ui.spacing_mut().item_spacing.x = s.s2;
         soon(ui, theme, |ui| {
-            IconButton::new(IconId::Attach, tr!("Attach a file")).show(ui, theme, keymap);
-            soon_tag(ui, theme);
+            if ui.available_width() >= side {
+                IconButton::new(IconId::Attach, tr!("Attach a file")).show(ui, theme, keymap);
+                if ui.available_width() >= tag_width {
+                    soon_tag(ui, theme);
+                }
+            }
         });
     });
 }

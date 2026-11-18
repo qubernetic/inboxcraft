@@ -1488,3 +1488,39 @@ fn the_floating_panel_casts_its_shadow_beyond_its_edge() {
         assert!(shadow.clip_rect.contains_rect(round), "{:?} clips the shadow of {panel:?}", shadow.clip_rect);
     }
 }
+
+#[test]
+fn in_a_narrow_pane_the_foot_s_coming_soon_gives_way_and_nothing_paints_through_send() {
+    for width in [1100.0, 1024.0, 1300.0] {
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 800.0))
+            .with_max_steps(12)
+            .build_ui_state(|ui, app: &mut InboxApp| app.ui(ui), InboxApp::new(Mailbox::new(sample::session(clock()).unwrap(), clock())));
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "New message").click();
+        harness.run();
+        for written in [false, true] {
+            if written {
+                // Send takes its key and grows.
+                type_into(&mut harness, "To", "odile@example.org,");
+                harness.run();
+            }
+            let send = rect_of(&harness, Role::Button, "Send");
+            let later = rect_of(&harness, Role::Button, "Send later");
+            let left = later.right() + 8.0 - 0.5;
+            let templates = rect_of(&harness, Role::Button, "Templates");
+            assert!(templates.left() >= left, "{width}: {templates:?} after {later:?}");
+            // What comes soon stands between the caret and Templates, 8 clear of the caret, or is not drawn.
+            let foot = |rect: egui::Rect| (rect.center().y - send.center().y).abs() < 8.0;
+            for soon in harness.query_all_by_label("coming soon").map(|node| node.rect()).filter(|rect| foot(*rect)) {
+                assert!(soon.left() >= left && soon.right() <= templates.left(), "{width} {written}: {soon:?} beside {send:?} {later:?}");
+            }
+            if let Some(attach) = harness.query_by_label("Attach a file").map(|node| node.rect()) {
+                assert!(attach.left() >= left && attach.right() <= templates.left(), "{width} {written}: {attach:?}");
+            }
+            if width >= 1300.0 {
+                assert!(harness.query_all_by_label("coming soon").any(|node| foot(node.rect())), "room for the tag at {width}");
+            }
+        }
+    }
+}
