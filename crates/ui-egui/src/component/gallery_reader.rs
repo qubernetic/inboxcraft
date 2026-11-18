@@ -177,6 +177,54 @@ fn tables(ui: &mut Ui, theme: &Theme) {
     }
 }
 
+/// The invitation card's board: its nine states, 640 wide, with the design board's words.
+fn invite_cards(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::invite_card::{CardEvent, CardState, Said, invite_card};
+    title(ui, theme, tr!("Invitation card"));
+    let event = CardEvent {
+        weekday: "MON",
+        day: "16",
+        month: "NOV",
+        title: "Design review",
+        when: "15:00 – 16:00  ·  today",
+        place: "Room 3",
+        who: "Marit Solheim (organiser), Teodor Vasquez, Ines Okafor and you",
+        cal: "Studio",
+    };
+    let goes = "marit@example.org";
+    let replies = [
+        (Said::Going, "Teodor Vasquez is going."),
+        (Said::Maybe, "Ines Okafor might go."),
+        (Said::No, "Pavel Hruska is not going."),
+        (Said::Nothing, "Dmitri Vale has not answered."),
+    ];
+    let states = [
+        (tr!("request"), CardState::Request { goes_to: goes }),
+        (tr!("changed"), CardState::Changed { changed: "time 14:00 → 15:00", goes_to: goes }),
+        (tr!("out-of-date"), CardState::OutOfDate { line: "Out of date: a later invitation replaces this one. You answered Going." }),
+        (tr!("answered"), CardState::Answered { answer: "You answered Going." }),
+        (tr!("cancelled"), CardState::Cancelled { line: "Marit Solheim cancelled this event.", remove: true }),
+        (tr!("reply"), CardState::Replies { replies: &replies }),
+        (tr!("no-answer-asked"), CardState::NoAnswerAsked),
+        (
+            tr!("cannot-answer"),
+            CardState::CannotAnswer {
+                why: "it was sent to lists@example.org, which is not one of your addresses, and the organiser asked only that address.",
+            },
+        ),
+        (tr!("clash"), CardState::Clash { clash: "Call Ines 15:30 – 15:45 is in the same hour", goes_to: goes }),
+    ];
+    for (state, card) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(640.0);
+                // Each card's controls stand apart from the others' for the keyboard and a screen reader.
+                ui.push_id(state, |ui| invite_card(ui, theme, keymap, &event, &card));
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
@@ -196,7 +244,9 @@ fn middle(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
 }
 
 /// The right column.
-fn right(_ui: &mut Ui, _theme: &Theme, _keymap: &Keymap) {}
+fn right(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    invite_cards(ui, theme, keymap);
+}
 
 /// Draws the page into `ui` in `theme` with the keys of `keymap`.
 pub fn page(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {

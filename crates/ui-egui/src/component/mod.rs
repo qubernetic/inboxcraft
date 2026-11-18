@@ -51,6 +51,7 @@ pub mod gallery_reader;
 pub mod hairline_table;
 pub mod hover;
 pub mod icon;
+pub mod invite_card;
 pub mod key;
 pub mod label;
 pub mod pill;
