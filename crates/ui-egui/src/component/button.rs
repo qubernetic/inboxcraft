@@ -423,6 +423,8 @@ pub(crate) enum Caret {
     Down,
     /// `▴`: closes.
     Up,
+    /// `▸`: folded (a thread's message, a quote).
+    Right,
 }
 
 impl Caret {
@@ -431,6 +433,7 @@ impl Caret {
         match self {
             Self::Down => '▾',
             Self::Up => '▴',
+            Self::Right => '▸',
         }
     }
 }
@@ -439,6 +442,34 @@ impl Caret {
 /// from another face, a triangle half the size wide and high (measured on the design's board): how far the next text
 /// would stand, its left and right, and its top and foot over the baseline.
 const CARET: (f32, f32, f32, f32, f32) = (0.502, 0.003, 0.499, 0.509, 0.011);
+
+/// The width a caret takes in `font`: as far as the next text would stand.
+pub(crate) fn caret_width(font: crate::theme::Font) -> f32 {
+    CARET.0 * font.size
+}
+
+/// The design's baseline of a line of `font` whose box is centred on `centre_y`: the box of the line height in the
+/// middle, half the leading over the ascent (not the hinted one egui puts the letters on, a fraction of a pixel lower).
+pub(crate) fn baseline(font: crate::theme::Font, centre_y: f32) -> f32 {
+    let (ascent, descent) = font.face.extent();
+    centre_y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size
+}
+
+/// Paints `caret` in `font`'s size as the design draws it, a triangle standing `after` the text before it, its foot
+/// on `baseline`, in `colour`.
+pub(crate) fn paint_caret(painter: &egui::Painter, font: crate::theme::Font, after: f32, baseline: f32, caret: Caret, colour: Color32) {
+    let (_, left, right, high, low) = CARET;
+    let s = font.size;
+    let (top, foot) = (baseline - high * s, baseline - low * s);
+    let (left, right) = (after + left * s, after + right * s);
+    let middle = (left + right) / 2.0;
+    let points = match caret {
+        Caret::Down => vec![egui::pos2(left, top), egui::pos2(right, top), egui::pos2(middle, foot)],
+        Caret::Up => vec![egui::pos2(left, foot), egui::pos2(middle, top), egui::pos2(right, foot)],
+        Caret::Right => vec![egui::pos2(left, top), egui::pos2(right, (top + foot) / 2.0), egui::pos2(left, foot)],
+    };
+    painter.add(egui::Shape::convex_polygon(points, colour, Stroke::NONE));
+}
 
 /// A small link of `words` followed by `caret`, drawn as the design draws it: the words, a space, and the caret's
 /// triangle; a screen reader hears the words and the caret's sign.
@@ -496,8 +527,7 @@ fn link_drawn(
         let top = (rect.center().y - galley.size().y / 2.0).round();
         // The baseline is the design's text box's (the box of the line height in the middle, half the leading over the
         // ascent), not the hinted one egui puts the letters on, which lies a fraction of a pixel lower.
-        let (ascent, descent) = font.face.extent();
-        let baseline = rect.center().y - font.line / 2.0 + (font.line - (ascent + descent) * font.size) / 2.0 + ascent * font.size;
+        let baseline = baseline(font, rect.center().y);
         // The underline, under the pointer and while pressed: the font's own, as the sheet's text decoration draws it,
         // its thickness and its place under the baseline from the face, so its edges may fall between pixels.
         if lit.pressed || lit.hover {
@@ -510,16 +540,7 @@ fn link_drawn(
         let after = text_left + galley.size().x;
         painter.galley(egui::pos2(text_left, top), galley, ink);
         if let Some((_, caret)) = caret {
-            let (_, left, right, high, low) = CARET;
-            let s = font.size;
-            let (top, foot) = (baseline - high * s, baseline - low * s);
-            let (left, right) = (after + left * s, after + right * s);
-            let middle = (left + right) / 2.0;
-            let points = match caret {
-                Caret::Down => vec![egui::pos2(left, top), egui::pos2(right, top), egui::pos2(middle, foot)],
-                Caret::Up => vec![egui::pos2(left, foot), egui::pos2(middle, top), egui::pos2(right, foot)],
-            };
-            painter.add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
+            paint_caret(painter, font, after, baseline, caret, ink);
         }
         if lit.focus {
             paint::focus_ring(painter, theme, rect, Ring::Outside);

@@ -64,6 +64,7 @@ pub mod slider;
 pub mod soon;
 pub mod switch;
 pub mod tag;
+pub mod thread_row;
 pub mod time_picker;
 pub mod toast;
 pub mod tooltip;

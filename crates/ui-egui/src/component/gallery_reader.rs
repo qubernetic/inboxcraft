@@ -12,6 +12,7 @@ use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::tr;
 
+use super::Shown;
 use super::gallery::{cell, cells, title};
 use super::margin;
 
@@ -81,11 +82,45 @@ fn content_bars(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     }
 }
 
+/// The thread row's board: folded, open, unread, hover and focus, 640 wide, with the design board's words.
+fn thread_rows(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
+    use super::thread_row::{ThreadLine, thread_row_with};
+    title(ui, theme, tr!("Thread row"));
+    let folded = ThreadLine {
+        sender: "Marit Solheim",
+        address: "marit@example.org",
+        preview: "Room 3 is free from ten. I can bring the projector, and Ines has the keys to the store room.",
+        date: "13:40",
+        unread: false,
+        open: false,
+    };
+    let open = ThreadLine { preview: "marit@example.org  ·  to you and Teodor", open: true, ..folded };
+    let states = [
+        (tr!("folded"), folded, Shown::Rest),
+        (tr!("open"), open, Shown::Rest),
+        (tr!("unread"), ThreadLine { unread: true, ..folded }, Shown::Rest),
+        (tr!("hover"), folded, Shown::Hover),
+        (tr!("focus"), folded, Shown::Focus),
+    ];
+    for (state, line, shown) in states {
+        cells(ui, theme, |ui| {
+            cell(ui, theme, state, |ui| {
+                ui.set_width(640.0);
+                // A board's row stands on the reader's surface, as in the design's board.
+                ui.painter().rect_filled(Rect::from_min_size(ui.cursor().min, vec2(640.0, theme.boxes().reader[2])), 0.0, theme.palette.surface);
+                thread_row_with(ui, theme, keymap, &line, Some(shown));
+            });
+        });
+    }
+}
+
 /// The left column.
 fn left(ui: &mut Ui, theme: &Theme, keymap: &Keymap) {
     why_lines(ui, theme, keymap);
     ui.add_space(BOARD_GAP);
     content_bars(ui, theme, keymap);
+    ui.add_space(BOARD_GAP);
+    thread_rows(ui, theme, keymap);
 }
 
 /// The middle column.
