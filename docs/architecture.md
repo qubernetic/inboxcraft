@@ -97,7 +97,8 @@ at most four reasons, most specific first, each a `kind` (`snooze`, `rule`, `sen
 `why.sender.group`, `why.sender.accepted`, `why.sender.blocked`, `why.screener.held`, `why.screener.blocked`,
 `why.screener.new`, `why.screener.known`, `why.thread.yours`, `why.thread.other`, `why.default`) that the front end
 words in its own language, and `args` with a fixed set of keys per `text_id`: times, a group or rule name, the
-sender's address (cleaned and cut at 254 characters), a count, a folder id and role. No text of the message goes
+sender's address, a count, a folder id and role. Every text in `args` is cleaned of control characters and invisible
+marks and cut at a character boundary: an address at 254 characters, a group, rule or role name at 64. No text of the message goes
 into the answer. `rule` names the grouped inbox classifier's rule (`calendar`, `automatic`, `list`, `junk`, `robot`,
 `other`), or `why.sender.group` the owner's choice of group for the sender, only for mail in the inbox of a grouped
 account; a return from a snooze counts while the message is in the inbox, as the store keeps
