@@ -191,7 +191,9 @@ pub fn float<R>(ctx: &Context, theme: &Theme, float: &Float, add: impl FnOnce(&m
 
 /// A float that holds what a person typed (the event editor): `Esc` and a press outside it close nothing, they come
 /// back as [`Leave`] and the caller decides. A press outside it reaches nothing under it (a ground of its own lies
-/// between them). It closes when the caller stops drawing it, and the caller gives the
+/// between them). That ground also swallows the wheel and the hover of everything under it, so nothing under the float
+/// scrolls or lights up while it is open; surfaces in the foreground (the window's own controls, the toasts) stay
+/// live over it. It closes when the caller stops drawing it, and the caller gives the
 /// keyboard back. While `quiet` another surface lies over it (the palette, the settings sheet): it takes neither key
 /// nor press, and is not modal, so that surface has them. What `add` gave (always there), and how it was asked to close.
 pub fn held<R>(ctx: &Context, theme: &Theme, float: &Float, quiet: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<(R, Option<Leave>)> {
