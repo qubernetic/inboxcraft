@@ -1104,3 +1104,20 @@ fn a_line_under_the_select_says_detect_replaced_the_picked_encryption() {
         assert!(harness.query_by_label(SAID).is_none(), "{theme:?}");
     }
 }
+
+#[test]
+fn two_steps_of_the_same_id_each_say_where_they_went() {
+    let mut harness = form_open(egui::Theme::Dark, FakeWorkers::passing());
+    let row = |server: &str| crate::onboard::StepRow {
+        id: "tcp".to_owned(),
+        state: StepState::Passed,
+        server: Some(server.to_owned()),
+        issuer: None,
+        message: None,
+    };
+    harness.state_mut().onboarding_mut().0.show_check(1, vec![row("a.example.org:993"), row("b.example.org:993")], false);
+    harness.run();
+    harness.run();
+    harness.get_by_label("a.example.org:993");
+    harness.get_by_label("b.example.org:993");
+}

@@ -649,7 +649,7 @@ pub(super) fn printed(steps: &[StepRow], running: bool) -> Vec<(&StepRow, check_
 /// One step's line: its short name, what it checks and where, a note at the right, and under it, when it failed, the
 /// engine's sentence; a screen reader hears its whole name and how it stands, then the server and port it reached and
 /// the certificate's issuer.
-fn step(ui: &mut Ui, theme: &Theme, row: &StepRow, state: check_step::StepState) {
+fn step(ui: &mut Ui, theme: &Theme, (at_line, row): (usize, &StepRow), state: check_step::StepState) {
     let ran = !matches!(row.state, StepState::Skipped | StepState::NotSet | StepState::NotBuilt | StepState::Held);
     let mut detail = checks(row).to_owned();
     if let Some(issuer) = row.issuer.as_ref().filter(|_| ran) {
@@ -677,7 +677,7 @@ fn step(ui: &mut Ui, theme: &Theme, row: &StepRow, state: check_step::StepState)
         .collect();
     if !reached.is_empty() {
         let line = Rect::from_min_max(at, pos2(ui.max_rect().right(), ui.min_rect().bottom()));
-        let response = ui.interact(line, ui.scope_id().with(("step-reached", row.id.as_str())), Sense::hover());
+        let response = ui.interact(line, ui.scope_id().with(("step-reached", at_line, row.id.as_str())), Sense::hover());
         let text = reached.join(" · ");
         response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &text));
     }
@@ -753,8 +753,8 @@ fn checking(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, onbo
         let shown = Frame::new().fill(p.term).inner_margin(component::margin(LIST_PAD.0 + 1.0, LIST_PAD.1 + 1.0)).show(ui, |ui| {
             ui.set_width(inner);
             ui.spacing_mut().item_spacing.y = STEP_GAP;
-            for (row, state) in lines {
-                step(ui, theme, row, state);
+            for (at_line, (row, state)) in lines.into_iter().enumerate() {
+                step(ui, theme, (at_line, row), state);
             }
         });
         let edge = shown.response.rect;
