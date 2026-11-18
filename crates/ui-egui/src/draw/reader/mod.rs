@@ -242,6 +242,13 @@ fn status(ui: &Ui, theme: &Theme, room: Rect, text: &str) {
     );
 }
 
+/// Whether the lists' menu key ([`keymap::MENU`], or its second key [`keymap::MENU_KEY`]), as bound, was pressed with
+/// the keyboard on `row`, a line of the reader with a menu of its own (`menu`, not open yet). The press is taken, and
+/// the list's keys rest while the keyboard is in the reader: one press opens one menu.
+pub(super) fn menu_keyed(ctx: &egui::Context, keymap: &Keymap, row: &egui::Response, menu: Id) -> bool {
+    row.has_focus() && !crate::component::popup::is_open(ctx, menu) && (keymap.pressed(ctx, keymap::MENU) || keymap.pressed(ctx, keymap::MENU_KEY))
+}
+
 /// "Back to the list", the design's first tool of the reader when the window holds one pane: the arrow left, the action
 /// [`keymap::BACK`]; a press asks for [`Asked::Back`]. Its id is kept for [`take_back_id`]. Whether it was drawn.
 pub(super) fn back_to_list(ui: &mut Ui, theme: &Theme, keymap: &Keymap, drawn: &mut Drawn) -> bool {

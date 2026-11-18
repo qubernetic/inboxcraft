@@ -126,12 +126,15 @@ fn head_line(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, rea
 /// The width of an open line's menu, in points: the subject's menu's.
 const LINE_MENU_WIDTH: f32 = 256.0;
 
-/// The menu of the open line `row` of message `id` (the Menu key, Shift F10 or a secondary press), the way to its full
-/// header that needs no room on the line: whether "Show the full header" (or "Hide …", while `shown`) was chosen. The
-/// one place the line's menu opens.
+/// The menu of the open line `row` of message `id` (the lists' menu key, as bound, or a secondary press), the way to
+/// its full header that needs no room on the line: whether "Show the full header" (or "Hide …", while `shown`) was
+/// chosen. The one place the line's menu opens.
 fn line_menu(ui: &Ui, theme: &Theme, keymap: &Keymap, row: &egui::Response, id: u64, shown: bool) -> bool {
     let name = if shown { tr!("Hide the full header") } else { tr!("Show the full header") };
     let menu = egui::Id::unique("reader-line-menu").with(id);
+    if super::menu_keyed(ui.ctx(), keymap, row, menu) {
+        popup::open_under(ui.ctx(), menu);
+    }
     let chosen = popup::context_menu(ui.ctx(), theme, row, menu, LINE_MENU_WIDTH, |ui| {
         let chosen = popup::entry(ui, theme, keymap, name, None).clicked();
         (chosen, chosen)

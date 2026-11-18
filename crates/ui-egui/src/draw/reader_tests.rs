@@ -1859,6 +1859,19 @@ fn an_older_unfolded_message_s_full_header_is_one_key_away_at_every_width() {
             assert!(!harness.state().reader().shows_details(older), "{at}: and hid it");
         }
     }
+    // The line's menu opens by the lists' menu key as bound: rebound to F2, F2 opens it and Shift F10 no longer does.
+    let fetch = Recorder::default();
+    let mut harness = opened_in(&fetch, Some(3), "Re: Allotment rota for November", 1440.0, 100, 1.0);
+    harness.state_mut().keymap_mut().bind(crate::keymap::MENU, egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::F2));
+    harness.get_by_label_contains("Odile Brannock, 08:35, folded").click();
+    settle(&mut harness);
+    assert!(tab_to_containing(&mut harness, OLDER), "rebound: Tab reaches the older open line");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, Key::F10);
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::MenuItem, "Show the full header").is_none(), "rebound: Shift F10 opens nothing");
+    harness.key_press(Key::F2);
+    harness.run();
+    harness.get_by_role_and_label(Role::MenuItem, "Show the full header");
 }
 
 #[test]

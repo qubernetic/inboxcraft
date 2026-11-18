@@ -509,8 +509,9 @@ fn subject(ui: &mut Ui, theme: &Theme, keymap: &Keymap, opened: Option<&Opened>,
             paint::focus_ring(ui.painter(), theme, run, paint::Ring::Outside);
         }
     }
-    // Enter opens the menu a secondary press opens (the menu key and Shift+F10 do too), so the copy is the keyboard's.
-    if response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
+    // Enter opens the menu a secondary press opens (the lists' menu key does too), so the copy is the keyboard's.
+    let keyed = super::menu_keyed(ui.ctx(), keymap, &response, subject_menu());
+    if keyed || (response.clicked() && !response.clicked_by(egui::PointerButton::Primary)) {
         popup::open_under(ui.ctx(), subject_menu());
     }
     let copied = popup::context_menu(ui.ctx(), theme, &response, subject_menu(), MOVE_WIDTH, |ui| {
