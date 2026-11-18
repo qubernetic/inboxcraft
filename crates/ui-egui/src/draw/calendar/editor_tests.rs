@@ -320,3 +320,26 @@ fn the_edit_editor_stands_over_the_details_at_the_card_s_bottom_right() {
         assert_eq!(editor.bottom(), card.bottom() + 1.0, "{editor:?} in {card:?}");
     }
 }
+
+#[test]
+fn the_question_to_the_guests_stands_in_its_box() {
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let p = crate::theme::Palette::of(if theme == egui::Theme::Dark { crate::theme::Mode::Dark } else { crate::theme::Mode::Light });
+        let harness = editing_the_party(theme);
+        let question = harness.get_by_label("Tell the 1 guest about this change?").rect();
+        let found = flat_rects(&harness);
+        // The frame: `panel`, a 1 px `cyan_edge`, 398 × 78, the question 13 in from its left and top.
+        let (boxed, _) = found
+            .iter()
+            .copied()
+            .filter(|(rect, fill)| *fill == p.panel && rect.contains_rect(question))
+            .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
+            .unwrap();
+        assert_eq!((boxed.width(), boxed.height()), (398.0, 78.0), "{boxed:?}");
+        assert_eq!((question.left() - boxed.left(), question.top() - boxed.top()), (13.0, 13.0), "{question:?} in {boxed:?}");
+        let side =
+            |rect: &egui::Rect| (rect.width() == boxed.width() && rect.height() == 1.0) || (rect.height() == boxed.height() && rect.width() == 1.0);
+        let edges = found.iter().filter(|(rect, fill)| *fill == p.cyan_edge && boxed.contains_rect(*rect) && side(rect)).count();
+        assert_eq!(edges, 4, "four sides of cyan_edge");
+    }
+}

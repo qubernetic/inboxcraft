@@ -38,6 +38,12 @@ const EDIT_RIGHT: f32 = 3.0;
 /// How far under its anchor a float hangs, in points ([`Float::anchor`]).
 const HANG: f32 = 4.0;
 
+/// The room inside the box of the question to the guests, in points, its edge not counted.
+const NOTIFY_PAD: f32 = 12.0;
+
+/// From the question to the guests to its answers, in points.
+const NOTIFY_GAP: f32 = 10.0;
+
 /// Between the editor's rows, in points.
 const ROWS: f32 = 12.0;
 
@@ -239,23 +245,40 @@ fn calendar_choice(ui: &mut Ui, theme: &Theme, editor: &mut Editor, width: f32) 
     }
 }
 
-/// The question whether to tell the guests of the change, with its two answers.
+/// The question whether to tell the guests of the change, with its two answers, in a box as the design's tell-guests
+/// frames draw it: `panel`, a 1 px `cyan_edge`, 12 inside, the answers 10 under the question.
 fn notify(ui: &mut Ui, theme: &Theme, editor: &mut Editor) {
     let p = &theme.palette;
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 8.0;
-        crate::component::label(ui, theme.fonts.body, &editor.notify_question(), p.ink);
-        let notify = editor.notify();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 24.0;
-            if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
-                editor.set_notify(false);
-            }
-            if radio(ui, theme, tr!("Send them the update"), notify).clicked() {
-                editor.set_notify(true);
-            }
-        });
+    let ppp = ui.pixels_per_point();
+    let line = super::grid::line(ppp);
+    let width = ui.available_width();
+    let inset = line + NOTIFY_PAD;
+    let start = ui.available_rect_before_wrap().min;
+    let start = pos2(super::grid::snap(start.x, ppp), super::grid::snap(start.y, ppp));
+    let ground = ui.painter().add(egui::Shape::Noop);
+    let inner = Rect::from_min_size(start + vec2(inset, inset), vec2((width - inset * 2.0).max(1.0), f32::INFINITY));
+    let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+    inside.spacing_mut().item_spacing.y = NOTIFY_GAP;
+    let question = editor.notify_question();
+    let galley = crate::component::wrapped(&inside, &question, theme.fonts.body, p.ink, inner.width(), 4, egui::Align::Min);
+    let (rect, response) = inside.allocate_exact_size(vec2(inner.width(), galley.size().y), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Label, true, &question));
+    crate::draw::paint::rows_at(inside.painter(), rect.min, inner.width(), galley, p.ink);
+    let notify = editor.notify();
+    inside.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 24.0;
+        if radio(ui, theme, tr!("Don't tell them"), !notify).clicked() {
+            editor.set_notify(false);
+        }
+        if radio(ui, theme, tr!("Send them the update"), notify).clicked() {
+            editor.set_notify(true);
+        }
     });
+    let bottom = super::grid::snap(inside.min_rect().bottom() + inset, ppp);
+    let boxed = Rect::from_min_max(start, pos2(start.x + width, bottom.max(start.y)));
+    ui.allocate_rect(boxed, egui::Sense::hover());
+    ui.painter().set(ground, egui::Shape::rect_filled(boxed, 0.0, p.panel));
+    super::stroke(ui.painter(), boxed, line, p.cyan_edge);
 }
 
 #[cfg(test)]
