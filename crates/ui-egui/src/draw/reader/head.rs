@@ -355,7 +355,6 @@ fn tools(ui: &mut Ui, theme: &Theme, keymap: &Keymap, mailbox: &Mailbox, reader:
         }
         let high = lines * side + (lines - 1.0) * TOOL_GAP;
         // In one pane the way back to the list leads, on a line of its own above the acts.
-        // The way back to the list on a line of its own above the acts.
         if back > 0.0 {
             ui.horizontal(|ui| super::back_to_list(ui, theme, keymap, drawn));
         }
